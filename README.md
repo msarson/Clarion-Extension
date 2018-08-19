@@ -12,7 +12,7 @@ This extension is desigend to be used as an addition to the fushnisoft.clarion e
 
 The extension currently provide various snippets to be used when coding.
 
-A cheat sheat [can be found here] (https://github.com/msarson/Clarion-Extension/blob/master/docs/CheatSheet.md)
+A cheat sheat [can be found here](https://github.com/msarson/Clarion-Extension/blob/master/docs/CheatSheet.md)
 
     
 ## Requirements
