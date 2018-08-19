@@ -7,7 +7,7 @@ Snippets are activated when a range of characters are typed that match the selec
 All variable are declared with eiher **V** for a normal variable declaration 
 or **RV** if you want a reference variable. The case doesn't matter.
 
-The list below is a list of variables that can be declared, so if you want a BYTE declaration the shortcut is **VB**
+The list below is a list of variables that can be declared, so if you want a BYTE declaration the shortcut is **VB** and if you wanted a reference BYTE (&BYTE) it would be **RVB**
 
 | Shortcut | variable | Comment |
 | :---: | --- | --- |

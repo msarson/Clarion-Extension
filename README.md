@@ -1,14 +1,10 @@
-# clarionextensions README
+# clarion-extensions README
 
-This is the README for extension "clarionextensions". 
-
-# Discussion available on ClarionHub!
-
-Read the announcment and join the discussion at [ClarionHub](http://clarionhub.com/t/clarion-syntax-highlighting-support-in-vscode/480)
+This is the README for the extension "clarion-extension". 
 
 ## Features
 
-This extension is desigend to be used as an addition to the fushnisoft.clarion extension.
+This extension is desigend to be used as an addition to the [fushnisoft.clarion](https://marketplace.visualstudio.com/items?itemName=Fushnisoft.Clarion) extension.
 
 The extension currently provide various snippets to be used when coding.
 

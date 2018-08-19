@@ -1,6 +1,6 @@
 {
-    "name": "clarionextensions",
-    "displayName": "ClarionExtension",
+    "name": "clarion-extensions",
+    "displayName": "Clarion-Extensions",
     "description": "Extension for Clarion Language",
     "version": "0.0.1",
     "publisher": "msarson",
