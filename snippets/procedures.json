@@ -1,6 +1,6 @@
 {
     "defineprocedurevoid": {
-        "prefix": "dpv",
+        "prefix": "dp",
         "body": [
             "${1:dName}           PROCEDURE(${2:Parameters})",
             "$0"
