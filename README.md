@@ -13,7 +13,8 @@ A cheat sheat [can be found here](https://github.com/msarson/Clarion-Extension/b
     
 ## Requirements
 
-This extension works better if you have the VS Code extension for clarion, this can either be downloaded directly and [install manually](https://code.visualstudio.com/docs/extensions/install-extension) or from within VSCode as described on the [Getting Started page](https://code.visualstudio.com/docs/editor/extension-gallery?pub=Fushnisoft&ext=Clarion).
+This extension works better if you have the VS Code extension for clarion, this can either be downloaded from the [market place](https://marketplace.visualstudio.com/items?itemName=Fushnisoft.Clarion) or directly from within
+the Visual Studio Code IDE
 
 ## Extension Settings
 
@@ -30,4 +31,10 @@ These are the release notes for clarion extensions.
 
 Initial release, including a few snippets to get started
 
+### 0.0.2
 
+Corrected ICON Issue
+
+### 0.0.3
+
+Fixed README.md
