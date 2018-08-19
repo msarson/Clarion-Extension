@@ -1,0 +1,182 @@
+{
+    "rvas": {
+        "prefix": "rvas",
+        "body": [
+            "${1:VariableName}                &ASTRING",
+            "$0"
+        ],
+        "description": "Reference Variable AString",
+        "scope": "source.clarion"
+    },
+    "rvbf4": {
+        "prefix": "rvbf4",
+        "body": [
+            "${1:VariableName}                &BFLOAT4",
+            "$0"
+        ],
+        "description": "Reference Variable BFloat4",
+        "scope": "source.clarion"
+    },
+    "rvbf8": {
+        "prefix": "rvb48",
+        "body": [
+            "${1:VariableName}                &BFLOAT8",
+            "$0"
+        ],
+        "description": "Reference Variable BFloat8",
+        "scope": "source.clarion"
+    },
+    "rvbs": {
+        "prefix": "rvbs",
+        "body": [
+            "${1:VariableName}                &BSTRING",
+            "$0"
+        ],
+        "description": "Reference Variable BString",
+        "scope": "source.clarion"
+    },
+    "rvb": {
+        "prefix": "rvb",
+        "body": [
+            "${1:VariableName}                &BYTE",
+            "$0"
+        ],
+        "description": "Reference Variable Byte",
+        "scope": "source.clarion"
+    },
+    "rvc": {
+        "prefix": "rvc",
+        "body": [
+            "${1:VariableName}                &CSTRING",
+            "$0"
+        ],
+        "description": "Reference Variable CString",
+        "scope": "source.clarion"
+    },
+    "rvdt": {
+        "prefix": "rvdt",
+        "body": [
+            "${1:VariableName}                &DATE",
+            "$0"
+        ],
+        "description": "Reference Variable Date",
+        "scope": "source.clarion"
+    },
+    "rvd": {
+        "prefix": "rvd",
+        "body": [
+            "${1:VariableName}                &DECIMAL !Is this valid",
+            "$0"
+        ],
+        "description": "Reference Variable Decimal",
+        "scope": "source.clarion"
+    },
+    "rvl": {
+        "prefix": "rvl",
+        "body": [
+            "${1:VariableName}                &LONG",
+            "$0"
+        ],
+        "description": "Reference Variable Long",
+        "scope": "source.clarion"
+    },
+    "rvpd": {
+        "prefix": "rvpd",
+        "body": [
+            "${1:VariableName}                &PDECIMAL  !Is this valid",
+            "$0"
+        ],
+        "description": "Reference Variable PDecimal",
+        "scope": "source.clarion"
+    },
+    "rvps": {
+        "prefix": "rvps",
+        "body": [
+            "${1:VariableName}                &PSTRING",
+            "$0"
+        ],
+        "description": "Reference Variable PString",
+        "scope": "source.clarion"
+    },
+    "rvr": {
+        "prefix": "rvr",
+        "body": [
+            "${1:VariableName}                &REAL",
+            "$0"
+        ],
+        "description": "Reference Variable REAL",
+        "scope": "source.clarion"
+    },
+    "rvsh": {
+        "prefix": "rvsh",
+        "body": [
+            "${1:VariableName}                &SHORT",
+            "$0"
+        ],
+        "description": "Reference Variable Short",
+        "scope": "source.clarion"
+    },
+    "rvsg": {
+        "prefix": "rvsg",
+        "body": [
+            "${1:VariableName}                &SIGNED",
+            "$0"
+        ],
+        "description": "Reference Variable Signed",
+        "scope": "source.clarion"
+    },
+    "rvsr": {
+        "prefix": "rvsr",
+        "body": [
+            "${1:VariableName}                &SREAL",
+            "$0"
+        ],
+        "description": "Reference Variable SReal",
+        "scope": "source.clarion"
+    },
+    "rvs": {
+        "prefix": "rvs",
+        "body": [
+            "${1:VariableName}                &STRING",
+            "$0"
+        ],
+        "description": "Reference Variable String",
+        "scope": "source.clarion"
+    },
+    "rvti": {
+        "prefix": "rvti",
+        "body": [
+            "${1:VariableName}                &TIME",
+            "$0"
+        ],
+        "description": "Reference Variable Time",
+        "scope": "source.clarion"
+    },
+    "rvul": {
+        "prefix": "rvsh",
+        "body": [
+            "${1:VariableName}                &ULONG",
+            "$0"
+        ],
+        "description": "Reference Variable ULong",
+        "scope": "source.clarion"
+    },
+    "rvusg": {
+        "prefix": "rvsg",
+        "body": [
+            "${1:VariableName}                &UNSIGNED",
+            "$0"
+        ],
+        "description": "Reference Variable UNSIGNED",
+        "scope": "source.clarion"
+    },
+    "rvus": {
+        "prefix": "rvus",
+        "body": [
+            "${1:VariableName}                &USHORT",
+            "$0"
+        ],
+        "description": "Reference Variable UShort",
+        "scope": "source.clarion"
+    }
+}

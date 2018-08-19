@@ -1,0 +1,46 @@
+{
+    "classdef": {
+        "prefix": "classdef",
+        "body": [
+            "${1:ctYada}   CLASS,TYPE,MODULE('${1:ctYada}.clw'),LINK('${1:ctYada}.clw')",
+            "!------------------------",
+            "CONSTRUCT      PROCEDURE()",
+            "DESTRUCT       PROCEDURE()",
+            "$0",
+            "   END"
+        ],
+        "description": "Create the definition of a new\r\nclarion class",
+        "scope": "source.clarion"
+    },
+    "classcode": {
+        "prefix": "classcode",
+        "body": [
+            "   MEMBER()",
+            "   INCLUDE('${1:ctYada}.inc'),ONCE",
+            "   MAP",
+            "   END",
+            "",
+            "",
+            "${1:ctYada}.CONSTRUCT      PROCEDURE()",
+            "   CODE",
+            "",
+            "${1:ctYada}.DESTRUCT       PROCEDURE()",
+            "   CODE",
+            "",
+            "$0"
+        ],
+        "description": "Create the code for a new\r\nclarion class",
+        "scope": "source.clarion"
+    },
+    "implementclassprocedure": {
+        "prefix": "icm",
+        "body": [
+            "${1:ClassNAme}.${2:MethodNAme}      PROCEDURE(${3:Parameters})",
+            "    CODE",
+            "",
+            "$0"
+        ],
+        "description": "Implement new class method",
+        "scope": "source.clarion"
+    }
+}

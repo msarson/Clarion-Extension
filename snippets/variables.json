@@ -1,0 +1,182 @@
+{
+    "vas": {
+        "prefix": "vas",
+        "body": [
+            "${1:VariableName}                ASTRING",
+            "$0"
+        ],
+        "description": "Variable AString",
+        "scope": "source.clarion"
+    },
+    "vbf4": {
+        "prefix": "vbf4",
+        "body": [
+            "${1:VariableName}                BFLOAT4",
+            "$0"
+        ],
+        "description": "Variable BFloat4",
+        "scope": "source.clarion"
+    },
+    "vbf8": {
+        "prefix": "vb48",
+        "body": [
+            "${1:VariableName}                BFLOAT8",
+            "$0"
+        ],
+        "description": "Variable BFloat8",
+        "scope": "source.clarion"
+    },
+    "vbs": {
+        "prefix": "vbs",
+        "body": [
+            "${1:VariableName}                BSTRING",
+            "$0"
+        ],
+        "description": "Variable BString",
+        "scope": "source.clarion"
+    },
+    "vb": {
+        "prefix": "vb",
+        "body": [
+            "${1:VariableName}                BYTE",
+            "$0"
+        ],
+        "description": "Variable Byte",
+        "scope": "source.clarion"
+    },
+    "vc": {
+        "prefix": "vc",
+        "body": [
+            "${1:VariableName}                CSTRING(${2:StringSize})",
+            "$0"
+        ],
+        "description": "Variable CString",
+        "scope": "source.clarion"
+    },
+    "vdt": {
+        "prefix": "vdt",
+        "body": [
+            "${1:VariableName}                DATE",
+            "$0"
+        ],
+        "description": "Variable Date",
+        "scope": "source.clarion"
+    },
+    "vd": {
+        "prefix": "vd",
+        "body": [
+            "${1:VariableName}                DECIMAL(${2:Length},${3:Places})",
+            "$0"
+        ],
+        "description": "Variable Decimal",
+        "scope": "source.clarion"
+    },
+    "vl": {
+        "prefix": "vl",
+        "body": [
+            "${1:VariableName}                LONG",
+            "$0"
+        ],
+        "description": "Variable Long",
+        "scope": "source.clarion"
+    },
+    "vpd": {
+        "prefix": "vpd",
+        "body": [
+            "${1:VariableName}                PDECIMAL(${2:Length},${3:Places})",
+            "$0"
+        ],
+        "description": "Variable PDecimal",
+        "scope": "source.clarion"
+    },
+    "vps": {
+        "prefix": "vps",
+        "body": [
+            "${1:VariableName}                PSTRING(${2:StringSize})",
+            "$0"
+        ],
+        "description": "Variable PString",
+        "scope": "source.clarion"
+    },
+    "vr": {
+        "prefix": "vr",
+        "body": [
+            "${1:VariableName}                REAL",
+            "$0"
+        ],
+        "description": "Variable REAL",
+        "scope": "source.clarion"
+    },
+    "vsh": {
+        "prefix": "vsh",
+        "body": [
+            "${1:VariableName}                SHORT",
+            "$0"
+        ],
+        "description": "Variable Short",
+        "scope": "source.clarion"
+    },
+    "vsg": {
+        "prefix": "vsg",
+        "body": [
+            "${1:VariableName}                SIGNED",
+            "$0"
+        ],
+        "description": "Variable Signed",
+        "scope": "source.clarion"
+    },
+    "vsr": {
+        "prefix": "vsr",
+        "body": [
+            "${1:VariableName}                SREAL",
+            "$0"
+        ],
+        "description": "Variable SReal",
+        "scope": "source.clarion"
+    },
+    "vs": {
+        "prefix": "vs",
+        "body": [
+            "${1:VariableName}                STRING(${2:StringSize})",
+            "$0"
+        ],
+        "description": "Variable String",
+        "scope": "source.clarion"
+    },
+    "vti": {
+        "prefix": "vti",
+        "body": [
+            "${1:VariableName}                TIME",
+            "$0"
+        ],
+        "description": "Variable Time",
+        "scope": "source.clarion"
+    },
+    "vul": {
+        "prefix": "vsh",
+        "body": [
+            "${1:VariableName}                ULONG",
+            "$0"
+        ],
+        "description": "Variable ULong",
+        "scope": "source.clarion"
+    },
+    "vusg": {
+        "prefix": "vsg",
+        "body": [
+            "${1:VariableName}                UNSIGNED",
+            "$0"
+        ],
+        "description": "Variable UNSIGNED",
+        "scope": "source.clarion"
+    },
+    "vus": {
+        "prefix": "vus",
+        "body": [
+            "${1:VariableName}                USHORT",
+            "$0"
+        ],
+        "description": "Variable UShort",
+        "scope": "source.clarion"
+    }
+}

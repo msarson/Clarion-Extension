@@ -1,0 +1,31 @@
+{
+    "defineprocedurevoid": {
+        "prefix": "dpv",
+        "body": [
+            "${1:dName}           PROCEDURE(${2:Parameters})",
+            "$0"
+        ],
+        "description": "Define a new method/procedure returning nothing",
+        "scope": "source.clarion"
+    },
+    "defineprocedurelong": {
+        "prefix": "dpl",
+        "body": [
+            "${1:dName}           PROCEDURE(${2:Parameters}),LONG",
+            "$0"
+        ],
+        "description": "Define a new method/procedure returning long",
+        "scope": "source.clarion"
+    },
+    "implementproceduremethod": {
+        "prefix": "ipr",
+        "body": [
+            "${1:Name}           PROCEDURE(${2:Parameters})",
+            "    CODE",
+            "",
+            "$0"
+        ],
+        "description": "Implement a new procedure",
+        "scope": "source.clarion"
+    }
+}

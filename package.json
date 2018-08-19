@@ -1,0 +1,48 @@
+{
+    "name": "clarionextensions",
+    "displayName": "ClarionExtension",
+    "description": "Extension for Clarion Language",
+    "version": "0.0.1",
+    "publisher": "msarson",
+    "engines": {
+        "vscode": "^1.26.0"
+    },
+    "categories": [
+        "Snippets"
+    ],
+    "contributes": {
+        "languages": [
+            {
+                "id": "clarion",
+                "aliases": [
+                    "Clarion",
+                    "clarion"
+                ],
+                "extensions": [
+                    ".clw",
+                    ".equ",
+                    ".inc",
+                    ".int"
+                ]
+            }
+        ],
+        "snippets": [
+            {
+                "language": "clarion",
+                "path": "./snippets/variables.json"
+            },
+            {
+                "language": "clarion",
+                "path": "./snippets/refvariables.json"
+            },
+            {
+                "language": "clarion",
+                "path": "./snippets/classes.json"
+            },
+            {
+                "language": "clarion",
+                "path": "./snippets/procedures.json"
+            }
+        ]
+    }
+}
