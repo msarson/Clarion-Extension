@@ -12,8 +12,8 @@
         "description": "Create the definition of a new\r\nclarion class",
         "scope": "source.clarion"
     },
-    "classimplementation": {
-        "prefix": "ci",
+    "classmodule": {
+        "prefix": "cmod",
         "body": [
             "   MEMBER()",
             "   INCLUDE('${1:ctYada}.inc'),ONCE",
@@ -29,10 +29,10 @@
             "",
             "$0"
         ],
-        "description": "Create the implementation code for a new\r\nclarion class",
+        "description": "Create the module code for a new\r\nclarion class",
         "scope": "source.clarion"
     },
-    "implementclassmethod": {
+    "classmethod": {
         "prefix": "cm",
         "body": [
             "${1:ClassNAme}.${2:MethodNAme}      PROCEDURE(${3:Parameters})",
@@ -40,7 +40,7 @@
             "",
             "$0"
         ],
-        "description": "Implement new class method",
+        "description": "Create new class method in class module",
         "scope": "source.clarion"
     }
 }
