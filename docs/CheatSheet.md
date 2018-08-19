@@ -1,4 +1,4 @@
-# Snippet Cheat sheet for the clarion extension
+# Snippet Cheat sheet for the clarion-extensions
 
 Snippets are activated when a range of characters are typed that match the selected snippet and then pressing the activation key, TAB for instance.
 
