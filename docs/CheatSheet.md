@@ -32,5 +32,17 @@ ul | ULONG |  |
 usg | UNSIGNED |  |
 us | USHORT |  |
 
+## Classes and procedures
 
+I am using the letter **D** to represent define and **I** for implement
+
+So **DC** defines a class, and **IC** would implement.
+
+| Shortcut | variable | Prefix with |
+| :---: | --- | :---: |
+| c | Class | d or i |
+| ctr | Class with constructor and destructor | D or I |
+| cm | Class Method Implementation | D or I |
+| m | Class Method body | I |
+| p | Procedure | D or I |
 

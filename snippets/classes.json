@@ -1,6 +1,6 @@
 {
-    "classdef": {
-        "prefix": "cd",
+    "defineclassctr": {
+        "prefix": "dctr",
         "body": [
             "${1:ctYada}   CLASS,TYPE,MODULE('${1:ctYada}.clw'),LINK('${1:ctYada}.clw')",
             "!------------------------",
@@ -9,11 +9,22 @@
             "$0",
             "   END"
         ],
+        "description": "Create the definition of a new\r\nclarion clas swith constructor\r\nand destructor",
+        "scope": "source.clarion"
+    },
+    "defineclass": {
+        "prefix": "dc",
+        "body": [
+            "${1:ctYada}   CLASS,TYPE,MODULE('${1:ctYada}.clw'),LINK('${1:ctYada}.clw')",
+            "!------------------------",
+            "$0",
+            "   END"
+        ],
         "description": "Create the definition of a new\r\nclarion class",
         "scope": "source.clarion"
     },
-    "classmodule": {
-        "prefix": "cmod",
+    "implementcmwithctrdtr": {
+        "prefix": "ictr",
         "body": [
             "   MEMBER()",
             "   INCLUDE('${1:ctYada}.inc'),ONCE",
@@ -29,18 +40,31 @@
             "",
             "$0"
         ],
-        "description": "Create the module code for a new\r\nclarion class",
+        "description": "Implenent the module code for a new\r\nclarion class with constructor\r\nand destructor ",
         "scope": "source.clarion"
     },
-    "classmethod": {
-        "prefix": "cm",
+    "implementcm": {
+        "prefix": "ic",
         "body": [
-            "${1:ClassNAme}.${2:MethodNAme}      PROCEDURE(${3:Parameters})",
-            "    CODE",
+            "   MEMBER()",
+            "   INCLUDE('${1:ctYada}.inc'),ONCE",
+            "   MAP",
+            "   END",
+            "",
             "",
             "$0"
         ],
-        "description": "Create new class method in class module",
+        "description": "Implenent the module code for a new\r\nclarion class",
+        "scope": "source.clarion"
+    },
+    "implementmethod": {
+        "prefix": "im",
+        "body": [
+            "${1:ClassNAme}.${2:MethodNAme}      PROCEDURE(${3:Parameters})$0",
+            "    CODE",
+            ""
+        ],
+        "description": "Create new class method for class module",
         "scope": "source.clarion"
     }
 }
