@@ -2,7 +2,7 @@
 
 Snippets are activated when a range of characters are typed that match the selected snippet and then pressing the activation key, TAB for instance.
 
-##Variables
+## Variables
 
 All variable are declared with eiher **V** for a normal variable declaration 
 or **RV** if you want a reference variable. The case doesn't matter.
