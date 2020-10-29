@@ -1,0 +1,142 @@
+{
+    "Clarion.ProcRefVar.AString": {
+        "prefix": "pvras",
+        "body": [
+            "&ASTRING ${0:Name}"
+        ],
+        "description": "Variable AString"
+    },
+    "Clarion.ProcRefVar.BFloat4": {
+        "prefix": "pvrbf4",
+        "body": [
+            "&BFLOAT4 ${0:Name}"
+        ],
+        "description": "Variable BFloat4"
+    },
+    "Clarion.ProcRefVar.BFloat8": {
+        "prefix": "pvrb48",
+        "body": [
+            "&BFLOAT8 ${0:Name}"
+        ],
+        "description": "Variable BFloat8"
+    },
+    "Clarion.ProcRefVar.BString": {
+        "prefix": "pvrbs",
+        "body": [
+            "&BSTRING ${0:Name}"
+        ],
+        "description": "Variable BString"
+    },
+    "Clarion.ProcRefVar.Byte": {
+        "prefix": "pvrb",
+        "body": [
+            "&BYTE ${0:Name}"
+        ],
+        "description": "Variable Byte"
+    },
+    "Clarion.ProcRefVar.CString": {
+        "prefix": "pvrcs",
+        "body": [
+            "&CSTRING ${0:Name}"
+        ],
+        "description": "Variable CString"
+    },
+    "Clarion.ProcRefVar.Date": {
+        "prefix": "pvrdt",
+        "body": [
+            "&DATE ${0:Name}"
+        ],
+        "description": "Variable Date"
+    },
+    "Clarion.ProcRefVar.Decimal": {
+        "prefix": "pvrd",
+        "body": [
+            "&DECIMAL ${0:Name}"
+        ],
+        "description": "Variable Decimal"
+    },
+    "Clarion.ProcRefVar.Long": {
+        "prefix": "pvrl",
+        "body": [
+            "&LONG ${0:Name}"
+        ],
+        "description": "Variable Long"
+    },
+    "Clarion.ProcRefVar.PDecimal": {
+        "prefix": "pvrpd",
+        "body": [
+            "&PDECIMAL ${0:Name}"
+        ],
+        "description": "Variable PDecimal"
+    },
+    "Clarion.ProcRefVar.PString": {
+        "prefix": "pvrps",
+        "body": [
+            "&PSTRING ${0:Name}"
+        ],
+        "description": "Variable PString"
+    },
+    "Clarion.ProcRefVar.Real": {
+        "prefix": "pvrr",
+        "body": [
+            "&REAL ${0:Name}"
+        ],
+        "description": "Variable REAL"
+    },
+    "Clarion.ProcRefVar.Short": {
+        "prefix": "pvrsh",
+        "body": [
+            "&SHORT ${0:Name}"
+        ],
+        "description": "Variable Short"
+    },
+    "Clarion.ProcRefVar.Signed": {
+        "prefix": "pvrsg",
+        "body": [
+            "&SIGNED ${0:Name}"
+        ],
+        "description": "Variable Signed"
+    },
+    "Clarion.ProcRefVar.SReal": {
+        "prefix": "pvrsr",
+        "body": [
+            "&SREAL ${0:Name}"
+        ],
+        "description": "Variable SReal"
+    },
+    "Clarion.ProcRefVar.String": {
+        "prefix": "pvrs",
+        "body": [
+            "&STRING ${0:Name}"
+        ],
+        "description": "Variable String"
+    },
+    "Clarion.ProcRefVar.Time": {
+        "prefix": "pvrti",
+        "body": [
+            "&TIME ${0:Name}"
+        ],
+        "description": "Variable Time"
+    },
+    "Clarion.ProcRefVar.ULong": {
+        "prefix": "pvrul",
+        "body": [
+            "&ULONG ${0:Name}"
+        ],
+        "description": "Variable ULong"
+    },
+    "Clarion.ProcRefVar.UnSigned": {
+        "prefix": "pvrusg",
+        "body": [
+            "&UNSIGNED ${0:Name}"
+        ],
+        "description": "Variable UNSIGNED"
+    },
+    "Clarion.ProcRefVar.UShort": {
+        "prefix": "pvrus",
+        "body": [
+            "&USHORT ${0:Name}"
+        ],
+        "description": "Variable UShort"
+    }
+}

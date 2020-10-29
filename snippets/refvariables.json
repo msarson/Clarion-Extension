@@ -1,182 +1,162 @@
 {
-    "rvas": {
+    "Clarion.Reference.Astring": {
         "prefix": "rvas",
         "body": [
             "${1:VariableName}                &ASTRING",
             "$0"
         ],
-        "description": "Reference Variable AString",
-        "scope": "source.clarion"
+        "description": "Reference Variable AString"
     },
-    "rvbf4": {
+    "Clarion.Reference.BFloat4": {
         "prefix": "rvbf4",
         "body": [
             "${1:VariableName}                &BFLOAT4",
             "$0"
         ],
-        "description": "Reference Variable BFloat4",
-        "scope": "source.clarion"
+        "description": "Reference Variable BFloat4"
     },
-    "rvbf8": {
+    "Clarion.Reference.BFloat8": {
         "prefix": "rvb48",
         "body": [
             "${1:VariableName}                &BFLOAT8",
             "$0"
         ],
-        "description": "Reference Variable BFloat8",
-        "scope": "source.clarion"
+        "description": "Reference Variable BFloat8"
     },
-    "rvbs": {
+    "Clarion.Reference.Bstring": {
         "prefix": "rvbs",
         "body": [
             "${1:VariableName}                &BSTRING",
             "$0"
         ],
-        "description": "Reference Variable BString",
-        "scope": "source.clarion"
+        "description": "Reference Variable BString"
     },
-    "rvb": {
+    "Clarion.Reference.Byte": {
         "prefix": "rvb",
         "body": [
             "${1:VariableName}                &BYTE",
             "$0"
         ],
-        "description": "Reference Variable Byte",
-        "scope": "source.clarion"
+        "description": "Reference Variable Byte"
     },
-    "rvc": {
-        "prefix": "rvc",
+    "Clarion.Reference.CString": {
+        "prefix": "rvcs",
         "body": [
             "${1:VariableName}                &CSTRING",
             "$0"
         ],
-        "description": "Reference Variable CString",
-        "scope": "source.clarion"
+        "description": "Reference Variable CString"
     },
-    "rvdt": {
+    "Clarion.Reference.Date": {
         "prefix": "rvdt",
         "body": [
             "${1:VariableName}                &DATE",
             "$0"
         ],
-        "description": "Reference Variable Date",
-        "scope": "source.clarion"
+        "description": "Reference Variable Date"
     },
-    "rvd": {
+    "Clarion.Reference.Decimal": {
         "prefix": "rvd",
         "body": [
             "${1:VariableName}                &DECIMAL !Is this valid",
             "$0"
         ],
-        "description": "Reference Variable Decimal",
-        "scope": "source.clarion"
+        "description": "Reference Variable Decimal"
     },
-    "rvl": {
+    "Clarion.Reference.Long": {
         "prefix": "rvl",
         "body": [
             "${1:VariableName}                &LONG",
             "$0"
         ],
-        "description": "Reference Variable Long",
-        "scope": "source.clarion"
+        "description": "Reference Variable Long"
     },
-    "rvpd": {
+    "Clarion.Reference.PDecimal": {
         "prefix": "rvpd",
         "body": [
             "${1:VariableName}                &PDECIMAL  !Is this valid",
             "$0"
         ],
-        "description": "Reference Variable PDecimal",
-        "scope": "source.clarion"
+        "description": "Reference Variable PDecimal"
     },
-    "rvps": {
+    "Clarion.Reference.PString": {
         "prefix": "rvps",
         "body": [
             "${1:VariableName}                &PSTRING",
             "$0"
         ],
-        "description": "Reference Variable PString",
-        "scope": "source.clarion"
+        "description": "Reference Variable PString"
     },
-    "rvr": {
+    "Clarion.Reference.Real": {
         "prefix": "rvr",
         "body": [
             "${1:VariableName}                &REAL",
             "$0"
         ],
-        "description": "Reference Variable REAL",
-        "scope": "source.clarion"
+        "description": "Reference Variable REAL"
     },
-    "rvsh": {
+    "Clarion.Reference.Short": {
         "prefix": "rvsh",
         "body": [
             "${1:VariableName}                &SHORT",
             "$0"
         ],
-        "description": "Reference Variable Short",
-        "scope": "source.clarion"
+        "description": "Reference Variable Short"
     },
-    "rvsg": {
+    "Clarion.Reference.Signed": {
         "prefix": "rvsg",
         "body": [
             "${1:VariableName}                &SIGNED",
             "$0"
         ],
-        "description": "Reference Variable Signed",
-        "scope": "source.clarion"
+        "description": "Reference Variable Signed"
     },
-    "rvsr": {
+    "Clarion.Reference.SReal": {
         "prefix": "rvsr",
         "body": [
             "${1:VariableName}                &SREAL",
             "$0"
         ],
-        "description": "Reference Variable SReal",
-        "scope": "source.clarion"
+        "description": "Reference Variable SReal"
     },
-    "rvs": {
+    "Clarion.Reference.String": {
         "prefix": "rvs",
         "body": [
             "${1:VariableName}                &STRING",
             "$0"
         ],
-        "description": "Reference Variable String",
-        "scope": "source.clarion"
+        "description": "Reference Variable String"
     },
-    "rvti": {
+    "Clarion.Reference.Time": {
         "prefix": "rvti",
         "body": [
             "${1:VariableName}                &TIME",
             "$0"
         ],
-        "description": "Reference Variable Time",
-        "scope": "source.clarion"
+        "description": "Reference Variable Time"
     },
-    "rvul": {
+    "Clarion.Reference.ULong": {
         "prefix": "rvsh",
         "body": [
             "${1:VariableName}                &ULONG",
             "$0"
         ],
-        "description": "Reference Variable ULong",
-        "scope": "source.clarion"
+        "description": "Reference Variable ULong"
     },
-    "rvusg": {
+    "Clarion.Reference.UnSigned": {
         "prefix": "rvsg",
         "body": [
             "${1:VariableName}                &UNSIGNED",
             "$0"
         ],
-        "description": "Reference Variable UNSIGNED",
-        "scope": "source.clarion"
+        "description": "Reference Variable UNSIGNED"
     },
-    "rvus": {
+    "Clarion.Reference.UShort": {
         "prefix": "rvus",
         "body": [
             "${1:VariableName}                &USHORT",
             "$0"
         ],
-        "description": "Reference Variable UShort",
-        "scope": "source.clarion"
+        "description": "Reference Variable UShort"
     }
 }

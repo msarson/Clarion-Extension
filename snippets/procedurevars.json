@@ -1,0 +1,142 @@
+{
+    "Clarion.ProcVar.AString": {
+        "prefix": "pvas",
+        "body": [
+            "ASTRING ${0:Name}"
+        ],
+        "description": "Variable AString"
+    },
+    "Clarion.ProcVar.BFloat4": {
+        "prefix": "pvbf4",
+        "body": [
+            "BFLOAT4 ${0:Name}"
+        ],
+        "description": "Variable BFloat4"
+    },
+    "Clarion.ProcVar.BFloat8": {
+        "prefix": "pvb48",
+        "body": [
+            "BFLOAT8 ${0:Name}"
+        ],
+        "description": "Variable BFloat8"
+    },
+    "Clarion.ProcVar.BString": {
+        "prefix": "pvbs",
+        "body": [
+            "BSTRING ${0:Name}"
+        ],
+        "description": "Variable BString"
+    },
+    "Clarion.ProcVar.Byte": {
+        "prefix": "pvb",
+        "body": [
+            "BYTE ${0:Name}"
+        ],
+        "description": "Variable Byte"
+    },
+    "Clarion.ProcVar.CString": {
+        "prefix": "pvcs",
+        "body": [
+            "CSTRING ${0:Name}"
+        ],
+        "description": "Variable CString"
+    },
+    "Clarion.ProcVar.Date": {
+        "prefix": "pvdt",
+        "body": [
+            "DATE ${0:Name}"
+        ],
+        "description": "Variable Date"
+    },
+    "Clarion.ProcVar.Decimal": {
+        "prefix": "pvd",
+        "body": [
+            "DECIMAL ${0:Name}"
+        ],
+        "description": "Variable Decimal"
+    },
+    "Clarion.ProcVar.Long": {
+        "prefix": "pvl",
+        "body": [
+            "LONG ${0:Name}"
+        ],
+        "description": "Variable Long"
+    },
+    "Clarion.ProcVar.PDecimal": {
+        "prefix": "pvpd",
+        "body": [
+            "PDECIMAL ${0:Name}"
+        ],
+        "description": "Variable PDecimal"
+    },
+    "Clarion.ProcVar.PString": {
+        "prefix": "pvps",
+        "body": [
+            "PSTRING ${0:Name}"
+        ],
+        "description": "Variable PString"
+    },
+    "Clarion.ProcVar.Real": {
+        "prefix": "pvr",
+        "body": [
+            "REAL ${0:Name}"
+        ],
+        "description": "Variable REAL"
+    },
+    "Clarion.ProcVar.Short": {
+        "prefix": "pvsh",
+        "body": [
+            "SHORT ${0:Name}"
+        ],
+        "description": "Variable Short"
+    },
+    "Clarion.ProcVar.Signed": {
+        "prefix": "pvsg",
+        "body": [
+            "SIGNED ${0:Name}"
+        ],
+        "description": "Variable Signed"
+    },
+    "Clarion.ProcVar.SReal": {
+        "prefix": "pvsr",
+        "body": [
+            "SREAL ${0:Name}"
+        ],
+        "description": "Variable SReal"
+    },
+    "Clarion.ProcVar.String": {
+        "prefix": "pvs",
+        "body": [
+            "STRING ${0:Name}"
+        ],
+        "description": "Variable String"
+    },
+    "Clarion.ProcVar.Time": {
+        "prefix": "pvti",
+        "body": [
+            "TIME ${0:Name}"
+        ],
+        "description": "Variable Time"
+    },
+    "Clarion.ProcVar.ULong": {
+        "prefix": "pvsh",
+        "body": [
+            "ULONG ${0:Name}"
+        ],
+        "description": "Variable ULong"
+    },
+    "Clarion.ProcVar.UnSigned": {
+        "prefix": "pvsg",
+        "body": [
+            "UNSIGNED ${0:Name}"
+        ],
+        "description": "Variable UNSIGNED"
+    },
+    "Clarion.ProcVar.UShort": {
+        "prefix": "pvus",
+        "body": [
+            "USHORT ${0:Name}"
+        ],
+        "description": "Variable UShort"
+    }
+}

@@ -1,0 +1,32 @@
+{
+    "JSON.clarionBuildTask": {
+        "prefix": "Clarion:build",
+        "body": [
+            "\"label\": \"build\",",
+            "\"type\": \"shell\",",
+            "\"command\": \"${1:C:\\\\\\Windows\\\\\\Microsoft.NET\\\\\\Framework\\\\\\v4.0.30319\\\\\\msbuild}\", 
+            "\"args\": [",
+            "    \"/property:GenerateFullPaths=true\",",
+            "    \"/t:build\",",
+            "    \"/m\",",
+            "    \"/consoleloggerparameters:NoSummary\",",
+            "    \"/property:Configuration=Debug\",",
+            "    \"/property:clarion_Sections=Debug\",",
+            "    \"/property:SolutionDir=\\${workspaceFolder}\",",
+            "    \"/property:ClarionBinPath=${2:Path to Clarion Bin Folder}\",",
+            "    \"/property:NoDependency=true\",",
+            "    \"/property:Verbosity=diagnostic\",",
+            "    \"/property:WarningLevel=1\","
+            "],",
+            "\"group\": {",
+            "    \"kind\": \"build\",",
+            "    \"isDefault\": true",
+            "},",
+            "\"presentation\": {",
+            "    \"reveal\": \"always\"",
+            "},",
+            "\"problemMatcher\": \"\\$msCompile\""
+        ],
+        "description": "Create the MSBuild settings for clarion"
+    }
+}

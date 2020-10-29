@@ -1,70 +1,70 @@
 {
-    "defineclassctr": {
-        "prefix": "dctr",
+    "Clarion.Define.Class.With.Constructor.Destructor": {
+        "prefix": "DCLASSCD",
         "body": [
-            "${1:ctYada}   CLASS,TYPE,MODULE('${1:ctYada}.clw'),LINK('${1:ctYada}.clw')",
-            "!------------------------",
-            "CONSTRUCT      PROCEDURE()",
-            "DESTRUCT       PROCEDURE()",
+            "${1:ClassName}\tCLASS,TYPE,MODULE('${1:ClassName}.clw'),LINK('${1:ClassName}.clw')",
+            "CONSTRUCT\t\tPROCEDURE()",
+            "DESTRUCT\t\tPROCEDURE()",
             "$0",
-            "   END"
+            "\t\t\t\tEND"
         ],
-        "description": "Create the definition of a new\r\nclarion clas swith constructor\r\nand destructor",
-        "scope": "source.clarion"
+        "description": "Create the definition of a new\r\nclarion class swith constructor\r\nand destructor"
     },
-    "defineclass": {
-        "prefix": "dc",
+    "Clarion.Define.Class": {
+        "prefix": "DCLASS",
         "body": [
-            "${1:ctYada}   CLASS,TYPE,MODULE('${1:ctYada}.clw'),LINK('${1:ctYada}.clw')",
-            "!------------------------",
+            "${1:ClassName}\tCLASS,TYPE,MODULE('${1:ClassName}.clw'),LINK('${1:ClassName}.clw')",
             "$0",
-            "   END"
+            "\t\t\tEND"
         ],
-        "description": "Create the definition of a new\r\nclarion class",
-        "scope": "source.clarion"
+        "description": "Create the definition of a new\r\nclarion class"
     },
-    "implementcmwithctrdtr": {
-        "prefix": "ictr",
+    "Clarion.Implement.Class.With.Constructor": {
+        "prefix": "IClassCD",
         "body": [
-            "   MEMBER()",
-            "   INCLUDE('${1:ctYada}.inc'),ONCE",
-            "   MAP",
-            "   END",
+            "\tMEMBER()",
+            "",
+            "\tINCLUDE('${1:ClassName}.inc'),ONCE",
+            "",
+            "\tMAP",
+            "\tEND",
             "",
             "",
-            "${1:ctYada}.CONSTRUCT      PROCEDURE()",
+            "${1:ClassName}.CONSTRUCT\t\tPROCEDURE()",
+            "",
             "   CODE",
             "",
-            "${1:ctYada}.DESTRUCT       PROCEDURE()",
-            "   CODE",
+            "${1:ClassName}.DESTRUCT\t\t\tPROCEDURE()",
+            "",
+            "\tCODE",
             "",
             "$0"
         ],
-        "description": "Implenent the module code for a new\r\nclarion class with constructor\r\nand destructor ",
-        "scope": "source.clarion"
+        "description": "Implenent the module code for a new\r\nclarion class with constructor\r\nand destructor "
     },
-    "implementcm": {
-        "prefix": "ic",
+    "Clarion.Implement.Class": {
+        "prefix": "IClass",
         "body": [
-            "   MEMBER()",
-            "   INCLUDE('${1:ctYada}.inc'),ONCE",
-            "   MAP",
-            "   END",
+            "\tMEMBER()",
             "",
+            "\tINCLUDE('${1:ClassName}.inc'),ONCE",
+            "",
+            "\tMAP",
+            "\tEND",
             "",
             "$0"
         ],
-        "description": "Implenent the module code for a new\r\nclarion class",
-        "scope": "source.clarion"
+        "description": "Implenent the module code for a new\r\nclarion class"
     },
-    "implementmethod": {
-        "prefix": "im",
+    "Clarion.Implement.Method": {
+        "prefix": "METHOD",
         "body": [
-            "${1:ClassNAme}.${2:MethodNAme}      PROCEDURE(${3:Parameters})$0",
-            "    CODE",
-            ""
+            "${1:ClassName}.${2:MethodName}      PROCEDURE(${3:Parameters})",
+            "",
+            "\tCODE",
+            "",
+            "$0"
         ],
-        "description": "Create new class method for class module",
-        "scope": "source.clarion"
+        "description": "Create new class method for class module"
     }
 }

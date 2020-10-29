@@ -1,0 +1,82 @@
+{
+    "Clarion.If": {
+        "prefix": "IF",
+        "body": [
+            "IF $0 THEN",
+            "\t",
+            "END"
+        ],
+        "description": "IF Block"
+    },
+    "Clarion.If.Then.Else": {
+        "prefix": "IFE",
+        "body": [
+            "IF $0 THEN",
+            "\t",
+            "ELSE",
+            "\t",
+            "END"
+        ],
+        "description": "IF THEN ELSE"
+    },
+    "Clarion.Map": {
+        "prefix": "MAP",
+        "body": [
+            "MAP",
+            "\t$0",
+            "END"
+        ],
+        "description": "MAP block"
+    },
+    "Clarion.Module": {
+        "prefix": "MODULE",
+        "body": [
+            "MODULE('${1:ModuleName}')",
+            "\t$0",
+            "END"
+        ],
+        "description": "MODULE block"
+    },
+    "Clarion.Loop": {
+        "prefix": "LOOP",
+        "body": [
+            "LOOP$0",
+            "\t",
+            "END"
+        ],
+        "description": "LOOP Block"
+    },
+    "Clarion.Loop.From.To": {
+        "prefix": "LOOPFT",
+        "body": [
+            "LOOP ${1:Variable} = ${2:From} TO ${3:To}",
+            "\t$0",
+            "END"
+        ],
+        "description": "LOOP From - To Blcok"
+    },
+    "Clarion.Loop.Through.File": {
+        "prefix": "LOOPFILE",
+        "body": [
+            "LOOP UNTIL ACCESS:${1:FileName}.NEXT()",
+            "\t$0",
+            "END"
+        ],
+        "description": "LOOP through file block"
+    },
+    "Clarion.Access.Method.Calll": {
+        "prefix": "ACCESS",
+        "body": [
+            "ACCESS:${1:FileName}.${2:Method}(${3:Params})"
+        ],
+        "description": "Access:FileName Call"
+    },
+    "Clarion.Debug.Value": {
+        "prefix": "DEBUG",
+        "body": [
+            "'${1:Text} [' & ${2:value} & ']'$0",
+
+        ],
+        "description": "Debug a value"
+    }
+}

@@ -1,22 +1,21 @@
 {
-    "defineprocedurevoid": {
-        "prefix": "dp",
+    "Clarion.Define.Procedure": {
+        "prefix": "DProc",
         "body": [
-            "${1:dName}           PROCEDURE(${2:Parameters})$0",
-            ""
+            "${1:Name}\t\tPROCEDURE(${2:Parameters})$0"
         ],
-        "description": "Define a new method/procedure returning nothing",
-        "scope": "source.clarion"
+        "description": "Define a new procedure returning nothing"
     },
-    "implementproceduremethod": {
-        "prefix": "ip",
+    "Clarion.Implement.Procedure": {
+        "prefix": "IProc",
         "body": [
-            "${1:Name}           PROCEDURE(${2:Parameters})",
-            "    CODE",
+            "${1:Name}\t\tPROCEDURE(${2:Parameters})",
             "",
+            "\tCODE",
             "$0"
         ],
-        "description": "Implement a new procedure",
-        "scope": "source.clarion"
+        "description": "Implement a new procedure"
     }
+    
+
 }

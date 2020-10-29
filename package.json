@@ -2,7 +2,7 @@
     "name": "clarion-extensions",
     "displayName": "Clarion-Extensions",
     "description": "Extension for Clarion Language",
-    "version": "0.0.3",
+    "version": "0.0.4",
     "publisher": "msarson",
     "repository": {
         "type": "git",
@@ -23,22 +23,11 @@
     "categories": [
         "Snippets"
     ],
+    "keywords": [
+        "clarion",
+        "json"
+    ],
     "contributes": {
-        "languages": [
-            {
-                "id": "clarion",
-                "aliases": [
-                    "Clarion",
-                    "clarion"
-                ],
-                "extensions": [
-                    ".clw",
-                    ".equ",
-                    ".inc",
-                    ".int"
-                ]
-            }
-        ],
         "snippets": [
             {
                 "language": "clarion",
@@ -55,6 +44,22 @@
             {
                 "language": "clarion",
                 "path": "./snippets/procedures.json"
+            },
+            {
+                "language": "clarion",
+                "path": "./snippets/procedurevars.json"
+            },
+            {
+                "language": "clarion",
+                "path": "./snippets/procedurerefvars.json"
+            },
+            {
+                "language": "clarion",
+                "path": "./snippets/statements.json"
+            },
+            {
+                "language": "jsonc",
+                "path": "./snippets/clarionbuildtask.json"
             }
         ]
     }
