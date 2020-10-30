@@ -27,6 +27,9 @@
         "clarion",
         "json"
     ],
+    "extensionDependencies": [
+        "fushnisoft.clarion"
+    ],
     "contributes": {
         "snippets": [
             {

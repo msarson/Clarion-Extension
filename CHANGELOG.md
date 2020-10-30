@@ -19,3 +19,5 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [0.1.1]
 - Fixes to documentation 
 - Fixes to Procedure Reference Vars
+## [0.1.2]
+- Added extension dependenceis on "fushnisoft.clarion"
