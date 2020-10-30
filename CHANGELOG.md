@@ -16,3 +16,6 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Added Procedure Reference Variables
 - New Definitions for Classes, Procedures and More
 - Added MS Build task snippet to compile code from within VS Code.
+## [0.1.1]
+- Fixes to documentation 
+- Fixes to Procedure Reference Vars

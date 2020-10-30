@@ -1,8 +1,8 @@
-# Snippet Cheat sheet for the clarion-extensions
+# **Snippet Cheat sheet for the clarion-extensions**
 
 Snippets are activated when a range of characters are typed that match the selected snippet and then pressing the activation key, TAB for instance.
 
-## Variables can be declared using eiher:
+## **Variables can be declared in the following way**
 
 **V{variable type}** for a normal variable declaration 
 Example **VS** to declare a string
@@ -22,13 +22,11 @@ example **PVS** to declare a string parameter
 **PVR{variable type}** if you want to define a procedure reference variable:
 example **PVRS** to declare a reference to a string parameter
 ```clarion
-(&STRING Foo)
+(*STRING Foo)
 ```
+## **The following variables types are available**
 
-
-The following variables types are available
-
-| Shortcut | variable | 
+| Shortcut | Variable | 
 | :---: | --- |
  as | ASTRING |
 bf4 | BFLOAT4 |
@@ -51,17 +49,17 @@ ul | ULONG |
 usg | UNSIGNED |
 us | USHORT |
 
-## Language Shortcuts
+## **Language Snippets**
 
-- Below is a list of Snippits that can be used
+**Below is a list of Snippits that can be used**
 
-IF
+**IF**
 ```clarion
 IF THEN
 
 END
 ```
-IFE
+**IFE**
 ```clarion
 IF THEN
 
@@ -69,58 +67,58 @@ ELSE
 
 END
 ```
-MAP
+**MAP**
 ```clarion
 MAP
 
 END
 ```
-MODULE
+**MODULE**
 ```clarion
 MODULE
 
 END
 ```
-LOOP
+**LOOP**
 ```clarion
 LOOP
 
 END
 ```
-LOOPFT
+**LOOPFT**
 ```clarion
 LOOP {var} = {From} to {To}
 
 END
 ```
-LOOPFILE
+**LOOPFILE**
 ```clarion
 LOOP UNTIL ACCESS:{FileName}.Next()
 
 END
 ```
-ACCESS
+**ACCESS**
 ```clarion
 Access:{FileName}.Methd(Params)
 ```
-DEBUG
+**DEBUG**
 ```clarion
 '{User Text} [' & {var} & ]'
 ```
-DCLASS - define a Class
+**DCLASS - define a Class**
 ```clarion
 {ClassName}	CLASS,TYPE,MODULE('{ClassName}.clw'),LINK('{ClassName}.clw')
 
             END
 ```
-DCLASSCD - define a class with a constructor and destructor
+**DCLASSCD - define a class with a constructor and destructor**
 ```clarion
 {ClassName}	CLASS,TYPE,MODULE('{ClassName}.clw'),LINK('{ClassName}.clw')
 CONSTRUCT		PROCEDURE()
 DESTRUCT		PROCEDURE()
             END  
 ```
-IClass - implement a class
+**IClass - implement a class**
 ```clarion
 	MEMBER()
 
@@ -129,7 +127,7 @@ IClass - implement a class
     MAP
     END
 ```
-IClassCD - implement a class with constructor and destructor
+**IClassCD - implement a class with constructor and destructor**
 ```clarion
   INCLUDE('{ClassName}.inc'),ONCE
 
@@ -144,17 +142,17 @@ IClassCD - implement a class with constructor and destructor
 
   CODE
 ```
-Method - implement a class method
+**Method - implement a class method**
 ```clarion
 {ClassName}.{MethodName}      PROCEDURE({Parameters})
 
   CODE
 ```
-DProc - define a procedure
+**DProc - define a procedure**
 ```clarion
 {Name}		PROCEDURE({parameters}),{ReturnType}
 ```
-IProc - implement a procedure
+**IProc - implement a procedure**
 ```clarion
 {Name}		PROCEDURE({parameters})
 

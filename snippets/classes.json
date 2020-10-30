@@ -3,8 +3,8 @@
         "prefix": "DCLASSCD",
         "body": [
             "${1:ClassName}\tCLASS,TYPE,MODULE('${1:ClassName}.clw'),LINK('${1:ClassName}.clw')",
-            "CONSTRUCT\t\tPROCEDURE()",
-            "DESTRUCT\t\tPROCEDURE()",
+            "Constrict\t\tPROCEDURE()",
+            "Destruct\t\tPROCEDURE()",
             "$0",
             "\t\t\t\tEND"
         ],
@@ -30,11 +30,11 @@
             "\tEND",
             "",
             "",
-            "${1:ClassName}.CONSTRUCT\t\tPROCEDURE()",
+            "${1:ClassName}.Construct\t\tPROCEDURE()",
             "",
             "   CODE",
             "",
-            "${1:ClassName}.DESTRUCT\t\t\tPROCEDURE()",
+            "${1:ClassName}.Destruct\t\t\tPROCEDURE()",
             "",
             "\tCODE",
             "",
@@ -59,11 +59,11 @@
     "Clarion.Implement.Method": {
         "prefix": "METHOD",
         "body": [
-            "${1:ClassName}.${2:MethodName}      PROCEDURE(${3:Parameters})",
+            "${1:ClassName}.${2:MethodName}      PROCEDURE($0)",
             "",
             "\tCODE",
-            "",
-            "$0"
+            ""
+            
         ],
         "description": "Create new class method for class module"
     }

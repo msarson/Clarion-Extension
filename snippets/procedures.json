@@ -2,17 +2,17 @@
     "Clarion.Define.Procedure": {
         "prefix": "DProc",
         "body": [
-            "${1:Name}\t\tPROCEDURE(${2:Parameters})$0"
+            "${1:Name}\t\tPROCEDURE($0)"
         ],
         "description": "Define a new procedure returning nothing"
     },
     "Clarion.Implement.Procedure": {
         "prefix": "IProc",
         "body": [
-            "${1:Name}\t\tPROCEDURE(${2:Parameters})",
+            "${1:Name}\t\tPROCEDURE($0)",
             "",
             "\tCODE",
-            "$0"
+            ""
         ],
         "description": "Implement a new procedure"
     }
