@@ -1,0 +1,22 @@
+{
+    "name": "clarion-client",
+    "description": "Client for the clarion language",
+    "author": "Mark Sarson  ",
+    "license": "MIT",
+    "version": "0.0.1",
+    "publisher": "msarson",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/msarson/Clarion-Extension"
+    },
+    "engines": {
+        "vscode": "^1.43.0"
+    },
+    "dependencies": {
+        "vscode-languageclient": "^6.1.3"
+    },
+    "devDependencies": {
+        "@types/vscode": "1.43.0",
+        "vscode-test": "^1.3.0"
+    }
+}

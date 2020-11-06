@@ -16,8 +16,12 @@
         "theme": "dark"
     },
     "engines": {
-        "vscode": "^1.26.0"
+        "vscode": "^1.43.0"
     },
+    "activationEvents": [
+		"onLanguage:clarion"
+	],
+    "main": "./client/out/extension",
     "icon": "images/sv57x57.png",
     "license": "MIT",
     "categories": [
@@ -31,6 +35,18 @@
         "fushnisoft.clarion"
     ],
     "contributes": {
+        "commands": [
+            {
+                "title": "Enable Clarion CodeLens",
+                "command": "clarion.enableCodeLens",
+                "category": "clarion CodeLens"
+            },
+            {
+                "title": "Disable Codelens",
+                "command": "clarion.disableCodeLens",
+                "category": "clarion CodeLens"
+            }
+        ],
         "snippets": [
             {
                 "language": "clarion",
@@ -64,6 +80,48 @@
                 "language": "jsonc",
                 "path": "./snippets/clarionbuildtask.json"
             }
-        ]
+        ],
+        "configuration": {
+            "type": "object",
+            "title": "clarion server configuration",
+            "properties": {
+                "clarion.enableCodeLens": {
+                    "type": "boolean",
+                    "default": true
+                },
+                "clarion.maxNumberOfProblems": {
+                    "scope": "resource",
+                    "type": "number",
+                    "default": 100,
+                    "description": "Controls the maximum number of problems produced by the server."
+                },
+                "clarion.trace.server": {
+                    "scope": "window",
+                    "type": "string",
+                    "enum": [
+                        "off",
+                        "messages",
+                        "verbose"
+                    ],
+                    "default": "off",
+                    "description": "Traces the communication between VS Code and the language server."
+                }
+            }
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -b",
+        "watch": "tsc -b -w",
+        "postinstall": "cd client && npm install && cd .."
+        
+    },
+    "devDependencies": {
+        "@types/mocha": "^8.0.3",
+        "mocha": "^8.1.1",
+        "@types/node": "^12.12.0",
+        "eslint": "^6.4.0",
+        "@typescript-eslint/parser": "^2.3.0",
+        "typescript": "^4.0.2"
     }
 }
