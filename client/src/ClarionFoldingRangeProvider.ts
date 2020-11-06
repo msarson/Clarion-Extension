@@ -18,7 +18,7 @@ export class ClarionFoldingRangeProvider implements FoldingRangeProvider {
             from: new RegExp("!REGION", "i"),
             to: new RegExp("!ENDREGION", "i"),
             removeComment: false
-         },
+        },
         {
             from: new RegExp(" FILE,DRIVER", "i"),
             to: new RegExp("END$", "i"),
@@ -31,63 +31,83 @@ export class ClarionFoldingRangeProvider implements FoldingRangeProvider {
         }
     ];
 
+
     provideFoldingRanges(document: TextDocument, context: FoldingContext, token: CancellationToken): ProviderResult<FoldingRange[]> {
         const ranges: FoldingRange[] = [];
         const foldStack: IFoldingPairHit[] = [];
 
+        // toClose can be pushed on the foldStack
+        let toClose: IFoldingPairHit | null = null;
+        //let toCloseAt:number=-1;
+
+        //-------------------------------------------- 
         for (let i = 0; i < document.lineCount; i++) {
             if (token.isCancellationRequested) {
                 return null;
             }
 
             let line = document.lineAt(i).text;
-            let startHit: IFoldingPairHit | null = null;
-            let startHitAt: number = -1;
 
+            //-------------------------------------------- 
             this.foldingPairs.forEach((p, n) => {
-                let sudoLine = line
-                if(p.removeComment) 
-                    sudoLine = sudoLine.replace(new RegExp('!.*$'),'').replace(new RegExp('\\|.*$'),'');
-                
-                
-                const startIdx = sudoLine.search(p.from);
-                const endIdx = sudoLine.search(p.to);
-                if (startIdx >= 0 && endIdx >= 0 &&
-                    startIdx < endIdx) {
-                    return; // can not fold "in" a line
-                }
+                //-------------------------------------------- look for a close
+                let lookAgain: number = 1;
+                do {
+                    lookAgain = 0;
+                    if (toClose != null) {
+                        const toCloseIdx = line.search(toClose.pair.to);
+                        if (toCloseIdx >= 0) {
+                            // we found the end of the range
+                            ranges.push(new FoldingRange(toClose.line, i));
+                            line = line.substring(toCloseIdx + 1, line.length);  // consume part of the line
 
-                if (startIdx >= 0) {
-                    if (startIdx < startHitAt || startHitAt < 0) {
-                        startHit = {
-                            pair: p,
-                            line: i
+                            if (foldStack.length > 0) {
+                                toClose = foldStack.pop()!;  // what does the ! do ?
+                                lookAgain = 1;
+
+                            } else {
+                                toClose = null;
+                            }
                         }
-                        startHitAt = startIdx
+                    }
+                } while (lookAgain == 1);
+                //--------------------------------------------
+
+
+
+                const startIdx = line.search(p.from);
+                if (startIdx > 0) {
+                    const endIdx = line.substring(startIdx + 1, line.length).search(p.to); // is there a way to just search the remaining part of the line ?
+                    if (endIdx > 0) {
+                        return; // can not fold "in" a line
+                    }
+
+                    // we have a the start of a folding pair
+
+                    if (toClose != null) {
+                        let pushme: IFoldingPairHit;// = new IFoldingPairHit();
+                        pushme =
+                        {
+                            pair: toClose.pair,
+                            line: toClose.line
+                        }
+                        foldStack.push(pushme);
+                    }
+
+                    toClose =
+                    {
+                        pair: p,
+                        line: i
                     }
                 }
 
-                if (endIdx >= 0 && foldStack.length > 0) {
-                    // found an end - compare to the top of the stack
-                    let topStart: IFoldingPairHit = foldStack.pop()!;
-                    if (topStart.pair.from === p.from) {
-                        // we have a match
-                        ranges.push(new FoldingRange(topStart.line, i));
-                    } else {
-                        // ignore - put top back on stack.
-                        foldStack.push(topStart);
-                    }
+            }); // foldingPairs.forEach 
 
-                }
-            });
-
-            if (startHit !== null) {
-                foldStack.push(startHit);
-            }
-        }
+        } // document.linecount
 
         return ranges;
     }
+
 
 
 }

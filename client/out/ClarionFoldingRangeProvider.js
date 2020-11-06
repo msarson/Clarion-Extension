@@ -25,49 +25,62 @@ class ClarionFoldingRangeProvider {
     provideFoldingRanges(document, context, token) {
         const ranges = [];
         const foldStack = [];
+        // toClose can be pushed on the foldStack
+        let toClose = null;
+        //let toCloseAt:number=-1;
+        //-------------------------------------------- 
         for (let i = 0; i < document.lineCount; i++) {
             if (token.isCancellationRequested) {
                 return null;
             }
             let line = document.lineAt(i).text;
-            let startHit = null;
-            let startHitAt = -1;
+            //-------------------------------------------- 
             this.foldingPairs.forEach((p, n) => {
-                let sudoLine = line;
-                if (p.removeComment)
-                    sudoLine = sudoLine.replace(new RegExp('!.*$'), '').replace(new RegExp('\\|.*$'), '');
-                const startIdx = sudoLine.search(p.from);
-                const endIdx = sudoLine.search(p.to);
-                if (startIdx >= 0 && endIdx >= 0 &&
-                    startIdx < endIdx) {
-                    return; // can not fold "in" a line
-                }
-                if (startIdx >= 0) {
-                    if (startIdx < startHitAt || startHitAt < 0) {
-                        startHit = {
+                //-------------------------------------------- look for a close
+                let lookAgain = 1;
+                do {
+                    lookAgain = 0;
+                    if (toClose != null) {
+                        const toCloseIdx = line.search(toClose.pair.to);
+                        if (toCloseIdx >= 0) {
+                            // we found the end of the range
+                            ranges.push(new vscode_1.FoldingRange(toClose.line, i));
+                            line = line.substring(toCloseIdx + 1, line.length); // consume part of the line
+                            if (foldStack.length > 0) {
+                                toClose = foldStack.pop(); // what does the ! do ?
+                                lookAgain = 1;
+                            }
+                            else {
+                                toClose = null;
+                            }
+                        }
+                    }
+                } while (lookAgain == 1);
+                //--------------------------------------------
+                const startIdx = line.search(p.from);
+                if (startIdx > 0) {
+                    const endIdx = line.substring(startIdx + 1, line.length).search(p.to); // is there a way to just search the remaining part of the line ?
+                    if (endIdx > 0) {
+                        return; // can not fold "in" a line
+                    }
+                    // we have a the start of a folding pair
+                    if (toClose != null) {
+                        let pushme; // = new IFoldingPairHit();
+                        pushme =
+                            {
+                                pair: toClose.pair,
+                                line: toClose.line
+                            };
+                        foldStack.push(pushme);
+                    }
+                    toClose =
+                        {
                             pair: p,
                             line: i
                         };
-                        startHitAt = startIdx;
-                    }
                 }
-                if (endIdx >= 0 && foldStack.length > 0) {
-                    // found an end - compare to the top of the stack
-                    let topStart = foldStack.pop();
-                    if (topStart.pair.from === p.from) {
-                        // we have a match
-                        ranges.push(new vscode_1.FoldingRange(topStart.line, i));
-                    }
-                    else {
-                        // ignore - put top back on stack.
-                        foldStack.push(topStart);
-                    }
-                }
-            });
-            if (startHit !== null) {
-                foldStack.push(startHit);
-            }
-        }
+            }); // foldingPairs.forEach 
+        } // document.linecount
         return ranges;
     }
 }
