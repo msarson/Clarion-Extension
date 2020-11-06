@@ -28,7 +28,13 @@ export class ClarionFoldingRangeProvider implements FoldingRangeProvider {
             from: new RegExp("\\s+RECORD", "i"),
             to: new RegExp("^\\s*END", "i"),
             removeComment: true
+        },
+        {
+            from: new RegExp("\\s+GROUP", "i"),
+            to: new RegExp("^\\s+END(\\s+|$)", "i"),
+            removeComment: true
         }
+
     ];
 
 
