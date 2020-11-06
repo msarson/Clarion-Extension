@@ -21,12 +21,12 @@ export class ClarionFoldingRangeProvider implements FoldingRangeProvider {
         },
         {
             from: new RegExp(" FILE,DRIVER", "i"),
-            to: new RegExp("END$", "i"),
+            to: new RegExp("^\\s*END", "i"),
             removeComment: true
         },
         {
-            from: new RegExp("^RECORD ", "i"),
-            to: new RegExp("END$", "i"),
+            from: new RegExp("\\s+RECORD", "i"),
+            to: new RegExp("^\\s*END", "i"),
             removeComment: true
         }
     ];
