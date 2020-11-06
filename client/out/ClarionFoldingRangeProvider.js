@@ -24,6 +24,11 @@ class ClarionFoldingRangeProvider {
                 from: new RegExp("\\s+GROUP", "i"),
                 to: new RegExp("^\\s+END(\\s+|$)", "i"),
                 removeComment: true
+            },
+            {
+                from: new RegExp("\\s+PROCEDURE", "i"),
+                to: new RegExp("\\s+PROCEDURE", "i"),
+                removeComment: true
             }
         ];
     }
