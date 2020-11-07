@@ -75,16 +75,19 @@ export class ClarionFoldingRangeProvider implements FoldingRangeProvider {
 
             //-------------------------------------------- 
             this.foldingPairs.forEach((p, n) => {
+                let parsingLine: string = line;
+                if (p.removeComment)
+                    parsingLine = parsingLine.replace(new RegExp('!.*$'), '').replace(new RegExp('\\|.*$'), '');
                 //-------------------------------------------- look for a close
                 let lookAgain: number = 1;
                 do {
                     lookAgain = 0;
                     if (toClose != null) {
-                        const toCloseIdx = line.search(toClose.pair.to);
+                        const toCloseIdx = parsingLine.search(toClose.pair.to);
                         if (toCloseIdx >= 0) {
                             // we found the end of the range
                             ranges.push(new FoldingRange(toClose.line, i));
-                            line = line.substring(toCloseIdx + 1, line.length);  // consume part of the line
+                            parsingLine = parsingLine.substring(toCloseIdx + 1, parsingLine.length);  // consume part of the line
 
                             if (foldStack.length > 0) {
                                 toClose = foldStack.pop()!;  // what does the ! do ?
@@ -100,9 +103,9 @@ export class ClarionFoldingRangeProvider implements FoldingRangeProvider {
 
 
 
-                const startIdx = line.search(p.from);
+                const startIdx = parsingLine.search(p.from);
                 if (startIdx > 0) {
-                    const endIdx = line.substring(startIdx + 1, line.length).search(p.to); // is there a way to just search the remaining part of the line ?
+                    const endIdx = parsingLine.substring(startIdx + 1, parsingLine.length).search(p.to); // is there a way to just search the remaining part of the line ?
                     if (endIdx > 0) {
                         return; // can not fold "in" a line
                     }
@@ -133,7 +136,7 @@ export class ClarionFoldingRangeProvider implements FoldingRangeProvider {
             // -----------------------------------------------
 
             line = document.lineAt(i).text;
-
+            line = line.replace(new RegExp('!.*$'), '').replace(new RegExp('\\|.*$'), '');
             let procIdx = line.search(regExProc);
             if (procIdx < 0) { procIdx = line.search(regExFunc); }
 
