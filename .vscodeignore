@@ -2,3 +2,8 @@
 .vscode-test/**
 .gitignore
 vsc-extension-quickstart.md
+**/*.map
+scripts/**
+src/
+node_modules
+
