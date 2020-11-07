@@ -34,19 +34,32 @@ export class ClarionFoldingRangeProvider implements FoldingRangeProvider {
             to: new RegExp("^\\s+END(\\s+|$)", "i"),
             removeComment: true
         }
-        ,
-        {
-            from: new RegExp("\\s+PROCEDURE", "i"),
-            to: new RegExp("\\s+PROCEDURE", "i"),
-            removeComment: true
-        }
-
+        
     ];
 
 
     provideFoldingRanges(document: TextDocument, context: FoldingContext, token: CancellationToken): ProviderResult<FoldingRange[]> {
         const ranges: FoldingRange[] = [];
         const foldStack: IFoldingPairHit[] = [];
+        //--------for the Proceudre/routine phase ----------
+        const regExProc: RegExp = new RegExp("\\s+PROCEDURE", "i");
+        const regExFunc: RegExp = new RegExp("\\s+FUNCTION", "i");
+        const regExRoutine: RegExp = new RegExp("\\s+ROUTINE", "i");
+
+        let procStartLine: number = -1;
+        let routineStartLine: number = -1;
+
+        // approach:: just search for the next PROCEDURE or ROUTINE 
+        // the end of a folding rangee (i - 1) is found when:
+        //  if in a ROUTINE  , then finding a new PROCEDURE or ROUTINE
+        //  if in a PROCEDURE, then finding a new PROCEDURE only 
+
+        // NOTE: this approach does NOT support nested procedures
+        //       to implement that we'll have to look for MAP's and check labels 
+
+        //----------proc --------
+
+
 
         // toClose can be pushed on the foldStack
         let toClose: IFoldingPairHit | null = null;
@@ -115,7 +128,44 @@ export class ClarionFoldingRangeProvider implements FoldingRangeProvider {
 
             }); // foldingPairs.forEach 
 
+            // -----------------------------------------------
+            // Handle PROCEDURES (or FUNCTION) and ROUTINES 
+            // -----------------------------------------------
+
+            line = document.lineAt(i).text;
+
+            let procIdx = line.search(regExProc);
+            if (procIdx < 0) { procIdx = line.search(regExFunc); }
+
+            if (procIdx >= 0) {  // we found the start of a new PROCEDURE (or FUNCTION)
+                if (routineStartLine > 0) {
+                    ranges.push(new FoldingRange(routineStartLine, i - 1));
+                    routineStartLine = -1;
+                }
+                if (procStartLine > 0) {
+                    ranges.push(new FoldingRange(procStartLine, i - 1));
+                }
+                procStartLine = i;
+            } else {
+                let rouIdx = line.search(regExRoutine);
+                if (rouIdx >= 0) { // we found a routine 
+                    if (routineStartLine > 0) {
+                        ranges.push(new FoldingRange(routineStartLine, i - 1));
+                    }
+                    routineStartLine = i;
+                }
+            }
+
         } // document.linecount
+
+        if (routineStartLine > 0) {
+            ranges.push(new FoldingRange(routineStartLine, document.lineCount - 1));
+            routineStartLine = -1;
+        }
+        if (procStartLine > 0) {
+            ranges.push(new FoldingRange(procStartLine, document.lineCount - 1));
+            procStartLine = -1;
+        }
 
         return ranges;
     }
