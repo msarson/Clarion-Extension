@@ -77,7 +77,7 @@ export class ClarionFoldingRangeProvider implements FoldingRangeProvider {
             this.foldingPairs.forEach((p, n) => {
                 let parsingLine: string = line;
                 if (p.removeComment)
-                    parsingLine = parsingLine.replace(new RegExp('!.*$'), '').replace(new RegExp('\\|.*$'), '');
+                    parsingLine = this.removeComments(parsingLine);
                 //-------------------------------------------- look for a close
                 let lookAgain: number = 1;
                 do {
@@ -136,7 +136,7 @@ export class ClarionFoldingRangeProvider implements FoldingRangeProvider {
             // -----------------------------------------------
 
             line = document.lineAt(i).text;
-            line = line.replace(new RegExp('!.*$'), '').replace(new RegExp('\\|.*$'), '');
+            line = this.removeComments(line);
             let procIdx = line.search(regExProc);
             if (procIdx < 0) { procIdx = line.search(regExFunc); }
 
@@ -175,4 +175,9 @@ export class ClarionFoldingRangeProvider implements FoldingRangeProvider {
 
 
 
+    ///Removes a comment from the end of a string 
+    private removeComments(line: string) {
+        line = line.replace(new RegExp('!.*$'), '').replace(new RegExp('\\|.*$'), '');
+        return line;
+    }
 }
