@@ -21,3 +21,5 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Fixes to Procedure Reference Vars
 ## [0.1.2]
 - Added extension dependenceis on "fushnisoft.clarion"
+## [0.2.0]
+- Added pragrammatic code folding

@@ -6,10 +6,11 @@ This is the README for the extension "clarion-extension".
 
 This extension is desigend to be used as an addition to the [fushnisoft.clarion](https://marketplace.visualstudio.com/items?itemName=Fushnisoft.Clarion) extension.
 
-The extension currently provide various snippets to be used when coding.
+The extension provides various snippets and code folding for use coding in clarion..
 
 A cheat sheat [can be found here](https://github.com/msarson/Clarion-Extension/blob/master/docs/CheatSheet.md)
 
+Codefolding is provided using a language client developed in typescript using vs code programmatic language features.
     
 ## Requirements
 

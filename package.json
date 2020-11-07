@@ -2,7 +2,7 @@
     "name": "clarion-extensions",
     "displayName": "Clarion-Extensions",
     "description": "Extension for Clarion Language",
-    "version": "0.1.2",
+    "version": "0.2.0",
     "publisher": "msarson",
     "repository": {
         "type": "git",
@@ -25,7 +25,8 @@
     "icon": "images/sv57x57.png",
     "license": "MIT",
     "categories": [
-        "Snippets"
+        "Snippets",
+        "Programming Languages"
     ],
     "keywords": [
         "clarion",
@@ -85,10 +86,6 @@
             "type": "object",
             "title": "clarion server configuration",
             "properties": {
-                "clarion.enableCodeLens": {
-                    "type": "boolean",
-                    "default": true
-                },
                 "clarion.maxNumberOfProblems": {
                     "scope": "resource",
                     "type": "number",
