@@ -25,6 +25,12 @@ class ClarionFoldingRangeProvider {
                 to: new RegExp("^\\s+END(\\s+|$)", "i"),
                 removeComment: true
             }
+            // could add  MAP, QUEUE , CLASS, ITEMIZE, INTERFACE 
+            // WINDOW,, SHEET, TAB,
+            // REPORT, BAND,
+            // CASE, LOOP, (IF, ELSIF, ELSE)
+            // DATA to CODE        
+            // OMIT & COMPILE <-- needs more than just regex, as need to match closing string
         ];
     }
     provideFoldingRanges(document, context, token) {
@@ -34,8 +40,13 @@ class ClarionFoldingRangeProvider {
         const regExProc = new RegExp("\\s+PROCEDURE", "i");
         const regExFunc = new RegExp("\\s+FUNCTION", "i");
         const regExRoutine = new RegExp("\\s+ROUTINE", "i");
+        const regExEnd = new RegExp("\\s+END(\\s+|$)", "i");
+        const regExGroup = new RegExp("\\s+GROUP(\\s+|$)", "i");
+        const RegExMaps = new RegExp("(\\s*)(INTERFACE|CLASS|MAP)(\\s+|$)", "i");
         let procStartLine = -1;
         let routineStartLine = -1;
+        let mapEndDepth = 0;
+        let isInMap = false;
         // approach:: just search for the next PROCEDURE or ROUTINE 
         // the end of a folding rangee (i - 1) is found when:
         //  if in a ROUTINE  , then finding a new PROCEDURE or ROUTINE
@@ -56,7 +67,7 @@ class ClarionFoldingRangeProvider {
             this.foldingPairs.forEach((p, n) => {
                 let parsingLine = line;
                 if (p.removeComment)
-                    parsingLine = parsingLine.replace(new RegExp('!.*$'), '').replace(new RegExp('\\|.*$'), '');
+                    parsingLine = this.removeComments(parsingLine);
                 //-------------------------------------------- look for a close
                 let lookAgain = 1;
                 do {
@@ -104,29 +115,47 @@ class ClarionFoldingRangeProvider {
             // -----------------------------------------------
             // Handle PROCEDURES (or FUNCTION) and ROUTINES 
             // -----------------------------------------------
-            line = document.lineAt(i).text;
-            line = line.replace(new RegExp('!.*$'), '').replace(new RegExp('\\|.*$'), '');
-            let procIdx = line.search(regExProc);
-            if (procIdx < 0) {
-                procIdx = line.search(regExFunc);
-            }
-            if (procIdx >= 0) { // we found the start of a new PROCEDURE (or FUNCTION)
-                if (routineStartLine > 0) {
-                    ranges.push(new vscode_1.FoldingRange(routineStartLine, i - 1));
-                    routineStartLine = -1;
+            line = this.removeComments(document.lineAt(i).text);
+            if (isInMap) {
+                if (line.search(regExGroup) >= 0) { // really only applies to CLASS (not MAP or INTERFACE)
+                    mapEndDepth += 1;
                 }
-                if (procStartLine > 0) {
-                    ranges.push(new vscode_1.FoldingRange(procStartLine, i - 1));
+                if (line.search(regExEnd) >= 0) {
+                    mapEndDepth -= 1;
+                    if (mapEndDepth == 0) {
+                        isInMap = false;
+                    }
                 }
-                procStartLine = i;
             }
             else {
-                let rouIdx = line.search(regExRoutine);
-                if (rouIdx >= 0) { // we found a routine 
-                    if (routineStartLine > 0) {
-                        ranges.push(new vscode_1.FoldingRange(routineStartLine, i - 1));
+                if (line.search(RegExMaps) >= 0) {
+                    isInMap = true;
+                    mapEndDepth = 1;
+                }
+                else {
+                    let procIdx = line.search(regExProc);
+                    if (procIdx < 0) {
+                        procIdx = line.search(regExFunc);
                     }
-                    routineStartLine = i;
+                    if (procIdx >= 0) { // we found the start of a new PROCEDURE (or FUNCTION)
+                        if (routineStartLine > 0) {
+                            ranges.push(new vscode_1.FoldingRange(routineStartLine, i - 1));
+                            routineStartLine = -1;
+                        }
+                        if (procStartLine > 0) {
+                            ranges.push(new vscode_1.FoldingRange(procStartLine, i - 1));
+                        }
+                        procStartLine = i;
+                    }
+                    else {
+                        let rouIdx = line.search(regExRoutine);
+                        if (rouIdx >= 0) { // we found a routine 
+                            if (routineStartLine > 0) {
+                                ranges.push(new vscode_1.FoldingRange(routineStartLine, i - 1));
+                            }
+                            routineStartLine = i;
+                        }
+                    }
                 }
             }
         } // document.linecount
@@ -139,6 +168,10 @@ class ClarionFoldingRangeProvider {
             procStartLine = -1;
         }
         return ranges;
+    }
+    removeComments(line) {
+        line = line.replace(new RegExp('!.*$'), '').replace(new RegExp('\\|.*$'), '');
+        return line;
     }
 }
 exports.ClarionFoldingRangeProvider = ClarionFoldingRangeProvider;

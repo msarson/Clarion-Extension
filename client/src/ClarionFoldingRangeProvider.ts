@@ -34,7 +34,13 @@ export class ClarionFoldingRangeProvider implements FoldingRangeProvider {
             to: new RegExp("^\\s+END(\\s+|$)", "i"),
             removeComment: true
         }
-        
+        // could add  MAP, QUEUE , CLASS, ITEMIZE, INTERFACE 
+        // WINDOW,, SHEET, TAB,
+        // REPORT, BAND,
+        // CASE, LOOP, (IF, ELSIF, ELSE)
+        // DATA to CODE        
+        // OMIT & COMPILE <-- needs more than just regex, as need to match closing string
+
     ];
 
 
@@ -45,9 +51,14 @@ export class ClarionFoldingRangeProvider implements FoldingRangeProvider {
         const regExProc: RegExp = new RegExp("\\s+PROCEDURE", "i");
         const regExFunc: RegExp = new RegExp("\\s+FUNCTION", "i");
         const regExRoutine: RegExp = new RegExp("\\s+ROUTINE", "i");
+        const regExEnd: RegExp = new RegExp("\\s+END(\\s+|$)", "i");
+        const regExGroup: RegExp = new RegExp("\\s+GROUP(\\s+|$)", "i");
+        const RegExMaps: RegExp = new RegExp("(\\s*)(INTERFACE|CLASS|MAP)(\\s+|$)", "i");
 
         let procStartLine: number = -1;
         let routineStartLine: number = -1;
+        let mapEndDepth: number = 0;
+        let isInMap: boolean = false;
 
         // approach:: just search for the next PROCEDURE or ROUTINE 
         // the end of a folding rangee (i - 1) is found when:
@@ -135,28 +146,45 @@ export class ClarionFoldingRangeProvider implements FoldingRangeProvider {
             // Handle PROCEDURES (or FUNCTION) and ROUTINES 
             // -----------------------------------------------
 
-            line = document.lineAt(i).text;
-            line = this.removeComments(line);
-            let procIdx = line.search(regExProc);
-            if (procIdx < 0) { procIdx = line.search(regExFunc); }
-
-            if (procIdx >= 0) {  // we found the start of a new PROCEDURE (or FUNCTION)
-                if (routineStartLine > 0) {
-                    ranges.push(new FoldingRange(routineStartLine, i - 1));
-                    routineStartLine = -1;
+            line = this.removeComments(document.lineAt(i).text);
+            if (isInMap) {
+                if (line.search(regExGroup) >= 0) { // really only applies to CLASS (not MAP or INTERFACE)
+                    mapEndDepth += 1;
                 }
-                if (procStartLine > 0) {
-                    ranges.push(new FoldingRange(procStartLine, i - 1));
-                }
-                procStartLine = i;
-            } else {
-                let rouIdx = line.search(regExRoutine);
-                if (rouIdx >= 0) { // we found a routine 
-                    if (routineStartLine > 0) {
-                        ranges.push(new FoldingRange(routineStartLine, i - 1));
+                if (line.search(regExEnd) >= 0) {
+                    mapEndDepth -= 1;
+                    if (mapEndDepth == 0) {
+                        isInMap = false;
                     }
-                    routineStartLine = i;
                 }
+            } else {
+                if (line.search(RegExMaps) >= 0) {
+                    isInMap = true;
+                    mapEndDepth = 1;
+                } else {
+                    let procIdx = line.search(regExProc);
+                    if (procIdx < 0) { procIdx = line.search(regExFunc); }
+
+                    if (procIdx >= 0) {  // we found the start of a new PROCEDURE (or FUNCTION)
+                        if (routineStartLine > 0) {
+                            ranges.push(new FoldingRange(routineStartLine, i - 1));
+                            routineStartLine = -1;
+                        }
+                        if (procStartLine > 0) {
+                            ranges.push(new FoldingRange(procStartLine, i - 1));
+                        }
+                        procStartLine = i;
+                    } else {
+                        let rouIdx = line.search(regExRoutine);
+                        if (rouIdx >= 0) { // we found a routine 
+                            if (routineStartLine > 0) {
+                                ranges.push(new FoldingRange(routineStartLine, i - 1));
+                            }
+                            routineStartLine = i;
+                        }
+                    }
+                }
+
             }
 
         } // document.linecount
@@ -172,10 +200,6 @@ export class ClarionFoldingRangeProvider implements FoldingRangeProvider {
 
         return ranges;
     }
-
-
-
-    ///Removes a comment from the end of a string 
     private removeComments(line: string) {
         line = line.replace(new RegExp('!.*$'), '').replace(new RegExp('\\|.*$'), '');
         return line;
