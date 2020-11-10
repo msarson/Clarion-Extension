@@ -19,8 +19,8 @@
         "vscode": "^1.43.0"
     },
     "activationEvents": [
-		"onLanguage:clarion"
-	],
+        "onLanguage:clarion"
+    ],
     "main": "./client/out/extension",
     "icon": "images/sv57x57.png",
     "license": "MIT",
@@ -36,18 +36,6 @@
         "fushnisoft.clarion"
     ],
     "contributes": {
-        "commands": [
-            {
-                "title": "Enable Clarion CodeLens",
-                "command": "clarion.enableCodeLens",
-                "category": "clarion CodeLens"
-            },
-            {
-                "title": "Disable Codelens",
-                "command": "clarion.disableCodeLens",
-                "category": "clarion CodeLens"
-            }
-        ],
         "snippets": [
             {
                 "language": "clarion",
@@ -110,8 +98,7 @@
         "vscode:prepublish": "npm run compile",
         "compile": "tsc -b",
         "watch": "tsc -b -w",
-        "postinstall": "cd client && npm install && cd .."
-        
+        "postinstall": "cd client && npm install && cd ../server  && npm install && cd .."
     },
     "devDependencies": {
         "@types/mocha": "^8.0.3",
