@@ -1,5 +1,4 @@
 import { ExtensionContext, languages, commands, Disposable, workspace, window } from 'vscode';
-import {ClarionFoldingRangeProvider} from './ClarionFoldingRangeProvider'
 import * as path from 'path';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } from 'vscode-languageclient';
 
@@ -43,8 +42,6 @@ export function activate(context: ExtensionContext) {
     );
     
     client.start();
-    
-   // context.subscriptions.push(languages.registerFoldingRangeProvider({ scheme: 'file', language: 'clarion' }, new ClarionFoldingRangeProvider()));
 }
 
 
@@ -54,9 +51,3 @@ export function deactivate(): Thenable<void> | undefined {
     }
     return client.stop();
 }
-// export function deactivate() {
-//     if (disposables) {
-//         disposables.forEach(item => item.dispose());
-//     }
-//     disposables = [];
-// }
