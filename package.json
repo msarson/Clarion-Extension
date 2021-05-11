@@ -19,8 +19,8 @@
         "vscode": "^1.43.0"
     },
     "activationEvents": [
-		"onLanguage:clarion"
-	],
+        "onLanguage:clarion"
+    ],
     "main": "./client/out/extension",
     "icon": "images/sv57x57.png",
     "license": "MIT",
@@ -111,7 +111,6 @@
         "compile": "tsc -b",
         "watch": "tsc -b -w",
         "postinstall": "cd client && npm install && cd .."
-        
     },
     "devDependencies": {
         "@types/mocha": "^8.0.3",
