@@ -29,7 +29,6 @@ function activate(context) {
     };
     client = new vscode_languageclient_1.LanguageClient('ClarionLanguageServer', 'Clarion Language Server', serverOptions, clientOptions);
     client.start();
-    // context.subscriptions.push(languages.registerFoldingRangeProvider({ scheme: 'file', language: 'clarion' }, new ClarionFoldingRangeProvider()));
 }
 exports.activate = activate;
 function deactivate() {
@@ -39,10 +38,4 @@ function deactivate() {
     return client.stop();
 }
 exports.deactivate = deactivate;
-// export function deactivate() {
-//     if (disposables) {
-//         disposables.forEach(item => item.dispose());
-//     }
-//     disposables = [];
-// }
 //# sourceMappingURL=extension.js.map
