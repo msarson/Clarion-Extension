@@ -2,36 +2,40 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deactivate = exports.activate = void 0;
 const vscode_1 = require("vscode");
-const ClarionFoldingRangeProvider_1 = require("./ClarionFoldingRangeProvider");
+const path = require("path");
+const vscode_languageclient_1 = require("vscode-languageclient");
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
-let disposables = [];
-// import {
-// 	LanguageClient,
-// 	LanguageClientOptions,
-// 	ServerOptions,
-// 	TransportKind
-// } from 'vscode-languageclient';
+//let disposables: Disposable[] = [];
+let client;
 function activate(context) {
-    context.subscriptions.push(vscode_1.languages.registerFoldingRangeProvider({ scheme: 'file', language: 'clarion' }, new ClarionFoldingRangeProvider_1.ClarionFoldingRangeProvider()));
-    // const codelensProvider = new CodelensProvider();
-    // languages.registerCodeLensProvider("*", codelensProvider);
-    // commands.registerCommand("clarion.enableCodeLens", () => {
-    //     workspace.getConfiguration("clarion").update("enableCodeLens", true, true);
-    // });
-    // commands.registerCommand("clarion.disableCodeLens", () => {
-    //     workspace.getConfiguration("clarion").update("enableCodeLens", false, true);
-    // });
-    // commands.registerCommand("clarion.codelensAction", (args: any) => {
-    //     window.showInformationMessage(`CodeLens action clicked with args=${args}`);
-    // });
+    let serverModule = context.asAbsolutePath(path.join('server', 'out', 'server.js'));
+    let debugOptions = { execArgv: ['--nolazy', '--inspect=6009'] };
+    let serverOptions = {
+        run: { module: serverModule, transport: vscode_languageclient_1.TransportKind.ipc },
+        debug: {
+            module: serverModule,
+            transport: vscode_languageclient_1.TransportKind.ipc,
+            options: debugOptions
+        }
+    };
+    let clientOptions = {
+        // js is used to trigger things
+        documentSelector: [{ scheme: 'file', language: 'clarion' }],
+        synchronize: {
+            // Notify the server about file changes to '.clientrc files contained in the workspace
+            fileEvents: vscode_1.workspace.createFileSystemWatcher('**/.clientrc')
+        }
+    };
+    client = new vscode_languageclient_1.LanguageClient('ClarionLanguageServer', 'Clarion Language Server', serverOptions, clientOptions);
+    client.start();
 }
 exports.activate = activate;
 function deactivate() {
-    if (disposables) {
-        disposables.forEach(item => item.dispose());
+    if (!client) {
+        return undefined;
     }
-    disposables = [];
+    return client.stop();
 }
 exports.deactivate = deactivate;
 //# sourceMappingURL=extension.js.map
