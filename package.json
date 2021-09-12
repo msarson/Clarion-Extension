@@ -36,18 +36,7 @@
         "fushnisoft.clarion"
     ],
     "contributes": {
-        "commands": [
-            {
-                "title": "Enable Clarion CodeLens",
-                "command": "clarion.enableCodeLens",
-                "category": "clarion CodeLens"
-            },
-            {
-                "title": "Disable Codelens",
-                "command": "clarion.disableCodeLens",
-                "category": "clarion CodeLens"
-            }
-        ],
+        
         "snippets": [
             {
                 "language": "clarion",
