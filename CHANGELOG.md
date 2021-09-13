@@ -23,3 +23,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Added extension dependenceis on "fushnisoft.clarion"
 ## [0.2.0]
 - Added pragrammatic code folding
+## [0.2.1]
+  Security update detected by GitHub dependabot.
+## [0.2.2]
+  12 May 2021 - Updated to latest packages.  
