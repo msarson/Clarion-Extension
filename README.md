@@ -16,3 +16,14 @@ Codefolding is provided using a language client developed in typescript using vs
 
 This extension require the VS Code extension for Clarion, this can either be downloaded from the [market place](https://marketplace.visualstudio.com/items?itemName=Fushnisoft.Clarion) or directly from within the Visual Studio Code IDE
 
+## Build and Create Package
+
+Make sure you have "Visual Studio Code Extensions" CLI installed
+```
+npm install -g vsce
+```
+Then run
+```
+vsce package
+```
+You will have `clarion-extensions-*.vsix` in project's folder.
