@@ -2,9 +2,14 @@ import {
     createConnection,
     TextDocuments,
     ProposedFeatures,
-    FoldingRange,
-    FoldingRangeRequestParam
-} from 'vscode-languageserver';
+   // FoldingRange,
+    
+    
+} from 'vscode-languageserver/node';
+import {
+   FoldingRange,
+   FoldingRangeParams
+} from 'vscode-languageserver-protocol'
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { ClarionFoldingRangeProvider } from './ClarionFoldingRangeProvider';
 
@@ -27,11 +32,11 @@ connection.onInitialize(params => {
 });
 
 connection.onInitialized(() => {
-    connection.window.showInformationMessage('Clarion Server Initialized');
+   // connection.window.showInformationMessage('Clarion Server Initialized');
 });
 
 
-function getFoldingRanges(params: FoldingRangeRequestParam): FoldingRange[] {
+function getFoldingRanges(params: FoldingRangeParams): FoldingRange[] {
     const document = documents.get(params.textDocument.uri);
     if (!document) {
         return [];

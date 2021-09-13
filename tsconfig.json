@@ -10,12 +10,13 @@
 	"include": [
 		"src"
 	],
-	"exclude": [
+	"exclude": [ 
 		"node_modules",
-		".vscode-test"
+		"**/node_modules/*",
+		"vscode-test"
 	],
 	"references": [
-		{"path": "./client" },
-		{ "path": "./server"}
+		{"path": "client" },
+		{ "path": "server"}
 	]
 }

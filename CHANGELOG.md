@@ -27,3 +27,5 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   Security update detected by GitHub dependabot.
 ## [0.2.2]
   12 May 2021 - Updated to latest packages.  
+## [0.2.5]
+  13 September 2021 - Thanks to the kind contribution of Allen Zhu who has provided a document outline addition. Ctrl+Shift+O 

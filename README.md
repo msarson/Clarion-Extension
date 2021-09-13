@@ -10,7 +10,9 @@ The extension provides various snippets and code folding for use coding in clari
 
 A cheat sheat [can be found here](https://github.com/msarson/Clarion-Extension/blob/master/docs/CheatSheet.md)
 
-Codefolding is provided using a language client developed in typescript using vs code programmatic language features.
+Codefolding is provided using a language server extension developed in typescript using vs code programmatic language features.
+
+Document Outline is provider in the language client, developed in typescript with a very kind contribution from Allen Zhu
     
 ## Requirements
 

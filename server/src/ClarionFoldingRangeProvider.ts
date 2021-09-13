@@ -1,8 +1,8 @@
 //import { CancellationToken, FoldingContext, FoldingRange, FoldingRangeProvider, ProviderResult, TextDocument } from 'vscode';
-import {    FoldingRange} from "vscode-languageserver-types";
-import {  TextDocumentPositionParams, DocumentRangeFormattingParams, ExecuteCommandParams, CodeActionParams, FoldingRangeRequestParam, DocumentColorParams, ColorPresentationParams, TextDocumentSyncKind } from 'vscode-languageserver-protocol';
+import {    FoldingRange} from "vscode-languageserver-protocol";
 import { TextDocument } from "vscode-languageserver-textdocument";
-import { CancellationToken, Range } from "vscode-languageserver";
+import { Range } from "vscode-languageserver";
+
 interface IFoldingPair {
     from: RegExp;
     to: RegExp;
@@ -86,7 +86,7 @@ export class ClarionFoldingRangeProvider {//implements FoldingRangeProvider {
             // }
             
             
-            let line = this.getLine({ document, i });
+            let line =  this.getLine({ document, i });
 
             //-------------------------------------------- 
             this.foldingPairs.forEach((p) => {
@@ -128,6 +128,7 @@ export class ClarionFoldingRangeProvider {//implements FoldingRangeProvider {
                     // we have a the start of a folding pair
 
                     if (toClose != null) {
+
                         let pushme: IFoldingPairHit;// = new IFoldingPairHit();
                         pushme =
                         {
@@ -208,7 +209,7 @@ export class ClarionFoldingRangeProvider {//implements FoldingRangeProvider {
         return FoldingRange.create(startLine, endLine);
     }
     private getLine({ document, i }: { document: TextDocument; i: number; }) {
-        return document.getText(Range.create(i, -1, i, Number.MAX_VALUE));
+        return document.getText(Range.create(i, 0, i,1000));//Number.MAX_VALUE));
     }
 
     private removeComments(line: string) {
