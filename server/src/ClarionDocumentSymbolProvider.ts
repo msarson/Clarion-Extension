@@ -1,6 +1,7 @@
-import * as vscode from 'vscode';
+import { DocumentSymbol, Range, SymbolKind } from 'vscode-languageserver';
+import { TextDocument } from 'vscode-languageserver-textdocument';
 
-export class ClarionDocumentSymbolProvider implements vscode.DocumentSymbolProvider {
+export class ClarionDocumentSymbolProvider {
 
     // Capitalize
     private format(cmd: string): string {
@@ -9,10 +10,9 @@ export class ClarionDocumentSymbolProvider implements vscode.DocumentSymbolProvi
 
     // based on Clarion6
     public provideDocumentSymbols(
-        document: vscode.TextDocument,
-        token: vscode.CancellationToken): Promise<vscode.DocumentSymbol[]> {
-        return new Promise((resolve, reject) => {
-            let symbols: vscode.DocumentSymbol[] = [];
+        document: TextDocument): DocumentSymbol[] {
+
+            let symbols: DocumentSymbol[] = [];
             let nodes = [symbols]
 
             let inside_root = false
@@ -20,21 +20,23 @@ export class ClarionDocumentSymbolProvider implements vscode.DocumentSymbolProvi
             let inside_routine = false
             let inside_variable = 0
 
-            const symbolkind_root = vscode.SymbolKind.Module
-            const symbolkind_procedure = vscode.SymbolKind.Method
-            const symbolkind_routine = vscode.SymbolKind.Property
-            const symbolkind_variable = vscode.SymbolKind.Variable
+            const symbolkind_root = SymbolKind.Module
+            const symbolkind_procedure = SymbolKind.Method
+            const symbolkind_routine = SymbolKind.Property
+            const symbolkind_variable = SymbolKind.Variable
 
-            let root_symbol: vscode.DocumentSymbol = null
-            let procedure_symbol: vscode.DocumentSymbol = null
-            let routine_symbol: vscode.DocumentSymbol = null
-            let variable_symbol: vscode.DocumentSymbol = null
+            let root_symbol: DocumentSymbol = null
+            let procedure_symbol: DocumentSymbol = null
+            let routine_symbol: DocumentSymbol = null
+            let variable_symbol: DocumentSymbol = null
 
             for (var i = 0; i < document.lineCount; i++) {
-                var line = document.lineAt(i);
-                let trimmedLine = line.text.trimStart()
-
-                if (line.isEmptyOrWhitespace || trimmedLine.startsWith("!"))
+                var currentLineRange = Range.create(i,0,i+1,0)
+                var line = document.getText(currentLineRange)
+                let trimmedLine = line.trimStart()
+                // string.isNullOrEmpty
+                // https://codereview.stackexchange.com/a/5710
+                if (!line || trimmedLine.startsWith("!"))
                     continue;
 
                 if (!inside_root) {
@@ -57,12 +59,13 @@ export class ClarionDocumentSymbolProvider implements vscode.DocumentSymbolProvi
                                 detail = trimmedLine.slice(bracketStart + 1, bracketEnd).trim();
                             }
                             
-                            root_symbol = new vscode.DocumentSymbol(
+                            root_symbol = DocumentSymbol.create(
                                 name,
                                 detail,
                                 symbolkind_root,
-                                new vscode.Range(line.range.start, document.lineAt(document.lineCount - 1).range.end),//until the last line of the file
-                                line.range
+                                Range.create(i,0, document.lineCount,0),//until the last line of the file
+                                currentLineRange,
+                                []
                             )
 
                             nodes[nodes.length - 1].push(root_symbol)
@@ -74,31 +77,33 @@ export class ClarionDocumentSymbolProvider implements vscode.DocumentSymbolProvi
                 }
 
                 if (inside_variable > 0){
-                    if (line.text.startsWith(" ") && (trimmedLine.startsWith(".") || trimmedLine.toLowerCase().startsWith("end"))){
+                    if (line.startsWith(" ") && (trimmedLine.startsWith(".") || trimmedLine.toLowerCase().startsWith("end"))){
                         inside_variable--
                     }
                     if (inside_variable == 0){
                         // udpate the Variable's range
                         let lastVariable = nodes[nodes.length - 1].pop()
-                        lastVariable.range = new vscode.Range(lastVariable.range.start, document.lineAt(line.range.start.line).range.end)
+                        lastVariable.range = Range.create(lastVariable.range.start, currentLineRange.end)
                         nodes[nodes.length - 1].push(lastVariable)
                     }
                 }
 
                 // the declaration of PROCEDURE, ROUTINE or VARIABLE has no leading space
-                if (!line.text.startsWith(" ") && !trimmedLine.startsWith("!")) {
-                    let tokens = line.text.split(/\s+/)
+                if (!line.startsWith(" ") && !trimmedLine.startsWith("!")) {
+                    let tokens = line.split(/\s+/)
                     if (tokens.length >= 2) {
                         let name = tokens[0]
                         let type = tokens[1]
 
                         if (type.toLowerCase().startsWith("procedure")) {
 
-                            procedure_symbol = new vscode.DocumentSymbol(
+                            procedure_symbol = DocumentSymbol.create(
                                 name,
                                 "",
                                 symbolkind_procedure,
-                                line.range, line.range
+                                currentLineRange,
+                                currentLineRange,
+                                []
                             )
 
                             // Since Clarion Procedure has no explicit section end symbol.
@@ -109,7 +114,7 @@ export class ClarionDocumentSymbolProvider implements vscode.DocumentSymbolProvi
 
                                 // udpate the previous Routine's range
                                 let lastRoutine = nodes[nodes.length - 1].pop()
-                                lastRoutine.range = new vscode.Range(lastRoutine.range.start, document.lineAt(line.range.start.line - 1).range.end)
+                                lastRoutine.range = Range.create(lastRoutine.range.start, currentLineRange.end)
                                 nodes[nodes.length - 1].push(lastRoutine)
                             }
                             if (inside_procedure) {
@@ -118,7 +123,7 @@ export class ClarionDocumentSymbolProvider implements vscode.DocumentSymbolProvi
 
                                 // update the previous Procedure's range
                                 let lastProcedure = nodes[nodes.length - 1].pop()
-                                lastProcedure.range = new vscode.Range(lastProcedure.range.start, document.lineAt(line.range.start.line - 1).range.end)
+                                lastProcedure.range = Range.create(lastProcedure.range.start, currentLineRange.end)
                                 nodes[nodes.length - 1].push(lastProcedure)
                             }
 
@@ -129,11 +134,13 @@ export class ClarionDocumentSymbolProvider implements vscode.DocumentSymbolProvi
                         }
 
                         else if (type.toLowerCase().startsWith("routine")) {
-                            routine_symbol = new vscode.DocumentSymbol(
+                            routine_symbol = DocumentSymbol.create(
                                 name,
                                 "",
                                 symbolkind_routine,
-                                line.range, line.range
+                                currentLineRange,
+                                currentLineRange,
+                                []
                             )
 
                             // Since Clarion Procedure has no explicit section end symbol.
@@ -144,7 +151,7 @@ export class ClarionDocumentSymbolProvider implements vscode.DocumentSymbolProvi
 
                                 // udpate the previous Routine's range
                                 let lastRoutine = nodes[nodes.length - 1].pop()
-                                lastRoutine.range = new vscode.Range(lastRoutine.range.start, document.lineAt(i - 1).range.end)
+                                lastRoutine.range = Range.create(lastRoutine.range.start, currentLineRange.end)
                                 nodes[nodes.length - 1].push(lastRoutine)
                             }
 
@@ -156,11 +163,13 @@ export class ClarionDocumentSymbolProvider implements vscode.DocumentSymbolProvi
 
                         else { // fall to VARIABLE
                             if (inside_variable == 0) {
-                                variable_symbol = new vscode.DocumentSymbol(
+                                variable_symbol = DocumentSymbol.create(
                                     name,
                                     "",
                                     symbolkind_variable,
-                                    line.range, line.range
+                                    currentLineRange,
+                                    currentLineRange,
+                                    []
                                 )
 
                                 nodes[nodes.length - 1].push(variable_symbol)
@@ -170,8 +179,6 @@ export class ClarionDocumentSymbolProvider implements vscode.DocumentSymbolProvi
                     }
                 }
             }
-
-            resolve(symbols);
-        });
+            return symbols
     }
 }
