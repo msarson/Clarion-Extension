@@ -1,15 +1,29 @@
 ﻿import { ExtensionContext, workspace } from 'vscode';
 import * as path from 'path';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } from 'vscode-languageclient/node';
+import * as vscode from 'vscode';
+import { ClarionExtensionCommands } from './ClarionExtensionCommands';
+import { registerProviders } from './provider'; // Import the new registration function
 
-// this method is called when your extension is activated
-// your extension is activated the very first time the command is executed
-
-//let disposables: Disposable[] = [];
 let client: LanguageClient;
 
-export function activate(context: ExtensionContext) {
-   
+export async function activate(context: ExtensionContext) {
+    const disposable = vscode.commands.registerCommand('clarion.configureClarionPropertiesFile', ClarionExtensionCommands.configureClarionPropertiesFile);
+    context.subscriptions.push(disposable);
+
+    if (workspace.workspaceFolders) {
+        // Call the method to update workspace configurations
+        await ClarionExtensionCommands.updateWorkspaceConfigurations();
+    }
+
+    // Register providers initially
+    registerProviders(context);
+
+    // Re-register providers when workspace trust is granted
+    vscode.workspace.onDidGrantWorkspaceTrust(() => {
+        registerProviders(context);
+    });
+
     let serverModule = context.asAbsolutePath(
         path.join('server', 'out', 'server.js')
     );
@@ -19,19 +33,22 @@ export function activate(context: ExtensionContext) {
     let serverOptions: ServerOptions = {
         run: { module: serverModule, transport: TransportKind.ipc },
         debug: {
-          module: serverModule,
-          transport: TransportKind.ipc,
-          options: debugOptions
+            module: serverModule,
+            transport: TransportKind.ipc,
+            options: debugOptions
         }
-      };
+    };
 
     let clientOptions: LanguageClientOptions = {
         // js is used to trigger things
         documentSelector: [{ scheme: 'file', language: 'clarion' }],
+        initializationOptions: {
+            settings: workspace.getConfiguration('clarion')
+        },
         synchronize: {
             // Notify the server about file changes to '.clientrc files contained in the workspace
-            fileEvents: workspace.createFileSystemWatcher('**/.clientrc')
-          }
+            fileEvents: workspace.createFileSystemWatcher('**/*.{clw,inc}')
+        }
     };
 
     client = new LanguageClient(
@@ -40,10 +57,11 @@ export function activate(context: ExtensionContext) {
         serverOptions,
         clientOptions
     );
-    
-    client.start();
-}
 
+    client.start();
+
+  
+}
 
 export function deactivate(): Thenable<void> | undefined {
     if (!client) {
@@ -51,3 +69,5 @@ export function deactivate(): Thenable<void> | undefined {
     }
     return client.stop();
 }
+
+

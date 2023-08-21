@@ -1,5 +1,5 @@
 //import { CancellationToken, FoldingContext, FoldingRange, FoldingRangeProvider, ProviderResult, TextDocument } from 'vscode';
-import {    FoldingRange} from "vscode-languageserver-protocol";
+import { FoldingRange} from "vscode-languageserver-protocol";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { Range } from "vscode-languageserver";
 

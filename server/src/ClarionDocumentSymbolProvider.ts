@@ -1,6 +1,12 @@
 import { DocumentSymbol, Range, SymbolKind } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
+enum ClarionSymbolKind {
+    Root = SymbolKind.Module,
+    Procedure = SymbolKind.Method,
+    Routine = SymbolKind.Property,
+    Variable = SymbolKind.Variable
+}
 
 export class ClarionDocumentSymbolProvider {
 
@@ -28,15 +34,12 @@ export class ClarionDocumentSymbolProvider {
         let inside_routine = false
         let inside_variable = 0
 
-        const symbolkind_root = SymbolKind.Module
-        const symbolkind_procedure = SymbolKind.Method
-        const symbolkind_routine = SymbolKind.Property
-        const symbolkind_variable = SymbolKind.Variable
 
-        let root_symbol: DocumentSymbol = null
-        let procedure_symbol: DocumentSymbol = null
-        let routine_symbol: DocumentSymbol = null
-        let variable_symbol: DocumentSymbol = null
+
+        let root_symbol: DocumentSymbol | null
+        let procedure_symbol: DocumentSymbol | null
+        let routine_symbol: DocumentSymbol | null
+        let variable_symbol: DocumentSymbol | null
 
         for (var i = 0; i < document.lineCount; i++) {
             var currentLineRange = this.getLineRange(document, i)
@@ -51,8 +54,8 @@ export class ClarionDocumentSymbolProvider {
                 // ROOT could be:
                 // "   MEMBER('FOO.clw')                                     !App=FOO"
                 // "   PROGRAM "
-                let name: string = undefined
-                let detail: string = undefined
+                let name: string = ""
+                let detail: string = ""
                 if (!trimmedLine.startsWith("!")) {
                     if (trimmedLine.toLowerCase().startsWith("member")) {
                         name = "MEMBER"
@@ -66,18 +69,18 @@ export class ClarionDocumentSymbolProvider {
                         if (0 < bracketStart && bracketStart < bracketEnd) {
                             detail = trimmedLine.slice(bracketStart + 1, bracketEnd).trim();
                         }
-
+                        const emptyChildren: DocumentSymbol[] = [];
                         root_symbol = DocumentSymbol.create(
                             name,
                             detail,
-                            symbolkind_root,
+                            ClarionSymbolKind.Root as SymbolKind,
                             this.getLineRange(document, i, document.lineCount),   // till the last line of the file
                             currentLineRange,
-                            []
+                            emptyChildren
                         )
 
                         nodes[nodes.length - 1].push(root_symbol)
-                        nodes.push(root_symbol.children)
+                        nodes.push(root_symbol.children!)
                         inside_root = true
                         //continue;
                     }
@@ -91,8 +94,10 @@ export class ClarionDocumentSymbolProvider {
                 if (inside_variable == 0) {
                     // udpate the Variable's range
                     let lastVariable = nodes[nodes.length - 1].pop()
-                    lastVariable.range = this.getLineRange(document, lastVariable.range.start.line, currentLineRange.start.line - 1)
-                    nodes[nodes.length - 1].push(lastVariable)
+                    if(lastVariable != null) {
+                        lastVariable.range = this.getLineRange(document, lastVariable.range.start.line, currentLineRange.start.line - 1)
+                        nodes[nodes.length - 1].push(lastVariable)
+                    }
                 }
             }
 
@@ -108,7 +113,7 @@ export class ClarionDocumentSymbolProvider {
                         procedure_symbol = DocumentSymbol.create(
                             name,
                             "",
-                            symbolkind_procedure,
+                            ClarionSymbolKind.Procedure as SymbolKind,
                             currentLineRange,
                             currentLineRange,
                             []
@@ -122,8 +127,10 @@ export class ClarionDocumentSymbolProvider {
 
                             // udpate the previous Routine's range
                             let lastRoutine = nodes[nodes.length - 1].pop()
-                            lastRoutine.range = this.getLineRange(document, lastRoutine.range.start.line, currentLineRange.start.line - 1)
-                            nodes[nodes.length - 1].push(lastRoutine)
+                            if(lastRoutine != null) {
+                                lastRoutine.range = this.getLineRange(document, lastRoutine.range.start.line, currentLineRange.start.line - 1)
+                                nodes[nodes.length - 1].push(lastRoutine)
+                            }
                         }
                         if (inside_procedure) {
                             nodes.pop()
@@ -131,24 +138,27 @@ export class ClarionDocumentSymbolProvider {
 
                             // update the previous Procedure's range
                             let lastProcedure = nodes[nodes.length - 1].pop()
-                            lastProcedure.range = this.getLineRange(document, lastProcedure.range.start.line, currentLineRange.start.line - 1)
-                            nodes[nodes.length - 1].push(lastProcedure)
+                            if(lastProcedure != null) {
+                                lastProcedure.range = this.getLineRange(document, lastProcedure.range.start.line, currentLineRange.start.line - 1)
+                                nodes[nodes.length - 1].push(lastProcedure)
+                            }
                         }
 
                         nodes[nodes.length - 1].push(procedure_symbol)
-                        nodes.push(procedure_symbol.children)
+                        nodes.push(procedure_symbol.children!)
                         inside_procedure = true
                         //continue;
                     }
 
                     else if (type.toLowerCase().startsWith("routine")) {
+                        const emptyChildren: DocumentSymbol[] = [];
                         routine_symbol = DocumentSymbol.create(
                             name,
                             "",
-                            symbolkind_routine,
+                            ClarionSymbolKind.Routine as SymbolKind,
                             currentLineRange,
                             currentLineRange,
-                            []
+                            emptyChildren
                         )
 
                         // Since Clarion Procedure has no explicit section end symbol.
@@ -159,13 +169,17 @@ export class ClarionDocumentSymbolProvider {
 
                             // udpate the previous Routine's range
                             let lastRoutine = nodes[nodes.length - 1].pop()
-                            lastRoutine.range = this.getLineRange(document, lastRoutine.range.start.line, currentLineRange.start.line - 1)
-                            nodes[nodes.length - 1].push(lastRoutine)
+                            if(lastRoutine != null) {
+                                lastRoutine.range = this.getLineRange(document, lastRoutine.range.start.line, currentLineRange.start.line - 1)
+                                nodes[nodes.length - 1].push(lastRoutine)
+                            }
                         }
 
                         nodes[nodes.length - 1].push(routine_symbol)
-                        nodes.push(routine_symbol.children)
-                        inside_routine = true
+                        if(routine_symbol.children == null) {
+                            nodes.push(routine_symbol.children!)
+                            inside_routine = true
+                        }
                         //continue;
                     }
 
@@ -174,7 +188,7 @@ export class ClarionDocumentSymbolProvider {
                             variable_symbol = DocumentSymbol.create(
                                 name,
                                 "",
-                                symbolkind_variable,
+                                ClarionSymbolKind.Variable as SymbolKind,
                                 currentLineRange,
                                 currentLineRange,
                                 []

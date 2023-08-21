@@ -17,6 +17,7 @@
     },
     "devDependencies": {
         "@types/vscode": "1.56.0",
+        "@types/xml2js": "^0.4.11",
         "vscode-test": "^1.5.2"
     }
 }
