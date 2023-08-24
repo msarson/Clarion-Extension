@@ -11,6 +11,8 @@ export async function activate(context: ExtensionContext) {
     const disposable = vscode.commands.registerCommand('clarion.configureClarionPropertiesFile', ClarionExtensionCommands.configureClarionPropertiesFile);
     context.subscriptions.push(disposable);
 
+    const soultutionFileSelector = vscode.commands.registerCommand('clarion.selectSolutionFile', ClarionExtensionCommands.selectSolutionFile);
+    // Check if the workspace is trusted
     if (workspace.workspaceFolders) {
         // Call the method to update workspace configurations
         await ClarionExtensionCommands.updateWorkspaceConfigurations();
@@ -23,6 +25,7 @@ export async function activate(context: ExtensionContext) {
     vscode.workspace.onDidGrantWorkspaceTrust(() => {
         registerProviders(context);
     });
+
 
     let serverModule = context.asAbsolutePath(
         path.join('server', 'out', 'server.js')

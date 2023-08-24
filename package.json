@@ -2,7 +2,7 @@
     "name": "clarion-extensions",
     "displayName": "Clarion-Extensions",
     "description": "Extension for Clarion Language",
-    "version": "0.2.5",
+    "version": "0.3.0",
     "publisher": "msarson",
     "repository": {
         "type": "git",
@@ -39,11 +39,13 @@
         "commands": [
             {
                 "command": "clarion.configureClarionPropertiesFile",
-                "title": "Select ClarionProperties.xml File"
+                "title": "Clarion Select ClarionProperties.xml File"
+            },
+            {
+                "command": "clarion.selectSolutionFile",
+                "title": "Clarion Select Application Solution File"
             }
-           
         ],
-
         "snippets": [
             {
                 "language": "clarion",
@@ -77,7 +79,7 @@
                 "language": "jsonc",
                 "path": "./snippets/clarionbuildtask.json"
             }
-        ],       
+        ],
         "configuration": {
             "type": "object",
             "title": "clarion server configuration",
@@ -115,31 +117,36 @@
                     "type": "string",
                     "default": "",
                     "description": "Path to the ClarionProperties.xml file"
-                  },
-                  "selectedClarionVersion": {
+                },
+                "selectedClarionVersion": {
                     "type": "string",
                     "default": "",
                     "description": "Selected Clarion version"
-                  },
-                  "selectedClarionPath": {
+                },
+                "selectedClarionPath": {
                     "type": "string",
                     "default": "",
                     "description": "Path of the selected Clarion version"
-                  },
-                  "selectedClarionRedirectionFile": {
+                },
+                "selectedClarionRedirectionFile": {
                     "type": "string",
                     "default": "",
                     "description": "Selected Clarion version's redirection file"
-                  },
-                  "selectedClarionMacros": {
+                },
+                "selectedClarionMacros": {
                     "type": "object",
                     "default": {},
                     "description": "Selected Clarion version's macros"
-                  },
-                  "selectedClarionLibsrc": {
+                },
+                "selectedClarionLibsrc": {
                     "type": "string",
                     "default": "",
                     "description": "Selected Clarion version's libsrc"
+                },
+                "applicationSolutionFile": {
+                    "type": "string",
+                    "default": "",
+                    "description": "application solution file"
                 }
             }
         }

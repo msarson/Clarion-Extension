@@ -132,7 +132,7 @@ export class ClarionExtensionCommands {
 
     if (redirectionFileProperty && redirectionFileProperty.Properties) {
       const macrosProperty = redirectionFileProperty.Properties.find((property: any) => property.$.name === 'Macros');
-      
+
       for (const prop in macrosProperty) {
         if (Array.isArray(macrosProperty[prop])) {
           const firstItem = macrosProperty[prop][0];
@@ -161,28 +161,33 @@ export class ClarionExtensionCommands {
 
         const selectedVersion = workspace.getConfiguration().get<string>('selectedClarionVersion');
         const selectedVersionProps = versionProperties.find(version => version.clarionVersion === selectedVersion);
-
+        const updatedSolution = workspace.getConfiguration().get<string>('applicationSolutionFile');
         if (selectedVersionProps) {
           const updatedPath = selectedVersionProps.path;
           const updatedRedirectionFile = selectedVersionProps.redirectionFile;
           const updatedMacros = selectedVersionProps.macros;
           const updatedLibsrc = selectedVersionProps.libsrc;
+        
 
           const currentPath = workspace.getConfiguration().get<string>('selectedClarionPath');
           const currentRedirectionFile = workspace.getConfiguration().get<string>('selectedClarionRedirectionFile');
           const currentMacros = workspace.getConfiguration().get<Record<string, string>>('selectedClarionMacros');
           const currentLibsrc = workspace.getConfiguration().get<string>('selectedClarionLibsrc');
+          const currentSoltion = workspace.getConfiguration().get<string>('applicationSolutionFile');
 
           if (
             updatedPath !== currentPath ||
             updatedRedirectionFile !== currentRedirectionFile ||
             JSON.stringify(updatedMacros) !== JSON.stringify(currentMacros) ||
-            updatedLibsrc !== currentLibsrc
+            updatedLibsrc !== currentLibsrc ||
+            updatedSolution !== currentSoltion
+            
           ) {
             await workspace.getConfiguration().update('selectedClarionPath', updatedPath, ConfigurationTarget.Workspace);
             await workspace.getConfiguration().update('selectedClarionRedirectionFile', updatedRedirectionFile, ConfigurationTarget.Workspace);
             await workspace.getConfiguration().update('selectedClarionMacros', updatedMacros, ConfigurationTarget.Workspace);
             await workspace.getConfiguration().update('selectedClarionLibsrc', updatedLibsrc, ConfigurationTarget.Workspace);
+            await workspace.getConfiguration().update('applicationSolutionFile', updatedSolution, ConfigurationTarget.Workspace);
           }
         }
       }
@@ -190,6 +195,28 @@ export class ClarionExtensionCommands {
       console.error(error);
     }
   }
- 
+  static async selectSolutionFile() {
+    const workspaceFolder = workspace.workspaceFolders?.[0];
+    if (workspaceFolder) {
+      const workspaceFolderUri = workspaceFolder.uri;
+      const workspaceFolderPath = workspaceFolderUri.fsPath;
+      const solutionFile = await window.showOpenDialog({
+        defaultUri: workspaceFolderUri,
+        canSelectFiles: true,
+        canSelectFolders: false,
+        openLabel: 'Select your solution file',
+        filters: {
+          XML: ['sln']
+        }
+      });
+      if (solutionFile && solutionFile.length > 0) {
+        const solutionFilePath = solutionFile[0].fsPath;
+        await workspace
+          .getConfiguration()
+          .update('applicationSolutionFile', solutionFilePath, ConfigurationTarget.Workspace);
+      }
+    }
+  }
+
 
 }

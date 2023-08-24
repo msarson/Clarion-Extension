@@ -8,6 +8,9 @@ enum ClarionSymbolKind {
     Variable = SymbolKind.Variable
 }
 
+/**
+ * Provides document symbols for Clarion files.
+ */
 export class ClarionDocumentSymbolProvider {
 
     // Capitalize
@@ -16,6 +19,13 @@ export class ClarionDocumentSymbolProvider {
     }
 
 
+    /**
+     * Returns a Range object that covers the specified lines in the given TextDocument.
+     * @param document The TextDocument to get the range from.
+     * @param startLineNum The line number to start the range from.
+     * @param endLineNum The line number to end the range at. If not provided, the range will only cover the startLineNum.
+     * @returns A Range object that covers the specified lines in the given TextDocument.
+     */
     private getLineRange(document: TextDocument, startLineNum: number, endLineNum?: number): Range {
         if (!endLineNum) { endLineNum = startLineNum }
         let lastLineText = document.getText(Range.create(endLineNum, 0, endLineNum + 1, 0))  // the text may contains 'CRLF'
@@ -23,6 +33,11 @@ export class ClarionDocumentSymbolProvider {
     }
 
     // based on Clarion6. Feel free to update the code with new Clarion versions
+    /**
+     * Provides an array of DocumentSymbol for the given TextDocument.
+     * @param document The TextDocument to provide DocumentSymbols for.
+     * @returns An array of DocumentSymbol.
+     */
     public provideDocumentSymbols(
         document: TextDocument): DocumentSymbol[] {
 
@@ -94,7 +109,7 @@ export class ClarionDocumentSymbolProvider {
                 if (inside_variable == 0) {
                     // udpate the Variable's range
                     let lastVariable = nodes[nodes.length - 1].pop()
-                    if(lastVariable != null) {
+                    if (lastVariable != null) {
                         lastVariable.range = this.getLineRange(document, lastVariable.range.start.line, currentLineRange.start.line - 1)
                         nodes[nodes.length - 1].push(lastVariable)
                     }
@@ -102,14 +117,14 @@ export class ClarionDocumentSymbolProvider {
             }
 
             // the declaration of PROCEDURE, ROUTINE or VARIABLE has no leading space
-            if (!line.startsWith(" ") && !trimmedLine.startsWith("!")) {
+            if (!line.startsWith(" ") && !trimmedLine.startsWith("!") && !trimmedLine.startsWith("?")) {
                 let tokens = line.split(/\s+/)
                 if (tokens.length >= 2) {
                     let name = tokens[0]
                     let type = tokens[1]
 
                     if (type.toLowerCase().startsWith("procedure")) {
-
+                       
                         procedure_symbol = DocumentSymbol.create(
                             name,
                             "",
@@ -127,7 +142,7 @@ export class ClarionDocumentSymbolProvider {
 
                             // udpate the previous Routine's range
                             let lastRoutine = nodes[nodes.length - 1].pop()
-                            if(lastRoutine != null) {
+                            if (lastRoutine != null) {
                                 lastRoutine.range = this.getLineRange(document, lastRoutine.range.start.line, currentLineRange.start.line - 1)
                                 nodes[nodes.length - 1].push(lastRoutine)
                             }
@@ -138,7 +153,7 @@ export class ClarionDocumentSymbolProvider {
 
                             // update the previous Procedure's range
                             let lastProcedure = nodes[nodes.length - 1].pop()
-                            if(lastProcedure != null) {
+                            if (lastProcedure != null) {
                                 lastProcedure.range = this.getLineRange(document, lastProcedure.range.start.line, currentLineRange.start.line - 1)
                                 nodes[nodes.length - 1].push(lastProcedure)
                             }
@@ -169,14 +184,14 @@ export class ClarionDocumentSymbolProvider {
 
                             // udpate the previous Routine's range
                             let lastRoutine = nodes[nodes.length - 1].pop()
-                            if(lastRoutine != null) {
+                            if (lastRoutine != null) {
                                 lastRoutine.range = this.getLineRange(document, lastRoutine.range.start.line, currentLineRange.start.line - 1)
                                 nodes[nodes.length - 1].push(lastRoutine)
                             }
                         }
 
                         nodes[nodes.length - 1].push(routine_symbol)
-                        if(routine_symbol.children == null) {
+                        if (routine_symbol.children == null) {
                             nodes.push(routine_symbol.children!)
                             inside_routine = true
                         }
@@ -201,6 +216,7 @@ export class ClarionDocumentSymbolProvider {
                 }
             }
         }
+
         return symbols
     }
 }

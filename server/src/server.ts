@@ -16,10 +16,10 @@ import {
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { ClarionFoldingRangeProvider } from './ClarionFoldingRangeProvider';
 import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
-import { ClarionDefinitionProvider } from './ClarionDefinitionProvider'; // Import your definition provider
+//import { ClarionDefinitionProvider } from './ClarionDefinitionProvider'; // Import your definition provider
 
 const clarionFoldingProvider = new ClarionFoldingRangeProvider();
-const clarionDefinitionProvider = new ClarionDefinitionProvider();
+//const clarionDefinitionProvider = new ClarionDefinitionProvider();
 const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider;
 let connection = createConnection(ProposedFeatures.all);
 let documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
