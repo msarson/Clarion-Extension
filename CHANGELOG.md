@@ -83,3 +83,34 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Acknowledgments
 
 - Added acknowledgment of the contribution of **Brahn Partridge**, who passed away in October 2021. Brahn's early work on the textmate language definition was instrumental in making this extension possible.
+- ## [0.3.1]
+  26 August 2023
+### Fixes
+
+- The redirection parsing could fail on local files.
+
+### New Features
+### Go To Definition for Included Files
+
+**This requires the settings described above to work**
+
+The "clarion-extension" now includes an advanced feature that enhances the "Go To Definition" functionality for `INCLUDE` and `MODULE` statements. With the new link provider and hover provider, the extension intelligently handles these statements and provides a more informative experience.
+
+Here's how it works:
+
+- When you use an `INCLUDE('FileName.clw')` or `Class MODULE('FileName.clw')` statement, the extension will check the Clarion workspace settings to locate the specified file.
+
+- If the file is found based on the settings, VS Code will highlight the file name by underlining it to indicate that it was found.
+
+- When you hover your mouse over the underlined link, a hover will appear displaying the first few lines of the code from the linked file.
+
+- For `INCLUDE` statements with sections, such as `INCLUDE('myFile.clw', 'SectionName')`, hovering over the section name will display the first few lines at that specific section location.
+
+To open the linked file directly:
+- **Ctrl+Click** on the underlined link.
+- Or, press **Ctrl+F12** to open the file.
+
+Please note that the previous functionality of this feature has been removed in favor of this more streamlined and informative experience.
+
+Make sure to have your workspace settings configured as described above to enable this feature.
+
