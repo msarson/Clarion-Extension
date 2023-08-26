@@ -74,7 +74,7 @@
     "Clarion.Debug.Value": {
         "prefix": "DEBUG",
         "body": [
-            "'${1:Text} [' & ${2:value} & ']'$0",
+            "'${1:Text} [' & ${2:value} & ']'$0"
 
         ],
         "description": "Debug a value"

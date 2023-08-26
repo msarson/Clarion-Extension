@@ -16,7 +16,7 @@
         "theme": "dark"
     },
     "engines": {
-        "vscode": "^1.43.0"
+        "vscode": "^1.67.0"
     },
     "activationEvents": [
         "onLanguage:clarion"
@@ -36,6 +36,13 @@
         "fushnisoft.clarion"
     ],
     "contributes": {
+        "keybindings": [
+            {
+                "command": "clarion.followLink",
+                "key": "ctrl+f12",
+                "when": "editorTextFocus"
+            }
+        ],
         "commands": [
             {
                 "command": "clarion.configureClarionPropertiesFile",
@@ -44,6 +51,10 @@
             {
                 "command": "clarion.selectSolutionFile",
                 "title": "Clarion Select Application Solution File"
+            },
+            {
+                "command": "clarion.followLink",
+                "title": "Clarion Follow Link"
             }
         ],
         "snippets": [

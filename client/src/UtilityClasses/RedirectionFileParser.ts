@@ -11,14 +11,15 @@ export class RedirectionFileParser {
     private readonly selectedClarionRedirectionFile: string | '';
     private readonly selectedClarionPath: string | '';
     private readonly macros: Record<string, string>;
-    constructor() {
+    private readonly compileMode: string | null = null;
+    constructor(compileMode: string | null) {
 
         // this.workspaceFolder = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
         const config = vscode.workspace.getConfiguration();
         this.selectedClarionRedirectionFile = config.get('selectedClarionRedirectionFile') as string;
         this.selectedClarionPath = config.get('selectedClarionPath') as string;
         this.macros = config.get('selectedClarionMacros') as Record<string, string>;
-      
+        this.compileMode = compileMode;
     }
 
     /**
@@ -40,7 +41,7 @@ export class RedirectionFileParser {
      * @param compileMode - The compile mode to use.
      * @returns An array of search paths.
      */
-    getSearchPaths(fileExtension: string, foundProjectPath: string | null, compileMode: string | null): string[] {
+    getSearchPaths(fileExtension: string, foundProjectPath: string | null): string[] {
         const paths: string[] = [];
         let pathToSearch: string;
         let redResult;
@@ -60,7 +61,7 @@ export class RedirectionFileParser {
         else {
             pathToSearch = path.join(this.selectedClarionPath, this.selectedClarionRedirectionFile);
         }
-        redResult = this.parseRedFile(pathToSearch, fileExtension, compileMode);
+        redResult = this.parseRedFile(pathToSearch, fileExtension);
 
 
         if (pathToSearch) {
@@ -80,10 +81,9 @@ export class RedirectionFileParser {
      * @param compileMode - The compile mode to filter the resolved paths by.
      * @returns An array of resolved paths.
      */
-    private parseRedFile(redFile: string, fileExtension: string, compileMode: string | null): string[] {
+    private parseRedFile(redFile: string, fileExtension: string): string[] {
         const content: string = fs.existsSync(redFile) ?
             fs.readFileSync(redFile, 'utf-8') : '';
-        console.log(redFile);
         const redPath = path.dirname(redFile);
         const pathsMap: Record<string, string[]> = {};
 
@@ -106,13 +106,13 @@ export class RedirectionFileParser {
                     continue;
                 }
 
-                if (!compileMode) {
+                if (!this.compileMode) {
                     if (foundSection.toLowerCase() === "debug" || foundSection.toLowerCase() === "release") {
                         foundSection = ""; // Skip "Debug" and "Release" sections if compileMode is not provided
                         continue;
                     }
-                } else if (foundSection.toLowerCase() !== compileMode.toLowerCase() && foundSection.toLowerCase() !== "common") {
-                            foundSection = ""; // Skip sections not matching compile mode
+                } else if (foundSection.toLowerCase() !== this.compileMode.toLowerCase() && foundSection.toLowerCase() !== "common") {
+                            foundSection = ""; // Skip sections not matching compile mode or common
                             continue;
 
                 }
@@ -125,7 +125,7 @@ export class RedirectionFileParser {
                         const includeDirectoryPath = path.dirname(includedRedFileName);
 
                         if (includeDirectoryPath) {
-                            const includedPaths = this.parseRedFile(includedRedFileName, fileExtension, compileMode);
+                            const includedPaths = this.parseRedFile(includedRedFileName, fileExtension);
                             if (fileExtension) {
                                 if (!pathsMap[fileExtension]) {
                                     pathsMap[fileExtension] = [];
@@ -156,7 +156,6 @@ export class RedirectionFileParser {
                             .filter(resolvedPath => resolvedPath !== null);
 
                         if (fileType === '*.*' || fileType.toLowerCase().includes(lowercaseFileExtension)) {
-                            console.log(foundSection + " : " + trimmedLine);
                             pathsMap[fileType] = pathsMap[fileType] || [];
                             pathsMap[fileType].push(...fileTypeResolvedPaths);
                         }
@@ -200,7 +199,6 @@ export class RedirectionFileParser {
             } else if (this.macros[lowercaseMacro]) {
                 return this.macros[lowercaseMacro];
             } else {
-                console.log(`Macro "${macro}" not found.`)
                 return match; // Keep the original macro if no replacement found
             }
         });
