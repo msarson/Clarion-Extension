@@ -3,13 +3,13 @@ import { DocumentManager } from './documentManager'; // Adjust the import path b
 
 export class TextEditorComponent implements vscode.Disposable {
     private documentManager: DocumentManager;
-    private refreshDisposable: vscode.Disposable;
+    // private refreshDisposable: vscode.Disposable;
 
     constructor(documentManager: DocumentManager) {
         this.documentManager = documentManager;
-        this.refreshDisposable = this.documentManager.onRefreshNeeded(uri => {
-            this.refreshTextEditor(uri);
-        });
+        // this.refreshDisposable = this.documentManager.onRefreshNeeded(uri => {
+        //     this.refreshTextEditor(uri);
+        // });
     }
 
     private refreshTextEditor(uri: vscode.Uri) {
@@ -27,6 +27,6 @@ export class TextEditorComponent implements vscode.Disposable {
     }
 
     dispose() {
-        this.refreshDisposable.dispose();
+        // this.refreshDisposable.dispose();
     }
 }

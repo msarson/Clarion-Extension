@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { RedirectionFileParser } from './RedirectionFileParser';
-import {  ClarionProjectClass } from './ClarionProject';
+import { ClarionProjectClass } from './ClarionProject';
 
 export interface ClarionLocation {
     fullFileName: string;
@@ -11,6 +11,9 @@ export interface ClarionLocation {
     linePositionEnd?: vscode.Position;
     statementType?: string;
     result?: RegExpExecArray
+}
+interface CustomRegExpMatch extends RegExpExecArray {
+    lineIndex: number;
 }
 // export class ClarionLocation implements vscode.DocumentLink {
 //     constructor(
@@ -26,49 +29,82 @@ class LocationProvider {
         this.clarionProject = new ClarionProjectClass();
     }
 
-    public getLocationFromPattern(document: vscode.TextDocument, lineNumber: number, pattern: RegExp): ClarionLocation  | null {
+
+
+    public getLocationFromPattern(document: vscode.TextDocument, pattern: RegExp): ClarionLocation[] | null {
         const documentDirectory = path.dirname(document.uri.fsPath);
         const solutionFolder: string = path.dirname(vscode.workspace.getConfiguration().get('applicationSolutionFile') as string);
 
         if (documentDirectory.startsWith(solutionFolder)) {
             this.clarionProject.properties = this.clarionProject.findProjectOrSolutionDirectory(documentDirectory);
         }
-        const line = document.lineAt(lineNumber).text;
-        
-        const fileAndSectionArray = this.splitFileNameAndSectionDetails(line, pattern);
-        if (!fileAndSectionArray) {
-            return null;
-        }
-        // get the start and end position from line, seaching for the value of fileAndSectionArray[1]
-        
 
-        const fullPath = this.getFullPath(fileAndSectionArray[1]);
-        if (!fullPath || !fs.existsSync(fullPath)) {
+        const matches = this.getRegexMatches(document, pattern);
+
+        if (!matches) {
             return null;
         }
-        const valueToFind = fileAndSectionArray[1];
-        const valueStart = line.indexOf(valueToFind);
-        const valueEnd = valueStart + valueToFind.length;
-        const sectionName = fileAndSectionArray[2] ? fileAndSectionArray[2] : ''; 
-        const sectionLineNumber = this.findSectionLineNumber(fullPath, sectionName);
-        return {
-            fullFileName: fullPath,
-            sectionLineLocation: new vscode.Position(sectionLineNumber, 0),
-            linePosition: new vscode.Position(lineNumber, valueStart), // Start position of the string
-            linePositionEnd: new vscode.Position(lineNumber, valueEnd), // End position of the string
-            result: fileAndSectionArray
+        const locations: ClarionLocation[] = [];
+        const customMatches: CustomRegExpMatch[] = matches;
+        customMatches.sort((a, b) => a.lineIndex - b.lineIndex);
+        for (const match of customMatches) {
+            const fileName = this.getFullPath(match[1]);
+            if (!fileName || !fs.existsSync(fileName)) {
+                continue;
+            }
+            const line = match.input;
+            const valueToFind = match[1]; // Update this to match the capture group index
+            const valueStart = match.index + match[0].indexOf(valueToFind); // Calculate the starting position based on the match index
+            const valueEnd = valueStart + valueToFind.length;
+            const sectionName = match[2] ? match[2] : ''; // Update this to match the capture group index
+            const sectionLineNumber = this.findSectionLineNumber(fileName, sectionName); // Use fileName instead of fullPath
+            const location: ClarionLocation = {
+                fullFileName: fileName,
+                sectionLineLocation: new vscode.Position(sectionLineNumber, 0),
+                linePosition: new vscode.Position(match.lineIndex, valueStart),
+                linePositionEnd: new vscode.Position(match.lineIndex, valueEnd),
+                statementType: '', // You can set the statementType here if needed
+                result: match, // Set the result to the match object if needed
+            };
+        
+            locations.push(location);
+            // Rest of the code to process the match and construct the ClarionLocation
         }
-       
+        return locations;
+
+
     }
 
+
+    private getRegexMatches(document: vscode.TextDocument, pattern: RegExp): CustomRegExpMatch[] {
+        const matches: CustomRegExpMatch[] = [];
+        for (let lineIndex = 0; lineIndex < document.lineCount; lineIndex++) {
+            const line = document.lineAt(lineIndex).text;
+            let match: RegExpExecArray | null;
+            while ((match = pattern.exec(line)) !== null) {
+                const customMatch: CustomRegExpMatch = {
+                    ...match,
+                    lineIndex,
+                } as CustomRegExpMatch; // Explicitly cast to the custom type
+                matches.push(customMatch);
+            }
+        }
+        return matches;
+    }
+
+
+
+
+
     private splitFileNameAndSectionDetails(line: string, pattern: RegExp): RegExpExecArray | null {
+
         const commentIndex = Math.min(line.indexOf('!'), line.indexOf('|'));
         const patternIndex = line.search(pattern);
-        
+
         if (commentIndex >= 0 && (patternIndex === -1 || commentIndex < patternIndex)) {
-            return null; 
+            return null;
         }
-        
+
         return pattern.exec(line);
     }
 
@@ -94,7 +130,7 @@ class LocationProvider {
         const matchingDocument = vscode.workspace.textDocuments.find(document =>
             document.uri.fsPath === fullPath
         );
-    
+
         if (matchingDocument && targetSection !== '') {
             const lines = matchingDocument.getText().split('\n');
             const sectionIndex = lines.findIndex(line =>
@@ -102,7 +138,7 @@ class LocationProvider {
             );
             return sectionIndex !== -1 ? sectionIndex : 0;
         }
-    
+
         // If the matching document is not found, read content from the file directly
         try {
             const fileContent = fs.readFileSync(fullPath, 'utf8');
@@ -116,7 +152,7 @@ class LocationProvider {
             return 0;
         }
     }
-    
+
 
     private constructFullPath(fileName: string, searchPath: string, solutionDirectory: string): string {
         let fullPath;

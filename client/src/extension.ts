@@ -79,7 +79,16 @@ export async function activate(context: ExtensionContext) {
         })
     );
 
-    
+    vscode.window.onDidChangeTextEditorSelection(async (event) => {
+        const editor = event.textEditor;
+        if (editor) {
+            const document = editor.document;
+            if (document === vscode.window.activeTextEditor?.document) {
+                // Update links for the focused document
+                documentManager.updateDocumentInfo(document);
+            }
+        }
+    });
     const textEditorComponent = new TextEditorComponent(documentManager);
     context.subscriptions.push(documentManager);
     context.subscriptions.push(textEditorComponent);
