@@ -9,33 +9,11 @@ import { TextEditorComponent } from './TextEditorComponent';
 let client: LanguageClient;
 
 export async function activate(context: ExtensionContext) {
-    const disposable = vscode.commands.registerCommand('clarion.configureClarionPropertiesFile', ClarionExtensionCommands.configureClarionPropertiesFile);
-    context.subscriptions.push(disposable);
 
-    const soultutionFileSelector = vscode.commands.registerCommand('clarion.selectSolutionFile', ClarionExtensionCommands.selectSolutionFile);
-    context.subscriptions.push(
-        vscode.commands.registerCommand('clarion.followLink', async () => {
-            const editor = vscode.window.activeTextEditor;
-           
-            if (editor) {
-                const position = editor.selection.active;
-                const linkUri = documentManager.getLinkUri(editor.document.uri,position);
-                if (linkUri) {
-                    vscode.commands.executeCommand('vscode.open', linkUri);
-                } else {
-                    vscode.window.showInformationMessage('No link found at the cursor position.');
-                }
-                //vscode.commands.executeCommand('vscode.open', linkUri);
-            }
-        })
-    );
 
 
     // Check if the workspace is trusted
-    if (workspace.workspaceFolders) {
-        // Call the method to update workspace configurations
-        await ClarionExtensionCommands.updateWorkspaceConfigurations();
-    }
+    
 
     let serverModule = context.asAbsolutePath(path.join('server', 'out', 'server.js'));
     let debugOptions = { execArgv: ['--nolazy', '--inspect=6009'] };
@@ -67,11 +45,45 @@ export async function activate(context: ExtensionContext) {
     );
 
     client.start();
-    const documentManager = new DocumentManager();
+    //Register the commands
+
+    // const disposable = vscode.commands.registerCommand('clarion.configureClarionPropertiesFile', () => {
+    //     vscode.window.showInformationMessage('Hello, World!');
+    // });
+    // context.subscriptions.push(disposable);
+
+    const disposable = vscode.commands.registerCommand('clarion.configureClarionPropertiesFile', ClarionExtensionCommands.configureClarionPropertiesFile);
+    context.subscriptions.push(disposable);
+
+
+    
+    const soultutionFileSelector = vscode.commands.registerCommand('clarion.selectSolutionFile', ClarionExtensionCommands.selectSolutionFile);
+    context.subscriptions.push(soultutionFileSelector);
+
+    
+   const documentManager = new DocumentManager();
+    context.subscriptions.push(
+        vscode.commands.registerCommand('clarion.followLink', async () => {
+            const editor = vscode.window.activeTextEditor;
+
+            if (editor) {
+                const position = editor.selection.active;
+                const linkUri = documentManager.getLinkUri(editor.document.uri, position);
+                if (linkUri) {
+                    vscode.commands.executeCommand('vscode.open', linkUri);
+                } else {
+                    vscode.window.showInformationMessage('No link found at the cursor position.');
+                }
+                //vscode.commands.executeCommand('vscode.open', linkUri);
+            }
+        })
+    );
+
+    
     const textEditorComponent = new TextEditorComponent(documentManager);
     context.subscriptions.push(documentManager);
     context.subscriptions.push(textEditorComponent);
-    
+
     // Register providers after Language Client is started and configurations are updated
     await ClarionExtensionCommands.updateWorkspaceConfigurations();
     registerProviders(context, documentManager);
@@ -79,13 +91,7 @@ export async function activate(context: ExtensionContext) {
     for (const openDocument of vscode.workspace.textDocuments) {
         documentManager.updateDocumentInfo(openDocument);
     }
-    // vscode.window.onDidChangeActiveTextEditor((editor) => {
-    //     if (editor) {
-    //         const document = editor.document;
-    //         // Update or trigger necessary actions based on the active text editor
-    //         documentManager.updateDocumentInfo(document); // Update the document info in the DocumentManager
-    //     }
-    // });
+    
 
     // Re-register providers when workspace trust is granted
     vscode.workspace.onDidGrantWorkspaceTrust(() => {
@@ -94,6 +100,10 @@ export async function activate(context: ExtensionContext) {
             documentManager.updateDocumentInfo(openDocument);
         }
     });
+    if (workspace.workspaceFolders) {
+        // Call the method to update workspace configurations
+        await ClarionExtensionCommands.updateWorkspaceConfigurations();
+    }
 }
 
 

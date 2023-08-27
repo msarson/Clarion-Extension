@@ -21,6 +21,7 @@ export class ClarionExtensionCommands {
     try {
       const appDataPath = process.env.APPDATA;
       if (!appDataPath) {
+        window.showErrorMessage(`unable to access appdata path`);
         console.error('APPDATA environment variable is not set.');
         return;
       }
