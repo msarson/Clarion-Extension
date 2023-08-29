@@ -137,7 +137,12 @@ export class RedirectionFileParser {
                 } else if (trimmedLine.includes('=') && foundSection) {
                     
                     const parts = trimmedLine.split('=');
-                    const fileTypes = parts[0].split(',').map(type => type.trim());
+                const fileMask = parts[0].trim();//.split(',').map(type => type.trim());
+                const includeFileTypes = ['*.clw', '*.inc', '*.equ'];
+                const shouldProcess = this.shouldProcessFileType(fileMask, includeFileTypes);
+                if (!shouldProcess) {
+                    continue;
+                }
                     const resolvedPaths: string[] = parts[1]
                         .split(';')
                         .flatMap(p => {
@@ -150,22 +155,40 @@ export class RedirectionFileParser {
                         });
 
                     const lowercaseFileExtension = fileExtension.toLowerCase();
-                    for (const fileType of fileTypes) {
                         const fileTypeResolvedPaths: string[] = resolvedPaths
                             .map(path => this.resolveMacro(path))
                             .filter(resolvedPath => resolvedPath !== null);
 
-                        if (fileType === '*.*' || fileType.toLowerCase().includes(lowercaseFileExtension)) {
-                            pathsMap[fileType] = pathsMap[fileType] || [];
-                            pathsMap[fileType].push(...fileTypeResolvedPaths);
+                if (fileMask === '*.*' || fileMask.toLowerCase().includes(lowercaseFileExtension)) {
+                    console.log("Trimmed line: " + trimmedLine);
+                    pathsMap[fileMask] = pathsMap[fileMask] || [];
+                    pathsMap[fileMask].push(...fileTypeResolvedPaths);
                         }
                     }
                 }
-            }
 
             const paths: string[] = Object.values(pathsMap).flat();
             return paths;
+    }
+    private shouldProcessFileType(fileMask: string, includeFileTypes: string[]): boolean {
+        if (fileMask === '*.*') {
+            return true;
         }
+        const lowercaseFileType = fileMask.toLowerCase();
+        for (const includedType of includeFileTypes) {
+            const lowercaseIncludedType = includedType.toLowerCase();
+            if (lowercaseIncludedType === lowercaseFileType ||
+                (lowercaseIncludedType.includes('*') && this.matchesWildcard(lowercaseFileType, lowercaseIncludedType))) {
+                return true;
+            }
+        }
+        return false;
+    }
+    private matchesWildcard(text: string, pattern: string): boolean {
+        const escapedPattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\*/g, '.*').replace(/\\\?/g, '.');
+        const regex = new RegExp(`^${escapedPattern}$`);
+        return regex.test(text);
+    }
 
 
     /**
