@@ -83,7 +83,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Acknowledgments
 
 - Added acknowledgment of the contribution of **Brahn Partridge**, who passed away in October 2021. Brahn's early work on the textmate language definition was instrumental in making this extension possible.
-- ## [0.3.1]
+- ## [0.3.2]
+- Unreleased
+- ## [0.3.3]
   26 August 2023
 ### Fixes
 
@@ -114,3 +116,9 @@ Please note that the previous functionality of this feature has been removed in 
 
 Make sure to have your workspace settings configured as described above to enable this feature.
 
+## [0.3.4]
+### Fixes
+Activation could try to take place even if workspace not trusted
+
+### Optomisations
+Only parse RED entries for CLW INC and EQU files.

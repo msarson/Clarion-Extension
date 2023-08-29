@@ -1,5 +1,5 @@
 # clarion-extension README
-## Version 0.3.1
+## Version 0.3.4
 
 Welcome to the README for the "clarion-extension" project!
 
