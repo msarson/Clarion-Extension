@@ -1,8 +1,8 @@
-import { window, workspace, ConfigurationTarget, Uri } from 'vscode';
+import { window, workspace, ConfigurationTarget, Uri, commands } from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { parseString } from 'xml2js';
-
+import { DocumentManager } from './documentManager';
 // Define the ClarionVersionProperties interface here if not already defined
 interface ClarionVersionProperties {
   clarionVersion: string;
@@ -11,6 +11,8 @@ interface ClarionVersionProperties {
   macros: Record<string, string>;
   libsrc: string;
 }
+
+
 
 /**
  * A class that contains methods for various Clarion extension commands.
@@ -216,6 +218,20 @@ export class ClarionExtensionCommands {
           .getConfiguration()
           .update('applicationSolutionFile', solutionFilePath, ConfigurationTarget.Workspace);
       }
+    }
+  }
+  static async followLink(documentManager: DocumentManager) {
+    const editor = window.activeTextEditor;
+
+    if (editor) {
+        const position = editor.selection.active;
+        const linkUri = documentManager.getLinkUri(editor.document.uri, position);
+        if (linkUri) {
+            commands.executeCommand('vscode.open', linkUri);
+        } else {
+            window.showInformationMessage('No link found at the cursor position.');
+        }
+        //vscode.commands.executeCommand('vscode.open', linkUri);
     }
   }
 

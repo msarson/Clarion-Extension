@@ -35,6 +35,7 @@ class LocationProvider {
         const documentDirectory = path.dirname(document.uri.fsPath);
         const solutionFolder: string = path.dirname(vscode.workspace.getConfiguration().get('applicationSolutionFile') as string);
 
+        
         if (documentDirectory.startsWith(solutionFolder)) {
             this.clarionProject.properties = this.clarionProject.findProjectOrSolutionDirectory(documentDirectory);
         }

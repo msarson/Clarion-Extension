@@ -27,6 +27,6 @@ export class TextEditorComponent implements vscode.Disposable {
     }
 
     dispose() {
-        // this.refreshDisposable.dispose();
+        //  this.refreshDisposable.dispose();
     }
 }
