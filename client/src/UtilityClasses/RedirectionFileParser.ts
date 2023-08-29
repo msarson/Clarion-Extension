@@ -41,6 +41,8 @@ export class RedirectionFileParser {
      * @param compileMode - The compile mode to use.
      * @returns An array of search paths.
      */
+
+    
     getSearchPaths(fileExtension: string, foundProjectPath: string | null): string[] {
         const paths: string[] = [];
         let pathToSearch: string;
@@ -82,6 +84,7 @@ export class RedirectionFileParser {
      * @returns An array of resolved paths.
      */
     private parseRedFile(redFile: string, fileExtension: string): string[] {
+        console.log("Parsing RED file: " + redFile);
         const content: string = fs.existsSync(redFile) ?
             fs.readFileSync(redFile, 'utf-8') : '';
         const redPath = path.dirname(redFile);
@@ -160,7 +163,6 @@ export class RedirectionFileParser {
                             .filter(resolvedPath => resolvedPath !== null);
 
                 if (fileMask === '*.*' || fileMask.toLowerCase().includes(lowercaseFileExtension)) {
-                    console.log("Trimmed line: " + trimmedLine);
                     pathsMap[fileMask] = pathsMap[fileMask] || [];
                     pathsMap[fileMask].push(...fileTypeResolvedPaths);
                         }

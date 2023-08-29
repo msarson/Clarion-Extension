@@ -122,3 +122,8 @@ Activation could try to take place even if workspace not trusted
 
 ### Optomisations
 Only parse RED entries for CLW INC and EQU files.
+
+## [0.3.5]
+
+##Fixes
+Bug introduced where the commands couldn't be found

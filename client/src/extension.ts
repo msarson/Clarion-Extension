@@ -8,6 +8,7 @@ import { TextEditorComponent } from './TextEditorComponent';
 import { ClarionHoverProvider } from './providers/hoverProvider';
 import { ClarionDocumentLinkProvider } from './providers/documentLinkProvier';
 import { DocumentManager } from './documentManager';
+import { RedirectionFileParser } from './UtilityClasses/RedirectionFileParser';
 let client: LanguageClient | undefined;
 
 export async function activate(context: ExtensionContext) {
@@ -30,27 +31,20 @@ export async function activate(context: ExtensionContext) {
     });
 
     handleTrustedWorkspace(context, documentManager, textEditorComponent, selectionHandler, disposables);
-
     if (isWorkspaceTrusted) {
-        startClientServer(context);
-        for (const openDocument of vscode.workspace.textDocuments) {
-            documentManager.updateDocumentInfo(openDocument);
-        }
+        startClientServer(context, documentManager);
+        
     }
 
     // Re-register providers when workspace trust is granted
     vscode.workspace.onDidGrantWorkspaceTrust(() => {
         handleTrustedWorkspace(context, documentManager, textEditorComponent, selectionHandler, disposables);
         if (workspace.isTrusted) {
-            startClientServer(context);
-            for (const openDocument of vscode.workspace.textDocuments) {
-                documentManager.updateDocumentInfo(openDocument);
-            }
+            startClientServer(context, documentManager);
+            
         } else {
             stopClientServer();
         }
-        
-        
     });
 
     if (workspace.workspaceFolders) {
@@ -78,6 +72,8 @@ function handleTrustedWorkspace(context: ExtensionContext, documentManager: Docu
             textEditorComponent,
             selectionHandler,
             vscode.commands.registerCommand('clarion.followLink', () => ClarionExtensionCommands.followLink(documentManager)),
+            vscode.commands.registerCommand('clarion.configureClarionPropertiesFile', ClarionExtensionCommands.configureClarionPropertiesFile),
+            vscode.commands.registerCommand('clarion.selectSolutionFile', ClarionExtensionCommands.selectSolutionFile),
             languages.registerDocumentLinkProvider('clarion', documentLinkProvider),
             languages.registerHoverProvider(documentSelector, hoverProvider)
         );
@@ -87,7 +83,7 @@ function handleTrustedWorkspace(context: ExtensionContext, documentManager: Docu
     }
 }
 
-function startClientServer(context: ExtensionContext) {
+function startClientServer(context: ExtensionContext, documentManager: DocumentManager) {
     let serverModule = context.asAbsolutePath(path.join('server', 'out', 'server.js'));
     let debugOptions = { execArgv: ['--nolazy', '--inspect=6009'] };
 
@@ -118,6 +114,10 @@ function startClientServer(context: ExtensionContext) {
     );
 
     client.start();
+  //  const projectFiles = findAndStoreProjectFiles();
+    for (const openDocument of vscode.workspace.textDocuments) {
+        documentManager.updateDocumentInfo(openDocument);
+    }
 }
 
 function stopClientServer() {
@@ -126,3 +126,49 @@ function stopClientServer() {
         client = undefined;
     }
 }
+interface ProjectFolderInfo {
+    path: string;
+    fileType: string;
+    searchPaths: string[];
+}
+export async function findAndStoreProjectFiles(): Promise<ProjectFolderInfo[]> {
+    const projectFolders: ProjectFolderInfo[] = [];
+    const projectFilesByFolder: Map<string, vscode.Uri> = new Map(); // To store the first project file found in each folder
+
+    // Search for all project files in the workspace
+    const projectFileUris = await vscode.workspace.findFiles('**/*.cwproj', '**/node_modules/**', 1000);
+
+    // Iterate through the found project files
+    for (const uri of projectFileUris) {
+        const folderPath = path.dirname(uri.fsPath);
+
+        if (folderPath) {
+            // If there's no project file stored for this folder, store the current one
+            if (!projectFilesByFolder.has(folderPath)) {
+                projectFilesByFolder.set(folderPath, uri);
+            
+                // Check if the URI is not already in the projectFiles array before pushing
+                if (!projectFolders.some(existingFolder  => existingFolder.path === folderPath)) {
+                    const redir = new RedirectionFileParser("Debug");
+                    const fileTypes = ["clw", "inc", "equ"];
+                    for (const fileType of fileTypes) {
+                        const typeRedirPath = redir.getSearchPaths(`*.${fileType}`, folderPath);
+                        projectFolders.push({
+                            path: folderPath,
+                            fileType,
+                            searchPaths: [...typeRedirPath]
+                        });
+                    }
+                    
+                }
+            }
+        }
+    }
+
+    return projectFolders;
+}
+
+
+
+
+
