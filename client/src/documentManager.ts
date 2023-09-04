@@ -1,56 +1,81 @@
-import * as vscode from 'vscode';
+import { 
+    Uri,
+    workspace,
+    Disposable,
+    TextDocument,
+    TextDocumentChangeEvent,
+    Position,
+    Range,
+    FileDeleteEvent,
+    FileRenameEvent,
+    DocumentLink
+} from 'vscode';
+
 import LocationProvider from './UtilityClasses/LocationProvider'; // Adjust the import path based on your project structure
 import { ClarionLocation } from './UtilityClasses/LocationProvider'; // Make sure this import is correct
-
+import { SolutionParser } from './SolutionParser'; // Adjust the import path based on your project structure
+import * as path from 'path';
 interface DocumentInfo {
     statementLocations: ClarionLocation[];
 }
 
-export class DocumentManager implements vscode.Disposable {
+export class DocumentManager implements Disposable {
+
+    private readonly modulePattern = /MODULE\s*\('([^']+)'\s*(?:,\s*'([^']+)'\s*)?\)/ig;
+    private readonly includePattern = /INCLUDE\s*\('([^']+)'\s*(?:,\s*'([^']+)'\s*)?(?:,\s*ONCE)?\)/ig;
+    private readonly memberPattern = /MEMBER\s*\(\s*'([^']+)'\s*\)/ig;
     private openDocuments: Map<string, DocumentInfo> = new Map(); // Store document info by URI
     private locationProvider: LocationProvider;
-    private disposables: vscode.Disposable[] = [];
-    constructor() {
-        this.locationProvider = new LocationProvider();
-        vscode.workspace.onDidOpenTextDocument(this.onDidOpenTextDocument, this);
-        vscode.workspace.onDidChangeTextDocument(this.onDidChangeTextDocument, this);
-        vscode.workspace.onDidSaveTextDocument(this.onDidSaveTextDocument, this);
-        vscode.workspace.onDidRenameFiles(this.onDidRenameFiles, this);
-        vscode.workspace.onDidDeleteFiles(this.onDidDeleteFiles, this);
+    private disposables: Disposable[] = [];
+    private solutionParser: SolutionParser;
+    
 
+    constructor(solutionParser: SolutionParser) {
+        
+        workspace.onDidOpenTextDocument(this.onDidOpenTextDocument, this);
+        workspace.onDidChangeTextDocument(this.onDidChangeTextDocument, this);
+        workspace.onDidSaveTextDocument(this.onDidSaveTextDocument, this);
+        workspace.onDidRenameFiles(this.onDidRenameFiles, this);
+        workspace.onDidDeleteFiles(this.onDidDeleteFiles, this);
+        this.solutionParser = solutionParser;
+        this.locationProvider = new LocationProvider(this.solutionParser);
+    }
+    async initialize(solutionParser: SolutionParser) {
+        this.solutionParser = solutionParser;
+       await this.locationProvider.initialize(solutionParser);
+    }
+    public inspectFullPath() {
+
+
+        
+       // this.locationProvider.inspectFullPath();
     }
 
 
-
-
-    private async onDidSaveTextDocument(document: vscode.TextDocument) {
+    private async onDidSaveTextDocument(document: TextDocument) {
         await this.updateDocumentInfo(document);
     }
 
-    private async onDidDeleteFiles(event: vscode.FileDeleteEvent) {
+    private async onDidDeleteFiles(event: FileDeleteEvent) {
         for (const fileDelete of event.files) {
             const deletedUri = fileDelete;
             // Handle deletion by removing entries from openDocuments map
         }
     }
-    private async onDidRenameFiles(event: vscode.FileRenameEvent) {
+    private async onDidRenameFiles(event: FileRenameEvent) {
         for (const fileRename of event.files) {
             const oldUri = fileRename.oldUri;
             const newUri = fileRename.newUri;
-            //get new document info from newUri
-
-
-
             // Handle renaming by updating the entries in openDocuments map
             // You might need to adjust the keys in the map accordingly
         }
     }
-    private async onDidOpenTextDocument(document: vscode.TextDocument) {
+    private async onDidOpenTextDocument(document: TextDocument) {
         await this.updateDocumentInfo(document);
 
     }
 
-    private async onDidChangeTextDocument(event: vscode.TextDocumentChangeEvent) {
+    private async onDidChangeTextDocument(event: TextDocumentChangeEvent) {
         const doc = event.document;
 
         await this.updateDocumentInfo(event.document);
@@ -58,10 +83,10 @@ export class DocumentManager implements vscode.Disposable {
 
 
 
-    getLinkUri(documentUri: vscode.Uri, position: vscode.Position): vscode.Uri | undefined {
+    getLinkUri(documentUri: Uri, position: Position): Uri | undefined {
         const location = this.findLinkAtPosition(documentUri, position);
         if (location) {
-            let targetUri = vscode.Uri.file(location.fullFileName);
+            let targetUri = Uri.file(location.fullFileName);
 
             if (location.statementType === "SECTION" && location.sectionLineLocation) {
                 const lineQueryParam = `${location.sectionLineLocation.line + 1}:1`;
@@ -73,27 +98,27 @@ export class DocumentManager implements vscode.Disposable {
         return undefined;
     }
 
-    generateDocumentLinks(uri: vscode.Uri): vscode.DocumentLink[] {
+    generateDocumentLinks(uri: Uri): DocumentLink[] {
         const documentInfo = this.getDocumentInfo(uri);
-        const links: vscode.DocumentLink[] = [];
+        const links: DocumentLink[] = [];
 
         if (documentInfo) {
             for (const location of documentInfo.statementLocations) {
                 // Generate links based on ClarionLocation properties and statementType
                 if (
-                    (location.statementType === "INCLUDE" || location.statementType === "MODULE" || location.statementType === "SECTION") &&
+                    (location.statementType === "INCLUDE" || location.statementType === "MODULE" || location.statementType === "MEMBER" || location.statementType === "SECTION") &&
                     location.linePosition &&
                     location.linePositionEnd
                 ) {
-                    let targetUri = vscode.Uri.file(location.fullFileName);
+                    let targetUri = Uri.file(location.fullFileName);
 
                     if (location.statementType === "SECTION" && location.sectionLineLocation) {
                         const lineQueryParam = `${location.sectionLineLocation.line + 1}:1`;
                         targetUri = targetUri.with({ fragment: lineQueryParam });
                     }
 
-                    const link = new vscode.DocumentLink(
-                        new vscode.Range(location.linePosition, location.linePositionEnd),
+                    const link = new DocumentLink(
+                        new Range(location.linePosition, location.linePositionEnd),
                         targetUri
                     );
                     links.push(link);
@@ -106,14 +131,14 @@ export class DocumentManager implements vscode.Disposable {
 
 
 
-    findLinkAtPosition(documentUri: vscode.Uri, position: vscode.Position): ClarionLocation | undefined {
+    findLinkAtPosition(documentUri: Uri, position: Position): ClarionLocation | undefined {
         const documentInfo = this.getDocumentInfo(documentUri);
 
         if (documentInfo) {
             for (const location of documentInfo.statementLocations) {
-                const linkRange = new vscode.Range(
-                    location.linePosition || new vscode.Position(0, 0),
-                    location.linePositionEnd || new vscode.Position(0, 0)
+                const linkRange = new Range(
+                    location.linePosition || new Position(0, 0),
+                    location.linePositionEnd || new Position(0, 0)
                 );
 
                 if (linkRange.contains(position)) {
@@ -125,31 +150,28 @@ export class DocumentManager implements vscode.Disposable {
         return undefined;
     }
    
-    public async updateDocumentInfo(document: vscode.TextDocument) {
+    
+    public async updateDocumentInfo(document: TextDocument) {
         if (document.uri.scheme !== 'file'|| document.uri.fsPath.endsWith('.code-workspace')) {
             return;
-            // Process the document as it's a file
-            // Your code for processing goes here
         }
-        console.log('updateDocumentInfo:', document.uri.toString());
-        const includePattern = /INCLUDE\s*\('([^']+)'\s*(?:,\s*'([^']+)'\s*)?(?:,\s*ONCE)?\)/ig;
-        const modulePattern = /MODULE\s*\('([^']+)'\s*(?:,\s*'([^']+)'\s*)?\)/ig;
-
         const statementLocations: ClarionLocation[] = [];
-        //  console.log('updateDocumentInfo:', document.uri.toString());
-        
-        this.processPattern(document, includePattern, "INCLUDE",  statementLocations);
-        this.processPattern(document, modulePattern, "MODULE",  statementLocations);
-
+        const includeLocations = this.processPattern(document, this.includePattern, "INCLUDE");
+        statementLocations.push(...includeLocations);
+        const moduleLocations = this.processPattern(document, this.modulePattern, "MODULE");
+        statementLocations.push(...moduleLocations);
+        const memberLocation = this.processPattern(document, this.memberPattern, "MEMBER");
+        statementLocations.push(...memberLocation);
         this.openDocuments.set(document.uri.toString(), {
             statementLocations
         });
     }
 
-    private processPattern(document: vscode.TextDocument, pattern: RegExp, statementType: string,  statementLocations: ClarionLocation[]) {
+    private processPattern(document: TextDocument, pattern: RegExp, statementType: string): ClarionLocation[] {
+        const statementLocations: ClarionLocation[] = [];
         const locations = this.locationProvider.getLocationFromPattern(document, pattern);
         if(!locations) {
-            return;
+            return statementLocations;
         }
         for (const location of locations) {
             const statementLocation: ClarionLocation = {
@@ -182,10 +204,10 @@ export class DocumentManager implements vscode.Disposable {
                 statementLocations.push(sectionLocation);
             }
         }
-
+        return statementLocations;
     }
 
-    getDocumentInfo(uri: vscode.Uri): DocumentInfo | undefined {
+    getDocumentInfo(uri: Uri): DocumentInfo | undefined {
         try {
             return this.openDocuments.get(uri.toString());
         } catch (error) {
@@ -193,8 +215,8 @@ export class DocumentManager implements vscode.Disposable {
             return undefined;
         }
     }
-    getDocumentContent(uri: vscode.Uri): string | undefined {
-        const document = vscode.workspace.textDocuments.find(doc => doc.uri.toString() === uri.toString());
+    getDocumentContent(uri: Uri): string | undefined {
+        const document = workspace.textDocuments.find(doc => doc.uri.toString() === uri.toString());
         if (document) {
             return document.getText();
         }
@@ -203,4 +225,5 @@ export class DocumentManager implements vscode.Disposable {
     dispose() {
         this.disposables.forEach(disposable => disposable.dispose());
     }
+    
 }

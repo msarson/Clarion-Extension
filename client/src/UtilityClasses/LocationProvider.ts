@@ -1,39 +1,36 @@
-import * as vscode from 'vscode';
+import { commands, TextDocument, window, Position, workspace, ViewColumn } from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { RedirectionFileParser } from './RedirectionFileParser';
 import { ClarionProjectClass } from './ClarionProject';
+import { SolutionParser } from '../SolutionParser';
 
 export interface ClarionLocation {
     fullFileName: string;
-    sectionLineLocation?: vscode.Position | null;
-    linePosition?: vscode.Position;
-    linePositionEnd?: vscode.Position;
+    sectionLineLocation?: Position | null;
+    linePosition?: Position;
+    linePositionEnd?: Position;
     statementType?: string;
     result?: RegExpExecArray
 }
 interface CustomRegExpMatch extends RegExpExecArray {
     lineIndex: number;
 }
-// export class ClarionLocation implements vscode.DocumentLink {
-//     constructor(
-//         public range: vscode.Range,
-//         public target: vscode.Uri,
-//         public sectionLinePosition?: vscode.Position
-//     ) {}
-// }
-class LocationProvider {
+export class LocationProvider {
     private clarionProject: ClarionProjectClass;
-
-    constructor() {
+    private solutionParser: SolutionParser | undefined;
+    constructor(solutionParser: SolutionParser) {
         this.clarionProject = new ClarionProjectClass();
     }
 
+    async initialize(solutionParser: SolutionParser) {
+        this.solutionParser = solutionParser;
+        
+    }
 
-
-    public getLocationFromPattern(document: vscode.TextDocument, pattern: RegExp): ClarionLocation[] | null {
+    public getLocationFromPattern(document: TextDocument, pattern: RegExp): ClarionLocation[] | null {
         const documentDirectory = path.dirname(document.uri.fsPath);
-        const solutionFolder: string = path.dirname(vscode.workspace.getConfiguration().get('applicationSolutionFile') as string);
+        const solutionFolder: string = path.dirname(workspace.getConfiguration().get('applicationSolutionFile') as string);
 
         
         if (documentDirectory.startsWith(solutionFolder)) {
@@ -49,7 +46,7 @@ class LocationProvider {
         const customMatches: CustomRegExpMatch[] = matches;
         customMatches.sort((a, b) => a.lineIndex - b.lineIndex);
         for (const match of customMatches) {
-            const fileName = this.getFullPath(match[1]);
+            const fileName = this.getFullPath(match[1], path.basename(document.uri.fsPath));
             if (!fileName || !fs.existsSync(fileName)) {
                 continue;
             }
@@ -61,9 +58,9 @@ class LocationProvider {
             const sectionLineNumber = this.findSectionLineNumber(fileName, sectionName); // Use fileName instead of fullPath
             const location: ClarionLocation = {
                 fullFileName: fileName,
-                sectionLineLocation: new vscode.Position(sectionLineNumber, 0),
-                linePosition: new vscode.Position(match.lineIndex, valueStart),
-                linePositionEnd: new vscode.Position(match.lineIndex, valueEnd),
+                sectionLineLocation: new Position(sectionLineNumber, 0),
+                linePosition: new Position(match.lineIndex, valueStart),
+                linePositionEnd: new Position(match.lineIndex, valueEnd),
                 statementType: '', // You can set the statementType here if needed
                 result: match, // Set the result to the match object if needed
             };
@@ -77,7 +74,7 @@ class LocationProvider {
     }
 
 
-    private getRegexMatches(document: vscode.TextDocument, pattern: RegExp): CustomRegExpMatch[] {
+    private getRegexMatches(document: TextDocument, pattern: RegExp): CustomRegExpMatch[] {
         const matches: CustomRegExpMatch[] = [];
         for (let lineIndex = 0; lineIndex < document.lineCount; lineIndex++) {
             const line = document.lineAt(lineIndex).text;
@@ -95,7 +92,7 @@ class LocationProvider {
 
 
 
-
+   
 
     private splitFileNameAndSectionDetails(line: string, pattern: RegExp): RegExpExecArray | null {
 
@@ -109,26 +106,43 @@ class LocationProvider {
         return pattern.exec(line);
     }
 
-    private getFullPath(fileName: string): string | null {
+    public getFullPath(fileName: string, documentFrom: string): string | null {
+        if(!this.solutionParser) {
+            console.log('No solution parser');
+            return null;
+        }
         const fileExtension = path.extname(fileName);
-        const redirectionFileParser = new RedirectionFileParser(this.clarionProject.properties?.compileMode!);
-        const searchPaths = redirectionFileParser.getSearchPaths(
-            fileExtension,
-            this.clarionProject.properties?.directory ?? null
-        );
 
-        for (const searchPath of searchPaths) {
-            const solutionFolder = path.dirname(vscode.workspace.getConfiguration().get('applicationSolutionFile') as string);
-            const fullPath = this.constructFullPath(fileName, searchPath, this.clarionProject.properties?.directory!);// solutionFolder);
-            if (fs.existsSync(fullPath)) {
+        //check if current document is in project and try find
+        let sourceFile = this.solutionParser.findSourceInProject(documentFrom);
+        if (sourceFile) {
+            const fullPath = this.solutionParser.findSourceFilePath(sourceFile, fileName);
+            if (fullPath) {
                 return fullPath;
             }
         }
+        //check if  filename is in project and try find
+        sourceFile = this.solutionParser.findSourceInProject(fileName);
+        if (sourceFile) {
+            const fullPath = this.solutionParser.findSourceFilePath(sourceFile, fileName);
+            if (fullPath) {
+                return fullPath;
+            }
+        }
+
+        //Check default red file
+        
+        const globalFile = this.solutionParser.findFileWithExtension(fileName);
+        if (globalFile != "") {
+            return globalFile;
+        }
         return null;
+      
     }
 
+
     private findSectionLineNumber(fullPath: string, targetSection: string): number {
-        const matchingDocument = vscode.workspace.textDocuments.find(document =>
+        const matchingDocument = workspace.textDocuments.find(document =>
             document.uri.fsPath === fullPath
         );
 
@@ -164,6 +178,39 @@ class LocationProvider {
             fullPath = path.join(searchPath, fileName);
         }
         return fullPath;
+    }
+    public async inspectFullPath(documentDirectory: string) {
+    
+        const panel = window.createWebviewPanel(
+            'inspectionPanel', // Unique ID
+            'Inspection Details', // Title
+            ViewColumn.One, // Column to show the panel in
+            {}
+        );
+        const editor = window.activeTextEditor;
+        if (editor) {
+            const redirectionFileParser = new RedirectionFileParser(this.clarionProject.properties?.compileMode!);
+            const fileName = editor.document.fileName;
+            const fileExtension = path.extname(fileName);
+            const searchPaths = redirectionFileParser.getSearchPaths(
+                fileExtension,
+                this.clarionProject.properties?.directory ?? null
+            );
+            const fullPath = await this.getFullPath(fileName, documentDirectory); // You need to implement this function
+    
+            panel.webview.html = `
+                <h2>Inspection Details</h2>
+                <p><strong>File Name:</strong> ${fileName}</p>
+                <p><strong>Search Paths:</strong> ${searchPaths}</p>
+                <p><strong>Full Path:</strong> ${fullPath || 'File not found'}</p>
+            `;
+            
+            
+            
+            
+            
+    
+        }
     }
 }
 

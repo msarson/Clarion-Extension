@@ -2,10 +2,9 @@ import {
     createConnection,
     TextDocuments,
     ProposedFeatures,
-    // FoldingRange,
-
-
 } from 'vscode-languageserver/node';
+
+
 import {
     DocumentSymbol,
     DocumentSymbolParams,

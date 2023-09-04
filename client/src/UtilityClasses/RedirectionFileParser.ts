@@ -1,4 +1,4 @@
-import * as vscode from 'vscode';
+import { workspace } from 'vscode';
 import * as path from 'path';     // Import path module
 import * as fs from 'fs';         // Import fs module
 /**
@@ -7,15 +7,15 @@ import * as fs from 'fs';         // Import fs module
 export class RedirectionFileParser {
 
 
-    
+
     private readonly selectedClarionRedirectionFile: string | '';
     private readonly selectedClarionPath: string | '';
     private readonly macros: Record<string, string>;
     private readonly compileMode: string | null = null;
     constructor(compileMode: string | null) {
 
-        // this.workspaceFolder = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
-        const config = vscode.workspace.getConfiguration();
+
+        const config = workspace.getConfiguration();
         this.selectedClarionRedirectionFile = config.get('selectedClarionRedirectionFile') as string;
         this.selectedClarionPath = config.get('selectedClarionPath') as string;
         this.macros = config.get('selectedClarionMacros') as Record<string, string>;
@@ -33,7 +33,7 @@ export class RedirectionFileParser {
         }
         return false;
     }
-    
+
     /**
      * Returns an array of search paths based on the provided file extension, project path, and compile mode.
      * @param fileExtension - The file extension to search for.
@@ -42,7 +42,7 @@ export class RedirectionFileParser {
      * @returns An array of search paths.
      */
 
-    
+
     getSearchPaths(fileExtension: string, foundProjectPath: string | null): string[] {
         const paths: string[] = [];
         let pathToSearch: string;
@@ -71,8 +71,10 @@ export class RedirectionFileParser {
         }
         paths.push(...redResult);
         // Add other paths based on your logic
+        const uniquePaths = Array.from(new Set(paths));
 
-        return paths;
+        return uniquePaths;
+        //return paths;
     }
 
 
@@ -83,95 +85,101 @@ export class RedirectionFileParser {
      * @param compileMode - The compile mode to filter the resolved paths by.
      * @returns An array of resolved paths.
      */
-    private parseRedFile(redFile: string, fileExtension: string): string[] {
-        console.log("Parsing RED file: " + redFile);
-        const content: string = fs.existsSync(redFile) ?
-            fs.readFileSync(redFile, 'utf-8') : '';
+    public parseRedFile(redFile: string, fileExtension: string): string[] {
+        const content: string = fs.existsSync(redFile) ? fs.readFileSync(redFile, 'utf-8') : '';
         const redPath = path.dirname(redFile);
         const pathsMap: Record<string, string[]> = {};
-
         const lines = content.split('\n');
         let foundSection = "";
+    
         for (const line of lines) {
             const trimmedLine = line.trim();
             if (trimmedLine.startsWith('--') || trimmedLine === '') {
                 continue;
             }
-            
-            const sectionMatch = trimmedLine.match(/^\[([^\]]+)\]$/);
+    
+            const sectionMatch = this.extractSection(trimmedLine);
             if (sectionMatch) {
-                foundSection = sectionMatch[1].trim();
-
-                if (foundSection.toLowerCase() === "copy") {
-                    // Skip "Copy" section
-
-                    foundSection = ""; // Skip
+                foundSection = sectionMatch;
+                if (this.shouldSkipSection(foundSection)) {
                     continue;
                 }
-
-                if (!this.compileMode) {
-                    if (foundSection.toLowerCase() === "debug" || foundSection.toLowerCase() === "release") {
-                        foundSection = ""; // Skip "Debug" and "Release" sections if compileMode is not provided
-                        continue;
+            } else if (trimmedLine.startsWith('{include')) {
+                this.processIncludedRedirection(redPath, trimmedLine, fileExtension, pathsMap);
+            } else if (trimmedLine.includes('=') && foundSection) {
+                this.processLine(foundSection, trimmedLine, redPath, fileExtension, pathsMap);
+            }
+        }
+    
+        return Object.values(pathsMap).flat();
+    }
+    
+    private extractSection(trimmedLine: string): string | null {
+        const sectionMatch = trimmedLine.match(/^\[([^\]]+)\]$/);
+        return sectionMatch ? sectionMatch[1].trim() : null;
+    }
+    
+    private shouldSkipSection(section: string): boolean {
+        if (section.toLowerCase() === "copy" || (!this.compileMode && (section.toLowerCase() === "debug" || section.toLowerCase() === "release"))) {
+            return true;
+        }
+    
+        if (this.compileMode && section.toLowerCase() !== this.compileMode.toLowerCase() && section.toLowerCase() !== "common") {
+            return true;
+        }
+    
+        return false;
+    }
+    
+    private processIncludedRedirection(redPath: string, line: string, fileExtension: string, pathsMap: Record<string, string[]>): void {
+        const includePathMatches = line.match(/{include\s+([^}]+)}/i);
+        if (includePathMatches && includePathMatches[1]) {
+            const includedRedFileName = this.resolveMacro(includePathMatches[1]);
+            const includeDirectoryPath = path.dirname(includedRedFileName);
+    
+            if (includeDirectoryPath) {
+                const includedPaths = this.parseRedFile(includedRedFileName, fileExtension);
+                if (fileExtension) {
+                    if (!pathsMap[fileExtension]) {
+                        pathsMap[fileExtension] = [];
                     }
-                } else if (foundSection.toLowerCase() !== this.compileMode.toLowerCase() && foundSection.toLowerCase() !== "common") {
-                            foundSection = ""; // Skip sections not matching compile mode or common
-                            continue;
-
+                    pathsMap[fileExtension].push(...includedPaths);
                 }
             }
-            else if (trimmedLine.startsWith('{include')) {
-                    // Process included redirection files
-                    const includePathMatches = trimmedLine.match(/{include\s+([^}]+)}/i);
-                    if (includePathMatches && includePathMatches[1]) {
-                        const includedRedFileName = this.resolveMacro(includePathMatches[1]);
-                        const includeDirectoryPath = path.dirname(includedRedFileName);
-
-                        if (includeDirectoryPath) {
-                            const includedPaths = this.parseRedFile(includedRedFileName, fileExtension);
-                            if (fileExtension) {
-                                if (!pathsMap[fileExtension]) {
-                                    pathsMap[fileExtension] = [];
-                                }
-                                pathsMap[fileExtension].push(...includedPaths);
-                            }
-                        }
-                    }
-                } else if (trimmedLine.includes('=') && foundSection) {
-                    
-                    const parts = trimmedLine.split('=');
-                const fileMask = parts[0].trim();//.split(',').map(type => type.trim());
-                const includeFileTypes = ['*.clw', '*.inc', '*.equ'];
-                const shouldProcess = this.shouldProcessFileType(fileMask, includeFileTypes);
-                if (!shouldProcess) {
-                    continue;
-                }
-                    const resolvedPaths: string[] = parts[1]
-                        .split(';')
-                        .flatMap(p => {
-                            try {
-                                return this.resolvePaths(p.trim(), redPath);
-                            } catch (error) {
-                                console.error(`Error resolving path "${p.trim()}":`, error);
-                                return []; // Return an empty array to avoid crashing the process
-                            }
-                        });
-
-                    const lowercaseFileExtension = fileExtension.toLowerCase();
-                        const fileTypeResolvedPaths: string[] = resolvedPaths
-                            .map(path => this.resolveMacro(path))
-                            .filter(resolvedPath => resolvedPath !== null);
-
-                if (fileMask === '*.*' || fileMask.toLowerCase().includes(lowercaseFileExtension)) {
-                    pathsMap[fileMask] = pathsMap[fileMask] || [];
-                    pathsMap[fileMask].push(...fileTypeResolvedPaths);
-                        }
-                    }
-                }
-
-            const paths: string[] = Object.values(pathsMap).flat();
-            return paths;
+        }
     }
+    
+    private processLine(foundSection: string, trimmedLine: string, redPath: string, fileExtension: string, pathsMap: Record<string, string[]>): void {
+        const parts = trimmedLine.split('=');
+        const fileMask = parts[0].trim();
+        const includeFileTypes = ['*.clw', '*.inc', '*.equ', '*.int'];
+        const shouldProcess = this.shouldProcessFileType(fileMask, includeFileTypes);
+        if (!shouldProcess) {
+            return;
+        }
+    
+        const resolvedPaths = this.resolvePaths(parts[1], redPath);
+        const fileTypeResolvedPaths = this.filterResolvedPaths(resolvedPaths);
+    
+        if (fileMask === '*.*' || fileMask.toLowerCase().includes(fileExtension.toLowerCase())) {
+            pathsMap[fileMask] = pathsMap[fileMask] || [];
+            pathsMap[fileMask].push(...fileTypeResolvedPaths);
+        }
+    }
+    
+    private filterResolvedPaths(paths: string[]): string[] {
+        return paths.flatMap(p => {
+            try {
+                return this.resolveMacro(p.trim());
+            } catch (error) {
+                console.error(`Error resolving path "${p.trim()}":`, error);
+                return []; // Return an empty array to avoid crashing the process
+            }
+        });
+    }
+    
+
+
     private shouldProcessFileType(fileMask: string, includeFileTypes: string[]): boolean {
         if (fileMask === '*.*') {
             return true;

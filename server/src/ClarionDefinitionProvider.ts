@@ -1,5 +1,5 @@
-import { TextDocument, Position, Location, Range, TextDocumentPositionParams } from 'vscode-languageserver-protocol';
-
+import {  Position, Location, Range, TextDocumentPositionParams } from 'vscode-languageserver-protocol';
+import { TextDocument } from 'vscode-languageserver-textdocument';
 export class ClarionDefinitionProvider {
     // Constructor or any setup methods if needed
 

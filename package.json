@@ -43,20 +43,36 @@
                 "when": "editorTextFocus"
             }
         ],
+        "views": {
+            "explorer": [
+                {
+                    "id": "solutionView",
+                    "name": "Solution View"
+                }
+            ]
+        },
         "commands": [
             {
                 "command": "clarion.configureClarionPropertiesFile",
-                "title": "Clarion Select ClarionProperties.xml File"
+                "title": "Clarion: Select ClarionProperties.xml File"
             },
             {
                 "command": "clarion.selectSolutionFile",
-                "title": "Clarion Select Application Solution File"
+                "title": "Clarion: Select Application Solution File"
             },
             {
                 "command": "clarion.followLink",
-                "title": "Clarion Follow Link"
+                "title": "Clarion: Follow Link"
+            },
+            {
+                "command": "clarion.inspectFullPath",
+                "title": "Clarion: Inspect search path for document"
+            },
+            {
+                "command": "clarion.openSolutionTree",
+                "title": "Clarion: Open Solution Tree"
             }
-        ],
+        ],        
         "snippets": [
             {
                 "language": "clarion",

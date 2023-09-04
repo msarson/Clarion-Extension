@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { parseString } from 'xml2js';
 import { DocumentManager } from './documentManager';
+import { SolutionParser } from './SolutionParser';
 // Define the ClarionVersionProperties interface here if not already defined
 interface ClarionVersionProperties {
   clarionVersion: string;
@@ -10,6 +11,12 @@ interface ClarionVersionProperties {
   redirectionFile: string;
   macros: Record<string, string>;
   libsrc: string;
+}
+
+interface ProjectInfo {
+  name: string;
+  path: string;
+  guid: string;
 }
 
 
@@ -54,29 +61,35 @@ export class ClarionExtensionCommands {
 
           if (versionSelection) {
             const selectedVersionProps = versionProperties.find(version => version.clarionVersion === versionSelection);
-
-            if (selectedVersionProps) {
-              await workspace
-                .getConfiguration()
-                .update('selectedClarionVersion', selectedVersionProps.clarionVersion, ConfigurationTarget.Workspace);
-              await workspace
-                .getConfiguration()
-                .update('selectedClarionPath', selectedVersionProps.path, ConfigurationTarget.Workspace);
-              await workspace
-                .getConfiguration()
-                .update('selectedClarionRedirectionFile', selectedVersionProps.redirectionFile, ConfigurationTarget.Workspace);
-              await workspace
-                .getConfiguration()
-                .update('selectedClarionMacros', selectedVersionProps.macros, ConfigurationTarget.Workspace);
-              await workspace
-                .getConfiguration()
-                .update('selectedClarionLibsrc', selectedVersionProps.libsrc, ConfigurationTarget.Workspace);
-            }
+            await ClarionExtensionCommands.updateWorkspaceSettings(selectedVersionProps);
           }
+          
+        }else {
+          window.showErrorMessage('No Clarion versions found in the selected ClarionProperties.xml file.');
         }
       }
     } catch (error) {
       console.error(error);
+    }
+  }
+
+  private static async updateWorkspaceSettings(selectedVersionProps: ClarionVersionProperties | undefined) {
+    if (selectedVersionProps) {
+      await workspace
+        .getConfiguration()
+        .update('selectedClarionVersion', selectedVersionProps.clarionVersion, ConfigurationTarget.Workspace);
+      await workspace
+        .getConfiguration()
+        .update('selectedClarionPath', selectedVersionProps.path, ConfigurationTarget.Workspace);
+      await workspace
+        .getConfiguration()
+        .update('selectedClarionRedirectionFile', selectedVersionProps.redirectionFile, ConfigurationTarget.Workspace);
+      await workspace
+        .getConfiguration()
+        .update('selectedClarionMacros', selectedVersionProps.macros, ConfigurationTarget.Workspace);
+      await workspace
+        .getConfiguration()
+        .update('selectedClarionLibsrc', selectedVersionProps.libsrc, ConfigurationTarget.Workspace);
     }
   }
 
@@ -161,43 +174,20 @@ export class ClarionExtensionCommands {
       const clarionFilePath = workspace.getConfiguration().get<string>('clarionPropertiesFile');
       if (clarionFilePath) {
         const versionProperties = await ClarionExtensionCommands.parseAvailableVersions(clarionFilePath);
-
         const selectedVersion = workspace.getConfiguration().get<string>('selectedClarionVersion');
-        const selectedVersionProps = versionProperties.find(version => version.clarionVersion === selectedVersion);
-        const updatedSolution = workspace.getConfiguration().get<string>('applicationSolutionFile');
-        if (selectedVersionProps) {
-          const updatedPath = selectedVersionProps.path;
-          const updatedRedirectionFile = selectedVersionProps.redirectionFile;
-          const updatedMacros = selectedVersionProps.macros;
-          const updatedLibsrc = selectedVersionProps.libsrc;
-        
-
-          const currentPath = workspace.getConfiguration().get<string>('selectedClarionPath');
-          const currentRedirectionFile = workspace.getConfiguration().get<string>('selectedClarionRedirectionFile');
-          const currentMacros = workspace.getConfiguration().get<Record<string, string>>('selectedClarionMacros');
-          const currentLibsrc = workspace.getConfiguration().get<string>('selectedClarionLibsrc');
-          const currentSoltion = workspace.getConfiguration().get<string>('applicationSolutionFile');
-
-          if (
-            updatedPath !== currentPath ||
-            updatedRedirectionFile !== currentRedirectionFile ||
-            JSON.stringify(updatedMacros) !== JSON.stringify(currentMacros) ||
-            updatedLibsrc !== currentLibsrc ||
-            updatedSolution !== currentSoltion
-            
-          ) {
-            await workspace.getConfiguration().update('selectedClarionPath', updatedPath, ConfigurationTarget.Workspace);
-            await workspace.getConfiguration().update('selectedClarionRedirectionFile', updatedRedirectionFile, ConfigurationTarget.Workspace);
-            await workspace.getConfiguration().update('selectedClarionMacros', updatedMacros, ConfigurationTarget.Workspace);
-            await workspace.getConfiguration().update('selectedClarionLibsrc', updatedLibsrc, ConfigurationTarget.Workspace);
-            await workspace.getConfiguration().update('applicationSolutionFile', updatedSolution, ConfigurationTarget.Workspace);
-          }
+        if (selectedVersion) {
+          const selectedVersionProps = versionProperties.find(version => version.clarionVersion === selectedVersion);
+          await this.updateWorkspaceSettings(selectedVersionProps);
         }
       }
     } catch (error) {
       console.error(error);
     }
   }
+
+
+  
+
   static async selectSolutionFile() {
     const workspaceFolder = workspace.workspaceFolders?.[0];
     if (workspaceFolder) {
@@ -217,21 +207,23 @@ export class ClarionExtensionCommands {
         await workspace
           .getConfiguration()
           .update('applicationSolutionFile', solutionFilePath, ConfigurationTarget.Workspace);
+
       }
     }
   }
+
   static async followLink(documentManager: DocumentManager) {
     const editor = window.activeTextEditor;
 
     if (editor) {
-        const position = editor.selection.active;
-        const linkUri = documentManager.getLinkUri(editor.document.uri, position);
-        if (linkUri) {
-            commands.executeCommand('vscode.open', linkUri);
-        } else {
-            window.showInformationMessage('No link found at the cursor position.');
-        }
-        //vscode.commands.executeCommand('vscode.open', linkUri);
+      const position = editor.selection.active;
+      const linkUri = documentManager.getLinkUri(editor.document.uri, position);
+      if (linkUri) {
+        commands.executeCommand('vscode.open', linkUri);
+      } else {
+        window.showInformationMessage('No link found at the cursor position.');
+      }
+
     }
   }
 
