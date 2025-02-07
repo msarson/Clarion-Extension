@@ -171,6 +171,17 @@ export class RedirectionFileParser {
         return false;
     }
     
+    /**
+     * Processes an included redirection file specified within a line of text.
+     * 
+     * This method searches for an include directive within the provided line, resolves the path to the included redirection file,
+     * and parses it to extract paths associated with the specified file extension. The extracted paths are then added to the pathsMap.
+     * 
+     * @param redPath - The path of the current redirection file being processed.
+     * @param line - The line of text containing the include directive.
+     * @param fileExtension - The file extension to filter the paths.
+     * @param pathsMap - A map where keys are file extensions and values are arrays of paths associated with those extensions.
+     */
     private processIncludedRedirection(redPath: string, line: string, fileExtension: string, pathsMap: Record<string, string[]>): void {
         const includePathMatches = line.match(/{include\s+([^}]+)}/i);
         if (includePathMatches && includePathMatches[1]) {
