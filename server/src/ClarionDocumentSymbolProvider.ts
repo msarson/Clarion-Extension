@@ -1,4 +1,4 @@
-import { DocumentSymbol, Range, SymbolKind } from 'vscode-languageserver';
+import { DocumentSymbol, Range, SymbolKind } from 'vscode-languageserver-types';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
 enum ClarionSymbolKind {
@@ -15,7 +15,7 @@ export class ClarionDocumentSymbolProvider {
 
     // Capitalize
     private format(cmd: string): string {
-        return cmd.substr(1).toLowerCase().replace(/^\w/, c => c.toUpperCase())
+        return cmd.slice(1).toLowerCase().replace(/^\w/, c => c.toUpperCase())
     }
 
 
@@ -38,185 +38,166 @@ export class ClarionDocumentSymbolProvider {
      * @param document The TextDocument to provide DocumentSymbols for.
      * @returns An array of DocumentSymbol.
      */
-    public provideDocumentSymbols(
-        document: TextDocument): DocumentSymbol[] {
+    public provideDocumentSymbols(document: TextDocument): DocumentSymbol[] {
+        const symbols: DocumentSymbol[] = [];
+        const nodes: DocumentSymbol[][] = [symbols];
 
-        let symbols: DocumentSymbol[] = [];
-        let nodes = [symbols]
+        let insideRoot = false;
+        let insideProcedure = false;
+        let insideRoutine = false;
+        let insideVariable = 0;
 
-        let inside_root = false
-        let inside_procedure = false
-        let inside_routine = false
-        let inside_variable = 0
+        for (let i = 0; i < document.lineCount; i++) {
+            const currentLineRange = this.getLineRange(document, i);
+            const line = document.getText(currentLineRange).replace(/[\r\n]+/g, '');
+            const trimmedLine = line.trimStart();
 
-
-
-        let root_symbol: DocumentSymbol | null
-        let procedure_symbol: DocumentSymbol | null
-        let routine_symbol: DocumentSymbol | null
-        let variable_symbol: DocumentSymbol | null
-
-        for (var i = 0; i < document.lineCount; i++) {
-            var currentLineRange = this.getLineRange(document, i)
-            var line = document.getText(currentLineRange).replace(/[\r\n]+/g, '')   // remove the annoying CRLF
-            let trimmedLine = line.trimStart()
-            // string.isNullOrEmpty
-            // https://codereview.stackexchange.com/a/5710
-            if (!line || trimmedLine.startsWith("!"))
+            if (!line || trimmedLine.startsWith('!')) {
                 continue;
+            }
 
-            if (!inside_root) {
-                // ROOT could be:
-                // "   MEMBER('FOO.clw')                                     !App=FOO"
-                // "   PROGRAM "
-                let name: string = ""
-                let detail: string = ""
-                if (!trimmedLine.startsWith("!")) {
-                    if (trimmedLine.toLowerCase().startsWith("member")) {
-                        name = "MEMBER"
-                    }
-                    else if (trimmedLine.toLowerCase().startsWith("program")) {
-                        name = "PROGRAM"
-                    }
-                    if (name && name.length > 0) {
-                        let bracketStart = trimmedLine.indexOf("(")
-                        let bracketEnd = trimmedLine.indexOf(")")
-                        if (0 < bracketStart && bracketStart < bracketEnd) {
-                            detail = trimmedLine.slice(bracketStart + 1, bracketEnd).trim();
-                        }
-                        const emptyChildren: DocumentSymbol[] = [];
-                        root_symbol = DocumentSymbol.create(
-                            name,
-                            detail,
-                            ClarionSymbolKind.Root as SymbolKind,
-                            this.getLineRange(document, i, document.lineCount),   // till the last line of the file
-                            currentLineRange,
-                            emptyChildren
-                        )
-
-                        nodes[nodes.length - 1].push(root_symbol)
-                        nodes.push(root_symbol.children!)
-                        inside_root = true
-                        //continue;
-                    }
+            // Process root if not already done.
+            if (!insideRoot) {
+                const { found, symbol: rootSymbol } = this.tryCreateRootSymbol(trimmedLine, currentLineRange, document, i);
+                if (found && rootSymbol) {
+                    nodes[nodes.length - 1].push(rootSymbol);
+                    nodes.push(rootSymbol.children!);
+                    insideRoot = true;
                 }
             }
 
-            if (inside_variable > 0) {
-                if (line.startsWith(" ") && (trimmedLine.startsWith(".") || trimmedLine.toLowerCase().startsWith("end"))) {
-                    inside_variable--
+            // Process variable block ending.
+            if (insideVariable > 0) {
+                if (
+                    line.startsWith(' ') &&
+                    (trimmedLine.startsWith('.') || trimmedLine.toLowerCase().startsWith('end'))
+                ) {
+                    insideVariable--;
                 }
-                if (inside_variable == 0) {
-                    // udpate the Variable's range
-                    let lastVariable = nodes[nodes.length - 1].pop()
-                    if (lastVariable != null) {
-                        lastVariable.range = this.getLineRange(document, lastVariable.range.start.line, currentLineRange.start.line - 1)
-                        nodes[nodes.length - 1].push(lastVariable)
-                    }
+                if (insideVariable === 0) {
+                    this.updateLastSymbolRange(nodes, document, currentLineRange.start.line);
                 }
             }
 
-            // the declaration of PROCEDURE, ROUTINE or VARIABLE has no leading space
-            if (!line.startsWith(" ") && !trimmedLine.startsWith("!") && !trimmedLine.startsWith("?")) {
-                let tokens = line.split(/\s+/)
+            // Process declarations: Procedure, Routine or Variable.
+            if (!line.startsWith(' ') && !trimmedLine.startsWith('!') && !trimmedLine.startsWith('?')) {
+                const tokens = line.split(/\s+/);
                 if (tokens.length >= 2) {
-                    let name = tokens[0]
-                    let type = tokens[1]
+                    const name = tokens[0];
+                    const type = tokens[1].toLowerCase();
 
-                    if (type.toLowerCase().startsWith("procedure")) {
-                       
-                        procedure_symbol = DocumentSymbol.create(
+                    if (type.startsWith('procedure')) {
+                        // Seal any ongoing routine or procedure.
+                        if (insideRoutine) {
+                            nodes.pop();
+                            insideRoutine = false;
+                            this.updateLastSymbolRange(nodes, document, currentLineRange.start.line);
+                        }
+                        if (insideProcedure) {
+                            nodes.pop();
+                            insideProcedure = false;
+                            this.updateLastSymbolRange(nodes, document, currentLineRange.start.line);
+                        }
+
+                        const procSymbol = DocumentSymbol.create(
                             name,
-                            "",
+                            '',
                             ClarionSymbolKind.Procedure as SymbolKind,
                             currentLineRange,
                             currentLineRange,
                             []
-                        )
-
-                        // Since Clarion Procedure has no explicit section end symbol.
-                        // When any ongoing Routing or Procedure meet the new Procedure, seal the previous section
-                        if (inside_routine) {
-                            nodes.pop()
-                            inside_routine = false
-
-                            // udpate the previous Routine's range
-                            let lastRoutine = nodes[nodes.length - 1].pop()
-                            if (lastRoutine != null) {
-                                lastRoutine.range = this.getLineRange(document, lastRoutine.range.start.line, currentLineRange.start.line - 1)
-                                nodes[nodes.length - 1].push(lastRoutine)
-                            }
+                        );
+                        nodes[nodes.length - 1].push(procSymbol);
+                        nodes.push(procSymbol.children!);
+                        insideProcedure = true;
+                    } else if (type.startsWith('routine')) {
+                        if (insideRoutine) {
+                            nodes.pop();
+                            insideRoutine = false;
+                            this.updateLastSymbolRange(nodes, document, currentLineRange.start.line);
                         }
-                        if (inside_procedure) {
-                            nodes.pop()
-                            inside_procedure = false
-
-                            // update the previous Procedure's range
-                            let lastProcedure = nodes[nodes.length - 1].pop()
-                            if (lastProcedure != null) {
-                                lastProcedure.range = this.getLineRange(document, lastProcedure.range.start.line, currentLineRange.start.line - 1)
-                                nodes[nodes.length - 1].push(lastProcedure)
-                            }
-                        }
-
-                        nodes[nodes.length - 1].push(procedure_symbol)
-                        nodes.push(procedure_symbol.children!)
-                        inside_procedure = true
-                        //continue;
-                    }
-
-                    else if (type.toLowerCase().startsWith("routine")) {
-                        const emptyChildren: DocumentSymbol[] = [];
-                        routine_symbol = DocumentSymbol.create(
+                        const routSymbol = DocumentSymbol.create(
                             name,
-                            "",
+                            '',
                             ClarionSymbolKind.Routine as SymbolKind,
                             currentLineRange,
                             currentLineRange,
-                            emptyChildren
-                        )
-
-                        // Since Clarion Procedure has no explicit section end symbol.
-                        // When any ongoing Routing meet the new Procedure, seal the previous section
-                        if (inside_routine) {
-                            nodes.pop()
-                            inside_routine = false
-
-                            // udpate the previous Routine's range
-                            let lastRoutine = nodes[nodes.length - 1].pop()
-                            if (lastRoutine != null) {
-                                lastRoutine.range = this.getLineRange(document, lastRoutine.range.start.line, currentLineRange.start.line - 1)
-                                nodes[nodes.length - 1].push(lastRoutine)
-                            }
-                        }
-
-                        nodes[nodes.length - 1].push(routine_symbol)
-                        if (routine_symbol.children == null) {
-                            nodes.push(routine_symbol.children!)
-                            inside_routine = true
-                        }
-                        //continue;
-                    }
-
-                    else { // fall to VARIABLE
-                        if (inside_variable == 0) {
-                            variable_symbol = DocumentSymbol.create(
+                            []
+                        );
+                        nodes[nodes.length - 1].push(routSymbol);
+                        nodes.push(routSymbol.children!);
+                        insideRoutine = true;
+                    } else {
+                        // Treat any other as VARIABLE.
+                        // For VARIABLE, update when a block is ending.
+                        if (insideVariable === 0) {
+                            const varSymbol = DocumentSymbol.create(
                                 name,
-                                "",
+                                '',
                                 ClarionSymbolKind.Variable as SymbolKind,
                                 currentLineRange,
                                 currentLineRange,
                                 []
-                            )
-
-                            nodes[nodes.length - 1].push(variable_symbol)
+                            );
+                            nodes[nodes.length - 1].push(varSymbol);
                         }
-                        //continue;
                     }
                 }
             }
         }
 
-        return symbols
+        return symbols;
+    }
+
+    private tryCreateRootSymbol(
+        trimmedLine: string,
+        currentLineRange: Range,
+        document: TextDocument,
+        currentLineNum: number
+    ): { found: boolean; symbol?: DocumentSymbol } {
+        let name = '';
+        let detail = '';
+
+        // Identify the root symbol by checking for "member(...)" or "program".
+        if (!trimmedLine.startsWith('!')) {
+            if (trimmedLine.toLowerCase().startsWith('member')) {
+                name = 'MEMBER';
+            } else if (trimmedLine.toLowerCase().startsWith('program')) {
+                name = 'PROGRAM';
+            }
+            if (name) {
+                const bracketStart = trimmedLine.indexOf('(');
+                const bracketEnd = trimmedLine.indexOf(')');
+                if (bracketStart > 0 && bracketStart < bracketEnd) {
+                    detail = trimmedLine.slice(bracketStart + 1, bracketEnd).trim();
+                }
+                // Root range extends from the current line to the end of document.
+                const rootRange = this.getLineRange(document, currentLineNum, document.lineCount);
+                const rootSymbol = DocumentSymbol.create(
+                    name,
+                    detail,
+                    ClarionSymbolKind.Root as SymbolKind,
+                    rootRange,
+                    currentLineRange,
+                    []
+                );
+                return { found: true, symbol: rootSymbol };
+            }
+        }
+        return { found: false };
+    }
+
+    private updateLastSymbolRange(
+        nodes: DocumentSymbol[][],
+        document: TextDocument,
+        endLine: number
+    ): void {
+        const currentNodes = nodes[nodes.length - 1];
+        if (currentNodes.length > 0) {
+            const lastSymbol = currentNodes.pop()!;
+            // Update the symbol's range to end at the line before the current one.
+            lastSymbol.range = this.getLineRange(document, lastSymbol.range.start.line, endLine - 1);
+            currentNodes.push(lastSymbol);
+        }
     }
 }

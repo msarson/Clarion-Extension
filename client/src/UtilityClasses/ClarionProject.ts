@@ -7,6 +7,28 @@ export interface clarionProperties {
     compileMode: string | null;
 }
 
+/**
+ * Represents a Clarion project that encapsulates logic to locate and parse a Clarion project file (.cwproj) from a given directory.
+ *
+ * @remarks
+ * The class offers methods to recursively search for a project file starting from a given directory and moving up to parent directories.
+ * When a project file is located, its content is read and parsed as XML to extract properties such as the compile mode.
+ *
+ * @property properties - An object containing the parsed Clarion project properties, or null if the project has not been found or parsed.
+ *
+ * @example
+ * Here's how you might use the ClarionProjectClass:
+ * ```typescript
+ * const project = new ClarionProjectClass();
+ * const clarionProperties = project.findProjectOrSolutionDirectory('path/to/start/directory');
+ * if (clarionProperties) {
+ *   console.log(`Found project file: ${clarionProperties.fileName}`);
+ *   console.log(`Compile mode: ${clarionProperties.compileMode}`);
+ * }
+ * ```
+ *
+ * @see {@link clarionProperties} for the expected structure of the project properties.
+ */
 export class ClarionProjectClass {
     public properties: clarionProperties | null = null;
     constructor() {

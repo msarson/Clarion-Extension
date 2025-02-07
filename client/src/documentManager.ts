@@ -19,6 +19,39 @@ interface DocumentInfo {
     statementLocations: ClarionLocation[];
 }
 
+/**
+ * The DocumentManager class is responsible for scanning, tracking, and managing document-related
+ * information within a Clarion environment. It monitors workspace events such as opening, editing,
+ * saving, renaming, and deleting text documents, and updates the document locations accordingly.
+ *
+ * This class utilizes several regular expressions to identify specific Clarion constructs including:
+ * - MODULE: Identifies module declarations.
+ * - INCLUDE: Handles file inclusion statements.
+ * - MEMBER: Extracts member statements.
+ *
+ * Additionally, DocumentManager leverages a LocationProvider to determine the precise positions (ranges)
+ * in documents for each recognized statement, enabling features like document link generation and
+ * navigation to specific document locations (including sections).
+ *
+ * @remarks
+ * - The class registers event listeners upon instantiation to keep the openDocuments map in sync with
+ *   the state of the workspace.
+ * - It integrates with a SolutionParser for solution-specific context and configuration.
+ * - The public API provides methods for initializing, analyzing document contents, and retrieving link URIs.
+ *
+ * @example
+ * ```typescript
+ * const solutionParser: SolutionParser = new SolutionParser(...);
+ * const documentManager = new DocumentManager(solutionParser);
+ * await documentManager.initialize(solutionParser);
+ * 
+ * // Retrieve a document's links
+ * const documentLinks = documentManager.generateDocumentLinks(documentUri);
+ * ```
+ *
+ * @see LocationProvider - Handles the extraction of location details using regex patterns.
+ * @see Disposable - Implements cleanup logic for registered event listeners.
+ */
 export class DocumentManager implements Disposable {
 
     private readonly modulePattern = /MODULE\s*\('([^']+)'\s*(?:,\s*'([^']+)'\s*)?\)/ig;
@@ -83,6 +116,18 @@ export class DocumentManager implements Disposable {
 
 
 
+    /**
+     * Retrieves the URI for a link found at the specified position in the document.
+     *
+     * This function searches for a link in the document at the given position using an internal lookup.
+     * If a link is found, it constructs a file URI from the link's file path. Additionally, if the link 
+     * corresponds to a section and the section line information is available, the URI is updated with a 
+     * fragment indicating the line number (incremented by one) and column position.
+     *
+     * @param documentUri - The URI of the document where the link search is performed.
+     * @param position - The position within the document to locate the link.
+     * @returns The constructed URI with an optional fragment if successful, or undefined if no link is found.
+     */
     getLinkUri(documentUri: Uri, position: Position): Uri | undefined {
         const location = this.findLinkAtPosition(documentUri, position);
         if (location) {
@@ -98,6 +143,21 @@ export class DocumentManager implements Disposable {
         return undefined;
     }
 
+    /**
+     * Generates document links for a provided URI based on the locations
+     * and types of statements found in the document.
+     *
+     * This method retrieves document information associated with the supplied URI.
+     * For each statement location in the document, it creates a DocumentLink if:
+     * - The statement type is either "INCLUDE", "MODULE", "MEMBER", or "SECTION".
+     * - Both the start and end positions (line positions) are defined.
+     *
+     * For "SECTION" statement types with an additional section line location, the generated
+     * target URI is modified to include a fragment indicating the line (offset by one) and column.
+     *
+     * @param uri - The URI of the document to generate links for.
+     * @returns An array of DocumentLink objects representing the navigable code links within the document.
+     */
     generateDocumentLinks(uri: Uri): DocumentLink[] {
         const documentInfo = this.getDocumentInfo(uri);
         const links: DocumentLink[] = [];
@@ -131,6 +191,14 @@ export class DocumentManager implements Disposable {
 
 
 
+    /**
+     * Searches for a link within the document at the specified position.
+     *
+     * @param documentUri - The URI of the document to search.
+     * @param position - The position within the document to check for a link.
+     *
+     * @returns The location of the link if the given position falls within any known link range, otherwise undefined.
+     */
     findLinkAtPosition(documentUri: Uri, position: Position): ClarionLocation | undefined {
         const documentInfo = this.getDocumentInfo(documentUri);
 
@@ -151,6 +219,15 @@ export class DocumentManager implements Disposable {
     }
    
     
+    /**
+     * Updates the document information by processing text patterns for include, module, and member declarations.
+     *
+     * @param document - The text document to be analyzed.
+     *
+     * @remarks
+     * This method ignores documents that do not use the 'file' URI scheme or have a file path ending with '.code-workspace'.
+     * It extracts locations for "INCLUDE", "MODULE", and "MEMBER" patterns and stores these locations in the openDocuments map.
+     */
     public async updateDocumentInfo(document: TextDocument) {
         if (document.uri.scheme !== 'file'|| document.uri.fsPath.endsWith('.code-workspace')) {
             return;
@@ -167,6 +244,18 @@ export class DocumentManager implements Disposable {
         });
     }
 
+    /**
+     * Processes a document to extract and map locations that match the provided regular expression pattern.
+     *
+     * This method retrieves locations from the document that adhere to the given pattern. Each matched location is converted 
+     * into a ClarionLocation object with the specified statement type. If the match result contains section information, an 
+     * additional ClarionLocation is created with adjusted start and end positions to reflect the section's location within the document.
+     *
+     * @param document - The text document to search in.
+     * @param pattern - The regular expression pattern used to identify locations within the document.
+     * @param statementType - A string specifying the type of statement to assign to the discovered locations.
+     * @returns An array of ClarionLocation objects representing the statement and, if applicable, its associated section.
+     */
     private processPattern(document: TextDocument, pattern: RegExp, statementType: string): ClarionLocation[] {
         const statementLocations: ClarionLocation[] = [];
         const locations = this.locationProvider.getLocationFromPattern(document, pattern);

@@ -16,6 +16,33 @@ export interface ClarionLocation {
 interface CustomRegExpMatch extends RegExpExecArray {
     lineIndex: number;
 }
+
+
+/**
+ * Provides functionality for locating file and section positions within the Clarion project.
+ *
+ * @remarks
+ * The LocationProvider class offers methods to parse documents using regular expression
+ * patterns, resolve file paths from given document locations, and interface with solution parsing
+ * mechanisms. It supports reading project properties, finding section start positions within files,
+ * and constructing full paths relative to the project/solution directories.
+ *
+ * Typical usage involves instantiating the class with a solution parser instance, initializing it,
+ * and then retrieving location details of patterns found within a text document.
+ *
+ * @example
+ * ```typescript
+ * const solutionParser = new SolutionParser(...);
+ * const locationProvider = new LocationProvider(solutionParser);
+ * await locationProvider.initialize(solutionParser);
+ * const locations = locationProvider.getLocationFromPattern(document, /your-regex-pattern/);
+ * if (locations) {
+ *   // Process retrieved locations
+ * }
+ * ```
+ *
+ * @public
+ */
 export class LocationProvider {
     private clarionProject: ClarionProjectClass;
     private solutionParser: SolutionParser | undefined;
@@ -28,6 +55,23 @@ export class LocationProvider {
         
     }
 
+    /**
+     * Scans the provided document for occurrences of a specified pattern and returns an array of corresponding locations.
+     *
+     * @param document - The text document to search within.
+     * @param pattern - The regular expression pattern used to find matches in the document.
+     * @returns An array of ClarionLocation objects representing the found locations, or null if no matches are found.
+     *
+     * @remarks
+     * This method processes the document by:
+     * - Determining the document's directory and locating the solution folder based on configuration.
+     * - Updating the clarionProject properties if the document directory is within the solution folder.
+     * - Extracting all matches from the document using the provided regular expression.
+     * - For each match, calculating the exact file path and position information, including the start and end positions of the matched value.
+     * - Returning an array of ClarionLocation objects that include positions, file names, and associated match data.
+     *
+     * Note: The function relies on external methods such as getRegexMatches, getFullPath, and findSectionLineNumber to compute the necessary location information.
+     */
     public getLocationFromPattern(document: TextDocument, pattern: RegExp): ClarionLocation[] | null {
         const documentDirectory = path.dirname(document.uri.fsPath);
         const solutionFolder: string = path.dirname(workspace.getConfiguration().get('applicationSolutionFile') as string);

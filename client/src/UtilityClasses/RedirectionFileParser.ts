@@ -1,8 +1,33 @@
 import { workspace } from 'vscode';
 import * as path from 'path';     // Import path module
 import * as fs from 'fs';         // Import fs module
+
 /**
- * A class that parses a Clarion redirection file and retrieves an array of paths to search for a given file extension.
+ * Parses a Clarion redirection file to extract and resolve file paths for the project.
+ *
+ * This class reads a redirection file specified in the workspace configuration and extracts paths using
+ * a set of rules defined by a compile mode, file extension filters, and macros. The parser performs the
+ * following tasks:
+ *
+ * - Fetches configuration settings including the selected redirection file, Clarion path, and additional macros.
+ * - Checks for the existence of the redirection file in different locations based on provided project paths.
+ * - Reads and parses the redirection file to resolve paths, applying macros where needed.
+ * - Processes sections and lines in the redirection file, handling included redirection files recursively.
+ * - Filters the extracted file paths based on the provided file extension and compile mode.
+ *
+ * @remarks
+ * The class is intended to integrate with a Clarion project environment where redirection files define
+ * various file search paths. It supports directives like "{include ...}" for nested redirection and
+ * conditionally skips sections not matching the current compile mode.
+ *
+ * @example
+ * ```typescript
+ * const parser = new RedirectionFileParser("release");
+ * const searchPaths = parser.getSearchPaths(".clw", "/path/to/project");
+ * console.log(searchPaths);
+ * ```
+ *
+ * @public
  */
 export class RedirectionFileParser {
 
@@ -22,10 +47,12 @@ export class RedirectionFileParser {
         this.compileMode = compileMode;
     }
 
+ 
     /**
-     * Checks if a file exists at the given file path.
-     * @param filePath The path of the file to check.
-     * @returns True if the file exists, false otherwise.
+     * Checks whether a file exists at the specified file path.
+     *
+     * @param filePath - The path of the file to be checked.
+     * @returns True if the file exists; otherwise, false.
      */
     fileExists(filePath: string): boolean {
         if (fs.existsSync(filePath)) {
@@ -43,6 +70,19 @@ export class RedirectionFileParser {
      */
 
 
+    /**
+     * Retrieves an array of unique search paths by locating the redirection file based on the provided parameters.
+     * 
+     * The method first attempts to use the found project path to locate the redirection file, if available.
+     * If the redirection file is not found in the specified project path, or if no project path is provided,
+     * it falls back to using the selected Clarion path. It then processes the located redirection file to extract
+     * additional search paths and returns a deduplicated list of all paths.
+     *
+     * @param fileExtension - The file extension used for filtering or processing within the redirection file.
+     * @param foundProjectPath - An optional path representing the project's location to search for the redirection file.
+     *                           If provided, the method will prioritize searching in this path.
+     * @returns An array of unique search paths compiled from the project and additional locations specified in the redirection file.
+     */
     getSearchPaths(fileExtension: string, foundProjectPath: string | null): string[] {
         const paths: string[] = [];
         let pathToSearch: string;

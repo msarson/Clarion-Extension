@@ -72,7 +72,7 @@
                 "command": "clarion.openSolutionTree",
                 "title": "Clarion: Open Solution Tree"
             }
-        ],        
+        ],
         "snippets": [
             {
                 "language": "clarion",
@@ -186,13 +186,17 @@
     },
     "devDependencies": {
         "@types/mocha": "^8.2.2",
-        "@types/node": "^15.0.2",
+        "@types/node": "^15.14.9",
         "@typescript-eslint/parser": "^4.31.0",
         "eslint": "^7.32.0",
         "mocha": "^10.1.0",
-        "typescript": "^4.2.4"
+        "typescript": "^4.2.4",
+        "vscode": "^1.1.37"
     },
     "dependencies": {
+        "vscode-languageserver": "^9.0.1",
+        "vscode-languageserver-protocol": "^3.17.5",
+        "vscode-languageserver-textdocument": "^1.0.12",
         "xml2js": "^0.6.2"
     }
 }

@@ -9,7 +9,8 @@ import {
     DocumentSymbol,
     DocumentSymbolParams,
     FoldingRange,
-    FoldingRangeParams
+    FoldingRangeParams,
+    InitializeParams
 } from 'vscode-languageserver-protocol'
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
@@ -23,10 +24,10 @@ const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider;
 let connection = createConnection(ProposedFeatures.all);
 let documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
 
-connection.onInitialize(params => {
+connection.onInitialize((params: InitializeParams) => {
 
     const settings = params.initializationOptions?.settings;
-    connection.onFoldingRanges(params => {
+    connection.onFoldingRanges((params: { textDocument: { uri: any; }; }) => {
         const document = documents.get(params.textDocument.uri);
         if (!document) {
             return [];

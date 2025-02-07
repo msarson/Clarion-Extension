@@ -24,7 +24,16 @@ export async function activate(context: ExtensionContext): Promise<void> {
     const documentManager = new DocumentManager(solutionParser!);
     const textEditorComponent = new TextEditorComponent(documentManager);
     
-    function registerSelectionChangeHandler() {
+    /**
+     * Registers an event handler for text editor selection changes.
+     *
+     * This event handler listens for selection changes in the text editor. When the selection changes
+     * and the affected document is the active document, it updates the document information using
+     * the document manager.
+     *
+     * @returns A Disposable that can be used to unregister the event handler.
+     */
+    function registerSelectionChangeHandler(): Disposable {
         return window.onDidChangeTextEditorSelection(async (event) => {
             const editor = event.textEditor;
             if (editor) {
