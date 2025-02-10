@@ -1,16 +1,18 @@
-import { commands, Uri, window, ExtensionContext, workspace, Disposable, languages } from 'vscode';
+import { commands, Uri, window, workspace, Disposable, languages } from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { RedirectionFileParser } from './UtilityClasses/RedirectionFileParser';
-import { parseString } from 'xml2js';
+import * as xml2js from 'xml2js';
+import { Logger } from './UtilityClasses/Logger';
+import { globalSettings } from './globals';
 
-// Represents an individual source file with its name and relative path.
+// Import global variables from extension.ts
+
+
 export class SourceFile {
     constructor(public name: string, public relativePath: string) { }
 }
 
-// Represents an individual project in the solution. It stores project details,
-// source files, and paths where additional files can be looked up.
 class ClarionProject {
     sourceFiles: SourceFile[] = [];
     pathsToLookin: Record<string, string[]> = {};
@@ -21,186 +23,183 @@ class ClarionProject {
         public guid: string,
         public buildConfiguration: string
     ) { }
-
-    // Adds a source file to this project with the given name and relative path.
     addSourceFile(name: string, relativePath: string) {
         this.sourceFiles.push(new SourceFile(name, relativePath));
     }
 }
 
-// A simple tree node class used for creating a hierarchical representation of the solution.
-class TreeNode {
-    constructor(public name: string, public children: TreeNode[] = []) { }
-}
-
-// Represents the overall solution containing multiple projects.
 class ClarionSolution {
     constructor(public name: string = '', public projects: ClarionProject[] = []) { }
 }
 
-// The main class responsible for parsing a solution file, building the project tree,
-// and providing methods to find and retrieve file paths.
 export class SolutionParser {
     public solution: ClarionSolution;
     public solutionTree: TreeNode | null;
-    // This maps file extensions to default search paths.
     public defaultPathsToLookin: Record<string, string[]> = {};
+    public solutionFilePath: string;
 
-    // Initializes the solution parser with the file path of the solution.
-    constructor(private filePath: string) {
+    constructor(filePath: string) {
+        this.solutionFilePath = filePath;
         const solutionName = path.basename(filePath);
-        const projects: ClarionProject[] = [];
-        this.solution = new ClarionSolution(solutionName, projects);
+        this.solution = new ClarionSolution(solutionName, []);
         this.solutionTree = null;
-        this.initialize();
+        //  this.initialize();
     }
 
-    // Asynchronous initialization that parses the solution, builds a tree representation,
-    // and retrieves default search paths from a redirection file.
-    private async initialize() {
-        this.solution = await this.parseSolution();
-        await this.buildSolutionTree();
-        // this.displaySolutionTree(); // Optionally displays the solution tree in console
+    public async initialize() {
         this.defaultPathsToLookin = await this.getDefaultPathsFromRedirectionFile();
+        this.solution = await this.parseSolution();
+        this.solution.projects.forEach(project => {
+            Logger.info(`📂 Project: ${project.name}`);
+            project.sourceFiles.forEach(sourceFile => {
+                Logger.info(`📄 Source File: ${sourceFile.name}`);
+                Logger.info(`📄 Source File Path: ${sourceFile.relativePath}`);
+            });
+            
+        });
+        Logger.info("📂 Parsed Projects:", this.solution.projects);
+        
+        await this.buildSolutionTree();
+        
     }
 
-    // Finds a file with the provided extension by looking into default search directories.
-    public findFileWithExtension(filename: string): string {
-        const extension = path.extname(filename).toLowerCase(); // lower case extension
-        const pathsToLookin = this.defaultPathsToLookin[extension] || [];
-        const solutionFolder: string = path.dirname(workspace.getConfiguration().get('applicationSolutionFile') as string);
-        for (let searchPath of pathsToLookin) {
-            if (searchPath === '.') {
-                searchPath = solutionFolder; // Replace '.' with the actual solution folder
-            }
-            if (fs.existsSync(searchPath)) {
-                const fullPath = path.join(searchPath, filename);
-                if (fs.existsSync(fullPath)) {
-                    return fullPath; // Return the full file path if it exists
-                }
+    private async getProjectPathsFromRedirectionFile(projectPath: string): Promise<Record<string, string[]>> {
+        let projectPathsToLookIn: Record<string, string[]> = {};
+    
+        // ✅ Pass the specific project path to the parser
+        const redirectionFileParser = new RedirectionFileParser("", projectPath);
+    
+        const redPaths = {
+            '.clw': redirectionFileParser.getSearchPaths('.clw', projectPath),
+            '.inc': redirectionFileParser.getSearchPaths('.inc', projectPath),
+            '.equ': redirectionFileParser.getSearchPaths('.equ', projectPath),
+            '.int': redirectionFileParser.getSearchPaths('.int', projectPath)
+        };
+    
+        Logger.info("📂 globalSettings.libsrcPaths:", globalSettings.libsrcPaths);
+    
+        // ✅ Now, each project gets **its own** paths
+        projectPathsToLookIn = {
+            '.clw': ['.'].concat(redPaths['.clw']).concat(globalSettings.libsrcPaths),
+            '.inc': ['.'].concat(redPaths['.inc']).concat(globalSettings.libsrcPaths),
+            '.equ': ['.'].concat(redPaths['.equ']).concat(globalSettings.libsrcPaths),
+            '.int': ['.'].concat(redPaths['.int']).concat(globalSettings.libsrcPaths)
+        };
+    
+        Logger.info(`📂 Final Search Paths for ${projectPath}:`, projectPathsToLookIn);
+        return projectPathsToLookIn;
+    }
+    
+    public findFileInRedirectionPaths(file: string, pathsToLookin: Record<string, string[]>, projectDir: string): string | null {
+        Logger.info(`🔍 Searching for file "${file}" in project redirection paths (Project Dir: ${projectDir})`);
+    
+        const fileExt = path.extname(file).toLowerCase();
+        
+        if (!pathsToLookin[fileExt]) {
+            Logger.warn(`⚠️ No search paths defined for extension: ${fileExt}`);
+            return null;
+        }
+    
+        for (const searchPath of pathsToLookin[fileExt]) {
+            // Ensure correct path resolution
+            const resolvedSearchPath = path.isAbsolute(searchPath)
+                ? path.normalize(searchPath) 
+                : path.join(projectDir, searchPath);
+    
+            const fullPath = path.join(resolvedSearchPath, file);
+            const normalizedFullPath = path.normalize(fullPath);
+    
+            Logger.info(`🔎 Checking: ${normalizedFullPath}`);
+    
+            if (fs.existsSync(normalizedFullPath)) {
+                Logger.info(`✅ File found: ${normalizedFullPath}`);
+                return normalizedFullPath;
             }
         }
-        return ""; // Returns empty string if file isn't found
+    
+        Logger.warn(`❌ File "${file}" not found in redirection paths`);
+        return null;
     }
+    
 
-    // Retrieves the default paths from a redirection file using RedirectionFileParser.
+    public findProjectForFile(fileName: string): ClarionProject | undefined {
+        Logger.info(`🔍 Searching for project containing file: ${fileName}`);
+    
+        for (const project of this.solution.projects) {
+            const foundSourceFile = project.sourceFiles.find(sourceFile =>
+                sourceFile.name.toLowerCase() === fileName.toLowerCase()
+            );
+    
+            if (foundSourceFile) {
+                Logger.info(`✅ File "${fileName}" found in project: ${project.name}`);
+                return project;
+            }
+        }
+    
+        Logger.warn(`❌ File "${fileName}" not found in any project.`);
+        return undefined;
+    }
+    
+    
     private async getDefaultPathsFromRedirectionFile(): Promise<Record<string, string[]>> {
-        let defaultPathsToLookIn: Record<string, string[]> = {};
-        const redirectionFileParser = new RedirectionFileParser("");
-        // For each file extension, set the default search path list
-        defaultPathsToLookIn = {
-            '.clw': ['.'].concat(redirectionFileParser.getSearchPaths('.clw', "")),
-            '.inc': ['.'].concat(redirectionFileParser.getSearchPaths('.inc', "")),
-            '.equ': ['.'].concat(redirectionFileParser.getSearchPaths('.equ', "")),
-            '.int': ['.'].concat(redirectionFileParser.getSearchPaths('.int', ""))
+        let defaultPathsToLookIn: Record<string, string[]> = {
+            '.clw': ['.'],
+            '.inc': ['.'],
+            '.equ': ['.'],
+            '.int': ['.']
         };
+    
+        for (const project of this.solution.projects) {
+            const redirectionFileParser = new RedirectionFileParser("", project.path);
+
+    
+            Logger.info(`📂 Resolving search paths for project: ${project.name} at ${project.path}`);
+    
+            const redPaths = {
+                '.clw': redirectionFileParser.getSearchPaths('.clw', project.path),
+                '.inc': redirectionFileParser.getSearchPaths('.inc', project.path),
+                '.equ': redirectionFileParser.getSearchPaths('.equ', project.path),
+                '.int': redirectionFileParser.getSearchPaths('.int', project.path)
+            };
+    
+            // ✅ Add project-specific paths while preserving previous entries
+            defaultPathsToLookIn['.clw'].push(...redPaths['.clw']);
+            defaultPathsToLookIn['.inc'].push(...redPaths['.inc']);
+            defaultPathsToLookIn['.equ'].push(...redPaths['.equ']);
+            defaultPathsToLookIn['.int'].push(...redPaths['.int']);
+        }
+    
+        // ✅ Merge with **global libsrc paths** to ensure system-wide paths are included
+        for (const key of Object.keys(defaultPathsToLookIn)) {
+            defaultPathsToLookIn[key] = Array.from(new Set(
+                defaultPathsToLookIn[key].concat(globalSettings.libsrcPaths) // 🔥 Restoring libsrc paths
+            ));
+        }
+    
+        Logger.info("🔹 Final Search Paths:", defaultPathsToLookIn);
         return defaultPathsToLookIn;
     }
-
-    // Builds a tree structure of the solution containing projects and their source files.
-    private async buildSolutionTree() {
-        this.solutionTree = new TreeNode(this.solution.name);
-        for (const project of this.solution.projects) {
-            const projectNode = new TreeNode(project.name);
-            for (const sourceFile of project.sourceFiles) {
-                const sourceFileNode = new TreeNode(sourceFile.name);
-                projectNode.children.push(sourceFileNode);
-            }
-            this.solutionTree.children.push(projectNode);
-        }
-    }
-
-    // Logs the constructed solution tree to the console.
-    private async displaySolutionTree() {
-        if (this.solutionTree) {
-            console.log(this.solutionTree);
-        } else {
-            console.log('Failed to build solution tree.');
-        }
-    }
-
-    // Parses the solution file to extract project details and their source files.
-    private async parseSolution(): Promise<ClarionSolution> {
-        // Caches for redirection file parsing results for efficiency.
-        const parsedRedirectionCache: Record<string, Record<string, string[]>> = {};
-        const pathsToLookInCache: Record<string, string[]> = {};
-
-        // Read the solution file content.
-        const solutionContent = fs.readFileSync(this.filePath, 'utf-8');
-        // Get user-selected redirection file settings and Clarion path from workspace configuration.
-        const selectedRedirectionFile = workspace.getConfiguration().get('selectedClarionRedirectionFile', '');
-        const selectedClarionPath = workspace.getConfiguration().get('selectedClarionPath', '');
-        // Regular expression to match each project entry from the solution file.
-        const projectEntryPattern = /Project\("([^"]+)"\) = "([^"]+)", "([^"]+)", "([^"]+)"/g;
-        let projectEntryMatch: RegExpExecArray | null;
-
-        const projectLocations = new Set<string>(); // Store distinct project directories
-
-        // Iterate through each match found in the solution file.
-        while ((projectEntryMatch = projectEntryPattern.exec(solutionContent)) !== null) {
-            const [, projectType, projectName, projectPath, projectGuid] = projectEntryMatch;
-
-            // Skip projects that aren't Clarion projects (based on file extension)
-            if (!projectPath.toLowerCase().endsWith('.cwproj')) {
-                continue;
-            }
-
-            // Resolve the absolute directory of the project.
-            const projectDir = path.dirname(path.resolve(this.filePath, '..', projectPath));
-            projectLocations.add(projectDir);
-
-            let redLocation = '';
-            const redirectionFilePath = path.join(projectDir, selectedRedirectionFile);
-            if (fs.existsSync(redirectionFilePath)) {
-                redLocation = redirectionFilePath;
-            } else {
-                redLocation = path.join(selectedClarionPath, selectedRedirectionFile);
-            }
-
-            // Read the project file content.
-            const projectContent = fs.readFileSync(path.resolve(this.filePath, '..', projectPath), 'utf-8');
-            // Retrieve the build configuration from the project content.
-            const buildConfiguration = await this.getBuildConfiguration(projectContent);
-            let pathsToLookIn: Record<string, string[]> = {};
-            if (redLocation) {
-                // Use cache if previously parsed.
-                if (parsedRedirectionCache[redLocation]) {
-                    pathsToLookIn = parsedRedirectionCache[redLocation];
-                } else {
-                    // Parse the redirection file for each extension using the parser.
-                    const redirectionFileParser = new RedirectionFileParser(buildConfiguration);
-                    pathsToLookIn['.clw'] = redirectionFileParser.getSearchPaths('.clw', projectDir);
-                    pathsToLookIn['.inc'] = redirectionFileParser.getSearchPaths('.inc', projectDir);
-                    pathsToLookIn['.equ'] = redirectionFileParser.getSearchPaths('.equ', projectDir);
-                    pathsToLookIn['.int'] = redirectionFileParser.getSearchPaths('.int', projectDir);
-                    parsedRedirectionCache[redLocation] = pathsToLookIn;
+    
+    public findSourceFilePath(sourceFile: SourceFile, destinationFile: string): string | undefined {
+        const project = this.findProjectForSourceFile(sourceFile);
+        if (project) {
+            const pathsToLookin = project.pathsToLookin[this.getExtension(destinationFile)];
+            if (pathsToLookin) {
+                for (const searchPath of pathsToLookin) {
+                    let fullPath: string;
+                    if (searchPath.startsWith('.')) {
+                        fullPath = path.join(project.path, searchPath, destinationFile);
+                    } else {
+                        fullPath = path.join(searchPath, destinationFile);
+                    }
+                    if (fs.existsSync(fullPath)) {
+                        return fullPath;
+                    }
                 }
             }
-            // Create a ClarionProject instance with the parsed project details.
-            const project = new ClarionProject(
-                projectName,
-                projectType,
-                projectDir,
-                projectGuid,
-                buildConfiguration
-            );
-            project.pathsToLookin = pathsToLookIn;
-            // Regular expression to find all source files referenced in the project file.
-            const sourceFilePattern = /<Compile Include="([^"]+)"/g;
-            let sourceFileMatch: RegExpExecArray | null;
-            while ((sourceFileMatch = sourceFilePattern.exec(projectContent)) !== null) {
-                const [, relativePath] = sourceFileMatch;
-                const absolutePath = path.resolve(projectDir, relativePath);
-                const sourceFileName = path.basename(absolutePath);
-                project.addSourceFile(sourceFileName, relativePath);
-            }
-            // Add the project to the solution.
-            this.solution.projects.push(project);
         }
-        return this.solution;
+        return undefined;
     }
-
-    // Finds a source file in the solution that matches the given file path.
     findSourceInProject(filePath: string): SourceFile | undefined {
         try {
             for (const project of this.solution.projects) {
@@ -212,47 +211,16 @@ export class SolutionParser {
                 }
             }
         } catch (error) {
-            console.log(error);
+            Logger.info(String(error));
         }
         return undefined;
     }
 
-    /**
-     * Finds the full path of the destination file in a project's defined search paths.
-     * @param sourceFile The source file object.
-     * @param destinarionFile The file name to search for.
-     * @returns The full path if the file exists, otherwise undefined.
-     */
-    findSourceFilePath(sourceFile: SourceFile, destinarionFile: string): string | undefined {
-        const project = this.findProjectForSourceFile(sourceFile);
-        if (project) {
-            const pathsToLookin = project.pathsToLookin[this.getExtension(destinarionFile)];
-            if (pathsToLookin) {
-                for (const searchPath of pathsToLookin) {
-                    let fullPath: string;
-                    if (searchPath.startsWith('.')) {
-                        // For relative paths, append the search path to the project's base path.
-                        fullPath = path.join(project.path, searchPath, destinarionFile);
-                    } else {
-                        // For absolute paths, use them directly.
-                        fullPath = path.join(searchPath, destinarionFile);
-                    }
-                    if (fs.existsSync(fullPath)) {
-                        return fullPath;
-                    }
-                }
-            }
-        }
-        return undefined;
+    private getExtension(destinationFile: string): string {
+        return path.extname(destinationFile).toLowerCase();
     }
 
-    // Helper to extract and lowercase the extension of a file.
-    private getExtension(destinarionFile: string) {
-        return path.extname(destinarionFile).toLowerCase();
-    }
-
-    // Finds the project that contains the given source file.
-    findProjectForSourceFile(sourceFile: SourceFile): ClarionProject | undefined {
+    private findProjectForSourceFile(sourceFile: SourceFile): ClarionProject | undefined {
         for (const project of this.solution.projects) {
             if (project.sourceFiles.includes(sourceFile)) {
                 return project;
@@ -261,19 +229,152 @@ export class SolutionParser {
         return undefined;
     }
 
-    // Parses the project file's XML content to extract the build configuration setting.
-    private async getBuildConfiguration(projectContent: string): Promise<string> {
-        return new Promise((resolve, reject) => {
-            parseString(projectContent, (err, result) => {
-                if (err) {
-                    reject(err);
-                } else {
-                    // Retrieves configuration value from the XML structure.
-                    const configuration = result.Project.PropertyGroup[0].Configuration[0];
-                    const value = configuration._ || '';
-                    resolve(value);
+    public async openFile(relativePath: string): Promise<void> {
+        try {
+            const absolutePath = path.resolve(path.dirname(this.solutionFilePath), relativePath);
+            Logger.info("🔹 Opening file:", absolutePath);
+
+            const fileUri = Uri.file(absolutePath);
+            if (!fs.existsSync(absolutePath)) {
+                window.showErrorMessage(`File not found: ${absolutePath}`);
+                return;
+            }
+
+            const doc = await workspace.openTextDocument(fileUri);
+            await window.showTextDocument(doc);
+        } catch (error) {
+            Logger.error("❌ Error opening file:", error);
+            window.showErrorMessage(`Error opening file: ${relativePath}`);
+        }
+    }
+
+    public findFileWithExtension(filename: string): string {
+        if (!this.solutionFilePath) {
+            Logger.error("❌ No solution file path set.");
+            return "";
+        }
+        const extension = path.extname(filename).toLowerCase();
+        const pathsToLookin = this.defaultPathsToLookin[extension] || [];
+        const solutionFolder: string = path.dirname(this.solutionFilePath);
+
+        for (let searchPath of pathsToLookin) {
+            if (searchPath === '.') {
+                searchPath = solutionFolder;
+            }
+            if (fs.existsSync(searchPath)) {
+                const fullPath = path.join(searchPath, filename);
+                if (fs.existsSync(fullPath)) {
+                    return fullPath;
                 }
-            });
+            }
+        }
+        return "";
+    }
+
+
+
+    public async parseSolution(): Promise<ClarionSolution> {
+        if (!this.solutionFilePath) {
+            Logger.error("❌ Solution file path is not set.");
+            return new ClarionSolution();
+        }
+    
+        const solutionContent = fs.readFileSync(this.solutionFilePath, 'utf-8');
+        const projectEntryPattern = /Project\("([^"]+)"\) = "([^"]+)", "([^"]+)", "([^"]+)"/g;
+        let projectEntryMatch: RegExpExecArray | null;
+    
+        while ((projectEntryMatch = projectEntryPattern.exec(solutionContent)) !== null) {
+            const [, projectType, projectName, projectPath, projectGuid] = projectEntryMatch;
+    
+            if (!projectPath.toLowerCase().endsWith('.cwproj')) {
+                continue;
+            }
+    
+            const projectDir = path.dirname(path.resolve(this.solutionFilePath, '..', projectPath));
+            const projectPathsToLookIn = await this.getProjectPathsFromRedirectionFile(projectDir);
+            const project = new ClarionProject(projectName, projectType, projectDir, projectGuid, "");
+            project.pathsToLookin = projectPathsToLookIn;
+    
+            // 🔥 ADD THIS - Collect source files
+            this.addSourceFilesToProject(project);
+    
+            this.solution.projects.push(project);
+        }
+    
+        Logger.info("📂 Final Parsed Projects:", this.solution.projects);
+        return this.solution;
+    }
+    
+    
+    /**
+     * Finds the correct file path for a source file using redirection paths.
+     */
+    // private findFileInRedirectionPaths(file: string, pathsToLookin: Record<string, string[]>, projectDir: string): string | null {
+    //     const fileExt = path.extname(file).toLowerCase();
+    
+    //     if (!pathsToLookin[fileExt]) return null;
+    
+    //     for (const searchPath of pathsToLookin[fileExt]) {
+    //         const fullPath = path.resolve(projectDir, searchPath, file);
+    //         if (fs.existsSync(fullPath)) {
+    //             return fullPath;
+    //         }
+    //     }
+    
+    //     return null;
+    // }
+    
+    private addSourceFilesToProject(project: ClarionProject) {
+        const projectFile = path.join(project.path, `${project.name}.cwproj`);
+    
+        if (!fs.existsSync(projectFile)) {
+            Logger.warn(`⚠️ Project file not found: ${projectFile}`);
+            return;
+        }
+    
+        const xmlContent = fs.readFileSync(projectFile, 'utf-8');
+        
+        xml2js.parseString(xmlContent, (err, result) => {
+            if (err) {
+                Logger.error(`❌ Failed to parse project file: ${projectFile}`, err);
+                return;
+            }
+    
+            // Extract all `<Compile Include="file.clw">`
+            const compileItems = result.Project.ItemGroup.flatMap((itemGroup: any) =>
+                itemGroup.Compile ? itemGroup.Compile.map((c: any) => c.$.Include) : []
+            );
+    
+            Logger.info(`📂 Found ${compileItems.length} source files in ${project.name}`);
+    
+            for (const file of compileItems) {
+                const resolvedPath = this.findFileInRedirectionPaths(file, project.pathsToLookin, project.path);
+                if (resolvedPath) {
+                    const relativePath = path.relative(project.path, resolvedPath);
+                    project.addSourceFile(file, relativePath);
+                    Logger.info(`📄 Added ${file} (resolved to ${relativePath}) to ${project.name}`);
+                } else {
+                    Logger.warn(`⚠️ Could not resolve ${file} using redirection paths.`);
+                }
+            }
         });
     }
+    
+
+
+    private async buildSolutionTree() {
+        this.solutionTree = new TreeNode(this.solution.name);
+        for (const project of this.solution.projects) {
+            const projectNode = new TreeNode(project.name);
+            for (const sourceFile of project.sourceFiles) {
+                const sourceFileNode = new TreeNode(sourceFile.name);
+                projectNode.children.push(sourceFileNode);
+            }
+            this.solutionTree.children.push(projectNode);
+        }
+    }
+}
+
+class TreeNode {
+    constructor(public name: string, public children: TreeNode[] = []) { }
 }

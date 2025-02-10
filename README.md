@@ -1,5 +1,5 @@
 # clarion-extension README
-## Version 0.3.4
+## Version 0.4.0
 
 Welcome to the README for the "clarion-extension" project!
 
@@ -13,50 +13,109 @@ Document Outline is supported, thanks to a generous contribution from [Allen Zhu
 
 ## Workspace Settings and Configuration
 
-We've introduced helpful workspace settings and commands:
+### Opening a Clarion Solution in VS Code (Version 4.0)
 
-- **Command: Clarion Configure ClarionProperties.xml File**
-  Use this command to configure the `ClarionProperties.xml` file for your workspace. To access the settings:
+In version **4.0**, we have simplified the process of opening a Clarion solution in **Visual Studio Code**.
 
-  1. Go to "File" > "Preferences" > "Settings".
-  2. Search for "clarion" to find the workspace settings related to the extension.
-  3. Manually edit the settings or use the provided command to configure them.
+> **NOTE:** Workspace settings from earlier versions have been **deprecated**.
 
-- **Command: Clarion Select Application Solution File**
-  This command assists in selecting your application's solution file.
+### How It Works (Opening a Solution Without a Workspace)
 
-  To activate these commands:
-  
-  1. Press `Ctrl + Shift + P` (or `Cmd + Shift + P` on macOS) to open the command palette.
-  2. Search for "Clarion" to see the available commands.
-  3. Select the desired command to execute.
+1. **Open the Solution Folder**  
+   - In **Visual Studio Code**, open the **root folder** where your **Clarion solution (.sln) file** is located.
 
-Please ensure that you have a workspace set up and the required settings configured for the extension's features to work as intended.
+2. **Select the Clarion Properties File**  
+   - Press `Ctrl+Shift+P` to open the **Command Palette**.
+   - Search for **"Clarion: Open Solution"** and select it.
+   - A **file dialog** will appear, prompting you to select the **ClarionProperties.xml** file in use.
+   - This file is typically located in:  
+     **`%appdata%\SoftVelocity\ClarionVersion\ClarionProperties.xml`**
 
-## Go To File for Included Files
+3. **Select the Clarion Version**  
+   - After selecting the properties file, another dialog will appear asking you to **select the Clarion version** that the solution is using for **generation and compilation**.
+   - This ensures the correct **redirection files** and **build settings** are applied.
 
-**This requires the settings described above to work**
+4. **Workspace Configuration (Optional but Recommended)**  
+   - Once the solution is loaded in **VS Code**, it is recommended to **save the workspace**.
+   - This allows for quick access to the solution in the future without repeating the setup process.
 
-The "clarion-extension" now includes an advanced feature that enhances the "Go To Definition" functionality for `INCLUDE` and `MODULE` statements. With the new link provider and hover provider, the extension intelligently handles these statements and provides a more informative experience.
+---
 
-Here's how it works:
+## Features of the Clarion Extension
 
-- When you use an `INCLUDE('FileName.clw')` or `Class MODULE('FileName.clw')` statement, the extension will check the Clarion workspace settings to locate the specified file.
+### 🛠 **Automatic Solution Parsing**
+Once the solution is opened, the **Clarion Language Extension** automatically:
+- Parses the **solution file** to detect all **projects**.
+- Reads **redirection files** (including **local redirection** files).
+- Builds an internal map of **search paths** where files in your projects should be located.
 
-- If the file is found based on the settings, VS Code will highlight the file name by underlining it to indicate that it was found.
+This enables various **advanced features** such as **Go To Definition**, **Hover Previews**, and the **Solution Explorer View**.
 
-- When you hover your mouse over the underlined link, a hover will appear displaying the first few lines of the code from the linked file.
+---
 
-- For `INCLUDE` statements with sections, such as `INCLUDE('myFile.clw', 'SectionName')`, hovering over the section name will display the first few lines at that specific section location.
+## 🖥 **Solution Explorer View**
+- The extension provides a **Solution View** in VS Code's **Explorer Panel**.
+- This allows you to **navigate your projects**, view **source files**, and open files **directly from the tree**.
 
-To open the linked file directly:
-- **Ctrl+Click** on the underlined link.
-- Or, press **Ctrl+F12** to open the file.
+---
 
-### Please note that the previous functionality of this feature has been removed in favor of this more streamlined and informative experience.
+## 🔍 **Enhanced "Go To Definition" Support**
+The extension enhances **Go To Definition** for `INCLUDE` and `MODULE` statements with **intelligent link detection**.
 
-Make sure to have your workspace settings configured as described above to enable this feature.
+### **Link Provider**
+- When VS Code encounters statements like:
+  ```clarion
+  INCLUDE('FileName.clw')
+  ```
+  or  
+  ```clarion
+  Class MODULE('FileName.clw')
+  ```
+  - It **searches the redirection paths** and **libsrc paths**.
+  - If the file is **found**, the filename will be **underlined**, indicating that VS Code has created a **clickable link**.
 
+- You can **navigate** to the linked file using:
+  - `Ctrl+Click` on the filename  
+  - `Ctrl+F12` to open the file in **VS Code**.
+
+---
+
+## ✨ **Hover Provider**
+- When hovering over an **INCLUDE** or **MODULE** statement, VS Code will display a **preview** of the file’s **starting content**.
+- This allows you to **quickly inspect** the contents of a referenced file **without opening it**.
+
+---
+
+## 🔄 **Manual Solution Refresh**
+### **Keeping the Solution Up-to-Date**
+When working with **Clarion’s AppGen**, developers often:
+- Add new projects.
+- Remove or rename existing projects.
+- Modify `cwproj` files.
+- Change redirection file settings.
+
+To ensure the **solution view** and **file links** remain accurate, you can **manually refresh the solution**.
+
+### **How to Refresh the Solution**
+1. Open the **Command Palette** (`Ctrl+Shift+P`).
+2. Search for **"Clarion: Refresh Solution"**.
+3. Select it to **reload the solution**.
+
+**What This Does:**
+- **Re-parses** the **solution file** (`.sln`) and all **projects** (`.cwproj`).
+- **Updates the Solution Explorer View** with any **new, removed, or modified** files.
+- Ensures **Go To Definition** and **Hover Previews** work correctly with any newly added files.
+
+---
+
+## 🚀 **Summary of Key Features**
+✅ **Automatic detection of solution structure.**  
+✅ **Solution Explorer View for easy file navigation.**  
+✅ **Go To Definition for INCLUDE & MODULE statements.**  
+✅ **Hover Preview for referenced files.**  
+✅ **Manual solution refresh to sync changes.**  
+
+With these features, **VS Code** becomes a powerful **Clarion development environment**. 🚀
 
 ## Getting Started
 

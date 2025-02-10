@@ -1,292 +1,261 @@
-import { workspace } from 'vscode';
-import * as path from 'path';     // Import path module
-import * as fs from 'fs';         // Import fs module
+import * as path from 'path';
+import * as fs from 'fs';
+import { Logger } from './Logger';
+import { globalSettings } from '../globals';
+
+// Import global variables from the extension
 
 /**
  * Parses a Clarion redirection file to extract and resolve file paths for the project.
- *
- * This class reads a redirection file specified in the workspace configuration and extracts paths using
- * a set of rules defined by a compile mode, file extension filters, and macros. The parser performs the
- * following tasks:
- *
- * - Fetches configuration settings including the selected redirection file, Clarion path, and additional macros.
- * - Checks for the existence of the redirection file in different locations based on provided project paths.
- * - Reads and parses the redirection file to resolve paths, applying macros where needed.
- * - Processes sections and lines in the redirection file, handling included redirection files recursively.
- * - Filters the extracted file paths based on the provided file extension and compile mode.
- *
- * @remarks
- * The class is intended to integrate with a Clarion project environment where redirection files define
- * various file search paths. It supports directives like "{include ...}" for nested redirection and
- * conditionally skips sections not matching the current compile mode.
- *
- * @example
- * ```typescript
- * const parser = new RedirectionFileParser("release");
- * const searchPaths = parser.getSearchPaths(".clw", "/path/to/project");
- * console.log(searchPaths);
- * ```
- *
- * @public
  */
 export class RedirectionFileParser {
-
-
-
-    private readonly selectedClarionRedirectionFile: string | '';
-    private readonly selectedClarionPath: string | '';
-    private readonly macros: Record<string, string>;
     private readonly compileMode: string | null = null;
-    constructor(compileMode: string | null) {
+    private readonly projectPath: string;
+    private readonly redirectionFile: string;
+    private readonly macros: Record<string, string>;
 
-
-        const config = workspace.getConfiguration();
-        this.selectedClarionRedirectionFile = config.get('selectedClarionRedirectionFile') as string;
-        this.selectedClarionPath = config.get('selectedClarionPath') as string;
-        this.macros = config.get('selectedClarionMacros') as Record<string, string>;
+    constructor(compileMode: string | null, projectPath: string) {
         this.compileMode = compileMode;
+        this.projectPath = projectPath; // Store the project path
+
+        // ✅ Determine which redirection file to use
+        const projectRedFile = path.join(this.projectPath, globalSettings.redirectionFile);
+        this.redirectionFile = fs.existsSync(projectRedFile)
+            ? projectRedFile
+            : path.join(globalSettings.redirectionPath, globalSettings.redirectionFile);
+
+        this.macros = globalSettings.macros;
+
+        Logger.info("🔹 Using Redirection File for Project:", this.redirectionFile);
     }
 
- 
     /**
-     * Checks whether a file exists at the specified file path.
-     *
-     * @param filePath - The path of the file to be checked.
-     * @returns True if the file exists; otherwise, false.
+     * Checks if a file exists at the specified path.
      */
     fileExists(filePath: string): boolean {
-        if (fs.existsSync(filePath)) {
-            return true;
-        }
-        return false;
+        return fs.existsSync(filePath);
     }
 
     /**
-     * Returns an array of search paths based on the provided file extension, project path, and compile mode.
-     * @param fileExtension - The file extension to search for.
-     * @param foundProjectPath - The path to the project, if found.
-     * @param compileMode - The compile mode to use.
-     * @returns An array of search paths.
-     */
-
-
-    /**
-     * Retrieves an array of unique search paths by locating the redirection file based on the provided parameters.
-     * 
-     * The method first attempts to use the found project path to locate the redirection file, if available.
-     * If the redirection file is not found in the specified project path, or if no project path is provided,
-     * it falls back to using the selected Clarion path. It then processes the located redirection file to extract
-     * additional search paths and returns a deduplicated list of all paths.
-     *
-     * @param fileExtension - The file extension used for filtering or processing within the redirection file.
-     * @param foundProjectPath - An optional path representing the project's location to search for the redirection file.
-     *                           If provided, the method will prioritize searching in this path.
-     * @returns An array of unique search paths compiled from the project and additional locations specified in the redirection file.
+     * Retrieves search paths by locating the redirection file.
      */
     getSearchPaths(fileExtension: string, foundProjectPath: string | null): string[] {
+        Logger.info("🔍 Resolving search paths for extension:", fileExtension);
         const paths: string[] = [];
-        let pathToSearch: string;
-        let redResult;
+        let redFileToParse: string;
 
-        //set pathToSearch to the project path if found
+        // ✅ Determine the redirection file location (Project-specific → Global fallback)
         if (foundProjectPath) {
-            //look for RED file in the path
-
-            const redFile = path.join(foundProjectPath, this.selectedClarionRedirectionFile);
-            if (this.fileExists(redFile)) {
-                pathToSearch = path.join(foundProjectPath, this.selectedClarionRedirectionFile);
+            const projectRedFile = path.resolve(foundProjectPath, this.redirectionFile);
+            if (this.fileExists(projectRedFile)) {
+                redFileToParse = projectRedFile;
+                Logger.info(`📌 Using project-specific redirection file: ${projectRedFile}`);
             } else {
-                pathToSearch = path.join(this.selectedClarionPath, this.selectedClarionRedirectionFile);
+                redFileToParse = path.join(globalSettings.redirectionPath, this.redirectionFile);
+                Logger.warn(`⚠️ No project-specific redirection file found, using global redirection file: ${redFileToParse}`);
             }
-
+        } else {
+            redFileToParse = path.join(globalSettings.redirectionPath, this.redirectionFile);
+            Logger.warn(`⚠️ No project path provided, defaulting to global redirection file: ${redFileToParse}`);
         }
-        else {
-            pathToSearch = path.join(this.selectedClarionPath, this.selectedClarionRedirectionFile);
-        }
-        redResult = this.parseRedFile(pathToSearch, fileExtension);
 
+        // ✅ Parse the determined redirection file
+        const redResult = this.parseRedFile(redFileToParse, fileExtension);
 
-        if (pathToSearch) {
-            paths.push(path.dirname(pathToSearch));
-        }
+        // ✅ Add the directory containing the redirection file to search paths
+        paths.push(path.dirname(redFileToParse));
         paths.push(...redResult);
-        // Add other paths based on your logic
-        const uniquePaths = Array.from(new Set(paths));
 
-        return uniquePaths;
-        //return paths;
+        return Array.from(new Set(paths));  // ✅ Remove duplicates
     }
+
 
 
     /**
      * Parses a redirection file and returns an array of resolved paths.
-     * @param redFile - The path to the redirection file.
-     * @param fileExtension - The file extension to filter the resolved paths by.
-     * @param compileMode - The compile mode to filter the resolved paths by.
-     * @returns An array of resolved paths.
      */
     public parseRedFile(redFile: string, fileExtension: string): string[] {
-        const content: string = fs.existsSync(redFile) ? fs.readFileSync(redFile, 'utf-8') : '';
+        if (!fs.existsSync(redFile)) return [];
+
+        const content: string = fs.readFileSync(redFile, 'utf-8');
         const redPath = path.dirname(redFile);
         const pathsMap: Record<string, string[]> = {};
         const lines = content.split('\n');
         let foundSection = "";
-    
+
         for (const line of lines) {
             const trimmedLine = line.trim();
-            if (trimmedLine.startsWith('--') || trimmedLine === '') {
-                continue;
-            }
-    
+            if (trimmedLine.startsWith('--') || trimmedLine === '') continue;
+
             const sectionMatch = this.extractSection(trimmedLine);
             if (sectionMatch) {
                 foundSection = sectionMatch;
-                if (this.shouldSkipSection(foundSection)) {
-                    continue;
-                }
+                if (this.shouldSkipSection(foundSection)) continue;
             } else if (trimmedLine.startsWith('{include')) {
                 this.processIncludedRedirection(redPath, trimmedLine, fileExtension, pathsMap);
             } else if (trimmedLine.includes('=') && foundSection) {
                 this.processLine(foundSection, trimmedLine, redPath, fileExtension, pathsMap);
             }
         }
-    
+
         return Object.values(pathsMap).flat();
     }
-    
+
     private extractSection(trimmedLine: string): string | null {
         const sectionMatch = trimmedLine.match(/^\[([^\]]+)\]$/);
         return sectionMatch ? sectionMatch[1].trim() : null;
     }
-    
+
     private shouldSkipSection(section: string): boolean {
-        if (section.toLowerCase() === "copy" || (!this.compileMode && (section.toLowerCase() === "debug" || section.toLowerCase() === "release"))) {
-            return true;
-        }
-    
-        if (this.compileMode && section.toLowerCase() !== this.compileMode.toLowerCase() && section.toLowerCase() !== "common") {
-            return true;
-        }
-    
+        if (section.toLowerCase() === "copy") return true;
+        if (!this.compileMode && (section.toLowerCase() === "debug" || section.toLowerCase() === "release")) return true;
+        if (this.compileMode && section.toLowerCase() !== this.compileMode.toLowerCase() && section.toLowerCase() !== "common") return true;
         return false;
     }
-    
-    /**
-     * Processes an included redirection file specified within a line of text.
-     * 
-     * This method searches for an include directive within the provided line, resolves the path to the included redirection file,
-     * and parses it to extract paths associated with the specified file extension. The extracted paths are then added to the pathsMap.
-     * 
-     * @param redPath - The path of the current redirection file being processed.
-     * @param line - The line of text containing the include directive.
-     * @param fileExtension - The file extension to filter the paths.
-     * @param pathsMap - A map where keys are file extensions and values are arrays of paths associated with those extensions.
-     */
+
     private processIncludedRedirection(redPath: string, line: string, fileExtension: string, pathsMap: Record<string, string[]>): void {
-        const includePathMatches = line.match(/{include\s+([^}]+)}/i);
-        if (includePathMatches && includePathMatches[1]) {
-            const includedRedFileName = this.resolveMacro(includePathMatches[1]);
-            const includeDirectoryPath = path.dirname(includedRedFileName);
+        Logger.info(`🔄 Processing Included File:`, line);
     
-            if (includeDirectoryPath) {
-                const includedPaths = this.parseRedFile(includedRedFileName, fileExtension);
-                if (fileExtension) {
-                    if (!pathsMap[fileExtension]) {
-                        pathsMap[fileExtension] = [];
+        const includePathMatches = line.match(/\{include\s+([^}]+)\}/i);
+        if (includePathMatches && includePathMatches[1]) {
+            const resolvedPaths = this.resolveMacro(includePathMatches[1]); // May return a string or array
+    
+            Logger.info(`📂 Resolved Include Paths:`, resolvedPaths);
+    
+            // Ensure `resolvedPaths` is always an array
+            const resolvedPathsArray = Array.isArray(resolvedPaths) ? resolvedPaths : [resolvedPaths];
+    
+            // Process each resolved path
+            for (const resolvedPath of resolvedPathsArray) {
+                if (typeof resolvedPath === "string") {
+                    const normalizedPath = path.isAbsolute(resolvedPath) 
+                    ? path.normalize(resolvedPath) 
+                    : path.join(globalSettings.redirectionPath, resolvedPath);
+
+                    Logger.info(`🔍 Checking Include Path:`, normalizedPath);
+    
+                    if (fs.existsSync(normalizedPath)) {
+                        Logger.info(`✅ Found and Parsing Included File:`, normalizedPath);
+                        const includedPaths = this.parseRedFile(normalizedPath, fileExtension);
+                        pathsMap[fileExtension] = pathsMap[fileExtension] || [];
+                        pathsMap[fileExtension].push(...includedPaths);
+                    } else {
+                        Logger.warn(`⚠️ Include File Not Found:`, normalizedPath);
                     }
-                    pathsMap[fileExtension].push(...includedPaths);
+                } else {
+                    Logger.warn(`⚠️ Unexpected resolved path type:`, resolvedPath);
                 }
             }
         }
     }
     
+
+
+
     private processLine(foundSection: string, trimmedLine: string, redPath: string, fileExtension: string, pathsMap: Record<string, string[]>): void {
         const parts = trimmedLine.split('=');
         const fileMask = parts[0].trim();
         const includeFileTypes = ['*.clw', '*.inc', '*.equ', '*.int'];
-        const shouldProcess = this.shouldProcessFileType(fileMask, includeFileTypes);
-        if (!shouldProcess) {
-            return;
-        }
-    
+
+        if (!this.shouldProcessFileType(fileMask, includeFileTypes)) return;
+
         const resolvedPaths = this.resolvePaths(parts[1], redPath);
         const fileTypeResolvedPaths = this.filterResolvedPaths(resolvedPaths);
-    
+
         if (fileMask === '*.*' || fileMask.toLowerCase().includes(fileExtension.toLowerCase())) {
             pathsMap[fileMask] = pathsMap[fileMask] || [];
             pathsMap[fileMask].push(...fileTypeResolvedPaths);
         }
     }
-    
+
     private filterResolvedPaths(paths: string[]): string[] {
         return paths.flatMap(p => {
             try {
                 return this.resolveMacro(p.trim());
             } catch (error) {
-                console.error(`Error resolving path "${p.trim()}":`, error);
-                return []; // Return an empty array to avoid crashing the process
+                Logger.error(`Error resolving path "${p.trim()}":`, error);
+                return [];
             }
         });
     }
+
+    private shouldProcessFileType(fileMask: string, includeFileTypes: string[]): boolean {
+        if (fileMask === '*.*') return true;
+        return includeFileTypes.some(type => fileMask.toLowerCase().includes(type.replace('*', '')));
+    }
+
+    private resolvePaths(pathsString: string, basePath: string): string[] {
+        return pathsString.split(';').map(p => this.resolveMacro(p.trim())).flat();  // Flatten nested arrays
+    }
+
+
+    
+    private resolveMacro(pathStr: string): string {
+        const macroPattern = /%([^%]+)%/g;
+    
+        Logger.info(`🔍 Resolving macros in path: ${pathStr}`);
+    
+        let resolvedPath = pathStr;
+        let match;
+    
+        // Keep resolving macros **until there are no more left**
+        while ((match = macroPattern.exec(resolvedPath)) !== null) {
+            const macro = match[1];
+            const lowerMacro = macro.toLowerCase();
+            Logger.info(`🔹 Found macro: ${macro} (normalized as ${lowerMacro})`);
+    
+            let resolvedValue: string | undefined;
+    
+            // Built-in macros
+            if (lowerMacro === 'bin') {
+                resolvedValue = globalSettings.redirectionPath;
+                Logger.info(`✅ Resolved %BIN% to: ${resolvedValue}`);
+            } else if (lowerMacro === 'redname') {
+                resolvedValue = path.basename(this.redirectionFile);
+                Logger.info(`✅ Resolved %REDNAME% to: ${resolvedValue}`);
+            } else {
+                resolvedValue = this.macros[lowerMacro];
+            }
+    
+            // Handle cases where the resolved value is an array
+            if (Array.isArray(resolvedValue) && resolvedValue.length > 0) {
+                Logger.warn(`⚠️ Macro ${macro} resolves to an array:`, resolvedValue);
+                resolvedValue = resolvedValue[0]; // Use the first item
+            }
+    
+            // Handle object case
+            if (resolvedValue && typeof resolvedValue === "object" && "$" in resolvedValue) {
+                Logger.info(`🔍 Extracting value from macro object:`, resolvedValue);
+                resolvedValue = (resolvedValue as any).$.value;
+            }
+    
+            // Ensure resolved value is a string
+            if (typeof resolvedValue !== "string") {
+                Logger.warn(`⚠️ Macro ${macro} could not be fully resolved, returning original.`);
+                resolvedValue = match[0]; // Keep original macro in case of failure
+            }
+    
+            // Replace the macro in the path
+            resolvedPath = resolvedPath.replace(match[0], resolvedValue);
+            Logger.info(`✅ After replacing ${macro}: ${resolvedPath}`);
+        }
+    
+        // Normalize the final resolved path
+        resolvedPath = path.normalize(resolvedPath);
+        Logger.info(`✅ Final Fully Resolved Path: ${resolvedPath}`);
+    
+        return resolvedPath;
+    }
+    
+    
     
 
 
-    private shouldProcessFileType(fileMask: string, includeFileTypes: string[]): boolean {
-        if (fileMask === '*.*') {
-            return true;
-        }
-        const lowercaseFileType = fileMask.toLowerCase();
-        for (const includedType of includeFileTypes) {
-            const lowercaseIncludedType = includedType.toLowerCase();
-            if (lowercaseIncludedType === lowercaseFileType ||
-                (lowercaseIncludedType.includes('*') && this.matchesWildcard(lowercaseFileType, lowercaseIncludedType))) {
-                return true;
-            }
-        }
-        return false;
-    }
-    private matchesWildcard(text: string, pattern: string): boolean {
-        const escapedPattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\*/g, '.*').replace(/\\\?/g, '.');
-        const regex = new RegExp(`^${escapedPattern}$`);
-        return regex.test(text);
-    }
 
 
-    /**
-     * Resolves the paths in the given string and returns an array of resolved paths.
-     * @param pathsString - A string containing paths separated by semicolons.
-     * @param basePath - The base path to resolve the paths against.
-     * @returns An array of resolved paths.
-     */
-    private resolvePaths(pathsString: string, basePath: string): string[] {
-        const paths = pathsString.split(';')
-            .map(path => path.trim())
-            .map(path => this.resolveMacro(path));
 
-        return paths;
-    }
 
-    /**
-     * Resolves macros in the given path string.
-     * @param path - The path string to resolve macros in.
-     * @returns The resolved path string.
-     */
-    private resolveMacro(path: string): string {
-        const macroPattern = /%([^%]+)%/g;
-
-        return path.replace(macroPattern, (match, macro) => {
-            const lowercaseMacro = macro.toLowerCase();
-            if (lowercaseMacro === 'bin') {
-                return this.selectedClarionPath;
-            } else if (lowercaseMacro === 'redname') {
-                return this.selectedClarionRedirectionFile;
-            } else if (this.macros[lowercaseMacro]) {
-                return this.macros[lowercaseMacro];
-            } else {
-                return match; // Keep the original macro if no replacement found
-            }
-        });
-    }
 }
+
 
 

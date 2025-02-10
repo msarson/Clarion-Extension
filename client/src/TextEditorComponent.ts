@@ -1,5 +1,6 @@
 import { commands, Uri, window,  workspace, Disposable, TextEdit, Range, WorkspaceEdit } from 'vscode';
 import { DocumentManager } from './documentManager'; // Adjust the import path based on your project structure
+import { Logger } from './UtilityClasses/Logger';
 
 export class TextEditorComponent implements Disposable {
     private documentManager: DocumentManager;
@@ -20,7 +21,7 @@ export class TextEditorComponent implements Disposable {
             const edit = new TextEdit(new Range(0, 0, textEditor.document.lineCount, 0), refreshedContent);
             const workspaceEdit = new WorkspaceEdit();
             workspaceEdit.set(uri, [edit]);
-            console.log('refreshTextEditor:', uri.toString());
+            Logger.info('refreshTextEditor:', uri.toString());
             workspace.applyEdit(workspaceEdit);
         }
     }

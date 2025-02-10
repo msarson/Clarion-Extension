@@ -1,8 +1,8 @@
 {
     "name": "clarion-extensions",
-    "displayName": "Clarion-Extensions",
+    "displayName": "Clarion Extensions",
     "description": "Extension for Clarion Language",
-    "version": "0.3.6",
+    "version": "0.3.8",
     "publisher": "msarson",
     "repository": {
         "type": "git",
@@ -16,7 +16,7 @@
         "theme": "dark"
     },
     "engines": {
-        "vscode": "^1.67.0"
+        "vscode": "^1.97.0"
     },
     "activationEvents": [
         "onLanguage:clarion"
@@ -53,24 +53,21 @@
         },
         "commands": [
             {
-                "command": "clarion.configureClarionPropertiesFile",
-                "title": "Clarion: Select ClarionProperties.xml File"
-            },
-            {
-                "command": "clarion.selectSolutionFile",
-                "title": "Clarion: Select Application Solution File"
-            },
-            {
                 "command": "clarion.followLink",
                 "title": "Clarion: Follow Link"
             },
             {
-                "command": "clarion.inspectFullPath",
-                "title": "Clarion: Inspect search path for document"
-            },
-            {
                 "command": "clarion.openSolutionTree",
                 "title": "Clarion: Open Solution Tree"
+            },
+            {
+                "command": "clarion.openSolution",
+                "title": "Clarion: Open Solution"
+            },
+            {
+              "command": "clarion.refreshSolution",
+              "title": "Clarion: Refresh Solution",
+              "category": "Clarion"
             }
         ],
         "snippets": [
@@ -109,8 +106,23 @@
         ],
         "configuration": {
             "type": "object",
-            "title": "clarion server configuration",
+            "title": "Clarion Extension Configuration",
             "properties": {
+                "clarion.solutionFile": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Path to the Clarion solution (.sln) file."
+                },
+                "clarion.propertiesFile": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Path to the ClarionProperties.xml file."
+                },
+                "clarion.version": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Selected Clarion version."
+                },
                 "clarion.maxNumberOfProblems": {
                     "scope": "resource",
                     "type": "number",
@@ -120,11 +132,7 @@
                 "clarion.trace.server": {
                     "scope": "window",
                     "type": "string",
-                    "enum": [
-                        "off",
-                        "messages",
-                        "verbose"
-                    ],
+                    "enum": ["off", "messages", "verbose"],
                     "default": "off",
                     "description": "Traces the communication between VS Code and the language server."
                 },
@@ -139,41 +147,6 @@
                     "type": "number",
                     "default": 2,
                     "description": "Spacing between MethodName and PROCEDURE in snippets."
-                },
-                "clarionPropertiesFile": {
-                    "type": "string",
-                    "default": "",
-                    "description": "Path to the ClarionProperties.xml file"
-                },
-                "selectedClarionVersion": {
-                    "type": "string",
-                    "default": "",
-                    "description": "Selected Clarion version"
-                },
-                "selectedClarionPath": {
-                    "type": "string",
-                    "default": "",
-                    "description": "Path of the selected Clarion version"
-                },
-                "selectedClarionRedirectionFile": {
-                    "type": "string",
-                    "default": "",
-                    "description": "Selected Clarion version's redirection file"
-                },
-                "selectedClarionMacros": {
-                    "type": "object",
-                    "default": {},
-                    "description": "Selected Clarion version's macros"
-                },
-                "selectedClarionLibsrc": {
-                    "type": "string",
-                    "default": "",
-                    "description": "Selected Clarion version's libsrc"
-                },
-                "applicationSolutionFile": {
-                    "type": "string",
-                    "default": "",
-                    "description": "application solution file"
                 }
             }
         }

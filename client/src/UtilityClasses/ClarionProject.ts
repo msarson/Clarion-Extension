@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import path = require('path');
+import { Logger } from './Logger';
 
 export interface clarionProperties {
     directory: string | null;
@@ -22,8 +23,8 @@ export interface clarionProperties {
  * const project = new ClarionProjectClass();
  * const clarionProperties = project.findProjectOrSolutionDirectory('path/to/start/directory');
  * if (clarionProperties) {
- *   console.log(`Found project file: ${clarionProperties.fileName}`);
- *   console.log(`Compile mode: ${clarionProperties.compileMode}`);
+ *   Logger.info(`Found project file: ${clarionProperties.fileName}`);
+ *   Logger.info(`Compile mode: ${clarionProperties.compileMode}`);
  * }
  * ```
  *
@@ -39,41 +40,46 @@ export class ClarionProjectClass {
         return projectFiles.length > 0 ? projectFiles[0] : null;
     }
 
-    public  findProjectOrSolutionDirectory(directory: string): clarionProperties | null{
-    
+    /**
+     * Recursively locates a Clarion project file starting from the provided directory and moving up to parent directories.
+     * When found, reads and parses the file to extract the compile mode.
+     *
+     * @param directory - The directory to start searching from.
+     * @returns An object containing the project directory, file name, and compile mode, or null if not found.
+     */
+    public findProjectOrSolutionDirectory(directory: string): clarionProperties | null {
         const projectFile = this.findProjectFile(directory);
-    
+
         if (projectFile) {
             const projectFilePath = path.join(directory, projectFile);
             const csprojContent = fs.readFileSync(projectFilePath, 'utf-8');
             const parser = new xml2js.Parser();
             const cleanedContent = csprojContent.replace(/^\uFEFF/, '');
-    
-            let compileMode = "Unknown";
+
+            let compileMode = 'Unknown';
             parser.parseString(cleanedContent, (err: any, result: any) => {
                 if (err) {
-                    console.error('Error parsing .csproj file:', err);
+                    Logger.error('Error parsing .csproj file:', err);
                     return;
                 }
-    
                 const configurationValue = result.Project.PropertyGroup[0].Configuration[0]._;
-                compileMode = configurationValue || "Unknown";
-               
+                compileMode = configurationValue || 'Unknown';
             });
+
             return {
                 directory,
                 fileName: projectFile,
                 compileMode
-            }
-    
+            };
         } else {
             const parentDirectory = path.dirname(directory);
             if (parentDirectory !== directory) {
                 return this.findProjectOrSolutionDirectory(parentDirectory);
             }
         }
+
         return null;
     }
 }
-const xml2js = require('xml2js');
+import xml2js = require('xml2js');
 

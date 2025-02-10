@@ -1,5 +1,6 @@
-import { DocumentLinkProvider, TextDocument, CancellationToken, ProviderResult, DocumentLink} from 'vscode';
+import { DocumentLinkProvider, TextDocument, CancellationToken, ProviderResult, DocumentLink } from 'vscode';
 import { DocumentManager } from '../documentManager'; // Adjust the import path based on your project structure
+import { Logger } from '../UtilityClasses/Logger';
 
 export class ClarionDocumentLinkProvider implements DocumentLinkProvider {
     private documentManager: DocumentManager;
@@ -10,10 +11,11 @@ export class ClarionDocumentLinkProvider implements DocumentLinkProvider {
 
     provideDocumentLinks(document: TextDocument, _token: CancellationToken): ProviderResult<DocumentLink[]> {
         if (_token.isCancellationRequested) {
-            // The user canceled the operation
-            return Promise.resolve([]);
+            return Promise.resolve([]); // If the user cancels, return an empty array.
         }
 
-        return this.documentManager.generateDocumentLinks(document.uri);
+        Logger.info(`Generating links for: ${document.uri.fsPath}`); // Debugging log
+
+        return Promise.resolve(this.documentManager.generateDocumentLinks(document.uri));
     }
 }
