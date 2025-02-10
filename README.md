@@ -1,5 +1,5 @@
 # clarion-extension README
-## Version 0.4.0
+## Version 0.4.1
 
 Welcome to the README for the "clarion-extension" project!
 
@@ -13,9 +13,9 @@ Document Outline is supported, thanks to a generous contribution from [Allen Zhu
 
 ## Workspace Settings and Configuration
 
-### Opening a Clarion Solution in VS Code (Version 4.0)
+### Opening a Clarion Solution in VS Code (Version 0.4.0)
 
-In version **4.0**, we have simplified the process of opening a Clarion solution in **Visual Studio Code**.
+In version **0.4.0**, we have simplified the process of opening a Clarion solution in **Visual Studio Code**.
 
 > **NOTE:** Workspace settings from earlier versions have been **deprecated**.
 

@@ -24,6 +24,14 @@ let treeView: TreeView<TreeNode> | undefined;
 
 export async function openClarionSolution() {
     try {
+        // ✅ Store current values in case user cancels
+        const previousSolutionFile = globalSolutionFile;
+        const previousPropertiesFile = globalClarionPropertiesFile;
+        const previousVersion = globalClarionVersion;
+
+        // ✅ Reset stored workspace settings (temporary)
+        await setGlobalClarionSelection("", "", "");
+
         // Step 1: Ask the user to select a `.sln` file
         const selectedFileUri = await window.showOpenDialog({
             canSelectFiles: true,
@@ -33,7 +41,8 @@ export async function openClarionSolution() {
         });
 
         if (!selectedFileUri || selectedFileUri.length === 0) {
-            window.showErrorMessage("No solution file selected.");
+            window.showWarningMessage("Solution selection canceled. Restoring previous settings.");
+            await setGlobalClarionSelection(previousSolutionFile, previousPropertiesFile, previousVersion);
             return;
         }
 
@@ -43,7 +52,7 @@ export async function openClarionSolution() {
         await commands.executeCommand('vscode.openFolder', workspaceUri, false);
 
         // ✅ Update global settings immediately
-        await setGlobalClarionSelection(solutionFilePath, globalClarionPropertiesFile, globalClarionVersion);
+        await setGlobalClarionSelection(solutionFilePath, "", "");
 
         // Step 2: Select or retrieve ClarionProperties.xml
         if (!globalClarionPropertiesFile || !fs.existsSync(globalClarionPropertiesFile)) {
@@ -52,11 +61,12 @@ export async function openClarionSolution() {
 
             if (!globalClarionPropertiesFile || !fs.existsSync(globalClarionPropertiesFile)) {
                 window.showErrorMessage("ClarionProperties.xml is required. Operation cancelled.");
+                await setGlobalClarionSelection(previousSolutionFile, previousPropertiesFile, previousVersion);
                 return;
             }
 
             // ✅ Save the new selection to workspace settings
-            await setGlobalClarionSelection(globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion);
+            await setGlobalClarionSelection(globalSolutionFile, globalClarionPropertiesFile, "");
         }
 
         // Step 3: Select or retrieve the Clarion version
@@ -66,6 +76,7 @@ export async function openClarionSolution() {
 
             if (!globalClarionVersion) {
                 window.showErrorMessage("Clarion version is required. Operation cancelled.");
+                await setGlobalClarionSelection(previousSolutionFile, previousPropertiesFile, previousVersion);
                 return;
             }
 
@@ -81,6 +92,7 @@ export async function openClarionSolution() {
 
         if (!selectedVersion) {
             window.showErrorMessage(`Clarion version '${globalClarionVersion}' not found in ClarionProperties.xml.`);
+            await setGlobalClarionSelection(previousSolutionFile, previousPropertiesFile, previousVersion);
             return;
         }
 
@@ -91,14 +103,9 @@ export async function openClarionSolution() {
         globalSettings.redirectionPath =
             selectedVersion.Properties?.find((p: any) => p.$.name === "RedirectionFile")?.Properties?.find((p: any) => p.$.name === "Macros")?.reddir?.[0]?.$.value || "";
 
-        // globalSettings.macros = 
-        //      selectedVersion.Properties?.find((p: any) => p.$.name === "RedirectionFile")?.Properties?.find((p: any) => p.$.name === "Macros") || {};
-        globalSettings.macros = ClarionExtensionCommands.extractMacros(
-            selectedVersion.Properties
-        );
+        globalSettings.macros = ClarionExtensionCommands.extractMacros(selectedVersion.Properties);
         globalSettings.libsrcPaths =
             selectedVersion.libsrc?.[0]?.$.value.split(';') || [];
-
 
         Logger.info("✅ Extracted Clarion Version Information:", {
             redirectionFile: globalSettings.redirectionFile,
