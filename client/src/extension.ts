@@ -1,4 +1,4 @@
-﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget } from 'vscode';
+﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, QuickPickItem } from 'vscode';
 import * as path from 'path';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } from 'vscode-languageclient/node';
 import { ClarionExtensionCommands } from './ClarionExtensionCommands';
@@ -13,13 +13,71 @@ import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, glob
 import { parseStringPromise } from 'xml2js';
 
 import * as fs from 'fs';
+import { RedirectionFileParser } from './UtilityClasses/RedirectionFileParser';
 
 let client: LanguageClient | undefined;
 let solutionParser: SolutionParser | undefined;
 let treeView: TreeView<TreeNode> | undefined;
-
+let solutionTreeDataProvider: SolutionTreeDataProvider | undefined; // Store globally
 // Additional globals for runtime use only
 
+export async function showClarionQuickOpen() {
+    const fileItems: QuickPickItem[] = [];
+    const seenFiles = new Set<string>(); // ✅ Prevent duplicates
+
+    // Step 1: Get default workspace files (VS Code behavior)
+    const workspaceFiles = await workspace.findFiles(`**/*.*`); // 🔍 Fetch all files
+
+    workspaceFiles.forEach(file => {
+        const filePath = file.fsPath;
+        if (!seenFiles.has(filePath)) { // ✅ Avoid duplicates
+            seenFiles.add(filePath);
+            fileItems.push({
+                label: path.basename(filePath),
+                description: `Workspace (${path.dirname(filePath)})`,
+                detail: filePath
+            });
+        }
+    });
+
+    // Step 2: Search redirection paths
+    if (globalSettings.redirectionPath) {
+        const redirectionParser = new RedirectionFileParser(globalSettings.redirectionFile, globalSettings.redirectionPath);
+        const projectPath = workspace.workspaceFolders?.[0]?.uri.fsPath || ""; 
+        
+        // Check common extensions
+        const extensions = [".clw", ".inc", ".equ", ".int"];
+        const redirectionPaths = extensions.flatMap(ext => redirectionParser.getSearchPaths(ext, projectPath));
+
+        redirectionPaths.forEach(searchPath => {
+            const files = fs.readdirSync(searchPath).filter(file => extensions.includes(path.extname(file)));
+            files.forEach(file => {
+                const fullPath = path.join(searchPath, file);
+                if (!seenFiles.has(fullPath)) { // ✅ Avoid duplicates
+                    seenFiles.add(fullPath);
+                    fileItems.push({
+                        label: file,
+                        description: `Redirection Path (${searchPath})`,
+                        detail: fullPath
+                    });
+                }
+            });
+        });
+    }
+
+    // Step 3: Show Quick Pick options with **live filtering**
+    const selectedItem = await window.showQuickPick(fileItems, {
+        placeHolder: "Start typing to filter files...",
+        ignoreFocusOut: false // Keeps the QuickPick open unless explicitly dismissed
+    });
+
+    // ✅ Ensure `selectedItem` has `detail` before using it
+    if (selectedItem && typeof selectedItem !== "string" && selectedItem.detail) {
+        const fileUri = Uri.file(selectedItem.detail);
+        const document = await workspace.openTextDocument(fileUri);
+        await window.showTextDocument(document);
+    }
+}
 
 
 export async function openClarionSolution() {
@@ -119,6 +177,7 @@ export async function openClarionSolution() {
         await solutionParser.initialize();
 
         commands.executeCommand('workbench.view.extension.solutionView');
+        await commands.executeCommand('setContext', 'clarion.solutionOpen', true);
         window.showInformationMessage(`Clarion Solution Loaded: ${path.basename(globalSolutionFile)}`);
 
     } catch (error: unknown) {
@@ -128,10 +187,43 @@ export async function openClarionSolution() {
     }
 }
 
+async function refreshClarionSolution(isRefreshingRef: { value: boolean }) {
+    if (isRefreshingRef.value) {
+        Logger.info("⏳ Refresh already in progress. Skipping...");
+        return;
+    }
 
+    try {
+        isRefreshingRef.value = true;
+        Logger.info("🔄 Refreshing Clarion Solution...");
 
+        // ✅ Clear existing projects to prevent duplicates
+        if (solutionParser) {
+            Logger.info("🗑 Clearing existing solution projects...");
+            solutionParser.solution.projects = []; // 🔥 Reset projects before re-parsing
+        }
 
-let solutionTreeDataProvider: SolutionTreeDataProvider | undefined; // Store globally
+        // ✅ Reinitialize solution parser
+        if (!solutionParser) {
+            Logger.warn("⚠ Solution parser is not initialized. Creating...");
+            solutionParser = new SolutionParser(globalSolutionFile);
+        }
+        await solutionParser.initialize();
+
+        // ✅ Ensure solution tree data provider is recreated properly
+        if (!solutionTreeDataProvider) {
+            Logger.warn("⚠ Solution tree data provider is not initialized. Creating...");
+            createSolutionTreeView();
+        } else {
+            Logger.info("🔄 Refreshing existing solution tree...");
+            solutionTreeDataProvider.refresh(); // ✅ Refresh the tree
+        }
+
+        Logger.info("✅ Solution tree refreshed.");
+    } finally {
+        isRefreshingRef.value = false;
+    }
+}
 
 function createSolutionTreeView() {
     if (!solutionParser) {
@@ -173,13 +265,10 @@ function createSolutionTreeView() {
     }
 }
 
-
-
-
 export async function activate(context: ExtensionContext): Promise<void> {
     const disposables: Disposable[] = [];
 
-    let isRefreshing = false;
+    const isRefreshingRef = { value: false };
     let solutionTreeDataProvider: SolutionTreeDataProvider | undefined;
 
     // ✅ Ensure the same documentManager instance is reused
@@ -188,58 +277,32 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
     // ✅ Register the open solution command
     context.subscriptions.push(commands.registerCommand('clarion.openSolution', openClarionSolution));
+    context.subscriptions.push(
+        commands.registerCommand("clarion.quickOpen", showClarionQuickOpen)
+    );
+
+    // ✅ Override default Ctrl+P behavior to include redirection paths
+    context.subscriptions.push(
+        commands.registerCommand("workbench.action.quickOpen", async () => {
+            await showClarionQuickOpen();
+        })
+    );
 
     // ✅ Register the manual refresh command
     context.subscriptions.push(
         commands.registerCommand('clarion.refreshSolution', async () => {
-            if (isRefreshing) {
-                Logger.info("⏳ Refresh already in progress. Skipping...");
-                return;
-            }
-    
-            try {
-                isRefreshing = true;
-                Logger.info("🔄 Refreshing Clarion Solution...");
-    
-                // ✅ Clear existing projects to prevent duplicates
-                if (solutionParser) {
-                    Logger.info("🗑 Clearing existing solution projects...");
-                    solutionParser.solution.projects = []; // 🔥 Reset projects before re-parsing
-                }
-    
-                // ✅ Reinitialize solution parser
-                if (!solutionParser) {
-                    Logger.warn("⚠ Solution parser is not initialized. Creating...");
-                    solutionParser = new SolutionParser(globalSolutionFile);
-                }
-                await solutionParser.initialize();
-    
-                // ✅ Ensure solution tree data provider is recreated properly
-                if (!solutionTreeDataProvider) {
-                    Logger.warn("⚠ Solution tree data provider is not initialized. Creating...");
-                    createSolutionTreeView();
-                } else {
-                    Logger.info("🔄 Refreshing existing solution tree...");
-                    solutionTreeDataProvider.refresh(); // ✅ Refresh the tree
-                }
-    
-                Logger.info("✅ Solution tree refreshed.");
-            } finally {
-                isRefreshing = false;
-            }
+            await refreshClarionSolution(isRefreshingRef);
         })
     );
-    
-    
-    
+
 
     // ✅ If workspace is already trusted, initialize immediately
-    if (workspace.isTrusted && !isRefreshing) {
+    if (workspace.isTrusted && !isRefreshingRef.value) {
         await workspaceHasBeenTrusted(context, documentManager, textEditorComponent, disposables);
     } else {
         // ✅ If workspace is NOT trusted, set up an event listener for when it becomes trusted
         workspace.onDidGrantWorkspaceTrust(async () => {
-            if (!isRefreshing) {
+            if (!isRefreshingRef.value) {
                 await workspaceHasBeenTrusted(context, documentManager, textEditorComponent, disposables);
             }
         });
@@ -247,7 +310,6 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
     context.subscriptions.push(...disposables);
 }
-
 
 async function workspaceHasBeenTrusted(
     context: ExtensionContext,
@@ -351,11 +413,7 @@ async function workspaceHasBeenTrusted(
     }
 
     // ✅ Register essential commands
-   // registerCommandIfNotExists('clarion.selectSolutionFile', ClarionExtensionCommands.selectSolutionFile);
     registerCommandIfNotExists('clarion.followLink', () => ClarionExtensionCommands.followLink(documentManager));
-    // registerCommandIfNotExists('clarion.inspectFullPath', async () => {
-    //     await documentManager.inspectFullPath();
-    // });
     registerCommandIfNotExists('clarion.openSolutionTree', async () => {
         createSolutionTreeView();
     });
@@ -364,41 +422,9 @@ async function workspaceHasBeenTrusted(
     startClientServer(context, documentManager);
 }
 
-
 export function deactivate(): Thenable<void> | undefined {
     stopClientServer();
     return undefined;
-}
-
-async function handleTrustedWorkspace(
-    context: ExtensionContext,
-    documentManager: DocumentManager,
-    textEditorComponent: TextEditorComponent,
-    disposables: Disposable[]
-) {
-    if (!workspace.isTrusted) {
-        return;
-    }
-
-    disposables.push(textEditorComponent);
-
-    const existingCommands = await commands.getCommands();
-
-    function registerCommandIfNotExists(command: string, callback: (...args: any[]) => any) {
-        if (!existingCommands.includes(command)) {
-            const disposable = commands.registerCommand(command, callback);
-            disposables.push(disposable);
-        }
-    }
-
-  //  registerCommandIfNotExists('clarion.selectSolutionFile', ClarionExtensionCommands.selectSolutionFile);
-    registerCommandIfNotExists('clarion.followLink', () => ClarionExtensionCommands.followLink(documentManager));
-    // registerCommandIfNotExists('clarion.inspectFullPath', async () => {
-    //     await documentManager.inspectFullPath();
-    // });
-    registerCommandIfNotExists('clarion.openSolutionTree', async () => {
-        createSolutionTreeView();
-    });
 }
 
 

@@ -1,5 +1,5 @@
-import { TreeDataProvider, TreeItem, Event, EventEmitter, TreeItemCollapsibleState } from 'vscode';
-import { SolutionParser, SourceFile } from './SolutionParser';
+import { TreeDataProvider, TreeItem, Event, EventEmitter, TreeItemCollapsibleState, ThemeIcon } from 'vscode';
+import { ClarionProject, ClarionSolution, SolutionParser, SourceFile } from './SolutionParser';
 import { Logger } from './UtilityClasses/Logger';
 
 export class TreeNode extends TreeItem {
@@ -44,15 +44,22 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     }
 
     getTreeItem(element: TreeNode): TreeItem {
-        const treeItem = new TreeItem(element.label!, element.collapsibleState);
-        if (element.data instanceof SourceFile) {
-            const relativePath = element.data.relativePath;
+        const label = element.label || "Unnamed Item";
+        const treeItem = new TreeItem(label, element.collapsibleState);
+    
+        if (element.data instanceof ClarionSolution) {
+            treeItem.iconPath = new ThemeIcon('file-symlink-directory'); // 🔷 Solution Icon
+        } else if (element.data instanceof ClarionProject) {
+            treeItem.iconPath = new ThemeIcon('project'); // 🔷 Project Icon
+        } else if (element.data instanceof SourceFile) {
+            treeItem.iconPath = new ThemeIcon('file-code'); // 🔷 File Icon
             treeItem.command = {
                 title: 'Open File',
                 command: 'clarion.openFile',
-                arguments: [relativePath]
+                arguments: [element.data.relativePath]
             };
         }
+    
         return treeItem;
     }
 

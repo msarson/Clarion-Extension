@@ -41,6 +41,11 @@
                 "command": "clarion.followLink",
                 "key": "ctrl+f12",
                 "when": "editorTextFocus"
+            },
+            {
+                "command": "clarion.quickOpen",
+                "key": "ctrl+p",
+                "when": "editorTextFocus"
             }
         ],
         "views": {
@@ -54,11 +59,13 @@
         "commands": [
             {
                 "command": "clarion.followLink",
-                "title": "Clarion: Follow Link"
+                "title": "Clarion: Follow Link",
+                "when": "clarion.solutionOpen"
             },
             {
                 "command": "clarion.openSolutionTree",
-                "title": "Clarion: Open Solution Tree"
+                "title": "Clarion: Open Solution Tree",
+                "when": "clarion.solutionOpen"
             },
             {
                 "command": "clarion.openSolution",
@@ -67,7 +74,13 @@
             {
               "command": "clarion.refreshSolution",
               "title": "Clarion: Refresh Solution",
-              "category": "Clarion"
+              "category": "Clarion",
+              "when": "clarion.solutionOpen"
+            },
+            {
+                "command": "clarion.quickOpen",
+                "title": "Clarion: Quick Open (Includes Redirection Paths)",
+                "when": "clarion.solutionOpen"
             }
         ],
         "snippets": [

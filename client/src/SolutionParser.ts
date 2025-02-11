@@ -13,7 +13,7 @@ export class SourceFile {
     constructor(public name: string, public relativePath: string) { }
 }
 
-class ClarionProject {
+export class ClarionProject {
     sourceFiles: SourceFile[] = [];
     pathsToLookin: Record<string, string[]> = {};
     constructor(
@@ -28,7 +28,7 @@ class ClarionProject {
     }
 }
 
-class ClarionSolution {
+export class ClarionSolution {
     constructor(public name: string = '', public projects: ClarionProject[] = []) { }
 }
 
