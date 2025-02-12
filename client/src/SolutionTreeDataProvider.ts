@@ -28,7 +28,8 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     }
 
     refresh(): void {
-        Logger.info("🔄 Triggering tree view refresh...");
+        const logger = new Logger(); 
+        logger.info("🔄 Triggering tree view refresh...");
         this._onDidChangeTreeData.fire(undefined); // 🔄 Triggers an update to the tree view
     }
 

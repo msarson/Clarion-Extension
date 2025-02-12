@@ -54,17 +54,20 @@ export class SolutionParser {
 
 
     private async initialize() {
+        const logger = new Logger(); 
+        logger.setDebugMode(true);
         this.defaultPathsToLookin = await this.getDefaultPathsFromRedirectionFile();
+        logger.setDebugMode(false);
         this.solution = await this.parseSolution();
         this.solution.projects.forEach(project => {
-            Logger.info(`📂 Project: ${project.name}`);
+            logger.info(`📂 Project: ${project.name}`);
             project.sourceFiles.forEach(sourceFile => {
-                Logger.info(`📄 Source File: ${sourceFile.name}`);
-                Logger.info(`📄 Source File Path: ${sourceFile.relativePath}`);
+                logger.info(`📄 Source File: ${sourceFile.name}`);
+                logger.info(`📄 Source File Path: ${sourceFile.relativePath}`);
             });
 
         });
-        Logger.info("📂 Parsed Projects:", this.solution.projects);
+        logger.info("📂 Parsed Projects:", this.solution.projects);
 
         await this.buildSolutionTree();
 
@@ -84,45 +87,46 @@ export class SolutionParser {
  * @returns A mapping of file extensions to their resolved search paths.
  */
 private async resolveProjectSearchPaths(projectPath: string): Promise<Record<string, string[]>> {
-    Logger.setDebugMode(true);
-    Logger.info(`📂 Resolving search paths for project: ${projectPath}`);
+    const logger = new Logger(); 
+    logger.info(`📂 Resolving search paths for project: ${projectPath}`);
 
     // ✅ Initialize RedirectionFileParser to get search paths
-    const redirectionFileParser = new RedirectionFileParser("", projectPath);
+    const redirectionFileParser = new RedirectionFileParser(globalSettings.configuration, projectPath);
 
     // ✅ Retrieve search paths for each relevant file extension
     const searchPathsByExt: Record<string, string[]> = {};
     const extensions = ['.clw', '.inc', '.equ', '.int'];
 
     for (const ext of extensions) {
-        Logger.setDebugMode(false);
+        
         searchPathsByExt[ext] = redirectionFileParser.getSearchPaths(ext, projectPath);
-        Logger.setDebugMode(true);
-        Logger.info(`📌 Paths extracted for ${ext}:`, searchPathsByExt[ext]); // Log order
+        
+        logger.info(`📌 Paths extracted for ${ext}:`, searchPathsByExt[ext]); // Log order
     }
 
     // ✅ Merge project paths with global library paths, ensuring redirection file order is kept
     const finalSearchPaths: Record<string, string[]> = {};
     for (const ext of extensions) {
         finalSearchPaths[ext] = ['.']
-            .concat(searchPathsByExt[ext])  // ✅ Preserve order from the redirection file
-            .concat(globalSettings.libsrcPaths);  // ✅ Append global paths at the end
+            .concat(searchPathsByExt[ext]);  // ✅ Preserve order from the redirection file
     }
+    
 
-    Logger.info(`📂 Final resolved search paths for ${projectPath}:`, finalSearchPaths);
-    Logger.setDebugMode(false);
+    logger.info(`📂 Final resolved search paths for ${projectPath}:`, finalSearchPaths);
+    
     return finalSearchPaths;
 }
 
 
 
     public findFileInRedirectionPaths(file: string, pathsToLookin: Record<string, string[]>, projectDir: string): string | null {
-        Logger.info(`🔍 Searching for file "${file}" in project redirection paths (Project Dir: ${projectDir})`);
+        const logger = new Logger(); 
+        logger.info(`🔍 Searching for file "${file}" in project redirection paths (Project Dir: ${projectDir})`);
 
         const fileExt = path.extname(file).toLowerCase();
 
         if (!pathsToLookin[fileExt]) {
-            Logger.warn(`⚠️ No search paths defined for extension: ${fileExt}`);
+            logger.warn(`⚠️ No search paths defined for extension: ${fileExt}`);
             return null;
         }
 
@@ -135,21 +139,22 @@ private async resolveProjectSearchPaths(projectPath: string): Promise<Record<str
             const fullPath = path.join(resolvedSearchPath, file);
             const normalizedFullPath = path.normalize(fullPath);
 
-            Logger.info(`🔎 Checking: ${normalizedFullPath}`);
+            logger.info(`🔎 Checking: ${normalizedFullPath}`);
 
             if (fs.existsSync(normalizedFullPath)) {
-                Logger.info(`✅ File found: ${normalizedFullPath}`);
+                logger.info(`✅ File found: ${normalizedFullPath}`);
                 return normalizedFullPath;
             }
         }
 
-        Logger.warn(`❌ File "${file}" not found in redirection paths`);
+        logger.warn(`❌ File "${file}" not found in redirection paths`);
         return null;
     }
 
 
     public findProjectForFile(fileName: string): ClarionProject | undefined {
-        Logger.info(`🔍 Searching for project containing file: ${fileName}`);
+        const logger = new Logger(); 
+        logger.info(`🔍 Searching for project containing file: ${fileName}`);
 
         for (const project of this.solution.projects) {
             const foundSourceFile = project.sourceFiles.find(sourceFile =>
@@ -157,54 +162,51 @@ private async resolveProjectSearchPaths(projectPath: string): Promise<Record<str
             );
 
             if (foundSourceFile) {
-                Logger.info(`✅ File "${fileName}" found in project: ${project.name}`);
+                logger.info(`✅ File "${fileName}" found in project: ${project.name}`);
                 return project;
             }
         }
 
-        Logger.warn(`❌ File "${fileName}" not found in any project.`);
+        logger.warn(`❌ File "${fileName}" not found in any project.`);
         return undefined;
     }
 
 
     private async getDefaultPathsFromRedirectionFile(): Promise<Record<string, string[]>> {
-        let defaultPathsToLookIn: Record<string, string[]> = {
-            '.clw': ['.'],
-            '.inc': ['.'],
-            '.equ': ['.'],
-            '.int': ['.']
-        };
-
+        const logger = new Logger(); 
+        const finalSearchPaths: Record<string, string[]> = {};
+    
         for (const project of this.solution.projects) {
-            const redirectionFileParser = new RedirectionFileParser("", project.path);
-
-
-            Logger.info(`📂 Resolving search paths for project: ${project.name} at ${project.path}`);
-
-            const redPaths = {
+            const redirectionFileParser = new RedirectionFileParser(globalSettings.configuration, project.path);
+    
+            logger.info(`📂 Resolving search paths for project: ${project.name} at ${project.path}`);
+    
+            const redPaths: Record<string, string[]> = {
                 '.clw': redirectionFileParser.getSearchPaths('.clw', project.path),
                 '.inc': redirectionFileParser.getSearchPaths('.inc', project.path),
                 '.equ': redirectionFileParser.getSearchPaths('.equ', project.path),
                 '.int': redirectionFileParser.getSearchPaths('.int', project.path)
             };
-
-            // ✅ Add project-specific paths while preserving previous entries
-            defaultPathsToLookIn['.clw'].push(...redPaths['.clw']);
-            defaultPathsToLookIn['.inc'].push(...redPaths['.inc']);
-            defaultPathsToLookIn['.equ'].push(...redPaths['.equ']);
-            defaultPathsToLookIn['.int'].push(...redPaths['.int']);
+    
+            for (const ext of Object.keys(redPaths)) {
+                if (!finalSearchPaths[ext]) {
+                    finalSearchPaths[ext] = [];
+                }
+    
+                // ✅ Add paths while preserving order and removing duplicates
+                redPaths[ext].forEach((path) => {
+                    if (!finalSearchPaths[ext].includes(path)) {
+                        finalSearchPaths[ext].push(path);
+                    }
+                });
+            }
         }
-
-        // ✅ Merge with **global libsrc paths** to ensure system-wide paths are included
-        for (const key of Object.keys(defaultPathsToLookIn)) {
-            defaultPathsToLookIn[key] = Array.from(new Set(
-                defaultPathsToLookIn[key].concat(globalSettings.libsrcPaths) // 🔥 Restoring libsrc paths
-            ));
-        }
-
-        Logger.info("🔹 Final Search Paths:", defaultPathsToLookIn);
-        return defaultPathsToLookIn;
+    
+        logger.info("🔹 Final Search Paths:", finalSearchPaths);
+        return finalSearchPaths;
     }
+    
+    
 
     public findSourceFilePath(sourceFile: SourceFile, destinationFile: string): string | undefined {
         const project = this.findProjectForSourceFile(sourceFile);
@@ -227,6 +229,7 @@ private async resolveProjectSearchPaths(projectPath: string): Promise<Record<str
         return undefined;
     }
     findSourceInProject(filePath: string): SourceFile | undefined {
+        const logger = new Logger(); 
         try {
             for (const project of this.solution.projects) {
                 const foundSourceFile = project.sourceFiles.find(sourceFile =>
@@ -237,7 +240,7 @@ private async resolveProjectSearchPaths(projectPath: string): Promise<Record<str
                 }
             }
         } catch (error) {
-            Logger.info(String(error));
+            logger.info(String(error));
         }
         return undefined;
     }
@@ -256,9 +259,10 @@ private async resolveProjectSearchPaths(projectPath: string): Promise<Record<str
     }
 
     public async openFile(relativePath: string): Promise<void> {
+        const logger = new Logger(); 
         try {
             const absolutePath = path.resolve(path.dirname(this.solutionFilePath), relativePath);
-            Logger.info("🔹 Opening file:", absolutePath);
+            logger.info("🔹 Opening file:", absolutePath);
 
             const fileUri = Uri.file(absolutePath);
             if (!fs.existsSync(absolutePath)) {
@@ -269,14 +273,15 @@ private async resolveProjectSearchPaths(projectPath: string): Promise<Record<str
             const doc = await workspace.openTextDocument(fileUri);
             await window.showTextDocument(doc);
         } catch (error) {
-            Logger.error("❌ Error opening file:", error);
+            logger.error("❌ Error opening file:", error);
             window.showErrorMessage(`Error opening file: ${relativePath}`);
         }
     }
 
     public findFileWithExtension(filename: string): string {
+        const logger = new Logger(); 
         if (!this.solutionFilePath) {
-            Logger.error("❌ No solution file path set.");
+            logger.error("❌ No solution file path set.");
             return "";
         }
         const extension = path.extname(filename).toLowerCase();
@@ -300,8 +305,9 @@ private async resolveProjectSearchPaths(projectPath: string): Promise<Record<str
 
 
     public async parseSolution(): Promise<ClarionSolution> {
+        const logger = new Logger(); 
         if (!this.solutionFilePath) {
-            Logger.error("❌ Solution file path is not set.");
+            logger.error("❌ Solution file path is not set.");
             return new ClarionSolution();
         }
 
@@ -327,7 +333,7 @@ private async resolveProjectSearchPaths(projectPath: string): Promise<Record<str
             this.solution.projects.push(project);
         }
 
-        Logger.info("📂 Final Parsed Projects:", this.solution.projects);
+        logger.info("📂 Final Parsed Projects:", this.solution.projects);
         return this.solution;
     }
 
@@ -351,10 +357,11 @@ private async resolveProjectSearchPaths(projectPath: string): Promise<Record<str
     // }
 
     private addSourceFilesToProject(project: ClarionProject) {
+        const logger = new Logger(); 
         const projectFile = path.join(project.path, `${project.name}.cwproj`);
 
         if (!fs.existsSync(projectFile)) {
-            Logger.warn(`⚠️ Project file not found: ${projectFile}`);
+            logger.warn(`⚠️ Project file not found: ${projectFile}`);
             return;
         }
 
@@ -362,7 +369,7 @@ private async resolveProjectSearchPaths(projectPath: string): Promise<Record<str
 
         xml2js.parseString(xmlContent, (err, result) => {
             if (err) {
-                Logger.error(`❌ Failed to parse project file: ${projectFile}`, err);
+                logger.error(`❌ Failed to parse project file: ${projectFile}`, err);
                 return;
             }
 
@@ -371,16 +378,16 @@ private async resolveProjectSearchPaths(projectPath: string): Promise<Record<str
                 itemGroup.Compile ? itemGroup.Compile.map((c: any) => c.$.Include) : []
             );
 
-            Logger.info(`📂 Found ${compileItems.length} source files in ${project.name}`);
+            logger.info(`📂 Found ${compileItems.length} source files in ${project.name}`);
 
             for (const file of compileItems) {
                 const resolvedPath = this.findFileInRedirectionPaths(file, project.pathsToLookin, project.path);
                 if (resolvedPath) {
                     const relativePath = path.relative(project.path, resolvedPath);
                     project.addSourceFile(file, relativePath);
-                    Logger.info(`📄 Added ${file} (resolved to ${relativePath}) to ${project.name}`);
+                    logger.info(`📄 Added ${file} (resolved to ${relativePath}) to ${project.name}`);
                 } else {
-                    Logger.warn(`⚠️ Could not resolve ${file} using redirection paths.`);
+                    logger.warn(`⚠️ Could not resolve ${file} using redirection paths.`);
                 }
             }
         });

@@ -23,8 +23,8 @@ export interface clarionProperties {
  * const project = new ClarionProjectClass();
  * const clarionProperties = project.findProjectOrSolutionDirectory('path/to/start/directory');
  * if (clarionProperties) {
- *   Logger.info(`Found project file: ${clarionProperties.fileName}`);
- *   Logger.info(`Compile mode: ${clarionProperties.compileMode}`);
+ *   logger.info(`Found project file: ${clarionProperties.fileName}`);
+ *   logger.info(`Compile mode: ${clarionProperties.compileMode}`);
  * }
  * ```
  *
@@ -48,6 +48,7 @@ export class ClarionProjectClass {
      * @returns An object containing the project directory, file name, and compile mode, or null if not found.
      */
     public findProjectOrSolutionDirectory(directory: string): clarionProperties | null {
+        const logger = new Logger(); 
         const projectFile = this.findProjectFile(directory);
 
         if (projectFile) {
@@ -59,7 +60,7 @@ export class ClarionProjectClass {
             let compileMode = 'Unknown';
             parser.parseString(cleanedContent, (err: any, result: any) => {
                 if (err) {
-                    Logger.error('Error parsing .csproj file:', err);
+                    logger.error('Error parsing .csproj file:', err);
                     return;
                 }
                 const configurationValue = result.Project.PropertyGroup[0].Configuration[0]._;

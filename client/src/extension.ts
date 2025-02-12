@@ -29,24 +29,25 @@ let solutionTreeDataProvider: SolutionTreeDataProvider | undefined; // Store glo
 
 
 export function getProjectPathForCurrentDocument(): string | undefined {
+    const logger = new Logger(); 
     const editor = window.activeTextEditor;
     if (!editor) {
-        Logger.warn("⚠️ No active editor found.");
+        logger.warn("⚠️ No active editor found.");
         return undefined;
     }
 
     const documentPath = editor.document.uri.fsPath;
-    Logger.info(`📂 Active Document: ${documentPath}`);
+    logger.info(`📂 Active Document: ${documentPath}`);
 
     // ✅ Step 1: Check if it's part of a known project
     const project = solutionParser?.findProjectForFile(path.basename(documentPath));
     if (project) {
-        Logger.info(`✅ Found project for file: ${project.name} -> ${project.path}`);
+        logger.info(`✅ Found project for file: ${project.name} -> ${project.path}`);
         return project.path;
     }
 
     // ✅ Step 2: Use redirection settings if project is not found
-    Logger.warn(`⚠️ File not found in parsed projects, searching redirection paths...`);
+    logger.warn(`⚠️ File not found in parsed projects, searching redirection paths...`);
 
     const redirectionParser = new RedirectionFileParser(globalSettings.configuration, "");
     const extensions = [".clw", ".inc", ".equ", ".int"];
@@ -56,13 +57,13 @@ export function getProjectPathForCurrentDocument(): string | undefined {
         for (const searchPath of searchPaths) {
             const fullPath = path.join(searchPath, path.basename(documentPath));
             if (fs.existsSync(fullPath)) {
-                Logger.info(`✅ Found file in redirection path: ${fullPath}`);
+                logger.info(`✅ Found file in redirection path: ${fullPath}`);
                 return path.dirname(fullPath);
             }
         }
     }
 
-    Logger.warn("❌ Could not determine project path for the current document.");
+    logger.warn("❌ Could not determine project path for the current document.");
     return undefined;
 }
 
@@ -81,6 +82,7 @@ export function getProjectPathForCurrentDocument(): string | undefined {
  * if no file is selected.
  */
 export async function showClarionQuickOpen(): Promise<void> {
+    const logger = new Logger(); 
     const fileItems: QuickPickItem[] = [];
     const seenFiles = new Set<string>(); // ✅ Prevent duplicates
 
@@ -101,8 +103,8 @@ export async function showClarionQuickOpen(): Promise<void> {
 
     // Step 2: Search redirection paths **for each extension separately**
     if (globalSettings.redirectionPath) {
-        Logger.setDebugMode(true);
-        Logger.info('🔍 Searching Redirection Paths:');
+        
+        logger.info('🔍 Searching Redirection Paths:');
         
 
         let projectPath = getProjectPathForCurrentDocument() || globalSettings.redirectionPath;
@@ -139,10 +141,10 @@ export async function showClarionQuickOpen(): Promise<void> {
                             }
                         });
                     } catch (error) {
-                        Logger.warn(`⚠️ Error reading directory: ${normalizedPath}`, error);
+                        logger.warn(`⚠️ Error reading directory: ${normalizedPath}`, error);
                     }
                 } else {
-                    Logger.warn(`⚠️ Skipping non-existent directory: ${normalizedPath}`);
+                    logger.warn(`⚠️ Skipping non-existent directory: ${normalizedPath}`);
                 }
             });
             
@@ -161,12 +163,13 @@ export async function showClarionQuickOpen(): Promise<void> {
         const document = await workspace.openTextDocument(fileUri);
         await window.showTextDocument(document);
     }
-    Logger.setDebugMode(false);
+    
 }
 
 
 
 export async function openClarionSolution() {
+    const logger = new Logger(); 
     try {
         // ✅ Store current values in case user cancels
         const previousSolutionFile = globalSolutionFile;
@@ -252,7 +255,7 @@ export async function openClarionSolution() {
         globalSettings.libsrcPaths =
             selectedVersion.libsrc?.[0]?.$.value.split(';') || [];
 
-        Logger.info("✅ Extracted Clarion Version Information:", {
+        logger.info("✅ Extracted Clarion Version Information:", {
             redirectionFile: globalSettings.redirectionFile,
             redirectionPath: globalSettings.redirectionPath,
             macros: globalSettings.macros,
@@ -269,57 +272,59 @@ export async function openClarionSolution() {
 
     } catch (error: unknown) {
         const errMessage = error instanceof Error ? error.message : String(error);
-        Logger.error("❌ Error opening solution:", error);
+        logger.error("❌ Error opening solution:", error);
         window.showErrorMessage(`Error opening Clarion solution: ${errMessage}`);
     }
 }
 
 async function refreshClarionSolution(isRefreshingRef: { value: boolean }) {
+    const logger = new Logger(); 
     if (isRefreshingRef.value) {
-        Logger.info("⏳ Refresh already in progress. Skipping...");
+        logger.info("⏳ Refresh already in progress. Skipping...");
         return;
     }
 
     try {
         isRefreshingRef.value = true;
-        Logger.info("🔄 Refreshing Clarion Solution...");
+        logger.info("🔄 Refreshing Clarion Solution...");
 
         // ✅ Clear existing projects to prevent duplicates
         if (solutionParser) {
-            Logger.info("🗑 Clearing existing solution projects...");
+            logger.info("🗑 Clearing existing solution projects...");
             solutionParser.solution.projects = []; // 🔥 Reset projects before re-parsing
         }
 
         // ✅ Reinitialize solution parser
         if (!solutionParser) {
-            Logger.warn("⚠ Solution parser is not initialized. Creating...");
+            logger.warn("⚠ Solution parser is not initialized. Creating...");
             solutionParser = await SolutionParser.create(globalSolutionFile);
         }
 
         // ✅ Ensure solution tree data provider is recreated properly
         if (!solutionTreeDataProvider) {
-            Logger.warn("⚠ Solution tree data provider is not initialized. Creating...");
+            logger.warn("⚠ Solution tree data provider is not initialized. Creating...");
             createSolutionTreeView();
         } else {
-            Logger.info("🔄 Refreshing existing solution tree...");
+            logger.info("🔄 Refreshing existing solution tree...");
             solutionTreeDataProvider.refresh(); // ✅ Refresh the tree
         }
 
-        Logger.info("✅ Solution tree refreshed.");
+        logger.info("✅ Solution tree refreshed.");
     } finally {
         isRefreshingRef.value = false;
     }
 }
 
 function createSolutionTreeView() {
+    const logger = new Logger(); 
     if (!solutionParser) {
-        Logger.error("❌ Solution parser is not initialized.");
+        logger.error("❌ Solution parser is not initialized.");
         return;
     }
 
     // ✅ If the tree view already exists, just refresh its data
     if (treeView && solutionTreeDataProvider) {
-        Logger.info("🔄 Refreshing existing solution tree...");
+        logger.info("🔄 Refreshing existing solution tree...");
         solutionTreeDataProvider.refresh();
         return;
     }
@@ -345,9 +350,9 @@ function createSolutionTreeView() {
             treeDataProvider: solutionTreeDataProvider,
             showCollapseAll: true
         });
-        Logger.info("✅ Solution tree view successfully registered.");
+        logger.info("✅ Solution tree view successfully registered.");
     } catch (error) {
-        Logger.error("❌ Error registering solution tree view:", error);
+        logger.error("❌ Error registering solution tree view:", error);
     }
 }
 
@@ -404,7 +409,8 @@ async function workspaceHasBeenTrusted(
     textEditorComponent: TextEditorComponent,
     disposables: Disposable[]
 ) {
-    Logger.info("✅ Workspace has been trusted or refreshed. Initializing...");
+    const logger = new Logger(); 
+    logger.info("✅ Workspace has been trusted or refreshed. Initializing...");
 
     // 🔄 Dispose of old subscriptions to avoid duplication
     disposables.forEach(disposable => disposable.dispose());
@@ -458,9 +464,9 @@ async function workspaceHasBeenTrusted(
                     globalSettings.libsrcPaths ||
                     [];
 
-                Logger.info("✅ Loaded Clarion settings from workspace:", globalSettings);
+                logger.info("✅ Loaded Clarion settings from workspace:", globalSettings);
             } else {
-                Logger.warn(`⚠ Clarion version '${globalClarionVersion}' not found in ClarionProperties.xml.`);
+                logger.warn(`⚠ Clarion version '${globalClarionVersion}' not found in ClarionProperties.xml.`);
             }
 
             // 🔄 RESET solutionParser & documentManager
@@ -484,7 +490,7 @@ async function workspaceHasBeenTrusted(
             );
 
         } catch (error) {
-            Logger.error("❌ Error parsing ClarionProperties.xml on startup:", error);
+            logger.error("❌ Error parsing ClarionProperties.xml on startup:", error);
         }
     }
 

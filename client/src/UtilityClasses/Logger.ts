@@ -1,33 +1,30 @@
 export class Logger {
-  
-    private static debugMode: boolean = false; // Default to false, can be controlled via a setting
+    private debugMode: boolean; // ✅ Now instance-specific
+
+    constructor(enableDebugMode: boolean = false) {
+        this.debugMode = enableDebugMode; // ✅ Default to OFF
+    }
 
     /**
-     * Enables or disables debug logging.
-     * @param enabled - If true, debug logs will be shown.
+     * Enables or disables debug logging for this instance.
      */
-    public static setDebugMode(enabled: boolean): void {
+    public setDebugMode(enabled: boolean): void {
         this.debugMode = enabled;
     }
 
     /**
-     * Logs an informational message to the console, only if debug mode is enabled.
-     * @param message - The message to log.
-     * @param args - Additional arguments to log.
+     * Logs an informational message, only if debug mode is enabled.
      */
-    public static info(message: string, ...args: any[]): void {
+    public info(message: string, ...args: any[]): void {
         if (this.debugMode) {
             console.log(`ℹ️ [INFO] ${message}`, ...args);
         }
     }
 
-
     /**
      * Logs a warning message to the console.
-     * @param message - The warning message.
-     * @param args - Additional arguments to log.
      */
-    public static warn(message: string, ...args: any[]): void {
+    public warn(message: string, ...args: any[]): void {
         if (this.debugMode) {
             console.warn(`⚠️ [WARN] ${message}`, ...args);
         }
@@ -35,23 +32,8 @@ export class Logger {
 
     /**
      * Logs an error message to the console.
-     * @param message - The error message.
-     * @param args - Additional arguments to log.
      */
-    public static error(message: string, ...args: any[]): void {
-        if (this.debugMode) {
+    public error(message: string, ...args: any[]): void {
             console.error(`❌ [ERROR] ${message}`, ...args);
-        }
-    }
-
-    /**
-     * Logs a debug message, only if debug mode is enabled.
-     * @param message - The debug message.
-     * @param args - Additional arguments to log.
-     */
-    public static debug(message: string, ...args: any[]): void {
-        if (this.debugMode) {
-            console.log(`🐛 [DEBUG] ${message}`, ...args);
-        }
     }
 }

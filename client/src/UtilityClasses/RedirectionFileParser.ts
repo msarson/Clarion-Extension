@@ -13,21 +13,31 @@ export class RedirectionFileParser {
     private readonly projectPath: string;
     private readonly redirectionFile: string;
     private readonly macros: Record<string, string>;
-
+    
     constructor(compileMode: string | null, projectPath: string) {
+        const logger = new Logger(true); 
         this.compileMode = compileMode;
         this.projectPath = projectPath; // Store the project path
-
-        // ✅ Determine which redirection file to use
+    
+        // ✅ Determine the correct redirection file
+    
         const projectRedFile = path.join(this.projectPath, globalSettings.redirectionFile);
-        this.redirectionFile = fs.existsSync(projectRedFile)
-            ? projectRedFile
-            : path.join(globalSettings.redirectionPath, globalSettings.redirectionFile);
-
+        const globalRedFile = path.join(globalSettings.redirectionPath, globalSettings.redirectionFile);
+    
+        if (fs.existsSync(projectRedFile)) {
+            this.redirectionFile = projectRedFile;
+        } else if (fs.existsSync(globalRedFile)) {
+            this.redirectionFile = globalRedFile;
+        } else {
+            this.redirectionFile = ""; // ✅ Ensure it's empty if no valid redirection file is found
+            logger.warn("⚠️ No valid redirection file found. Defaulting to empty.");
+        }
+    
         this.macros = globalSettings.macros;
-
-        Logger.info("🔹 Using Redirection File for Project:", this.redirectionFile);
+        
+        logger.info(`🔹 Using Redirection File for Project: ${this.redirectionFile || "None Found"}`);
     }
+    
 
     /**
      * Checks if a file exists at the specified path.
@@ -40,23 +50,25 @@ export class RedirectionFileParser {
      * Retrieves search paths by locating the redirection file.
      */
     getSearchPaths(fileExtension: string, foundProjectPath: string | null): string[] {
-        Logger.info("🔍 Resolving search paths for extension:", fileExtension);
+        const  logger = new Logger(); 
+        logger.info("🔍 Resolving search paths for extension:", fileExtension);
         const paths: string[] = [];
         let redFileToParse: string;
 
         // ✅ Determine the redirection file location (Project-specific → Global fallback)
         if (foundProjectPath) {
             const projectRedFile = path.resolve(foundProjectPath, this.redirectionFile);
+
             if (this.fileExists(projectRedFile)) {
                 redFileToParse = projectRedFile;
-                Logger.info(`📌 Using project-specific redirection file: ${projectRedFile}`);
+                logger.info(`📌 Using project-specific redirection file: ${projectRedFile}`);
             } else {
-                redFileToParse = path.join(globalSettings.redirectionPath, this.redirectionFile);
-                Logger.warn(`⚠️ No project-specific redirection file found, using global redirection file: ${redFileToParse}`);
+                redFileToParse = globalSettings.redirectionPath;
+                logger.warn(`⚠️ No project-specific redirection file found, using global redirection file: ${redFileToParse}`);
             }
         } else {
-            redFileToParse = path.join(globalSettings.redirectionPath, this.redirectionFile);
-            Logger.warn(`⚠️ No project path provided, defaulting to global redirection file: ${redFileToParse}`);
+            redFileToParse = this.redirectionFile;
+            logger.warn(`⚠️ No project path provided, defaulting to global redirection file: ${redFileToParse}`);
         }
 
         // ✅ Parse the determined redirection file
@@ -75,120 +87,122 @@ export class RedirectionFileParser {
      * Parses a redirection file and returns an array of resolved paths.
      */
     public parseRedFile(redFile: string, fileExtension: string): string[] {
-        Logger.setDebugMode(true);
+        const logger = new Logger(true); 
         if (!fs.existsSync(redFile)) {
-            Logger.warn(`⚠️ Redirection file not found: ${redFile}`);
+            logger.warn(`⚠️ Redirection file not found: ${redFile}`);
             return [];
         }
-    
-        Logger.info(`📂 Parsing redirection file: ${redFile}`);
+
+        logger.info(`📂 Parsing redirection file: ${redFile} (Looking for: *.${fileExtension})`);
         const content: string = fs.readFileSync(redFile, 'utf-8');
         const redPath = path.dirname(redFile);
         const paths: string[] = [];
+
+        // ✅ Ensure '.' is added FIRST for each extension when parsing starts
+        if (!paths.includes('.')) {
+            paths.push('.');  // 🔥 Adds project root first
+            logger.info(`📌 Added project root '.' to search paths for .${fileExtension}`);
+        }
         const lines = content.split('\n');
         let foundSection = "";
-    
+
         for (const line of lines) {
             const trimmedLine = line.trim();
             if (trimmedLine.startsWith('--') || trimmedLine === '') continue; // Skip comments/empty lines
-    
+
             // ✅ Detect Section Headers and Set Active Section
             const sectionMatch = this.extractSection(trimmedLine);
             if (sectionMatch) {
                 foundSection = sectionMatch;
-                Logger.info(`🔹 Found Section: [${foundSection}]`);
-            } 
+                if (foundSection.toLowerCase() !== "common" && (foundSection.toLowerCase() !== globalSettings.configuration.toLowerCase())) {
+                    logger.info(`🔹 Skipping Section: [${foundSection}] (Looking for: *.${fileExtension})`);
+                    continue;
+                }
+                logger.info(`🔹 Found Section: [${foundSection}] (Looking for: *.${fileExtension})`);
+            }
             // ✅ Process `{include ...}` in order where they appear
             else if (trimmedLine.startsWith('{include')) {
-                Logger.info(`🔄 Processing included redirection file: ${trimmedLine}`);
+                logger.info(`🔄 Processing included redirection file for *.${fileExtension}: ${trimmedLine}`);
                 const pathsMap: Record<string, string[]> = { [fileExtension]: paths };
+
                 this.processIncludedRedirection(redPath, trimmedLine, fileExtension, pathsMap);
-            } 
+            }
             // ✅ Process Paths for the Active Section
             else if (trimmedLine.includes('=') && foundSection) {
+                logger.info(`📌 Processing line in [${foundSection}] for *.${fileExtension}: ${trimmedLine}`);
+
                 const extractedPaths = this.processLine(foundSection, trimmedLine, redPath, fileExtension, {});
+
                 if (extractedPaths.length > 0) {
-                    Logger.info(`📌 Extracted paths from [${foundSection}]: (${extractedPaths.length})`);
-                    extractedPaths.forEach((path, index) => Logger.info(`   ${index + 1}. ${path}`));
+                    logger.info(`📌 Extracted paths from [${foundSection}] for *.${fileExtension}: (${extractedPaths.length})`);
+                    extractedPaths.forEach((path, index) => logger.info(`   ${index + 1}. ${path}`));
                 }
                 paths.push(...extractedPaths); // ✅ Append paths immediately in order
             }
         }
-    
-        Logger.info(`✅ Completed parsing redirection file: ${redFile}`);
-        Logger.info(`📂 Final ordered paths for .${fileExtension}: (${paths.length})`);
-        paths.forEach((path, index) => Logger.info(`   ${index + 1}. ${path}`));
-        Logger.setDebugMode(false);
-        return paths; // ✅ Now maintains the exact order found in the RED file
+
+        globalSettings.libsrcPaths.forEach(libPath => paths.push(libPath));
+
+        // ✅ Remove duplicates while preserving order
+        const uniquePaths = paths.filter((path, index) => paths.indexOf(path) === index);
+        
+        // ✅ Log the final ordered list without duplicates
+        logger.info(`✅ Completed parsing redirection file: ${redFile} (Looking for: *.${fileExtension})`);
+        logger.info(`📂 Final ordered paths for *.${fileExtension}: (${uniquePaths.length})`);
+        uniquePaths.forEach((path, index) => logger.info(`   ${index + 1}. ${path}`));
+        
+        return uniquePaths; // ✅ Return de-duplicated list
+
+
     }
-    
-    
+
+
 
     private extractSection(trimmedLine: string): string | null {
         const sectionMatch = trimmedLine.match(/^\[([^\]]+)\]$/);
         return sectionMatch ? sectionMatch[1].trim() : null;
     }
 
-    private shouldSkipSection(section: string): boolean {
-        // 🔹 Normalize section names for case-insensitive comparison
-        const normalizedSection = section.toLowerCase();
-    
-        // 🔹 If no compile mode is set, warn the user and default to 'release'
-        if (!this.compileMode) {
-            Logger.warn("⚠ No compile mode set! Defaulting to 'release'.");
-            this.compileMode = "release";  // ✅ Default to 'release'
-        }
-    
-        // 🔹 Always skip 'copy' section
-        if (normalizedSection === "copy") return true;
-    
-        // 🔹 Skip 'debug' if compile mode is 'release'
-        if (this.compileMode.toLowerCase() === "release" && normalizedSection === "debug") return true;
-    
-        // 🔹 Skip 'release' if compile mode is 'debug'
-        if (this.compileMode.toLowerCase() === "debug" && normalizedSection === "release") return true;
-    
-        // 🔹 Process only 'common' and the matching compile mode
-        return !(normalizedSection === "common" || normalizedSection === this.compileMode.toLowerCase());
-    }
-    
+
+
 
     private processIncludedRedirection(redPath: string, line: string, fileExtension: string, pathsMap: Record<string, string[]>): void {
-        Logger.info(`🔄 Processing Included File:`, line);
-    
+        const  logger = new Logger(); 
+        logger.info(`🔄 Processing Included File:`, line);
+
         const includePathMatches = line.match(/\{include\s+([^}]+)\}/i);
         if (includePathMatches && includePathMatches[1]) {
             const resolvedPaths = this.resolveMacro(includePathMatches[1]); // May return a string or array
-    
-            Logger.info(`📂 Resolved Include Paths:`, resolvedPaths);
-    
+
+            logger.info(`📂 Resolved Include Paths:`, resolvedPaths);
+
             // Ensure `resolvedPaths` is always an array
             const resolvedPathsArray = Array.isArray(resolvedPaths) ? resolvedPaths : [resolvedPaths];
-    
+
             // Process each resolved path
             for (const resolvedPath of resolvedPathsArray) {
                 if (typeof resolvedPath === "string") {
-                    const normalizedPath = path.isAbsolute(resolvedPath) 
-                    ? path.normalize(resolvedPath) 
-                    : path.join(globalSettings.redirectionPath, resolvedPath);
+                    const normalizedPath = path.isAbsolute(resolvedPath)
+                        ? path.normalize(resolvedPath)
+                        : path.join(globalSettings.redirectionPath, resolvedPath);
 
-                    Logger.info(`🔍 Checking Include Path:`, normalizedPath);
-    
+                        logger.info(`🔍 Checking Include Path:`, normalizedPath);
+
                     if (fs.existsSync(normalizedPath)) {
-                        Logger.info(`✅ Found and Parsing Included File:`, normalizedPath);
+                        logger.info(`✅ Found and Parsing Included File:`, normalizedPath);
                         const includedPaths = this.parseRedFile(normalizedPath, fileExtension);
                         pathsMap[fileExtension] = pathsMap[fileExtension] || [];
                         pathsMap[fileExtension].push(...includedPaths);
                     } else {
-                        Logger.warn(`⚠️ Include File Not Found:`, normalizedPath);
+                        logger.warn(`⚠️ Include File Not Found:`, normalizedPath);
                     }
                 } else {
-                    Logger.warn(`⚠️ Unexpected resolved path type:`, resolvedPath);
+                    logger.warn(`⚠️ Unexpected resolved path type:`, resolvedPath);
                 }
             }
         }
     }
-    
+
 
 
 
@@ -196,27 +210,28 @@ export class RedirectionFileParser {
         const parts = trimmedLine.split('=');
         const fileMask = parts[0].trim();
         const includeFileTypes = ['*.clw', '*.inc', '*.equ', '*.int'];
-    
+
         if (!this.shouldProcessFileType(fileMask, includeFileTypes)) return [];
-    
+
         const resolvedPaths = this.resolvePaths(parts[1], redPath);
         const fileTypeResolvedPaths = this.filterResolvedPaths(resolvedPaths);
-    
+
         if (fileMask === '*.*' || fileMask.toLowerCase().includes(fileExtension.toLowerCase())) {
             pathsMap[fileMask] = pathsMap[fileMask] || [];
             pathsMap[fileMask].push(...fileTypeResolvedPaths);
         }
-    
+
         return fileTypeResolvedPaths; // ✅ Ensure it returns resolved paths
     }
-    
+
 
     private filterResolvedPaths(paths: string[]): string[] {
         return paths.flatMap(p => {
             try {
                 return this.resolveMacro(p.trim());
             } catch (error) {
-                Logger.error(`Error resolving path "${p.trim()}":`, error);
+                const  logger = new Logger(); 
+                logger.error(`Error resolving path "${p.trim()}":`, error);
                 return [];
             }
         });
@@ -232,66 +247,66 @@ export class RedirectionFileParser {
     }
 
 
-    
+
     private resolveMacro(pathStr: string): string {
         const macroPattern = /%([^%]+)%/g;
-    
-        Logger.info(`🔍 Resolving macros in path: ${pathStr}`);
-    
+        const  logger = new Logger(); 
+        logger.info(`🔍 Resolving macros in path: ${pathStr}`);
+
         let resolvedPath = pathStr;
         let match;
-    
+
         // Keep resolving macros **until there are no more left**
         while ((match = macroPattern.exec(resolvedPath)) !== null) {
             const macro = match[1];
             const lowerMacro = macro.toLowerCase();
-            Logger.info(`🔹 Found macro: ${macro} (normalized as ${lowerMacro})`);
-    
+            logger.info(`🔹 Found macro: ${macro} (normalized as ${lowerMacro})`);
+
             let resolvedValue: string | undefined;
-    
+
             // Built-in macros
             if (lowerMacro === 'bin') {
                 resolvedValue = globalSettings.redirectionPath;
-                Logger.info(`✅ Resolved %BIN% to: ${resolvedValue}`);
+                logger.info(`✅ Resolved %BIN% to: ${resolvedValue}`);
             } else if (lowerMacro === 'redname') {
                 resolvedValue = path.basename(this.redirectionFile);
-                Logger.info(`✅ Resolved %REDNAME% to: ${resolvedValue}`);
+                logger.info(`✅ Resolved %REDNAME% to: ${resolvedValue}`);
             } else {
                 resolvedValue = this.macros[lowerMacro];
             }
-    
+
             // Handle cases where the resolved value is an array
             if (Array.isArray(resolvedValue) && resolvedValue.length > 0) {
-                Logger.warn(`⚠️ Macro ${macro} resolves to an array:`, resolvedValue);
+                logger.warn(`⚠️ Macro ${macro} resolves to an array:`, resolvedValue);
                 resolvedValue = resolvedValue[0]; // Use the first item
             }
-    
+
             // Handle object case
             if (resolvedValue && typeof resolvedValue === "object" && "$" in resolvedValue) {
-                Logger.info(`🔍 Extracting value from macro object:`, resolvedValue);
+                logger.info(`🔍 Extracting value from macro object:`, resolvedValue);
                 resolvedValue = (resolvedValue as any).$.value;
             }
-    
+
             // Ensure resolved value is a string
             if (typeof resolvedValue !== "string") {
-                Logger.warn(`⚠️ Macro ${macro} could not be fully resolved, returning original.`);
+                logger.warn(`⚠️ Macro ${macro} could not be fully resolved, returning original.`);
                 resolvedValue = match[0]; // Keep original macro in case of failure
             }
-    
+
             // Replace the macro in the path
             resolvedPath = resolvedPath.replace(match[0], resolvedValue);
-            Logger.info(`✅ After replacing ${macro}: ${resolvedPath}`);
+            logger.info(`✅ After replacing ${macro}: ${resolvedPath}`);
         }
-    
+
         // Normalize the final resolved path
         resolvedPath = path.normalize(resolvedPath);
-        Logger.info(`✅ Final Fully Resolved Path: ${resolvedPath}`);
-    
+        logger.info(`✅ Final Fully Resolved Path: ${resolvedPath}`);
+
         return resolvedPath;
     }
-    
-    
-    
+
+
+
 
 
 

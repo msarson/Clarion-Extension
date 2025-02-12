@@ -9,13 +9,7 @@ import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, 
 // Example: Updating the stored settings
 //await setGlobalClarionSelection("solution.sln", "ClarionProperties.xml", "Clarion 11");
 
-/*Example: Updating the non-stored settings (in-memory only)
-globalSettings.redirectionFile = "myRedirection.red";
-globalSettings.redirectionPath = "/path/to/redirection";
-globalSettings.macros = { "BIN": "C:\\Clarion11\\BIN" };
-globalSettings.libsrcPaths = ["C:\\Clarion11\\LIBSRC"];
-*/
-// Import global variables
+
 
 
 // Define the ClarionVersionProperties interface
@@ -33,11 +27,12 @@ export class ClarionExtensionCommands {
    * Prompts the user to select a ClarionProperties.xml file and updates the global settings.
    */
   static async configureClarionPropertiesFile() {
+    const logger = new Logger();
     try {
       const appDataPath = process.env.APPDATA;
       if (!appDataPath) {
         window.showErrorMessage("Unable to access AppData path.");
-        Logger.error('APPDATA environment variable is not set.');
+        logger.error('APPDATA environment variable is not set.');
         return;
       }
 
@@ -57,7 +52,7 @@ export class ClarionExtensionCommands {
       }
 
       const selectedFilePath = selectedFileUri[0].fsPath;
-      Logger.info("📂 Selected ClarionProperties.xml:", selectedFilePath);
+      logger.info("📂 Selected ClarionProperties.xml:", selectedFilePath);
 
       // ✅ Update global setting and workspace setting for ClarionProperties.xml
       await setGlobalClarionSelection(globalSolutionFile, selectedFilePath, globalClarionVersion ,globalSettings.configuration);
@@ -95,7 +90,7 @@ export class ClarionExtensionCommands {
       window.showInformationMessage(`Clarion version '${versionSelection}' selected and settings updated.`);
 
     } catch (error) {
-      Logger.error("❌ Error in configureClarionPropertiesFile:", error);
+      logger.error("❌ Error in configureClarionPropertiesFile:", error);
       window.showErrorMessage(`Error configuring Clarion properties: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -105,13 +100,14 @@ export class ClarionExtensionCommands {
    * @param selectedVersionProps The selected Clarion version properties.
    */
   private static updateGlobalSettings(selectedVersionProps: ClarionVersionProperties | undefined) {
+    const logger = new Logger(); 
     if (selectedVersionProps) {
       globalSettings.redirectionFile = selectedVersionProps.redirectionFile;
       globalSettings.redirectionPath = path.dirname(selectedVersionProps.redirectionFile);
       globalSettings.macros = selectedVersionProps.macros;
       globalSettings.libsrcPaths = selectedVersionProps.libsrc.split(';');
 
-      Logger.info("✅ Updated global Clarion settings:", {
+      logger.info("✅ Updated global Clarion settings:", {
         globalRedirectionFile: globalSettings.redirectionFile,
         globalRedirectionPath: globalSettings.redirectionPath,
         globalMacros: globalSettings.macros,
@@ -164,18 +160,18 @@ export class ClarionExtensionCommands {
   }
 
   public static extractMacros(properties: any): Record<string, string> {
-    
+    const logger = new Logger(); 
     const macros: Record<string, string> = {};
 
-    Logger.info("🔍 Starting extractMacros...");
+    logger.info("🔍 Starting extractMacros...");
 
     if (!properties || typeof properties !== 'object') {
-      Logger.error("❌ extractMacros received invalid properties:", properties);
+      logger.error("❌ extractMacros received invalid properties:", properties);
       return macros;
     }
 
     if (!Array.isArray(properties)) {
-      Logger.warn("⚠️ Expected properties to be an array, but got:", typeof properties);
+      logger.warn("⚠️ Expected properties to be an array, but got:", typeof properties);
       properties = [properties];  // Convert to array if it's an object
     }
 
@@ -185,32 +181,32 @@ export class ClarionExtensionCommands {
       const macrosProperty = redirectionFileProperty.Properties.find((p: any) => p.$.name === 'Macros');
 
       if (macrosProperty) {
-        Logger.info("📌 Found 'Macros' section. Parsing properties...");
+        logger.info("📌 Found 'Macros' section. Parsing properties...");
 
         for (const prop in macrosProperty) {
-          Logger.info(`🔹 Processing macro: ${prop}`, macrosProperty[prop]);
+          logger.info(`🔹 Processing macro: ${prop}`, macrosProperty[prop]);
 
           if (Array.isArray(macrosProperty[prop]) && macrosProperty[prop].length > 0) {
             const firstItem = macrosProperty[prop][0];
 
             if (firstItem && typeof firstItem === "object" && "$" in firstItem && "value" in firstItem.$) {
               macros[prop.toLowerCase()] = String(firstItem.$.value);
-              Logger.info(`✅ Extracted Macro: ${prop} → "${macros[prop.toLowerCase()]}"`);
+              logger.info(`✅ Extracted Macro: ${prop} → "${macros[prop.toLowerCase()]}"`);
             } else {
-              Logger.warn(`⚠️ Unexpected structure for macro '${prop}':`, firstItem);
+              logger.warn(`⚠️ Unexpected structure for macro '${prop}':`, firstItem);
             }
           } else {
-            Logger.warn(`⚠️ Macro '${prop}' does not contain an array or is empty.`);
+            logger.warn(`⚠️ Macro '${prop}' does not contain an array or is empty.`);
           }
         }
       } else {
-        Logger.warn("⚠️ No 'Macros' section found in RedirectionFile.");
+        logger.warn("⚠️ No 'Macros' section found in RedirectionFile.");
       }
     } else {
-      Logger.warn("⚠️ No 'RedirectionFile' property found in provided XML.");
+      logger.warn("⚠️ No 'RedirectionFile' property found in provided XML.");
     }
 
-    Logger.info("✅ Final Extracted Macros:", macros);
+    logger.info("✅ Final Extracted Macros:", macros);
     
     return macros;
   }
@@ -222,6 +218,7 @@ export class ClarionExtensionCommands {
    * Prompts the user to select a solution file (.sln).
    */
   static async selectSolutionFile() {
+    const logger = new Logger(); 
     try {
       const workspaceFolder = workspace.workspaceFolders?.[0];
 
@@ -248,7 +245,7 @@ export class ClarionExtensionCommands {
 
       window.showInformationMessage(`Solution file selected: ${solutionFilePath}`);
     } catch (error) {
-      Logger.error("Error selecting solution file:", error);
+      logger.error("Error selecting solution file:", error);
       window.showErrorMessage("An error occurred while selecting the solution file.");
     }
   }
@@ -279,7 +276,8 @@ export class ClarionExtensionCommands {
         }
       }
     } catch (error) {
-      Logger.error(String(error));
+      const logger = new Logger(); 
+      logger.error(String(error));
     }
   }
   static async followLink(documentManager: DocumentManager) {

@@ -96,37 +96,37 @@ export class LocationProvider {
     }
 
     public getFullPath(fileName: string, documentFrom: string): string | null {
-        
+        const logger = new Logger(); 
         if (!this.solutionParser) {
-            Logger.info('❌ No solution parser available');
+            logger.info('❌ No solution parser available');
             return null;
         }
     
-        Logger.info(`🔎 Searching for file: ${fileName} (from ${documentFrom})`);
+        logger.info(`🔎 Searching for file: ${fileName} (from ${documentFrom})`);
     
         // 🔹 Find the project dynamically based on the current file
         const project = this.solutionParser.findProjectForFile(documentFrom);
         
         if (project) {
-            Logger.info(`📂 Using project-specific paths for ${fileName}`);
+            logger.info(`📂 Using project-specific paths for ${fileName}`);
             const fullPath = this.solutionParser.findFileInRedirectionPaths(fileName, project.pathsToLookin, project.path);
             
             if (fullPath) {
-                Logger.info(`✅ Found in project paths: ${fullPath}`);
+                logger.info(`✅ Found in project paths: ${fullPath}`);
                 return fullPath;
             }
         } else {
-            Logger.warn(`⚠️ No project association found for ${documentFrom}, falling back to global redirection.`);
+            logger.warn(`⚠️ No project association found for ${documentFrom}, falling back to global redirection.`);
         }
     
         // 🔹 Fall back to global paths
         const globalFile = this.solutionParser.findFileWithExtension(fileName);
         if (globalFile !== "") {
-            Logger.info(`✅ Resolved via global redirection: ${globalFile}`);
+            logger.info(`✅ Resolved via global redirection: ${globalFile}`);
             return globalFile;
         }
     
-        Logger.warn(`❌ Could not resolve file: ${fileName}`);
+        logger.warn(`❌ Could not resolve file: ${fileName}`);
         return null;
     }
     
@@ -151,7 +151,8 @@ export class LocationProvider {
             );
             return sectionIndex !== -1 ? sectionIndex : 0;
         } catch (error) {
-            Logger.error('Error reading file content:', error);
+            const logger = new Logger(); 
+            logger.error('Error reading file content:', error);
             return 0;
         }
     }
