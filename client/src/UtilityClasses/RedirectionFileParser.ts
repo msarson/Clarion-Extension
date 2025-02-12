@@ -9,7 +9,7 @@ import { globalSettings } from '../globals';
  * Parses a Clarion redirection file to extract and resolve file paths for the project.
  */
 export class RedirectionFileParser {
-    private readonly compileMode: string | null = null;
+    private compileMode: string | null = null;
     private readonly projectPath: string;
     private readonly redirectionFile: string;
     private readonly macros: Record<string, string>;
@@ -75,31 +75,54 @@ export class RedirectionFileParser {
      * Parses a redirection file and returns an array of resolved paths.
      */
     public parseRedFile(redFile: string, fileExtension: string): string[] {
-        if (!fs.existsSync(redFile)) return [];
-
+        Logger.setDebugMode(true);
+        if (!fs.existsSync(redFile)) {
+            Logger.warn(`⚠️ Redirection file not found: ${redFile}`);
+            return [];
+        }
+    
+        Logger.info(`📂 Parsing redirection file: ${redFile}`);
         const content: string = fs.readFileSync(redFile, 'utf-8');
         const redPath = path.dirname(redFile);
-        const pathsMap: Record<string, string[]> = {};
+        const paths: string[] = [];
         const lines = content.split('\n');
         let foundSection = "";
-
+    
         for (const line of lines) {
             const trimmedLine = line.trim();
-            if (trimmedLine.startsWith('--') || trimmedLine === '') continue;
-
+            if (trimmedLine.startsWith('--') || trimmedLine === '') continue; // Skip comments/empty lines
+    
+            // ✅ Detect Section Headers and Set Active Section
             const sectionMatch = this.extractSection(trimmedLine);
             if (sectionMatch) {
                 foundSection = sectionMatch;
-                if (this.shouldSkipSection(foundSection)) continue;
-            } else if (trimmedLine.startsWith('{include')) {
+                Logger.info(`🔹 Found Section: [${foundSection}]`);
+            } 
+            // ✅ Process `{include ...}` in order where they appear
+            else if (trimmedLine.startsWith('{include')) {
+                Logger.info(`🔄 Processing included redirection file: ${trimmedLine}`);
+                const pathsMap: Record<string, string[]> = { [fileExtension]: paths };
                 this.processIncludedRedirection(redPath, trimmedLine, fileExtension, pathsMap);
-            } else if (trimmedLine.includes('=') && foundSection) {
-                this.processLine(foundSection, trimmedLine, redPath, fileExtension, pathsMap);
+            } 
+            // ✅ Process Paths for the Active Section
+            else if (trimmedLine.includes('=') && foundSection) {
+                const extractedPaths = this.processLine(foundSection, trimmedLine, redPath, fileExtension, {});
+                if (extractedPaths.length > 0) {
+                    Logger.info(`📌 Extracted paths from [${foundSection}]: (${extractedPaths.length})`);
+                    extractedPaths.forEach((path, index) => Logger.info(`   ${index + 1}. ${path}`));
+                }
+                paths.push(...extractedPaths); // ✅ Append paths immediately in order
             }
         }
-
-        return Object.values(pathsMap).flat();
+    
+        Logger.info(`✅ Completed parsing redirection file: ${redFile}`);
+        Logger.info(`📂 Final ordered paths for .${fileExtension}: (${paths.length})`);
+        paths.forEach((path, index) => Logger.info(`   ${index + 1}. ${path}`));
+        Logger.setDebugMode(false);
+        return paths; // ✅ Now maintains the exact order found in the RED file
     }
+    
+    
 
     private extractSection(trimmedLine: string): string | null {
         const sectionMatch = trimmedLine.match(/^\[([^\]]+)\]$/);
@@ -107,11 +130,28 @@ export class RedirectionFileParser {
     }
 
     private shouldSkipSection(section: string): boolean {
-        if (section.toLowerCase() === "copy") return true;
-        if (!this.compileMode && (section.toLowerCase() === "debug" || section.toLowerCase() === "release")) return true;
-        if (this.compileMode && section.toLowerCase() !== this.compileMode.toLowerCase() && section.toLowerCase() !== "common") return true;
-        return false;
+        // 🔹 Normalize section names for case-insensitive comparison
+        const normalizedSection = section.toLowerCase();
+    
+        // 🔹 If no compile mode is set, warn the user and default to 'release'
+        if (!this.compileMode) {
+            Logger.warn("⚠ No compile mode set! Defaulting to 'release'.");
+            this.compileMode = "release";  // ✅ Default to 'release'
+        }
+    
+        // 🔹 Always skip 'copy' section
+        if (normalizedSection === "copy") return true;
+    
+        // 🔹 Skip 'debug' if compile mode is 'release'
+        if (this.compileMode.toLowerCase() === "release" && normalizedSection === "debug") return true;
+    
+        // 🔹 Skip 'release' if compile mode is 'debug'
+        if (this.compileMode.toLowerCase() === "debug" && normalizedSection === "release") return true;
+    
+        // 🔹 Process only 'common' and the matching compile mode
+        return !(normalizedSection === "common" || normalizedSection === this.compileMode.toLowerCase());
     }
+    
 
     private processIncludedRedirection(redPath: string, line: string, fileExtension: string, pathsMap: Record<string, string[]>): void {
         Logger.info(`🔄 Processing Included File:`, line);
@@ -152,21 +192,24 @@ export class RedirectionFileParser {
 
 
 
-    private processLine(foundSection: string, trimmedLine: string, redPath: string, fileExtension: string, pathsMap: Record<string, string[]>): void {
+    private processLine(foundSection: string, trimmedLine: string, redPath: string, fileExtension: string, pathsMap: Record<string, string[]>): string[] {
         const parts = trimmedLine.split('=');
         const fileMask = parts[0].trim();
         const includeFileTypes = ['*.clw', '*.inc', '*.equ', '*.int'];
-
-        if (!this.shouldProcessFileType(fileMask, includeFileTypes)) return;
-
+    
+        if (!this.shouldProcessFileType(fileMask, includeFileTypes)) return [];
+    
         const resolvedPaths = this.resolvePaths(parts[1], redPath);
         const fileTypeResolvedPaths = this.filterResolvedPaths(resolvedPaths);
-
+    
         if (fileMask === '*.*' || fileMask.toLowerCase().includes(fileExtension.toLowerCase())) {
             pathsMap[fileMask] = pathsMap[fileMask] || [];
             pathsMap[fileMask].push(...fileTypeResolvedPaths);
         }
+    
+        return fileTypeResolvedPaths; // ✅ Ensure it returns resolved paths
     }
+    
 
     private filterResolvedPaths(paths: string[]): string[] {
         return paths.flatMap(p => {

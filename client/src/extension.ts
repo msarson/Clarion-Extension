@@ -48,7 +48,7 @@ export function getProjectPathForCurrentDocument(): string | undefined {
     // ✅ Step 2: Use redirection settings if project is not found
     Logger.warn(`⚠️ File not found in parsed projects, searching redirection paths...`);
 
-    const redirectionParser = new RedirectionFileParser("", "");
+    const redirectionParser = new RedirectionFileParser(globalSettings.configuration, "");
     const extensions = [".clw", ".inc", ".equ", ".int"];
 
     for (const ext of extensions) {
