@@ -1,140 +1,127 @@
-# clarion-extension README
-## Version 0.4.1
+# clarion-extension README  
+## Version 0.4.2  
 
-Welcome to the README for the "clarion-extension" project!
+Welcome to the README for the **Clarion Extension** project!  
 
-## Features
+## Features  
 
-The "clarion-extension" is designed as an addition to the [fushnisoft.clarion](https://marketplace.visualstudio.com/items?itemName=Fushnisoft.Clarion) extension. It offers various snippets and code folding for efficient Clarion coding.
+The **Clarion Extension** enhances the functionality of the [Fushnisoft Clarion Extension](https://marketplace.visualstudio.com/items?itemName=Fushnisoft.Clarion). It provides snippets, code folding, and other productivity tools for Clarion development in VS Code.  
 
-You can find a handy [Cheat Sheet here](https://github.com/msarson/Clarion-Extension/blob/master/docs/CheatSheet.md). We also provide initial code folding, which will be expanded upon. A special thanks to [Mark Goldberg](https://github.com/MarkGoldberg) for his contribution.
+For a quick reference, check out the [Cheat Sheet](https://github.com/msarson/Clarion-Extension/blob/master/docs/CheatSheet.md).  
 
-Document Outline is supported, thanks to a generous contribution from [Allen Zhu](https://github.com/celeron533).
+A special thanks to [Mark Goldberg](https://github.com/MarkGoldberg) for his contributions to code folding and [Allen Zhu](https://github.com/celeron533) for Document Outline support.  
 
-## Workspace Settings and Configuration
+---
 
-### Opening a Clarion Solution in VS Code (Version 0.4.0)
+## 🚀 What's New in Version 0.4.2?  
 
-In version **0.4.0**, we have simplified the process of opening a Clarion solution in **Visual Studio Code**.
+### 🔧 **Improvements and Bug Fixes**  
+- **Substantial bug fixes** to **redirection parsing**, ensuring improved accuracy when locating files.  
+- **Ctrl+P now respects redirection files** by searching both **project-specific** redirection files and the **global** redirection file specified in `ClarionProperties.xml`.  
+- **Build Configuration Support:**  
+  - Added the ability to **switch between Release and Debug builds** using the new command:  
+    **Clarion: Set Configuration** (accessible via **Ctrl+Shift+P**).  
+  - This setting is **obeyed in redirection parsing**, ensuring the correct configuration is used when resolving paths.  
+  - Default configuration: **Release**.  
+- **Solution Explorer Icons:**  
+  - The **Solution View now includes icons** for better visual organization and navigation.  
 
-> **NOTE:** Workspace settings from earlier versions have been **deprecated**.
+---
 
-### How It Works (Opening a Solution Without a Workspace)
+## 🛠 Opening a Clarion Solution in VS Code  
+
+Since version **0.4.0**, the process of opening a Clarion solution in **Visual Studio Code** has been streamlined.  
+
+### **Opening a Solution Without a Workspace**  
 
 1. **Open the Solution Folder**  
-   - In **Visual Studio Code**, open the **root folder** where your **Clarion solution (.sln) file** is located.
+   - In **Visual Studio Code**, open the **root folder** where your **Clarion solution (.sln) file** is located.  
 
 2. **Select the Clarion Properties File**  
-   - Press `Ctrl+Shift+P` to open the **Command Palette**.
-   - Search for **"Clarion: Open Solution"** and select it.
-   - A **file dialog** will appear, prompting you to select the **ClarionProperties.xml** file in use.
-   - This file is typically located in:  
-     **`%appdata%\SoftVelocity\ClarionVersion\ClarionProperties.xml`**
+   - Open the **Command Palette** (**Ctrl+Shift+P**).  
+   - Search for **"Clarion: Open Solution"** and select it.  
+   - Choose the `ClarionProperties.xml` file from:  
+     **%appdata%\SoftVelocity\ClarionVersion\ClarionProperties.xml**  
 
 3. **Select the Clarion Version**  
-   - After selecting the properties file, another dialog will appear asking you to **select the Clarion version** that the solution is using for **generation and compilation**.
-   - This ensures the correct **redirection files** and **build settings** are applied.
+   - After selecting the properties file, choose the **Clarion version** used for **generation and compilation**.  
+   - This ensures the correct **redirection files** and **build settings** are applied.  
 
-4. **Workspace Configuration (Optional but Recommended)**  
-   - Once the solution is loaded in **VS Code**, it is recommended to **save the workspace**.
-   - This allows for quick access to the solution in the future without repeating the setup process.
-
----
-
-## Features of the Clarion Extension
-
-### 🛠 **Automatic Solution Parsing**
-Once the solution is opened, the **Clarion Language Extension** automatically:
-- Parses the **solution file** to detect all **projects**.
-- Reads **redirection files** (including **local redirection** files).
-- Builds an internal map of **search paths** where files in your projects should be located.
-
-This enables various **advanced features** such as **Go To Definition**, **Hover Previews**, and the **Solution Explorer View**.
+4. **(Optional) Save the Workspace**  
+   - Once the solution is loaded in **VS Code**, saving the workspace allows for quick reloading in the future.  
 
 ---
 
-## 🖥 **Solution Explorer View**
-- The extension provides a **Solution View** in VS Code's **Explorer Panel**.
-- This allows you to **navigate your projects**, view **source files**, and open files **directly from the tree**.
+## Features of the Clarion Extension  
+
+### 📌 **Automatic Solution Parsing**  
+Once a solution is opened, the extension:  
+- Parses the **solution file** to detect all **projects**.  
+- Reads **redirection files** (including **local redirection** files).  
+- Builds an internal map of **search paths** for **Go To Definition**, **Hover Previews**, and the **Solution Explorer View**.  
+
+### 📂 **Solution Explorer View**  
+- Provides an **Explorer Panel view** of the Clarion solution.  
+- Displays **projects and source files** in a structured tree.  
+- Now includes **icons for better organization**.  
+
+### 🔍 **Enhanced "Go To Definition"**  
+- Supports **INCLUDE and MODULE statements**.  
+- Automatically detects files via **redirection paths and libsrc paths**.  
+- **Ctrl+Click** or **Ctrl+F12** opens the referenced file.  
+
+### ✨ **Hover Provider**  
+- Hovering over an **INCLUDE** or **MODULE** statement shows a **preview** of the file’s content.  
+
+### 🔄 **Manual Solution Refresh**  
+- Keeps the solution synchronized with **AppGen changes** (added/removed projects, modified cwproj files, etc.).  
+- Use **"Clarion: Refresh Solution"** from **Ctrl+Shift+P** to update.  
+
+### 🏗 **Configurable Build Type (New in 0.4.2!)**  
+- Change between **Release** and **Debug** builds using:  
+  **"Clarion: Set Configuration"** from **Ctrl+Shift+P**.  
+- Redirection parsing now respects the selected build configuration.  
 
 ---
 
-## 🔍 **Enhanced "Go To Definition" Support**
-The extension enhances **Go To Definition** for `INCLUDE` and `MODULE` statements with **intelligent link detection**.
+## ✅ Summary of Key Features  
+✔ **Automatic solution structure detection**.  
+✔ **Solution Explorer View with icons**.  
+✔ **Go To Definition for INCLUDE & MODULE**.  
+✔ **Hover Preview for referenced files**.  
+✔ **Manual refresh to sync solution changes**.  
+✔ **Redirection-aware Ctrl+P searches**.  
+✔ **Configurable Release/Debug builds**.  
 
-### **Link Provider**
-- When VS Code encounters statements like:
-  ```clarion
-  INCLUDE('FileName.clw')
-  ```
-  or  
-  ```clarion
-  Class MODULE('FileName.clw')
-  ```
-  - It **searches the redirection paths** and **libsrc paths**.
-  - If the file is **found**, the filename will be **underlined**, indicating that VS Code has created a **clickable link**.
-
-- You can **navigate** to the linked file using:
-  - `Ctrl+Click` on the filename  
-  - `Ctrl+F12` to open the file in **VS Code**.
+With these enhancements, **VS Code** becomes an even more powerful **Clarion development environment**. 🚀  
 
 ---
 
-## ✨ **Hover Provider**
-- When hovering over an **INCLUDE** or **MODULE** statement, VS Code will display a **preview** of the file’s **starting content**.
-- This allows you to **quickly inspect** the contents of a referenced file **without opening it**.
+## Getting Started  
+
+To maximize the benefits of this extension:  
+1. Ensure you have the **Fushnisoft Clarion Extension** installed from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=Fushnisoft.Clarion).  
+2. Follow the **Opening a Clarion Solution** instructions to configure your workspace.  
 
 ---
 
-## 🔄 **Manual Solution Refresh**
-### **Keeping the Solution Up-to-Date**
-When working with **Clarion’s AppGen**, developers often:
-- Add new projects.
-- Remove or rename existing projects.
-- Modify `cwproj` files.
-- Change redirection file settings.
+## Contributing and Feedback  
 
-To ensure the **solution view** and **file links** remain accurate, you can **manually refresh the solution**.
-
-### **How to Refresh the Solution**
-1. Open the **Command Palette** (`Ctrl+Shift+P`).
-2. Search for **"Clarion: Refresh Solution"**.
-3. Select it to **reload the solution**.
-
-**What This Does:**
-- **Re-parses** the **solution file** (`.sln`) and all **projects** (`.cwproj`).
-- **Updates the Solution Explorer View** with any **new, removed, or modified** files.
-- Ensures **Go To Definition** and **Hover Previews** work correctly with any newly added files.
+This project is actively evolving, and we welcome feedback! If you encounter issues or have suggestions, please contribute on [GitHub](https://github.com/msarson/Clarion-Extension).  
 
 ---
 
-## 🚀 **Summary of Key Features**
-✅ **Automatic detection of solution structure.**  
-✅ **Solution Explorer View for easy file navigation.**  
-✅ **Go To Definition for INCLUDE & MODULE statements.**  
-✅ **Hover Preview for referenced files.**  
-✅ **Manual solution refresh to sync changes.**  
+## Acknowledgments  
 
-With these features, **VS Code** becomes a powerful **Clarion development environment**. 🚀
+This extension builds upon the work of:  
+- [Mark Goldberg](https://github.com/MarkGoldberg) – Code folding.  
+- [Allen Zhu](https://github.com/celeron533) – Document Outline support.  
+- **Brahn Partridge** (1974-2021) – Early work on textmate language definition, which laid the foundation for this extension.  
 
-## Getting Started
+---
 
-To maximize the "clarion-extension," ensure you have the VS Code extension for Clarion installed. You can obtain it [from the marketplace](https://marketplace.visualstudio.com/items?itemName=Fushnisoft.Clarion) or directly within Visual Studio Code.
+## Additional Resources  
 
-## Contributing and Feedback
+📖 **[Cheat Sheet](https://github.com/msarson/Clarion-Extension/blob/master/docs/CheatSheet.md)** – Quick reference for features and usage.  
 
-As the "clarion-extension" project is in beta, we eagerly welcome your feedback and contributions. If you encounter issues or have improvement ideas, please don't hesitate to share them. Together, we can refine and enhance this extension to better serve Clarion developers.
-
-## Acknowledgments
-
-This extension builds upon the groundwork laid by [Mark Goldberg](https://github.com/MarkGoldberg) for code folding, and benefits from the contributions of [Allen Zhu](https://github.com/celeron533) for Document Outline support.
-
-We also acknowledge the invaluable contribution of **Brahn Partridge**, who passed away in October 2021. A great friend and contributor to the Clarion community, Brahn's early work on the textmate language definition laid the foundation for this extension. Without his efforts, this extension would not have been possible.
-
-## Additional Resources
-
-For quick reference, consult the [Cheat Sheet](https://github.com/msarson/Clarion-Extension/blob/master/docs/CheatSheet.md) to unlock the full potential of the extension.
-
-Thank you for choosing the "clarion-extension." Happy coding!
-
-
+Thank you for using **Clarion Extension**! 🎉  

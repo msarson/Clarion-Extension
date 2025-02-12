@@ -63,25 +63,21 @@ export class DocumentManager implements Disposable {
     private openDocuments: Map<string, DocumentInfo> = new Map(); // Store document info by URI
     private locationProvider!: LocationProvider;
     private disposables: Disposable[] = [];
-    private solutionParser!: SolutionParser;
 
 
-    private constructor(solutionParser: SolutionParser) {
-        this.solutionParser = solutionParser;
+    private constructor() {
 
     }
     // ✅ Static factory method to ensure proper async initialization
     public static async create(solutionParser: SolutionParser): Promise<DocumentManager> {
-        const manager = new DocumentManager(solutionParser);
+        const manager = new DocumentManager();
         await manager.initialize(solutionParser);
         return manager;
     }
     private async initialize(solutionParser: SolutionParser) {
         const logger = new Logger(); 
         logger.info("✅ DocumentManager.initialize() called");
-        this.solutionParser = solutionParser;
         this.locationProvider = new LocationProvider(solutionParser);
-        //   await this.locationProvider.initialize(solutionParser);
 
         this.disposables.push(
             workspace.onDidOpenTextDocument(this.onDidOpenTextDocument, this),
@@ -188,18 +184,23 @@ export class DocumentManager implements Disposable {
      * @returns An array of DocumentLink objects representing the navigable code links within the document.
      */
     generateDocumentLinks(uri: Uri): DocumentLink[] {
-        const logger = new Logger(); 
+        
+        logger.info(`🔗 Generating links for document: ${uri.fsPath}`);
+    
         const documentInfo = this.getDocumentInfo(uri);
         if (!documentInfo) {
-            logger.info("DocumentInfo is undefined for uri: ", uri);
+            logger.info("❌ DocumentInfo is undefined for uri:", uri.fsPath);
             return [];
         }
-
+    
         const links: DocumentLink[] = [];
-        logger.info(`Checking document: ${uri.fsPath}`);
-
+        logger.info(`📄 Checking document: ${uri.fsPath}`);
+        logger.info(`📌 Found ${documentInfo.statementLocations.length} statement locations`);
+    
         // 🔹 Process existing document statements from `documentInfo`
         for (const location of documentInfo.statementLocations) {
+            logger.info(`🔍 Processing location: ${JSON.stringify(location)}`);
+    
             if (
                 (location.statementType === "INCLUDE" || location.statementType === "MODULE" ||
                     location.statementType === "MEMBER" || location.statementType === "SECTION") &&
@@ -207,13 +208,14 @@ export class DocumentManager implements Disposable {
                 location.linePositionEnd
             ) {
                 let targetUri = Uri.file(location.fullFileName);
-                logger.info(`Creating link: ${location.statementType} -> ${targetUri.fsPath}`);
-
+                logger.info(`🔗 Creating link: ${location.statementType} -> ${targetUri.fsPath}`);
+    
                 if (location.statementType === "SECTION" && location.sectionLineLocation) {
                     const lineQueryParam = `${location.sectionLineLocation.line + 1}:1`;
                     targetUri = targetUri.with({ fragment: lineQueryParam });
+                    logger.info(`📍 Adding section fragment: ${lineQueryParam}`);
                 }
-
+    
                 const link = new DocumentLink(
                     new Range(location.linePosition, location.linePositionEnd),
                     targetUri
@@ -221,12 +223,15 @@ export class DocumentManager implements Disposable {
                 links.push(link);
             }
         }
-
+    
         // 🔹 Find and process LINK('filename.ext') using `documentInfo`
         for (const location of documentInfo.statementLocations) {
+            logger.info(`🔍 Processing LINK statement: ${JSON.stringify(location)}`);
+    
             if (location.statementType === "LINK" && location.fullFileName) {
                 const targetUri = Uri.file(location.fullFileName);
-                logger.info(`Creating LINK() reference: ${location.fullFileName} -> ${targetUri.fsPath}`);
+                logger.info(`🔗 Creating LINK() reference: ${location.fullFileName} -> ${targetUri.fsPath}`);
+    
                 if (location.linePosition && location.linePositionEnd) {
                     const link = new DocumentLink(
                         new Range(location.linePosition, location.linePositionEnd),
@@ -236,9 +241,12 @@ export class DocumentManager implements Disposable {
                 }
             }
         }
-
+    
+        logger.info(`✅ Document link generation complete. Created ${links.length} links.`);
         return links;
     }
+    
+    
 
 
 

@@ -15,7 +15,7 @@ export class RedirectionFileParser {
     private readonly macros: Record<string, string>;
     
     constructor(compileMode: string | null, projectPath: string) {
-        const logger = new Logger(true); 
+        const logger = new Logger(); 
         this.compileMode = compileMode;
         this.projectPath = projectPath; // Store the project path
     
@@ -87,7 +87,7 @@ export class RedirectionFileParser {
      * Parses a redirection file and returns an array of resolved paths.
      */
     public parseRedFile(redFile: string, fileExtension: string): string[] {
-        const logger = new Logger(true); 
+        const logger = new Logger(); 
         if (!fs.existsSync(redFile)) {
             logger.warn(`⚠️ Redirection file not found: ${redFile}`);
             return [];

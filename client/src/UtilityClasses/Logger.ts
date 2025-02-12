@@ -11,6 +11,10 @@ export class Logger {
     public setDebugMode(enabled: boolean): void {
         this.debugMode = enabled;
     }
+    public getDebugMode(): boolean {
+        return this.debugMode;
+    }
+    
 
     /**
      * Logs an informational message, only if debug mode is enabled.

@@ -56,9 +56,19 @@ export class SolutionParser {
     private async initialize() {
         const logger = new Logger(); 
         logger.setDebugMode(true);
-        this.defaultPathsToLookin = await this.getDefaultPathsFromRedirectionFile();
-        logger.setDebugMode(false);
+        
+        
         this.solution = await this.parseSolution();
+        this.defaultPathsToLookin = await this.getDefaultPathsFromRedirectionFile();
+        if(logger.getDebugMode())
+          this.debugProjects(logger);
+        logger.info("📂 Parsed Projects:", this.solution.projects);
+
+        await this.buildSolutionTree();
+
+    }
+
+    private debugProjects(logger: Logger) {
         this.solution.projects.forEach(project => {
             logger.info(`📂 Project: ${project.name}`);
             project.sourceFiles.forEach(sourceFile => {
@@ -67,10 +77,6 @@ export class SolutionParser {
             });
 
         });
-        logger.info("📂 Parsed Projects:", this.solution.projects);
-
-        await this.buildSolutionTree();
-
     }
 
     /**
