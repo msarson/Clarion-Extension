@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import { parseString } from 'xml2js';
 import { DocumentManager } from './documentManager';
 import { Logger } from './UtilityClasses/Logger';
-import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, setGlobalClarionSelection, globalSettings } from './globals';
+import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, setGlobalClarionSelection, globalSettings,  } from './globals';
 
 // Example: Updating the stored settings
 //await setGlobalClarionSelection("solution.sln", "ClarionProperties.xml", "Clarion 11");
@@ -60,7 +60,7 @@ export class ClarionExtensionCommands {
       Logger.info("📂 Selected ClarionProperties.xml:", selectedFilePath);
 
       // ✅ Update global setting and workspace setting for ClarionProperties.xml
-      await setGlobalClarionSelection(globalSolutionFile, selectedFilePath, globalClarionVersion);
+      await setGlobalClarionSelection(globalSolutionFile, selectedFilePath, globalClarionVersion ,globalSettings.configuration);
 
       // ✅ Parse available versions from the selected file
       const versionProperties = await ClarionExtensionCommands.parseAvailableVersions(selectedFilePath);
@@ -87,7 +87,7 @@ export class ClarionExtensionCommands {
       }
 
       // ✅ Update global setting and workspace setting for Clarion version
-      await setGlobalClarionSelection(globalSolutionFile, globalClarionPropertiesFile, versionSelection);
+      await setGlobalClarionSelection(globalSolutionFile, globalClarionPropertiesFile, versionSelection, globalSettings.configuration);
 
       // ✅ Update runtime global settings (NOT stored in workspace)
       ClarionExtensionCommands.updateGlobalSettings(selectedVersionProps);

@@ -4,20 +4,24 @@ import { workspace, ConfigurationTarget } from 'vscode';
 export let globalSolutionFile: string = "";
 export let globalClarionPropertiesFile: string = "";
 export let globalClarionVersion: string = "";
+let _globalClarionConfiguration: string = "Release";
 
 export async function setGlobalClarionSelection(
     solutionFile: string,
     clarionPropertiesFile: string,
-    clarionVersion: string
+    clarionVersion: string,
+    clarionConfiguration: string //= "Release" // Optional, default to Release
 ) {
     globalSolutionFile = solutionFile;
     globalClarionPropertiesFile = clarionPropertiesFile;
     globalClarionVersion = clarionVersion;
+    _globalClarionConfiguration = clarionConfiguration; 
 
     // Save to workspace settings
     await workspace.getConfiguration().update('clarion.solutionFile', solutionFile, ConfigurationTarget.Workspace);
     await workspace.getConfiguration().update('clarion.propertiesFile', clarionPropertiesFile, ConfigurationTarget.Workspace);
     await workspace.getConfiguration().update('clarion.version', clarionVersion, ConfigurationTarget.Workspace);
+    await workspace.getConfiguration().update('clarion.configuration', clarionConfiguration, ConfigurationTarget.Workspace);
 }
 
 // ❌ These should NOT be saved in workspace
@@ -28,6 +32,12 @@ let _globalLibsrcPaths: string[] = [];
 
 // ✅ Use `get` and `set` properties instead of exports
 export const globalSettings = {
+    get configuration() {
+        return _globalClarionConfiguration;
+    },
+    set configuration(value: string) {
+        _globalClarionConfiguration = value;
+    },
     get redirectionFile() {
         return _globalRedirectionFile;
     },
@@ -56,3 +66,15 @@ export const globalSettings = {
         _globalLibsrcPaths = value;
     }
 };
+
+/**
+ * Loads existing Clarion settings from the workspace
+ */
+// export function loadGlobalClarionSettings() {
+//     const config = workspace.getConfiguration("clarion");
+    
+//     globalSolutionFile = config.get<string>("solutionFile", "");
+//     globalClarionPropertiesFile = config.get<string>("propertiesFile", "");
+//     globalClarionVersion = config.get<string>("version", "");
+//     globalClarionConfiguration = config.get<string>("configuration", "Release"); // Default to Release
+// }

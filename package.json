@@ -81,6 +81,11 @@
                 "command": "clarion.quickOpen",
                 "title": "Clarion: Quick Open (Includes Redirection Paths)",
                 "when": "clarion.solutionOpen"
+            },
+            {
+                "command": "clarion.setConfiguration",
+                "title": "Clarion: Set Configuration",
+                "when": "clarion.solutionOpen"
             }
         ],
         "snippets": [
@@ -135,6 +140,11 @@
                     "type": "string",
                     "default": "",
                     "description": "Selected Clarion version."
+                },
+                "clarion.configuration": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Selected Clarion configuration."
                 },
                 "clarion.maxNumberOfProblems": {
                     "scope": "resource",

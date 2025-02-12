@@ -38,15 +38,22 @@ export class SolutionParser {
     public defaultPathsToLookin: Record<string, string[]> = {};
     public solutionFilePath: string;
 
-    constructor(filePath: string) {
+   // Change the constructor to private
+    private constructor(filePath: string) {
         this.solutionFilePath = filePath;
         const solutionName = path.basename(filePath);
         this.solution = new ClarionSolution(solutionName, []);
         this.solutionTree = null;
-        //  this.initialize();
     }
 
-    public async initialize() {
+    public static async create(filePath: string): Promise<SolutionParser> {
+        const parser = new SolutionParser(filePath);
+        await parser.initialize();  // Ensure async initialization runs
+        return parser;
+    }
+    
+
+    private async initialize() {
         this.defaultPathsToLookin = await this.getDefaultPathsFromRedirectionFile();
         this.solution = await this.parseSolution();
         this.solution.projects.forEach(project => {

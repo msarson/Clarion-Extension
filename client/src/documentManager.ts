@@ -1,4 +1,4 @@
-import { 
+import {
     Uri,
     workspace,
     Disposable,
@@ -58,26 +58,30 @@ export class DocumentManager implements Disposable {
     private readonly modulePattern = /MODULE\s*\('([^']+)'\s*(?:,\s*'([^']+)'\s*)?\)/ig;
     private readonly includePattern = /INCLUDE\s*\('([^']+)'\s*(?:,\s*'([^']+)'\s*)?(?:,\s*ONCE)?\)/ig;
     private readonly memberPattern = /MEMBER\s*\(\s*'([^']+)'\s*\)/ig;
+    private readonly linkPattern = /LINK\s*\(\s*'([^']+)'/ig;  // Updated regex to match LINK('somefile')
+
     private openDocuments: Map<string, DocumentInfo> = new Map(); // Store document info by URI
     private locationProvider!: LocationProvider;
     private disposables: Disposable[] = [];
     private solutionParser!: SolutionParser;
-    
 
-    constructor(solutionParser: SolutionParser) {
-        // this.solutionParser = solutionParser;
-        // this.locationProvider = new LocationProvider(solutionParser); // ✅ Initialize immediately
 
-        
-     //   this.locationProvider = new LocationProvider(this.solutionParser);
+    private constructor(solutionParser: SolutionParser) {
+        this.solutionParser = solutionParser;
+
     }
-
-    async initialize(solutionParser: SolutionParser) {
+    // ✅ Static factory method to ensure proper async initialization
+    public static async create(solutionParser: SolutionParser): Promise<DocumentManager> {
+        const manager = new DocumentManager(solutionParser);
+        await manager.initialize(solutionParser);
+        return manager;
+    }
+    private async initialize(solutionParser: SolutionParser) {
         Logger.info("✅ DocumentManager.initialize() called");
         this.solutionParser = solutionParser;
         this.locationProvider = new LocationProvider(solutionParser);
-        await this.locationProvider.initialize(solutionParser);
-    
+        //   await this.locationProvider.initialize(solutionParser);
+
         this.disposables.push(
             workspace.onDidOpenTextDocument(this.onDidOpenTextDocument, this),
             workspace.onDidChangeTextDocument(this.onDidChangeTextDocument, this),
@@ -85,8 +89,8 @@ export class DocumentManager implements Disposable {
             workspace.onDidRenameFiles(this.onDidRenameFiles, this),
             workspace.onDidDeleteFiles(this.onDidDeleteFiles, this)
         );
-    
-           // ✅ Manually process currently open documents
+
+        // ✅ Manually process currently open documents
         for (const document of workspace.textDocuments) {
             Logger.info(`📄 Processing open document at startup: ${document.uri.fsPath}`);
             await this.updateDocumentInfo(document);
@@ -94,11 +98,11 @@ export class DocumentManager implements Disposable {
 
         Logger.info("✅ DocumentManager event listeners registered.");
     }
-    
+
     // public inspectFullPath() {
 
 
-        
+
     //    // this.locationProvider.inspectFullPath();
     // }
 
@@ -181,26 +185,44 @@ export class DocumentManager implements Disposable {
      */
     generateDocumentLinks(uri: Uri): DocumentLink[] {
         const documentInfo = this.getDocumentInfo(uri);
-        if(documentInfo === undefined) {
-           Logger.info("DocumentInfo is undefined for uri: ", uri); 
+        if (!documentInfo) {
+            Logger.info("DocumentInfo is undefined for uri: ", uri);
+            return [];
         }
+
         const links: DocumentLink[] = [];
         Logger.info(`Checking document: ${uri.fsPath}`);
-        if (documentInfo) {
-            for (const location of documentInfo.statementLocations) {
-                // Generate links based on ClarionLocation properties and statementType
-                if (
-                    (location.statementType === "INCLUDE" || location.statementType === "MODULE" || location.statementType === "MEMBER" || location.statementType === "SECTION") &&
-                    location.linePosition &&
-                    location.linePositionEnd
-                ) {
-                    let targetUri = Uri.file(location.fullFileName);
-                    Logger.info(`Creating link: ${location.statementType} -> ${targetUri.fsPath}`);
-                    if (location.statementType === "SECTION" && location.sectionLineLocation) {
-                        const lineQueryParam = `${location.sectionLineLocation.line + 1}:1`;
-                        targetUri = targetUri.with({ fragment: lineQueryParam });
-                    }
 
+        // 🔹 Process existing document statements from `documentInfo`
+        for (const location of documentInfo.statementLocations) {
+            if (
+                (location.statementType === "INCLUDE" || location.statementType === "MODULE" ||
+                    location.statementType === "MEMBER" || location.statementType === "SECTION") &&
+                location.linePosition &&
+                location.linePositionEnd
+            ) {
+                let targetUri = Uri.file(location.fullFileName);
+                Logger.info(`Creating link: ${location.statementType} -> ${targetUri.fsPath}`);
+
+                if (location.statementType === "SECTION" && location.sectionLineLocation) {
+                    const lineQueryParam = `${location.sectionLineLocation.line + 1}:1`;
+                    targetUri = targetUri.with({ fragment: lineQueryParam });
+                }
+
+                const link = new DocumentLink(
+                    new Range(location.linePosition, location.linePositionEnd),
+                    targetUri
+                );
+                links.push(link);
+            }
+        }
+
+        // 🔹 Find and process LINK('filename.ext') using `documentInfo`
+        for (const location of documentInfo.statementLocations) {
+            if (location.statementType === "LINK" && location.fullFileName) {
+                const targetUri = Uri.file(location.fullFileName);
+                Logger.info(`Creating LINK() reference: ${location.fullFileName} -> ${targetUri.fsPath}`);
+                if (location.linePosition && location.linePositionEnd) {
                     const link = new DocumentLink(
                         new Range(location.linePosition, location.linePositionEnd),
                         targetUri
@@ -212,6 +234,7 @@ export class DocumentManager implements Disposable {
 
         return links;
     }
+
 
 
 
@@ -241,8 +264,8 @@ export class DocumentManager implements Disposable {
 
         return undefined;
     }
-   
-    
+
+
     /**
      * Updates the document information by processing text patterns for include, module, and member declarations.
      *
@@ -257,21 +280,22 @@ export class DocumentManager implements Disposable {
             Logger.warn(`⚠ Skipping document: ${document.uri.fsPath}`);
             return;
         }
-    
+
         Logger.info(`📄 Updating document info: ${document.uri.fsPath}`);
-    
+
         const statementLocations: ClarionLocation[] = [];
         statementLocations.push(...this.processPattern(document, this.includePattern, "INCLUDE"));
         statementLocations.push(...this.processPattern(document, this.modulePattern, "MODULE"));
         statementLocations.push(...this.processPattern(document, this.memberPattern, "MEMBER"));
-    
+        statementLocations.push(...this.processPattern(document, this.linkPattern, "LINK"));
+
         // Store document info in openDocuments map
         this.openDocuments.set(document.uri.toString().toLowerCase(), { statementLocations });
-    
+
         Logger.info(`✅ Stored document info for ${document.uri.fsPath}`);
         Logger.info(`📄 openDocuments now has ${this.openDocuments.size} entries.`);
     }
-    
+
 
     /**
      * Processes a document to extract and map locations that match the provided regular expression pattern.
@@ -292,19 +316,19 @@ export class DocumentManager implements Disposable {
         }
         const statementLocations: ClarionLocation[] = [];
         const locations = this.locationProvider.getLocationFromPattern(document, pattern);
-        
+
         Logger.info(`Processing ${statementType} in: ${document.uri.fsPath}`);
         Logger.info(`Pattern: ${pattern}`);
         Logger.info(`Found locations:`, locations);
-    
+
         if (!locations || locations.length === 0) {
             Logger.warn(`No ${statementType} matches found!`);
             return statementLocations;
         }
-    
+
         for (const location of locations) {
             Logger.info(`Matched ${statementType}:`, location);
-    
+
             const statementLocation: ClarionLocation = {
                 fullFileName: location.fullFileName,
                 sectionLineLocation: null,
@@ -313,20 +337,20 @@ export class DocumentManager implements Disposable {
                 statementType: statementType,
                 result: location.result
             };
-    
+
             statementLocations.push(statementLocation);
         }
-    
+
         return statementLocations;
     }
-    
+
 
     getDocumentInfo(uri: Uri): DocumentInfo | undefined {
         try {
             // Normalize the URI for consistency in lookups
             const normalizedUri = uri.toString().toLowerCase();
             Logger.info(`🔍 Checking document info for URI: ${normalizedUri}`);
-    
+
             // Debugging: Show all stored documents
             if (this.openDocuments.size === 0) {
                 Logger.warn("⚠ openDocuments map is EMPTY.");
@@ -334,24 +358,24 @@ export class DocumentManager implements Disposable {
                 Logger.info(`📄 Currently tracked documents (${this.openDocuments.size}):`);
                 this.openDocuments.forEach((_, key) => Logger.info(`   - ${key}`));
             }
-    
+
             // Attempt to retrieve document info
             const docInfo = this.openDocuments.get(normalizedUri);
-    
+
             if (docInfo) {
                 Logger.info(`✅ Document info FOUND for URI: ${normalizedUri}`);
             } else {
                 Logger.warn(`⚠ No document info found for URI: ${normalizedUri}`);
             }
-    
+
             return docInfo;
         } catch (error) {
             Logger.error("❌ Error in getDocumentInfo:", error);
             return undefined;
         }
     }
-    
-    
+
+
     getDocumentContent(uri: Uri): string | undefined {
         const document = workspace.textDocuments.find(doc => doc.uri.toString() === uri.toString());
         if (document) {
@@ -362,5 +386,5 @@ export class DocumentManager implements Disposable {
     dispose() {
         this.disposables.forEach(disposable => disposable.dispose());
     }
-    
+
 }

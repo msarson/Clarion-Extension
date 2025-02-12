@@ -1,7 +1,6 @@
 import { commands, TextDocument, window, Position, workspace, ViewColumn } from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { RedirectionFileParser } from './RedirectionFileParser';
 import { ClarionProjectClass } from './ClarionProject';
 import { SolutionParser } from '../SolutionParser';
 import { Logger } from './Logger';
@@ -31,11 +30,12 @@ export class LocationProvider {
     
     constructor(solutionParser: SolutionParser) {
         this.clarionProject = new ClarionProjectClass();
-    }
-
-    async initialize(solutionParser: SolutionParser) {
         this.solutionParser = solutionParser;
     }
+
+    // async initialize(solutionParser: SolutionParser) {
+    //     this.solutionParser = solutionParser;
+    // }
 
     /**
      * Scans the provided document for occurrences of a specified pattern and returns an array of corresponding locations.
