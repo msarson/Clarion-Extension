@@ -28,10 +28,18 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     }
 
     refresh(): void {
-        const logger = new Logger(); 
-        logger.info("🔄 Triggering tree view refresh...");
-        this._onDidChangeTreeData.fire(undefined); // 🔄 Triggers an update to the tree view
+        const logger = new Logger();
+        logger.info("🔄 Refreshing solution tree...");
+    
+        // 🔥 Ensure solutionParser is reloaded before refreshing tree
+        this.solutionParser.parseSolution().then(() => {
+            this._onDidChangeTreeData.fire(undefined);
+            logger.info("✅ Solution tree successfully refreshed.");
+        }).catch(error => {
+            logger.error("❌ Error refreshing solution tree:", error);
+        });
     }
+    
 
     getParent(element: TreeNode): TreeNode | null {
         return null;

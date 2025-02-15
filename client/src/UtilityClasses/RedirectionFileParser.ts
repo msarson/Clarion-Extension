@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { Logger } from './Logger';
 import { globalSettings } from '../globals';
+import { workspace } from 'vscode';
 
 // Import global variables from the extension
 
@@ -80,6 +81,7 @@ export class RedirectionFileParser {
 
         return Array.from(new Set(paths));  // ✅ Remove duplicates
     }
+    
 
 
 
@@ -92,12 +94,12 @@ export class RedirectionFileParser {
             logger.warn(`⚠️ Redirection file not found: ${redFile}`);
             return [];
         }
-
+    
         logger.info(`📂 Parsing redirection file: ${redFile} (Looking for: *.${fileExtension})`);
         const content: string = fs.readFileSync(redFile, 'utf-8');
         const redPath = path.dirname(redFile);
         const paths: string[] = [];
-
+    
         // ✅ Ensure '.' is added FIRST for each extension when parsing starts
         if (!paths.includes('.')) {
             paths.push('.');  // 🔥 Adds project root first
@@ -105,11 +107,11 @@ export class RedirectionFileParser {
         }
         const lines = content.split('\n');
         let foundSection = "";
-
+    
         for (const line of lines) {
             const trimmedLine = line.trim();
             if (trimmedLine.startsWith('--') || trimmedLine === '') continue; // Skip comments/empty lines
-
+    
             // ✅ Detect Section Headers and Set Active Section
             const sectionMatch = this.extractSection(trimmedLine);
             if (sectionMatch) {
@@ -124,15 +126,15 @@ export class RedirectionFileParser {
             else if (trimmedLine.startsWith('{include')) {
                 logger.info(`🔄 Processing included redirection file for *.${fileExtension}: ${trimmedLine}`);
                 const pathsMap: Record<string, string[]> = { [fileExtension]: paths };
-
+    
                 this.processIncludedRedirection(redPath, trimmedLine, fileExtension, pathsMap);
             }
             // ✅ Process Paths for the Active Section
             else if (trimmedLine.includes('=') && foundSection) {
                 logger.info(`📌 Processing line in [${foundSection}] for *.${fileExtension}: ${trimmedLine}`);
-
+    
                 const extractedPaths = this.processLine(foundSection, trimmedLine, redPath, fileExtension, {});
-
+    
                 if (extractedPaths.length > 0) {
                     logger.info(`📌 Extracted paths from [${foundSection}] for *.${fileExtension}: (${extractedPaths.length})`);
                     extractedPaths.forEach((path, index) => logger.info(`   ${index + 1}. ${path}`));
@@ -140,9 +142,9 @@ export class RedirectionFileParser {
                 paths.push(...extractedPaths); // ✅ Append paths immediately in order
             }
         }
-
+    
         globalSettings.libsrcPaths.forEach(libPath => paths.push(libPath));
-
+    
         // ✅ Remove duplicates while preserving order
         const uniquePaths = paths.filter((path, index) => paths.indexOf(path) === index);
         
@@ -152,10 +154,8 @@ export class RedirectionFileParser {
         uniquePaths.forEach((path, index) => logger.info(`   ${index + 1}. ${path}`));
         
         return uniquePaths; // ✅ Return de-duplicated list
-
-
     }
-
+    
 
 
     private extractSection(trimmedLine: string): string | null {

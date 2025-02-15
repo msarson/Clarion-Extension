@@ -72,10 +72,10 @@
                 "title": "Clarion: Open Solution"
             },
             {
-              "command": "clarion.refreshSolution",
-              "title": "Clarion: Refresh Solution",
-              "category": "Clarion",
-              "when": "clarion.solutionOpen"
+                "command": "clarion.refreshSolution",
+                "title": "Clarion: Refresh Solution",
+                "category": "Clarion",
+                "when": "clarion.solutionOpen"
             },
             {
                 "command": "clarion.quickOpen",
@@ -126,6 +126,32 @@
             "type": "object",
             "title": "Clarion Extension Configuration",
             "properties": {
+                "clarion.fileSearchExtensions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": [
+                        ".clw",
+                        ".inc",
+                        ".equ",
+                        ".eq"
+                    ],
+                    "description": "Defines the file extensions used for searching files in Quick Open (Ctrl+P)."
+                },
+                "clarion.defaultLookupExtensions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": [
+                        ".clw",
+                        ".inc",
+                        ".equ",
+                        ".eq"
+                    ],
+                    "description": "Defines the file extensions used for document linking and hover previews when a file is not part of a project."
+                },
                 "clarion.solutionFile": {
                     "type": "string",
                     "default": "",
@@ -155,7 +181,11 @@
                 "clarion.trace.server": {
                     "scope": "window",
                     "type": "string",
-                    "enum": ["off", "messages", "verbose"],
+                    "enum": [
+                        "off",
+                        "messages",
+                        "verbose"
+                    ],
                     "default": "off",
                     "description": "Traces the communication between VS Code and the language server."
                 },

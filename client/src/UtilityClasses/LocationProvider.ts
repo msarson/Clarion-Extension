@@ -42,46 +42,47 @@ export class LocationProvider {
      */
     public getLocationFromPattern(document: TextDocument, pattern: RegExp): ClarionLocation[] | null {
         const documentDirectory = path.dirname(document.uri.fsPath);
-        const solutionFolder: string = path.dirname(globalSettings.redirectionPath);
-
-
-        if (documentDirectory.startsWith(solutionFolder)) {
-            this.clarionProject.properties = this.clarionProject.findProjectOrSolutionDirectory(documentDirectory);
-        }
-
+    
+        // ✅ Restore the original way of determining the project directory
+        this.clarionProject.properties = this.clarionProject.findProjectOrSolutionDirectory(documentDirectory);
+    
         const matches = this.getRegexMatches(document, pattern);
         if (!matches) return null;
-
+    
         const locations: ClarionLocation[] = [];
         const customMatches: CustomRegExpMatch[] = matches;
-        customMatches.sort((a, b) => a.lineIndex - b.lineIndex);
-
+        customMatches.sort((a, b) => a.lineIndex - b.lineIndex);  // ✅ Ensure correct order
+    
         for (const match of customMatches) {
             const fileName = this.getFullPath(match[1], path.basename(document.uri.fsPath));
             if (!fileName || !fs.existsSync(fileName)) {
                 continue;
             }
-
+    
+            // ✅ Calculate the position where the match occurs
             const valueToFind = match[1]; 
             const valueStart = match.index + match[0].indexOf(valueToFind);
             const valueEnd = valueStart + valueToFind.length;
             const sectionName = match[2] || ''; 
             const sectionLineNumber = this.findSectionLineNumber(fileName, sectionName);
-
+    
+            // ✅ Ensure location object has all necessary properties
             const location: ClarionLocation = {
                 fullFileName: fileName,
                 sectionLineLocation: new Position(sectionLineNumber, 0),
                 linePosition: new Position(match.lineIndex, valueStart),
                 linePositionEnd: new Position(match.lineIndex, valueEnd),
-                statementType: '',
+                statementType: '',  // Statement type is handled separately
                 result: match,
             };
-
+    
             locations.push(location);
         }
         return locations;
     }
-
+    
+    
+    
     private getRegexMatches(document: TextDocument, pattern: RegExp): CustomRegExpMatch[] {
         const matches: CustomRegExpMatch[] = [];
         for (let lineIndex = 0; lineIndex < document.lineCount; lineIndex++) {

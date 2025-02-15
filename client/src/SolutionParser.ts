@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import { RedirectionFileParser } from './UtilityClasses/RedirectionFileParser';
 import * as xml2js from 'xml2js';
 import { Logger } from './UtilityClasses/Logger';
-import { globalSettings } from './globals';
+import { globalSettings, globalSolutionFile } from './globals';
 
 // Import global variables from extension.ts
 
@@ -55,7 +55,7 @@ export class SolutionParser {
 
     private async initialize() {
         const logger = new Logger(); 
-        logger.setDebugMode(true);
+        
         
         
         this.solution = await this.parseSolution();
@@ -79,6 +79,11 @@ export class SolutionParser {
         });
     }
 
+    private getDefaultLookupExtensions(): string[] {
+        const config = workspace.getConfiguration("clarion");
+        return config.get<string[]>("defaultLookupExtensions") ?? [".clw", ".inc", ".equ", ".eq"];
+    }
+
     /**
   * Resolves and merges search paths for a project by reading its redirection file.
   * 
@@ -92,37 +97,39 @@ export class SolutionParser {
  * @param projectPath - The root path of the project.
  * @returns A mapping of file extensions to their resolved search paths.
  */
-private async resolveProjectSearchPaths(projectPath: string): Promise<Record<string, string[]>> {
-    const logger = new Logger(); 
-    logger.info(`📂 Resolving search paths for project: ${projectPath}`);
-
-    // ✅ Initialize RedirectionFileParser to get search paths
-    const redirectionFileParser = new RedirectionFileParser(globalSettings.configuration, projectPath);
-
-    // ✅ Retrieve search paths for each relevant file extension
-    const searchPathsByExt: Record<string, string[]> = {};
-    const extensions = ['.clw', '.inc', '.equ', '.int'];
-
-    for (const ext of extensions) {
+  
+    private async resolveProjectSearchPaths(projectPath: string): Promise<Record<string, string[]>> {
+        const logger = new Logger(false);
+        logger.info(`📂 Resolving search paths for project: ${projectPath}`);
+    
+        // ✅ Keep setting-based extensions lookup
+        const extensions = this.getDefaultLookupExtensions(); 
         
-        searchPathsByExt[ext] = redirectionFileParser.getSearchPaths(ext, projectPath);
+        const redirectionFileParser = new RedirectionFileParser(globalSettings.configuration, projectPath);
+    
+        // ✅ Retrieve search paths for each relevant file extension
+        const searchPathsByExt: Record<string, string[]> = {};
+    
+        for (const ext of extensions) {
+            const normalizedExt = ext.toLowerCase(); // ✅ Ensure consistent case
+            searchPathsByExt[normalizedExt] = redirectionFileParser.getSearchPaths(normalizedExt, projectPath);
+    
+            logger.info(`📌 Paths extracted for ${normalizedExt}:`, searchPathsByExt[normalizedExt]); // Log order
+        }
+    
+        // ✅ Merge project paths with global library paths, ensuring redirection file order is kept
+        const finalSearchPaths: Record<string, string[]> = {};
+        for (const ext of extensions) {
+            const normalizedExt = ext.toLowerCase(); // ✅ Normalize extension case
+            finalSearchPaths[normalizedExt] = ['.']
+                .concat(searchPathsByExt[normalizedExt]);  // ✅ Preserve order from the redirection file
+        }
+    
+        logger.info(`📂 Final resolved search paths for ${projectPath}:`, finalSearchPaths);
         
-        logger.info(`📌 Paths extracted for ${ext}:`, searchPathsByExt[ext]); // Log order
-    }
-
-    // ✅ Merge project paths with global library paths, ensuring redirection file order is kept
-    const finalSearchPaths: Record<string, string[]> = {};
-    for (const ext of extensions) {
-        finalSearchPaths[ext] = ['.']
-            .concat(searchPathsByExt[ext]);  // ✅ Preserve order from the redirection file
+        return finalSearchPaths;
     }
     
-
-    logger.info(`📂 Final resolved search paths for ${projectPath}:`, finalSearchPaths);
-    
-    return finalSearchPaths;
-}
-
 
 
     public findFileInRedirectionPaths(file: string, pathsToLookin: Record<string, string[]>, projectDir: string): string | null {
@@ -178,27 +185,29 @@ private async resolveProjectSearchPaths(projectPath: string): Promise<Record<str
     }
 
 
-    private async getDefaultPathsFromRedirectionFile(): Promise<Record<string, string[]>> {
-        const logger = new Logger(); 
-        const finalSearchPaths: Record<string, string[]> = {};
+    public getDefaultPathsFromRedirectionFile(): Record<string, string[]> {
+        const logger = new Logger();
+        logger.info("📌 Fetching default paths from redirection file.");
     
+        const finalSearchPaths: Record<string, string[]> = {};
+        const extensions = this.getDefaultLookupExtensions(); // ✅ Keep setting-based extensions lookup
+        logger.info("🔹 Default Extensions:", extensions);
         for (const project of this.solution.projects) {
             const redirectionFileParser = new RedirectionFileParser(globalSettings.configuration, project.path);
-    
+            
             logger.info(`📂 Resolving search paths for project: ${project.name} at ${project.path}`);
     
-            const redPaths: Record<string, string[]> = {
-                '.clw': redirectionFileParser.getSearchPaths('.clw', project.path),
-                '.inc': redirectionFileParser.getSearchPaths('.inc', project.path),
-                '.equ': redirectionFileParser.getSearchPaths('.equ', project.path),
-                '.int': redirectionFileParser.getSearchPaths('.int', project.path)
-            };
+            const redPaths: Record<string, string[]> = {};
+    
+            for (const ext of extensions) {
+                const normalizedExt = ext.toLowerCase();
+                redPaths[normalizedExt] = redirectionFileParser.getSearchPaths(normalizedExt, project.path);
+            }
     
             for (const ext of Object.keys(redPaths)) {
                 if (!finalSearchPaths[ext]) {
                     finalSearchPaths[ext] = [];
                 }
-    
                 // ✅ Add paths while preserving order and removing duplicates
                 redPaths[ext].forEach((path) => {
                     if (!finalSearchPaths[ext].includes(path)) {

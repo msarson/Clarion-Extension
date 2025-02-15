@@ -16,6 +16,7 @@ import { ClarionLocation } from './UtilityClasses/LocationProvider'; // Make sur
 import { SolutionParser } from './SolutionParser'; // Adjust the import path based on your project structure
 import * as path from 'path';
 import { Logger } from './UtilityClasses/Logger';
+import { globalSettings } from './globals';
 interface DocumentInfo {
     statementLocations: ClarionLocation[];
 }
@@ -75,7 +76,7 @@ export class DocumentManager implements Disposable {
         return manager;
     }
     private async initialize(solutionParser: SolutionParser) {
-        const logger = new Logger(); 
+        const logger = new Logger();
         logger.info("✅ DocumentManager.initialize() called");
         this.locationProvider = new LocationProvider(solutionParser);
 
@@ -105,7 +106,7 @@ export class DocumentManager implements Disposable {
 
 
     private async onDidSaveTextDocument(document: TextDocument) {
-        const logger = new Logger(); 
+        const logger = new Logger();
         logger.info(`Document saved: ${document.uri.fsPath}`);
         await this.updateDocumentInfo(document);
     }
@@ -126,14 +127,14 @@ export class DocumentManager implements Disposable {
         }
     }
     private async onDidOpenTextDocument(document: TextDocument) {
-        const logger = new Logger(); 
+        const logger = new Logger();
         logger.info(`📄 [EVENT] Document opened: ${document.uri.fsPath}`);
         await this.updateDocumentInfo(document);
 
     }
 
     private async onDidChangeTextDocument(event: TextDocumentChangeEvent) {
-        const logger = new Logger(); 
+        const logger = new Logger();
         const doc = event.document;
         logger.info(`Document changed: ${doc.uri.fsPath}`);
         await this.updateDocumentInfo(event.document);
@@ -184,23 +185,30 @@ export class DocumentManager implements Disposable {
      * @returns An array of DocumentLink objects representing the navigable code links within the document.
      */
     generateDocumentLinks(uri: Uri): DocumentLink[] {
-        
-        logger.info(`🔗 Generating links for document: ${uri.fsPath}`);
-    
+        const logger = new Logger();
         const documentInfo = this.getDocumentInfo(uri);
+        logger.info(`🔗 Generating links for document: ${uri.fsPath}`);
+        logger.info(`🔍 Checking document for INCLUDE links: ${uri.fsPath}`);
+
+
+
         if (!documentInfo) {
             logger.info("❌ DocumentInfo is undefined for uri:", uri.fsPath);
             return [];
         }
-    
+        for (const location of documentInfo.statementLocations) {
+            logger.info(`📝 Found INCLUDE statement: ${location.fullFileName} (${location.statementType})`);
+        }
+
+
         const links: DocumentLink[] = [];
         logger.info(`📄 Checking document: ${uri.fsPath}`);
         logger.info(`📌 Found ${documentInfo.statementLocations.length} statement locations`);
-    
+
         // 🔹 Process existing document statements from `documentInfo`
         for (const location of documentInfo.statementLocations) {
             logger.info(`🔍 Processing location: ${JSON.stringify(location)}`);
-    
+
             if (
                 (location.statementType === "INCLUDE" || location.statementType === "MODULE" ||
                     location.statementType === "MEMBER" || location.statementType === "SECTION") &&
@@ -209,13 +217,13 @@ export class DocumentManager implements Disposable {
             ) {
                 let targetUri = Uri.file(location.fullFileName);
                 logger.info(`🔗 Creating link: ${location.statementType} -> ${targetUri.fsPath}`);
-    
+
                 if (location.statementType === "SECTION" && location.sectionLineLocation) {
                     const lineQueryParam = `${location.sectionLineLocation.line + 1}:1`;
                     targetUri = targetUri.with({ fragment: lineQueryParam });
                     logger.info(`📍 Adding section fragment: ${lineQueryParam}`);
                 }
-    
+
                 const link = new DocumentLink(
                     new Range(location.linePosition, location.linePositionEnd),
                     targetUri
@@ -223,15 +231,15 @@ export class DocumentManager implements Disposable {
                 links.push(link);
             }
         }
-    
+
         // 🔹 Find and process LINK('filename.ext') using `documentInfo`
         for (const location of documentInfo.statementLocations) {
             logger.info(`🔍 Processing LINK statement: ${JSON.stringify(location)}`);
-    
+
             if (location.statementType === "LINK" && location.fullFileName) {
                 const targetUri = Uri.file(location.fullFileName);
                 logger.info(`🔗 Creating LINK() reference: ${location.fullFileName} -> ${targetUri.fsPath}`);
-    
+
                 if (location.linePosition && location.linePositionEnd) {
                     const link = new DocumentLink(
                         new Range(location.linePosition, location.linePositionEnd),
@@ -241,12 +249,12 @@ export class DocumentManager implements Disposable {
                 }
             }
         }
-    
+
         logger.info(`✅ Document link generation complete. Created ${links.length} links.`);
         return links;
     }
-    
-    
+
+
 
 
 
@@ -289,7 +297,22 @@ export class DocumentManager implements Disposable {
      * It extracts locations for "INCLUDE", "MODULE", and "MEMBER" patterns and stores these locations in the openDocuments map.
      */
     public async updateDocumentInfo(document: TextDocument) {
-        const logger = new Logger(); 
+        const logger = new Logger();
+
+        logger.info(`📄 Processing document: ${document.uri.fsPath}`);
+
+        // 🔹 Get latest lookup extensions
+        const lookupExtensions = globalSettings.defaultLookupExtensions;
+        const documentExt = path.extname(document.uri.fsPath).toLowerCase();
+
+
+        logger.info(`🔍 Current lookup extensions: ${JSON.stringify(lookupExtensions)}`);
+
+        // if (!lookupExtensions.includes(documentExt)) {
+        //     logger.warn(`⚠️ Skipping document, not in lookup extensions: ${documentExt}`);
+        //     return; // 🔹 Exit early if not in the lookup list
+        // }
+
         if (document.uri.scheme !== 'file' || document.uri.fsPath.endsWith('.code-workspace')) {
             logger.warn(`⚠ Skipping document: ${document.uri.fsPath}`);
             return;
@@ -297,20 +320,29 @@ export class DocumentManager implements Disposable {
 
         logger.info(`📄 Updating document info: ${document.uri.fsPath}`);
 
+        // 🔹 Reprocess links
         const statementLocations: ClarionLocation[] = [];
         statementLocations.push(...this.processPattern(document, this.includePattern, "INCLUDE"));
         statementLocations.push(...this.processPattern(document, this.modulePattern, "MODULE"));
         statementLocations.push(...this.processPattern(document, this.memberPattern, "MEMBER"));
         statementLocations.push(...this.processPattern(document, this.linkPattern, "LINK"));
 
-        // Store document info in openDocuments map
-        this.openDocuments.set(document.uri.toString().toLowerCase(), { statementLocations });
+        // 🔹 Only store document info if there are statement locations
+        if (statementLocations.length > 0) {
+            this.openDocuments.set(document.uri.toString().toLowerCase(), { statementLocations });
 
-        logger.info(`✅ Stored document info for ${document.uri.fsPath}`);
-        logger.info(`📄 openDocuments now has ${this.openDocuments.size} entries.`);
+            logger.info(`✅ Stored document info for ${document.uri.fsPath}`);
+            logger.info(`📄 openDocuments now has ${this.openDocuments.size} entries.`);
+            // 🔹 Log Each Statement Location
+            logger.info(`🔍 Statement Locations Found (${statementLocations.length}):`);
+            // statementLocations.forEach((location, index) => {
+            //     logger.info(`   [${index + 1}] Type: ${location.type}, Line: ${location.range.start.line + 1}, Text: ${location.text}`);
+            // });
+        } else {
+            logger.info(`⚠️ Skipping storing document info for ${document.uri.fsPath}, no statement locations found.`);
+        }
+
     }
-
-
     /**
      * Processes a document to extract and map locations that match the provided regular expression pattern.
      *
@@ -324,24 +356,24 @@ export class DocumentManager implements Disposable {
      * @returns An array of ClarionLocation objects representing the statement and, if applicable, its associated section.
      */
     private processPattern(document: TextDocument, pattern: RegExp, statementType: string): ClarionLocation[] {
-        const logger = new Logger(); 
+        const logger = new Logger(false);
         if (!this.locationProvider) {
             logger.error(`❌ Error: locationProvider is not initialized when processing ${statementType}.`);
             return [];
         }
         const statementLocations: ClarionLocation[] = [];
-        const locations = this.locationProvider.getLocationFromPattern(document, pattern);
+        const clarionLocation = this.locationProvider.getLocationFromPattern(document, pattern);
 
         logger.info(`Processing ${statementType} in: ${document.uri.fsPath}`);
         logger.info(`Pattern: ${pattern}`);
-        logger.info(`Found locations:`, locations);
+        logger.info(`Found locations:`, clarionLocation);
 
-        if (!locations || locations.length === 0) {
+        if (!clarionLocation || clarionLocation.length === 0) {
             logger.warn(`No ${statementType} matches found!`);
             return statementLocations;
         }
 
-        for (const location of locations) {
+        for (const location of clarionLocation) {
             logger.info(`Matched ${statementType}:`, location);
 
             const statementLocation: ClarionLocation = {
@@ -361,7 +393,7 @@ export class DocumentManager implements Disposable {
 
 
     getDocumentInfo(uri: Uri): DocumentInfo | undefined {
-        const logger = new Logger(); 
+        const logger = new Logger();
         try {
             // Normalize the URI for consistency in lookups
             const normalizedUri = uri.toString().toLowerCase();
