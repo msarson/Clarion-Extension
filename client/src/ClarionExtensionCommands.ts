@@ -23,81 +23,98 @@ interface ClarionVersionProperties {
 
 export class ClarionExtensionCommands {
 
+
   /**
-   * Prompts the user to select a ClarionProperties.xml file and updates the global settings.
+   * Asynchronously prompts the user to locate and select a ClarionProperties.xml file and parses
+   * available Clarion versions from the file. Then prompts the user to choose a Clarion version
+   * and updates global and workspace settings with the chosen version. Displays relevant error
+   * or informational messages to the user as needed.
+   *
+   * @returns A Promise that resolves once the ClarionProperties.xml selection and version choice have been
+   *          recorded in global and workspace settings. Returns early if any part of the process fails.
+   *
+   * @throws Will throw an error if any step in selecting or updating the ClarionProperties.xml or version fails.
    */
   static async configureClarionPropertiesFile() {
     const logger = new Logger();
     try {
-      const appDataPath = process.env.APPDATA;
-      if (!appDataPath) {
-        window.showErrorMessage("Unable to access AppData path.");
-        logger.error('APPDATA environment variable is not set.');
-        return;
-      }
+        const appDataPath = process.env.APPDATA;
+        if (!appDataPath) {
+            window.showErrorMessage("Unable to access AppData path.");
+            logger.error("APPDATA environment variable is not set.");
+            return;
+        }
 
-      const defaultDirectory = Uri.file(path.join(appDataPath, 'SoftVelocity', 'Clarion'));
+        const defaultDirectory = Uri.file(path.join(appDataPath, "SoftVelocity", "Clarion"));
 
-      const selectedFileUri = await window.showOpenDialog({
-        defaultUri: defaultDirectory,
-        canSelectFiles: true,
-        canSelectFolders: false,
-        openLabel: 'Select ClarionProperties.xml',
-        filters: { XML: ['xml'] }
-      });
+        const selectedFileUri = await window.showOpenDialog({
+            defaultUri: defaultDirectory,
+            canSelectFiles: true,
+            canSelectFolders: false,
+            openLabel: "Select ClarionProperties.xml",
+            filters: { XML: ["xml"] },
+        });
 
-      if (!selectedFileUri || selectedFileUri.length === 0) {
-        window.showErrorMessage("No ClarionProperties.xml file selected.");
-        return;
-      }
+        if (!selectedFileUri || selectedFileUri.length === 0) {
+            window.showWarningMessage("No ClarionProperties.xml file selected.");
+            return;
+        }
 
-      const selectedFilePath = selectedFileUri[0].fsPath;
-      logger.info("📂 Selected ClarionProperties.xml:", selectedFilePath);
+        const selectedFilePath = selectedFileUri[0].fsPath;
+        logger.info("📂 Selected ClarionProperties.xml:", selectedFilePath);
 
-      // ✅ Update global setting and workspace setting for ClarionProperties.xml
-      await setGlobalClarionSelection(globalSolutionFile, selectedFilePath, globalClarionVersion ,globalSettings.configuration);
+        // ✅ Save the properties file path
+        await setGlobalClarionSelection(globalSolutionFile, selectedFilePath, globalClarionVersion, globalSettings.configuration);
 
-      // ✅ Parse available versions from the selected file
-      const versionProperties = await ClarionExtensionCommands.parseAvailableVersions(selectedFilePath);
+        // ✅ Parse available versions from the selected file
+        const versionProperties = await ClarionExtensionCommands.parseAvailableVersions(selectedFilePath);
 
-      if (versionProperties.length === 0) {
-        window.showErrorMessage('No Clarion versions found in the selected ClarionProperties.xml file.');
-        return;
-      }
+        if (versionProperties.length === 0) {
+            window.showErrorMessage("No Clarion versions found in the selected ClarionProperties.xml file.");
+            return;
+        }
 
-      // ✅ Ask the user to select a Clarion version
-      const versionSelection = await window.showQuickPick(versionProperties.map(v => v.clarionVersion), {
-        placeHolder: 'Select a Clarion version'
-      });
+        // ✅ Prompt user to select a version
+        const versionSelection = await window.showQuickPick(versionProperties.map((v) => v.clarionVersion), {
+            placeHolder: "Select a Clarion version",
+        });
 
-      if (!versionSelection) {
-        window.showErrorMessage("No Clarion version selected.");
-        return;
-      }
+        if (!versionSelection) {
+            window.showWarningMessage("No Clarion version selected. Keeping previous version.");
+            return;
+        }
 
-      const selectedVersionProps = versionProperties.find(v => v.clarionVersion === versionSelection);
-      if (!selectedVersionProps) {
-        window.showErrorMessage(`Clarion version '${versionSelection}' not found in ClarionProperties.xml.`);
-        return;
-      }
+        // ✅ Find the selected version's properties
+        const selectedVersionProps = versionProperties.find((v) => v.clarionVersion === versionSelection);
+        if (!selectedVersionProps) {
+            window.showErrorMessage(`Clarion version '${versionSelection}' not found in ClarionProperties.xml.`);
+            return;
+        }
 
-      // ✅ Update global setting and workspace setting for Clarion version
-      await setGlobalClarionSelection(globalSolutionFile, globalClarionPropertiesFile, versionSelection, globalSettings.configuration);
+        // ✅ Save the selected version
+        await setGlobalClarionSelection(globalSolutionFile, selectedFilePath, versionSelection, globalSettings.configuration);
 
-      // ✅ Update runtime global settings (NOT stored in workspace)
-      ClarionExtensionCommands.updateGlobalSettings(selectedVersionProps);
+        // ✅ Update global runtime settings (NOT stored in workspace.json)
+        ClarionExtensionCommands.updateGlobalSettings(selectedVersionProps);
 
-      window.showInformationMessage(`Clarion version '${versionSelection}' selected and settings updated.`);
+        window.showInformationMessage(`Clarion version '${versionSelection}' selected and settings updated.`);
 
     } catch (error) {
-      logger.error("❌ Error in configureClarionPropertiesFile:", error);
-      window.showErrorMessage(`Error configuring Clarion properties: ${error instanceof Error ? error.message : String(error)}`);
+        logger.error("❌ Error in configureClarionPropertiesFile:", error);
+        window.showErrorMessage(`Error configuring Clarion properties: ${error instanceof Error ? error.message : String(error)}`);
     }
-  }
+}
+
 
   /**
-   * Updates the global variables instead of workspace settings.
-   * @param selectedVersionProps The selected Clarion version properties.
+   * Updates the global Clarion settings to reflect the specified version properties.
+   *
+   * @param selectedVersionProps - The Clarion version properties that will be used
+   * to update the current global configuration. If omitted, no update occurs.
+   *
+   * @remarks
+   * This method adjusts the global redirection file, its directory path, macros, and LIBSRC paths
+   * to match the specified version's configuration. It logs the updated settings for reference.
    */
   private static updateGlobalSettings(selectedVersionProps: ClarionVersionProperties | undefined) {
     const logger = new Logger(); 
@@ -116,10 +133,12 @@ export class ClarionExtensionCommands {
     }
   }
 
-
-
   /**
-   * Reads and parses available Clarion version properties from an XML file.
+   * Asynchronously parses the specified XML file to retrieve all available Clarion versions.
+   *
+   * @param filePath - The full path to the XML file containing Clarion version properties.
+   * @returns A promise that resolves to an array of ClarionVersionProperties objects, each representing
+   *          a discovered Clarion version along with its associated configuration data.
    */
   private static async parseAvailableVersions(filePath: string): Promise<ClarionVersionProperties[]> {
     const xmlContent = fs.readFileSync(filePath, 'utf-8');
@@ -154,11 +173,35 @@ export class ClarionExtensionCommands {
     return versions;
   }
 
+  /**
+   * Retrieves the value of the "RedirectionFile" property from a given array
+   * of property objects. If the property is not found, returns an empty string.
+   *
+   * @param properties - The array of property objects to search.
+   * @returns The value of the "RedirectionFile" property or an empty string if it's absent.
+   */
   private static extractRedirectionFile(properties: any[]): string {
     const redirectionFileProperty = properties.find((p: any) => p.$.name === 'RedirectionFile');
     return redirectionFileProperty?.Name?.[0]?.$.value || '';
   }
 
+
+  /**
+   * Extracts macro definitions from a given properties object, typically derived
+   * from XML structure. This function expects to find a "RedirectionFile" property
+   * containing a "Macros" section, each macro item being parsed into a key-value pair.
+   * 
+   * @param properties - The properties object (or array of objects) containing
+   *   potential macro definitions under "RedirectionFile" → "Macros".
+   * @returns A record mapping each macro name (in lowercase) to its string value.
+   * 
+   * @remarks
+   * - Logs various messages to indicate the extraction process and any anomalies
+   *   with the data structure.
+   * - Converts a single properties object into an array for uniform processing.
+   * - Any macro entries that do not meet the expected format generate warning logs
+   *   rather than an error.
+   */
   public static extractMacros(properties: any): Record<string, string> {
     const logger = new Logger(); 
     const macros: Record<string, string> = {};
@@ -212,10 +255,17 @@ export class ClarionExtensionCommands {
   }
 
 
-
-
   /**
-   * Prompts the user to select a solution file (.sln).
+   * Prompts the user to select a solution file from the current workspace and updates the workspace configuration.
+   * 
+   * @remarks
+   * This method opens a file dialog filtered for Visual Studio solution files, allowing the user to pick a file.
+   * If a file is successfully selected, it updates the `clarion.solutionFile` setting in the workspace configuration 
+   * and shows a confirmation message. Otherwise, it shows a notification indicating no file was selected or an error occurred.
+   * 
+   * @throws Will show an error message and log in case of any unexpected failure during file selection.
+   * 
+   * @returns A promise that resolves once the solution file selection and configuration update are complete.
    */
   static async selectSolutionFile() {
     const logger = new Logger(); 
@@ -249,21 +299,70 @@ export class ClarionExtensionCommands {
       window.showErrorMessage("An error occurred while selecting the solution file.");
     }
   }
+
+
+  /**
+   * Asynchronously selects a Clarion version from the workspace configuration.
+   * 
+   * Retrieves a list of available Clarion versions from the extension settings.
+   * If no versions are configured, displays an error message. Otherwise, presents
+   * a quick pick menu allowing the user to choose a version, then updates the
+   * workspace settings with the chosen version and displays a confirmation message.
+   *
+   * @returns A promise that resolves when the chosen version is stored or if none is chosen.
+   */
   static async selectClarionVersion() {
-    const versions = workspace.getConfiguration().get<string[]>('clarion.versions', []);
-    if (versions.length === 0) {
-      window.showErrorMessage("No Clarion versions found in settings.");
-      return;
+    const config = workspace.getConfiguration();
+    let versions = config.get<string[]>('clarion.versions', []);
+
+    const choices = versions.length > 0
+        ? [...versions, "🔹 Add new version..."]
+        : ["🔹 Add new version..."];
+
+    const selectedVersion = await window.showQuickPick(choices, { placeHolder: "Select a Clarion version" });
+
+    // ✅ If user cancels, exit
+    if (!selectedVersion) return;
+
+    // ✅ Handle manual version entry
+    if (selectedVersion === "🔹 Add new version...") {
+        const manualVersion = await window.showInputBox({
+            prompt: "Enter a Clarion version (e.g., Clarion 11.1.13855):",
+            placeHolder: "Clarion 11.1.XXXXX"
+        });
+
+        if (!manualVersion) {
+            window.showWarningMessage("Clarion version selection was canceled.");
+            return;
+        }
+
+        // ✅ Ensure the new version is added to the list
+        versions.push(manualVersion);
+        await config.update('clarion.versions', versions, ConfigurationTarget.Workspace);
+        await config.update('clarion.version', manualVersion, ConfigurationTarget.Workspace);
+
+        window.showInformationMessage(`Added and selected Clarion version: ${manualVersion}`);
+        return; // ✅ Ensure we EXIT after setting the version
     }
 
-    const selectedVersion = await window.showQuickPick(versions, { placeHolder: "Select a Clarion version" });
-    if (selectedVersion) {
-      await workspace.getConfiguration().update('selectedClarionVersion', selectedVersion, ConfigurationTarget.Workspace);
-      window.showInformationMessage(`Selected Clarion version: ${selectedVersion}`);
-    }
-  }
+    // ✅ If user selects an existing version, just set it and exit
+    await config.update('clarion.version', selectedVersion, ConfigurationTarget.Workspace);
+    window.showInformationMessage(`Selected Clarion version: ${selectedVersion}`);
+}
 
 
+
+
+  /**
+   * Asynchronously updates the workspace configurations for Clarion.
+   *
+   * This method retrieves the Clarion properties file path and selected version from
+   * the user's workspace settings. It parses available versions and updates the global
+   * settings if a matching version is found. Any errors are logged.
+   *
+   * @throws {Error} If there is a problem reading or parsing the properties file, or
+   * if updating the configuration fails for any reason.
+   */
   static async updateWorkspaceConfigurations() {
     try {
       const clarionFilePath = workspace.getConfiguration().get<string>('clarion.propertiesFile');

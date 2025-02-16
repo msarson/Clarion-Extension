@@ -1,6 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
-import { Logger } from './Logger';
+import { Logger } from '../UtilityClasses/Logger';
 import { globalSettings } from '../globals';
 import { workspace } from 'vscode';
 

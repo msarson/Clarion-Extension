@@ -45,9 +45,18 @@
             {
                 "command": "clarion.quickOpen",
                 "key": "ctrl+p",
-                "when": "editorTextFocus"
+                "when": "clarion.solutionOpen && editorTextFocus"
             }
         ],
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "clarionViews",
+                    "title": "Clarion",
+                    "icon": "images/sv57x57.png"
+                }
+            ]
+        },
         "views": {
             "explorer": [
                 {
@@ -63,19 +72,8 @@
                 "when": "clarion.solutionOpen"
             },
             {
-                "command": "clarion.openSolutionTree",
-                "title": "Clarion: Open Solution Tree",
-                "when": "clarion.solutionOpen"
-            },
-            {
                 "command": "clarion.openSolution",
                 "title": "Clarion: Open Solution"
-            },
-            {
-                "command": "clarion.refreshSolution",
-                "title": "Clarion: Refresh Solution",
-                "category": "Clarion",
-                "when": "clarion.solutionOpen"
             },
             {
                 "command": "clarion.quickOpen",

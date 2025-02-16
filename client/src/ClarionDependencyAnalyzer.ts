@@ -6,13 +6,24 @@ enum DependencyType {
     Module = 'MODULE',
 }
 
+/**
+ * Class responsible for analyzing dependencies in Clarion files.
+ */
 export class ClarionDependencyAnalyzer {
     private dependencyGraph: Map<string, { type: DependencyType, modulePath: string, lineNumber: number }[]>;
 
+    /**
+     * Creates an instance of ClarionDependencyAnalyzer.
+     * @param filePath - The path to the Clarion file to analyze.
+     */
     constructor(private filePath: string) {
         this.dependencyGraph = new Map<string, { type: DependencyType, modulePath: string, lineNumber: number }[]>();
     }
 
+    /**
+     * Parses the dependencies of a given Clarion file.
+     * @param filePath - The path to the Clarion file to parse.
+     */
     private parseDependencies(filePath: string) {
         if (!fs.existsSync(filePath)) {
             return;
@@ -51,6 +62,10 @@ export class ClarionDependencyAnalyzer {
         }
     }
 
+    /**
+     * Analyzes the dependencies of the initial Clarion file.
+     * @returns A map representing the dependency graph.
+     */
     public analyze() {
         this.parseDependencies(this.filePath);
         return this.dependencyGraph;

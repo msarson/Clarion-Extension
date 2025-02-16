@@ -11,12 +11,13 @@ import {
     DocumentLink
 } from 'vscode';
 
-import LocationProvider from './UtilityClasses/LocationProvider'; // Adjust the import path based on your project structure
-import { ClarionLocation } from './UtilityClasses/LocationProvider'; // Make sure this import is correct
-import { SolutionParser } from './SolutionParser'; // Adjust the import path based on your project structure
+import LocationProvider from './providers/LocationProvider'; // Adjust the import path based on your project structure
+import { ClarionLocation } from './providers/LocationProvider'; // Make sure this import is correct
+
 import * as path from 'path';
 import { Logger } from './UtilityClasses/Logger';
 import { globalSettings } from './globals';
+import { SolutionParser } from './Parser/SolutionParser';
 interface DocumentInfo {
     statementLocations: ClarionLocation[];
 }
@@ -303,7 +304,7 @@ export class DocumentManager implements Disposable {
 
         // 🔹 Get latest lookup extensions
         const lookupExtensions = globalSettings.defaultLookupExtensions;
-        const documentExt = path.extname(document.uri.fsPath).toLowerCase();
+        
 
 
         logger.info(`🔍 Current lookup extensions: ${JSON.stringify(lookupExtensions)}`);

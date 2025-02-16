@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { DocumentManager } from '../documentManager'; // Adjust the import path based on your project structure
-import { ClarionLocation } from '../UtilityClasses/LocationProvider'; // Make sure this import is correct
+import { ClarionLocation } from './LocationProvider'; // Make sure this import is correct
 export class ClarionHoverProvider implements vscode.HoverProvider {
     private documentManager: DocumentManager;
 

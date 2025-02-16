@@ -1,36 +1,13 @@
 import { commands, Uri, window, workspace, Disposable, languages } from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { RedirectionFileParser } from './UtilityClasses/RedirectionFileParser';
+
 import * as xml2js from 'xml2js';
-import { Logger } from './UtilityClasses/Logger';
-import { globalSettings, globalSolutionFile } from './globals';
-
-// Import global variables from extension.ts
-
-
-export class SourceFile {
-    constructor(public name: string, public relativePath: string) { }
-}
-
-export class ClarionProject {
-    sourceFiles: SourceFile[] = [];
-    pathsToLookin: Record<string, string[]> = {};
-    constructor(
-        public name: string,
-        public type: string,
-        public path: string,
-        public guid: string,
-        public buildConfiguration: string
-    ) { }
-    addSourceFile(name: string, relativePath: string) {
-        this.sourceFiles.push(new SourceFile(name, relativePath));
-    }
-}
-
-export class ClarionSolution {
-    constructor(public name: string = '', public projects: ClarionProject[] = []) { }
-}
+import { ClarionProject, ClarionSourcerFile } from './ClarionProject';
+import { ClarionSolution } from './ClarionSolution';
+import { RedirectionFileParser } from './RedirectionFileParser';
+import { globalSettings } from '../globals';
+import { Logger } from '../UtilityClasses/Logger';
 
 export class SolutionParser {
     public solution: ClarionSolution;
@@ -223,7 +200,7 @@ export class SolutionParser {
     
     
 
-    public findSourceFilePath(sourceFile: SourceFile, destinationFile: string): string | undefined {
+    public findSourceFilePath(sourceFile: ClarionSourcerFile, destinationFile: string): string | undefined {
         const project = this.findProjectForSourceFile(sourceFile);
         if (project) {
             const pathsToLookin = project.pathsToLookin[this.getExtension(destinationFile)];
@@ -243,7 +220,7 @@ export class SolutionParser {
         }
         return undefined;
     }
-    findSourceInProject(filePath: string): SourceFile | undefined {
+    findSourceInProject(filePath: string): ClarionSourcerFile | undefined {
         const logger = new Logger(); 
         try {
             for (const project of this.solution.projects) {
@@ -264,7 +241,7 @@ export class SolutionParser {
         return path.extname(destinationFile).toLowerCase();
     }
 
-    private findProjectForSourceFile(sourceFile: SourceFile): ClarionProject | undefined {
+    private findProjectForSourceFile(sourceFile: ClarionSourcerFile): ClarionProject | undefined {
         for (const project of this.solution.projects) {
             if (project.sourceFiles.includes(sourceFile)) {
                 return project;
@@ -295,7 +272,7 @@ export class SolutionParser {
 
     public findFileWithExtension(filename: string): string {
         const logger = new Logger(); 
-        if (!this.solutionFilePath) {
+        if (!this.solutionFilePath|| this.solutionFilePath.trim() === "") {
             logger.error("❌ No solution file path set.");
             return "";
         }
@@ -321,10 +298,11 @@ export class SolutionParser {
 
     public async parseSolution(): Promise<ClarionSolution> {
         const logger = new Logger(); 
-        if (!this.solutionFilePath) {
-            logger.error("❌ Solution file path is not set.");
-            return new ClarionSolution();
-        }
+
+       if (!this.solutionFilePath || this.solutionFilePath.trim() === "") {
+        logger.error("❌ Solution file path is not set. returning empty solution.");
+        return new ClarionSolution(); // ✅ Return an empty solution instead of failing
+    }
 
         const solutionContent = fs.readFileSync(this.solutionFilePath, 'utf-8');
         const projectEntryPattern = /Project\("([^"]+)"\) = "([^"]+)", "([^"]+)", "([^"]+)"/g;
@@ -339,7 +317,7 @@ export class SolutionParser {
 
             const projectDir = path.dirname(path.resolve(this.solutionFilePath, '..', projectPath));
             const projectPathsToLookIn = await this.resolveProjectSearchPaths(projectDir);
-            const project = new ClarionProject(projectName, projectType, projectDir, projectGuid, "");
+            const project = new ClarionProject(projectName, projectType, projectDir, projectGuid);
             project.pathsToLookin = projectPathsToLookIn;
 
             // 🔥 ADD THIS - Collect source files

@@ -19,17 +19,53 @@ export async function setGlobalClarionSelection(
     clarionVersion: string,
     clarionConfiguration: string
 ) {
+    const logger = new Logger(true);
+    logger.info("🔄 Updating global settings:", {
+        solutionFile,
+        clarionPropertiesFile,
+        clarionVersion,
+        clarionConfiguration
+    });
+
+    // ✅ Update global variables
     globalSolutionFile = solutionFile;
     globalClarionPropertiesFile = clarionPropertiesFile;
     globalClarionVersion = clarionVersion;
     _globalClarionConfiguration = clarionConfiguration;
 
-    // Save to workspace settings
-    await workspace.getConfiguration().update('clarion.solutionFile', solutionFile, ConfigurationTarget.Workspace);
-    await workspace.getConfiguration().update('clarion.propertiesFile', clarionPropertiesFile, ConfigurationTarget.Workspace);
-    await workspace.getConfiguration().update('clarion.version', clarionVersion, ConfigurationTarget.Workspace);
-    await workspace.getConfiguration().update('clarion.configuration', clarionConfiguration, ConfigurationTarget.Workspace);
+    // ✅ Only save to workspace if all required values are set
+    if (solutionFile && clarionPropertiesFile && clarionVersion) {
+        logger.info("✅ All required settings are set. Saving to workspace settings...");
+        await workspace.getConfiguration().update('clarion.solutionFile', solutionFile, ConfigurationTarget.Workspace);
+        await workspace.getConfiguration().update('clarion.propertiesFile', clarionPropertiesFile, ConfigurationTarget.Workspace);
+        await workspace.getConfiguration().update('clarion.version', clarionVersion, ConfigurationTarget.Workspace);
+        await workspace.getConfiguration().update('clarion.configuration', clarionConfiguration, ConfigurationTarget.Workspace);
+
+        // ✅ Ensure lookup extensions are written ONLY when a valid solution exists
+        const config = workspace.getConfiguration("clarion");
+
+        const fileSearchExtensions = config.inspect<string[]>("fileSearchExtensions")?.workspaceValue;
+        const defaultLookupExtensions = config.inspect<string[]>("defaultLookupExtensions")?.workspaceValue;
+
+        const updatePromises: Thenable<void>[] = [];
+
+        if (!fileSearchExtensions) {
+            updatePromises.push(config.update("fileSearchExtensions", DEFAULT_EXTENSIONS, ConfigurationTarget.Workspace));
+        }
+
+        if (!defaultLookupExtensions) {
+            updatePromises.push(config.update("defaultLookupExtensions", DEFAULT_EXTENSIONS, ConfigurationTarget.Workspace));
+        }
+
+        if (updatePromises.length > 0) {
+            await Promise.all(updatePromises);
+            logger.info("✅ Default lookup settings applied to workspace.json.");
+        }
+    } else {
+        logger.warn("⚠️ Not saving to workspace settings: One or more required values are missing.");
+    }
 }
+
 
 // ❌ These should NOT be saved in workspace
 let _globalRedirectionFile = "";
@@ -92,13 +128,13 @@ export const globalSettings = {
 
         const updatePromises: Thenable<void>[] = [];
 
-        if (!fileSearchExtensions) {
-            updatePromises.push(config.update("fileSearchExtensions", DEFAULT_EXTENSIONS, ConfigurationTarget.Workspace));
-        }
+        // if (!fileSearchExtensions) {
+        //     updatePromises.push(config.update("fileSearchExtensions", DEFAULT_EXTENSIONS, ConfigurationTarget.Workspace));
+        // }
 
-        if (!defaultLookupExtensions) {
-            updatePromises.push(config.update("defaultLookupExtensions", DEFAULT_EXTENSIONS, ConfigurationTarget.Workspace));
-        }
+        // if (!defaultLookupExtensions) {
+        //     updatePromises.push(config.update("defaultLookupExtensions", DEFAULT_EXTENSIONS, ConfigurationTarget.Workspace));
+        // }
 
         if (updatePromises.length > 0) {
             await Promise.all(updatePromises);

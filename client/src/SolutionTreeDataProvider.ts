@@ -1,51 +1,43 @@
 import { TreeDataProvider, TreeItem, Event, EventEmitter, TreeItemCollapsibleState, ThemeIcon } from 'vscode';
-import { ClarionProject, ClarionSolution, SolutionParser, SourceFile } from './SolutionParser';
 import { Logger } from './UtilityClasses/Logger';
+import { TreeNode } from './TreeNode';
+import { ClarionProject, ClarionSourcerFile } from './Parser/ClarionProject';
+import { ClarionSolution } from './Parser/ClarionSolution';
+import { SolutionParser } from './Parser/SolutionParser';
 
-export class TreeNode extends TreeItem {
-    public children: TreeNode[];
-    public data?: any;
-
-    constructor(
-        label: string | undefined,
-        collapsibleState: TreeItemCollapsibleState = TreeItemCollapsibleState.None,
-        data?: any,
-        children: TreeNode[] = []
-    ) {
-        super(label ?? "Unknown Node", collapsibleState); // ✅ Ensure label is valid
-        this.children = children;
-        this.data = data;
-    }
-}
 export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
-    private _onDidChangeTreeData: EventEmitter<TreeNode | undefined> = new EventEmitter<TreeNode | undefined>();
-    readonly onDidChangeTreeData: Event<TreeNode | undefined> = this._onDidChangeTreeData.event;
+    private _onDidChangeTreeData: EventEmitter<void> = new EventEmitter<void>();
+    readonly onDidChangeTreeData: Event<void> = this._onDidChangeTreeData.event;
 
-    public solutionParser: SolutionParser;
+    public solutionParser: SolutionParser | undefined; // 🔹 Start undefined
 
-    constructor(solutionParser: SolutionParser) {
+    constructor(solutionParser?: SolutionParser) {
         this.solutionParser = solutionParser;
     }
 
     refresh(): void {
         const logger = new Logger();
         logger.info("🔄 Refreshing solution tree...");
-    
-        // 🔥 Ensure solutionParser is reloaded before refreshing tree
+
+        if (!this.solutionParser) {
+            logger.warn("⚠️ Cannot refresh solution tree: No solution loaded.");
+            this._onDidChangeTreeData.fire();
+            return;
+        }
+
         this.solutionParser.parseSolution().then(() => {
-            this._onDidChangeTreeData.fire(undefined);
+            this._onDidChangeTreeData.fire();
             logger.info("✅ Solution tree successfully refreshed.");
         }).catch(error => {
             logger.error("❌ Error refreshing solution tree:", error);
         });
     }
-    
-
-    getParent(element: TreeNode): TreeNode | null {
-        return null;
-    }
 
     getChildren(element?: TreeNode): TreeNode[] {
+        if (!this.solutionParser) {
+            return []; // ✅ Return an empty list if no solution is loaded
+        }
+
         if (element && element.children) {
             return element.children;
         }
@@ -55,12 +47,12 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     getTreeItem(element: TreeNode): TreeItem {
         const label = element.label || "Unnamed Item";
         const treeItem = new TreeItem(label, element.collapsibleState);
-    
+
         if (element.data instanceof ClarionSolution) {
             treeItem.iconPath = new ThemeIcon('file-symlink-directory'); // 🔷 Solution Icon
         } else if (element.data instanceof ClarionProject) {
             treeItem.iconPath = new ThemeIcon('project'); // 🔷 Project Icon
-        } else if (element.data instanceof SourceFile) {
+        } else if (element.data instanceof ClarionSourcerFile) {
             treeItem.iconPath = new ThemeIcon('file-code'); // 🔷 File Icon
             treeItem.command = {
                 title: 'Open File',
@@ -68,11 +60,15 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 arguments: [element.data.relativePath]
             };
         }
-    
+
         return treeItem;
     }
 
     getTreeItems(): TreeNode[] {
+        if (!this.solutionParser) {
+            return []; // ✅ Return an empty list if no solution is loaded
+        }
+
         const solution = this.solutionParser.solution;
         const projectNodes = solution.projects.map((project) => {
             const projectNode = new TreeNode(project.name, TreeItemCollapsibleState.Expanded, project);

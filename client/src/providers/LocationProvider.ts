@@ -1,10 +1,11 @@
 import { commands, TextDocument, window, Position, workspace, ViewColumn } from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { ClarionProjectClass } from './ClarionProject';
-import { SolutionParser } from '../SolutionParser';
-import { Logger } from './Logger';
+import { ClarionProjectClass } from '../UtilityClasses/ClarionProject';
+
+import { Logger } from '../UtilityClasses/Logger';
 import { globalSettings } from '../globals';
+import { SolutionParser } from '../Parser/SolutionParser';
 
 // Import global variables from extension.ts
 
