@@ -1,5 +1,5 @@
 # clarion-extension README  
-## Version 0.4.2  
+## Version 0.4.4  
 
 Welcome to the README for the **Clarion Extension** project!  
 
@@ -79,7 +79,7 @@ Once a solution is opened, the extension:
 ### ✨ **Hover Provider**  
 - Hovering over an **INCLUDE** or **MODULE** statement shows a **preview** of the file’s content.  
 
-### 💪 **Configurable Build Type (New in 0.4.2!)**  
+### 💪 **Configurable Build Type (New in 0.4.4!)**  
 - Change between **Release** and **Debug** builds using:  
   **"Clarion: Set Configuration"** from **Ctrl+Shift+P**.  
 - Redirection parsing now respects the selected build configuration.  
