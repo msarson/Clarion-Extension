@@ -1,5 +1,5 @@
 # clarion-extension README  
-## Version 0.4.4  
+## Version 0.4.5  
 
 Welcome to the README for the **Clarion Extension** project!  
 
@@ -82,7 +82,7 @@ Once a solution is opened, the extension:
 ### 💪 **Configurable Build Type (New in 0.4.4!)**  
 - Change between **Release** and **Debug** builds using:  
   **"Clarion: Set Configuration"** from **Ctrl+Shift+P**.  
-- Redirection parsing now respects the selected build configuration.  
+- Redirection parsing now respects the selected build configuration.  npm 
 
 ---
 
