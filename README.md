@@ -13,6 +13,12 @@ A special thanks to [Mark Goldberg](https://github.com/MarkGoldberg) for his con
 
 ---
 
+## ⚠️ Beta Release Notice  
+This extension is still considered **beta quality**. If you encounter any issues, please report them at:  
+[GitHub Issues](https://github.com/msarson/Clarion-Extension/issues)
+
+---
+
 ## 🚀 What's New in Version 0.4.2?  
 
 ### 🔧 **Improvements and Bug Fixes**  
@@ -73,11 +79,7 @@ Once a solution is opened, the extension:
 ### ✨ **Hover Provider**  
 - Hovering over an **INCLUDE** or **MODULE** statement shows a **preview** of the file’s content.  
 
-### 🔄 **Manual Solution Refresh**  
-- Keeps the solution synchronized with **AppGen changes** (added/removed projects, modified cwproj files, etc.).  
-- Use **"Clarion: Refresh Solution"** from **Ctrl+Shift+P** to update.  
-
-### 🏗 **Configurable Build Type (New in 0.4.2!)**  
+### 💪 **Configurable Build Type (New in 0.4.2!)**  
 - Change between **Release** and **Debug** builds using:  
   **"Clarion: Set Configuration"** from **Ctrl+Shift+P**.  
 - Redirection parsing now respects the selected build configuration.  
@@ -89,7 +91,6 @@ Once a solution is opened, the extension:
 ✔ **Solution Explorer View with icons**.  
 ✔ **Go To Definition for INCLUDE & MODULE**.  
 ✔ **Hover Preview for referenced files**.  
-✔ **Manual refresh to sync solution changes**.  
 ✔ **Redirection-aware Ctrl+P searches**.  
 ✔ **Configurable Release/Debug builds**.  
 
@@ -122,6 +123,7 @@ This extension builds upon the work of:
 
 ## Additional Resources  
 
-📖 **[Cheat Sheet](https://github.com/msarson/Clarion-Extension/blob/master/docs/CheatSheet.md)** – Quick reference for features and usage.  
+📚 **[Cheat Sheet](https://github.com/msarson/Clarion-Extension/blob/master/docs/CheatSheet.md)** – Quick reference for features and usage.  
 
-Thank you for using **Clarion Extension**! 🎉  
+Thank you for using **Clarion Extension**! 🎉
+
