@@ -2,7 +2,7 @@
     "name": "clarion-extensions",
     "displayName": "Clarion Extensions",
     "description": "Extension for Clarion Language",
-    "version": "0.4.5",
+    "version": "0.4.7",
     "publisher": "msarson",
     "repository": {
         "type": "git",
@@ -19,7 +19,8 @@
         "vscode": "^1.97.0"
     },
     "activationEvents": [
-        "onLanguage:clarion"
+        "onLanguage:clarion",
+        "onStartupFinished"
     ],
     "main": "./client/out/extension",
     "icon": "images/sv57x57.png",

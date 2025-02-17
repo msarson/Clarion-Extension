@@ -26,7 +26,7 @@ let documentManager: DocumentManager | undefined;
 export async function activate(context: ExtensionContext): Promise<void> {
     const disposables: Disposable[] = [];
     const isRefreshingRef = { value: false };
-    const logger = new Logger();
+    const logger = new Logger(true);
 
     logger.info("🔄 Activating Clarion extension...");
 
@@ -56,7 +56,15 @@ export async function activate(context: ExtensionContext): Promise<void> {
         await showClarionQuickOpen();
     }));
 
-
+    context.subscriptions.push(commands.registerCommand("clarion.openSolution", async () => {
+        if (!workspace.isTrusted) {
+            window.showWarningMessage("Clarion features require a trusted workspace.");
+            return;
+        }
+    
+        await openClarionSolution(context);
+    }));
+    
     context.subscriptions.push(commands.registerCommand("clarion.setConfiguration", async () => {
         if (!workspace.isTrusted) {
             window.showWarningMessage("Clarion features require a trusted workspace.");

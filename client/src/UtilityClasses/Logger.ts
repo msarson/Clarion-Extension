@@ -3,7 +3,7 @@ export class Logger {
     private procedureName: string | null = null;
     private static activeProcedures: Set<string> = new Set();
 
-    constructor(enableDebugMode: boolean = false) {
+    constructor(enableDebugMode: boolean = true) {
         this.debugMode = enableDebugMode;
     }
 
