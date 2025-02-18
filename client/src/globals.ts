@@ -19,7 +19,7 @@ export async function setGlobalClarionSelection(
     clarionVersion: string,
     clarionConfiguration: string
 ) {
-    const logger = new Logger(true);
+    const logger = new Logger();
     logger.info("🔄 Updating global settings:", {
         solutionFile,
         clarionPropertiesFile,

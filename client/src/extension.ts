@@ -26,7 +26,7 @@ let documentManager: DocumentManager | undefined;
 export async function activate(context: ExtensionContext): Promise<void> {
     const disposables: Disposable[] = [];
     const isRefreshingRef = { value: false };
-    const logger = new Logger(true);
+    const logger = new Logger();
 
     logger.info("🔄 Activating Clarion extension...");
 
@@ -45,7 +45,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
     // ✅ Step 3: Load workspace settings before initialization
     await globalSettings.initializeFromWorkspace();
 
-
+    registerOpenCommand(context);
 
     context.subscriptions.push(commands.registerCommand("clarion.quickOpen", async () => {
         if (!workspace.isTrusted) {
@@ -61,10 +61,10 @@ export async function activate(context: ExtensionContext): Promise<void> {
             window.showWarningMessage("Clarion features require a trusted workspace.");
             return;
         }
-    
+
         await openClarionSolution(context);
     }));
-    
+
     context.subscriptions.push(commands.registerCommand("clarion.setConfiguration", async () => {
         if (!workspace.isTrusted) {
             window.showWarningMessage("Clarion features require a trusted workspace.");
@@ -73,6 +73,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
         await setConfiguration();
     }));
+
 
     // ✅ Watch for changes in Clarion configuration settings
     context.subscriptions.push(
@@ -106,6 +107,11 @@ async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: D
     // Dispose of old subscriptions
     disposables.forEach(disposable => disposable.dispose());
     disposables.length = 0;
+
+    if (!client) {
+        logger.info("🚀 Starting Clarion Language Server...");
+        startClientServer(context, documentManager!);
+    }
 
     // ✅ Only initialize if a solution exists in settings
     if (globalSolutionFile && globalClarionPropertiesFile && globalClarionVersion) {
@@ -235,7 +241,8 @@ async function handleSettingsChange(context: ExtensionContext) {
     registerLanguageFeatures(context);
 }
 
-
+let hoverProviderDisposable: Disposable | null = null;
+let documentLinkProviderDisposable: Disposable | null = null;
 
 function registerLanguageFeatures(context: ExtensionContext) {
     const logger = new Logger();
@@ -245,22 +252,31 @@ function registerLanguageFeatures(context: ExtensionContext) {
         return;
     }
 
-    logger.info("🔗 Re-registering Document Link Provider...");
-    context.subscriptions.push(
-        languages.registerDocumentLinkProvider(
-            { scheme: "file", language: "clarion" },
-            new ClarionDocumentLinkProvider(documentManager)
-        )
-    );
+    // ✅ Fix: Ensure only one Document Link Provider is registered
+    if (documentLinkProviderDisposable) {
+        documentLinkProviderDisposable.dispose(); // Remove old provider if it exists
+    }
 
-    logger.info("📝 Re-registering Hover Provider...");
-    context.subscriptions.push(
-        languages.registerHoverProvider(
-            { scheme: "file", language: "clarion" },
-            new ClarionHoverProvider(documentManager)
-        )
+    logger.info("🔗 Registering Document Link Provider...");
+    documentLinkProviderDisposable = languages.registerDocumentLinkProvider(
+        { scheme: "file", language: "clarion" },
+        new ClarionDocumentLinkProvider(documentManager)
     );
+    context.subscriptions.push(documentLinkProviderDisposable);
+
+    // ✅ Fix: Ensure only one Hover Provider is registered
+    if (hoverProviderDisposable) {
+        hoverProviderDisposable.dispose(); // Remove old provider if it exists
+    }
+
+    logger.info("📝 Registering Hover Provider...");
+    hoverProviderDisposable = languages.registerHoverProvider(
+        { scheme: "file", language: "clarion" },
+        new ClarionHoverProvider(documentManager)
+    );
+    context.subscriptions.push(hoverProviderDisposable);
 }
+
 
 async function refreshOpenDocuments() {
 
@@ -292,28 +308,73 @@ async function refreshOpenDocuments() {
 
     logger.info(`✅ Successfully refreshed ${openDocuments.length} open documents.`);
 }
+async function registerOpenCommand(context: ExtensionContext) {
+    commands.getCommands().then((cmds) => {
+        if (!cmds.includes('clarion.openFile')) {
+            context.subscriptions.push(commands.registerCommand('clarion.openFile', async (filePath: string) => {
+                if (!filePath) {
+                    window.showErrorMessage("❌ No file path provided.");
+                    return;
+                }
+                try {
+                    const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(workspace.rootPath || "", filePath);
+                    const doc = await workspace.openTextDocument(Uri.file(absolutePath));
+                    await window.showTextDocument(doc);
+                } catch (error) {
+                    window.showErrorMessage(`❌ Failed to open file: ${filePath}`);
+                }
+            }));
+        }
+    });
+}
+
 
 function createSolutionTreeView() {
-    if (!solutionTreeDataProvider) {
-        // ✅ Initialize provider if not already set (empty state)
-        solutionTreeDataProvider = new SolutionTreeDataProvider();
+    const logger = new Logger(false);
+    if (!solutionParser) {
+        logger.error("❌ Solution parser is not initialized.");
+        return;
     }
 
-    if (!treeView) {
-        // ✅ Only create the view if it doesn’t already exist
-        treeView = window.createTreeView("solutionView", {
+    // ✅ If the tree view already exists, just refresh its data
+    if (treeView && solutionTreeDataProvider) {
+        logger.info("🔄 Refreshing existing solution tree...");
+        solutionTreeDataProvider.refresh();
+        return;
+    }
+
+    // ✅ Create the solution tree provider
+    solutionTreeDataProvider = new SolutionTreeDataProvider(solutionParser);
+
+    // ✅ Ensure `clarion.openFile` is properly registered
+    // commands.getCommands().then((cmds) => {
+    //     if (!cmds.includes('clarion.openFile')) {
+    //         commands.registerCommand('clarion.openFile', async (filePath: string) => {
+    //             if (!filePath) {
+    //                 window.showErrorMessage("❌ No file path provided.");
+    //                 return;
+    //             }
+    //             try {
+    //                 const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(workspace.rootPath || "", filePath);
+    //                 const doc = await workspace.openTextDocument(Uri.file(absolutePath));
+    //                 await window.showTextDocument(doc);
+    //             } catch (error) {
+    //                 logger.error(`❌ Failed to open file: ${filePath}`, error);
+    //                 window.showErrorMessage(`❌ Failed to open file: ${filePath}`);
+    //             }
+    //         });
+    //     }
+    // });
+
+    try {
+        // ✅ Create the tree view only if it doesn't exist
+        treeView = window.createTreeView('solutionView', {
             treeDataProvider: solutionTreeDataProvider,
             showCollapseAll: true
         });
-    }
-
-    if (solutionParser) {
-        // ✅ Update the provider with the new solution
-        solutionTreeDataProvider.solutionParser = solutionParser;
-        solutionTreeDataProvider.refresh();
-
-        // ✅ Set context to indicate a solution is loaded
-        commands.executeCommand("setContext", "clarion.solutionOpen", true);
+        logger.info("✅ Solution tree view successfully registered.");
+    } catch (error) {
+        logger.error("❌ Error registering solution tree view:", error);
     }
 }
 
@@ -592,6 +653,7 @@ export function deactivate(): Thenable<void> | undefined {
 }
 
 function startClientServer(context: ExtensionContext, documentManager: DocumentManager) {
+    console.log("Starting Clarion Language Server...");
     let serverModule = context.asAbsolutePath(path.join('server', 'out', 'server.js'));
     let debugOptions = { execArgv: ['--nolazy', '--inspect=6009'] };
 

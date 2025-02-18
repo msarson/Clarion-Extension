@@ -9,14 +9,15 @@ export class ClarionDocumentLinkProvider implements DocumentLinkProvider {
         this.documentManager = documentManager; // Initialize the DocumentManager
     }
 
-    provideDocumentLinks(document: TextDocument, _token: CancellationToken): ProviderResult<DocumentLink[]> {
-        const logger = new Logger(); 
+    async provideDocumentLinks(document: TextDocument, _token: CancellationToken): Promise<DocumentLink[]> {
         if (_token.isCancellationRequested) {
-            return Promise.resolve([]); // If the user cancels, return an empty array.
+            return []; // Return an empty array if the operation was cancelled
         }
-
-        logger.info(`Generating links for: ${document.uri.fsPath}`); // Debugging log
-
-        return Promise.resolve(this.documentManager.generateDocumentLinks(document.uri));
+    
+        const logger = new Logger();
+        logger.info(`🔗 Generating links for document: ${document.uri.fsPath}`);
+    
+        return this.documentManager.generateDocumentLinks(document.uri);
     }
+    
 }

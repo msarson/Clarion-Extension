@@ -185,79 +185,47 @@ export class DocumentManager implements Disposable {
      * @param uri - The URI of the document to generate links for.
      * @returns An array of DocumentLink objects representing the navigable code links within the document.
      */
+
     generateDocumentLinks(uri: Uri): DocumentLink[] {
         const logger = new Logger();
         const documentInfo = this.getDocumentInfo(uri);
-        logger.info(`🔗 Generating links for document: ${uri.fsPath}`);
-        logger.info(`🔍 Checking document for INCLUDE links: ${uri.fsPath}`);
-
-
 
         if (!documentInfo) {
-            logger.info("❌ DocumentInfo is undefined for uri:", uri.fsPath);
+            logger.warn(`❌ No document info available for ${uri.fsPath}`);
             return [];
         }
-        for (const location of documentInfo.statementLocations) {
-            logger.info(`📝 Found INCLUDE statement: ${location.fullFileName} (${location.statementType})`);
-        }
-
 
         const links: DocumentLink[] = [];
-        logger.info(`📄 Checking document: ${uri.fsPath}`);
-        logger.info(`📌 Found ${documentInfo.statementLocations.length} statement locations`);
-
+        const supportedTypes = ["INCLUDE", "MODULE", "MEMBER", "SECTION", "LINK"];
         // 🔹 Process existing document statements from `documentInfo`
         for (const location of documentInfo.statementLocations) {
             logger.info(`🔍 Processing location: ${JSON.stringify(location)}`);
+        
+            if (!supportedTypes.includes(location.statementType ?? "") || !location.fullFileName || !location.linePosition || !location.linePositionEnd) {
 
-            if (
-                (location.statementType === "INCLUDE" || location.statementType === "MODULE" ||
-                    location.statementType === "MEMBER" || location.statementType === "SECTION") &&
-                location.linePosition &&
-                location.linePositionEnd
-            ) {
-                let targetUri = Uri.file(location.fullFileName);
-                logger.info(`🔗 Creating link: ${location.statementType} -> ${targetUri.fsPath}`);
-
-                if (location.statementType === "SECTION" && location.sectionLineLocation) {
-                    const lineQueryParam = `${location.sectionLineLocation.line + 1}:1`;
-                    targetUri = targetUri.with({ fragment: lineQueryParam });
-                    logger.info(`📍 Adding section fragment: ${lineQueryParam}`);
-                }
-
-                const link = new DocumentLink(
-                    new Range(location.linePosition, location.linePositionEnd),
-                    targetUri
-                );
-                links.push(link);
+                continue; // Skip invalid or unsupported entries
             }
+        
+            let targetUri = Uri.file(location.fullFileName);
+        
+            if (location.statementType === "SECTION" && location.sectionLineLocation) {
+                const lineQueryParam = `${location.sectionLineLocation.line + 1}:1`;
+                targetUri = targetUri.with({ fragment: lineQueryParam });
+                logger.info(`📍 Adding section fragment: ${lineQueryParam}`);
+            }
+        
+          
+        
+            const link = new DocumentLink(
+                new Range(location.linePosition, location.linePositionEnd),
+                targetUri
+            );
+            links.push(link);
         }
 
-        // 🔹 Find and process LINK('filename.ext') using `documentInfo`
-        for (const location of documentInfo.statementLocations) {
-            logger.info(`🔍 Processing LINK statement: ${JSON.stringify(location)}`);
-
-            if (location.statementType === "LINK" && location.fullFileName) {
-                const targetUri = Uri.file(location.fullFileName);
-                logger.info(`🔗 Creating LINK() reference: ${location.fullFileName} -> ${targetUri.fsPath}`);
-
-                if (location.linePosition && location.linePositionEnd) {
-                    const link = new DocumentLink(
-                        new Range(location.linePosition, location.linePositionEnd),
-                        targetUri
-                    );
-                    links.push(link);
-                }
-            }
-        }
-
-        logger.info(`✅ Document link generation complete. Created ${links.length} links.`);
+   
         return links;
     }
-
-
-
-
 
 
     /**

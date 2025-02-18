@@ -2,187 +2,114 @@ import { FoldingRange } from "vscode-languageserver-protocol";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { Range } from "vscode-languageserver-types";
 
+interface Node {
+    keyword: string;
+    startLine: number;
+    parent: Node | null;
+    willFold: boolean;
+    closingRegex: RegExp;
+}
+
 interface IFoldingPair {
     from: RegExp;
     to: RegExp;
+    keyword: string;
+    willFold: boolean;
     removeComment: boolean;
 }
 
-interface IFoldingPairHit {
-    line: number;
-    pair: IFoldingPair;
-}
-export class ClarionFoldingRangeProvider {//implements FoldingRangeProvider {
+export class ClarionFoldingRangeProvider {
     private foldingPairs: IFoldingPair[] = [
-        {
-            from: new RegExp("!REGION", "i"),
-            to: new RegExp("!ENDREGION", "i"),
-            removeComment: false
-        },
-        {
-            from: new RegExp(" FILE,DRIVER", "i"),
-            to: new RegExp("^\\s*END", "i"),
-            removeComment: true
-        },
-        {
-            from: new RegExp("\\s+RECORD", "i"),
-            to: new RegExp("^\\s*END", "i"),
-            removeComment: true
-        },
-        {
-            from: new RegExp("\\s+GROUP", "i"),
-            to: new RegExp("^\\s+END(\\s+|$)", "i"),
-            removeComment: true
-        }
-        // could add  MAP, QUEUE , CLASS, ITEMIZE, INTERFACE 
-        // WINDOW,, SHEET, TAB,
-        // REPORT, BAND,
-        // CASE, LOOP, (IF, ELSIF, ELSE)
-        // DATA to CODE        
-        // OMIT & COMPILE <-- needs more than just regex, as need to match closing string
-
+        { from: /!REGION/i, to: /!ENDREGION/i, keyword: "!REGION", willFold: true, removeComment: false },
+        { from: /^(\w+\s+)?FILE,DRIVER/i, to: /^\s*END/i, keyword: "FILE", willFold: true, removeComment: true },
+        { from: /^\s*RECORD/i, to: /^\s*END/i, keyword: "RECORD", willFold: true, removeComment: true },
+        { from: /(?<=\s)GROUP\s*\(?/i, to: /^\s*END(\s+|$)/i, keyword: "GROUP", willFold: true, removeComment: true },
+        { from: /(?<=\s)QUEUE\s*\(?/i, to: /^\s*END(\s+|$)/i, keyword: "QUEUE", willFold: true, removeComment: true },
+        { from: /^\s*CASE/i, to: /^\s*END/i, keyword: "CASE", willFold: true, removeComment: true },
+        { from: /^\s*LOOP/i, to: /^\s*END/i, keyword: "LOOP", willFold: true, removeComment: true },
+        { from: /^\s*IF/i, to: /^\s*END/i, keyword: "IF", willFold: true, removeComment: true },
+        { from: /^\s*MAP/i, to: /^\s*END/i, keyword: "MAP", willFold: true, removeComment: true },
+        { from: /(?<=\s)VIEW\s*\(?/i, to: /^\s*END/i, keyword: "VIEW", willFold: true, removeComment: true },
+        { from: /(?<=\s)CLASS\s*\(?/i, to: /^\s*END/i, keyword: "CLASS", willFold: true, removeComment: true },
+        { from: /\bJOIN\s*(?=\()/i, to: /^\s*END/i, keyword: "JOIN", willFold: true, removeComment: true },
+        { from: /\bMODULE\s*(?=\()/i, to: /^\s*END/i, keyword: "MODULE", willFold: true, removeComment: true }
     ];
+    
+    
 
-
-    /**
-     * Provides an array of FoldingRange objects that can be used to fold regions of the document.
-     * @param document The TextDocument to provide folding ranges for.
-     * @returns An array of FoldingRange objects.
-     */
     provideFoldingRanges(document: TextDocument): FoldingRange[] {
+        console.log("[ClarionFoldingRangeProvider] Starting tree-based folding computation.");
         const ranges: FoldingRange[] = [];
-        const foldStack: IFoldingPairHit[] = [];
-    
-        const regExProc: RegExp = new RegExp("\\s+PROCEDURE", "i");
-        const regExFunc: RegExp = new RegExp("\\s+FUNCTION", "i");
-        const regExRoutine: RegExp = new RegExp("\\s+ROUTINE", "i");
-        const regExEnd: RegExp = new RegExp("\\s+END(\\s+|$)", "i");
-        const regExGroup: RegExp = new RegExp("\\s+GROUP(\\s+|$)", "i");
-        const RegExMaps: RegExp = new RegExp("(\\s*)(INTERFACE|CLASS|MAP|MODULE)(\\s+|$)", "i");
-    
-        let procStartLine: number = -1;
-        let routineStartLine: number = -1;
-        let mapEndDepth: number = 0;
-        let isInMap: boolean = false;
-        let toClose: IFoldingPairHit | null = null;
+        let rootNode: Node = { keyword: "ROOT", startLine: -1, parent: null, willFold: false, closingRegex: /^$/ };
+        let currentNode = rootNode;
     
         for (let i = 0; i < document.lineCount; i++) {
             let line = this.getLine({ document, i });
+            let uncommentedLine = line;
+            line = this.removeComments(line);
     
-            // Handle folding pairs
-            this.foldingPairs.forEach((p) => {
-                let parsingLine: string = line;
-                if (p.removeComment)
-                    parsingLine = this.removeComments(parsingLine);
+            let isInString = false;
+            let filteredLine = "";
+            for (let char of line) {
+                if (char === "'") isInString = !isInString;
+                if (!isInString) filteredLine += char;
+            }
     
-                // Handle closing folding ranges
-                let lookAgain: boolean = true;
-                while (lookAgain) {
-                    lookAgain = false;
-                    if (toClose != null) {
-                        const toCloseIdx = parsingLine.search(toClose.pair.to);
-                        if (toCloseIdx >= 0) {
-                            ranges.push(this.createRange({ startLine: toClose.line, endLine: i }));
-                            parsingLine = parsingLine.substring(toCloseIdx + 1, parsingLine.length);
-                            if (foldStack.length > 0) {
-                                toClose = foldStack.pop()!;
-                                lookAgain = true;
-                            } else {
-                                toClose = null;
-                            }
-                        }
-                    }
-                }
-    
-                // Handle opening folding ranges
-                const startIdx = parsingLine.search(p.from);
-                if (startIdx > 0) {
-                    const endIdx = parsingLine.substring(startIdx + 1, parsingLine.length).search(p.to);
-                    if (endIdx > 0) {
-                        return; // Cannot fold "in" a line
-                    }
-    
-                    if (toClose != null) {
-                        let pushme: IFoldingPairHit;
-                        pushme = {
-                            pair: toClose.pair,
-                            line: toClose.line
-                        };
-                        foldStack.push(pushme);
-                    }
-    
-                    toClose = {
-                        pair: p,
-                        line: i
-                    };
-                }
-            });
-    
-            // Handle PROCEDURES, ROUTINES, and MAPS
-            line = this.removeComments(this.getLine({ document, i }));
-            if (isInMap) {
-                if (line.search(regExGroup) >= 0) {
-                    mapEndDepth += 1;
-                }
-                if (line.search(regExEnd) >= 0) {
-                    mapEndDepth -= 1;
-                    if (mapEndDepth == 0) {
-                        isInMap = false;
-                    }
-                }
-            } else {
-                if (line.search(RegExMaps) >= 0) {
-                    isInMap = true;
-                    mapEndDepth = 1;
-                } else {
-                    let procIdx = line.search(regExProc);
-                    if (procIdx < 0) {
-                        procIdx = line.search(regExFunc);
-                    }
-    
-                    if (procIdx >= 0) {
-                        if (routineStartLine > 0) {
-                            ranges.push(this.createRange({ startLine: routineStartLine, endLine: i - 1 }));
-                            routineStartLine = -1;
-                        }
-                        if (procStartLine > 0) {
-                            ranges.push(this.createRange({ startLine: procStartLine, endLine: i - 1 }));
-                        }
-                        procStartLine = i;
+            for (const p of this.foldingPairs) {
+                let parsingLine = p.removeComment ? filteredLine : uncommentedLine;
+                console.log(`[DEBUG] Checking '${p.keyword}' on Line ${i}: '${parsingLine}'`);
+            
+                if (p.keyword === "JOIN") {
+                    if (p.from.test(parsingLine)) {
+                        console.log(`[JOIN DETECTED] Line ${i}: '${parsingLine}'`);
                     } else {
-                        let rouIdx = line.search(regExRoutine);
-                        if (rouIdx >= 0) {
-                            if (routineStartLine > 0) {
-                                ranges.push(this.createRange({ startLine: routineStartLine, endLine: i - 1 }));
-                            }
-                            routineStartLine = i;
-                        }
+                        console.log(`[JOIN NOT FOUND] Line ${i}: '${parsingLine}'`);
                     }
+                }
+                if (parsingLine.match(p.from)) {
+                    console.log(`[Line ${i}] Found opening match: ${p.keyword}`);
+                    let newNode: Node = { keyword: p.keyword, startLine: i, parent: currentNode, willFold: p.willFold, closingRegex: p.to };
+                    currentNode = newNode;
+                    break; // Move to next line immediately after opening match
+                }
+            }
+    
+            let parsingLine = currentNode.closingRegex ? (currentNode.closingRegex.test(filteredLine) ? filteredLine : uncommentedLine) : filteredLine;
+            if (currentNode.closingRegex.test(parsingLine)) {
+                if (currentNode.parent) {
+                    console.log(`${line}`);
+                    console.log(`[Line ${i}] Closing block '${currentNode.keyword}' started at line ${currentNode.startLine}`);
+                    if (currentNode.willFold) {
+                        ranges.push(this.createRange({ startLine: currentNode.startLine, endLine: i }));
+                    }
+                    currentNode = currentNode.parent; // Move up only after closing one level
+                } else {
+                    console.log(`[Line ${i}] Unmatched closing detected at root level.`);
                 }
             }
         }
     
-        // Add remaining ranges
-        if (routineStartLine > 0) {
-            ranges.push(this.createRange({ startLine: routineStartLine, endLine: document.lineCount - 1 }));
-        }
-        if (procStartLine > 0) {
-            ranges.push(this.createRange({ startLine: procStartLine, endLine: document.lineCount - 1 }));
-        }
-    
+        console.log("[ClarionFoldingRangeProvider] Folding computation finished.", ranges);
         return ranges;
     }
 
-    
     private createRange({ startLine, endLine }: { startLine: number; endLine: number; }): FoldingRange {
         return FoldingRange.create(startLine, endLine);
     }
     private getLine({ document, i }: { document: TextDocument; i: number; }) {
-        return document.getText(Range.create(i, 0, i,1000));//Number.MAX_VALUE));
+        return document.getText(Range.create(i, 0, i, 1000));
     }
-
     private removeComments(line: string) {
-        line = line.replace(new RegExp('!.*$'), '').replace(new RegExp('\\|.*$'), '');
-        return line;
+        // Find the first occurrence of '!' or '|'
+        const commentIndex = Math.min(
+            line.indexOf('!') !== -1 ? line.indexOf('!') : Infinity,
+            line.indexOf('|') !== -1 ? line.indexOf('|') : Infinity
+        );
+    
+        // If no comment marker is found, return the line as is
+        if (commentIndex === Infinity) return line;
+    
+        // Return the substring before the comment marker, trimming any trailing spaces
+        return line.substring(0, commentIndex).trim();
     }
 }

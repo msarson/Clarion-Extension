@@ -1,5 +1,5 @@
 # clarion-extension README  
-## Version 0.4.7  
+## Version 0.4.10  
 
 Welcome to the README for the **Clarion Extension** project!  
 
