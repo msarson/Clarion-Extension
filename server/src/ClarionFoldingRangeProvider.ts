@@ -31,64 +31,95 @@ export class ClarionFoldingRangeProvider {
         { from: /^\s*MAP/i, to: /^\s*END/i, keyword: "MAP", willFold: true, removeComment: true },
         { from: /(?<=\s)VIEW\s*\(?/i, to: /^\s*END/i, keyword: "VIEW", willFold: true, removeComment: true },
         { from: /(?<=\s)CLASS\s*\(?/i, to: /^\s*END/i, keyword: "CLASS", willFold: true, removeComment: true },
+        { from: /(?<=\s)INTERFACE\s*\(?/i, to: /^\s*END/i, keyword: "INTERFACE", willFold: true, removeComment: true },
         { from: /\bJOIN\s*(?=\()/i, to: /^\s*END/i, keyword: "JOIN", willFold: true, removeComment: true },
         { from: /\bMODULE\s*(?=\()/i, to: /^\s*END/i, keyword: "MODULE", willFold: true, removeComment: true }
     ];
-    
-    
 
     provideFoldingRanges(document: TextDocument): FoldingRange[] {
-        console.log("[ClarionFoldingRangeProvider] Starting tree-based folding computation.");
+        console.log("[ClarionFoldingRangeProvider] Starting folding computation.");
         const ranges: FoldingRange[] = [];
         let rootNode: Node = { keyword: "ROOT", startLine: -1, parent: null, willFold: false, closingRegex: /^$/ };
         let currentNode = rootNode;
-    
+        let isInMapOrClass = false; // Track MAP or CLASS nesting
+        let lastProcedureStartLine: number | null = null; // Track PROCEDURE/FUNCTION/ROUTINE folding
+
+        const procedureRegex = /^\s*\w+(\.\w+)?\s+(PROCEDURE|FUNCTION|ROUTINE)\s*(\([^)]*\))?/i;
+        console.log(`[DEBUG] Total lines in document: ${document.lineCount}`);
         for (let i = 0; i < document.lineCount; i++) {
-            let line = this.getLine({ document, i });
+            let line = this.getLine({ document, i }).trim();
             let uncommentedLine = line;
+            
+
             line = this.removeComments(line);
-    
+            console.log(`[DEBUG] Line ${i}: '${uncommentedLine}'`);
+
             let isInString = false;
             let filteredLine = "";
             for (let char of line) {
                 if (char === "'") isInString = !isInString;
                 if (!isInString) filteredLine += char;
             }
-    
+
+            // 🔹 **Detect PROCEDURE/FUNCTION/ROUTINE (Outside MAP/CLASS)**
+            if (!isInMapOrClass && procedureRegex.test(filteredLine)) {
+                console.log(`[MATCH] PROCEDURE/FUNCTION/ROUTINE found at line ${i}`);
+
+                // **Close the previous procedure before starting the new one**
+                if (lastProcedureStartLine !== null) {
+                    ranges.push(this.createRange({ startLine: lastProcedureStartLine, endLine: i - 1 }));
+                    console.log(`[FOLD] Closing previous procedure from ${lastProcedureStartLine} to ${i - 1}`);
+                }
+
+                // Start a new procedure fold
+                lastProcedureStartLine = i;
+            }
+
+            // 🔹 **Handle Other Folding Structures**
             for (const p of this.foldingPairs) {
                 let parsingLine = p.removeComment ? filteredLine : uncommentedLine;
-                console.log(`[DEBUG] Checking '${p.keyword}' on Line ${i}: '${parsingLine}'`);
-            
-                if (p.keyword === "JOIN") {
+              //  console.log(`[DEBUG] Checking '${p.keyword}' on Line ${i}: '${parsingLine}'`);
+
+                if (p.keyword === "MAP" || p.keyword === "CLASS" || p.keyword === "INTERFACE") {
                     if (p.from.test(parsingLine)) {
-                        console.log(`[JOIN DETECTED] Line ${i}: '${parsingLine}'`);
-                    } else {
-                        console.log(`[JOIN NOT FOUND] Line ${i}: '${parsingLine}'`);
+                        isInMapOrClass = true;
+                        console.log(`[ENTER] ${p.keyword} block on line ${i}`);
                     }
                 }
-                if (parsingLine.match(p.from)) {
+
+
+                if (p.from.test(parsingLine)) {
                     console.log(`[Line ${i}] Found opening match: ${p.keyword}`);
                     let newNode: Node = { keyword: p.keyword, startLine: i, parent: currentNode, willFold: p.willFold, closingRegex: p.to };
                     currentNode = newNode;
                     break; // Move to next line immediately after opening match
                 }
             }
-    
+
             let parsingLine = currentNode.closingRegex ? (currentNode.closingRegex.test(filteredLine) ? filteredLine : uncommentedLine) : filteredLine;
             if (currentNode.closingRegex.test(parsingLine)) {
                 if (currentNode.parent) {
-                    console.log(`${line}`);
                     console.log(`[Line ${i}] Closing block '${currentNode.keyword}' started at line ${currentNode.startLine}`);
                     if (currentNode.willFold) {
                         ranges.push(this.createRange({ startLine: currentNode.startLine, endLine: i }));
                     }
-                    currentNode = currentNode.parent; // Move up only after closing one level
+                    if (currentNode.keyword === "MAP" || currentNode.keyword === "CLASS" || currentNode.keyword === "INTERFACE") {
+                        isInMapOrClass = false; // ✅ Fix: Exit MAP/CLASS only when its closing END is found
+                        console.log(`[EXIT] MAP or CLASS ended on line ${i}`);
+                    }
+                    currentNode = currentNode.parent;
                 } else {
                     console.log(`[Line ${i}] Unmatched closing detected at root level.`);
                 }
             }
         }
-    
+
+        // 🔹 **Handle Last Procedure at EOF**
+        if (lastProcedureStartLine !== null) {
+            ranges.push(this.createRange({ startLine: lastProcedureStartLine, endLine: document.lineCount - 1 }));
+            console.log(`[FOLD] Adding final fold from ${lastProcedureStartLine} to EOF`);
+        }
+
         console.log("[ClarionFoldingRangeProvider] Folding computation finished.", ranges);
         return ranges;
     }
@@ -100,16 +131,10 @@ export class ClarionFoldingRangeProvider {
         return document.getText(Range.create(i, 0, i, 1000));
     }
     private removeComments(line: string) {
-        // Find the first occurrence of '!' or '|'
         const commentIndex = Math.min(
             line.indexOf('!') !== -1 ? line.indexOf('!') : Infinity,
             line.indexOf('|') !== -1 ? line.indexOf('|') : Infinity
         );
-    
-        // If no comment marker is found, return the line as is
-        if (commentIndex === Infinity) return line;
-    
-        // Return the substring before the comment marker, trimming any trailing spaces
-        return line.substring(0, commentIndex).trim();
+        return commentIndex === Infinity ? line : line.substring(0, commentIndex).trim();
     }
 }

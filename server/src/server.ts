@@ -2,8 +2,10 @@ import {
     createConnection,
     TextDocuments,
     ProposedFeatures,
+    Hover,
+    HoverParams,
+    MarkupKind
 } from 'vscode-languageserver/node';
-
 
 import {
     DocumentSymbol,
@@ -11,59 +13,67 @@ import {
     FoldingRange,
     FoldingRangeParams,
     InitializeParams
-} from 'vscode-languageserver-protocol'
+} from 'vscode-languageserver-protocol';
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { ClarionFoldingRangeProvider } from './ClarionFoldingRangeProvider';
 import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
-//import { ClarionDefinitionProvider } from './ClarionDefinitionProvider'; // Import your definition provider
 
 const clarionFoldingProvider = new ClarionFoldingRangeProvider();
-//const clarionDefinitionProvider = new ClarionDefinitionProvider();
-const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider;
+const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider();
 let connection = createConnection(ProposedFeatures.all);
 let documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
 
+// Store folding ranges for hover lookups
+const storedFoldingRanges: Map<string, FoldingRange[]> = new Map();
+
 connection.onInitialize((params: InitializeParams) => {
-
-    const settings = params.initializationOptions?.settings;
-    connection.onFoldingRanges((params: { textDocument: { uri: any; }; }) => {
+    connection.onFoldingRanges((params: FoldingRangeParams) => {
         const document = documents.get(params.textDocument.uri);
-        if (!document) {
-            return [];
-        }
+        if (!document) return [];
 
-        return clarionFoldingProvider.provideFoldingRanges(document);
-    }
-    );
+        const foldingRanges = clarionFoldingProvider.provideFoldingRanges(document);
+        storedFoldingRanges.set(params.textDocument.uri, foldingRanges);
+        return foldingRanges;
+    });
 
-    connection.onDocumentSymbol(params => {
+    connection.onDocumentSymbol((params: DocumentSymbolParams) => {
         const document = documents.get(params.textDocument.uri);
-        if (!document) {
-            return [];
-        }
-        
-    
+        if (!document) return [];
+
         return clarionDocumentSymbolProvider.provideDocumentSymbols(document);
-        
-    }
-    );
+    });
 
-    
-    // connection.onDefinition(params => {
-    //     const document = documents.get(params.textDocument.uri);
-    //     if (!document) {
-    //         return null;
-    //     }
-    //     return clarionDefinitionProvider.handleDefinitionRequest(params, document);
-    // });
+    connection.onHover((params: HoverParams): Hover | null => {
+        const document = documents.get(params.textDocument.uri);
+        if (!document) return null;
+
+        const position = params.position;
+        const foldingRanges = storedFoldingRanges.get(params.textDocument.uri) || [];
+
+        // Check if the position is inside a folded range
+        const range = foldingRanges.find(fr => fr.startLine <= position.line && fr.endLine >= position.line);
+        if (!range) return null;
+
+        // Extract folded content
+        const foldedText = document.getText({
+            start: { line: range.startLine, character: 0 },
+            end: { line: range.endLine, character: Number.MAX_SAFE_INTEGER }
+        });
+
+        return {
+            contents: {
+                kind: MarkupKind.Markdown,
+                value: `\`\`\`clarion\n${foldedText}\n\`\`\``
+            }
+        };
+    });
 
     return {
         capabilities: {
             foldingRangeProvider: true,
-            documentSymbolProvider: true
-            //,
-            //definitionProvider: true // Enable your definition provider
+            documentSymbolProvider: true,
+            hoverProvider: true // ✅ Enables server-side hover for folded regions
         }
     };
 });
