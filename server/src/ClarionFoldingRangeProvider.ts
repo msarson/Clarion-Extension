@@ -1,6 +1,7 @@
 import { FoldingRange } from "vscode-languageserver-protocol";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { Range } from "vscode-languageserver-types";
+import ClarionTokenizer from "./ClarionTokenizer";
 
 interface Node {
     keyword: string;
@@ -25,176 +26,188 @@ export class ClarionFoldingRangeProvider {
         { from: /^(\w+\s+)?FILE,DRIVER/i, to: /^\s*END/i, keyword: "FILE", willFold: true, removeComment: true }
     ];
 
-    // 🔹 Regex Constants (Following the Two Rules)
-    private static readonly REGEX_END_BASED = /\s+\b${keyword}\b/i;
-    private static readonly REGEX_END_SPACE_BASED = /\s+\b${keyword}\b\s*\(?/i;
-    private static readonly REGEX_MODULE_BASED = /\s+\b${keyword}\b\s*\(?/i;
-    private static readonly REGEX_OTHER_KEYWORDS = /\s+\b${keyword}\b\s*(?=\()/i;
-
-
-
     // 🔹 Keyword Groups
-    private endBasedKeywords: string[] = ["CASE", "IF", "LOOP", "MAP", "RECORD", "MENUBAR"];
-    private endSpaceBasedKeywords: string[] = ["GROUP", "QUEUE"];
-    private moduleBasedKeywords: string[] = ["CLASS", "INTERFACE", "VIEW"];
-    private otherKeywords: string[] = ["JOIN", "MODULE"];
+    private allKeywords: string[] = [
+        "CASE", "IF", "LOOP", "WINDOW", "SHEET",
+        "TAB", "QUEUE", "CLASS", "MAP", "FILE",
+        "RECORD", "VIEW", "JOIN", "INTERFACE", "GROUP",
+        "MODULE", "OPTION", "REPORT", "FORM", "DETAIL",
+        "HEADER", "FOOTER", "BREAK", "TOOLBAR", "MENUBAR",
+        "MENU", "ACCEPT", "APPLICATION", "OLE", "ITEMIZE",
+        "EXECUTE", "BEGIN"
+    ];
+    // 🔹 New Helper Function for Keyword Extraction
+    private getFirstWordAfterSpace(line: string): string {
+        let originalLine = line; // Store original for debugging
+        // Check if the first character is not a space (column 1 text exists)
+        if (line.length > 0 && line[0] !== ' ') {
+            let match = line.match(/^\w+/); // Extract first word
+            if (match) {
+                line = line.substring(match[0].length).trimStart(); // Remove that word & trim
+            }
+        }
+        line = line.trim(); // Trim the line
+        let match = line.match(/^\w+/);
+        if (match != undefined) {
+            match[0] = match[0];
+        }
 
-    private controlKeywords = ["APPLICATION", "WINDOW", ];
+        return match ? match[0] : "";  // Always return a string, never null
+    }
+
 
 
     // 🔹 Helper Function to Create Folding Pairs
-    private createFoldingPair = (keyword: string, patternType: string): IFoldingPair => {
-        let fromPattern;
-
-        switch (patternType) {
-            case "endBasedKeywords":
-                fromPattern = new RegExp(`^\\s*\\b${keyword}\\b`, "i");
-                break;
-            case "endSpaceBasedKeywords":
-                fromPattern = new RegExp(`\\s+\\b${keyword}\\b\\s*\\(?`, "i");
-                break;
-            case "moduleBasedKeywords":
-                fromPattern = new RegExp(`\\s+\\b${keyword}\\b\\s*\\(?`, "i");
-                break;
-            case "otherKeywords":
-                fromPattern = new RegExp(`^\\s*\\b${keyword}\\b\\s*(?=\\()`, "i");
-                break;
-            case "controlKeywords":
-                fromPattern = new RegExp(`\\s+\\b${keyword}\\b`, "i");
-                break;
-
-            default:
-                throw new Error(`Unknown pattern type: ${patternType}`);
-        }
-
-
+    private createFoldingPair = (keyword: string): IFoldingPair => {
         return {
-            from: new RegExp(fromPattern, "i"),
+            from: new RegExp(`^${keyword}\\b`, "i"),
             to: /^\s*END(\s+|$)/i,
             keyword: keyword,
             willFold: true,
             removeComment: true
         };
     };
-    // 🔹 Folding Pairs Using Constants
+
+    // 🔹 Folding Pairs Using the New Logic
     private foldingPairs: IFoldingPair[] = [
         // Static pairs first
         ...this.staticFfoldingPairs,
 
-        // Conditional Before Paren
-        ...this.endBasedKeywords.map(keyword => this.createFoldingPair(keyword, "endBasedKeywords")),
-
-        // Require Space Before
-        ...this.endSpaceBasedKeywords.map(keyword => this.createFoldingPair(keyword, "endSpaceBasedKeywords")),
-
-        // General Keywords
-        ...this.moduleBasedKeywords.map(keyword => this.createFoldingPair(keyword, "moduleBasedKeywords")),
-
-        // Other Keywords
-        ...this.otherKeywords.map(keyword => this.createFoldingPair(keyword, "otherKeywords")),
-
-        ...this.controlKeywords.map(keyword => this.createFoldingPair(keyword, "controlKeywords"))
-
-        
+        // Unified folding for all keywords
+        ...this.allKeywords.map(keyword => ({
+            from: new RegExp(`\\b${keyword}\\b(\\s+|\\t+|\\s*\\t*)`, "i"),
+            to: /^\s*END(\s+|$)/i,
+            keyword: keyword,
+            willFold: true,
+            removeComment: true
+        }))
     ];
+    private skippedLines = new Set<number>(); // Track merged lines
+
+    private getLogicalLine({ document, i }: { document: TextDocument; i: number; }): string {
+        if (this.skippedLines.has(i)) {
+            return ""; // 🚀 Ignore lines we already merged
+        }
+
+        let line = document.getText(Range.create(i, 0, i, 1000)); // ❌ Do NOT trim here
+        let logicalLine = "";
+
+        while (i < document.lineCount) {
+            let uncommentedLine = this.removeComments(line); // ❌ Do NOT trim here either
+
+            if (uncommentedLine.endsWith("|")) {  // ✅ Handle Clarion's line continuation
+                logicalLine += uncommentedLine.slice(0, -1) + " "; // ✅ Remove `|`, add space
+                this.skippedLines.add(i + 1);  // 🔹 Mark next line to be skipped
+                i++; // Move to next line
+                line = document.getText(Range.create(i, 0, i, 1000)); // ❌ Do NOT trim
+                continue; // Continue processing next line
+            }
+
+            logicalLine += uncommentedLine;
+            break;
+        }
+        return logicalLine;
+    }
+
 
 
     provideFoldingRanges(document: TextDocument): FoldingRange[] {
-        console.log("[ClarionFoldingRangeProvider] Starting folding computation.");
+
+        const tokenizer = new ClarionTokenizer(document.getText());
+        const tokens = tokenizer.tokenize();
+        // Improved logging
+        console.log("🔍 Tokenized Clarion Source Code:");
+        tokens.forEach((token, index) => {
+            console.log(`[${index}] Line ${token.line} | Type: ${token.type} | Value: "${token.value}"`);
+        });
         const ranges: FoldingRange[] = [];
         let rootNode: Node = { keyword: "ROOT", startLine: -1, parent: null, willFold: false, closingRegex: /^$/ };
         let currentNode = rootNode;
-        let isInMapOrClass = false;
+        let isInMapOrClass = false;  // Track if inside CLASS/MAP/INTERFACE
         let lastProcedureStartLine: number | null = null;
 
         const procedureRegex = /^\s*\w+(\.\w+)?\s+(PROCEDURE|FUNCTION|ROUTINE)\s*(\([^)]*\))?/i;
-        console.log(`[DEBUG] Total lines in document: ${document.lineCount}`);
 
         for (let i = 0; i < document.lineCount; i++) {
-            let line = this.getLine({ document, i }).trim();
-            let uncommentedLine = line;
-            line = this.removeComments(line);
 
-            let isInString = false;
-            let filteredLine = "";
-            for (let char of line) {
-                if (char === "'") isInString = !isInString;
-                if (!isInString) filteredLine += char;
+            let line = this.getLogicalLine({ document, i });//.trim();
+            if (!line.trim()) continue;
+            let uncommentedLine = line;
+
+
+            // 🔹 **Check for CLASS/MAP/INTERFACE and Set `isInMapOrClass = true`**
+            if (line.match(/\b(CLASS|MAP|INTERFACE)\b/i)) {
+                isInMapOrClass = true;
             }
 
-            // 🔹 Detect PROCEDURE/FUNCTION/ROUTINE
-            if (!isInMapOrClass && procedureRegex.test(filteredLine)) {
-                console.log(`[MATCH] PROCEDURE/FUNCTION/ROUTINE found at line ${i}`);
+            // 🔹 **Skip Procedure Detection if Inside CLASS/MAP/INTERFACE**
+            if (!isInMapOrClass && procedureRegex.test(line)) {
                 if (lastProcedureStartLine !== null) {
                     ranges.push(this.createRange({ startLine: lastProcedureStartLine, endLine: i - 1 }));
-                    console.log(`[FOLD] Closing previous procedure from ${lastProcedureStartLine} to ${i - 1}`);
                 }
                 lastProcedureStartLine = i;
             }
 
-            // 🔹 Handle Other Folding Structures
-            for (const p of this.foldingPairs) {
-                let parsingLine = p.removeComment ? filteredLine : uncommentedLine;
+            // 🔹 **Extract First Word After Space**
+            let keyword = this.getFirstWordAfterSpace(line);
+            let isEnd = this.isEndStatement(line);
+            if (!keyword && !isEnd) continue;
 
-                // 🔹 Log the line being tested and the current pattern
-                console.log(`[DEBUG] Testing line ${i}: "${parsingLine}" with pattern "${p.from}" for keyword "${p.keyword}"`);
-
-                // 🔹 Track Keyword Groups
-                console.log(`[DEBUG] Checking against pattern group: ${p.keyword}`);
-
-                // 🔹 Special handling for MAP, CLASS, INTERFACE
-                if (p.keyword === "MAP" || p.keyword === "CLASS" || p.keyword === "INTERFACE") {
-                    if (p.from.test(parsingLine)) {
-                        isInMapOrClass = true;
-                        console.log(`[ENTER] ${p.keyword} block on line ${i}`);
-                    }
-                }
-
-                // 🔹 Test for opening match
-                if (p.from.test(parsingLine)) {
-                    console.log(`[Line ${i}] Found opening match: ${p.keyword}`);
-                    let newNode: Node = {
-                        keyword: p.keyword,
-                        startLine: i,
-                        parent: currentNode,
-                        willFold: p.willFold,
-                        closingRegex: p.to
-                    };
-                    currentNode = newNode;
-                    break;
-                } else {
-                    console.log(`[Line ${i}] No match for keyword: ${p.keyword}`);
-                }
-            }
-
-
-            let parsingLine = currentNode.closingRegex ? (currentNode.closingRegex.test(filteredLine) ? filteredLine : uncommentedLine) : filteredLine;
-            if (this.isEndStatement(parsingLine)) {
+            if (isEnd) {
                 if (currentNode.parent) {
-                    console.log(`[Line ${i}] Closing block '${currentNode.keyword}' started at line ${currentNode.startLine}`);
                     if (currentNode.willFold) {
                         ranges.push(this.createRange({ startLine: currentNode.startLine, endLine: i }));
                     }
-                    if (currentNode.keyword === "MAP" || currentNode.keyword === "CLASS" || currentNode.keyword === "INTERFACE") {
+
+                    // ✅ **Exit CLASS/MAP/INTERFACE when encountering `END`**
+                    if (currentNode.keyword === "CLASS" || currentNode.keyword === "MAP" || currentNode.keyword === "INTERFACE") {
                         isInMapOrClass = false;
-                        console.log(`[EXIT] MAP or CLASS ended on line ${i}`);
                     }
+
                     currentNode = currentNode.parent;
-                } else {
-                    console.log(`[Line ${i}] Unmatched closing detected at root level.`);
                 }
+                continue;
             }
+
+            let matchedPair: IFoldingPair | undefined;
+            if (keyword !== null) {
+                matchedPair = this.foldingPairs.find(p => p.keyword.toUpperCase() === keyword.toUpperCase());
+            }
+
+
+
+
+
+
+            if (matchedPair) {
+
+                // 🚀 Prevent opening an IF block if it ends with `.`
+
+                let newNode: Node = {
+                    keyword: matchedPair.keyword,
+                    startLine: i,
+                    parent: currentNode,
+                    willFold: matchedPair.willFold,
+                    closingRegex: matchedPair.to
+                };
+                currentNode = newNode;
+            }
+
+
+
+            // 🔹 **Handle Closing Matches**
+
         }
 
-        // 🔹 Handle Last Procedure at EOF
+        // 🔹 **Handle Last Procedure at EOF**
         if (lastProcedureStartLine !== null) {
             ranges.push(this.createRange({ startLine: lastProcedureStartLine, endLine: document.lineCount - 1 }));
-            console.log(`[FOLD] Adding final fold from ${lastProcedureStartLine} to EOF`);
         }
 
-        console.log("[ClarionFoldingRangeProvider] Folding computation finished.", ranges);
         return ranges;
     }
+
+
 
     private createRange({ startLine, endLine }: { startLine: number; endLine: number; }): FoldingRange {
         return FoldingRange.create(startLine, endLine);
@@ -204,15 +217,35 @@ export class ClarionFoldingRangeProvider {
         return document.getText(Range.create(i, 0, i, 1000));
     }
 
-    private removeComments(line: string) {
+    private removeComments(line: string): string {
+        const originalLine = line; // Store original for debugging
+
+        // Remove content inside single quotes
+        let isInString = false;
+        let filteredLine = "";
+        for (let char of line) {
+            if (char === "'") isInString = !isInString;
+            if (!isInString) filteredLine += char;
+        }
+
+        // Remove comments (everything after `!` or `|`)
         const commentIndex = Math.min(
-            line.indexOf('!') !== -1 ? line.indexOf('!') : Infinity,
-            line.indexOf('|') !== -1 ? line.indexOf('|') : Infinity
+            filteredLine.indexOf('!') !== -1 ? filteredLine.indexOf('!') : Infinity,
+            filteredLine.indexOf('|') !== -1 ? filteredLine.indexOf('|') : Infinity
         );
-        return commentIndex === Infinity ? line : line.substring(0, commentIndex).trim();
+
+        const result = commentIndex === Infinity ? filteredLine : filteredLine.substring(0, commentIndex).trim();
+
+        // Debug output
+
+        return result;
     }
 
+
+
+
     private isEndStatement(line: string): boolean {
-        return line.trim().toUpperCase() === "END";
+        line = line.trim();
+        return line.toUpperCase() === "END" || line.endsWith(".");
     }
 }
