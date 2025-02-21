@@ -11,8 +11,9 @@ import {
 } from 'vscode-languageserver-protocol';
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { ClarionFoldingRangeProvider } from './ClarionFoldingRangeProvider';
+
 import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
+import { ClarionFoldingRangeProvider } from './ClarionFoldingRangeProvider';
 
 // ✅ Initialize Providers
 const clarionFoldingProvider = new ClarionFoldingRangeProvider();
