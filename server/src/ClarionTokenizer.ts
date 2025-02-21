@@ -112,15 +112,15 @@ export class ClarionTokenizer {
                         // ✅ Move position forward based on match length
                         position += match[0].length;
                         column += match[0].length;
-
-                        // ✅ Continue searching for more matches in the same line
+                        matched = true;
+                        break; // ✅ Stop checking after a successful match
                     }
 
+                    if (matched) break; // ✅ Stop checking other patterns if a match is found
                 }
 
                 if (!matched) {
-                    // ❌ REMOVE THIS IF NOT NEEDED
-                    // console.log(`⚠️ Skipping Unmatched Char: '${line[position]}' at Position: ${position} (Column: ${column})`);
+                    // ✅ Ensure tokenizer moves forward even if no match
                     position++;
                     column++;
                 }
@@ -136,9 +136,9 @@ export const tokenPatterns: Record<TokenType, RegExp> = {
     [TokenType.Comment]: /!.*/i,
     [TokenType.LineContinuation]: /&?\s*\|.*/i,
 
-    [TokenType.String]: /'[^']*'/i,
-    [TokenType.Keyword]: /\b(?:RETURN|OF|ELSE|THEN|UNTIL|EXIT|NEW|END)\b/i, // Remove IF and LOOP from here
-    [TokenType.Structure]: /\b(?:APPLICATION|CASE|CLASS|GROUP|IF|INTERFACE|JOIN|LOOP|MAP|MENU|MENUBAR|MODULE|QUEUE|RECORD|REPORT|SECTION|SHEET|TAB|TOOLBAR|VIEW|WINDOW)\b/i, // Ensure JOIN, LOOP, and IF are included here
+    [TokenType.String]: /'([^']|'')*'/i, // ✅ Fixed to handle multiple strings properly
+    [TokenType.Keyword]: /\b(?:RETURN|OF|ELSE|THEN|UNTIL|EXIT|NEW|END)\b/i,
+    [TokenType.Structure]: /\b(?:APPLICATION|CASE|CLASS|GROUP|IF|INTERFACE|JOIN|LOOP|MAP|MENU|MENUBAR|MODULE|QUEUE|RECORD|REPORT|SECTION|SHEET|TAB|TOOLBAR|VIEW|WINDOW)\b/i,
     [TokenType.Procedure]: /\bPROCEDURE\b/i,
     [TokenType.Function]: /\b(?:PROJECT|STATUS|AT)\b/i,
     [TokenType.Directive]: /\b(?:ASSERT|BEiN|COMPILE|EQUATE|INCLUDE|ITEMIZE|OMIT|ONCE|SECTION|SIZE)\b/i,
@@ -152,8 +152,6 @@ export const tokenPatterns: Record<TokenType, RegExp> = {
     [TokenType.Constant]: /\b(?:TRUE|FALSE|NULL)\b/i,
     [TokenType.Type]: /\b(?:ANY|ASTRING|BFLOAT4|BFLOAT8|BLOB|MEMO|BOOL|BSTRING|BYTE|CSTRING|DATE|DECIMAL|DOUBLE|FLOAT4|LONG|LIKE|PDECIMAL|PSTRING|REAL|SHORT|SIGNED|SREAL|STRING|TIME|ULONG|UNSIGNED|USHORT|VARIANT)\b/i,
     [TokenType.ImplicitVariable]: /\b[A-Za-z][A-Za-z0-9_]+(?:\$|#|")\b/i,
-    [TokenType.Delimiter]: /[,():]/i,  // ✅ Handles symbols like ( ) , :
-    [TokenType.Unknown]: /\S+/i  // ✅ Only catches what is NOT matched by any other pattern
+    [TokenType.Delimiter]: /[,():]/i,  
+    [TokenType.Unknown]: /\S+/i  
 };
-
-
