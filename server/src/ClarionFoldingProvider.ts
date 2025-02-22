@@ -142,6 +142,7 @@ class ClarionFoldingProvider {
         let openProcedure: { startLine: number } | null = null;
         let openRoutine: { startLine: number } | null = null;
         let insideClassOrInterfaceOrMap = false;
+        let regionStack: { startLine: number; label?: string }[] = [];
     
         for (let i = 0; i < this.tokens.length; i++) {
             const token = this.tokens[i];
@@ -173,6 +174,28 @@ class ClarionFoldingProvider {
                     if (["CLASS", "INTERFACE", "MAP"].includes(lastStructure.type)) {
                         insideClassOrInterfaceOrMap = false;
                     }
+                }
+            }
+    
+            // ✅ Detect `!region` start
+            if (token.type === TokenType.Comment && upperValue.trim().startsWith("!REGION")) {
+
+                const labelMatch = token.value.match(/!REGION\s+"?(.*?)"?$/i);
+                const label = labelMatch ? labelMatch[1] : undefined;
+                this.logMessage(`✅ [DEBUG] Found REGION starting at line ${token.line} (Label: ${label ?? "None"})`);
+                regionStack.push({ startLine: token.line, label });
+            }
+    
+            // ✅ Detect `!endregion` and close last opened REGION
+            if (token.type === TokenType.Comment && upperValue.trim().startsWith("!ENDREGION")) {
+                const lastRegion = regionStack.pop();
+                if (lastRegion) {
+                    this.logMessage(`📌 [DEBUG] Closing REGION from line ${lastRegion.startLine} to ${token.line} (Label: ${lastRegion.label ?? "None"})`);
+                    this.foldingRanges.push({
+                        startLine: lastRegion.startLine,
+                        endLine: token.line,
+                        kind: FoldingRangeKind.Region
+                    });
                 }
             }
     
@@ -238,7 +261,6 @@ class ClarionFoldingProvider {
         // ✅ Close any remaining open STRUCTURES at EOF
         while (structureStack.length > 0) {
             const lastStructure = structureStack.pop();
-            this.logMessage(`📌 [DEBUG] Closing unclosed STRUCTURE '${lastStructure?.type}' from line ${lastStructure?.startLine} to EOF`);
             this.foldingRanges.push({
                 startLine: lastStructure?.startLine ?? 0,
                 endLine: this.tokens[this.tokens.length - 1]?.line ?? 0,
@@ -246,9 +268,18 @@ class ClarionFoldingProvider {
             });
         }
     
+        // ✅ Close any remaining open REGIONS at EOF
+        while (regionStack.length > 0) {
+            const lastRegion = regionStack.pop();
+            this.foldingRanges.push({
+                startLine: lastRegion?.startLine ?? 0,
+                endLine: this.tokens[this.tokens.length - 1]?.line ?? 0,
+                kind: FoldingRangeKind.Region
+            });
+        }
+    
         // ✅ Close any remaining open PROCEDURE or ROUTINE at EOF
         if (openProcedure) {
-            this.logMessage(`📌 [DEBUG] Closing last PROCEDURE from line ${openProcedure.startLine} to EOF`);
             this.foldingRanges.push({
                 startLine: openProcedure.startLine,
                 endLine: this.tokens[this.tokens.length - 1]?.line ?? 0,
@@ -256,7 +287,6 @@ class ClarionFoldingProvider {
             });
         }
         if (openRoutine) {
-            this.logMessage(`📌 [DEBUG] Closing last ROUTINE from line ${openRoutine.startLine} to EOF`);
             this.foldingRanges.push({
                 startLine: openRoutine.startLine,
                 endLine: this.tokens[this.tokens.length - 1]?.line ?? 0,
@@ -267,6 +297,7 @@ class ClarionFoldingProvider {
         this.logMessage("✅ [DEBUG] Folding computation finished.");
         return this.foldingRanges;
     }
+    
     
     
     
