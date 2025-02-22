@@ -138,17 +138,24 @@ class ClarionFoldingProvider {
     
         this.foldingRanges = [];
     
-        // ✅ Handle STRUCTURE folding by tracking start and closing on END
         let structureStack: { type: string; startLine: number }[] = [];
+        let openProcedure: { startLine: number } | null = null;
+        let openRoutine: { startLine: number } | null = null;
+        let insideClassOrInterfaceOrMap = false;
     
         for (let i = 0; i < this.tokens.length; i++) {
             const token = this.tokens[i];
             const upperValue = token.value.toUpperCase();
     
-            // ✅ Detect STRUCTURE start
+            // ✅ Detect STRUCTURE start (push to stack)
             if (token.type === TokenType.Structure) {
                 this.logMessage(`✅ [DEBUG] Found STRUCTURE '${upperValue}' starting at line ${token.line}`);
                 structureStack.push({ type: upperValue, startLine: token.line });
+    
+                // ✅ Mark when inside CLASS/INTERFACE/MAP
+                if (["CLASS", "INTERFACE", "MAP"].includes(upperValue)) {
+                    insideClassOrInterfaceOrMap = true;
+                }
             }
     
             // ✅ Detect END and close last opened STRUCTURE
@@ -161,11 +168,74 @@ class ClarionFoldingProvider {
                         endLine: token.line,
                         kind: FoldingRangeKind.Region
                     });
+    
+                    // ✅ Exit CLASS/INTERFACE/MAP if applicable
+                    if (["CLASS", "INTERFACE", "MAP"].includes(lastStructure.type)) {
+                        insideClassOrInterfaceOrMap = false;
+                    }
                 }
+            }
+    
+            // ✅ Detect PROCEDURE start
+            if (token.type === TokenType.Keyword && upperValue === "PROCEDURE") {
+                // ❌ Skip procedures inside CLASS, INTERFACE, or MAP
+                if (insideClassOrInterfaceOrMap) continue;
+    
+                // ✅ Close previous PROCEDURE
+                if (openProcedure) {
+                    this.logMessage(`📌 [DEBUG] Closing PROCEDURE from line ${openProcedure.startLine} to ${token.line - 1}`);
+                    this.foldingRanges.push({
+                        startLine: openProcedure.startLine,
+                        endLine: token.line - 1,
+                        kind: FoldingRangeKind.Region
+                    });
+                    openProcedure = null;
+                }
+    
+                // ✅ Close previous ROUTINE (if any)
+                if (openRoutine) {
+                    this.logMessage(`📌 [DEBUG] Closing ROUTINE from line ${openRoutine.startLine} to ${token.line - 1}`);
+                    this.foldingRanges.push({
+                        startLine: openRoutine.startLine,
+                        endLine: token.line - 1,
+                        kind: FoldingRangeKind.Region
+                    });
+                    openRoutine = null;
+                }
+    
+                this.logMessage(`✅ [DEBUG] New PROCEDURE starts at line ${token.line}`);
+                openProcedure = { startLine: token.line };
+            }
+    
+            // ✅ Detect ROUTINE start
+            if (token.type === TokenType.Keyword && upperValue === "ROUTINE") {
+                // ✅ Close the current PROCEDURE if a ROUTINE is found
+                if (openProcedure) {
+                    this.logMessage(`📌 [DEBUG] Closing PROCEDURE from line ${openProcedure.startLine} to ${token.line - 1}`);
+                    this.foldingRanges.push({
+                        startLine: openProcedure.startLine,
+                        endLine: token.line - 1,
+                        kind: FoldingRangeKind.Region
+                    });
+                    openProcedure = null;
+                }
+    
+                // ✅ Close previous ROUTINE (if any)
+                if (openRoutine) {
+                    this.logMessage(`📌 [DEBUG] Closing ROUTINE from line ${openRoutine.startLine} to ${token.line - 1}`);
+                    this.foldingRanges.push({
+                        startLine: openRoutine.startLine,
+                        endLine: token.line - 1,
+                        kind: FoldingRangeKind.Region
+                    });
+                }
+    
+                this.logMessage(`✅ [DEBUG] New ROUTINE starts at line ${token.line}`);
+                openRoutine = { startLine: token.line };
             }
         }
     
-        // ✅ Close any remaining open STRUCTURE at EOF
+        // ✅ Close any remaining open STRUCTURES at EOF
         while (structureStack.length > 0) {
             const lastStructure = structureStack.pop();
             this.logMessage(`📌 [DEBUG] Closing unclosed STRUCTURE '${lastStructure?.type}' from line ${lastStructure?.startLine} to EOF`);
@@ -176,73 +246,9 @@ class ClarionFoldingProvider {
             });
         }
     
-        // ✅ Handle PROCEDURE and ROUTINE folding (from test logic)
-        let openProcedure: { startLine: number } | null = null;
-        let openRoutine: { startLine: number } | null = null;
-        let insideClassOrInterfaceOrMap = false;
-    
-        for (let i = 0; i < this.tokens.length; i++) {
-            const token = this.tokens[i];
-            const upperValue = token.value.toUpperCase();
-    
-            // ✅ Track when inside CLASS, INTERFACE, or MAP (so we skip their PROCEDUREs)
-            if (token.type === TokenType.Structure && ["CLASS", "INTERFACE", "MAP"].includes(upperValue)) {
-                insideClassOrInterfaceOrMap = true;
-            }
-            if (token.type === TokenType.Keyword && upperValue === "END" && insideClassOrInterfaceOrMap) {
-                insideClassOrInterfaceOrMap = false;
-            }
-    
-            // ✅ Detect PROCEDURE (closes on next PROCEDURE or ROUTINE)
-            if (token.type === TokenType.Keyword && upperValue === "PROCEDURE") {
-                if (insideClassOrInterfaceOrMap) continue;
-    
-                if (openProcedure) {
-                    this.foldingRanges.push({
-                        startLine: openProcedure.startLine,
-                        endLine: token.line - 1,
-                        kind: FoldingRangeKind.Region
-                    });
-                    openProcedure = null;
-                }
-    
-                if (openRoutine) {
-                    this.foldingRanges.push({
-                        startLine: openRoutine.startLine,
-                        endLine: token.line - 1,
-                        kind: FoldingRangeKind.Region
-                    });
-                    openRoutine = null;
-                }
-    
-                openProcedure = { startLine: token.line };
-            }
-    
-            // ✅ Detect ROUTINE (closes on next ROUTINE or PROCEDURE)
-            if (token.type === TokenType.Keyword && upperValue === "ROUTINE") {
-                if (openProcedure) {
-                    this.foldingRanges.push({
-                        startLine: openProcedure.startLine,
-                        endLine: token.line - 1,
-                        kind: FoldingRangeKind.Region
-                    });
-                    openProcedure = null;
-                }
-    
-                if (openRoutine) {
-                    this.foldingRanges.push({
-                        startLine: openRoutine.startLine,
-                        endLine: token.line - 1,
-                        kind: FoldingRangeKind.Region
-                    });
-                }
-    
-                openRoutine = { startLine: token.line };
-            }
-        }
-    
         // ✅ Close any remaining open PROCEDURE or ROUTINE at EOF
         if (openProcedure) {
+            this.logMessage(`📌 [DEBUG] Closing last PROCEDURE from line ${openProcedure.startLine} to EOF`);
             this.foldingRanges.push({
                 startLine: openProcedure.startLine,
                 endLine: this.tokens[this.tokens.length - 1]?.line ?? 0,
@@ -250,6 +256,7 @@ class ClarionFoldingProvider {
             });
         }
         if (openRoutine) {
+            this.logMessage(`📌 [DEBUG] Closing last ROUTINE from line ${openRoutine.startLine} to EOF`);
             this.foldingRanges.push({
                 startLine: openRoutine.startLine,
                 endLine: this.tokens[this.tokens.length - 1]?.line ?? 0,
@@ -260,6 +267,7 @@ class ClarionFoldingProvider {
         this.logMessage("✅ [DEBUG] Folding computation finished.");
         return this.foldingRanges;
     }
+    
     
     
 }
