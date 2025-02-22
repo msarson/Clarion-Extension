@@ -5,20 +5,28 @@ import ClarionFoldingProvider from "./ClarionFoldingProvider";
 import { ClarionTokenizer } from "./ClarionTokenizer";
 
 export class ClarionFoldingRangeProvider {
-    provideFoldingRanges(document: TextDocument): FoldingRange[] {
-        console.log("[ClarionFoldingRangeProvider] Starting folding computation.");
+    private logMessage: (message: string) => void;
 
-        // Tokenize the document
-        const tokenizer = new ClarionTokenizer(document.getText());
-        const tokens = tokenizer.tokenize();
-
-        // Use ClarionFoldingProvider to compute folding ranges
-        const foldingProvider = new ClarionFoldingProvider(tokens);
-        const foldingRanges = foldingProvider.computeFoldingRanges();
-
-        console.log("[ClarionFoldingRangeProvider] Folding computation finished.");
-        return foldingRanges;
+    constructor(logMessage: (message: string) => void) {
+        this.logMessage = logMessage;
     }
 
-  
+    provideFoldingRanges(document: TextDocument): FoldingRange[] {
+        this.logMessage("[ClarionFoldingRangeProvider] Starting folding computation.");
+
+        // ✅ Pass logMessage to tokenizer
+        const tokenizer = new ClarionTokenizer(document.getText(), this.logMessage);
+        const tokens = tokenizer.tokenize();
+
+        // ✅ Log token count
+        this.logMessage(`[ClarionFoldingRangeProvider] Tokenization complete. ${tokens.length} tokens found.`);
+
+        // ✅ Use ClarionFoldingProvider to compute folding ranges
+        const foldingProvider = new ClarionFoldingProvider(tokens, this.logMessage);
+        const foldingRanges = foldingProvider.computeFoldingRanges();
+
+        this.logMessage("[ClarionFoldingRangeProvider] Folding computation finished.");
+        return foldingRanges;
+    }
 }
+

@@ -14,10 +14,11 @@ export enum TokenType {
     Constant,
     Type,
     ImplicitVariable,
-    Structure,     // ✅ Structure TokenType for FILE, JOIN, etc.
-    Procedure,     // ✅ New TokenType for PROCEDURE()
+    Structure,  // ✅ Structure TokenType for FILE, JOIN, etc.
+   // Procedure,  // ✅ TokenType for PROCEDURE()
+   // Routine,    // ✅ New TokenType for ROUTINE
     LineContinuation, // ✅ For '|'
-    Delimiter,     // ✅ Added for symbols like '(', ')', ','  
+    Delimiter,   // ✅ Added for symbols like '(', ')', ','  
     Unknown
 }
 
@@ -32,12 +33,14 @@ export interface Token {
 export class ClarionTokenizer {
     private text: string;
     private tokens: Token[];
-    private contextStack: { type: string, startLine: number }[]; // ✅ Stack to track context with start line
+    private contextStack: { type: string; startLine: number }[];
+    private logMessage: (message: string) => void;
 
-    constructor(text: string) {
+    constructor(text: string, logMessage: (message: string) => void) {
         this.text = text;
         this.tokens = [];
-        this.contextStack = []; // ✅ Initialize context stack
+        this.contextStack = [];
+        this.logMessage = logMessage;
     }
 
     public tokenize(): Token[] {
@@ -46,8 +49,6 @@ export class ClarionTokenizer {
         lines.forEach((line, lineNumber) => {
             let position = 0;
             let column = 0;
-
-            // Capture leading whitespace for column tracking
             const leadingSpaces = line.match(/^(\s*)/);
             if (leadingSpaces) {
                 column = leadingSpaces[0].length;
@@ -57,50 +58,42 @@ export class ClarionTokenizer {
                 const substring = line.slice(position);
                 let matched = false;
 
-                if (line.trim() === "") break; // Skip empty lines
+                if (line.trim() === "") break;
 
                 for (const tokenTypeKey of Object.keys(tokenPatterns)) {
+            //        this.logMessage(`🔍 Checking for ${TokenType[Number(tokenTypeKey)]} at Line ${lineNumber}, Col ${column}`);
                     const tokenType = Number(tokenTypeKey) as TokenType;
                     const pattern = tokenPatterns[tokenType];
-
                     let match;
                     while ((match = pattern.exec(substring)) !== null) {
-                        if (match.index !== 0) break;  // Ensure match starts at current position
+                        if (match.index !== 0) break;
 
-                        // ✅ LOG MATCHED TOKEN
-                        console.log(`✅ Matched: '${match[0]}' as ${TokenType[tokenType]} (Pattern: ${pattern}) at Line ${lineNumber}, Col ${column}`);
-
-                        // Ensure Labels are ONLY in column 0
-                        if (tokenType === TokenType.Label && column !== 0) {
-                            console.log(`❌ Skipping Misclassified Label at Col ${column}: '${match[0]}'`);
-                            continue;
-                        }
-
-                        // Ensure Keywords are ONLY in column 2 or later
-                        if (tokenType === TokenType.Keyword && column < 2) {
-                            console.log(`❌ Skipping Misclassified Keyword at Col ${column}: '${match[0]}'`);
-                            continue;
-                        }
+                        this.logMessage(`✅ Matched: '${match[0]}' as ${TokenType[tokenType]} at Line ${lineNumber}, Col ${column}`);
 
                         // ✅ Handle context stack for structures
                         if (tokenType === TokenType.Structure) {
                             this.contextStack.push({ type: match[0].toUpperCase(), startLine: lineNumber });
                         }
 
-                        // ✅ Handle context stack for END
+                        // ✅ Handle END keyword for structures
                         if (tokenType === TokenType.Keyword && match[0].toUpperCase() === "END" && this.contextStack.length > 0) {
                             const context = this.contextStack.pop();
                             if (context) {
-                                console.log(`🔍 [DEBUG] Structure ${context.type} starts at line ${context.startLine} and ends at line ${lineNumber}`);
+                                this.logMessage(`🔍 [DEBUG] Structure ${context.type} starts at line ${context.startLine} and ends at line ${lineNumber}`);
                             }
                         }
 
-                        // ✅ Handle PROCEDURE within INTERFACE, CLASS, or MAP
-                        if (tokenType === TokenType.Procedure && this.contextStack.length > 0) {
-                            console.log(`✅ Matched PROCEDURE within ${this.contextStack[this.contextStack.length - 1].type} at Line ${lineNumber}`);
-                        }
+                        // // ✅ Detect PROCEDUREs, but do NOT manage their end
+                        // if (tokenType === TokenType.Keyword && match[0].toUpperCase() === "PROCEDURE") {
+                        //     this.logMessage(`✅ [DEBUG] Found PROCEDURE '${match[0]}' at line ${lineNumber}`);
+                        // }
 
-                        // ✅ Add the token
+                        // // ✅ Detect ROUTINEs
+                        // if (tokenType === TokenType.Routine) {
+                        //     this.logMessage(`✅ [DEBUG] Found ROUTINE '${match[0]}' at line ${lineNumber}`);
+                        // }
+
+                        // ✅ Add Token
                         this.tokens.push({
                             type: tokenType,
                             value: match[0],
@@ -109,25 +102,23 @@ export class ClarionTokenizer {
                             context: this.contextStack.length > 0 ? this.contextStack[this.contextStack.length - 1].type : undefined
                         });
 
-                        // ✅ Move position forward based on match length
                         position += match[0].length;
                         column += match[0].length;
                         matched = true;
-                        break; // ✅ Stop checking after a successful match
+                        break;
                     }
 
-                    if (matched) break; // ✅ Stop checking other patterns if a match is found
+                    if (matched) break;
                 }
 
                 if (!matched) {
-                    // ✅ Ensure tokenizer moves forward even if no match
                     position++;
                     column++;
                 }
             }
         });
 
-        console.log(`📊 Tokenization Complete. Total Tokens: ${this.tokens.length}`);
+        this.logMessage(`📊 Tokenization Complete. Total Tokens: ${this.tokens.length}`);
         return this.tokens;
     }
 }
@@ -135,13 +126,13 @@ export class ClarionTokenizer {
 export const tokenPatterns: Record<TokenType, RegExp> = {
     [TokenType.Comment]: /!.*/i,
     [TokenType.LineContinuation]: /&?\s*\|.*/i,
-
-    [TokenType.String]: /'([^']|'')*'/i, // ✅ Fixed to handle multiple strings properly
-    [TokenType.Keyword]: /\b(?:RETURN|OF|ELSE|THEN|UNTIL|EXIT|NEW|END)\b/i,
-    [TokenType.Structure]: /\b(?:APPLICATION|CASE|CLASS|GROUP|IF|INTERFACE|JOIN|LOOP|MAP|MENU|MENUBAR|MODULE|QUEUE|RECORD|REPORT|SECTION|SHEET|TAB|TOOLBAR|VIEW|WINDOW)\b/i,
-    [TokenType.Procedure]: /\bPROCEDURE\b/i,
+    [TokenType.String]: /'([^']|'')*'/i,
+    [TokenType.Keyword]: /\b(?:RETURN|OF|ELSE|THEN|UNTIL|EXIT|NEW|END|PROCEDURE|ROUTINE)\b/i,
+    [TokenType.Structure]: /\b(?:APPLICATION|CASE|CLASS|GROUP|IF|INTERFACE|FILE|JOIN|LOOP|MAP|MENU|MENUBAR|MODULE|QUEUE|RECORD|REPORT|SECTION|SHEET|TAB|TOOLBAR|VIEW|WINDOW)\b(?=[,()\s]|$)/i,
+//    [TokenType.Procedure]: /\bPROCEDURE\b/i,
+   // [TokenType.Routine]: /\bROUTINE\b/i,
     [TokenType.Function]: /\b(?:PROJECT|STATUS|AT)\b/i,
-    [TokenType.Directive]: /\b(?:ASSERT|BEiN|COMPILE|EQUATE|INCLUDE|ITEMIZE|OMIT|ONCE|SECTION|SIZE)\b/i,
+    [TokenType.Directive]: /\b(?:ASSERT|BEGIN|COMPILE|EQUATE|INCLUDE|ITEMIZE|OMIT|ONCE|SECTION|SIZE)\b/i,
     [TokenType.Property]: /\b(?:DRIVER|PROP|PROPLIST|EVENT|COLOR|CREATE|BRUSH|LEVEL|STD|CURSOR|ICON|BEEP|REJECT|FONT|CHARSET|PEN|LISTZONE|BUTTON|MSGMODE|TEXT|FREEZE|DDE|FF_|OCX|DOCK|MATCH|PAPER|DRIVEROP|DATATYPE|GradientTypes)\b/i,
     [TokenType.Variable]: /\b(?:LOC|GLO):\w+\b/i,
     [TokenType.Number]: /\b\d+(\.\d+)?\b/i,
@@ -152,6 +143,6 @@ export const tokenPatterns: Record<TokenType, RegExp> = {
     [TokenType.Constant]: /\b(?:TRUE|FALSE|NULL)\b/i,
     [TokenType.Type]: /\b(?:ANY|ASTRING|BFLOAT4|BFLOAT8|BLOB|MEMO|BOOL|BSTRING|BYTE|CSTRING|DATE|DECIMAL|DOUBLE|FLOAT4|LONG|LIKE|PDECIMAL|PSTRING|REAL|SHORT|SIGNED|SREAL|STRING|TIME|ULONG|UNSIGNED|USHORT|VARIANT)\b/i,
     [TokenType.ImplicitVariable]: /\b[A-Za-z][A-Za-z0-9_]+(?:\$|#|")\b/i,
-    [TokenType.Delimiter]: /[,():]/i,  
-    [TokenType.Unknown]: /\S+/i  
+    [TokenType.Delimiter]: /[,():]/i,
+    [TokenType.Unknown]: /\S+/i
 };
