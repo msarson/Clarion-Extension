@@ -32,10 +32,13 @@ function clearLogFile() {
     }
 }
 
-/**
- * ✅ Logs messages to both the file and the VS Code Debug Console.
- */
+// ✅ Toggle this to `true` or `false` to enable/disable logging
+const LOGGING_ENABLED = true;
+
+// ✅ Logs messages to both the file and the VS Code Debug Console if enabled.
 function logMessage(message: string) {
+    if (!LOGGING_ENABLED) return;  // ✅ Exit early if logging is disabled
+
     const timestamp = new Date().toISOString();
     const formattedMessage = `[${timestamp}] ${message}\n`;
 
@@ -43,8 +46,9 @@ function logMessage(message: string) {
     fs.appendFileSync(logFilePath, formattedMessage);
 
     // ✅ Send to VS Code Debug Console
-    connection.console.log(`[Server] ${message}`);
+   // connection.console.log(`[Server] ${message}`);
 }
+
 
 // ✅ Initialize Providers
 const clarionFoldingProvider = new ClarionFoldingRangeProvider(logMessage);

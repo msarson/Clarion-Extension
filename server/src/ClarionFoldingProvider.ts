@@ -28,8 +28,17 @@ class ClarionFoldingProvider {
             const upperValue = token.value.toUpperCase();
 
             // ✅ Detect STRUCTURE start (push to stack)
+            // ✅ Detect STRUCTURE start (push to stack)
             if (token.type === TokenType.Structure) {
                 this.logMessage(`✅ [DEBUG] Found STRUCTURE '${upperValue}' starting at line ${token.line}`);
+
+                // ✅ Check if END or "." appears on the same line → If so, DO NOT push it to the stack
+                const nextToken = this.tokens[i + 1];
+                if (nextToken && nextToken.line === token.line && (nextToken.value === "END" || nextToken.value === ".")) {
+                    this.logMessage(`🚫 [DEBUG] Skipping fold for single-line STRUCTURE '${upperValue}' at line ${token.line}`);
+                    continue; // ✅ Skip pushing this structure
+                }
+
                 structureStack.push({ type: upperValue, startLine: token.line });
 
                 if (["CLASS", "INTERFACE", "MAP"].includes(upperValue)) {
@@ -38,7 +47,7 @@ class ClarionFoldingProvider {
             }
 
             // ✅ Detect END and close the last opened STRUCTURE
-            if (token.type === TokenType.Keyword && upperValue === "END") {
+            if ((token.type === TokenType.Keyword && upperValue === "END") || token.value === ".") {
                 if (structureStack.length > 0) {
                     const lastStructure = structureStack.pop();
                     if (lastStructure) {
@@ -71,15 +80,37 @@ class ClarionFoldingProvider {
                 }
             }
 
-               // ✅ Detect `!region` start
-               if (token.type === TokenType.Comment && upperValue.trim().startsWith("!REGION")) {
+            // ✅ Detect `!region` start
+            if (token.type === TokenType.Comment && upperValue.trim().startsWith("!REGION")) {
 
                 const labelMatch = token.value.match(/!REGION\s+"?(.*?)"?$/i);
                 const label = labelMatch ? labelMatch[1] : undefined;
                 this.logMessage(`✅ [DEBUG] Found REGION starting at line ${token.line} (Label: ${label ?? "None"})`);
                 regionStack.push({ startLine: token.line, label });
             }
-    
+
+            // ✅ Detect `!endregion` and close last opened REGION
+            if (token.type === TokenType.Comment && upperValue.trim().startsWith("!ENDREGION")) {
+                const lastRegion = regionStack.pop();
+                if (lastRegion) {
+                    this.logMessage(`📌 [DEBUG] Closing REGION from line ${lastRegion.startLine} to ${token.line} (Label: ${lastRegion.label ?? "None"})`);
+                    this.foldingRanges.push({
+                        startLine: lastRegion.startLine,
+                        endLine: token.line,
+                        kind: FoldingRangeKind.Region
+                    });
+                }
+            }
+
+            // ✅ Detect `!region` start
+            if (token.type === TokenType.Comment && upperValue.trim().startsWith("!REGION")) {
+
+                const labelMatch = token.value.match(/!REGION\s+"?(.*?)"?$/i);
+                const label = labelMatch ? labelMatch[1] : undefined;
+                this.logMessage(`✅ [DEBUG] Found REGION starting at line ${token.line} (Label: ${label ?? "None"})`);
+                regionStack.push({ startLine: token.line, label });
+            }
+
             // ✅ Detect `!endregion` and close last opened REGION
             if (token.type === TokenType.Comment && upperValue.trim().startsWith("!ENDREGION")) {
                 const lastRegion = regionStack.pop();
@@ -145,6 +176,16 @@ class ClarionFoldingProvider {
                 this.logMessage(`✅ [DEBUG] New ROUTINE starts at line ${token.line}`);
                 openRoutine = { startLine: token.line };
             }
+        }
+
+        // ✅ Close any remaining open REGIONS at EOF
+        while (regionStack.length > 0) {
+            const lastRegion = regionStack.pop();
+            this.foldingRanges.push({
+                startLine: lastRegion?.startLine ?? 0,
+                endLine: this.tokens[this.tokens.length - 1]?.line ?? 0,
+                kind: FoldingRangeKind.Region
+            });
         }
 
         // ✅ Close any remaining open STRUCTURES at EOF
