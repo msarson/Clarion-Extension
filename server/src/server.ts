@@ -40,7 +40,7 @@ function logMessage(message: string) {
     const formattedMessage = `[${timestamp}] ${message}\n`;
 
     // ✅ Write to file
-    //fs.appendFileSync(logFilePath, formattedMessage);
+    fs.appendFileSync(logFilePath, formattedMessage);
 
     // ✅ Send to VS Code Debug Console
     connection.console.log(`[Server] ${message}`);
