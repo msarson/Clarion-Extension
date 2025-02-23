@@ -1,5 +1,5 @@
 # clarion-extension README  
-## Version 0.4.10  
+## Version 0.4.11  
 
 Welcome to the README for the **Clarion Extension** project!  
 
@@ -16,6 +16,56 @@ A special thanks to [Mark Goldberg](https://github.com/MarkGoldberg) for his con
 ## ⚠️ Beta Release Notice  
 This extension is still considered **beta quality**. If you encounter any issues, please report them at:  
 [GitHub Issues](https://github.com/msarson/Clarion-Extension/issues)
+
+---
+
+## 🚀 What's New in Version 0.4.11?  
+
+### ⚠️ **Work in Progress – Report Issues Here!**  
+This release is very much a **work in progress**, and your feedback is invaluable.  
+If you encounter any issues, please report them here:  
+👉 **[GitHub Issues](https://github.com/msarson/Clarion-Extension/issues)**  
+
+---
+
+### 🔥 **Language Server Now Enabled**  
+We've **turned on the server component** of the Language Server Protocol (LSP).  
+- **Document outlining** and **breadcrumbs** should now be working again.  
+- This should improve **navigation** within large Clarion files.  
+
+---
+
+### 📂 **Introducing Code Folding in Clarion**  
+**This release introduces an experimental folding provider!** 🎉  
+
+#### 🔍 **How it Works**  
+To enable folding, we first built a **Clarion tokenizer**.  
+- This tokenizer **breaks down Clarion code into meaningful components**, allowing us to analyze structures more effectively.  
+- In future updates, having a tokenizer will **enable additional features**, such as:  
+  - **Code formatting**  
+  - **Syntax-aware auto-completion**  
+  - **Improved diagnostics and error checking**  
+
+#### 📌 **Folding Rules & `.` as an END Operator**  
+Clarion’s structure often requires an explicit `END` keyword. However, based on discussions and references (📖 **[Clarion Language: Statements that Require Matching END](https://clarionhub.com/t/clarion-language-complete-list-of-statements-that-require-a-matching-end/7924)**), we have decided to **work with `.` as an implicit `END` operator** where applicable.  
+- This allows more **natural folding** for **short inline conditionals** and **single-line procedures**.  
+
+#### ⚠️ **Potential Issues – Report Folding Bugs!**  
+This is the **first iteration** of folding, and there **may be cases where folding is incorrect**.  
+- If you notice **unexpected behavior**, please report it.  
+- **Providing a code example that breaks folding** will help tremendously!  
+
+---
+
+### 🚀 **Future Plans: Customizable Folding**  
+A planned feature is **user-defined folding preferences**.  
+- Users will be able to **choose which items to fold**, customizing folding behavior based on their needs.  
+- This will be added **when folding is stable enough for general use**.  
+
+---
+
+🔗 **As always, your feedback helps make the extension better!**  
+**Report issues & suggestions here**: 👉 **[GitHub Issues](https://github.com/msarson/Clarion-Extension/issues)**  
 
 ---
 

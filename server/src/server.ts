@@ -24,16 +24,19 @@ const logFilePath = path.join(__dirname, 'server-debug.log');
 /**
  * ✅ Clears the debug log at the start of the server.
  */
+const LOGGING_ENABLED = false;
 function clearLogFile() {
+
     try {
-        fs.writeFileSync(logFilePath, '');
+        if (LOGGING_ENABLED)
+            fs.writeFileSync(logFilePath, '');
     } catch (error) {
         console.error(`Error clearing log file: ${error}`);
     }
 }
 
 // ✅ Toggle this to `true` or `false` to enable/disable logging
-const LOGGING_ENABLED = true;
+
 
 // ✅ Logs messages to both the file and the VS Code Debug Console if enabled.
 function logMessage(message: string) {
