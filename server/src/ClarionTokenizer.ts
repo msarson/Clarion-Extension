@@ -15,9 +15,10 @@ export enum TokenType {
     Property,
     Constant,
     Type,
-    TypeAnnotation, // ✅ Used for complex types like Queue, Group when passed as parameters
+    TypeAnnotation,
     ImplicitVariable,
     Structure,
+    ReferenceVariable,  // ✅ NEW: Handles cases like Queue:Browse:1
     LineContinuation,
     Delimiter,
     FunctionArgumentParameter,
@@ -26,6 +27,9 @@ export enum TokenType {
     PropertyFunction,
     Unknown
 }
+
+
+
 
 
 
@@ -88,7 +92,7 @@ export class ClarionTokenizer {
                     TokenType.Comment,
                     TokenType.LineContinuation,
                     TokenType.String,
-                    
+                    TokenType.ReferenceVariable,
                     TokenType.Type,
                     TokenType.PointerParameter,
                     TokenType.FieldEquateLabel,
@@ -105,6 +109,7 @@ export class ClarionTokenizer {
                     TokenType.Class,
                     TokenType.Attribute,
                     TokenType.Constant,
+                    
                     TokenType.Variable,
                     TokenType.ImplicitVariable,
                     TokenType.Delimiter,
@@ -114,12 +119,17 @@ export class ClarionTokenizer {
                 /** 🔍 Check for Other Tokens */
                 for (const tokenType of orderedTokenTypes) {
                     const pattern = tokenPatterns[tokenType];
-                    if (!pattern) continue; // ✅ Skip if pattern is undefined
+                    if (!pattern) { 
+                        logger.warn(`🔍 [DEBUG] Token pattern is undefined for ${TokenType[tokenType]}`);
+                        continue; // ✅ Skip if pattern is undefined
+                    }
                 
                     let match = pattern.exec(substring);
                     
                     if (match && match.index === 0) { // ✅ Ensure match is not null and starts at index 0
-                     //   this.logMessage(`🔍 [DEBUG] Token matched: '${match[0]}' as ${TokenType[tokenType]} at Line ${lineNumber}, Col ${column}`);
+                        if (tokenType === TokenType.Structure || (tokenType === TokenType.Keyword && match[0].toUpperCase() === "END")) {
+                            logger.debug(`🔍 [DEBUG] Token matched: '${match[0]}' as ${TokenType[tokenType]} at Line ${lineNumber}, Col ${column} token `);
+                        }
                         
                         // ✅ Now pushing token to this.tokens
                         this.tokens.push({
@@ -176,7 +186,7 @@ export class ClarionTokenizer {
                         });
                         paramStart += param.length + 1;
                     });
-                    logger.debug(`🔹 [DEBUG] Split parameters for '${functionName}' → [${params.join(", ")}]`);
+               //     logger.debug(`🔹 [DEBUG] Split parameters for '${functionName}' → [${params.join(", ")}]`);
                 }
             }
 
@@ -199,18 +209,63 @@ export class ClarionTokenizer {
     }
 }
 
+const STRUCTURE_PATTERNS: Record<string, RegExp> = {
+    MODULE: /^\s*MODULE\b/i,  // MODULE should be first word on the line
+    APPLICATION: /\bAPPLICATION\b/i,
+    CASE: /\bCASE\b/i,
+    CLASS: /\bCLASS\b/i,
+    GROUP: /\bGROUP\b/i,
+    FILE: /\bFILE\b/i,
+    INTERFACE: /\bINTERFACE\b/i,
+    JOIN: /\bJOIN\b/i,
+    LOOP: /\bLOOP\b/i,
+    MAP: /\bMAP\b/i,
+    MENU: /\bMENU\b/i,
+    MENUBAR: /\bMENUBAR\b/i,
+    QUEUE: /\bQUEUE(?!\s+\w+\))\b/i,  // Prevents detecting Queue:Browse as a structure
+    RECORD: /\bRECORD\b/i,
+    REPORT: /\bREPORT\b/i,
+    SECTION: /\bSECTION\b/i,
+    SHEET: /\bSHEET\b/i,
+    TAB: /\bTAB\b/i,
+    TOOLBAR: /\bTOOLBAR\b/i,
+    VIEW: /\bVIEW\b/i,
+    WINDOW: /\bWINDOW\b/i,
+    OPTION: /\bOPTION\b/i,
+    ITEMIZE: /\bITEMIZE\b/i,
+    EXECUTE: /\bEXECUTE\b/i,
+    BEGIN: /\bBEGIN\b/i,
+    FORM: /\bFORM\b/i,
+    DETAIL: /\bDETAIL\b/i,
+    HEADER: /\bHEADER\b/i,
+    FOOTER: /\bFOOTER\b/i,
+    BREAK: /\bBREAK\b/i,
+    ACCEPT: /\bACCEPT\b/i,
+    OLE: /\bOLE\b/i,
+};
+
+
 export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Comment]: /!.*/i,
     [TokenType.LineContinuation]: /&?\s*\|.*/i,
     [TokenType.String]: /'([^']|'')*'/i,
     // [TokenType.FunctionArgumentParameter]: /(?<=\()\s*[A-Za-z_][A-Za-z0-9_]*(?:\s*=\s*(?:\w+|[+-]?\d+(?:\.\d+)?|'.*?'))?(?=\s*[,)\n])/i,
     [TokenType.FunctionArgumentParameter]: /\b[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)/i,  // Captures anything inside ()
+    [TokenType.PointerParameter]: /\*\s*\b[A-Za-z_][A-Za-z0-9_]*\b/i,
 
-    [TokenType.PointerParameter]: /\*\?\s*\b[A-Za-z_][A-Za-z0-9_]*\b/i,
+    //[TokenType.PointerParameter]: /\*\?\s*\b[A-Za-z_][A-Za-z0-9_]*\b/i,
     [TokenType.FieldEquateLabel]: /\?[A-Za-z_][A-Za-z0-9_]*/i,
     [TokenType.Keyword]: /\b(?:RETURN|OF|ELSE|THEN|UNTIL|EXIT|NEW|END|PROCEDURE|ROUTINE|PROC)\b/i,
+    [TokenType.Structure]: new RegExp(
+        Object.values(STRUCTURE_PATTERNS).map(r => r.source).join("|"), "i"
+    ),
+    
+
+
     // ✅ Excludes QUEUE when appearing inside parameters
-    [TokenType.Structure]: /\b(?:APPLICATION|CASE|CLASS|GROUP|IF|INTERFACE|FILE|JOIN|LOOP|MAP|MENU|MENUBAR|MODULE|QUEUE(?!\s+\w+\))|RECORD|REPORT|SECTION|SHEET|TAB|TOOLBAR|VIEW|WINDOW|OPTION|ITEMIZE|EXECUTE|BEGIN|FORM|DETAIL|HEADER|FOOTER|BREAK|ACCEPT|OLE)\b/i,
+    //[TokenType.Structure]: /^(?:\s*MODULE\b(?!\s*\()|\b(APPLICATION|CASE|CLASS|GROUP|FILE|INTERFACE|JOIN|LOOP|MAP|MENU|MENUBAR|QUEUE(?!\s+\w+\))|RECORD|REPORT|SECTION|SHEET|TAB|TOOLBAR|VIEW|WINDOW|OPTION|ITEMIZE|EXECUTE|BEGIN|FORM|DETAIL|HEADER|FOOTER|BREAK|ACCEPT|OLE)\b)/i,
+
+//    [TokenType.Structure]: /\b(?:APPLICATION|CASE|CLASS|GROUP|IF|INTERFACE|FILE|JOIN|LOOP|MAP|MENU|MENUBAR|MODULE|QUEUE(?!\s+\w+\))|RECORD|REPORT|SECTION|SHEET|TAB|TOOLBAR|VIEW|WINDOW|OPTION|ITEMIZE|EXECUTE|BEGIN|FORM|DETAIL|HEADER|FOOTER|BREAK|ACCEPT|OLE)\b/i,
     [TokenType.Function]: /\b(?:COLOR|LINK|DLL)\b(?=\s*\()/i,
     [TokenType.Directive]: /\b(?:ASSERT|BEGIN|COMPILE|EQUATE|INCLUDE|ITEMIZE|OMIT|ONCE|SECTION|SIZE)\b(?=\s*\()/i,
     [TokenType.Property]: /\b(?:HVSCROLL|SEPARATOR|LIST|RESIZE|DEFAULT|CENTER|MAX|SYSTEM|IMM|DRIVER|PROP|PROPLIST|EVENT|CREATE|BRUSH|LEVEL|STD|CURSOR|BEEP|REJECT|CHARSET|PEN|LISTZONE|BUTTON|MSGMODE|TEXT|FREEZE|DDE|FF_|OCX|DOCK|MATCH|PAPER|DRIVEROP|DATATYPE|GradientTypes|STD|ITEM|MDI|GRAY|HLP)\b/i,
@@ -228,7 +283,10 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Type]: /\b(?:ANY|ASTRING|BFLOAT4|BFLOAT8|BLOB|MEMO|BOOL|BSTRING|BYTE|CSTRING|DATE|DECIMAL|DOUBLE|FLOAT4|LONG|LIKE|PDECIMAL|PSTRING|REAL|SHORT|SIGNED|SREAL|STRING|TIME|ULONG|UNSIGNED|USHORT|VARIANT)\b/i,
     [TokenType.ImplicitVariable]: /\b[A-Za-z][A-Za-z0-9_]+(?:\$|#|")\b/i,
     [TokenType.Delimiter]: /[,():.]/i,
+    [TokenType.ReferenceVariable]: /&[A-Za-z_][A-Za-z0-9_]*:[A-Za-z_][A-Za-z0-9_:]*/i,
     [TokenType.Unknown]: /\S+/i
 };
+
+
 
 
