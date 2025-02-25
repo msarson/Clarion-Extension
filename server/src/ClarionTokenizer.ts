@@ -38,6 +38,8 @@ export interface Token {
     value: string;
     line: number;
     start: number;
+    isStructure?: boolean;       // ✅ True if this token starts a structure
+    structureFinishesAt?: number; // ✅ The line number where the structure ends
 }
 
 export class ClarionTokenizer {
@@ -51,6 +53,8 @@ export class ClarionTokenizer {
 
     public tokenize(): Token[] {
         const lines = this.text.split(/\r?\n/);
+
+        let structureStack: { tokenIndex: number, type: string, startLine: number }[] = [];
 
         lines.forEach((line, lineNumber) => {
             let position = 0;
@@ -82,12 +86,14 @@ export class ClarionTokenizer {
                 }
             }
 
+            
 
             while (position < line.length) {
                 const substring = line.slice(position);
                 let matched = false;
-
+            
                 if (line.trim() === "") break;
+            
                 const orderedTokenTypes: TokenType[] = [
                     TokenType.Comment,
                     TokenType.LineContinuation,
@@ -109,48 +115,79 @@ export class ClarionTokenizer {
                     TokenType.Class,
                     TokenType.Attribute,
                     TokenType.Constant,
-                    
                     TokenType.Variable,
                     TokenType.ImplicitVariable,
                     TokenType.Delimiter,
                     TokenType.Unknown
                 ];
-
+            
                 /** 🔍 Check for Other Tokens */
                 for (const tokenType of orderedTokenTypes) {
                     const pattern = tokenPatterns[tokenType];
                     if (!pattern) { 
                         logger.warn(`🔍 [DEBUG] Token pattern is undefined for ${TokenType[tokenType]}`);
-                        continue; // ✅ Skip if pattern is undefined
+                        continue;
                     }
-                
+            
                     let match = pattern.exec(substring);
                     
-                    if (match && match.index === 0) { // ✅ Ensure match is not null and starts at index 0
-                        if (tokenType === TokenType.Structure || (tokenType === TokenType.Keyword && match[0].toUpperCase() === "END")) {
-                            logger.debug(`🔍 [DEBUG] Token matched: '${match[0]}' as ${TokenType[tokenType]} at Line ${lineNumber}, Col ${column} token `);
-                        }
-                        
-                        // ✅ Now pushing token to this.tokens
-                        this.tokens.push({
+                    if (match && match.index === 0) { 
+                        let newToken: Token = {
                             type: tokenType,
                             value: match[0],
                             line: lineNumber,
                             start: column
-                        });
-                
+                        };
+            
+                        // ✅ If it's a structure, mark it and push to stack
+                        if (tokenType === TokenType.Structure) {
+                            newToken.isStructure = true;
+                        
+                            structureStack.push({
+                                tokenIndex: this.tokens.length,
+                                type: match[0].trim(), // ✅ Trim whitespace to ensure matching with END
+                                startLine: lineNumber
+                            });
+                        
+                            logger.debug(`🔍 [DEBUG] Structure started: '${match[0].trim()}' at Line ${lineNumber}`);
+                        }
+                        
+            
+                        // ✅ If it's an END, close the last opened structure
+                        if (tokenType === TokenType.Keyword && match[0].toUpperCase() === "END") {
+                            logger.debug(`🔍 [DEBUG] END found at Line ${lineNumber}. Current stack:`, structureStack);
+                            
+                            if (structureStack.length > 0) {
+                                const lastStructure = structureStack.pop();
+                                if (lastStructure) {
+                                    this.tokens[lastStructure.tokenIndex].structureFinishesAt = lineNumber;
+                                    logger.debug(`🔍 [DEBUG] Structure '${lastStructure.type}' ended at Line ${lineNumber}`);
+                                }
+                            } else {
+                                logger.warn(`⚠️ [WARNING] Unmatched END at Line ${lineNumber} (No open structure to close)`);
+                            }
+                        }
+                        
+                        
+                        
+                        
+            
+                        // ✅ Now pushing token to this.tokens
+                        this.tokens.push(newToken);
+            
                         position += match[0].length;
                         column += match[0].length;
                         matched = true;
-                        break; // ✅ Stop processing after the first valid match
+                        break;
                     }
                 }
-                
+            
                 if (!matched) {
                     position++;
                     column++;
                 }
             }
+            
                 
         });
         for (let i = 0; i < this.tokens.length; i++) {
