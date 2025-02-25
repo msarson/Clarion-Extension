@@ -1,17 +1,24 @@
-// A launch configuration that launches the extension inside a new window
-// Use IntelliSense to learn about possible attributes.
-// Hover to view descriptions of existing attributes.
-// For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
 {
 	"version": "0.2.5",
 	"configurations": [
 		{
+			"name": "Launch Server",
+			"type": "node",
+			"request": "launch",
+			"program": "${workspaceFolder}/server/out/server.js",
+			"args": ["--stdio"],
+			"restart": true,
+			"outFiles": ["${workspaceFolder}/server/out/**/*.js"],
+			"sourceMaps": true
+		},
+		{
+			"name": "Attach to Server",
 			"type": "node",
 			"request": "attach",
-			"name": "Attach to Server",
 			"port": 6009,
 			"restart": true,
-			"outFiles": ["${workspaceRoot}/server/out/**/*.js"]
+			"outFiles": ["${workspaceFolder}/server/out/**/*.js"],
+			"sourceMaps": true
 		},
 		{
 			"name": "Launch Client",
@@ -30,7 +37,8 @@
 	"compounds": [
 		{
 			"name": "Client + Server",
-			"configurations": ["Launch Client", "Attach to Server"]
+			"configurations": ["Launch Server", "Attach to Server", "Launch Client"],
+			"stopAll": true
 		}
 	]
 }

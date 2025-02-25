@@ -1,6 +1,7 @@
 import { DocumentLinkProvider, TextDocument, CancellationToken, ProviderResult, DocumentLink } from 'vscode';
 import { DocumentManager } from '../documentManager'; // Adjust the import path based on your project structure
-import { Logger } from '../UtilityClasses/Logger';
+import logger from '../logger';
+
 
 export class ClarionDocumentLinkProvider implements DocumentLinkProvider {
     private documentManager: DocumentManager;
@@ -14,7 +15,6 @@ export class ClarionDocumentLinkProvider implements DocumentLinkProvider {
             return []; // Return an empty array if the operation was cancelled
         }
     
-        const logger = new Logger();
         logger.info(`🔗 Generating links for document: ${document.uri.fsPath}`);
     
         return this.documentManager.generateDocumentLinks(document.uri);

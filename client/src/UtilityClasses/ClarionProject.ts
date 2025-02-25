@@ -1,6 +1,5 @@
 import * as fs from 'fs';
 import path = require('path');
-import { Logger } from './Logger';
 
 export interface clarionProperties {
     directory: string | null;
@@ -48,7 +47,6 @@ export class ClarionProjectClass {
      * @returns An object containing the project directory, file name, and compile mode, or null if not found.
      */
     public findProjectOrSolutionDirectory(directory: string): clarionProperties | null {
-        const logger = new Logger(); 
         const projectFile = this.findProjectFile(directory);
 
         if (projectFile) {
@@ -83,4 +81,6 @@ export class ClarionProjectClass {
     }
 }
 import xml2js = require('xml2js');
+import logger from '../logger';
+
 

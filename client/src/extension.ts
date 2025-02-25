@@ -8,12 +8,13 @@ import { DocumentManager } from './documentManager';
 
 import { SolutionTreeDataProvider } from './SolutionTreeDataProvider';
 import { TreeNode } from './TreeNode';
-import { Logger } from './UtilityClasses/Logger';
 import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile, setGlobalClarionSelection } from './globals';
 import { parseStringPromise } from 'xml2js';
 import * as fs from 'fs';
 import { RedirectionFileParser } from './Parser/RedirectionFileParser';
 import { SolutionParser } from './Parser/SolutionParser';
+import logger from './logger';
+
 
 let client: LanguageClient | undefined;
 let solutionParser: SolutionParser | undefined;
@@ -26,7 +27,6 @@ let documentManager: DocumentManager | undefined;
 export async function activate(context: ExtensionContext): Promise<void> {
     const disposables: Disposable[] = [];
     const isRefreshingRef = { value: false };
-    const logger = new Logger();
 
     logger.info("🔄 Activating Clarion extension...");
 
@@ -97,7 +97,6 @@ export async function activate(context: ExtensionContext): Promise<void> {
 }
 
 async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: Disposable[]): Promise<void> {
-    const logger = new Logger();
     logger.info("✅ Workspace has been trusted or refreshed. Initializing...");
 
     // Load settings from workspace.json
@@ -128,7 +127,6 @@ async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: D
 
 
 async function initializeSolution(context: ExtensionContext, refreshDocs: boolean = false): Promise<void> {
-    const logger = new Logger();
     logger.info("🔄 Initializing Clarion Solution...");
 
     if (!globalSolutionFile || !globalClarionPropertiesFile || !globalClarionVersion) {
@@ -153,7 +151,6 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
 
 
 async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<DocumentManager> {
-    const logger = new Logger();
     logger.info("🔄 Reinitializing SolutionParser and DocumentManager...");
 
     if (solutionParser) {
@@ -185,7 +182,6 @@ async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<Do
  * If a document is not tracked in `workspace.textDocuments`, it forces VS Code to load it.
  */
 export async function getAllOpenDocuments(): Promise<TextDocument[]> {
-    const logger = new Logger(); // Replace with your Logger instance if needed
     const openDocuments: TextDocument[] = [];
 
     if ("tabGroups" in window) {
@@ -228,7 +224,6 @@ export async function getAllOpenDocuments(): Promise<TextDocument[]> {
 
 
 async function handleSettingsChange(context: ExtensionContext) {
-    const logger = new Logger();
 
     // ✅ Reinitialize global settings from workspace settings.json
     await globalSettings.initializeFromWorkspace();
@@ -245,7 +240,6 @@ let hoverProviderDisposable: Disposable | null = null;
 let documentLinkProviderDisposable: Disposable | null = null;
 
 function registerLanguageFeatures(context: ExtensionContext) {
-    const logger = new Logger();
 
     if (!documentManager) {
         logger.warn("⚠️ Cannot register language features: documentManager is undefined!");
@@ -281,7 +275,6 @@ function registerLanguageFeatures(context: ExtensionContext) {
 async function refreshOpenDocuments() {
 
 
-    const logger = new Logger(false);
 
     logger.info("🔄 Refreshing all open documents...");
 
@@ -298,7 +291,6 @@ async function refreshOpenDocuments() {
 
     for (const document of openDocuments) {
         const documentUri = document.uri;
-        logger.info(`🔄 Refreshing document: ${documentUri.fsPath}`);
 
         // ✅ Ensure the document manager updates the links
         if (documentManager) {
@@ -330,7 +322,6 @@ async function registerOpenCommand(context: ExtensionContext) {
 
 
 function createSolutionTreeView() {
-    const logger = new Logger(false);
     if (!solutionParser) {
         logger.error("❌ Solution parser is not initialized.");
         return;
@@ -380,7 +371,6 @@ function createSolutionTreeView() {
 
 
 export async function openClarionSolution(context: ExtensionContext) {
-    const logger = new Logger();
     try {
         // ✅ Store current values in case user cancels
         const previousSolutionFile = globalSolutionFile;
@@ -477,7 +467,6 @@ export async function openClarionSolution(context: ExtensionContext) {
 
 
 export async function showClarionQuickOpen(): Promise<void> {
-    const logger = new Logger();
 
     // ✅ Prevent execution if no Clarion solution is open
     if (!globalSolutionFile) {
@@ -653,7 +642,7 @@ export function deactivate(): Thenable<void> | undefined {
 }
 
 function startClientServer(context: ExtensionContext, documentManager: DocumentManager) {
-    console.log("Starting Clarion Language Server...");
+    logger.info("Starting Clarion Language Server...");
     let serverModule = context.asAbsolutePath(path.join('server', 'out', 'server.js'));
     let debugOptions = { execArgv: ['--nolazy', '--inspect=6009'] };
 

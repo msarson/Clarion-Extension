@@ -1,8 +1,9 @@
 import * as path from 'path';
 import * as fs from 'fs';
-import { Logger } from '../UtilityClasses/Logger';
 import { globalSettings } from '../globals';
 import { workspace } from 'vscode';
+import logger from '../logger';
+
 
 // Import global variables from the extension
 
@@ -16,7 +17,6 @@ export class RedirectionFileParser {
     private readonly macros: Record<string, string>;
     
     constructor(compileMode: string | null, projectPath: string) {
-        const logger = new Logger(); 
         this.compileMode = compileMode;
         this.projectPath = projectPath; // Store the project path
     
@@ -51,7 +51,6 @@ export class RedirectionFileParser {
      * Retrieves search paths by locating the redirection file.
      */
     getSearchPaths(fileExtension: string, foundProjectPath: string | null): string[] {
-        const  logger = new Logger(); 
         logger.info("🔍 Resolving search paths for extension:", fileExtension);
         const paths: string[] = [];
         let redFileToParse: string;
@@ -89,7 +88,6 @@ export class RedirectionFileParser {
      * Parses a redirection file and returns an array of resolved paths.
      */
     public parseRedFile(redFile: string, fileExtension: string): string[] {
-        const logger = new Logger(); 
         if (!fs.existsSync(redFile)) {
             logger.warn(`⚠️ Redirection file not found: ${redFile}`);
             return [];
@@ -167,7 +165,6 @@ export class RedirectionFileParser {
 
 
     private processIncludedRedirection(redPath: string, line: string, fileExtension: string, pathsMap: Record<string, string[]>): void {
-        const  logger = new Logger(); 
         logger.info(`🔄 Processing Included File:`, line);
 
         const includePathMatches = line.match(/\{include\s+([^}]+)\}/i);
@@ -230,7 +227,6 @@ export class RedirectionFileParser {
             try {
                 return this.resolveMacro(p.trim());
             } catch (error) {
-                const  logger = new Logger(); 
                 logger.error(`Error resolving path "${p.trim()}":`, error);
                 return [];
             }
@@ -250,7 +246,6 @@ export class RedirectionFileParser {
 
     private resolveMacro(pathStr: string): string {
         const macroPattern = /%([^%]+)%/g;
-        const  logger = new Logger(); 
         logger.info(`🔍 Resolving macros in path: ${pathStr}`);
 
         let resolvedPath = pathStr;

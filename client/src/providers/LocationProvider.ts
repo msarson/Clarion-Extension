@@ -3,9 +3,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ClarionProjectClass } from '../UtilityClasses/ClarionProject';
 
-import { Logger } from '../UtilityClasses/Logger';
 import { globalSettings } from '../globals';
 import { SolutionParser } from '../Parser/SolutionParser';
+import logger from '../logger';
+
 
 // Import global variables from extension.ts
 
@@ -98,7 +99,6 @@ export class LocationProvider {
     }
 
     public getFullPath(fileName: string, documentFrom: string): string | null {
-        const logger = new Logger(); 
         if (!this.solutionParser) {
             logger.info('❌ No solution parser available');
             return null;
@@ -118,7 +118,7 @@ export class LocationProvider {
                 return fullPath;
             }
         } else {
-            logger.warn(`⚠️ No project association found for ${documentFrom}, falling back to global redirection.`);
+            logger.info(`⚠️ No project association found for ${documentFrom}, falling back to global redirection.`);
         }
     
         // 🔹 Fall back to global paths
@@ -153,7 +153,6 @@ export class LocationProvider {
             );
             return sectionIndex !== -1 ? sectionIndex : 0;
         } catch (error) {
-            const logger = new Logger(); 
             logger.error('Error reading file content:', error);
             return 0;
         }

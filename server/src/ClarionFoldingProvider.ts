@@ -1,19 +1,16 @@
-import { FoldingRange, FoldingRangeKind } from "vscode-languageserver-types";
+import { DocumentSymbol, FoldingRange, FoldingRangeKind, TextDocument } from "vscode-languageserver-types";
 import { Token, TokenType } from "./ClarionTokenizer";
 
 class ClarionFoldingProvider {
     private tokens: Token[];
     private foldingRanges: FoldingRange[];
-    private logMessage: (message: string) => void;
 
-    constructor(tokens: Token[], logMessage: (message: string) => void) {
+    constructor(tokens: Token[]) {
         this.tokens = tokens;
         this.foldingRanges = [];
-        this.logMessage = logMessage;
     }
 
     public computeFoldingRanges(): FoldingRange[] {
-        this.logMessage("🔍 [DEBUG] Starting computeFoldingRanges");
 
         this.foldingRanges = [];
 
@@ -30,12 +27,10 @@ class ClarionFoldingProvider {
             // ✅ Detect STRUCTURE start (push to stack)
             // ✅ Detect STRUCTURE start (push to stack)
             if (token.type === TokenType.Structure) {
-                this.logMessage(`✅ [DEBUG] Found STRUCTURE '${upperValue}' starting at line ${token.line}`);
 
                 // ✅ Check if END or "." appears on the same line → If so, DO NOT push it to the stack
                 const nextToken = this.tokens[i + 1];
                 if (nextToken && nextToken.line === token.line && (nextToken.value === "END" || nextToken.value === ".")) {
-                    this.logMessage(`🚫 [DEBUG] Skipping fold for single-line STRUCTURE '${upperValue}' at line ${token.line}`);
                     continue; // ✅ Skip pushing this structure
                 }
 
@@ -51,7 +46,6 @@ class ClarionFoldingProvider {
                 if (structureStack.length > 0) {
                     const lastStructure = structureStack.pop();
                     if (lastStructure) {
-                        this.logMessage(`📌 [DEBUG] Closing STRUCTURE '${lastStructure.type}' from line ${lastStructure.startLine} to ${token.line}`);
                         this.foldingRanges.push({
                             startLine: lastStructure.startLine,
                             endLine: token.line,
@@ -70,7 +64,6 @@ class ClarionFoldingProvider {
                 if (structureStack.length > 0) {
                     const lastStructure = structureStack.pop();
                     if (lastStructure) {
-                        this.logMessage(`📌 [DEBUG] Closing STRUCTURE '${lastStructure.type}' with '.' from line ${lastStructure.startLine} to ${token.line}`);
                         this.foldingRanges.push({
                             startLine: lastStructure.startLine,
                             endLine: token.line,
@@ -85,7 +78,6 @@ class ClarionFoldingProvider {
 
                 const labelMatch = token.value.match(/!REGION\s+"?(.*?)"?$/i);
                 const label = labelMatch ? labelMatch[1] : undefined;
-                this.logMessage(`✅ [DEBUG] Found REGION starting at line ${token.line} (Label: ${label ?? "None"})`);
                 regionStack.push({ startLine: token.line, label });
             }
 
@@ -93,7 +85,6 @@ class ClarionFoldingProvider {
             if (token.type === TokenType.Comment && upperValue.trim().startsWith("!ENDREGION")) {
                 const lastRegion = regionStack.pop();
                 if (lastRegion) {
-                    this.logMessage(`📌 [DEBUG] Closing REGION from line ${lastRegion.startLine} to ${token.line} (Label: ${lastRegion.label ?? "None"})`);
                     this.foldingRanges.push({
                         startLine: lastRegion.startLine,
                         endLine: token.line,
@@ -107,7 +98,6 @@ class ClarionFoldingProvider {
 
                 const labelMatch = token.value.match(/!REGION\s+"?(.*?)"?$/i);
                 const label = labelMatch ? labelMatch[1] : undefined;
-                this.logMessage(`✅ [DEBUG] Found REGION starting at line ${token.line} (Label: ${label ?? "None"})`);
                 regionStack.push({ startLine: token.line, label });
             }
 
@@ -115,7 +105,6 @@ class ClarionFoldingProvider {
             if (token.type === TokenType.Comment && upperValue.trim().startsWith("!ENDREGION")) {
                 const lastRegion = regionStack.pop();
                 if (lastRegion) {
-                    this.logMessage(`📌 [DEBUG] Closing REGION from line ${lastRegion.startLine} to ${token.line} (Label: ${lastRegion.label ?? "None"})`);
                     this.foldingRanges.push({
                         startLine: lastRegion.startLine,
                         endLine: token.line,
@@ -129,7 +118,6 @@ class ClarionFoldingProvider {
                 if (insideClassOrInterfaceOrMap) continue;
 
                 if (openProcedure) {
-                    this.logMessage(`📌 [DEBUG] Closing PROCEDURE from line ${openProcedure.startLine} to ${token.line - 1}`);
                     this.foldingRanges.push({
                         startLine: openProcedure.startLine,
                         endLine: token.line - 1,
@@ -139,7 +127,6 @@ class ClarionFoldingProvider {
                 }
 
                 if (openRoutine) {
-                    this.logMessage(`📌 [DEBUG] Closing ROUTINE from line ${openRoutine.startLine} to ${token.line - 1}`);
                     this.foldingRanges.push({
                         startLine: openRoutine.startLine,
                         endLine: token.line - 1,
@@ -148,14 +135,12 @@ class ClarionFoldingProvider {
                     openRoutine = null;
                 }
 
-                this.logMessage(`✅ [DEBUG] New PROCEDURE starts at line ${token.line}`);
                 openProcedure = { startLine: token.line };
             }
 
             // ✅ Detect ROUTINE start
             if (token.type === TokenType.Keyword && upperValue === "ROUTINE") {
                 if (openProcedure) {
-                    this.logMessage(`📌 [DEBUG] Closing PROCEDURE from line ${openProcedure.startLine} to ${token.line - 1}`);
                     this.foldingRanges.push({
                         startLine: openProcedure.startLine,
                         endLine: token.line - 1,
@@ -165,7 +150,6 @@ class ClarionFoldingProvider {
                 }
 
                 if (openRoutine) {
-                    this.logMessage(`📌 [DEBUG] Closing ROUTINE from line ${openRoutine.startLine} to ${token.line - 1}`);
                     this.foldingRanges.push({
                         startLine: openRoutine.startLine,
                         endLine: token.line - 1,
@@ -173,7 +157,6 @@ class ClarionFoldingProvider {
                     });
                 }
 
-                this.logMessage(`✅ [DEBUG] New ROUTINE starts at line ${token.line}`);
                 openRoutine = { startLine: token.line };
             }
         }
@@ -223,9 +206,10 @@ class ClarionFoldingProvider {
             });
         }
 
-        this.logMessage("✅ [DEBUG] Folding computation finished.");
         return this.foldingRanges;
     }
+   
+    
 }
 
 export default ClarionFoldingProvider;

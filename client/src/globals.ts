@@ -2,7 +2,8 @@ import { workspace, ConfigurationTarget, window } from 'vscode';
 import * as fs from 'fs';
 import { parseStringPromise } from 'xml2js';
 import { ClarionExtensionCommands } from './ClarionExtensionCommands';
-import { Logger } from './UtilityClasses/Logger';
+import logger from './logger';
+
 
 // ✅ These are stored in workspace settings
 export let globalSolutionFile: string = "";
@@ -19,7 +20,6 @@ export async function setGlobalClarionSelection(
     clarionVersion: string,
     clarionConfiguration: string
 ) {
-    const logger = new Logger();
     logger.info("🔄 Updating global settings:", {
         solutionFile,
         clarionPropertiesFile,
@@ -144,7 +144,6 @@ export const globalSettings = {
 
     /** ✅ Load settings from workspace.json */
     async initializeFromWorkspace() {
-        const logger = new Logger();
 
         // ✅ Read workspace settings
         const solutionFile = workspace.getConfiguration().get<string>("clarion.solutionFile", "") || "";

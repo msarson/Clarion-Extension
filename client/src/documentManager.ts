@@ -15,9 +15,11 @@ import LocationProvider from './providers/LocationProvider'; // Adjust the impor
 import { ClarionLocation } from './providers/LocationProvider'; // Make sure this import is correct
 
 import * as path from 'path';
-import { Logger } from './UtilityClasses/Logger';
+
 import { globalSettings } from './globals';
 import { SolutionParser } from './Parser/SolutionParser';
+import logger from './logger';
+
 interface DocumentInfo {
     statementLocations: ClarionLocation[];
 }
@@ -77,7 +79,7 @@ export class DocumentManager implements Disposable {
         return manager;
     }
     private async initialize(solutionParser: SolutionParser) {
-        const logger = new Logger();
+        
         logger.info("✅ DocumentManager.initialize() called");
         this.locationProvider = new LocationProvider(solutionParser);
 
@@ -91,7 +93,6 @@ export class DocumentManager implements Disposable {
 
         // ✅ Manually process currently open documents
         for (const document of workspace.textDocuments) {
-            logger.info(`📄 Processing open document at startup: ${document.uri.fsPath}`);
             await this.updateDocumentInfo(document);
         }
 
@@ -107,7 +108,6 @@ export class DocumentManager implements Disposable {
 
 
     private async onDidSaveTextDocument(document: TextDocument) {
-        const logger = new Logger();
         logger.info(`Document saved: ${document.uri.fsPath}`);
         await this.updateDocumentInfo(document);
     }
@@ -128,14 +128,13 @@ export class DocumentManager implements Disposable {
         }
     }
     private async onDidOpenTextDocument(document: TextDocument) {
-        const logger = new Logger();
         logger.info(`📄 [EVENT] Document opened: ${document.uri.fsPath}`);
         await this.updateDocumentInfo(document);
 
     }
 
     private async onDidChangeTextDocument(event: TextDocumentChangeEvent) {
-        const logger = new Logger();
+        
         const doc = event.document;
         logger.info(`Document changed: ${doc.uri.fsPath}`);
         await this.updateDocumentInfo(event.document);
@@ -187,7 +186,6 @@ export class DocumentManager implements Disposable {
      */
 
     generateDocumentLinks(uri: Uri): DocumentLink[] {
-        const logger = new Logger();
         const documentInfo = this.getDocumentInfo(uri);
 
         if (!documentInfo) {
@@ -199,7 +197,6 @@ export class DocumentManager implements Disposable {
         const supportedTypes = ["INCLUDE", "MODULE", "MEMBER", "SECTION", "LINK"];
         // 🔹 Process existing document statements from `documentInfo`
         for (const location of documentInfo.statementLocations) {
-            logger.info(`🔍 Processing location: ${JSON.stringify(location)}`);
         
             if (!supportedTypes.includes(location.statementType ?? "") || !location.fullFileName || !location.linePosition || !location.linePositionEnd) {
 
@@ -211,7 +208,6 @@ export class DocumentManager implements Disposable {
             if (location.statementType === "SECTION" && location.sectionLineLocation) {
                 const lineQueryParam = `${location.sectionLineLocation.line + 1}:1`;
                 targetUri = targetUri.with({ fragment: lineQueryParam });
-                logger.info(`📍 Adding section fragment: ${lineQueryParam}`);
             }
         
           
@@ -266,7 +262,6 @@ export class DocumentManager implements Disposable {
      * It extracts locations for "INCLUDE", "MODULE", and "MEMBER" patterns and stores these locations in the openDocuments map.
      */
     public async updateDocumentInfo(document: TextDocument) {
-        const logger = new Logger();
 
         logger.info(`📄 Processing document: ${document.uri.fsPath}`);
 
@@ -325,7 +320,7 @@ export class DocumentManager implements Disposable {
      * @returns An array of ClarionLocation objects representing the statement and, if applicable, its associated section.
      */
     private processPattern(document: TextDocument, pattern: RegExp, statementType: string): ClarionLocation[] {
-        const logger = new Logger(false);
+        
         if (!this.locationProvider) {
             logger.error(`❌ Error: locationProvider is not initialized when processing ${statementType}.`);
             return [];
@@ -338,12 +333,11 @@ export class DocumentManager implements Disposable {
         logger.info(`Found locations:`, clarionLocation);
 
         if (!clarionLocation || clarionLocation.length === 0) {
-            logger.warn(`No ${statementType} matches found!`);
+            logger.info(`No ${statementType} matches found!`);
             return statementLocations;
         }
 
         for (const location of clarionLocation) {
-            logger.info(`Matched ${statementType}:`, location);
 
             const statementLocation: ClarionLocation = {
                 fullFileName: location.fullFileName,
@@ -362,7 +356,7 @@ export class DocumentManager implements Disposable {
 
 
     getDocumentInfo(uri: Uri): DocumentInfo | undefined {
-        const logger = new Logger();
+        
         try {
             // Normalize the URI for consistency in lookups
             const normalizedUri = uri.toString().toLowerCase();
@@ -371,16 +365,13 @@ export class DocumentManager implements Disposable {
             // Debugging: Show all stored documents
             if (this.openDocuments.size === 0) {
                 logger.warn("⚠ openDocuments map is EMPTY.");
-            } else {
-                logger.info(`📄 Currently tracked documents (${this.openDocuments.size}):`);
-                this.openDocuments.forEach((_, key) => logger.info(`   - ${key}`));
-            }
+            } 
 
             // Attempt to retrieve document info
             const docInfo = this.openDocuments.get(normalizedUri);
 
             if (docInfo) {
-                logger.info(`✅ Document info FOUND for URI: ${normalizedUri}`);
+                //logger.info(`✅ Document info FOUND for URI: ${normalizedUri}`);
             } else {
                 logger.warn(`⚠ No document info found for URI: ${normalizedUri}`);
             }

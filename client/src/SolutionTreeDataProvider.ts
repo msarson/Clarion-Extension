@@ -1,9 +1,10 @@
 import { TreeDataProvider, TreeItem, Event, EventEmitter, TreeItemCollapsibleState, ThemeIcon } from 'vscode';
-import { Logger } from './UtilityClasses/Logger';
 import { TreeNode } from './TreeNode';
 import { ClarionProject, ClarionSourcerFile } from './Parser/ClarionProject';
 import { ClarionSolution } from './Parser/ClarionSolution';
 import { SolutionParser } from './Parser/SolutionParser';
+import logger from './logger';
+
 
 export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     private _onDidChangeTreeData: EventEmitter<void> = new EventEmitter<void>();
@@ -16,7 +17,6 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     }
 
     refresh(): void {
-        const logger = new Logger();
         logger.info("🔄 Refreshing solution tree...");
 
         if (!this.solutionParser) {

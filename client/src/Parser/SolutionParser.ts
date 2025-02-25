@@ -7,7 +7,8 @@ import { ClarionProject, ClarionSourcerFile } from './ClarionProject';
 import { ClarionSolution } from './ClarionSolution';
 import { RedirectionFileParser } from './RedirectionFileParser';
 import { globalSettings } from '../globals';
-import { Logger } from '../UtilityClasses/Logger';
+import logger from '../logger';
+
 
 export class SolutionParser {
     public solution: ClarionSolution;
@@ -31,30 +32,18 @@ export class SolutionParser {
 
 
     private async initialize() {
-        const logger = new Logger(); 
         
         
         
         this.solution = await this.parseSolution();
         this.defaultPathsToLookin = await this.getDefaultPathsFromRedirectionFile();
-        if(logger.getDebugMode())
-          this.debugProjects(logger);
+        
         logger.info("📂 Parsed Projects:", this.solution.projects);
 
         await this.buildSolutionTree();
 
     }
 
-    private debugProjects(logger: Logger) {
-        this.solution.projects.forEach(project => {
-            logger.info(`📂 Project: ${project.name}`);
-            project.sourceFiles.forEach(sourceFile => {
-                logger.info(`📄 Source File: ${sourceFile.name}`);
-                logger.info(`📄 Source File Path: ${sourceFile.relativePath}`);
-            });
-
-        });
-    }
 
     private getDefaultLookupExtensions(): string[] {
         const config = workspace.getConfiguration("clarion");
@@ -76,7 +65,6 @@ export class SolutionParser {
  */
   
     private async resolveProjectSearchPaths(projectPath: string): Promise<Record<string, string[]>> {
-        const logger = new Logger(false);
         logger.info(`📂 Resolving search paths for project: ${projectPath}`);
     
         // ✅ Keep setting-based extensions lookup
@@ -110,7 +98,6 @@ export class SolutionParser {
 
 
     public findFileInRedirectionPaths(file: string, pathsToLookin: Record<string, string[]>, projectDir: string): string | null {
-        const logger = new Logger(); 
         logger.info(`🔍 Searching for file "${file}" in project redirection paths (Project Dir: ${projectDir})`);
 
         const fileExt = path.extname(file).toLowerCase();
@@ -143,7 +130,6 @@ export class SolutionParser {
 
 
     public findProjectForFile(fileName: string): ClarionProject | undefined {
-        const logger = new Logger(); 
         logger.info(`🔍 Searching for project containing file: ${fileName}`);
 
         for (const project of this.solution.projects) {
@@ -152,18 +138,16 @@ export class SolutionParser {
             );
 
             if (foundSourceFile) {
-                logger.info(`✅ File "${fileName}" found in project: ${project.name}`);
                 return project;
             }
         }
 
-        logger.warn(`❌ File "${fileName}" not found in any project.`);
+        logger.info(`❌ File "${fileName}" not found in any project.`);
         return undefined;
     }
 
 
     public getDefaultPathsFromRedirectionFile(): Record<string, string[]> {
-        const logger = new Logger();
         logger.info("📌 Fetching default paths from redirection file.");
     
         const finalSearchPaths: Record<string, string[]> = {};
@@ -221,7 +205,6 @@ export class SolutionParser {
         return undefined;
     }
     findSourceInProject(filePath: string): ClarionSourcerFile | undefined {
-        const logger = new Logger(); 
         try {
             for (const project of this.solution.projects) {
                 const foundSourceFile = project.sourceFiles.find(sourceFile =>
@@ -251,7 +234,6 @@ export class SolutionParser {
     }
 
     public async openFile(relativePath: string): Promise<void> {
-        const logger = new Logger(); 
         try {
             const absolutePath = path.resolve(path.dirname(this.solutionFilePath), relativePath);
             logger.info("🔹 Opening file:", absolutePath);
@@ -271,7 +253,6 @@ export class SolutionParser {
     }
 
     public findFileWithExtension(filename: string): string {
-        const logger = new Logger(); 
         if (!this.solutionFilePath|| this.solutionFilePath.trim() === "") {
             logger.error("❌ No solution file path set.");
             return "";
@@ -297,7 +278,6 @@ export class SolutionParser {
 
 
     public async parseSolution(): Promise<ClarionSolution> {
-        const logger = new Logger(); 
 
        if (!this.solutionFilePath || this.solutionFilePath.trim() === "") {
         logger.error("❌ Solution file path is not set. returning empty solution.");
@@ -350,7 +330,6 @@ export class SolutionParser {
     // }
 
     private addSourceFilesToProject(project: ClarionProject) {
-        const logger = new Logger(); 
         const projectFile = path.join(project.path, `${project.name}.cwproj`);
 
         if (!fs.existsSync(projectFile)) {

@@ -3,8 +3,9 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { parseString } from 'xml2js';
 import { DocumentManager } from './documentManager';
-import { Logger } from './UtilityClasses/Logger';
 import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, setGlobalClarionSelection, globalSettings,  } from './globals';
+import logger from './logger';
+
 
 // Example: Updating the stored settings
 //await setGlobalClarionSelection("solution.sln", "ClarionProperties.xml", "Clarion 11");
@@ -36,12 +37,11 @@ export class ClarionExtensionCommands {
    * @throws Will throw an error if any step in selecting or updating the ClarionProperties.xml or version fails.
    */
   static async configureClarionPropertiesFile() {
-    const logger = new Logger();
+    
     try {
         const appDataPath = process.env.APPDATA;
         if (!appDataPath) {
             window.showErrorMessage("Unable to access AppData path.");
-            logger.error("APPDATA environment variable is not set.");
             return;
         }
 
@@ -61,7 +61,7 @@ export class ClarionExtensionCommands {
         }
 
         const selectedFilePath = selectedFileUri[0].fsPath;
-        logger.info("📂 Selected ClarionProperties.xml:", selectedFilePath);
+        
 
         // ✅ Save the properties file path
         await setGlobalClarionSelection(globalSolutionFile, selectedFilePath, globalClarionVersion, globalSettings.configuration);
@@ -100,7 +100,7 @@ export class ClarionExtensionCommands {
         window.showInformationMessage(`Clarion version '${versionSelection}' selected and settings updated.`);
 
     } catch (error) {
-        logger.error("❌ Error in configureClarionPropertiesFile:", error);
+        
         window.showErrorMessage(`Error configuring Clarion properties: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
@@ -117,19 +117,14 @@ export class ClarionExtensionCommands {
    * to match the specified version's configuration. It logs the updated settings for reference.
    */
   private static updateGlobalSettings(selectedVersionProps: ClarionVersionProperties | undefined) {
-    const logger = new Logger(); 
+    
     if (selectedVersionProps) {
       globalSettings.redirectionFile = selectedVersionProps.redirectionFile;
       globalSettings.redirectionPath = path.dirname(selectedVersionProps.redirectionFile);
       globalSettings.macros = selectedVersionProps.macros;
       globalSettings.libsrcPaths = selectedVersionProps.libsrc.split(';');
 
-      logger.info("✅ Updated global Clarion settings:", {
-        globalRedirectionFile: globalSettings.redirectionFile,
-        globalRedirectionPath: globalSettings.redirectionPath,
-        globalMacros: globalSettings.macros,
-        globalLibsrcPaths: globalSettings.libsrcPaths
-      });
+      
     }
   }
 
@@ -203,13 +198,13 @@ export class ClarionExtensionCommands {
    *   rather than an error.
    */
   public static extractMacros(properties: any): Record<string, string> {
-    const logger = new Logger(); 
+    
     const macros: Record<string, string> = {};
 
-    logger.info("🔍 Starting extractMacros...");
+    
 
     if (!properties || typeof properties !== 'object') {
-      logger.error("❌ extractMacros received invalid properties:", properties);
+    
       return macros;
     }
 
@@ -224,17 +219,17 @@ export class ClarionExtensionCommands {
       const macrosProperty = redirectionFileProperty.Properties.find((p: any) => p.$.name === 'Macros');
 
       if (macrosProperty) {
-        logger.info("📌 Found 'Macros' section. Parsing properties...");
+        
 
         for (const prop in macrosProperty) {
-          logger.info(`🔹 Processing macro: ${prop}`, macrosProperty[prop]);
+          
 
           if (Array.isArray(macrosProperty[prop]) && macrosProperty[prop].length > 0) {
             const firstItem = macrosProperty[prop][0];
 
             if (firstItem && typeof firstItem === "object" && "$" in firstItem && "value" in firstItem.$) {
               macros[prop.toLowerCase()] = String(firstItem.$.value);
-              logger.info(`✅ Extracted Macro: ${prop} → "${macros[prop.toLowerCase()]}"`);
+          
             } else {
               logger.warn(`⚠️ Unexpected structure for macro '${prop}':`, firstItem);
             }
@@ -268,7 +263,6 @@ export class ClarionExtensionCommands {
    * @returns A promise that resolves once the solution file selection and configuration update are complete.
    */
   static async selectSolutionFile() {
-    const logger = new Logger(); 
     try {
       const workspaceFolder = workspace.workspaceFolders?.[0];
 
@@ -375,7 +369,6 @@ export class ClarionExtensionCommands {
         }
       }
     } catch (error) {
-      const logger = new Logger(); 
       logger.error(String(error));
     }
   }

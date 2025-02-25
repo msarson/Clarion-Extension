@@ -1,3 +1,5 @@
+import logger from "./logger";
+
 export enum TokenType {
     Comment,
     String,
@@ -37,12 +39,10 @@ export interface Token {
 export class ClarionTokenizer {
     private text: string;
     private tokens: Token[];
-    private logMessage: (message: string) => void;
 
-    constructor(text: string, logMessage: (message: string) => void) {
+    constructor(text: string) {
         this.text = text;
         this.tokens = [];
-        this.logMessage = logMessage;
     }
 
     public tokenize(): Token[] {
@@ -59,7 +59,7 @@ export class ClarionTokenizer {
             // ✅ Check if the first word is a LABEL (Column 1), but ignore if the first character is '!'
             if (column === 0) {
                 if (line.startsWith("!")) {
-                    //this.logMessage(`🔹 [DEBUG] Skipping label check: Line ${lineNumber} starts with '!', treating as comment.`);
+                    
                 } else {
                     const labelMatch = line.match(/^(\S+)\s/); // Capture first word before space
                     if (labelMatch) {
@@ -69,8 +69,7 @@ export class ClarionTokenizer {
                             line: lineNumber,
                             start: column
                         });
-                        
-                        this.logMessage(`✅ Matched: '${labelMatch[1]}' as Label at Line ${lineNumber}, Col ${column}`);
+
 
                         // Move position past the label
                         position += labelMatch[1].length + 1; // +1 to skip the space
@@ -89,15 +88,15 @@ export class ClarionTokenizer {
                     TokenType.Comment,
                     TokenType.LineContinuation,
                     TokenType.String,
-                    TokenType.Variable,
+                    
                     TokenType.Type,
                     TokenType.PointerParameter,
                     TokenType.FieldEquateLabel,
                     TokenType.Property,
                     TokenType.PropertyFunction,
                     TokenType.Keyword,
-                    TokenType.Structure,  
-                    TokenType.FunctionArgumentParameter,  
+                    TokenType.Structure,
+                    TokenType.FunctionArgumentParameter,
                     TokenType.TypeAnnotation,
                     TokenType.Function,
                     TokenType.Directive,
@@ -106,51 +105,82 @@ export class ClarionTokenizer {
                     TokenType.Class,
                     TokenType.Attribute,
                     TokenType.Constant,
+                    TokenType.Variable,
                     TokenType.ImplicitVariable,
                     TokenType.Delimiter,
                     TokenType.Unknown
                 ];
-                
+
                 /** 🔍 Check for Other Tokens */
                 for (const tokenType of orderedTokenTypes) {
-                    //const tokenType = Number(tokenTypeKey) as TokenType;
                     const pattern = tokenPatterns[tokenType];
-                    let match;
-
                     if (!pattern) continue; // ✅ Skip if pattern is undefined
-
-                    while ((match = pattern.exec(substring)) !== null) {
-
-                        if (match.index !== 0) break;
-                       // if (tokenType === TokenType.Unknown) {
-                            this.logMessage(`✅ Matched: '${match[0]}' as ${TokenType[tokenType]} at Line ${lineNumber}, Col ${column}`);
-                      //  }
-
+                
+                    let match = pattern.exec(substring);
+                    
+                    if (match && match.index === 0) { // ✅ Ensure match is not null and starts at index 0
+                     //   this.logMessage(`🔍 [DEBUG] Token matched: '${match[0]}' as ${TokenType[tokenType]} at Line ${lineNumber}, Col ${column}`);
+                        
+                        // ✅ Now pushing token to this.tokens
                         this.tokens.push({
                             type: tokenType,
                             value: match[0],
                             line: lineNumber,
                             start: column
                         });
-
+                
                         position += match[0].length;
                         column += match[0].length;
                         matched = true;
-                        break;
+                        break; // ✅ Stop processing after the first valid match
                     }
-
-                    if (matched) break;
                 }
-
+                
                 if (!matched) {
                     position++;
                     column++;
                 }
             }
+                
         });
         for (let i = 0; i < this.tokens.length; i++) {
             const token = this.tokens[i];
-        
+
+            // ✅ Check for function-like tokens with parameters (e.g., PRE(INV))
+            if (token.type === TokenType.FunctionArgumentParameter || token.type === TokenType.TypeAnnotation) {
+                let match = token.value.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)$/);
+                if (match) {
+                    let functionName = match[1];
+                    let params = match[2].split(/\s*,\s*/);  // ✅ Split parameters at commas
+
+                    // ✅ Identify if functionName is a known Property
+                    let isProperty = functionName.toUpperCase() === "PRE";
+
+                    // ✅ Set correct type for functionName (Property or Function)
+                    this.tokens[i] = {
+                        type: isProperty ? TokenType.Property : TokenType.Function,
+                        value: functionName,
+                        line: token.line,
+                        start: token.start
+                    };
+
+                    let paramStart = token.start + functionName.length + 1;
+
+                    // ✅ Insert parameters separately
+                    params.forEach((param, index) => {
+                        this.tokens.splice(i + 1 + index, 0, {
+                            type: TokenType.Variable,  // ✅ Ensure INV is classified correctly
+                            value: param,
+                            line: token.line,
+                            start: paramStart
+                        });
+                        paramStart += param.length + 1;
+                    });
+                    logger.debug(`🔹 [DEBUG] Split parameters for '${functionName}' → [${params.join(", ")}]`);
+                }
+            }
+
+
             // ✅ If token is a Structure (e.g., WINDOW), check if it's inside a function call
             if (token.type === TokenType.Structure) {
                 // Look for an opening parenthesis before this token
@@ -158,12 +188,13 @@ export class ClarionTokenizer {
                 if (prevToken && prevToken.value === "(") {
                     // ✅ Reclassify as FunctionArgumentParameter
                     token.type = TokenType.FunctionArgumentParameter;
-                    this.logMessage(`🔹 [DEBUG] Reclassified '${token.value}' as FunctionArgumentParameter at line ${token.line}`);
+                    logger.debug(`🔹 [DEBUG] Reclassified '${token.value}' as FunctionArgumentParameter at line ${token.line}`);
                 }
             }
         }
-        
-        this.logMessage(`📊 Tokenization Complete. Total Tokens: ${this.tokens.length}`);
+
+
+       
         return this.tokens;
     }
 }
@@ -172,7 +203,9 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Comment]: /!.*/i,
     [TokenType.LineContinuation]: /&?\s*\|.*/i,
     [TokenType.String]: /'([^']|'')*'/i,
-    [TokenType.FunctionArgumentParameter]: /(?<=\()\s*[A-Za-z_][A-Za-z0-9_]*(?:\s*=\s*(?:\w+|[+-]?\d+(?:\.\d+)?|'.*?'))?(?=\s*[,)\n])/i,
+    // [TokenType.FunctionArgumentParameter]: /(?<=\()\s*[A-Za-z_][A-Za-z0-9_]*(?:\s*=\s*(?:\w+|[+-]?\d+(?:\.\d+)?|'.*?'))?(?=\s*[,)\n])/i,
+    [TokenType.FunctionArgumentParameter]: /\b[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)/i,  // Captures anything inside ()
+
     [TokenType.PointerParameter]: /\*\?\s*\b[A-Za-z_][A-Za-z0-9_]*\b/i,
     [TokenType.FieldEquateLabel]: /\?[A-Za-z_][A-Za-z0-9_]*/i,
     [TokenType.Keyword]: /\b(?:RETURN|OF|ELSE|THEN|UNTIL|EXIT|NEW|END|PROCEDURE|ROUTINE|PROC)\b/i,
@@ -182,7 +215,8 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Directive]: /\b(?:ASSERT|BEGIN|COMPILE|EQUATE|INCLUDE|ITEMIZE|OMIT|ONCE|SECTION|SIZE)\b(?=\s*\()/i,
     [TokenType.Property]: /\b(?:HVSCROLL|SEPARATOR|LIST|RESIZE|DEFAULT|CENTER|MAX|SYSTEM|IMM|DRIVER|PROP|PROPLIST|EVENT|CREATE|BRUSH|LEVEL|STD|CURSOR|BEEP|REJECT|CHARSET|PEN|LISTZONE|BUTTON|MSGMODE|TEXT|FREEZE|DDE|FF_|OCX|DOCK|MATCH|PAPER|DRIVEROP|DATATYPE|GradientTypes|STD|ITEM|MDI|GRAY|HLP)\b/i,
     [TokenType.PropertyFunction]: /\b(?:FORMAT|FONT|USE|ICON|STATUS|MSG|TIP|AT|PROJECT|FROM|NAME|DLL)\b(?=\s*\()/i,
-    [TokenType.Variable]: /\b[A-Z]+\:\w+\b/i,
+    //[TokenType.Variable]: /\b[A-Z]+\:\w+\b/i,
+    [TokenType.Variable]: /&?[A-Za-z_][A-Za-z0-9_]*\s*(?:&[A-Za-z_][A-Za-z0-9_]*)?/i,
     // ✅ Added support for Binary, Octal, Hex constants
     [TokenType.Number]: /[+-]?(?:\d+\.\d+|\d+(?!\.\d)|\d+[bBoOhH]|\h*[A-Fa-f0-9]+[hH])/,
     [TokenType.Operator]: /[+\-*/=<>!&]/i,

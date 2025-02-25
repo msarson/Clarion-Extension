@@ -206,17 +206,18 @@
     "scripts": {
         "vscode:prepublish": "npm run compile",
         "compile": "tsc -b",
-        "watch": "tsc -b -w",
-        "postinstall": "cd client && npm install && cd ../server  && npm install && cd .."
+        "watch": "tsc -b -w"
     },
     "devDependencies": {
         "@types/mocha": "^8.2.2",
-        "@types/node": "^15.14.9",
+        "@types/node": "^22.13.5",
         "@types/vscode": "^1.97.0",
-        "@typescript-eslint/parser": "^4.31.0",
+        "@typescript-eslint/parser": "^8.25.0",
         "@vscode/test-electron": "^2.4.1",
-        "eslint": "^7.32.0",
+        "eslint": "^9.21.0",
+        "glob": "^11.0.1",
         "mocha": "^11.1.0",
+        "rimraf": "^6.0.1",
         "typescript": "^4.2.4"
     },
     "dependencies": {
@@ -226,6 +227,7 @@
         "vscode-languageserver": "^9.0.1",
         "vscode-languageserver-protocol": "^3.17.5",
         "vscode-languageserver-textdocument": "^1.0.12",
+        "winston": "^3.17.0",
         "xml2js": "^0.6.2"
     }
 }
