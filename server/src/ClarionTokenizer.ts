@@ -1,4 +1,8 @@
-import logger from "./logger";
+import logger from "./logger.js";
+
+
+
+
 
 export enum TokenType {
     Comment,
@@ -9,7 +13,6 @@ export enum TokenType {
     Variable,
     Number,
     Operator,
-    Label,
     Class,
     Attribute,
     Property,
@@ -40,6 +43,10 @@ export interface Token {
     start: number;
     isStructure?: boolean;       // ✅ True if this token starts a structure
     structureFinishesAt?: number; // ✅ The line number where the structure ends
+    isProcedure?: boolean;       // ✅ True if this token starts a procedure
+    procedureFinishesAt?: number; // ✅ The line number where the procedure ends
+    isRoutine?: boolean;         // ✅ True if this token starts a routine
+    routineFinishesAt?: number;   // ✅ The line number where the routine ends
 }
 
 export class ClarionTokenizer {
@@ -53,214 +60,181 @@ export class ClarionTokenizer {
 
     public tokenize(): Token[] {
         const lines = this.text.split(/\r?\n/);
-
+    
         let structureStack: { tokenIndex: number, type: string, startLine: number }[] = [];
-
+        let procedureStack: { tokenIndex: number, startLine: number }[] = [];
+        let routineStack: { tokenIndex: number, startLine: number }[] = [];
+        let insideClassOrInterfaceOrMap = false;
+    
         lines.forEach((line, lineNumber) => {
             let position = 0;
             let column = 0;
             const leadingSpaces = line.match(/^(\s*)/);
-            if (leadingSpaces) {
-                column = leadingSpaces[0].length;
-            }
-
-            // ✅ Check if the first word is a LABEL (Column 1), but ignore if the first character is '!'
-            if (column === 0) {
-                if (line.startsWith("!")) {
-                    
-                } else {
-                    const labelMatch = line.match(/^(\S+)\s/); // Capture first word before space
-                    if (labelMatch) {
-                        this.tokens.push({
-                            type: TokenType.Label,
-                            value: labelMatch[1],
-                            line: lineNumber,
-                            start: column
-                        });
-
-
-                        // Move position past the label
-                        position += labelMatch[1].length + 1; // +1 to skip the space
-                        column += labelMatch[1].length + 1;
-                    }
-                }
-            }
-
-            
-
+            if (leadingSpaces) column = leadingSpaces[0].length;
+    
             while (position < line.length) {
                 const substring = line.slice(position);
                 let matched = false;
-            
+    
                 if (line.trim() === "") break;
-            
+    
                 const orderedTokenTypes: TokenType[] = [
-                    TokenType.Comment,
-                    TokenType.LineContinuation,
-                    TokenType.String,
-                    TokenType.ReferenceVariable,
-                    TokenType.Type,
-                    TokenType.PointerParameter,
-                    TokenType.FieldEquateLabel,
-                    TokenType.Property,
-                    TokenType.PropertyFunction,
-                    TokenType.Keyword,
-                    TokenType.Structure,
-                    TokenType.FunctionArgumentParameter,
-                    TokenType.TypeAnnotation,
-                    TokenType.Function,
-                    TokenType.Directive,
-                    TokenType.Number,
-                    TokenType.Operator,
-                    TokenType.Class,
-                    TokenType.Attribute,
-                    TokenType.Constant,
-                    TokenType.Variable,
-                    TokenType.ImplicitVariable,
-                    TokenType.Delimiter,
-                    TokenType.Unknown
+                    TokenType.Comment, TokenType.LineContinuation, TokenType.String, TokenType.ReferenceVariable,
+                    TokenType.Type, TokenType.PointerParameter, TokenType.FieldEquateLabel, TokenType.Property,
+                    TokenType.PropertyFunction, TokenType.Keyword, TokenType.Structure, TokenType.FunctionArgumentParameter,
+                    TokenType.TypeAnnotation, TokenType.Function, TokenType.Directive, TokenType.Number,
+                    TokenType.Operator, TokenType.Class, TokenType.Attribute, TokenType.Constant, TokenType.Variable,
+                    TokenType.ImplicitVariable, TokenType.Delimiter, TokenType.Unknown
                 ];
-            
+    
                 /** 🔍 Check for Other Tokens */
                 for (const tokenType of orderedTokenTypes) {
                     const pattern = tokenPatterns[tokenType];
-                    if (!pattern) { 
+                    if (!pattern) {
                         logger.warn(`🔍 [DEBUG] Token pattern is undefined for ${TokenType[tokenType]}`);
                         continue;
                     }
-            
+    
                     let match = pattern.exec(substring);
-                    
-                    if (match && match.index === 0) { 
+                    if (match && match.index === 0) {
                         let newToken: Token = {
                             type: tokenType,
                             value: match[0],
                             line: lineNumber,
                             start: column
                         };
-            
-                        // ✅ If it's a structure, mark it and push to stack
+    
+                        // ✅ Detect STRUCTURE (Push to stack)
                         if (tokenType === TokenType.Structure) {
                             newToken.isStructure = true;
-                        
                             structureStack.push({
                                 tokenIndex: this.tokens.length,
-                                type: match[0].trim(), // ✅ Trim whitespace to ensure matching with END
+                                type: match[0].trim(),
                                 startLine: lineNumber
                             });
-                        
-                            logger.debug(`🔍 [DEBUG] Structure started: '${match[0].trim()}' at Line ${lineNumber}`);
+                            logger.debug(`🔍 [DEBUG] STRUCTURE START detected: '${match[0].trim()}' at Line ${lineNumber}`);
                         }
-                        
-            
-                        // ✅ If it's an END, close the last opened structure
+    
+                        // ✅ Detect END (Pop structure stack)
                         if (tokenType === TokenType.Keyword && match[0].toUpperCase() === "END") {
-                            logger.debug(`🔍 [DEBUG] END found at Line ${lineNumber}. Current stack:`, structureStack);
-                            
-                            if (structureStack.length > 0) {
-                                const lastStructure = structureStack.pop();
-                                if (lastStructure) {
-                                    this.tokens[lastStructure.tokenIndex].structureFinishesAt = lineNumber;
-                                    logger.debug(`🔍 [DEBUG] Structure '${lastStructure.type}' ended at Line ${lineNumber}`);
-                                }
+                            const lastStructure = structureStack.pop();
+                            if (lastStructure) {  
+                                this.tokens[lastStructure.tokenIndex].structureFinishesAt = lineNumber;
+                                logger.debug(`✅ [DEBUG] STRUCTURE '${lastStructure.type}' ends at Line ${lineNumber}`);
                             } else {
-                                logger.warn(`⚠️ [WARNING] Unmatched END at Line ${lineNumber} (No open structure to close)`);
+                                logger.warn(`⚠️ [WARNING] Unmatched END at Line ${lineNumber} (No open STRUCTURE)`);
                             }
                         }
-                        
-                        
-                        
-                        
-            
+    
+                        // ✅ Detect CLASS, INTERFACE, MAP (Ignore PROCEDURES inside)
+                        if (tokenType === TokenType.Structure && ["CLASS", "INTERFACE", "MAP"].includes(match[0].toUpperCase())) {
+                            insideClassOrInterfaceOrMap = true;
+                        }
+    
+                        // ✅ Detect END (Unmark CLASS, INTERFACE, MAP scope)
+                        if (tokenType === TokenType.Keyword && match[0].toUpperCase() === "END") {
+                            insideClassOrInterfaceOrMap = false;
+                        }
+    
+                        // ✅ Detect PROCEDURE (Ignore inside CLASS, INTERFACE, MAP)
+                        if (tokenType === TokenType.Keyword && match[0].toUpperCase() === "PROCEDURE") {
+                            if (!insideClassOrInterfaceOrMap) {
+                                if (procedureStack.length > 0) {
+                                    const lastProcedure = procedureStack.pop();
+                                    if (lastProcedure) {  
+                                        this.tokens[lastProcedure.tokenIndex].procedureFinishesAt = lineNumber - 1;
+                                        logger.debug(`✅ [DEBUG] PROCEDURE at Line ${lastProcedure.startLine} finishes at Line ${lineNumber - 1}`);
+                                    }
+                                }
+                                newToken.isProcedure = true;
+                                procedureStack.push({ tokenIndex: this.tokens.length, startLine: lineNumber });
+                                logger.debug(`🔍 [DEBUG] PROCEDURE START detected at Line ${lineNumber}`);
+                            } else {
+                                logger.debug(`🚫 [DEBUG] Ignoring PROCEDURE at Line ${lineNumber} (Inside ${insideClassOrInterfaceOrMap})`);
+                            }
+                        }
+    
+                        // ✅ Detect ROUTINE (Same logic as PROCEDURE)
+                        if (tokenType === TokenType.Keyword && match[0].toUpperCase() === "ROUTINE") {
+                            if (routineStack.length > 0) {
+                                const lastRoutine = routineStack.pop();
+                                if (lastRoutine) {  
+                                    this.tokens[lastRoutine.tokenIndex].routineFinishesAt = lineNumber - 1;
+                                    logger.debug(`✅ [DEBUG] ROUTINE at Line ${lastRoutine.startLine} finishes at Line ${lineNumber - 1}`);
+                                }
+                            }
+                            newToken.isRoutine = true;
+                            routineStack.push({ tokenIndex: this.tokens.length, startLine: lineNumber });
+                            logger.debug(`🔍 [DEBUG] ROUTINE START detected at Line ${lineNumber}`);
+                        }
+    
                         // ✅ Now pushing token to this.tokens
                         this.tokens.push(newToken);
-            
                         position += match[0].length;
                         column += match[0].length;
                         matched = true;
                         break;
                     }
                 }
-            
+    
                 if (!matched) {
                     position++;
                     column++;
                 }
             }
-            
-                
         });
-        for (let i = 0; i < this.tokens.length; i++) {
-            const token = this.tokens[i];
-
-            // ✅ Check for function-like tokens with parameters (e.g., PRE(INV))
-            if (token.type === TokenType.FunctionArgumentParameter || token.type === TokenType.TypeAnnotation) {
-                let match = token.value.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)$/);
-                if (match) {
-                    let functionName = match[1];
-                    let params = match[2].split(/\s*,\s*/);  // ✅ Split parameters at commas
-
-                    // ✅ Identify if functionName is a known Property
-                    let isProperty = functionName.toUpperCase() === "PRE";
-
-                    // ✅ Set correct type for functionName (Property or Function)
-                    this.tokens[i] = {
-                        type: isProperty ? TokenType.Property : TokenType.Function,
-                        value: functionName,
-                        line: token.line,
-                        start: token.start
-                    };
-
-                    let paramStart = token.start + functionName.length + 1;
-
-                    // ✅ Insert parameters separately
-                    params.forEach((param, index) => {
-                        this.tokens.splice(i + 1 + index, 0, {
-                            type: TokenType.Variable,  // ✅ Ensure INV is classified correctly
-                            value: param,
-                            line: token.line,
-                            start: paramStart
-                        });
-                        paramStart += param.length + 1;
-                    });
-               //     logger.debug(`🔹 [DEBUG] Split parameters for '${functionName}' → [${params.join(", ")}]`);
-                }
-            }
-
-
-            // ✅ If token is a Structure (e.g., WINDOW), check if it's inside a function call
-            if (token.type === TokenType.Structure) {
-                // Look for an opening parenthesis before this token
-                const prevToken = this.tokens[i - 1];
-                if (prevToken && prevToken.value === "(") {
-                    // ✅ Reclassify as FunctionArgumentParameter
-                    token.type = TokenType.FunctionArgumentParameter;
-                    logger.debug(`🔹 [DEBUG] Reclassified '${token.value}' as FunctionArgumentParameter at line ${token.line}`);
-                }
+    
+        // ✅ Close any remaining open STRUCTURES at EOF
+        while (structureStack.length > 0) {
+            const lastStructure = structureStack.pop();
+            if (lastStructure) {  
+                this.tokens[lastStructure.tokenIndex].structureFinishesAt = this.tokens[this.tokens.length - 1]?.line ?? 0;
+                logger.debug(`⚠️ [DEBUG] STRUCTURE '${lastStructure.type}' finishes at EOF`);
             }
         }
-
-
-       
+    
+        // ✅ Close any remaining open PROCEDURE at EOF
+        while (procedureStack.length > 0) {
+            const lastProcedure = procedureStack.pop();
+            if (lastProcedure) {  
+                this.tokens[lastProcedure.tokenIndex].procedureFinishesAt = this.tokens[this.tokens.length - 1]?.line ?? 0;
+                logger.debug(`⚠️ [DEBUG] PROCEDURE at Line ${lastProcedure.startLine} finishes at EOF`);
+            }
+        }
+    
+        // ✅ Close any remaining open ROUTINE at EOF
+        while (routineStack.length > 0) {
+            const lastRoutine = routineStack.pop();
+            if (lastRoutine) {  
+                this.tokens[lastRoutine.tokenIndex].routineFinishesAt = this.tokens[this.tokens.length - 1]?.line ?? 0;
+                logger.debug(`⚠️ [DEBUG] ROUTINE at Line ${lastRoutine.startLine} finishes at EOF`);
+            }
+        }
+    
         return this.tokens;
     }
+    
+    
+    
+
 }
 
 const STRUCTURE_PATTERNS: Record<string, RegExp> = {
-    MODULE: /^\s*MODULE\b/i,  // MODULE should be first word on the line
+    MODULE: /^\s*MODULE\b/i,  // MODULE should be the first word on the line
     APPLICATION: /\bAPPLICATION\b/i,
     CASE: /\bCASE\b/i,
     CLASS: /\bCLASS\b/i,
     GROUP: /\bGROUP\b/i,
     FILE: /\bFILE\b/i,
     INTERFACE: /\bINTERFACE\b/i,
+    IF: /\bIF\b/i,  // ✅ Re-added "IF" as a structure
     JOIN: /\bJOIN\b/i,
     LOOP: /\bLOOP\b/i,
     MAP: /\bMAP\b/i,
     MENU: /\bMENU\b/i,
     MENUBAR: /\bMENUBAR\b/i,
-    QUEUE: /\bQUEUE(?!\s+\w+\))\b/i,  // Prevents detecting Queue:Browse as a structure
-    RECORD: /\bRECORD\b/i,
+    QUEUE: /\bQUEUE(?![:\(])\b/i,  // Prevents detecting Queue:Browse as a structure
+    RECORD: /^\s*\w+\s+RECORD\b/i,  // RECORD must follow a label
     REPORT: /\bREPORT\b/i,
     SECTION: /\bSECTION\b/i,
     SHEET: /\bSHEET\b/i,
@@ -271,15 +245,16 @@ const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     OPTION: /\bOPTION\b/i,
     ITEMIZE: /\bITEMIZE\b/i,
     EXECUTE: /\bEXECUTE\b/i,
-    BEGIN: /\bBEGIN\b/i,
-    FORM: /\bFORM\b/i,
-    DETAIL: /\bDETAIL\b/i,
-    HEADER: /\bHEADER\b/i,
-    FOOTER: /\bFOOTER\b/i,
-    BREAK: /\bBREAK\b/i,
-    ACCEPT: /\bACCEPT\b/i,
-    OLE: /\bOLE\b/i,
+    BEGIN: /\bBEGIN\b/i,  // ✅ Re-added
+    FORM: /\bFORM\b/i,  // ✅ Re-added
+    DETAIL: /\bDETAIL\b/i,  // ✅ Re-added
+    HEADER: /\bHEADER\b/i,  // ✅ Re-added
+    FOOTER: /\bFOOTER\b/i,  // ✅ Re-added
+    BREAK: /\bBREAK\b/i,  // ✅ Re-added
+    ACCEPT: /\bACCEPT\b/i,  // ✅ Re-added
+    OLE: /\bOLE\b/i
 };
+
 
 
 export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
@@ -292,17 +267,15 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
 
     //[TokenType.PointerParameter]: /\*\?\s*\b[A-Za-z_][A-Za-z0-9_]*\b/i,
     [TokenType.FieldEquateLabel]: /\?[A-Za-z_][A-Za-z0-9_]*/i,
-    [TokenType.Keyword]: /\b(?:RETURN|OF|ELSE|THEN|UNTIL|EXIT|NEW|END|PROCEDURE|ROUTINE|PROC)\b/i,
+    [TokenType.Keyword]: /\b(?:RETURN|OF|ELSE|THEN|UNTIL|EXIT|NEW|END|PROCEDURE|ROUTINE|PROC|BREAK)\b/i,
     [TokenType.Structure]: new RegExp(
         Object.values(STRUCTURE_PATTERNS).map(r => r.source).join("|"), "i"
     ),
-    
+
 
 
     // ✅ Excludes QUEUE when appearing inside parameters
-    //[TokenType.Structure]: /^(?:\s*MODULE\b(?!\s*\()|\b(APPLICATION|CASE|CLASS|GROUP|FILE|INTERFACE|JOIN|LOOP|MAP|MENU|MENUBAR|QUEUE(?!\s+\w+\))|RECORD|REPORT|SECTION|SHEET|TAB|TOOLBAR|VIEW|WINDOW|OPTION|ITEMIZE|EXECUTE|BEGIN|FORM|DETAIL|HEADER|FOOTER|BREAK|ACCEPT|OLE)\b)/i,
 
-//    [TokenType.Structure]: /\b(?:APPLICATION|CASE|CLASS|GROUP|IF|INTERFACE|FILE|JOIN|LOOP|MAP|MENU|MENUBAR|MODULE|QUEUE(?!\s+\w+\))|RECORD|REPORT|SECTION|SHEET|TAB|TOOLBAR|VIEW|WINDOW|OPTION|ITEMIZE|EXECUTE|BEGIN|FORM|DETAIL|HEADER|FOOTER|BREAK|ACCEPT|OLE)\b/i,
     [TokenType.Function]: /\b(?:COLOR|LINK|DLL)\b(?=\s*\()/i,
     [TokenType.Directive]: /\b(?:ASSERT|BEGIN|COMPILE|EQUATE|INCLUDE|ITEMIZE|OMIT|ONCE|SECTION|SIZE)\b(?=\s*\()/i,
     [TokenType.Property]: /\b(?:HVSCROLL|SEPARATOR|LIST|RESIZE|DEFAULT|CENTER|MAX|SYSTEM|IMM|DRIVER|PROP|PROPLIST|EVENT|CREATE|BRUSH|LEVEL|STD|CURSOR|BEEP|REJECT|CHARSET|PEN|LISTZONE|BUTTON|MSGMODE|TEXT|FREEZE|DDE|FF_|OCX|DOCK|MATCH|PAPER|DRIVEROP|DATATYPE|GradientTypes|STD|ITEM|MDI|GRAY|HLP)\b/i,

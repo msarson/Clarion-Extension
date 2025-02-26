@@ -1,7 +1,8 @@
 import { DocumentSymbol, SymbolKind, Range } from "vscode-languageserver-types";
-import { StructureNode } from "./clarionStructureExtractor";
-import { Token, TokenType } from "./ClarionTokenizer";
-import logger from "./logger";
+import { StructureNode } from "./clarionStructureExtractor.js";
+import { TokenType } from "./ClarionTokenizer.js";
+import logger from "./logger.js";
+
 
 
 
@@ -46,11 +47,11 @@ class ClarionFileParser {
     public getPrefix(): string {
         for (let i = 0; i < this.fileNode.tokens.length; i++) {
             const token = this.fileNode.tokens[i];
-            console.log(`[getprefix] token type: ${token.type} token value: ${token.value}`);
+            logger.debug(`[getprefix] token type: ${token.type} token value: ${token.value}`);
              if (token.type === TokenType.Property && token.value.toUpperCase() === "PRE") {
                  const nextToken = this.fileNode.tokens[i + 1]; // Expect '(' at i+1 and driver name at i+2
                  if (nextToken && nextToken.type === TokenType.Variable) {
-                     console.log(`📂 [DEBUG] Found prefix '${nextToken.value.replace(/'/g, "")}'`);
+                     logger.debug(`📂 [DEBUG] Found prefix '${nextToken.value.replace(/'/g, "")}'`);
                      return nextToken.value.replace(/'/g, ""); // ✅ Remove quotes
                  }
             }
@@ -71,7 +72,7 @@ class ClarionFileParser {
                 for (let i = 0; i < child.tokens.length; i++) {
                     const token = child.tokens[i];
         
-                    if (token.type === TokenType.Label) {
+                    if (token.type === TokenType.Variable) {
                         const fieldName = token.value;
                         let typeToken = child.tokens[i + 1]; // Expect field type next
                         let fullType = typeToken ? typeToken.value : ""; // Start with base type
@@ -91,7 +92,7 @@ class ClarionFileParser {
                                 }
         
                                 // Stop when reaching next field or END
-                                if (nextToken.type === TokenType.Label || 
+                                if (nextToken.type === TokenType.Variable || 
                                     (nextToken.type === TokenType.Keyword && nextToken.value.toUpperCase() === "END")) {
                                     break;
                                 }

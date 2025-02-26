@@ -1,8 +1,4 @@
-import {
-    createConnection,
-    TextDocuments,
-    ProposedFeatures
-} from 'vscode-languageserver/node';
+
 
 import {
     DocumentSymbolParams,
@@ -11,11 +7,10 @@ import {
 } from 'vscode-languageserver-protocol';
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
-
-import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
-import { ClarionFoldingRangeProvider } from './ClarionFoldingRangeProvider';
-
-import logger from './logger';
+import { ClarionFoldingRangeProvider } from './ClarionFoldingRangeProvider.js';
+import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider.js';
+import logger from './logger.js';
+import { createConnection, ProposedFeatures, TextDocuments } from 'vscode-languageserver';
 
 
 

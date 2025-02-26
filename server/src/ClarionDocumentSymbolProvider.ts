@@ -1,9 +1,10 @@
 import { DocumentSymbol, Range, SymbolKind } from 'vscode-languageserver-types';
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { Token, TokenType, ClarionTokenizer } from './ClarionTokenizer';
-import ClarionStructureExtractor from './clarionStructureExtractor';
-import ClarionFileParser from './ClarionFileParser';
-import ClarionClassParser from './ClarionClassParser';
+import { ClarionTokenizer, Token } from './ClarionTokenizer.js';
+import ClarionStructureExtractor from './clarionStructureExtractor.js';
+import ClarionFileParser from './ClarionFileParser.js';
+import ClarionClassParser from './ClarionClassParser.js';
+
 
 enum ClarionSymbolKind {
     Root = SymbolKind.Module,

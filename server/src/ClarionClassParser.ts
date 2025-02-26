@@ -1,7 +1,9 @@
-import { DocumentSymbol, SymbolKind, Range } from "vscode-languageserver-types";
-import { StructureNode } from "./clarionStructureExtractor";
-import { Token, TokenType } from "./ClarionTokenizer";
-import logger from "./logger";
+
+import { StructureNode } from "./clarionStructureExtractor.js";
+import { TokenType } from "./ClarionTokenizer.js";
+import logger from "./logger.js";
+
+
 
 /**
  * Parses a Clarion CLASS structure to extract:
@@ -32,7 +34,7 @@ class ClarionClassParser {
         for (let i = 0; i < this.classNode.tokens.length; i++) {
             const token = this.classNode.tokens[i];
 
-            if (token.type === TokenType.Label) {
+            if (token.type === TokenType.Variable) {
                 let nextToken = this.classNode.tokens[i + 1];
 
                 if (nextToken && (nextToken.value.toUpperCase() === "PROCEDURE")) {
@@ -49,7 +51,7 @@ class ClarionClassParser {
                             continue;
                         }
 
-                        if (paramToken.type === TokenType.Keyword || paramToken.type === TokenType.Label) {
+                        if (paramToken.type === TokenType.Keyword || paramToken.type === TokenType.Variable) {
                             break; // Stop at next declaration
                         }
 
@@ -80,7 +82,7 @@ class ClarionClassParser {
         for (let i = 0; i < this.classNode.tokens.length; i++) {
             const token = this.classNode.tokens[i];
 
-            if (token.type === TokenType.Label) {
+            if (token.type === TokenType.Variable) {
                 let nextToken = this.classNode.tokens[i + 1];
 
                 if (nextToken && nextToken.type === TokenType.Type) {
@@ -99,7 +101,7 @@ class ClarionClassParser {
                             continue;
                         }
 
-                        if (typeDetailToken.type === TokenType.Keyword || typeDetailToken.type === TokenType.Label) {
+                        if (typeDetailToken.type === TokenType.Keyword || typeDetailToken.type === TokenType.Variable) {
                             break; // Stop at next declaration
                         }
 

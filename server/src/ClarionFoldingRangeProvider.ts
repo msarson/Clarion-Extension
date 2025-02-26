@@ -1,8 +1,9 @@
 import { FoldingRange } from "vscode-languageserver-protocol";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { Range } from "vscode-languageserver-types";
-import ClarionFoldingProvider from "./ClarionFoldingProvider";
-import { ClarionTokenizer } from "./ClarionTokenizer";
+import { ClarionTokenizer } from "./ClarionTokenizer.js";
+import ClarionFoldingProvider from "./ClarionFoldingProvider.js";
+
 
 export class ClarionFoldingRangeProvider {
     

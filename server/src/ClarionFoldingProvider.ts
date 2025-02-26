@@ -1,6 +1,8 @@
 import { FoldingRange, FoldingRangeKind } from "vscode-languageserver-types";
-import { Token, TokenType } from "./ClarionTokenizer";
-import logger from "./logger";  // ✅ Import logger
+import { Token, TokenType } from "./ClarionTokenizer.js";
+import logger from "./logger.js";
+
+
 
 class ClarionFoldingProvider {
     private tokens: Token[];
@@ -44,72 +46,47 @@ class ClarionFoldingProvider {
 
     /** 🔹 Second pass: Process PROCEDURE, ROUTINE, and REGIONS */
     private foldProceduresAndRegions(): void {
-        let openProcedure: { startLine: number } | null = null;
-        let openRoutine: { startLine: number } | null = null;
-        let insideClassOrInterfaceOrMap = false;
+        // ✅ Fold PROCEDURES
+        const procedureTokens = this.tokens.filter(t => t.procedureFinishesAt !== undefined);
+    
+        for (const token of procedureTokens) {
+            this.foldingRanges.push({
+                startLine: token.line,
+                endLine: token.procedureFinishesAt!,
+                kind: FoldingRangeKind.Region
+            });
+    
+            logger.debug(`✅ [DEBUG] Folded PROCEDURE '${token.value}' from Line ${token.line} to ${token.procedureFinishesAt}`);
+        }
+    
+        // ✅ Fold ROUTINES
+        const routineTokens = this.tokens.filter(t => t.routineFinishesAt !== undefined);
+    
+        for (const token of routineTokens) {
+            this.foldingRanges.push({
+                startLine: token.line,
+                endLine: token.routineFinishesAt!,
+                kind: FoldingRangeKind.Region
+            });
+    
+            logger.debug(`✅ [DEBUG] Folded ROUTINE '${token.value}' from Line ${token.line} to ${token.routineFinishesAt}`);
+        }
+    
+        // ✅ Fold REGIONS (unchanged)
         let regionStack: { startLine: number; label?: string }[] = [];
-
-        for (let i = 0; i < this.tokens.length; i++) {
-            const token = this.tokens[i];
+    
+        for (const token of this.tokens) {
             const upperValue = token.value.toUpperCase();
-
-            // ✅ Ignore if token was already processed as part of a structure
-            if (token.isStructure) continue;
-
-            // ✅ Detect PROCEDURE start
-            if (token.type === TokenType.Keyword && upperValue === "PROCEDURE") {
-                if (insideClassOrInterfaceOrMap) continue;
-
-                if (openProcedure) {
-                    this.foldingRanges.push({
-                        startLine: openProcedure.startLine,
-                        endLine: token.line - 1,
-                        kind: FoldingRangeKind.Region
-                    });
-                    openProcedure = null;
-                }
-
-                if (openRoutine) {
-                    this.foldingRanges.push({
-                        startLine: openRoutine.startLine,
-                        endLine: token.line - 1,
-                        kind: FoldingRangeKind.Region
-                    });
-                    openRoutine = null;
-                }
-
-                openProcedure = { startLine: token.line };
-            }
-
-            // ✅ Detect ROUTINE start
-            if (token.type === TokenType.Keyword && upperValue === "ROUTINE") {
-                if (openProcedure) {
-                    this.foldingRanges.push({
-                        startLine: openProcedure.startLine,
-                        endLine: token.line - 1,
-                        kind: FoldingRangeKind.Region
-                    });
-                    openProcedure = null;
-                }
-
-                if (openRoutine) {
-                    this.foldingRanges.push({
-                        startLine: openRoutine.startLine,
-                        endLine: token.line - 1,
-                        kind: FoldingRangeKind.Region
-                    });
-                }
-
-                openRoutine = { startLine: token.line };
-            }
-
+    
             // ✅ Detect `!region` start
             if (token.type === TokenType.Comment && upperValue.trim().startsWith("!REGION")) {
                 const labelMatch = token.value.match(/!REGION\s+"?(.*?)"?$/i);
                 const label = labelMatch ? labelMatch[1] : undefined;
                 regionStack.push({ startLine: token.line, label });
+    
+                logger.debug(`🔹 [DEBUG] Region START detected at Line ${token.line} (${label ?? "No Label"})`);
             }
-
+    
             // ✅ Detect `!endregion` and close last opened REGION
             if (token.type === TokenType.Comment && upperValue.trim().startsWith("!ENDREGION")) {
                 const lastRegion = regionStack.pop();
@@ -119,10 +96,12 @@ class ClarionFoldingProvider {
                         endLine: token.line,
                         kind: FoldingRangeKind.Region
                     });
+    
+                    logger.debug(`🔹 [DEBUG] Region END detected from Line ${lastRegion.startLine} to ${token.line}`);
                 }
             }
         }
-
+    
         // ✅ Close any remaining open REGIONS at EOF
         while (regionStack.length > 0) {
             const lastRegion = regionStack.pop();
@@ -131,24 +110,11 @@ class ClarionFoldingProvider {
                 endLine: this.tokens[this.tokens.length - 1]?.line ?? 0,
                 kind: FoldingRangeKind.Region
             });
-        }
-
-        // ✅ Close any remaining open PROCEDURE or ROUTINE at EOF
-        if (openProcedure) {
-            this.foldingRanges.push({
-                startLine: openProcedure.startLine,
-                endLine: this.tokens[this.tokens.length - 1]?.line ?? 0,
-                kind: FoldingRangeKind.Region
-            });
-        }
-        if (openRoutine) {
-            this.foldingRanges.push({
-                startLine: openRoutine.startLine,
-                endLine: this.tokens[this.tokens.length - 1]?.line ?? 0,
-                kind: FoldingRangeKind.Region
-            });
+    
+            logger.debug(`⚠️ [DEBUG] Region END (at EOF) from Line ${lastRegion?.startLine ?? 0} to EOF`);
         }
     }
+    
 }
 
 export default ClarionFoldingProvider;
