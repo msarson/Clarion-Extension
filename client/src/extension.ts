@@ -1,6 +1,8 @@
-﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, QuickPickItem, ThemeIcon } from 'vscode';
-import * as path from 'path';
+﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, QuickPickItem, ThemeIcon, TextEditor, window as vscodeWindow } from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } from 'vscode-languageclient/node';
+
+import * as path from 'path';
+
 import { ClarionExtensionCommands } from './ClarionExtensionCommands';
 import { ClarionHoverProvider } from './providers/hoverProvider';
 import { ClarionDocumentLinkProvider } from './providers/documentLinkProvier';
@@ -49,7 +51,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
     context.subscriptions.push(commands.registerCommand("clarion.quickOpen", async () => {
         if (!workspace.isTrusted) {
-            window.showWarningMessage("Clarion features require a trusted workspace.");
+            vscodeWindow.showWarningMessage("Clarion features require a trusted workspace.");
             return;
         }
 
@@ -58,7 +60,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
     context.subscriptions.push(commands.registerCommand("clarion.openSolution", async () => {
         if (!workspace.isTrusted) {
-            window.showWarningMessage("Clarion features require a trusted workspace.");
+            vscodeWindow.showWarningMessage("Clarion features require a trusted workspace.");
             return;
         }
 
@@ -67,7 +69,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
     context.subscriptions.push(commands.registerCommand("clarion.setConfiguration", async () => {
         if (!workspace.isTrusted) {
-            window.showWarningMessage("Clarion features require a trusted workspace.");
+            vscodeWindow.showWarningMessage("Clarion features require a trusted workspace.");
             return;
         }
 
@@ -146,7 +148,7 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
     // ✅ Mark the solution as open in the VS Code context
     await commands.executeCommand("setContext", "clarion.solutionOpen", true);
 
-    window.showInformationMessage(`Clarion Solution Loaded: ${path.basename(globalSolutionFile)}`);
+    vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(globalSolutionFile)}`);
 }
 
 
@@ -215,7 +217,8 @@ export async function getAllOpenDocuments(): Promise<TextDocument[]> {
         }
     } else {
         logger.warn("⚠️ `tabGroups` API not available, falling back to `visibleTextEditors`.");
-        return window.visibleTextEditors.map(editor => editor.document);
+        return vscodeWindow.visibleTextEditors.map((editor: TextEditor) => editor.document);
+
     }
 
     logger.info(`🔍 Found ${openDocuments.length} open documents.`);
@@ -305,15 +308,15 @@ async function registerOpenCommand(context: ExtensionContext) {
         if (!cmds.includes('clarion.openFile')) {
             context.subscriptions.push(commands.registerCommand('clarion.openFile', async (filePath: string) => {
                 if (!filePath) {
-                    window.showErrorMessage("❌ No file path provided.");
+                    vscodeWindow.showErrorMessage("❌ No file path provided.");
                     return;
                 }
                 try {
                     const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(workspace.rootPath || "", filePath);
                     const doc = await workspace.openTextDocument(Uri.file(absolutePath));
-                    await window.showTextDocument(doc);
+                    await vscodeWindow.showTextDocument(doc);
                 } catch (error) {
-                    window.showErrorMessage(`❌ Failed to open file: ${filePath}`);
+                    vscodeWindow.showErrorMessage(`❌ Failed to open file: ${filePath}`);
                 }
             }));
         }
@@ -342,16 +345,16 @@ function createSolutionTreeView() {
     //     if (!cmds.includes('clarion.openFile')) {
     //         commands.registerCommand('clarion.openFile', async (filePath: string) => {
     //             if (!filePath) {
-    //                 window.showErrorMessage("❌ No file path provided.");
+    //                 vscodeWindow.showErrorMessage("❌ No file path provided.");
     //                 return;
     //             }
     //             try {
     //                 const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(workspace.rootPath || "", filePath);
     //                 const doc = await workspace.openTextDocument(Uri.file(absolutePath));
-    //                 await window.showTextDocument(doc);
+    //                 await vscodeWindow.showTextDocument(doc);
     //             } catch (error) {
     //                 logger.error(`❌ Failed to open file: ${filePath}`, error);
-    //                 window.showErrorMessage(`❌ Failed to open file: ${filePath}`);
+    //                 vscodeWindow.showErrorMessage(`❌ Failed to open file: ${filePath}`);
     //             }
     //         });
     //     }
@@ -359,7 +362,7 @@ function createSolutionTreeView() {
 
     try {
         // ✅ Create the tree view only if it doesn't exist
-        treeView = window.createTreeView('solutionView', {
+        treeView = vscodeWindow.createTreeView('solutionView', {
             treeDataProvider: solutionTreeDataProvider,
             showCollapseAll: true
         });
@@ -379,7 +382,7 @@ export async function openClarionSolution(context: ExtensionContext) {
         const previousConfiguration = globalSettings.configuration;
 
         // ✅ Step 1: Ask the user to select a `.sln` file
-        const selectedFileUri = await window.showOpenDialog({
+        const selectedFileUri = await vscodeWindow.showOpenDialog({
             canSelectFiles: true,
             canSelectFolders: false,
             openLabel: "Select Clarion Solution (.sln)",
@@ -387,7 +390,7 @@ export async function openClarionSolution(context: ExtensionContext) {
         });
 
         if (!selectedFileUri || selectedFileUri.length === 0) {
-            window.showWarningMessage("Solution selection canceled. Restoring previous settings.");
+            vscodeWindow.showWarningMessage("Solution selection canceled. Restoring previous settings.");
             await setGlobalClarionSelection(previousSolutionFile, previousPropertiesFile, previousVersion, previousConfiguration);
             return;
         }
@@ -401,7 +404,7 @@ export async function openClarionSolution(context: ExtensionContext) {
             await ClarionExtensionCommands.configureClarionPropertiesFile();
 
             if (!globalClarionPropertiesFile || !fs.existsSync(globalClarionPropertiesFile)) {
-                window.showErrorMessage("ClarionProperties.xml is required. Operation cancelled.");
+                vscodeWindow.showErrorMessage("ClarionProperties.xml is required. Operation cancelled.");
                 await setGlobalClarionSelection(previousSolutionFile, previousPropertiesFile, previousVersion, previousConfiguration);
                 return;
             }
@@ -413,7 +416,7 @@ export async function openClarionSolution(context: ExtensionContext) {
             await ClarionExtensionCommands.selectClarionVersion();
 
             if (!globalClarionVersion) {
-                window.showErrorMessage("Clarion version is required. Operation cancelled.");
+                vscodeWindow.showErrorMessage("Clarion version is required. Operation cancelled.");
                 await setGlobalClarionSelection(previousSolutionFile, previousPropertiesFile, previousVersion, previousConfiguration);
                 return;
             }
@@ -433,7 +436,7 @@ export async function openClarionSolution(context: ExtensionContext) {
         } else {
             // If the data provider is not initialized, create it
             solutionTreeDataProvider = new SolutionTreeDataProvider(solutionParser);
-            treeView = window.createTreeView("solutionView", {
+            treeView = vscodeWindow.createTreeView("solutionView", {
                 treeDataProvider: solutionTreeDataProvider,
                 showCollapseAll: true
             });
@@ -444,7 +447,7 @@ export async function openClarionSolution(context: ExtensionContext) {
         // if (registeredCommands.includes("workbench.view.extension.solutionView")) {
         //     await commands.executeCommand("workbench.view.extension.solutionView");
         // } else {
-        //     window.showErrorMessage("Solution View failed to register. Please restart VS Code.");
+        //     vscodeWindow.showErrorMessage("Solution View failed to register. Please restart VS Code.");
         // }
         initializeSolution(context, true);
         // ✅ Step 8: Register Language Features
@@ -452,19 +455,14 @@ export async function openClarionSolution(context: ExtensionContext) {
 
         // ✅ Step 9: Mark solution as open
         await commands.executeCommand("setContext", "clarion.solutionOpen", true);
-        window.showInformationMessage(`Clarion Solution Loaded: ${path.basename(globalSolutionFile)}`);
+        vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(globalSolutionFile)}`);
 
     } catch (error) {
         const errMessage = error instanceof Error ? error.message : String(error);
         logger.error("❌ Error opening solution:", error);
-        window.showErrorMessage(`Error opening Clarion solution: ${errMessage}`);
+        vscodeWindow.showErrorMessage(`Error opening Clarion solution: ${errMessage}`);
     }
 }
-
-
-
-
-
 
 export async function showClarionQuickOpen(): Promise<void> {
 
@@ -594,12 +592,12 @@ export async function showClarionQuickOpen(): Promise<void> {
     });
 
     if (fileItems.length === 0) {
-        window.showErrorMessage("No matching Clarion files found in the workspace.");
+        vscodeWindow.showErrorMessage("No matching Clarion files found in the workspace.");
         return;
     }
 
     // ✅ Ensure Quick Pick UI does not close on accidental Ctrl+P
-    const quickPick = window.createQuickPick();
+    const quickPick = vscodeWindow.createQuickPick();
     quickPick.items = fileItems;
     quickPick.matchOnDescription = true;
     quickPick.matchOnDetail = false;
@@ -610,7 +608,7 @@ export async function showClarionQuickOpen(): Promise<void> {
         const selection = quickPick.selectedItems[0];
         if (selection?.detail) {
             const doc = await workspace.openTextDocument(Uri.file(selection.detail));
-            await window.showTextDocument(doc);
+            await vscodeWindow.showTextDocument(doc);
         }
         quickPick.hide();
     });
@@ -618,14 +616,10 @@ export async function showClarionQuickOpen(): Promise<void> {
     quickPick.show();
 }
 
-
-
-
-
 async function setConfiguration() {
     const options = ["Debug", "Release"];
 
-    const selectedConfig = await window.showQuickPick(options, {
+    const selectedConfig = await vscodeWindow.showQuickPick(options, {
         placeHolder: "Select Clarion Configuration"
     });
 
@@ -633,12 +627,11 @@ async function setConfiguration() {
 
     globalSettings.configuration = selectedConfig;
     await workspace.getConfiguration().update("clarion.configuration", selectedConfig, ConfigurationTarget.Workspace);
-    window.showInformationMessage(`Clarion configuration set to ${selectedConfig}`);
+    vscodeWindow.showInformationMessage(`Clarion configuration set to ${selectedConfig}`);
 }
 
 export function deactivate(): Thenable<void> | undefined {
-    stopClientServer();
-    return undefined;
+    return stopClientServer();
 }
 
 function startClientServer(context: ExtensionContext, documentManager: DocumentManager) {
@@ -658,12 +651,14 @@ function startClientServer(context: ExtensionContext, documentManager: DocumentM
     };
 
     client = new LanguageClient("ClarionLanguageServer", "Clarion Language Server", serverOptions, clientOptions);
+    
+    // Start the client and handle the promise
     client.start();
 }
 
 function stopClientServer() {
     if (client) {
-        client.stop();
-        client = undefined;
+        return client.stop();
     }
+    return undefined;
 }

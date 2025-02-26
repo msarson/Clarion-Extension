@@ -4,7 +4,7 @@ import { Range } from "vscode-languageserver-types";
 import { ClarionTokenizer } from "./ClarionTokenizer.js";
 import ClarionFoldingProvider from "./ClarionFoldingProvider.js";
 
-
+// Ensure the class is properly exported
 export class ClarionFoldingRangeProvider {
     
 

@@ -23,7 +23,7 @@ import { createConnection, ProposedFeatures, TextDocuments } from 'vscode-langua
 // ✅ Initialize Providers
 const clarionFoldingProvider = new ClarionFoldingRangeProvider();
 const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider();
-
+const features = ProposedFeatures.all;
 // ✅ Create Connection and Documents Manager
 let connection = createConnection(ProposedFeatures.all);
 let documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);

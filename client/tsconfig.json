@@ -2,13 +2,17 @@
 	"compilerOptions": {
 		"forceConsistentCasingInFileNames": true,
 		"strict": true,
-		"module": "commonjs",
-		"target": "es2019",
-		"lib": ["ES2019"],
+		"module": "NodeNext",          // Updated to NodeNext for better subpath support
+		"target": "ESNext",
+		"lib": ["ESNext"],
+		"moduleResolution": "NodeNext", // Updated to NodeNext for better subpath support
+		"esModuleInterop": true,
+		"resolveJsonModule": true,      // Added to support JSON imports
+		"allowSyntheticDefaultImports": true, // Added for compatibility
 		"outDir": "out",
 		"rootDir": "src",
 		"sourceMap": true,
-		"types": ["@types/vscode"]  // <-- Add this line
+		"types": ["node", "@types/vscode"]  // Added node types explicitly
 	},
 	"include": ["src"],
 	"exclude": ["node_modules", "vscode-test"]

@@ -1,5 +1,6 @@
 import * as fs from 'fs';
-import path = require('path');
+import * as xml2js from 'xml2js';
+
 
 export interface clarionProperties {
     directory: string | null;
@@ -80,7 +81,8 @@ export class ClarionProjectClass {
         return null;
     }
 }
-import xml2js = require('xml2js');
+
 import logger from '../logger';
+import path from 'path';
 
 

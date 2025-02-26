@@ -1,19 +1,24 @@
 {
     "compilerOptions": {
-		"forceConsistentCasingInFileNames": true,
-		"strict": true,
-		"module": "commonjs",
-		"target": "es2019",
-		"lib": ["ES2019"],
-		"outDir": "out",
-		"rootDir": "./src",
-		"sourceMap": true
-	},
+        "forceConsistentCasingInFileNames": true,
+        "strict": true,
+        "module": "NodeNext",          
+        "target": "ESNext",
+        "lib": ["ESNext"],
+        "moduleResolution": "NodeNext", 
+        "esModuleInterop": true,
+        "resolveJsonModule": true,      
+        "allowSyntheticDefaultImports": true,
+        "outDir": "out",
+        "rootDir": "./src",
+        "sourceMap": true,
+        "types": ["node"]
+    },
     "include": [
-		"src"
-	],
+        "src"
+    ],
     "exclude": [
-		"node_modules",
-		"**/node_modules/*"
-	]
+        "node_modules",
+        "**/node_modules/*"
+    ]
 }

@@ -15,6 +15,7 @@ enum ClarionSymbolKind {
     TablesGroup = SymbolKind.Namespace // ✅ Represents the "Tables" parent node
 }
 
+// Ensure the class is properly exported
 export class ClarionDocumentSymbolProvider {
 
 
