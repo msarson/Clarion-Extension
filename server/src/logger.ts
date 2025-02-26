@@ -1,17 +1,19 @@
-import winston from "winston";
-import { fileURLToPath } from 'url';
-import path from 'path';
+import * as winston from "winston";
+import * as path from "path";
+import * as fs from "fs";
 
-// ES Module equivalent for __dirname
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// ✅ Ensure previous instances are closed
+winston.loggers.close("default");
 
-winston.loggers.close("default"); // ✅ Force clearing previous instances
+// ✅ Explicitly set log file
+const logFile = path.join(__dirname, "server.log");
+console.log("Log File:", logFile);
+// ✅ Remove the log file if it exists (so it starts fresh)
+// if (fs.existsSync(logFile)) {
+//     fs.unlinkSync(logFile);
+// }
 
-// Define log path - using the current directory as reference
-const logFile = path.join(__dirname, '..', 'server.log');
-
-// Define log format
+// ✅ Define log format
 const logFormat = winston.format.combine(
     winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
     winston.format.printf(({ timestamp, level, message }) => `[${timestamp}] ${level.toUpperCase()}: ${message}`)
@@ -19,13 +21,15 @@ const logFormat = winston.format.combine(
 
 // ✅ Create Winston logger
 const logger = winston.createLogger({
-    level: "warn", // Set log level (debug, info, warn, error)
+    level: "debug", // 🔥 Ensure all logs (debug, info, warn, error) are recorded
     format: logFormat,
     transports: [
-        new winston.transports.Console({level: "warn"}), // ✅ Logs to console
-        new winston.transports.File({ filename: logFile, level: "warn" }) // ✅ Logs to server.log
+        new winston.transports.Console({ level: "debug" }), // ✅ Send ALL logs to Debug Console
+        new winston.transports.File({ filename: logFile, level: "debug" }) // ✅ Save ALL logs to file
     ]
 });
 
-// Export logger for use in other files
+// ✅ Debug Test Message
+logger.debug("🚀 Winston Logger Initialized");
+
 export default logger;

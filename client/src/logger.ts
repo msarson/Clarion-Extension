@@ -1,6 +1,5 @@
-import winston from "winston";
-
-
+import * as winston from "winston";
+import * as path from "path";
 winston.loggers.close("default"); // ✅ Force clearing previous instances
 // Determine if running in client or server based on __dirname
 const logFile = "client.log";
