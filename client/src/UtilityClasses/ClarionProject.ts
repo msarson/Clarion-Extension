@@ -83,6 +83,6 @@ export class ClarionProjectClass {
 }
 
 import logger from '../logger';
-import path from 'path';
+import path = require('path');
 
 

@@ -1,4 +1,4 @@
-﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, QuickPickItem, ThemeIcon, TextEditor, window as vscodeWindow } from 'vscode';
+﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, QuickPickItem, ThemeIcon, TextEditor, window as vscodeWindow, Diagnostic, DiagnosticSeverity, Range, Position, Terminal, Selection } from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } from 'vscode-languageclient/node';
 
 import * as path from 'path';
@@ -16,6 +16,8 @@ import * as fs from 'fs';
 import { RedirectionFileParser } from './Parser/RedirectionFileParser';
 import { SolutionParser } from './Parser/SolutionParser';
 import logger from './logger';
+import { exec } from 'child_process';
+import { runClarionBuild } from './buildTasks';
 
 
 let client: LanguageClient | undefined;
@@ -48,7 +50,10 @@ export async function activate(context: ExtensionContext): Promise<void> {
     await globalSettings.initializeFromWorkspace();
 
     registerOpenCommand(context);
-
+    context.subscriptions.push(
+        commands.registerCommand("clarion.buildSolution", runClarionBuild)
+    );
+    
     context.subscriptions.push(commands.registerCommand("clarion.quickOpen", async () => {
         if (!workspace.isTrusted) {
             vscodeWindow.showWarningMessage("Clarion features require a trusted workspace.");
@@ -634,6 +639,69 @@ export function deactivate(): Thenable<void> | undefined {
     return stopClientServer();
 }
 
+const diagnosticCollection = languages.createDiagnosticCollection("clarion-build");
+
+
+
+
+function showErrorMessages(errors: { file: string; line: number; message: string }[]) {
+    errors.forEach((err) => {
+        const fileUri = Uri.file(err.file);
+        const message = `❌ Error: ${err.message} (File: ${err.file}, Line: ${err.line})`;
+
+        window.showErrorMessage(message, "Open File").then((selection) => {
+            if (selection === "Open File") {
+                workspace.openTextDocument(fileUri).then((doc) => {
+                    window.showTextDocument(doc, { preview: false }).then((editor) => {
+                        const position = new Position(err.line - 1, 0);
+                        editor.selection = new Selection(position, position);
+                        editor.revealRange(new Range(position, position));
+                    });
+                });
+            }
+        });
+    });
+}
+/**
+ * Parses MSBuild output to extract errors and warnings.
+ */
+function parseBuildOutput(output: string) {
+    const diagnostics: { [key: string]: Diagnostic[] } = {};
+    diagnosticCollection.clear();
+
+    // Regex to match MSBuild errors: file(line,column): error code: message
+    const errorRegex = /(.+?)\((\d+),(\d+)\): (error|warning) (\w+): (.+)/g;
+    let match;
+
+    while ((match = errorRegex.exec(output)) !== null) {
+        const [_, filePath, line, column, type, errorCode, message] = match;
+        const severity = type === "error" ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning;
+
+        const uri = Uri.file(filePath);
+        const range = new Range(new Position(parseInt(line) - 1, parseInt(column) - 1), new Position(parseInt(line) - 1, parseInt(column) + 10));
+        const diagnostic = new Diagnostic(range, `${errorCode}: ${message}`, severity);
+
+        if (!diagnostics[filePath]) {
+            diagnostics[filePath] = [];
+        }
+        diagnostics[filePath].push(diagnostic);
+    }
+
+    Object.keys(diagnostics).forEach(file => {
+        diagnosticCollection.set(Uri.file(file), diagnostics[file]);
+    });
+
+    if (Object.keys(diagnostics).length > 0) {
+        vscodeWindow.showWarningMessage("❌ Build completed with errors. See the Problems panel.");
+    } else {
+        vscodeWindow.showInformationMessage("✅ Build successful! No errors detected.");
+    }
+}
+
+
+
+
+
 function startClientServer(context: ExtensionContext, documentManager: DocumentManager) {
     logger.info("Starting Clarion Language Server...");
     let serverModule = context.asAbsolutePath(path.join('server', 'out', 'server.js'));
@@ -655,6 +723,8 @@ function startClientServer(context: ExtensionContext, documentManager: DocumentM
     // Start the client and handle the promise
     client.start();
 }
+
+
 
 function stopClientServer() {
     if (client) {

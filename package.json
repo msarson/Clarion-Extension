@@ -37,6 +37,22 @@
         "fushnisoft.clarion"
     ],
     "contributes": {
+        "problemMatchers": [
+            {
+                "name": "clarionBuildMatcher",
+                "owner": "clarion",
+                "fileLocation": [
+                    "absolute"
+                ],
+                "pattern": {
+                    "regexp": "^\\s*\\d*>?\\s*(.+\\.clw)\\((\\d+),(\\d+)\\):\\s+(error|warning)\\s*:\\s*(.*)\\s+\\[.*\\]$",
+                    "file": 1,
+                    "line": 2,
+                    "column": 3,
+                    "message": 4
+                }
+            }
+        ],
         "keybindings": [
             {
                 "command": "clarion.followLink",
@@ -47,6 +63,11 @@
                 "command": "clarion.quickOpen",
                 "key": "ctrl+p",
                 "when": "clarion.solutionOpen && editorTextFocus"
+            },
+            {
+                "command": "clarion.buildSolution",
+                "key": "ctrl+shift+b",
+                "when": "clarion.solutionOpen"
             }
         ],
         "viewsContainers": {
@@ -67,6 +88,12 @@
             ]
         },
         "commands": [
+            {
+                "command": "clarion.buildSolution",
+                "title": "Build Clarion Solution",
+                "key": "ctrl+shift+b",
+                "when": "clarion.solutionOpen"
+            },
             {
                 "command": "clarion.followLink",
                 "title": "Clarion: Follow Link",
