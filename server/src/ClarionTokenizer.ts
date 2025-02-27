@@ -219,43 +219,78 @@ export class ClarionTokenizer {
 
 }
 
+// const STRUCTURE_PATTERNS: Record<string, RegExp> = {
+//     ACCEPT: /^\s{1,}ACCEPT\b/i,
+//     APPLICATION: /\bAPPLICATION\b/i,
+//     BEGIN: /^\s{1,}BEGIN\b/i,
+//     BREAK: /^\s{1,}BREAK\b/i,
+//     CASE: /^\s{1,}CASE\b/i,
+//     CLASS: /^\s{1,}CLASS\b/i,
+//     DETAIL: /^\s{1,}DETAIL\b/i,
+//     EXECUTE: /^\s{1,}EXECUTE\b/i,  // ✅ EXECUTE should not be in column 1
+//     FILE: /^\s{1,}FILE\b/i,
+//     FOOTER: /^\s{1,}FOOTER\b/i,
+//     FORM: /^\s{1,}FORM\b/i,
+//     GROUP: /^\s{1,}GROUP\b/i,
+//     HEADER: /^\s{1,}HEADER\b/i,
+//     IF: /^\s{1,}IF\b/i,
+//     INTERFACE: /^\s{1,}INTERFACE\b/i,
+//     ITEMIZE: /^\s{1,}\w*\s*ITEMIZE\s*\(/i,  // ✅ ITEMIZE should not be in column 1
+//     JOIN: /^\s{1,}JOIN\b/i,
+//     LOOP: /^\s{1,}LOOP\b/i,
+//     MAP: /^\s{1,}MAP\b/i,
+//     MENU: /^\s{1,}MENU\b/i,
+//     MENUBAR: /^\s{1,}MENUBAR\b/i,
+//     MODULE: /^\s*MODULE\b/i,  // MODULE should be first word on the line
+//     OLE: /^\s{1,}OLE\b/i,
+//     OPTION: /^\s{1,}OPTION\b/i,
+//     QUEUE: /^\s{1,}QUEUE(?![:\(])\b/i,  // Prevents detecting Queue:Browse as a structure
+//     RECORD: /^\s*\w+\s+RECORD\b/i,  // RECORD must follow a label
+//     REPORT: /^\s{1,}REPORT\b/i,
+//     SECTION: /^\s{1,}SECTION\b/i,
+//     SHEET: /^\s{1,}SHEET\b/i,
+//     TAB: /^\s{1,}TAB\b/i,
+//     TOOLBAR: /^\s{1,}TOOLBAR\b/i,
+//     VIEW: /^\s{1,}VIEW\b/i,
+//     WINDOW: /^\s{1,}WINDOW\b/i
+// };
+
+
 const STRUCTURE_PATTERNS: Record<string, RegExp> = {
-    ACCEPT: /^\s{1,}ACCEPT\b/i,
+    MODULE: /^\s*MODULE\b/i,  // MODULE should be the first word on the line
     APPLICATION: /\bAPPLICATION\b/i,
-    BEGIN: /^\s{1,}BEGIN\b/i,
-    BREAK: /^\s{1,}BREAK\b/i,
-    CASE: /^\s{1,}CASE\b/i,
-    CLASS: /^\s{1,}CLASS\b/i,
-    DETAIL: /^\s{1,}DETAIL\b/i,
-    EXECUTE: /^\s{1,}EXECUTE\b/i,  // ✅ EXECUTE should not be in column 1
-    FILE: /^\s{1,}FILE\b/i,
-    FOOTER: /^\s{1,}FOOTER\b/i,
-    FORM: /^\s{1,}FORM\b/i,
-    GROUP: /^\s{1,}GROUP\b/i,
-    HEADER: /^\s{1,}HEADER\b/i,
-    IF: /^\s{1,}IF\b/i,
-    INTERFACE: /^\s{1,}INTERFACE\b/i,
-    ITEMIZE: /^\s{1,}\w*\s*ITEMIZE\s*\(/i,  // ✅ ITEMIZE should not be in column 1
-    JOIN: /^\s{1,}JOIN\b/i,
-    LOOP: /^\s{1,}LOOP\b/i,
-    MAP: /^\s{1,}MAP\b/i,
-    MENU: /^\s{1,}MENU\b/i,
-    MENUBAR: /^\s{1,}MENUBAR\b/i,
-    MODULE: /^\s*MODULE\b/i,  // MODULE should be first word on the line
-    OLE: /^\s{1,}OLE\b/i,
-    OPTION: /^\s{1,}OPTION\b/i,
-    QUEUE: /^\s{1,}QUEUE(?![:\(])\b/i,  // Prevents detecting Queue:Browse as a structure
+    CASE: /\bCASE\b/i,
+    CLASS: /\bCLASS\b/i,
+    GROUP: /\bGROUP\b/i,
+    FILE: /\bFILE\b/i,
+    INTERFACE: /\bINTERFACE\b/i,
+    IF: /\bIF\b/i,  // ✅ Re-added "IF" as a structure
+    JOIN: /\bJOIN\b/i,
+    LOOP: /\bLOOP\b/i,
+    MAP: /\bMAP\b/i,
+    MENU: /\bMENU\b/i,
+    MENUBAR: /\bMENUBAR\b/i,
+    QUEUE: /\bQUEUE(?![:\(])\b/i,  // Prevents detecting Queue:Browse as a structure
     RECORD: /^\s*\w+\s+RECORD\b/i,  // RECORD must follow a label
-    REPORT: /^\s{1,}REPORT\b/i,
-    SECTION: /^\s{1,}SECTION\b/i,
-    SHEET: /^\s{1,}SHEET\b/i,
-    TAB: /^\s{1,}TAB\b/i,
-    TOOLBAR: /^\s{1,}TOOLBAR\b/i,
-    VIEW: /^\s{1,}VIEW\b/i,
-    WINDOW: /^\s{1,}WINDOW\b/i
+    REPORT: /\bREPORT\b/i,
+    SECTION: /\bSECTION\b/i,
+    SHEET: /\bSHEET\b/i,
+    TAB: /\bTAB\b/i,
+    TOOLBAR: /\bTOOLBAR\b/i,
+    VIEW: /\bVIEW\b/i,
+    WINDOW: /\bWINDOW\b/i,
+    OPTION: /\bOPTION\b/i,
+    ITEMIZE: /\bITEMIZE\b/i,
+    EXECUTE: /\bEXECUTE\b/i,
+    BEGIN: /\bBEGIN\b/i,  // ✅ Re-added
+    FORM: /\bFORM\b/i,  // ✅ Re-added
+    DETAIL: /\bDETAIL\b/i,  // ✅ Re-added
+    HEADER: /\bHEADER\b/i,  // ✅ Re-added
+    FOOTER: /\bFOOTER\b/i,  // ✅ Re-added
+    BREAK: /\bBREAK\b/i,  // ✅ Re-added
+    ACCEPT: /\bACCEPT\b/i,  // ✅ Re-added
+    OLE: /\bOLE\b/i
 };
-
-
 
 
 export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
