@@ -197,58 +197,69 @@ class ClarionFileParser {
     }
 
     // New static method for getting file symbols
-    static getFileSymbols(document: TextDocument, tokens: Token[], nodes: DocumentSymbol[][]): void {
-        logger.info(`Processing FILE symbols...`);
+    static getFileSymbols(tokens: Token[], nodes: DocumentSymbol[][]): void {
+        logger.info(`📂 [DEBUG] Processing FILE symbols...`);
+        
         const extractor = new ClarionStructureExtractor(tokens);
         const fileStructures = extractor.extractStructures("FILE");
-        logger.info(`Found ${fileStructures.length} FILE structures.`);
         
+        logger.info(`✅ [DEBUG] Found ${fileStructures.length} FILE structures.`);
         if (fileStructures.length === 0) return;
-
-        // Create "Tables" parent node
+    
+        // ✅ Create "Tables" parent node
         const tablesParentSymbol = DocumentSymbol.create(
             "Tables",
             "Table Definitions",
             ClarionSymbolKind.TablesGroup as SymbolKind,
-            ClarionFileParser.getLineRange(document, 0, document.lineCount - 1),
-            ClarionFileParser.getLineRange(document, 0, document.lineCount - 1),
+            ClarionFileParser.getTokenRange(tokens, 0, tokens.length - 1),
+            ClarionFileParser.getTokenRange(tokens, 0, tokens.length - 1),
             []
         );
-
+    
         for (const file of fileStructures) {
             const fileParser = new ClarionFileParser(file);
             const driverType = fileParser.getDriverType();
             const prefix = fileParser.getPrefix();
             const fields = fileParser.getFields();
-
+    
             const fileSymbol = DocumentSymbol.create(
                 fileParser.getFileName(),
-                driverType + ' PRE(' + prefix + ')',
+                `${driverType} PRE(${prefix})`,
                 ClarionSymbolKind.Table as SymbolKind,
-                ClarionFileParser.getLineRange(document, file.start, file.end ?? file.start),
-                ClarionFileParser.getLineRange(document, file.start, file.end ?? file.start),
+                ClarionFileParser.getTokenRange(tokens, file.start, file.end ?? file.start),
+                ClarionFileParser.getTokenRange(tokens, file.start, file.end ?? file.start),
                 []
             );
-
-            // Add fields as children of the file
+    
+            // ✅ Add fields as children of the file
             for (const field of fields) {
                 const fieldSymbol = DocumentSymbol.create(
                     field.name,
                     field.type,
                     SymbolKind.Field,
-                    ClarionFileParser.getLineRange(document, field.start),
-                    ClarionFileParser.getLineRange(document, field.start),
+                    ClarionFileParser.getTokenRange(tokens, field.start),
+                    ClarionFileParser.getTokenRange(tokens, field.start),
                     []
                 );
-
+    
                 fileSymbol.children!.push(fieldSymbol);
             }
-
+    
             tablesParentSymbol.children!.push(fileSymbol);
         }
-
+    
         nodes[0].push(tablesParentSymbol);
     }
+    static getTokenRange(tokens: Token[], startIndex: number, endIndex?: number): Range {
+        const startToken = tokens[startIndex];
+        const endToken = tokens[endIndex ?? startIndex];
+    
+        return Range.create(
+            startToken.line, startToken.start, 
+            endToken.line, endToken.start + endToken.value.length
+        );
+    }
+    
 
     // Helper method for getting line ranges
     private static getLineRange(document: TextDocument, startLineNum: number, endLineNum?: number): Range {

@@ -30,7 +30,8 @@ export enum TokenType {
     PropertyFunction,
     Unknown,
     Label,
-    EndStatement
+    EndStatement,
+    clarionDocument
 }
 
 
@@ -61,7 +62,7 @@ export class ClarionTokenizer {
     }
 
     public tokenize(): Token[] {
-        logger.info("🔍 [DEBUG] Starting tokenization...");
+        logger.warn("🔍 [DEBUG] Starting tokenization...");
         const lines = this.text.split(/\r?\n/);
 
         let structureStack: { tokenIndex: number, type: string, startLine: number }[] = [];
@@ -69,7 +70,9 @@ export class ClarionTokenizer {
         let routineStack: { tokenIndex: number, startLine: number }[] = [];
         let insideClassOrInterfaceOrMap = false;
 
-        lines.forEach((line, lineNumber) => {
+        for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
+            const line = lines[lineNumber];
+            if (line.trim() === "") continue;
             let position = 0;
             let column = 0;
             const leadingSpaces = line.match(/^(\s*)/);
@@ -85,7 +88,7 @@ export class ClarionTokenizer {
                 logger.info(`📌 [DEBUG] Processing line ${lineNumber}: "${line.trim()}"`);
 
                 const orderedTokenTypes: TokenType[] = [
-                    TokenType.Comment, TokenType.Label, TokenType.LineContinuation, TokenType.String, TokenType.ReferenceVariable,
+                    TokenType.Comment, TokenType.clarionDocument, TokenType.Label, TokenType.LineContinuation, TokenType.String, TokenType.ReferenceVariable,
                     TokenType.Type, TokenType.PointerParameter, TokenType.FieldEquateLabel, TokenType.Property,
                     TokenType.PropertyFunction, TokenType.EndStatement, TokenType.Keyword, TokenType.Structure, TokenType.FunctionArgumentParameter,
                     TokenType.TypeAnnotation, TokenType.Function, TokenType.Directive, TokenType.Number,
@@ -233,7 +236,7 @@ export class ClarionTokenizer {
                 logger.info(`⚠️ [DEBUG] ROUTINE at Line ${lastRoutine.startLine} finishes at EOF`);
             }
         }
-        logger.info("🔍 [DEBUG] Tokenization complete.");
+        logger.warn("🔍 [DEBUG] Tokenization complete.");
         return this.tokens;
     }
 
@@ -288,6 +291,7 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.FunctionArgumentParameter]: /\b[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)/i,  // Captures anything inside ()
     [TokenType.PointerParameter]: /\*\s*\b[A-Za-z_][A-Za-z0-9_]*\b/i,
     [TokenType.FieldEquateLabel]: /\?[A-Za-z_][A-Za-z0-9_]*/i,
+    [TokenType.clarionDocument]: /\b(?:PROGRAM|MEMBER)\b/i,
     [TokenType.Keyword]: /\b(?:RETURN|OF|ELSE|THEN|UNTIL|EXIT|NEW|PROCEDURE|ROUTINE|PROC|BREAK)\b/i,
     [TokenType.Structure]: new RegExp(
         Object.values(STRUCTURE_PATTERNS).map(r => r.source).join("|"), "i"

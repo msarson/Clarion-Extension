@@ -1,11 +1,7 @@
 import { DocumentSymbol, Range, SymbolKind } from 'vscode-languageserver-types';
-import { TextDocument } from 'vscode-languageserver-textdocument';
-import { ClarionTokenizer, Token } from './ClarionTokenizer.js';
-import ClarionStructureExtractor from './clarionStructureExtractor.js';
+import { Token, TokenType } from './ClarionTokenizer.js';
 import ClarionFileParser from './ClarionFileParser.js';
-import ClarionClassParser from './ClarionClassParser.js';
 import logger from './logger.js';
-import { log } from 'console';
 
 enum ClarionSymbolKind {
     Root = SymbolKind.Module,
@@ -16,236 +12,162 @@ enum ClarionSymbolKind {
     TablesGroup = SymbolKind.Namespace
 }
 
-// Ensure the class is properly exported
 export class ClarionDocumentSymbolProvider {
-
-    public provideDocumentSymbols(document: TextDocument): DocumentSymbol[] {
+    public provideDocumentSymbols(tokens: Token[]): DocumentSymbol[] {
         const symbols: DocumentSymbol[] = [];
         const nodes: DocumentSymbol[][] = [symbols];
     
-        // Tokenize the document
-        const tokenizer = new ClarionTokenizer(document.getText());
-        const tokens = tokenizer.tokenize();
-    
-        let insideRoot = false;
         let insideProcedure = false;
         let insideRoutine = false;
-        let insideVariable = 0;
+        let rootSymbol: DocumentSymbol | null = null;
     
-        for (let i = 0; i < document.lineCount; i++) {
-            const currentLineRange = this.getLineRange(document, i);
-            const line = document.getText(currentLineRange).replace(/[\r\n]+/g, '');
-            const trimmedLine = line.trimStart();
+        logger.info(`🔍 [DEBUG] Processing ${tokens.length} tokens for document symbols.`);
     
-            if (!line || trimmedLine.startsWith('!')) continue; // Ignore empty lines and comments
-    
-            // Process root if not already set
-            if (!insideRoot) {
-                const { found, symbol: rootSymbol } = this.tryCreateRootSymbol(trimmedLine, currentLineRange, document, i);
-                if (found && rootSymbol) {
-                    nodes[nodes.length - 1].push(rootSymbol);
-                    nodes.push(rootSymbol.children!);
-                    insideRoot = true;
-                    logger.warn(`About to call ClarionFileParser.getFileSymbols`);
-                    // Use the static method from ClarionFileParser instead
-                    ClarionFileParser.getFileSymbols(document, tokens, nodes);
-                    logger.warn(`After call ClarionFileParser.getFileSymbols`);
-                    // this.getClassSymbols(document, tokens, nodes);
-                }
-            }
-        }
-    
-        // Now process PROCEDURE, ROUTINE, VARIABLE (After Tables)
-        for (let i = 0; i < document.lineCount; i++) {
-            const currentLineRange = this.getLineRange(document, i);
-            const line = document.getText(currentLineRange).replace(/[\r\n]+/g, '');
-            const trimmedLine = line.trimStart();
-    
-            if (!line || trimmedLine.startsWith('!')) continue; // Ignore empty lines and comments
-    
-            if (!line.startsWith(' ') && !trimmedLine.startsWith('!') && !trimmedLine.startsWith('?')) {
-                const tokens = line.split(/\s+/);
-                if (tokens.length >= 2) {
-                    const name = tokens[0];
-                    const type = tokens[1].toLowerCase();
-    
-                    if (type.startsWith('procedure')) {
-                        if (insideRoutine) {
-                            nodes.pop();
-                            insideRoutine = false;
-                            this.updateLastSymbolRange(nodes, document, currentLineRange.start.line);
-                        }
-                        if (insideProcedure) {
-                            nodes.pop();
-                            insideProcedure = false;
-                            this.updateLastSymbolRange(nodes, document, currentLineRange.start.line);
-                        }
-    
-                        const procSymbol = DocumentSymbol.create(
-                            name,
-                            '',
-                            ClarionSymbolKind.Procedure as SymbolKind,
-                            currentLineRange,
-                            currentLineRange,
-                            []
-                        );
-                        nodes[nodes.length - 1].push(procSymbol);
-                        nodes.push(procSymbol.children!);
-                        insideProcedure = true;
-                    } else if (type.startsWith('routine')) {
-                        if (insideRoutine) {
-                            nodes.pop();
-                            insideRoutine = false;
-                            this.updateLastSymbolRange(nodes, document, currentLineRange.start.line);
-                        }
-    
-                        const routSymbol = DocumentSymbol.create(
-                            name,
-                            '',
-                            ClarionSymbolKind.Routine as SymbolKind,
-                            currentLineRange,
-                            currentLineRange,
-                            []
-                        );
-                        nodes[nodes.length - 1].push(routSymbol);
-                        nodes.push(routSymbol.children!);
-                        insideRoutine = true;
-                    } else {
-                        // Treat any other as VARIABLE.
-                        if (insideVariable === 0) {
-                            const varSymbol = DocumentSymbol.create(
-                                name,
-                                '',
-                                ClarionSymbolKind.Variable as SymbolKind,
-                                currentLineRange,
-                                currentLineRange,
-                                []
-                            );
-                            nodes[nodes.length - 1].push(varSymbol);
-                        }
-                    }
-                }
-            }
-        }
-        logger.warn(`Returning symbols`);
-        return symbols;
-    }
-
-    // Remove the getFileSymbols method, it's now in ClarionFileParser
-    
-    private getClassSymbols(document: TextDocument, tokens: Token[], nodes: DocumentSymbol[][]): void {
-        const extractor = new ClarionStructureExtractor(tokens);
-        const classStructures = extractor.extractStructures("CLASS");
-    
-        if (classStructures.length === 0) return;
-    
-        // Create "Classes" parent node
-        const classesParentSymbol = DocumentSymbol.create(
-            "Classes",
-            "Class Definitions",
-            ClarionSymbolKind.TablesGroup as SymbolKind,
-            this.getLineRange(document, 0, document.lineCount - 1),
-            this.getLineRange(document, 0, document.lineCount - 1),
-            []
-        );
-    
-        for (const clarionClass of classStructures) {
-            const classParser = new ClarionClassParser(clarionClass);
-            const className = classParser.getClassName();
-            const procedures = classParser.getProcedures();
-            const variables = classParser.getVariables();
-    
-            // Create a symbol for the class itself
-            const classSymbol = DocumentSymbol.create(
-                className,
-                "Class Definition",
-                ClarionSymbolKind.Table as SymbolKind,
-                this.getLineRange(document, clarionClass.start, clarionClass.end ?? clarionClass.start),
-                this.getLineRange(document, clarionClass.start, clarionClass.end ?? clarionClass.start),
+        // ✅ Process `clarionDocument` token first (PROGRAM / MEMBER)
+        const documentToken = tokens.find(t => t.type === TokenType.clarionDocument);
+        if (documentToken) {
+            rootSymbol = DocumentSymbol.create(
+                documentToken.value,
+                "Clarion Source File",
+                ClarionSymbolKind.Root as SymbolKind,
+                this.getTokenRange(tokens, documentToken.line, documentToken.line),
+                this.getTokenRange(tokens, documentToken.line, documentToken.line),
                 []
             );
+            nodes[nodes.length - 1].push(rootSymbol);
+            nodes.push(rootSymbol.children!);
     
-            // Add methods (procedures) as children of the class
-            for (const procedure of procedures) {
-                const procedureSymbol = DocumentSymbol.create(
-                    procedure.name,
-                    procedure.signature,
-                    SymbolKind.Method,
-                    this.getLineRange(document, procedure.start),
-                    this.getLineRange(document, procedure.start),
-                    []
-                );
-                classSymbol.children!.push(procedureSymbol);
-            }
-    
-            // Add variables as children of the class
-            for (const variable of variables) {
-                const variableSymbol = DocumentSymbol.create(
-                    variable.name,
-                    variable.type,
-                    SymbolKind.Variable,
-                    this.getLineRange(document, variable.start),
-                    this.getLineRange(document, variable.start),
-                    []
-                );
-                classSymbol.children!.push(variableSymbol);
-            }
-    
-            classesParentSymbol.children!.push(classSymbol);
+            // ✅ Extract TABLES immediately (no need to wait)
+            ClarionFileParser.getFileSymbols(tokens, nodes);
+        } else {
+            logger.warn(`⚠️ [DEBUG] No clarionDocument token found (PROGRAM or MEMBER missing?)`);
         }
+        let tokenCounter = 0
+        let tokenCount = tokens.filter(t => 
+            t.type === TokenType.Keyword || 
+            t.type === TokenType.Label).length;
+        // ✅ Filter tokens before processing (only process relevant ones)
+        tokens
+            .filter(t => t.type === TokenType.Keyword || t.type === TokenType.Label)
+            .forEach(token => {
+                tokenCounter++;
+                const upperValue = token.value.toUpperCase();
+               
+                // ✅ Handle PROCEDURE (still inside `TokenType.Keyword`)
+                if (upperValue === "PROCEDURE") {
+                    if (insideRoutine) {
+                        nodes.pop();
+                        insideRoutine = false;
+                        this.updateLastSymbolRange(nodes, tokens, token.line);
+                    }
+                    if (insideProcedure) {
+                        nodes.pop();
+                        insideProcedure = false;
+                        this.updateLastSymbolRange(nodes, tokens, token.line);
+                    }
     
-        // Add the "Classes" parent node to the document tree
-        nodes[0].push(classesParentSymbol);
+                    const procSymbol = DocumentSymbol.create(
+                        tokens[tokens.indexOf(token) - 1]?.value || "UnnamedProcedure",
+                        "",
+                        ClarionSymbolKind.Procedure as SymbolKind,
+                        this.getTokenRange(tokens, token.line, token.line),
+                        this.getTokenRange(tokens, token.line, token.line),
+                        []
+                    );
+    
+                    nodes[nodes.length - 1].push(procSymbol);
+                    nodes.push(procSymbol.children!);
+                    insideProcedure = true;
+                }
+    
+                // ✅ Handle ROUTINE (still inside `TokenType.Keyword`)
+                else if (upperValue === "ROUTINE") {
+                    if (insideRoutine) {
+                        nodes.pop();
+                        insideRoutine = false;
+                        this.updateLastSymbolRange(nodes, tokens, token.line);
+                    }
+    
+                    const routSymbol = DocumentSymbol.create(
+                        tokens[tokens.indexOf(token) - 1]?.value || "UnnamedRoutine",
+                        "",
+                        ClarionSymbolKind.Routine as SymbolKind,
+                        this.getTokenRange(tokens, token.line, token.line),
+                        this.getTokenRange(tokens, token.line, token.line),
+                        []
+                    );
+    
+                    nodes[nodes.length - 1].push(routSymbol);
+                    nodes.push(routSymbol.children!);
+                    insideRoutine = true;
+                }
+    
+                // ✅ Handle VARIABLES
+                else if (token.type === TokenType.Label) {
+                    const varSymbol = DocumentSymbol.create(
+                        token.value,
+                        "",
+                        ClarionSymbolKind.Variable as SymbolKind,
+                        this.getTokenRange(tokens, token.line, token.line),
+                        this.getTokenRange(tokens, token.line, token.line),
+                        []
+                    );
+                    nodes[nodes.length - 1].push(varSymbol);
+                }
+            });
+    
+        return symbols;
     }
     
-    private tryCreateRootSymbol(
-        trimmedLine: string,
-        currentLineRange: Range,
-        document: TextDocument,
-        currentLineNum: number
-    ): { found: boolean; symbol?: DocumentSymbol } {
-        let name = '';
-        let detail = '';
-
-        if (!trimmedLine.startsWith('!')) {
-            if (trimmedLine.toLowerCase().startsWith('member')) {
-                name = 'MEMBER';
-            } else if (trimmedLine.toLowerCase().startsWith('program')) {
-                name = 'PROGRAM';
-            }
-
-            if (name) {
-                const rootRange = this.getLineRange(document, currentLineNum, document.lineCount);
-                const rootSymbol = DocumentSymbol.create(
-                    name,
-                    detail,
-                    ClarionSymbolKind.Root as SymbolKind,
-                    rootRange,
-                    currentLineRange,
-                    []
-                );
-                return { found: true, symbol: rootSymbol };
-            }
-        }
-        return { found: false };
-    }
-
-    private getLineRange(document: TextDocument, startLineNum: number, endLineNum?: number): Range {
-        if (!endLineNum) endLineNum = startLineNum;
-        let lastLineText = document.getText(Range.create(endLineNum, 0, endLineNum + 1, 0));
-        return Range.create(startLineNum, 0, endLineNum, lastLineText.length);
-    }
-
-    private updateLastSymbolRange(
-        nodes: DocumentSymbol[][],
-        document: TextDocument,
-        endLine: number
-    ): void {
+    
+    private updateLastSymbolRange(nodes: DocumentSymbol[][], tokens: Token[], endLine: number): void {
+        if (nodes.length === 0) return;
+    
         const currentNodes = nodes[nodes.length - 1];
         if (currentNodes.length > 0) {
             const lastSymbol = currentNodes.pop()!;
-            lastSymbol.range = this.getLineRange(document, lastSymbol.range.start.line, endLine - 1);
+    
+            // 🔍 Fix: Ensure we're passing the tokens array, NOT nodes
+            lastSymbol.range = this.getTokenRange(tokens, lastSymbol.range.start.line, endLine);
+            
             currentNodes.push(lastSymbol);
         }
+    }
+    
+
+    private getTokenRange(tokens: Token[], startLine: number, endLine: number): Range {
+        const startToken = tokens.find((t: Token) => t.line === startLine);
+        const endToken = [...tokens].reverse().find((t: Token) => t.line === endLine);
+
+        if (!startToken || !endToken) {
+            logger.warn(`⚠️ [DEBUG] getTokenRange: Unable to find tokens for range (${startLine}-${endLine})`);
+            return Range.create(startLine, 0, endLine, 0);
+        }
+
+        return Range.create(startToken.line, startToken.start, endToken.line, endToken.start + endToken.value.length);
+    }
+
+    private tryCreateRootSymbol(token: Token): { found: boolean; symbol?: DocumentSymbol } {
+        let name = '';
+
+        if (token.type === TokenType.Keyword && token.value.toUpperCase() === "MEMBER") {
+            name = "MEMBER";
+        } else if (token.type === TokenType.Keyword && token.value.toUpperCase() === "PROGRAM") {
+            name = "PROGRAM";
+        }
+
+        if (name) {
+            const rootSymbol = DocumentSymbol.create(
+                name,
+                "",
+                ClarionSymbolKind.Root as SymbolKind,
+                this.getTokenRange([token], token.line, token.line),
+                this.getTokenRange([token], token.line, token.line),
+                []
+            );
+            return { found: true, symbol: rootSymbol };
+        }
+
+        return { found: false };
     }
 }

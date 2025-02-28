@@ -7,86 +7,76 @@ import {
 import {
     DocumentSymbolParams,
     FoldingRangeParams,
-    InitializeParams
+    InitializeParams,
+    InitializeResult
 } from 'vscode-languageserver-protocol';
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
 import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
 import { ClarionFoldingRangeProvider } from './ClarionFoldingRangeProvider';
+import { ClarionTokenizer, Token } from './ClarionTokenizer';
 
-import * as fs from 'fs';
-import * as path from 'path';
 import logger from './logger';
-
-// ✅ Define Log File Path (stored in extension's server directory)
-const logFilePath = path.join(__dirname, 'server-debug.log');
-
-/**
- * ✅ Clears the debug log at the start of the server.
- */
-const LOGGING_ENABLED = false;
-function clearLogFile() {
-
-    try {
-        if (LOGGING_ENABLED)
-            fs.writeFileSync(logFilePath, '');
-    } catch (error) {
-        console.error(`Error clearing log file: ${error}`);
-    }
-}
-
-// ✅ Toggle this to `true` or `false` to enable/disable logging
-
-
-// ✅ Logs messages to both the file and the VS Code Debug Console if enabled.
-function logMessage(message: string) {
-    if (!LOGGING_ENABLED) return;  // ✅ Exit early if logging is disabled
-
-    const timestamp = new Date().toISOString();
-    const formattedMessage = `[${timestamp}] ${message}\n`;
-
-    // ✅ Write to file
-    fs.appendFileSync(logFilePath, formattedMessage);
-
-    // ✅ Send to VS Code Debug Console
-   // connection.console.log(`[Server] ${message}`);
-}
-
 
 // ✅ Initialize Providers
 const clarionFoldingProvider = new ClarionFoldingRangeProvider();
 const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider();
 
 // ✅ Create Connection and Documents Manager
-let connection = createConnection(ProposedFeatures.all);
-let documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
+const connection = createConnection(ProposedFeatures.all);
+const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
 
-// ✅ Clear the log file at server startup
-clearLogFile();
-logger.warn("Clarion Language Server Initialized.");
+// ✅ Token Cache for Performance
+const tokenCache: Map<string, Token[]> = new Map();
 
-connection.onInitialize((params: InitializeParams) => {
-    logMessage("Received onInitialize request from VS Code.");
+/**
+ * ✅ Retrieves cached tokens or tokenizes the document if not cached.
+ */
+function getCachedTokens(document: TextDocument): Token[] {
+    logger.warn(`🔍 [CACHE CHECK] Checking for cached tokens for ${document.uri} ${!tokenCache.has(document.uri)}`);
+    if (!tokenCache.has(document.uri)) {
+        logger.warn(`🔍 [CACHE MISS] Tokenizing ${document.uri}`);
+        const tokenizer = new ClarionTokenizer(document.getText());
+        const tokens = tokenizer.tokenize();
+        tokenCache.set(document.uri, tokens);
+    } else {
+        logger.warn(`✅ [CACHE HIT] Using cached tokens for ${document.uri}`);
+    }
+    return tokenCache.get(document.uri)!;
+}
 
-    // ✅ Handle Folding Ranges
-    connection.onFoldingRanges((params: FoldingRangeParams) => {
-        const document = documents.get(params.textDocument.uri);
-        if (!document) return [];
+// ✅ Handle Folding Ranges (Uses Cached Tokens)
+connection.onFoldingRanges((params: FoldingRangeParams) => {
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return [];
 
-        logger.warn(`Processing folding ranges for: ${params.textDocument.uri}`);
-        return clarionFoldingProvider.provideFoldingRanges(document);
-    });
+    logger.warn(`📂 Processing folding ranges for: ${params.textDocument.uri}`);
 
-    // ✅ Handle Document Symbols
-    connection.onDocumentSymbol((params: DocumentSymbolParams) => {
-        const document = documents.get(params.textDocument.uri);
-        if (!document) return [];
+    const tokens = getCachedTokens(document);
+    return clarionFoldingProvider.provideFoldingRanges(tokens);
+});
 
-        logger.warn(`Processing document symbols for: ${params.textDocument.uri}`);
-        return clarionDocumentSymbolProvider.provideDocumentSymbols(document);
-    });
+// ✅ Handle Document Symbols (Uses Cached Tokens)
+connection.onDocumentSymbol((params: DocumentSymbolParams) => {
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return [];
 
+    logger.warn(`📂 Processing document symbols for: ${params.textDocument.uri}`);
+
+    const tokens = getCachedTokens(document);
+    return clarionDocumentSymbolProvider.provideDocumentSymbols(tokens);
+});
+
+// ✅ Clear Cache When Document Closes
+documents.onDidClose(event => {
+    tokenCache.delete(event.document.uri);
+    logger.info(`🗑️ [CACHE CLEAR] Removed cached tokens for ${event.document.uri}`);
+});
+
+// ✅ Server Initialization
+connection.onInitialize((params: InitializeParams): InitializeResult => {
+    logger.info("⚡ Received onInitialize request from VS Code.");
     return {
         capabilities: {
             foldingRangeProvider: true,
@@ -95,12 +85,13 @@ connection.onInitialize((params: InitializeParams) => {
     };
 });
 
-// ✅ Initialize and Listen
+// ✅ Server Fully Initialized
 connection.onInitialized(() => {
-    logger.warn("Clarion Language Server fully initialized.");
+    logger.info("✅ Clarion Language Server fully initialized.");
 });
 
+// ✅ Start Listening
 documents.listen(connection);
 connection.listen();
 
-logger.warn("Clarion Language Server is now listening for requests.");
+logger.info("🟢 Clarion Language Server is now listening for requests.");
