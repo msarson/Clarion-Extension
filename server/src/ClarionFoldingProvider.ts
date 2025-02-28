@@ -27,11 +27,10 @@ class ClarionFoldingProvider {
 
     /** 🔹 First pass: Process structures for folding */
     private foldStructures(): void {
-        // ✅ Step 1: Filter only structure tokens
         const structureTokens = this.tokens.filter(t => t.isStructure);
     
         for (const token of structureTokens) {
-            if (token.structureFinishesAt !== undefined) {
+            if (token.structureFinishesAt !== undefined && token.line < token.structureFinishesAt) {
                 this.foldingRanges.push({
                     startLine: token.line,
                     endLine: token.structureFinishesAt,
@@ -39,6 +38,8 @@ class ClarionFoldingProvider {
                 });
     
                 logger.debug(`✅ [DEBUG] Folded STRUCTURE '${token.value}' from Line ${token.line} to ${token.structureFinishesAt}`);
+            } else {
+                logger.debug(`🚫 [DEBUG] Skipping STRUCTURE '${token.value}' at Line ${token.line} (No valid folding range or same line)`);
             }
         }
     }

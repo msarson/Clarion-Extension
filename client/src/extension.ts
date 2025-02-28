@@ -34,6 +34,11 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
     logger.info("🔄 Activating Clarion extension...");
 
+    if (!client) {
+        logger.info("🚀 Starting Clarion Language Server...");
+        startClientServer(context, documentManager!);
+    }
+
     // ✅ Step 1: Ensure a workspace is saved
     if (!workspace.workspaceFolders) {
         logger.info("⚠️ No saved workspace detected. Clarion features will be disabled until a workspace is saved.");
@@ -114,10 +119,7 @@ async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: D
     disposables.forEach(disposable => disposable.dispose());
     disposables.length = 0;
 
-    if (!client) {
-        logger.info("🚀 Starting Clarion Language Server...");
-        startClientServer(context, documentManager!);
-    }
+  
 
     // ✅ Only initialize if a solution exists in settings
     if (globalSolutionFile && globalClarionPropertiesFile && globalClarionVersion) {

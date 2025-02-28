@@ -28,7 +28,9 @@ export enum TokenType {
     PointerParameter,
     FieldEquateLabel,
     PropertyFunction,
-    Unknown
+    Unknown,
+    Label,
+    EndStatement
 }
 
 
@@ -59,52 +61,70 @@ export class ClarionTokenizer {
     }
 
     public tokenize(): Token[] {
+        logger.info("🔍 [DEBUG] Starting tokenization...");
         const lines = this.text.split(/\r?\n/);
-    
+
         let structureStack: { tokenIndex: number, type: string, startLine: number }[] = [];
         let procedureStack: { tokenIndex: number, startLine: number }[] = [];
         let routineStack: { tokenIndex: number, startLine: number }[] = [];
         let insideClassOrInterfaceOrMap = false;
-    
+
         lines.forEach((line, lineNumber) => {
             let position = 0;
             let column = 0;
             const leadingSpaces = line.match(/^(\s*)/);
             if (leadingSpaces) column = leadingSpaces[0].length;
-    
+
             while (position < line.length) {
                 const substring = line.slice(position);
                 let matched = false;
-    
+
                 if (line.trim() === "") break;
-    
+
+                /** 🔍 Debugging: Start Processing Line */
+                logger.info(`📌 [DEBUG] Processing line ${lineNumber}: "${line.trim()}"`);
+
                 const orderedTokenTypes: TokenType[] = [
-                    TokenType.Comment, TokenType.LineContinuation, TokenType.String, TokenType.ReferenceVariable,
+                    TokenType.Comment, TokenType.Label, TokenType.LineContinuation, TokenType.String, TokenType.ReferenceVariable,
                     TokenType.Type, TokenType.PointerParameter, TokenType.FieldEquateLabel, TokenType.Property,
-                    TokenType.PropertyFunction, TokenType.Keyword, TokenType.Structure, TokenType.FunctionArgumentParameter,
+                    TokenType.PropertyFunction, TokenType.EndStatement, TokenType.Keyword, TokenType.Structure, TokenType.FunctionArgumentParameter,
                     TokenType.TypeAnnotation, TokenType.Function, TokenType.Directive, TokenType.Number,
                     TokenType.Operator, TokenType.Class, TokenType.Attribute, TokenType.Constant, TokenType.Variable,
                     TokenType.ImplicitVariable, TokenType.Delimiter, TokenType.Unknown
                 ];
-    
-                /** 🔍 Check for Other Tokens */
+
                 for (const tokenType of orderedTokenTypes) {
                     const pattern = tokenPatterns[tokenType];
+
                     if (!pattern) {
-                        logger.warn(`🔍 [DEBUG] Token pattern is undefined for ${TokenType[tokenType]}`);
+                        logger.info(`⚠️ [DEBUG] No regex pattern found for ${TokenType[tokenType]}`);
                         continue;
                     }
-    
+
+                    if (tokenType === TokenType.Label && column != 0) {
+                        continue;
+                    }
+                    
+
                     let match = pattern.exec(substring);
                     if (match && match.index === 0) {
+                        // if the match is a structure, make sure the character berfore it is a space 
+                        if (tokenType === TokenType.Structure && position > 0 && line[position - 1] !== " ") {
+                            logger.info(`⚠️ [DEBUG] Ignoring STRUCTURE at Column ${column} (No space before)`);
+                            continue;
+                        }
+                       
+                        
+                        logger.info(`✅                     [DEBUG] Matched TokenType: ${TokenType[tokenType]} | Value: "${match[0]}" at Column ${column}`);
+
                         let newToken: Token = {
                             type: tokenType,
                             value: match[0],
                             line: lineNumber,
                             start: column
                         };
-    
-                        // ✅ Detect STRUCTURE (Push to stack)
+
+                        // ✅ Debugging for STRUCTURE matching
                         if (tokenType === TokenType.Structure) {
                             newToken.isStructure = true;
                             structureStack.push({
@@ -112,63 +132,64 @@ export class ClarionTokenizer {
                                 type: match[0].trim(),
                                 startLine: lineNumber
                             });
-                            logger.debug(`🔍 [DEBUG] STRUCTURE START detected: '${match[0].trim()}' at Line ${lineNumber}`);
+                            logger.info(`🔍 [DEBUG] STRUCTURE START detected: '${match[0].trim()}' at Line ${lineNumber}`);
                         }
-    
-                        // ✅ Detect END (Pop structure stack)
-                        if (tokenType === TokenType.Keyword && match[0].toUpperCase() === "END") {
+
+                        // ✅ Debugging for END matching
+                        if (tokenType === TokenType.EndStatement) {// && match[0].toUpperCase() === "END") {
                             const lastStructure = structureStack.pop();
-                            if (lastStructure) {  
+                            if (lastStructure) {
                                 this.tokens[lastStructure.tokenIndex].structureFinishesAt = lineNumber;
-                                logger.debug(`✅ [DEBUG] STRUCTURE '${lastStructure.type}' ends at Line ${lineNumber}`);
+                                logger.info(`✅ [DEBUG] STRUCTURE '${lastStructure.type}' ends at Line ${lineNumber}`);
                             } else {
-                                logger.warn(`⚠️ [WARNING] Unmatched END at Line ${lineNumber} (No open STRUCTURE)`);
+                                logger.info(`⚠️ [WARNING] Unmatched END at Line ${lineNumber} (No open STRUCTURE)`);
                             }
                         }
-    
-                        // ✅ Detect CLASS, INTERFACE, MAP (Ignore PROCEDURES inside)
+
+                        // ✅ Debugging for CLASS, INTERFACE, MAP scope detection
                         if (tokenType === TokenType.Structure && ["CLASS", "INTERFACE", "MAP"].includes(match[0].toUpperCase())) {
                             insideClassOrInterfaceOrMap = true;
+                            logger.info(`🔍 [DEBUG] Inside CLASS/INTERFACE/MAP at Line ${lineNumber}`);
                         }
-    
-                        // ✅ Detect END (Unmark CLASS, INTERFACE, MAP scope)
-                        if (tokenType === TokenType.Keyword && match[0].toUpperCase() === "END") {
+
+                        if (tokenType === TokenType.EndStatement) {//  && match[0].toUpperCase() === "END") {
                             insideClassOrInterfaceOrMap = false;
+                            logger.info(`✅ [DEBUG] Leaving CLASS/INTERFACE/MAP scope at Line ${lineNumber}`);
                         }
-    
-                        // ✅ Detect PROCEDURE (Ignore inside CLASS, INTERFACE, MAP)
+
+                        // ✅ Debugging for PROCEDURE matching
                         if (tokenType === TokenType.Keyword && match[0].toUpperCase() === "PROCEDURE") {
                             if (!insideClassOrInterfaceOrMap) {
                                 if (procedureStack.length > 0) {
                                     const lastProcedure = procedureStack.pop();
-                                    if (lastProcedure) {  
+                                    if (lastProcedure) {
                                         this.tokens[lastProcedure.tokenIndex].procedureFinishesAt = lineNumber - 1;
-                                        logger.debug(`✅ [DEBUG] PROCEDURE at Line ${lastProcedure.startLine} finishes at Line ${lineNumber - 1}`);
+                                        logger.info(`✅ [DEBUG] PROCEDURE at Line ${lastProcedure.startLine} finishes at Line ${lineNumber - 1}`);
                                     }
                                 }
                                 newToken.isProcedure = true;
                                 procedureStack.push({ tokenIndex: this.tokens.length, startLine: lineNumber });
-                                logger.debug(`🔍 [DEBUG] PROCEDURE START detected at Line ${lineNumber}`);
+                                logger.info(`🔍 [DEBUG] PROCEDURE START detected at Line ${lineNumber}`);
                             } else {
-                                logger.debug(`🚫 [DEBUG] Ignoring PROCEDURE at Line ${lineNumber} (Inside ${insideClassOrInterfaceOrMap})`);
+                                logger.info(`🚫 [DEBUG] Ignoring PROCEDURE at Line ${lineNumber} (Inside ${insideClassOrInterfaceOrMap})`);
                             }
                         }
-    
-                        // ✅ Detect ROUTINE (Same logic as PROCEDURE)
+
+                        // ✅ Debugging for ROUTINE matching
                         if (tokenType === TokenType.Keyword && match[0].toUpperCase() === "ROUTINE") {
                             if (routineStack.length > 0) {
                                 const lastRoutine = routineStack.pop();
-                                if (lastRoutine) {  
+                                if (lastRoutine) {
                                     this.tokens[lastRoutine.tokenIndex].routineFinishesAt = lineNumber - 1;
-                                    logger.debug(`✅ [DEBUG] ROUTINE at Line ${lastRoutine.startLine} finishes at Line ${lineNumber - 1}`);
+                                    logger.info(`✅ [DEBUG] ROUTINE at Line ${lastRoutine.startLine} finishes at Line ${lineNumber - 1}`);
                                 }
                             }
                             newToken.isRoutine = true;
                             routineStack.push({ tokenIndex: this.tokens.length, startLine: lineNumber });
-                            logger.debug(`🔍 [DEBUG] ROUTINE START detected at Line ${lineNumber}`);
+                            logger.info(`🔍 [DEBUG] ROUTINE START detected at Line ${lineNumber}`);
                         }
-    
-                        // ✅ Now pushing token to this.tokens
+
+                        // ✅ Pushing token to `this.tokens`
                         this.tokens.push(newToken);
                         position += match[0].length;
                         column += match[0].length;
@@ -176,85 +197,50 @@ export class ClarionTokenizer {
                         break;
                     }
                 }
-    
+
                 if (!matched) {
+                  //  logger.info(`⚠️ [DEBUG] No token matched at Column ${column}, skipping character.`);
                     position++;
                     column++;
                 }
             }
+
         });
-    
+
         // ✅ Close any remaining open STRUCTURES at EOF
         while (structureStack.length > 0) {
             const lastStructure = structureStack.pop();
-            if (lastStructure) {  
+            if (lastStructure) {
                 this.tokens[lastStructure.tokenIndex].structureFinishesAt = this.tokens[this.tokens.length - 1]?.line ?? 0;
-                logger.debug(`⚠️ [DEBUG] STRUCTURE '${lastStructure.type}' finishes at EOF`);
+                logger.info(`⚠️ [DEBUG] STRUCTURE [${lastStructure.type}] at line [${lastStructure.startLine}]' finishes at EOF`);
             }
         }
-    
+
         // ✅ Close any remaining open PROCEDURE at EOF
         while (procedureStack.length > 0) {
             const lastProcedure = procedureStack.pop();
-            if (lastProcedure) {  
+            if (lastProcedure) {
                 this.tokens[lastProcedure.tokenIndex].procedureFinishesAt = this.tokens[this.tokens.length - 1]?.line ?? 0;
-                logger.debug(`⚠️ [DEBUG] PROCEDURE at Line ${lastProcedure.startLine} finishes at EOF`);
+                logger.info(`⚠️ [DEBUG] PROCEDURE at Line ${lastProcedure.startLine} finishes at EOF`);
             }
         }
-    
+
         // ✅ Close any remaining open ROUTINE at EOF
         while (routineStack.length > 0) {
             const lastRoutine = routineStack.pop();
-            if (lastRoutine) {  
+            if (lastRoutine) {
                 this.tokens[lastRoutine.tokenIndex].routineFinishesAt = this.tokens[this.tokens.length - 1]?.line ?? 0;
-                logger.debug(`⚠️ [DEBUG] ROUTINE at Line ${lastRoutine.startLine} finishes at EOF`);
+                logger.info(`⚠️ [DEBUG] ROUTINE at Line ${lastRoutine.startLine} finishes at EOF`);
             }
         }
-    
+        logger.info("🔍 [DEBUG] Tokenization complete.");
         return this.tokens;
     }
-    
-    
-    
+
+
+
 
 }
-
-// const STRUCTURE_PATTERNS: Record<string, RegExp> = {
-//     ACCEPT: /^\s{1,}ACCEPT\b/i,
-//     APPLICATION: /\bAPPLICATION\b/i,
-//     BEGIN: /^\s{1,}BEGIN\b/i,
-//     BREAK: /^\s{1,}BREAK\b/i,
-//     CASE: /^\s{1,}CASE\b/i,
-//     CLASS: /^\s{1,}CLASS\b/i,
-//     DETAIL: /^\s{1,}DETAIL\b/i,
-//     EXECUTE: /^\s{1,}EXECUTE\b/i,  // ✅ EXECUTE should not be in column 1
-//     FILE: /^\s{1,}FILE\b/i,
-//     FOOTER: /^\s{1,}FOOTER\b/i,
-//     FORM: /^\s{1,}FORM\b/i,
-//     GROUP: /^\s{1,}GROUP\b/i,
-//     HEADER: /^\s{1,}HEADER\b/i,
-//     IF: /^\s{1,}IF\b/i,
-//     INTERFACE: /^\s{1,}INTERFACE\b/i,
-//     ITEMIZE: /^\s{1,}\w*\s*ITEMIZE\s*\(/i,  // ✅ ITEMIZE should not be in column 1
-//     JOIN: /^\s{1,}JOIN\b/i,
-//     LOOP: /^\s{1,}LOOP\b/i,
-//     MAP: /^\s{1,}MAP\b/i,
-//     MENU: /^\s{1,}MENU\b/i,
-//     MENUBAR: /^\s{1,}MENUBAR\b/i,
-//     MODULE: /^\s*MODULE\b/i,  // MODULE should be first word on the line
-//     OLE: /^\s{1,}OLE\b/i,
-//     OPTION: /^\s{1,}OPTION\b/i,
-//     QUEUE: /^\s{1,}QUEUE(?![:\(])\b/i,  // Prevents detecting Queue:Browse as a structure
-//     RECORD: /^\s*\w+\s+RECORD\b/i,  // RECORD must follow a label
-//     REPORT: /^\s{1,}REPORT\b/i,
-//     SECTION: /^\s{1,}SECTION\b/i,
-//     SHEET: /^\s{1,}SHEET\b/i,
-//     TAB: /^\s{1,}TAB\b/i,
-//     TOOLBAR: /^\s{1,}TOOLBAR\b/i,
-//     VIEW: /^\s{1,}VIEW\b/i,
-//     WINDOW: /^\s{1,}WINDOW\b/i
-// };
-
 
 const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     MODULE: /^\s*MODULE\b/i,  // MODULE should be the first word on the line
@@ -271,7 +257,8 @@ const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     MENU: /\bMENU\b/i,
     MENUBAR: /\bMENUBAR\b/i,
     QUEUE: /\bQUEUE(?![:\(])\b/i,  // Prevents detecting Queue:Browse as a structure
-    RECORD: /^\s*\w+\s+RECORD\b/i,  // RECORD must follow a label
+   // RECORD: /^\s*(\w+)\s+(RECORD)\b/i,
+    RECORD: /\bRECORD\b/i,
     REPORT: /\bREPORT\b/i,
     SECTION: /\bSECTION\b/i,
     SHEET: /\bSHEET\b/i,
@@ -297,38 +284,31 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Comment]: /!.*/i,
     [TokenType.LineContinuation]: /&?\s*\|.*/i,
     [TokenType.String]: /'([^']|'')*'/i,
-    // [TokenType.FunctionArgumentParameter]: /(?<=\()\s*[A-Za-z_][A-Za-z0-9_]*(?:\s*=\s*(?:\w+|[+-]?\d+(?:\.\d+)?|'.*?'))?(?=\s*[,)\n])/i,
+    [TokenType.EndStatement]: /^\s*(END|\.)\s*$/i,  // ✅ Matches `END` or `.`
     [TokenType.FunctionArgumentParameter]: /\b[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)/i,  // Captures anything inside ()
     [TokenType.PointerParameter]: /\*\s*\b[A-Za-z_][A-Za-z0-9_]*\b/i,
-
-    //[TokenType.PointerParameter]: /\*\?\s*\b[A-Za-z_][A-Za-z0-9_]*\b/i,
     [TokenType.FieldEquateLabel]: /\?[A-Za-z_][A-Za-z0-9_]*/i,
-    [TokenType.Keyword]: /\b(?:RETURN|OF|ELSE|THEN|UNTIL|EXIT|NEW|END|PROCEDURE|ROUTINE|PROC|BREAK)\b/i,
+    [TokenType.Keyword]: /\b(?:RETURN|OF|ELSE|THEN|UNTIL|EXIT|NEW|PROCEDURE|ROUTINE|PROC|BREAK)\b/i,
     [TokenType.Structure]: new RegExp(
         Object.values(STRUCTURE_PATTERNS).map(r => r.source).join("|"), "i"
     ),
-
-
-
-    // ✅ Excludes QUEUE when appearing inside parameters
-
     [TokenType.Function]: /\b(?:COLOR|LINK|DLL)\b(?=\s*\()/i,
     [TokenType.Directive]: /\b(?:ASSERT|BEGIN|COMPILE|EQUATE|INCLUDE|ITEMIZE|OMIT|ONCE|SECTION|SIZE)\b(?=\s*\()/i,
     [TokenType.Property]: /\b(?:HVSCROLL|SEPARATOR|LIST|RESIZE|DEFAULT|CENTER|MAX|SYSTEM|IMM|DRIVER|PROP|PROPLIST|EVENT|CREATE|BRUSH|LEVEL|STD|CURSOR|BEEP|REJECT|CHARSET|PEN|LISTZONE|BUTTON|MSGMODE|TEXT|FREEZE|DDE|FF_|OCX|DOCK|MATCH|PAPER|DRIVEROP|DATATYPE|GradientTypes|STD|ITEM|MDI|GRAY|HLP)\b/i,
-    [TokenType.PropertyFunction]: /\b(?:FORMAT|FONT|USE|ICON|STATUS|MSG|TIP|AT|PROJECT|FROM|NAME|DLL)\b(?=\s*\()/i,
-    //[TokenType.Variable]: /\b[A-Z]+\:\w+\b/i,
+    [TokenType.PropertyFunction]: /\b(?:FORMAT|FONT|USE|ICON|STATUS|MSG|TIP|AT|PROJECT|PRE|FROM|NAME|DLL)\b(?=\s*\()/i,
+    [TokenType.Label]: /^\s*([A-Za-z_][A-Za-z0-9_:]*)\b/i,
     [TokenType.Variable]: /&?[A-Za-z_][A-Za-z0-9_]*\s*(?:&[A-Za-z_][A-Za-z0-9_]*)?/i,
     // ✅ Added support for Binary, Octal, Hex constants
     [TokenType.Number]: /[+-]?(?:\d+\.\d+|\d+(?!\.\d)|\d+[bBoOhH]|\h*[A-Fa-f0-9]+[hH])/,
     [TokenType.Operator]: /[+\-*/=<>!&]/i,
     [TokenType.Class]: /^[A-Za-z_][A-Za-z0-9_:]*\.[A-Za-z_][A-Za-z0-9_:.]*\s/i,
-    [TokenType.Attribute]: /\b(?:ABOVE|ABSOLUTE|AUTO|BINDABLE|CONST|DERIVED|DIM|EXTEND|EXTERNAL|GLOBALCLASS|IMM|IMPLEMENTS|INCLUDE|INS|LATE|MODULE|NOBAR|NOCASE|NOFRAME|NOMEMO|NOMERGE|NOSHEET|OPT|OVER|OVR|OWNER|PRE|PRIVATE|PROTECTED|PUBLIC|STATIC|THREAD|TYPE|VIRTUAL)\b/i,
+    [TokenType.Attribute]: /\b(?:ABOVE|ABSOLUTE|AUTO|BINDABLE|CONST|DERIVED|DIM|EXTEND|EXTERNAL|GLOBALCLASS|IMM|IMPLEMENTS|INCLUDE|INS|LATE|MODULE|NOBAR|NOCASE|NOFRAME|NOMEMO|NOMERGE|NOSHEET|OPT|OVER|OVR|OWNER|PRIVATE|PROTECTED|PUBLIC|STATIC|THREAD|TYPE|VIRTUAL)\b/i,
     [TokenType.Constant]: /\b(?:TRUE|FALSE|NULL|STD:*)\b/i,
     // ✅ NEW: Detects QUEUE, GROUP, RECORD when used as parameters
     [TokenType.TypeAnnotation]: /\b(?:QUEUE|GROUP|RECORD|FILE|VIEW|REPORT|MODULE)\s+\w+\)/i,
     [TokenType.Type]: /\b(?:ANY|ASTRING|BFLOAT4|BFLOAT8|BLOB|MEMO|BOOL|BSTRING|BYTE|CSTRING|DATE|DECIMAL|DOUBLE|FLOAT4|LONG|LIKE|PDECIMAL|PSTRING|REAL|SHORT|SIGNED|SREAL|STRING|TIME|ULONG|UNSIGNED|USHORT|VARIANT)\b/i,
     [TokenType.ImplicitVariable]: /\b[A-Za-z][A-Za-z0-9_]+(?:\$|#|")\b/i,
-    [TokenType.Delimiter]: /[,():.]/i,
+    [TokenType.Delimiter]: /[,():]/i,  // ❌ Remove "." from here
     [TokenType.ReferenceVariable]: /&[A-Za-z_][A-Za-z0-9_]*:[A-Za-z_][A-Za-z0-9_:]*/i,
     [TokenType.Unknown]: /\S+/i
 };

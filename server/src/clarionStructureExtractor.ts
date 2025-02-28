@@ -45,6 +45,8 @@ class ClarionStructureExtractor {
      * @returns The constructed StructureNode.
      */
     private createStructureNode(token: Token): StructureNode {
+        logger.info(`🔍 [DEBUG] Creating StructureNode for: '${token.value.toUpperCase()}' at Line ${token.line}`);
+    
         let structureNode: StructureNode = {
             name: "Unnamed",
             type: token.value.toUpperCase(),
@@ -54,35 +56,79 @@ class ClarionStructureExtractor {
             children: []
         };
     
-        // ✅ Check if the previous token is a label (structure name)
+        // ✅ Assign previous token (label) as structure name if it exists
         let tokenIndex = this.tokens.indexOf(token);
         if (tokenIndex > 0) {
             let prevToken = this.tokens[tokenIndex - 1];
-            if (prevToken.type === TokenType.Variable) {
-                structureNode.name = prevToken.value;  // ✅ Assign label as structure name
+            if (prevToken.type === TokenType.Label) {
+                structureNode.name = prevToken.value; // ✅ Assign label as name
+                logger.info(`✅ [DEBUG] Assigned Label Name: '${structureNode.name}' to Structure '${structureNode.type}'`);
             }
         }
     
-        // ✅ Extract tokens within the structure range
-        structureNode.tokens = this.tokens.filter(t =>
-            t.line > token.line && t.line <= (token.structureFinishesAt ?? Number.MAX_VALUE)
+        // ✅ Find all child structures inside this structure
+        let childStructures = this.tokens.filter(t =>
+            t.isStructure &&
+            t.line > token.line && t.line < (token.structureFinishesAt ?? Number.MAX_VALUE)
         );
     
-        // ✅ Check if there's a name declaration inside the structure (e.g., CLASS, FILE)
-        for (const t of structureNode.tokens) {
-            if (t.type === TokenType.Variable && structureNode.name === "Unnamed") {
-                structureNode.name = t.value;  // ✅ Assign first encountered variable as name
-                break;
-            }
-        }
+        logger.info(`🔍 [DEBUG] Found ${childStructures.length} child structures inside '${structureNode.type}'`);
     
-        // ✅ Extract nested structures
-        structureNode.children = structureNode.tokens
-            .filter(t => t.isStructure) // ✅ Only extract nested structures
-            .map(t => this.createStructureNode(t)); // ✅ Recursively build child structures
+        // ✅ Extract tokens, excluding those inside child structures
+        structureNode.tokens = this.tokens.filter(t => {
+            if (t.line < token.line || t.line > (token.structureFinishesAt ?? Number.MAX_VALUE)) {
+                return false;
+            }
+    
+            // ✅ Exclude tokens that belong to child structures
+            const isInsideChild = childStructures.some(child =>
+                t.line >= child.line && t.line <= (child.structureFinishesAt ?? Number.MAX_VALUE)
+            );
+    
+            if (isInsideChild) {
+                logger.info(`🚫 [DEBUG] Excluding Token: '${t.value}' at Line ${t.line} (Inside Child Structure '${structureNode.type}')`);
+            }
+    
+            return !isInsideChild;
+        });
+    
+        logger.info(`✅ [DEBUG] '${structureNode.type}' contains ${structureNode.tokens.length} tokens (excluding children)`);
+    
+        // ✅ Recursively build child structures **ENSURING THEY ARE ADDED TO THE PARENT**
+        structureNode.children = childStructures.map(childToken => {
+            logger.info(`🔍 [DEBUG] Processing Child Structure: '${childToken.value.toUpperCase()}' at Line ${childToken.line}`);
+    
+            let childNode = this.createStructureNode(childToken);
+    
+            // ✅ Assign previous token (label) to child name if available
+            let childIndex = this.tokens.indexOf(childToken);
+            if (childIndex > 0) {
+                let prevChildToken = this.tokens[childIndex - 1];
+                if (prevChildToken.type === TokenType.Variable) {
+                    childNode.name = prevChildToken.value; // ✅ Assign label to child structure
+                    logger.info(`✅ [DEBUG] Assigned Label Name: '${childNode.name}' to Child Structure '${childNode.type}'`);
+                }
+            }
+    
+            // 🔍 **Check if the child node is actually being assigned correctly**
+            if (childNode) {
+                logger.info(`✅ [DEBUG] Successfully assigned '${childNode.type}' as a child of '${structureNode.type}'`);
+            } else {
+                logger.info(`⚠️ [WARNING] Child structure '${childToken.value.toUpperCase()}' NOT properly assigned to '${structureNode.type}'`);
+            }
+    
+            return childNode;
+        });
+    
+        logger.info(`✅ [DEBUG] Structure '${structureNode.type}' has ${structureNode.children.length} child structures`);
     
         return structureNode;
     }
+    
+    
+    
+    
+    
     
 }
 

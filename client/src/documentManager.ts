@@ -373,7 +373,7 @@ export class DocumentManager implements Disposable {
             if (docInfo) {
                 //logger.info(`✅ Document info FOUND for URI: ${normalizedUri}`);
             } else {
-                logger.warn(`⚠ No document info found for URI: ${normalizedUri}`);
+               // logger.warn(`⚠ No document info found for URI: ${normalizedUri}`);
             }
 
             return docInfo;

@@ -17,6 +17,7 @@ import { ClarionFoldingRangeProvider } from './ClarionFoldingRangeProvider';
 
 import * as fs from 'fs';
 import * as path from 'path';
+import logger from './logger';
 
 // ✅ Define Log File Path (stored in extension's server directory)
 const logFilePath = path.join(__dirname, 'server-debug.log');
@@ -63,7 +64,7 @@ let documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
 
 // ✅ Clear the log file at server startup
 clearLogFile();
-logMessage("Clarion Language Server Initialized.");
+logger.warn("Clarion Language Server Initialized.");
 
 connection.onInitialize((params: InitializeParams) => {
     logMessage("Received onInitialize request from VS Code.");
@@ -73,7 +74,7 @@ connection.onInitialize((params: InitializeParams) => {
         const document = documents.get(params.textDocument.uri);
         if (!document) return [];
 
-        logMessage(`Processing folding ranges for: ${params.textDocument.uri}`);
+        logger.warn(`Processing folding ranges for: ${params.textDocument.uri}`);
         return clarionFoldingProvider.provideFoldingRanges(document);
     });
 
@@ -82,7 +83,7 @@ connection.onInitialize((params: InitializeParams) => {
         const document = documents.get(params.textDocument.uri);
         if (!document) return [];
 
-        logMessage(`Processing document symbols for: ${params.textDocument.uri}`);
+        logger.warn(`Processing document symbols for: ${params.textDocument.uri}`);
         return clarionDocumentSymbolProvider.provideDocumentSymbols(document);
     });
 
@@ -96,10 +97,10 @@ connection.onInitialize((params: InitializeParams) => {
 
 // ✅ Initialize and Listen
 connection.onInitialized(() => {
-    logMessage("Clarion Language Server fully initialized.");
+    logger.warn("Clarion Language Server fully initialized.");
 });
 
 documents.listen(connection);
 connection.listen();
 
-logMessage("Clarion Language Server is now listening for requests.");
+logger.warn("Clarion Language Server is now listening for requests.");

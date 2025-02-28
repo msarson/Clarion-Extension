@@ -4,26 +4,26 @@ import { ClarionTokenizer, Token } from './ClarionTokenizer.js';
 import ClarionStructureExtractor from './clarionStructureExtractor.js';
 import ClarionFileParser from './ClarionFileParser.js';
 import ClarionClassParser from './ClarionClassParser.js';
-
+import logger from './logger.js';
+import { log } from 'console';
 
 enum ClarionSymbolKind {
     Root = SymbolKind.Module,
     Procedure = SymbolKind.Method,
     Routine = SymbolKind.Property,
     Variable = SymbolKind.Variable,
-    Table = SymbolKind.Struct, // ✅ 'FILE' is a table definition
-    TablesGroup = SymbolKind.Namespace // ✅ Represents the "Tables" parent node
+    Table = SymbolKind.Struct,
+    TablesGroup = SymbolKind.Namespace
 }
 
 // Ensure the class is properly exported
 export class ClarionDocumentSymbolProvider {
 
-
     public provideDocumentSymbols(document: TextDocument): DocumentSymbol[] {
         const symbols: DocumentSymbol[] = [];
         const nodes: DocumentSymbol[][] = [symbols];
     
-        // ✅ Tokenize the document
+        // Tokenize the document
         const tokenizer = new ClarionTokenizer(document.getText());
         const tokens = tokenizer.tokenize();
     
@@ -39,22 +39,23 @@ export class ClarionDocumentSymbolProvider {
     
             if (!line || trimmedLine.startsWith('!')) continue; // Ignore empty lines and comments
     
-            // ✅ Process root if not already set
+            // Process root if not already set
             if (!insideRoot) {
                 const { found, symbol: rootSymbol } = this.tryCreateRootSymbol(trimmedLine, currentLineRange, document, i);
                 if (found && rootSymbol) {
                     nodes[nodes.length - 1].push(rootSymbol);
                     nodes.push(rootSymbol.children!);
                     insideRoot = true;
-    
-                    // ✅ Process FILE symbols FIRST
-                    this.getFileSymbols(document, tokens, nodes);
-                    this.getClassSymbols(document, tokens, nodes);
+                    logger.warn(`About to call ClarionFileParser.getFileSymbols`);
+                    // Use the static method from ClarionFileParser instead
+                    ClarionFileParser.getFileSymbols(document, tokens, nodes);
+                    logger.warn(`After call ClarionFileParser.getFileSymbols`);
+                    // this.getClassSymbols(document, tokens, nodes);
                 }
             }
         }
     
-        // ✅ Now process PROCEDURE, ROUTINE, VARIABLE (After Tables)
+        // Now process PROCEDURE, ROUTINE, VARIABLE (After Tables)
         for (let i = 0; i < document.lineCount; i++) {
             const currentLineRange = this.getLineRange(document, i);
             const line = document.getText(currentLineRange).replace(/[\r\n]+/g, '');
@@ -126,74 +127,19 @@ export class ClarionDocumentSymbolProvider {
                 }
             }
         }
-    
+        logger.warn(`Returning symbols`);
         return symbols;
     }
-    
 
-    private getFileSymbols(document: TextDocument, tokens: Token[], nodes: DocumentSymbol[][]): void {
-        const extractor = new ClarionStructureExtractor(tokens);
-        const fileStructures = extractor.extractStructures("FILE");
+    // Remove the getFileSymbols method, it's now in ClarionFileParser
     
-        if (fileStructures.length === 0) return;
-    
-        
-    
-        // ✅ Create "Tables" parent node
-        const tablesParentSymbol = DocumentSymbol.create(
-            "Tables",
-            "Table Definitions",
-            ClarionSymbolKind.TablesGroup as SymbolKind,
-            this.getLineRange(document, 0, document.lineCount - 1),
-            this.getLineRange(document, 0, document.lineCount - 1),
-            []
-        );
-    
-        for (const file of fileStructures) {
-            const fileParser = new ClarionFileParser(file);
-            const driverType = fileParser.getDriverType();
-            const prefix = fileParser.getPrefix();
-            const fields = fileParser.getFields();
-    
-            
-    
-            const fileSymbol = DocumentSymbol.create(
-                fileParser.getFileName(),
-                driverType + ' PRE(' + prefix + ')',
-                ClarionSymbolKind.Table as SymbolKind,
-                this.getLineRange(document, file.start, file.end ?? file.start),
-                this.getLineRange(document, file.start, file.end ?? file.start),
-                []
-            );
-    
-            // ✅ Add fields as children of the file
-            for (const field of fields) {
-                
-    
-                const fieldSymbol = DocumentSymbol.create(
-                    field.name,
-                    field.type, // ✅ Show field type
-                    SymbolKind.Field,
-                    this.getLineRange(document, field.start),
-                    this.getLineRange(document, field.start),
-                    []
-                );
-    
-                fileSymbol.children!.push(fieldSymbol);
-            }
-    
-            tablesParentSymbol.children!.push(fileSymbol);
-        }
-    
-        nodes[0].push(tablesParentSymbol);
-    }
     private getClassSymbols(document: TextDocument, tokens: Token[], nodes: DocumentSymbol[][]): void {
         const extractor = new ClarionStructureExtractor(tokens);
         const classStructures = extractor.extractStructures("CLASS");
     
         if (classStructures.length === 0) return;
     
-        // ✅ Create "Classes" parent node
+        // Create "Classes" parent node
         const classesParentSymbol = DocumentSymbol.create(
             "Classes",
             "Class Definitions",
@@ -209,7 +155,7 @@ export class ClarionDocumentSymbolProvider {
             const procedures = classParser.getProcedures();
             const variables = classParser.getVariables();
     
-            // ✅ Create a symbol for the class itself
+            // Create a symbol for the class itself
             const classSymbol = DocumentSymbol.create(
                 className,
                 "Class Definition",
@@ -219,7 +165,7 @@ export class ClarionDocumentSymbolProvider {
                 []
             );
     
-            // ✅ Add methods (procedures) as children of the class
+            // Add methods (procedures) as children of the class
             for (const procedure of procedures) {
                 const procedureSymbol = DocumentSymbol.create(
                     procedure.name,
@@ -232,7 +178,7 @@ export class ClarionDocumentSymbolProvider {
                 classSymbol.children!.push(procedureSymbol);
             }
     
-            // ✅ Add variables as children of the class
+            // Add variables as children of the class
             for (const variable of variables) {
                 const variableSymbol = DocumentSymbol.create(
                     variable.name,
@@ -248,13 +194,10 @@ export class ClarionDocumentSymbolProvider {
             classesParentSymbol.children!.push(classSymbol);
         }
     
-        // ✅ Add the "Classes" parent node to the document tree
+        // Add the "Classes" parent node to the document tree
         nodes[0].push(classesParentSymbol);
     }
     
-    
-    
-
     private tryCreateRootSymbol(
         trimmedLine: string,
         currentLineRange: Range,

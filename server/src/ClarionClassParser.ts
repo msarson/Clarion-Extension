@@ -34,7 +34,7 @@ class ClarionClassParser {
         for (let i = 0; i < this.classNode.tokens.length; i++) {
             const token = this.classNode.tokens[i];
 
-            if (token.type === TokenType.Variable) {
+            if (token.type === TokenType.Label) {
                 let nextToken = this.classNode.tokens[i + 1];
 
                 if (nextToken && (nextToken.value.toUpperCase() === "PROCEDURE")) {
@@ -51,7 +51,7 @@ class ClarionClassParser {
                             continue;
                         }
 
-                        if (paramToken.type === TokenType.Keyword || paramToken.type === TokenType.Variable) {
+                        if (paramToken.type === TokenType.Keyword || paramToken.type === TokenType.Label) {
                             break; // Stop at next declaration
                         }
 

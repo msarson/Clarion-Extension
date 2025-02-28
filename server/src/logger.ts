@@ -25,7 +25,7 @@ const logger = winston.createLogger({
     format: logFormat,
     transports: [
         new winston.transports.Console({ level: "debug" }), // ✅ Send ALL logs to Debug Console
-        new winston.transports.File({ filename: logFile, level: "debug" }) // ✅ Save ALL logs to file
+        new winston.transports.File({ filename: logFile, level: "warn" }) // ✅ Save ALL logs to file
     ]
 });
 
