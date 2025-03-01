@@ -41,13 +41,13 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
     // ✅ Step 1: Ensure a workspace is saved
     if (!workspace.workspaceFolders) {
-        logger.info("⚠️ No saved workspace detected. Clarion features will be disabled until a workspace is saved.");
+        logger.warn("⚠️ No saved workspace detected. Clarion features will be disabled until a workspace is saved.");
         return; // ⛔ Exit early
     }
 
     // ✅ Step 2: Ensure the workspace is trusted
     if (!workspace.isTrusted) {
-        logger.info("⚠️ Workspace is not trusted. Clarion features will remain disabled until trust is granted.");
+        logger.warn("⚠️ Workspace is not trusted. Clarion features will remain disabled until trust is granted.");
         return; // ⛔ Exit early
     }
 

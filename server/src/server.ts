@@ -34,24 +34,34 @@ const tokenCache: Map<string, Token[]> = new Map();
  * ✅ Retrieves cached tokens or tokenizes the document if not cached.
  */
 function getCachedTokens(document: TextDocument): Token[] {
-    logger.warn(`🔍 [CACHE CHECK] Checking for cached tokens for ${document.uri} ${!tokenCache.has(document.uri)}`);
+    if (!serverInitialized) {
+        logger.warn(`⚠️ [server.ts] [DELAY] Server not initialized yet, delaying tokenization for ${document.uri}`);
+        return [];
+    }
+    logger.info(`🔍 [server.ts] [CACHE CHECK] Checking for cached tokens for ${document.uri} ${!tokenCache.has(document.uri)}`);
     if (!tokenCache.has(document.uri)) {
-        logger.warn(`🔍 [CACHE MISS] Tokenizing ${document.uri}`);
+        logger.info(`🔍 [server.ts] [CACHE MISS] Tokenizing ${document.uri}`);
         const tokenizer = new ClarionTokenizer(document.getText());
         const tokens = tokenizer.tokenize();
         tokenCache.set(document.uri, tokens);
+
     } else {
-        logger.warn(`✅ [CACHE HIT] Using cached tokens for ${document.uri}`);
+        logger.info(`✅ [server.ts] [CACHE HIT] Using cached tokens for ${document.uri}`);
     }
     return tokenCache.get(document.uri)!;
 }
 
 // ✅ Handle Folding Ranges (Uses Cached Tokens)
 connection.onFoldingRanges((params: FoldingRangeParams) => {
+ 
     const document = documents.get(params.textDocument.uri);
-    if (!document) return [];
 
-    logger.warn(`📂 Processing folding ranges for: ${params.textDocument.uri}`);
+    if (!document) return [];
+    if (!serverInitialized) {
+        logger.warn(`⚠️ [server.ts] [DELAY] Server not initialized yet, delaying tokenization for ${document.uri}`);
+        return [];
+    }
+    logger.info(`📂 [server.ts] Processing folding ranges for: ${params.textDocument.uri}`);
 
     const tokens = getCachedTokens(document);
     return clarionFoldingProvider.provideFoldingRanges(tokens);
@@ -60,23 +70,28 @@ connection.onFoldingRanges((params: FoldingRangeParams) => {
 // ✅ Handle Document Symbols (Uses Cached Tokens)
 connection.onDocumentSymbol((params: DocumentSymbolParams) => {
     const document = documents.get(params.textDocument.uri);
+  
     if (!document) return [];
-
-    logger.warn(`📂 Processing document symbols for: ${params.textDocument.uri}`);
-
+    
+    if (!serverInitialized) {
+        logger.warn(`⚠️ [server.ts] [DELAY] Server not initialized yet, delaying tokenization for ${document.uri}`);
+        return [];
+    }
+    logger.info(`📂 [server.ts] Fetching tokens for: ${params.textDocument.uri}`);
     const tokens = getCachedTokens(document);
+    
     return clarionDocumentSymbolProvider.provideDocumentSymbols(tokens);
 });
 
 // ✅ Clear Cache When Document Closes
 documents.onDidClose(event => {
     tokenCache.delete(event.document.uri);
-    logger.info(`🗑️ [CACHE CLEAR] Removed cached tokens for ${event.document.uri}`);
+    logger.info(`🗑️ [server.ts] [CACHE CLEAR] Removed cached tokens for ${event.document.uri}`);
 });
 
 // ✅ Server Initialization
 connection.onInitialize((params: InitializeParams): InitializeResult => {
-    logger.info("⚡ Received onInitialize request from VS Code.");
+    logger.info("⚡ [server.ts] Received onInitialize request from VS Code.");
     return {
         capabilities: {
             foldingRangeProvider: true,
@@ -84,14 +99,15 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
         }
     };
 });
-
+let serverInitialized = false;
 // ✅ Server Fully Initialized
 connection.onInitialized(() => {
-    logger.info("✅ Clarion Language Server fully initialized.");
+    logger.info("✅ [server.ts] Clarion Language Server fully initialized.");
+    serverInitialized = true;
 });
 
 // ✅ Start Listening
 documents.listen(connection);
 connection.listen();
 
-logger.info("🟢 Clarion Language Server is now listening for requests.");
+logger.info("🟢 [server.ts] Clarion Language Server is now listening for requests.");

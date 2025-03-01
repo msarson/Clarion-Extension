@@ -1,35 +1,55 @@
-import * as winston from "winston";
-import * as path from "path";
-import * as fs from "fs";
+class Logger {
+    private level: "debug" | "info" | "warn" | "error";
+    
+    constructor(level: "debug" | "info" | "warn" | "error" = "debug") {
+        this.level = level;
 
-// ✅ Ensure previous instances are closed
-winston.loggers.close("default");
 
-// ✅ Explicitly set log file
-const logFile = path.join(__dirname, "server.log");
-console.log("Log File:", logFile);
-// ✅ Remove the log file if it exists (so it starts fresh)
-// if (fs.existsSync(logFile)) {
-//     fs.unlinkSync(logFile);
-// }
+    }
 
-// ✅ Define log format
-const logFormat = winston.format.combine(
-    winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
-    winston.format.printf(({ timestamp, level, message }) => `[${timestamp}] ${level.toUpperCase()}: ${message}`)
-);
+    private getTimestamp(): string {
+        return new Date().toISOString(); // ✅ ISO Timestamp
+    }
 
-// ✅ Create Winston logger
-const logger = winston.createLogger({
-    level: "debug", // 🔥 Ensure all logs (debug, info, warn, error) are recorded
-    format: logFormat,
-    transports: [
-        new winston.transports.Console({ level: "debug" }), // ✅ Send ALL logs to Debug Console
-        new winston.transports.File({ filename: logFile, level: "warn" }) // ✅ Save ALL logs to file
-    ]
-});
+    private shouldLog(level: "debug" | "info" | "warn" | "error"): boolean {
+        const levels = ["debug", "info", "warn", "error"];
+        return levels.indexOf(level) >= levels.indexOf(this.level);
+    }
 
-// ✅ Debug Test Message
-logger.debug("🚀 Winston Logger Initialized");
+    debug(message: string, ...args: any[]) {
+        if (this.shouldLog("debug")) {
+           console.log(`[${this.getTimestamp()}] 🐛 DEBUG:`, message, ...args);
+        }
+    }
+
+    info(message: string, ...args: any[]) {
+        if (this.shouldLog("info")) {
+            console.log(`[${this.getTimestamp()}] ℹ️ INFO:`, message, ...args);
+        }
+    }
+
+    warn(message: string, ...args: any[]) {
+        if (this.shouldLog("warn")) {
+            console.log(`[${this.getTimestamp()}] ⚠️ WARN:`, message, ...args);
+        }
+    }
+
+    error(message: string, ...args: any[]) {
+        if (this.shouldLog("error")) {
+            console.log(`[${this.getTimestamp()}] ❌ ERROR:`, message, ...args);
+        }
+    }
+
+    setLevel(newLevel: "debug" | "info" | "warn" | "error") {
+        this.level = newLevel;
+         console.log(`[${this.getTimestamp()}] 🔄 LOG LEVEL SET TO: ${newLevel.toUpperCase()}`);
+    }
+}
+
+// ✅ Export an instance of the logger
+const logger = new Logger("warn"); // Default level: debug
+logger.info("✅ [Logger] Direct logger.info inside logger");
+logger.info("✅ [Logger] Logging function called!");
+logger.info("✅ [Logger] Logging function finished!");
 
 export default logger;

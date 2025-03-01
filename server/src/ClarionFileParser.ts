@@ -45,7 +45,7 @@ class ClarionFileParser {
             if (token.type === TokenType.Property && token.value.toUpperCase() === "DRIVER") {
                 const nextToken = this.fileNode.tokens[i + 2]; // Expect '(' at i+1 and driver name at i+2
                 if (nextToken && nextToken.type === TokenType.String) {
-                    logger.info(`📂 [DEBUG] Found DRIVER '${nextToken.value.replace(/'/g, "")}'`);
+                    logger.info(`📂 [FileParser] Found DRIVER '${nextToken.value.replace(/'/g, "")}'`);
                     return nextToken.value.replace(/'/g, ""); // ✅ Remove quotes
                 }
             }
@@ -55,11 +55,11 @@ class ClarionFileParser {
     public getPrefix(): string {
         for (let i = 0; i < this.fileNode.tokens.length; i++) {
             const token = this.fileNode.tokens[i];
-            logger.debug(`[getprefix] token type: ${token.type} token value: ${token.value}`);
+            logger.info(`[getprefix] token type: ${token.type} token value: ${token.value}`);
              if (token.type === TokenType.PropertyFunction && token.value.toUpperCase() === "PRE") {
                  const nextToken = this.fileNode.tokens[i + 2]; // Expect '(' at i+1 and driver name at i+2
                  if (nextToken && nextToken.type === TokenType.Variable) {
-                     logger.debug(`📂 [DEBUG] Found prefix '${nextToken.value.replace(/'/g, "")}'`);
+                     logger.info(`📂 [FileParser] Found prefix '${nextToken.value.replace(/'/g, "")}'`);
                      return nextToken.value.replace(/'/g, ""); // ✅ Remove quotes
                  }
             }
@@ -75,7 +75,7 @@ class ClarionFileParser {
         // ✅ Look for the RECORD structure inside the FILE
         for (const child of this.fileNode.children) {
             if (child.type === "RECORD") {
-                logger.info(`📂 [DEBUG] Processing RECORD inside FILE '${this.fileNode.name}'`);
+                logger.info(`📂 [FileParser] Processing RECORD inside FILE '${this.fileNode.name}'`);
         
                 for (let i = 0; i < child.tokens.length; i++) {
                     const token = child.tokens[i];
@@ -121,7 +121,7 @@ class ClarionFileParser {
                                 start: token.line
                             });
         
-                            logger.info(`📂 [FIELD] ${fieldName} - ${fullType.trim()} (Line: ${token.line})`);
+                            logger.info(`📂 [FileParser] [FIELD] ${fieldName} - ${fullType.trim()} (Line: ${token.line})`);
                         }
                     }
                 }
@@ -137,7 +137,7 @@ class ClarionFileParser {
      * Converts parsed file data into a VS Code DocumentSymbol.
      */
     public toDocumentSymbol(document: any): DocumentSymbol {
-        logger.info(`📌 [DEBUG] Creating symbol for FILE '${this.fileNode.name}'`);
+        logger.info(`📌 [FileParser] Creating symbol for FILE '${this.fileNode.name}'`);
 
         // ✅ Extract driver type
         const driverType = this.getDriverType();
@@ -155,7 +155,7 @@ class ClarionFileParser {
         // ✅ Process child RECORD structure
         for (const childNode of this.fileNode.children) {
             if (childNode.type === "RECORD") {
-                logger.info(`📌 [DEBUG] Adding RECORD for FILE '${this.fileNode.name}'`);
+                logger.info(`📌 [FileParser] Adding RECORD for FILE '${this.fileNode.name}'`);
 
                 const recordSymbol = DocumentSymbol.create(
                     "Record",
@@ -168,7 +168,7 @@ class ClarionFileParser {
 
                 // ✅ Extract fields from RECORD
                 for (const field of this.getFields()) {
-                    logger.info(`📂 [DEBUG] Adding FIELD '${field.name}' to RECORD`);
+                    logger.info(`📂 [FileParser] Adding FIELD '${field.name}' to RECORD`);
 
                     const fieldSymbol = DocumentSymbol.create(
                         field.name,
@@ -198,14 +198,14 @@ class ClarionFileParser {
 
     // New static method for getting file symbols
     static getFileSymbols(tokens: Token[], nodes: DocumentSymbol[][]): void {
-        logger.info(`📂 [DEBUG] Processing FILE symbols...`);
-        
+        logger.info(`📂 [FileParser] Processing FILE symbols...`);
+   
         const extractor = new ClarionStructureExtractor(tokens);
         const fileStructures = extractor.extractStructures("FILE");
         
-        logger.info(`✅ [DEBUG] Found ${fileStructures.length} FILE structures.`);
+        
         if (fileStructures.length === 0) return;
-    
+        logger.info(`✅ [FileParser] Found ${fileStructures.length} FILE structures.`);
         // ✅ Create "Tables" parent node
         const tablesParentSymbol = DocumentSymbol.create(
             "Tables",

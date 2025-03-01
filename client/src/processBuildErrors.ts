@@ -5,8 +5,8 @@ import logger from "./logger";
 const diagnosticCollection: DiagnosticCollection = languages.createDiagnosticCollection("clarion");
 
 function processBuildErrors(buildOutput: string) {
-    logger.warn("🔍 Processing build output for errors and warnings...");
-    logger.warn("📝 Raw Build Output:\n", buildOutput);
+    logger.info("🔍 Processing build output for errors and warnings...");
+    logger.info("📝 Raw Build Output:\n", buildOutput);
 
     // ✅ Updated regex to capture both errors and warnings without breaking existing matches
     const errorPattern = /^.*?>([A-Z]:\\.*?\.clw)\((\d+),(\d+)\):\s+(error|warning)\s*:\s*(.*?)\s+\[.*\]$/gm;
@@ -16,7 +16,7 @@ function processBuildErrors(buildOutput: string) {
 
     let match;
     while ((match = errorPattern.exec(buildOutput)) !== null) {
-        logger.warn("✅ Match Found:", match); // 🔍 Log each match
+        logger.info("✅ Match Found:", match); // 🔍 Log each match
 
         const [, filePath, line, column, type, message] = match;
         const absFilePath = path.resolve(filePath);
@@ -37,10 +37,10 @@ function processBuildErrors(buildOutput: string) {
         const severity = type === "error" ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning;
         const diagnostic = new Diagnostic(new Range(startPosition, endPosition), message, severity);
 
-        logger.warn(`📌 Creating ${type.toUpperCase()} diagnostic for file: ${filePath}`);
-        logger.warn(`🔹 Line: ${line}, Column: ${column}`);
-        logger.warn(`💬 Message: ${message}`);
-        logger.warn(`🗂 Absolute File Path: ${absFilePath}`);
+        logger.info(`📌 Creating ${type.toUpperCase()} diagnostic for file: ${filePath}`);
+        logger.info(`🔹 Line: ${line}, Column: ${column}`);
+        logger.info(`💬 Message: ${message}`);
+        logger.info(`🗂 Absolute File Path: ${absFilePath}`);
 
         if (!diagnostics.has(absFilePath)) {
             diagnostics.set(absFilePath, []);
@@ -48,16 +48,16 @@ function processBuildErrors(buildOutput: string) {
         diagnostics.get(absFilePath)?.push(diagnostic);
     }
 
-    logger.warn("🧹 Resetting diagnostics...");
+    logger.info("🧹 Resetting diagnostics...");
     // ✅ Clear and reset diagnostics with a delay to ensure VS Code updates properly
     setTimeout(() => {
         diagnosticCollection.clear();
-        logger.warn("📌 Adding new diagnostics...");
+        logger.info("📌 Adding new diagnostics...");
         diagnostics.forEach((diagArray, file) => {
-            logger.warn(`📌 Adding ${diagArray.length} diagnostics for ${file}`);
+            logger.info(`📌 Adding ${diagArray.length} diagnostics for ${file}`);
             diagnosticCollection.set(Uri.file(file), diagArray);
         });
-        logger.warn("✅ Errors and warnings processed and added to Problems panel.");
+        logger.info("✅ Errors and warnings processed and added to Problems panel.");
     }, 100);
 }
 

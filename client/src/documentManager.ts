@@ -59,10 +59,18 @@ interface DocumentInfo {
  */
 export class DocumentManager implements Disposable {
 
-    private readonly modulePattern = /MODULE\s*\('([^']+)'\s*(?:,\s*'([^']+)'\s*)?\)/ig;
-    private readonly includePattern = /INCLUDE\s*\('([^']+)'\s*(?:,\s*'([^']+)'\s*)?(?:,\s*ONCE)?\)/ig;
-    private readonly memberPattern = /MEMBER\s*\(\s*'([^']+)'\s*\)/ig;
-    private readonly linkPattern = /LINK\s*\(\s*'([^']+)'/ig;  // Updated regex to match LINK('somefile')
+    // private readonly modulePattern = /MODULE\s*\('([^']+)'\s*(?:,\s*'([^']+)'\s*)?\)/ig;
+    // private readonly includePattern = /INCLUDE\s*\('([^']+)'\s*(?:,\s*'([^']+)'\s*)?(?:,\s*ONCE)?\)/ig;
+    // private readonly memberPattern = /MEMBER\s*\(\s*'([^']+)'\s*\)/ig;
+    // private readonly linkPattern = /LINK\s*\(\s*'([^']+)'/ig;  // Updated regex to match LINK('somefile')
+
+
+    //added detection for extensions
+    private readonly modulePattern = /MODULE\s*\(\s*'([^']+\.[a-zA-Z0-9]+)'\s*(?:,\s*'([^']+\.[a-zA-Z0-9]+)'\s*)?\)/ig;
+    private readonly includePattern = /INCLUDE\s*\(\s*'([^']+\.[a-zA-Z0-9]+)'\s*(?:,\s*'([^']+\.[a-zA-Z0-9]+)'\s*)?(?:,\s*ONCE)?\)/ig;
+    private readonly memberPattern = /MEMBER\s*\(\s*'([^']+\.[a-zA-Z0-9]+)'\s*\)/ig;
+    private readonly linkPattern = /LINK\s*\(\s*'([^']+\.[a-zA-Z0-9]+)'\s*\)/ig;
+
 
     private openDocuments: Map<string, DocumentInfo> = new Map(); // Store document info by URI
     private locationProvider!: LocationProvider;
@@ -79,7 +87,7 @@ export class DocumentManager implements Disposable {
         return manager;
     }
     private async initialize(solutionParser: SolutionParser) {
-        
+
         logger.info("✅ DocumentManager.initialize() called");
         this.locationProvider = new LocationProvider(solutionParser);
 
@@ -134,7 +142,7 @@ export class DocumentManager implements Disposable {
     }
 
     private async onDidChangeTextDocument(event: TextDocumentChangeEvent) {
-        
+
         const doc = event.document;
         logger.info(`Document changed: ${doc.uri.fsPath}`);
         await this.updateDocumentInfo(event.document);
@@ -189,7 +197,7 @@ export class DocumentManager implements Disposable {
         const documentInfo = this.getDocumentInfo(uri);
 
         if (!documentInfo) {
-            logger.warn(`❌ No document info available for ${uri.fsPath}`);
+            logger.error(`❌ No document info available for ${uri.fsPath}`);
             return [];
         }
 
@@ -197,21 +205,21 @@ export class DocumentManager implements Disposable {
         const supportedTypes = ["INCLUDE", "MODULE", "MEMBER", "SECTION", "LINK"];
         // 🔹 Process existing document statements from `documentInfo`
         for (const location of documentInfo.statementLocations) {
-        
+
             if (!supportedTypes.includes(location.statementType ?? "") || !location.fullFileName || !location.linePosition || !location.linePositionEnd) {
 
                 continue; // Skip invalid or unsupported entries
             }
-        
+
             let targetUri = Uri.file(location.fullFileName);
-        
+
             if (location.statementType === "SECTION" && location.sectionLineLocation) {
                 const lineQueryParam = `${location.sectionLineLocation.line + 1}:1`;
                 targetUri = targetUri.with({ fragment: lineQueryParam });
             }
-        
-          
-        
+
+
+
             const link = new DocumentLink(
                 new Range(location.linePosition, location.linePositionEnd),
                 targetUri
@@ -219,7 +227,7 @@ export class DocumentManager implements Disposable {
             links.push(link);
         }
 
-   
+
         return links;
     }
 
@@ -267,7 +275,7 @@ export class DocumentManager implements Disposable {
 
         // 🔹 Get latest lookup extensions
         const lookupExtensions = globalSettings.defaultLookupExtensions;
-        
+
 
 
         logger.info(`🔍 Current lookup extensions: ${JSON.stringify(lookupExtensions)}`);
@@ -278,7 +286,7 @@ export class DocumentManager implements Disposable {
         // }
 
         if (document.uri.scheme !== 'file' || document.uri.fsPath.endsWith('.code-workspace')) {
-            logger.warn(`⚠ Skipping document: ${document.uri.fsPath}`);
+            logger.info(`⚠ Skipping document: ${document.uri.fsPath}`);
             return;
         }
 
@@ -303,7 +311,7 @@ export class DocumentManager implements Disposable {
             //     logger.info(`   [${index + 1}] Type: ${location.type}, Line: ${location.range.start.line + 1}, Text: ${location.text}`);
             // });
         } else {
-            logger.info(`⚠️ Skipping storing document info for ${document.uri.fsPath}, no statement locations found.`);
+            logger.warn(`⚠️ Skipping storing document info for ${document.uri.fsPath}, no statement locations found.`);
         }
 
     }
@@ -320,7 +328,7 @@ export class DocumentManager implements Disposable {
      * @returns An array of ClarionLocation objects representing the statement and, if applicable, its associated section.
      */
     private processPattern(document: TextDocument, pattern: RegExp, statementType: string): ClarionLocation[] {
-        
+
         if (!this.locationProvider) {
             logger.error(`❌ Error: locationProvider is not initialized when processing ${statementType}.`);
             return [];
@@ -356,7 +364,7 @@ export class DocumentManager implements Disposable {
 
 
     getDocumentInfo(uri: Uri): DocumentInfo | undefined {
-        
+
         try {
             // Normalize the URI for consistency in lookups
             const normalizedUri = uri.toString().toLowerCase();
@@ -364,8 +372,8 @@ export class DocumentManager implements Disposable {
 
             // Debugging: Show all stored documents
             if (this.openDocuments.size === 0) {
-                logger.warn("⚠ openDocuments map is EMPTY.");
-            } 
+                logger.info("⚠ openDocuments map is EMPTY.");
+            }
 
             // Attempt to retrieve document info
             const docInfo = this.openDocuments.get(normalizedUri);
@@ -373,7 +381,7 @@ export class DocumentManager implements Disposable {
             if (docInfo) {
                 //logger.info(`✅ Document info FOUND for URI: ${normalizedUri}`);
             } else {
-               // logger.warn(`⚠ No document info found for URI: ${normalizedUri}`);
+                // logger.info(`⚠ No document info found for URI: ${normalizedUri}`);
             }
 
             return docInfo;

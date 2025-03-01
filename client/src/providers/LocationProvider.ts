@@ -118,7 +118,7 @@ export class LocationProvider {
                 return fullPath;
             }
         } else {
-            logger.info(`⚠️ No project association found for ${documentFrom}, falling back to global redirection.`);
+            logger.warn(`⚠️ No project association found for ${documentFrom}, falling back to global redirection.`);
         }
     
         // 🔹 Fall back to global paths
@@ -128,7 +128,7 @@ export class LocationProvider {
             return globalFile;
         }
     
-        logger.warn(`❌ Could not resolve file: ${fileName}`);
+        logger.error(`❌ Could not resolve file: ${fileName}`);
         return null;
     }
     
@@ -153,7 +153,7 @@ export class LocationProvider {
             );
             return sectionIndex !== -1 ? sectionIndex : 0;
         } catch (error) {
-            logger.error('Error reading file content:', error);
+            logger.info('Error reading file content:', error);
             return 0;
         }
     }

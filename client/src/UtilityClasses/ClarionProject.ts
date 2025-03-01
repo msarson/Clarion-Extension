@@ -59,7 +59,7 @@ export class ClarionProjectClass {
             let compileMode = 'Unknown';
             parser.parseString(cleanedContent, (err: any, result: any) => {
                 if (err) {
-                    logger.error('Error parsing .csproj file:', err);
+                    logger.info('Error parsing .csproj file:', err);
                     return;
                 }
                 const configurationValue = result.Project.PropertyGroup[0].Configuration[0]._;

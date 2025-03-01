@@ -11,7 +11,7 @@ export class ClarionFoldingRangeProvider {
 
     
     provideFoldingRanges(tokens: Token[]): FoldingRange[] {
-        // logger.warn(`📂 [DEBUG] Folding Range Provider called for ${document.uri}`);
+        // logger.info(`📂 [DEBUG] Folding Range Provider called for ${document.uri}`);
         // // ✅ Pass logMessage to tokenizer
         // const tokenizer = new ClarionTokenizer(document.getText());
         // const tokens = tokenizer.tokenize();

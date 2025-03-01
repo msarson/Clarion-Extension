@@ -135,7 +135,7 @@ export class RedirectionFileParser {
     
                 if (extractedPaths.length > 0) {
                     logger.info(`📌 Extracted paths from [${foundSection}] for *.${fileExtension}: (${extractedPaths.length})`);
-                    extractedPaths.forEach((path, index) => logger.info(`   ${index + 1}. ${path}`));
+                    extractedPaths.forEach((path, index) =>  logger.info(`   ${index + 1}. ${path}`));
                 }
                 paths.push(...extractedPaths); // ✅ Append paths immediately in order
             }
@@ -149,7 +149,7 @@ export class RedirectionFileParser {
         // ✅ Log the final ordered list without duplicates
         logger.info(`✅ Completed parsing redirection file: ${redFile} (Looking for: *.${fileExtension})`);
         logger.info(`📂 Final ordered paths for *.${fileExtension}: (${uniquePaths.length})`);
-        uniquePaths.forEach((path, index) => logger.info(`   ${index + 1}. ${path}`));
+        uniquePaths.forEach((path, index) =>  logger.info(`   ${index + 1}. ${path}`));
         
         return uniquePaths; // ✅ Return de-duplicated list
     }
@@ -227,7 +227,7 @@ export class RedirectionFileParser {
             try {
                 return this.resolveMacro(p.trim());
             } catch (error) {
-                logger.error(`Error resolving path "${p.trim()}":`, error);
+                logger.info(`Error resolving path "${p.trim()}":`, error);
                 return [];
             }
         });

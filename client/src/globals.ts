@@ -20,7 +20,7 @@ export async function setGlobalClarionSelection(
     clarionVersion: string,
     clarionConfiguration: string
 ) {
-    logger.info("🔄 Updating global settings:", {
+     logger.info("🔄 Updating global settings:", {
         solutionFile,
         clarionPropertiesFile,
         clarionVersion,
@@ -190,7 +190,7 @@ export const globalSettings = {
             globalSettings.libsrcPaths =
                 selectedVersion.libsrc?.[0]?.$.value.split(";") || [];
 
-            logger.info("✅ Extracted Clarion settings from ClarionProperties.xml", {
+             logger.info("✅ Extracted Clarion settings from ClarionProperties.xml", {
                 redirectionFile: globalSettings.redirectionFile,
                 redirectionPath: globalSettings.redirectionPath,
                 macros: globalSettings.macros,

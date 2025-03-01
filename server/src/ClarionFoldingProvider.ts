@@ -4,6 +4,8 @@ import logger from "./logger.js";
 
 
 
+
+
 class ClarionFoldingProvider {
     private tokens: Token[];
     private foldingRanges: FoldingRange[];
@@ -28,8 +30,10 @@ class ClarionFoldingProvider {
     /** 🔹 First pass: Process structures for folding */
     private foldStructures(): void {
         const structureTokens = this.tokens.filter(t => t.isStructure);
-    
         for (const token of structureTokens) {
+            
+
+            logger.info(`🔹 [FoldinfProvider] Found STRUCTURE '${token.value}' at Line ${token.line}`);
             if (token.structureFinishesAt !== undefined && token.line < token.structureFinishesAt) {
                 this.foldingRanges.push({
                     startLine: token.line,
@@ -37,9 +41,9 @@ class ClarionFoldingProvider {
                     kind: FoldingRangeKind.Region
                 });
     
-                logger.debug(`✅ [DEBUG] Folded STRUCTURE '${token.value}' from Line ${token.line} to ${token.structureFinishesAt}`);
+                logger.info(`✅ [FoldinfProvider] Folded STRUCTURE '${token.value}' from Line ${token.line} to ${token.structureFinishesAt}`);
             } else {
-                logger.debug(`🚫 [DEBUG] Skipping STRUCTURE '${token.value}' at Line ${token.line} (No valid folding range or same line)`);
+                logger.info(`🚫 [FoldinfProvider] Skipping STRUCTURE '${token.value}' at Line ${token.line} (No valid folding range or same line)`);
             }
         }
     }
@@ -57,7 +61,7 @@ class ClarionFoldingProvider {
                 kind: FoldingRangeKind.Region
             });
     
-            logger.debug(`✅ [DEBUG] Folded PROCEDURE '${token.value}' from Line ${token.line} to ${token.procedureFinishesAt}`);
+            logger.info(`✅ [FoldinfProvider] Folded PROCEDURE '${token.value}' from Line ${token.line} to ${token.procedureFinishesAt}`);
         }
     
         // ✅ Fold ROUTINES
@@ -70,7 +74,7 @@ class ClarionFoldingProvider {
                 kind: FoldingRangeKind.Region
             });
     
-            logger.debug(`✅ [DEBUG] Folded ROUTINE '${token.value}' from Line ${token.line} to ${token.routineFinishesAt}`);
+            logger.info(`✅ [FoldinfProvider] Folded ROUTINE '${token.value}' from Line ${token.line} to ${token.routineFinishesAt}`);
         }
     
         // ✅ Fold REGIONS (unchanged)
@@ -85,7 +89,7 @@ class ClarionFoldingProvider {
                 const label = labelMatch ? labelMatch[1] : undefined;
                 regionStack.push({ startLine: token.line, label });
     
-                logger.debug(`🔹 [DEBUG] Region START detected at Line ${token.line} (${label ?? "No Label"})`);
+                logger.info(`🔹 [FoldinfProvider] Region START detected at Line ${token.line} (${label ?? "No Label"})`);
             }
     
             // ✅ Detect `!endregion` and close last opened REGION
@@ -98,7 +102,7 @@ class ClarionFoldingProvider {
                         kind: FoldingRangeKind.Region
                     });
     
-                    logger.debug(`🔹 [DEBUG] Region END detected from Line ${lastRegion.startLine} to ${token.line}`);
+                    logger.info(`🔹 [FoldinfProvider] Region END detected from Line ${lastRegion.startLine} to ${token.line}`);
                 }
             }
         }
@@ -112,7 +116,7 @@ class ClarionFoldingProvider {
                 kind: FoldingRangeKind.Region
             });
     
-            logger.debug(`⚠️ [DEBUG] Region END (at EOF) from Line ${lastRegion?.startLine ?? 0} to EOF`);
+            logger.warn(`⚠️ [FoldinfProvider] Region END (at EOF) from Line ${lastRegion?.startLine ?? 0} to EOF`);
         }
     }
     

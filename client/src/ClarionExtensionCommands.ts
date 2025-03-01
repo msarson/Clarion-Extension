@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { parseString } from 'xml2js';
 import { DocumentManager } from './documentManager';
-import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, setGlobalClarionSelection, globalSettings,  } from './globals';
+import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, setGlobalClarionSelection, globalSettings, } from './globals';
 import logger from './logger';
 
 
@@ -37,73 +37,73 @@ export class ClarionExtensionCommands {
    * @throws Will throw an error if any step in selecting or updating the ClarionProperties.xml or version fails.
    */
   static async configureClarionPropertiesFile() {
-    
+
     try {
-        const appDataPath = process.env.APPDATA;
-        if (!appDataPath) {
-            window.showErrorMessage("Unable to access AppData path.");
-            return;
-        }
+      const appDataPath = process.env.APPDATA;
+      if (!appDataPath) {
+        window.showErrorMessage("Unable to access AppData path.");
+        return;
+      }
 
-        const defaultDirectory = Uri.file(path.join(appDataPath, "SoftVelocity", "Clarion"));
+      const defaultDirectory = Uri.file(path.join(appDataPath, "SoftVelocity", "Clarion"));
 
-        const selectedFileUri = await window.showOpenDialog({
-            defaultUri: defaultDirectory,
-            canSelectFiles: true,
-            canSelectFolders: false,
-            openLabel: "Select ClarionProperties.xml",
-            filters: { XML: ["xml"] },
-        });
+      const selectedFileUri = await window.showOpenDialog({
+        defaultUri: defaultDirectory,
+        canSelectFiles: true,
+        canSelectFolders: false,
+        openLabel: "Select ClarionProperties.xml",
+        filters: { XML: ["xml"] },
+      });
 
-        if (!selectedFileUri || selectedFileUri.length === 0) {
-            window.showWarningMessage("No ClarionProperties.xml file selected.");
-            return;
-        }
+      if (!selectedFileUri || selectedFileUri.length === 0) {
+        window.showWarningMessage("No ClarionProperties.xml file selected.");
+        return;
+      }
 
-        const selectedFilePath = selectedFileUri[0].fsPath;
-        
+      const selectedFilePath = selectedFileUri[0].fsPath;
 
-        // ✅ Save the properties file path
-        await setGlobalClarionSelection(globalSolutionFile, selectedFilePath, globalClarionVersion, globalSettings.configuration);
 
-        // ✅ Parse available versions from the selected file
-        const versionProperties = await ClarionExtensionCommands.parseAvailableVersions(selectedFilePath);
+      // ✅ Save the properties file path
+      await setGlobalClarionSelection(globalSolutionFile, selectedFilePath, globalClarionVersion, globalSettings.configuration);
 
-        if (versionProperties.length === 0) {
-            window.showErrorMessage("No Clarion versions found in the selected ClarionProperties.xml file.");
-            return;
-        }
+      // ✅ Parse available versions from the selected file
+      const versionProperties = await ClarionExtensionCommands.parseAvailableVersions(selectedFilePath);
 
-        // ✅ Prompt user to select a version
-        const versionSelection = await window.showQuickPick(versionProperties.map((v) => v.clarionVersion), {
-            placeHolder: "Select a Clarion version",
-        });
+      if (versionProperties.length === 0) {
+        window.showErrorMessage("No Clarion versions found in the selected ClarionProperties.xml file.");
+        return;
+      }
 
-        if (!versionSelection) {
-            window.showWarningMessage("No Clarion version selected. Keeping previous version.");
-            return;
-        }
+      // ✅ Prompt user to select a version
+      const versionSelection = await window.showQuickPick(versionProperties.map((v) => v.clarionVersion), {
+        placeHolder: "Select a Clarion version",
+      });
 
-        // ✅ Find the selected version's properties
-        const selectedVersionProps = versionProperties.find((v) => v.clarionVersion === versionSelection);
-        if (!selectedVersionProps) {
-            window.showErrorMessage(`Clarion version '${versionSelection}' not found in ClarionProperties.xml.`);
-            return;
-        }
+      if (!versionSelection) {
+        window.showWarningMessage("No Clarion version selected. Keeping previous version.");
+        return;
+      }
 
-        // ✅ Save the selected version
-        await setGlobalClarionSelection(globalSolutionFile, selectedFilePath, versionSelection, globalSettings.configuration);
+      // ✅ Find the selected version's properties
+      const selectedVersionProps = versionProperties.find((v) => v.clarionVersion === versionSelection);
+      if (!selectedVersionProps) {
+        window.showErrorMessage(`Clarion version '${versionSelection}' not found in ClarionProperties.xml.`);
+        return;
+      }
 
-        // ✅ Update global runtime settings (NOT stored in workspace.json)
-        ClarionExtensionCommands.updateGlobalSettings(selectedVersionProps);
+      // ✅ Save the selected version
+      await setGlobalClarionSelection(globalSolutionFile, selectedFilePath, versionSelection, globalSettings.configuration);
 
-        window.showInformationMessage(`Clarion version '${versionSelection}' selected and settings updated.`);
+      // ✅ Update global runtime settings (NOT stored in workspace.json)
+      ClarionExtensionCommands.updateGlobalSettings(selectedVersionProps);
+
+      window.showInformationMessage(`Clarion version '${versionSelection}' selected and settings updated.`);
 
     } catch (error) {
-        
-        window.showErrorMessage(`Error configuring Clarion properties: ${error instanceof Error ? error.message : String(error)}`);
+
+      window.showErrorMessage(`Error configuring Clarion properties: ${error instanceof Error ? error.message : String(error)}`);
     }
-}
+  }
 
 
   /**
@@ -117,14 +117,14 @@ export class ClarionExtensionCommands {
    * to match the specified version's configuration. It logs the updated settings for reference.
    */
   private static updateGlobalSettings(selectedVersionProps: ClarionVersionProperties | undefined) {
-    
+
     if (selectedVersionProps) {
       globalSettings.redirectionFile = selectedVersionProps.redirectionFile;
       globalSettings.redirectionPath = path.dirname(selectedVersionProps.redirectionFile);
       globalSettings.macros = selectedVersionProps.macros;
       globalSettings.libsrcPaths = selectedVersionProps.libsrc.split(';');
 
-      
+
     }
   }
 
@@ -198,13 +198,13 @@ export class ClarionExtensionCommands {
    *   rather than an error.
    */
   public static extractMacros(properties: any): Record<string, string> {
-    
+
     const macros: Record<string, string> = {};
 
-    
+
 
     if (!properties || typeof properties !== 'object') {
-    
+
       return macros;
     }
 
@@ -219,17 +219,20 @@ export class ClarionExtensionCommands {
       const macrosProperty = redirectionFileProperty.Properties.find((p: any) => p.$.name === 'Macros');
 
       if (macrosProperty) {
-        
+
 
         for (const prop in macrosProperty) {
-          
 
+          if (prop.toLowerCase() === "$") {
+            logger.info(`🔍 Skipping $ property: '${prop}'`);
+            continue; // ✅ Skip this iteration of the loop
+          }
           if (Array.isArray(macrosProperty[prop]) && macrosProperty[prop].length > 0) {
             const firstItem = macrosProperty[prop][0];
 
             if (firstItem && typeof firstItem === "object" && "$" in firstItem && "value" in firstItem.$) {
               macros[prop.toLowerCase()] = String(firstItem.$.value);
-          
+
             } else {
               logger.warn(`⚠️ Unexpected structure for macro '${prop}':`, firstItem);
             }
@@ -245,7 +248,7 @@ export class ClarionExtensionCommands {
     }
 
     logger.info("✅ Final Extracted Macros:", macros);
-    
+
     return macros;
   }
 
@@ -289,7 +292,7 @@ export class ClarionExtensionCommands {
 
       window.showInformationMessage(`Solution file selected: ${solutionFilePath}`);
     } catch (error) {
-      logger.error("Error selecting solution file:", error);
+      logger.info("Error selecting solution file:", error);
       window.showErrorMessage("An error occurred while selecting the solution file.");
     }
   }
@@ -310,8 +313,8 @@ export class ClarionExtensionCommands {
     let versions = config.get<string[]>('clarion.versions', []);
 
     const choices = versions.length > 0
-        ? [...versions, "🔹 Add new version..."]
-        : ["🔹 Add new version..."];
+      ? [...versions, "🔹 Add new version..."]
+      : ["🔹 Add new version..."];
 
     const selectedVersion = await window.showQuickPick(choices, { placeHolder: "Select a Clarion version" });
 
@@ -320,29 +323,29 @@ export class ClarionExtensionCommands {
 
     // ✅ Handle manual version entry
     if (selectedVersion === "🔹 Add new version...") {
-        const manualVersion = await window.showInputBox({
-            prompt: "Enter a Clarion version (e.g., Clarion 11.1.13855):",
-            placeHolder: "Clarion 11.1.XXXXX"
-        });
+      const manualVersion = await window.showInputBox({
+        prompt: "Enter a Clarion version (e.g., Clarion 11.1.13855):",
+        placeHolder: "Clarion 11.1.XXXXX"
+      });
 
-        if (!manualVersion) {
-            window.showWarningMessage("Clarion version selection was canceled.");
-            return;
-        }
+      if (!manualVersion) {
+        window.showWarningMessage("Clarion version selection was canceled.");
+        return;
+      }
 
-        // ✅ Ensure the new version is added to the list
-        versions.push(manualVersion);
-        await config.update('clarion.versions', versions, ConfigurationTarget.Workspace);
-        await config.update('clarion.version', manualVersion, ConfigurationTarget.Workspace);
+      // ✅ Ensure the new version is added to the list
+      versions.push(manualVersion);
+      await config.update('clarion.versions', versions, ConfigurationTarget.Workspace);
+      await config.update('clarion.version', manualVersion, ConfigurationTarget.Workspace);
 
-        window.showInformationMessage(`Added and selected Clarion version: ${manualVersion}`);
-        return; // ✅ Ensure we EXIT after setting the version
+      window.showInformationMessage(`Added and selected Clarion version: ${manualVersion}`);
+      return; // ✅ Ensure we EXIT after setting the version
     }
 
     // ✅ If user selects an existing version, just set it and exit
     await config.update('clarion.version', selectedVersion, ConfigurationTarget.Workspace);
     window.showInformationMessage(`Selected Clarion version: ${selectedVersion}`);
-}
+  }
 
 
 
@@ -369,7 +372,7 @@ export class ClarionExtensionCommands {
         }
       }
     } catch (error) {
-      logger.error(String(error));
+      logger.info(String(error));
     }
   }
   static async followLink(documentManager: DocumentManager) {

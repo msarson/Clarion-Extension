@@ -124,7 +124,7 @@ export class SolutionParser {
             }
         }
 
-        logger.warn(`❌ File "${file}" not found in redirection paths`);
+        logger.error(`❌ File "${file}" not found in redirection paths`);
         return null;
     }
 

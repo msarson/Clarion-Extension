@@ -13,14 +13,14 @@
     },
     "dependencies": {
         "vscode-languageserver": "^7.0.0",
-        "vscode-languageserver-textdocument": "^1.0.1",
-        "vscode-languageserver-protocol-foldingprovider": "^2.0.1"
+        "vscode-languageserver-protocol-foldingprovider": "^2.0.1",
+        "vscode-languageserver-textdocument": "^1.0.1"
     },
-   "resolutions": {
-    "mocha": "^11.1.0",
-    "mkdirp": "^3.0.1",
-    "minimatch": "^10.0.1",
-    "minimist": "^1.2.6"
+    "resolutions": {
+        "mocha": "^11.1.0",
+        "mkdirp": "^3.0.1",
+        "minimatch": "^10.0.1",
+        "minimist": "^1.2.6"
     },
     "scripts": {}
 }

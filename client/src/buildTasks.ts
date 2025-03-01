@@ -243,17 +243,17 @@ function setupBuildCompletionHandler(buildLogPath: string) {
 function processTaskCompletion(event: TaskProcessEndEvent, buildLogPath: string) {
     fs.readFile(buildLogPath, "utf8", (err, data) => {
         if (err) {
-            logger.error("Error reading build log:", err);
+            logger.info("Error reading build log:", err);
         } else {
             logger.info("Captured Build Output");
-            logger.warn(data);
+            logger.info(data);
             processBuildErrors(data);
         }
 
         // Delete the temporary log file after processing
         fs.unlink(buildLogPath, (unlinkErr) => {
             if (unlinkErr) {
-                logger.warn("Failed to delete build log:", unlinkErr);
+                logger.info("Failed to delete build log:", unlinkErr);
             } else {
                 logger.info("Deleted temporary build log");
             }

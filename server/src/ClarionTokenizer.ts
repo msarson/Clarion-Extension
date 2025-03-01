@@ -1,9 +1,5 @@
 import logger from "./logger.js";
 
-
-
-
-
 export enum TokenType {
     Comment,
     String,
@@ -21,7 +17,7 @@ export enum TokenType {
     TypeAnnotation,
     ImplicitVariable,
     Structure,
-    ReferenceVariable,  // ✅ NEW: Handles cases like Queue:Browse:1
+    ReferenceVariable,
     LineContinuation,
     Delimiter,
     FunctionArgumentParameter,
@@ -31,25 +27,20 @@ export enum TokenType {
     Unknown,
     Label,
     EndStatement,
-    clarionDocument
+    ClarionDocument // ✅ PROGRAM / MEMBER token type
 }
-
-
-
-
-
 
 export interface Token {
     type: TokenType;
     value: string;
     line: number;
     start: number;
-    isStructure?: boolean;       // ✅ True if this token starts a structure
-    structureFinishesAt?: number; // ✅ The line number where the structure ends
-    isProcedure?: boolean;       // ✅ True if this token starts a procedure
-    procedureFinishesAt?: number; // ✅ The line number where the procedure ends
-    isRoutine?: boolean;         // ✅ True if this token starts a routine
-    routineFinishesAt?: number;   // ✅ The line number where the routine ends
+    isStructure?: boolean;
+    structureFinishesAt?: number;
+    isProcedure?: boolean;
+    procedureFinishesAt?: number;
+    isRoutine?: boolean;
+    routineFinishesAt?: number;
 }
 
 export class ClarionTokenizer {
@@ -61,138 +52,47 @@ export class ClarionTokenizer {
         this.tokens = [];
     }
 
+    /** ✅ Public method to tokenize text */
     public tokenize(): Token[] {
-        logger.warn("🔍 [DEBUG] Starting tokenization...");
+        logger.info("🔍 [Tokenizer] Starting tokenization...");
         const lines = this.text.split(/\r?\n/);
 
-        let structureStack: { tokenIndex: number, type: string, startLine: number }[] = [];
-        let procedureStack: { tokenIndex: number, startLine: number }[] = [];
-        let routineStack: { tokenIndex: number, startLine: number }[] = [];
-        let insideClassOrInterfaceOrMap = false;
 
+        
+        this.tokenizeLines(lines); // ✅ Step 1: Tokenize all lines
+        this.analyzeTokenRelationships(); // ✅ Step 2: Process relationships
+
+        logger.info("🔍 [Tokenizer] Tokenization complete.");
+        return this.tokens;
+    }
+
+    /** ✅ Step 1: Tokenize all lines */
+    private tokenizeLines(lines: string[]): void {
         for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
             const line = lines[lineNumber];
-            if (line.trim() === "") continue;
+            if (line.trim() === "") continue; // ✅ Skip blank lines
+
             let position = 0;
-            let column = 0;
-            const leadingSpaces = line.match(/^(\s*)/);
-            if (leadingSpaces) column = leadingSpaces[0].length;
+            let column = line.match(/^(\s*)/)?.[0].length || 0;
 
             while (position < line.length) {
                 const substring = line.slice(position);
                 let matched = false;
 
-                if (line.trim() === "") break;
-
-                /** 🔍 Debugging: Start Processing Line */
-                logger.info(`📌 [DEBUG] Processing line ${lineNumber}: "${line.trim()}"`);
-
-                const orderedTokenTypes: TokenType[] = [
-                    TokenType.Comment, TokenType.clarionDocument, TokenType.Label, TokenType.LineContinuation, TokenType.String, TokenType.ReferenceVariable,
-                    TokenType.Type, TokenType.PointerParameter, TokenType.FieldEquateLabel, TokenType.Property,
-                    TokenType.PropertyFunction, TokenType.EndStatement, TokenType.Keyword, TokenType.Structure, TokenType.FunctionArgumentParameter,
-                    TokenType.TypeAnnotation, TokenType.Function, TokenType.Directive, TokenType.Number,
-                    TokenType.Operator, TokenType.Class, TokenType.Attribute, TokenType.Constant, TokenType.Variable,
-                    TokenType.ImplicitVariable, TokenType.Delimiter, TokenType.Unknown
-                ];
-
                 for (const tokenType of orderedTokenTypes) {
                     const pattern = tokenPatterns[tokenType];
-
-                    if (!pattern) {
-                        logger.info(`⚠️ [DEBUG] No regex pattern found for ${TokenType[tokenType]}`);
-                        continue;
-                    }
-
-                    if (tokenType === TokenType.Label && column != 0) {
-                        continue;
-                    }
-                    
+                    if (!pattern) continue;
+                    if (tokenType === TokenType.Label && column !== 0) continue; // ✅ Labels must be in column 0
 
                     let match = pattern.exec(substring);
                     if (match && match.index === 0) {
-                        // if the match is a structure, make sure the character berfore it is a space 
-                        if (tokenType === TokenType.Structure && position > 0 && line[position - 1] !== " ") {
-                            logger.info(`⚠️ [DEBUG] Ignoring STRUCTURE at Column ${column} (No space before)`);
-                            continue;
-                        }
-                       
-                        
-                        logger.info(`✅                     [DEBUG] Matched TokenType: ${TokenType[tokenType]} | Value: "${match[0]}" at Column ${column}`);
-
                         let newToken: Token = {
                             type: tokenType,
-                            value: match[0],
+                            value: match[0].trim(),
                             line: lineNumber,
                             start: column
                         };
 
-                        // ✅ Debugging for STRUCTURE matching
-                        if (tokenType === TokenType.Structure) {
-                            newToken.isStructure = true;
-                            structureStack.push({
-                                tokenIndex: this.tokens.length,
-                                type: match[0].trim(),
-                                startLine: lineNumber
-                            });
-                            logger.info(`🔍 [DEBUG] STRUCTURE START detected: '${match[0].trim()}' at Line ${lineNumber}`);
-                        }
-
-                        // ✅ Debugging for END matching
-                        if (tokenType === TokenType.EndStatement) {// && match[0].toUpperCase() === "END") {
-                            const lastStructure = structureStack.pop();
-                            if (lastStructure) {
-                                this.tokens[lastStructure.tokenIndex].structureFinishesAt = lineNumber;
-                                logger.info(`✅ [DEBUG] STRUCTURE '${lastStructure.type}' ends at Line ${lineNumber}`);
-                            } else {
-                                logger.info(`⚠️ [WARNING] Unmatched END at Line ${lineNumber} (No open STRUCTURE)`);
-                            }
-                        }
-
-                        // ✅ Debugging for CLASS, INTERFACE, MAP scope detection
-                        if (tokenType === TokenType.Structure && ["CLASS", "INTERFACE", "MAP"].includes(match[0].toUpperCase())) {
-                            insideClassOrInterfaceOrMap = true;
-                            logger.info(`🔍 [DEBUG] Inside CLASS/INTERFACE/MAP at Line ${lineNumber}`);
-                        }
-
-                        if (tokenType === TokenType.EndStatement) {//  && match[0].toUpperCase() === "END") {
-                            insideClassOrInterfaceOrMap = false;
-                            logger.info(`✅ [DEBUG] Leaving CLASS/INTERFACE/MAP scope at Line ${lineNumber}`);
-                        }
-
-                        // ✅ Debugging for PROCEDURE matching
-                        if (tokenType === TokenType.Keyword && match[0].toUpperCase() === "PROCEDURE") {
-                            if (!insideClassOrInterfaceOrMap) {
-                                if (procedureStack.length > 0) {
-                                    const lastProcedure = procedureStack.pop();
-                                    if (lastProcedure) {
-                                        this.tokens[lastProcedure.tokenIndex].procedureFinishesAt = lineNumber - 1;
-                                        logger.info(`✅ [DEBUG] PROCEDURE at Line ${lastProcedure.startLine} finishes at Line ${lineNumber - 1}`);
-                                    }
-                                }
-                                newToken.isProcedure = true;
-                                procedureStack.push({ tokenIndex: this.tokens.length, startLine: lineNumber });
-                                logger.info(`🔍 [DEBUG] PROCEDURE START detected at Line ${lineNumber}`);
-                            } else {
-                                logger.info(`🚫 [DEBUG] Ignoring PROCEDURE at Line ${lineNumber} (Inside ${insideClassOrInterfaceOrMap})`);
-                            }
-                        }
-
-                        // ✅ Debugging for ROUTINE matching
-                        if (tokenType === TokenType.Keyword && match[0].toUpperCase() === "ROUTINE") {
-                            if (routineStack.length > 0) {
-                                const lastRoutine = routineStack.pop();
-                                if (lastRoutine) {
-                                    this.tokens[lastRoutine.tokenIndex].routineFinishesAt = lineNumber - 1;
-                                    logger.info(`✅ [DEBUG] ROUTINE at Line ${lastRoutine.startLine} finishes at Line ${lineNumber - 1}`);
-                                }
-                            }
-                            newToken.isRoutine = true;
-                            routineStack.push({ tokenIndex: this.tokens.length, startLine: lineNumber });
-                            logger.info(`🔍 [DEBUG] ROUTINE START detected at Line ${lineNumber}`);
-                        }
-
-                        // ✅ Pushing token to `this.tokens`
                         this.tokens.push(newToken);
                         position += match[0].length;
                         column += match[0].length;
@@ -202,56 +102,132 @@ export class ClarionTokenizer {
                 }
 
                 if (!matched) {
-                  //  logger.info(`⚠️ [DEBUG] No token matched at Column ${column}, skipping character.`);
                     position++;
                     column++;
                 }
             }
+        }
+    }
 
-        });
+    /** ✅ Step 2: Analyze Token Relationships */
+    private analyzeTokenRelationships(): void {
+        let structureStack: { tokenIndex: number, type: string, startLine: number }[] = [];
+        let procedureStack: { tokenIndex: number, startLine: number }[] = [];
+        let routineStack: { tokenIndex: number, startLine: number }[] = [];
+        let insideClassOrInterfaceOrMapDepth = 0; // Track nesting levels
+
+        for (let i = 0; i < this.tokens.length; i++) {
+            const token = this.tokens[i];
+
+            // ✅ Detect STRUCTURES
+            if (token.type === TokenType.Structure) {
+                logger.info(`🔍 [Tokenizer] Structure Detected: '${token.value}' at Line ${token.line}, Ends at ${token.structureFinishesAt ?? "UNKNOWN"}`);
+
+                token.isStructure = true;
+                structureStack.push({ tokenIndex: i, type: token.value.trim(), startLine: token.line });
+
+                // ✅ If it's a CLASS, MAP, or INTERFACE, enter a new scope
+                if (["CLASS", "MAP", "INTERFACE"].includes(token.value.toUpperCase())) {
+                    insideClassOrInterfaceOrMapDepth++;
+                }
+            }
+
+            // ✅ Detect END statements (Closing last opened structure)
+            if (token.type === TokenType.EndStatement) {
+                logger.info(`🔍 [Tokenizer] [CHECK] END detected at Line ${token.line}`);
+                const lastStructure = structureStack.pop();
+                if (lastStructure) {
+                    this.tokens[lastStructure.tokenIndex].structureFinishesAt = token.line;
+                    logger.info(`✅ [Tokenizer] [CHECK] Structure '${lastStructure.type}' starts at Line ${lastStructure.startLine} ends at Line ${token.line}`);
+                    // ✅ If exiting a CLASS, MAP, or INTERFACE, decrease scope depth
+                    if (["CLASS", "MAP", "INTERFACE"].includes(lastStructure.type.toUpperCase())) {
+                        insideClassOrInterfaceOrMapDepth = Math.max(0, insideClassOrInterfaceOrMapDepth - 1);
+                    }
+                } else {
+                    logger.warn(`⚠️[Tokenizer] [WARNING] Unmatched END at Line ${token.line}`);
+                }
+            }
+
+            // ✅ Handle PROCEDURE tokens (Only if not inside CLASS/MAP/INTERFACE)
+            if (token.type === TokenType.Keyword && token.value.toUpperCase() === "PROCEDURE") {
+                if (insideClassOrInterfaceOrMapDepth === 0) {
+                    if (procedureStack.length > 0) {
+                        const lastProcedure = procedureStack.pop();
+                        if (lastProcedure) {
+                            this.tokens[lastProcedure.tokenIndex].procedureFinishesAt = token.line - 1;
+                        }
+                    }
+                    token.isProcedure = true;
+                    procedureStack.push({ tokenIndex: i, startLine: token.line });
+                } else {
+                    // ✅ Ensure PROCEDURE inside class/map is explicitly NOT marked
+                    token.isProcedure = false;
+                }
+            }
+
+            // ✅ Handle ROUTINE tokens
+            if (token.type === TokenType.Keyword && token.value.toUpperCase() === "ROUTINE") {
+                if (routineStack.length > 0) {
+                    const lastRoutine = routineStack.pop();
+                    if (lastRoutine) {
+                        this.tokens[lastRoutine.tokenIndex].routineFinishesAt = token.line - 1;
+                    }
+                }
+                token.isRoutine = true;
+                routineStack.push({ tokenIndex: i, startLine: token.line });
+            }
+        }
 
         // ✅ Close any remaining open STRUCTURES at EOF
         while (structureStack.length > 0) {
             const lastStructure = structureStack.pop();
-            if (lastStructure) {
+            if (lastStructure !== undefined) {
                 this.tokens[lastStructure.tokenIndex].structureFinishesAt = this.tokens[this.tokens.length - 1]?.line ?? 0;
-                logger.info(`⚠️ [DEBUG] STRUCTURE [${lastStructure.type}] at line [${lastStructure.startLine}]' finishes at EOF`);
             }
         }
 
-        // ✅ Close any remaining open PROCEDURE at EOF
+        // ✅ Close any remaining open PROCEDURES at EOF
         while (procedureStack.length > 0) {
             const lastProcedure = procedureStack.pop();
-            if (lastProcedure) {
+            if (lastProcedure !== undefined) {
                 this.tokens[lastProcedure.tokenIndex].procedureFinishesAt = this.tokens[this.tokens.length - 1]?.line ?? 0;
-                logger.info(`⚠️ [DEBUG] PROCEDURE at Line ${lastProcedure.startLine} finishes at EOF`);
             }
         }
 
-        // ✅ Close any remaining open ROUTINE at EOF
+        // ✅ Close any remaining open ROUTINES at EOF
         while (routineStack.length > 0) {
             const lastRoutine = routineStack.pop();
-            if (lastRoutine) {
+            if (lastRoutine !== undefined) {
                 this.tokens[lastRoutine.tokenIndex].routineFinishesAt = this.tokens[this.tokens.length - 1]?.line ?? 0;
-                logger.info(`⚠️ [DEBUG] ROUTINE at Line ${lastRoutine.startLine} finishes at EOF`);
             }
         }
-        logger.warn("🔍 [DEBUG] Tokenization complete.");
-        return this.tokens;
+        for (const token of this.tokens) {
+            if (token.isStructure && !token.structureFinishesAt) {
+                logger.warn(`⚠️[Tokenizer] [WARNING] Structure '${token.value}' at Line ${token.line} is missing an end marker!`);
+            }
+        }
+
     }
-
-
 
 
 }
 
+/** ✅ Ordered token types */
+const orderedTokenTypes: TokenType[] = [
+    TokenType.Comment, TokenType.ClarionDocument, TokenType.Label, TokenType.LineContinuation, TokenType.String, TokenType.ReferenceVariable,
+    TokenType.Type, TokenType.PointerParameter, TokenType.FieldEquateLabel, TokenType.Property,
+    TokenType.PropertyFunction, TokenType.EndStatement, TokenType.Keyword, TokenType.Structure, TokenType.FunctionArgumentParameter,
+    TokenType.TypeAnnotation, TokenType.Function, TokenType.Directive, TokenType.Number,
+    TokenType.Operator, TokenType.Class, TokenType.Attribute, TokenType.Constant, TokenType.Variable,
+    TokenType.ImplicitVariable, TokenType.Delimiter, TokenType.Unknown
+];
 const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     MODULE: /^\s*MODULE\b/i,  // MODULE should be the first word on the line
     APPLICATION: /\bAPPLICATION\b/i,
     CASE: /\bCASE\b/i,
     CLASS: /\bCLASS\b/i,
     GROUP: /\bGROUP\b/i,
-    FILE: /\bFILE\b/i,
+    FILE: /\sFILE\b/i,
     INTERFACE: /\bINTERFACE\b/i,
     IF: /\bIF\b/i,  // ✅ Re-added "IF" as a structure
     JOIN: /\bJOIN\b/i,
@@ -281,8 +257,7 @@ const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     ACCEPT: /\bACCEPT\b/i,  // ✅ Re-added
     OLE: /\bOLE\b/i
 };
-
-
+/** ✅ Token Patterns (Kept Exactly the Same) */
 export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Comment]: /!.*/i,
     [TokenType.LineContinuation]: /&?\s*\|.*/i,
@@ -291,7 +266,7 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.FunctionArgumentParameter]: /\b[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)/i,  // Captures anything inside ()
     [TokenType.PointerParameter]: /\*\s*\b[A-Za-z_][A-Za-z0-9_]*\b/i,
     [TokenType.FieldEquateLabel]: /\?[A-Za-z_][A-Za-z0-9_]*/i,
-    [TokenType.clarionDocument]: /\b(?:PROGRAM|MEMBER)\b/i,
+    [TokenType.ClarionDocument]: /\b(?:PROGRAM|MEMBER)\b/i,
     [TokenType.Keyword]: /\b(?:RETURN|OF|ELSE|THEN|UNTIL|EXIT|NEW|PROCEDURE|ROUTINE|PROC|BREAK)\b/i,
     [TokenType.Structure]: new RegExp(
         Object.values(STRUCTURE_PATTERNS).map(r => r.source).join("|"), "i"
@@ -316,7 +291,3 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.ReferenceVariable]: /&[A-Za-z_][A-Za-z0-9_]*:[A-Za-z_][A-Za-z0-9_:]*/i,
     [TokenType.Unknown]: /\S+/i
 };
-
-
-
-
