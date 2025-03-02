@@ -1,6 +1,7 @@
 import { DocumentLinkProvider, TextDocument, CancellationToken, ProviderResult, DocumentLink } from 'vscode';
 import { DocumentManager } from '../documentManager'; // Adjust the import path based on your project structure
-import logger from '../logger';
+import LoggerManager from '../logger';
+const logger = LoggerManager.getLogger("DocumentLinkProvider");
 
 
 export class ClarionDocumentLinkProvider implements DocumentLinkProvider {

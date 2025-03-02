@@ -1,10 +1,10 @@
 class Logger {
     private level: "debug" | "info" | "warn" | "error";
-    
-    constructor(level: "debug" | "info" | "warn" | "error" = "debug") {
+    private name: string;
+
+    constructor(name: string, level: "debug" | "info" | "warn" | "error" = "debug") {
+        this.name = name;
         this.level = level;
-
-
     }
 
     private getTimestamp(): string {
@@ -18,38 +18,44 @@ class Logger {
 
     debug(message: string, ...args: any[]) {
         if (this.shouldLog("debug")) {
-           console.log(`[${this.getTimestamp()}] 🐛 DEBUG:`, message, ...args);
+            console.log(`[${this.getTimestamp()}] [${this.name}] 🐛 DEBUG:`, message, ...args);
         }
     }
 
     info(message: string, ...args: any[]) {
         if (this.shouldLog("info")) {
-            console.log(`[${this.getTimestamp()}] ℹ️ INFO:`, message, ...args);
+            console.log(`[${this.getTimestamp()}] [${this.name}] ℹ️ INFO:`, message, ...args);
         }
     }
 
     warn(message: string, ...args: any[]) {
         if (this.shouldLog("warn")) {
-            console.log(`[${this.getTimestamp()}] ⚠️ WARN:`, message, ...args);
+            console.log(`[${this.getTimestamp()}] [${this.name}] ⚠️ WARN:`, message, ...args);
         }
     }
 
     error(message: string, ...args: any[]) {
         if (this.shouldLog("error")) {
-            console.log(`[${this.getTimestamp()}] ❌ ERROR:`, message, ...args);
+            console.log(`[${this.getTimestamp()}] [${this.name}] ❌ ERROR:`, message, ...args);
         }
     }
 
     setLevel(newLevel: "debug" | "info" | "warn" | "error") {
         this.level = newLevel;
-         console.log(`[${this.getTimestamp()}] 🔄 LOG LEVEL SET TO: ${newLevel.toUpperCase()}`);
+        console.log(`[${this.getTimestamp()}] [${this.name}] 🔄 LOG LEVEL SET TO: ${newLevel.toUpperCase()}`);
     }
 }
 
-// ✅ Export an instance of the logger
-const logger = new Logger("warn"); // Default level: debug
-logger.info("✅ [Logger] Direct logger.info inside logger");
-logger.info("✅ [Logger] Logging function called!");
-logger.info("✅ [Logger] Logging function finished!");
+// ✅ Logger Manager to store multiple logger instances
+class LoggerManager {
+    private static loggers: Map<string, Logger> = new Map();
 
-export default logger;
+    static getLogger(name: string, level: "debug" | "info" | "warn" | "error" = "warn"): Logger {
+        if (!LoggerManager.loggers.has(name)) {
+            LoggerManager.loggers.set(name, new Logger(name, level));
+        }
+        return LoggerManager.loggers.get(name)!;
+    }
+}
+
+export default LoggerManager;

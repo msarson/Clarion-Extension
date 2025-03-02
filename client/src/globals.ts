@@ -2,7 +2,8 @@ import { workspace, ConfigurationTarget, window } from 'vscode';
 import * as fs from 'fs';
 import { parseStringPromise } from 'xml2js';
 import { ClarionExtensionCommands } from './ClarionExtensionCommands';
-import logger from './logger';
+import LoggerManager from './logger';
+const logger = LoggerManager.getLogger("Globals");
 
 
 // ✅ These are stored in workspace settings

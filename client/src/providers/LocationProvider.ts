@@ -5,7 +5,8 @@ import { ClarionProjectClass } from '../UtilityClasses/ClarionProject';
 
 import { globalSettings } from '../globals';
 import { SolutionParser } from '../Parser/SolutionParser';
-import logger from '../logger';
+import LoggerManager from '../logger';
+const logger = LoggerManager.getLogger("LocationProvider");
 
 
 // Import global variables from extension.ts

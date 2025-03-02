@@ -3,7 +3,8 @@ import { TreeNode } from './TreeNode';
 import { ClarionProject, ClarionSourcerFile } from './Parser/ClarionProject';
 import { ClarionSolution } from './Parser/ClarionSolution';
 import { SolutionParser } from './Parser/SolutionParser';
-import logger from './logger';
+import LoggerManager from './logger';
+const logger = LoggerManager.getLogger("SolutionTreeDataProvider");
 
 
 export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {

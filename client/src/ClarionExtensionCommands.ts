@@ -4,7 +4,8 @@ import * as fs from 'fs';
 import { parseString } from 'xml2js';
 import { DocumentManager } from './documentManager';
 import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, setGlobalClarionSelection, globalSettings, } from './globals';
-import logger from './logger';
+import LoggerManager from './logger';
+const logger = LoggerManager.getLogger("ExtensionCommands");
 
 
 // Example: Updating the stored settings

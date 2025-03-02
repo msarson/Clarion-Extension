@@ -1,11 +1,11 @@
 import { DocumentSymbol, SymbolKind, Range } from "vscode-languageserver-types";
 import { StructureNode } from "./clarionStructureExtractor.js";
 import { TokenType } from "./ClarionTokenizer.js";
-import logger from "./logger.js";
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token } from './ClarionTokenizer.js';
 import ClarionStructureExtractor from './clarionStructureExtractor.js';
-
+import LoggerManager from './logger';
+const logger = LoggerManager.getLogger("ClarionFileParser");
 enum ClarionSymbolKind {
     Root = SymbolKind.Module,
     Procedure = SymbolKind.Method,

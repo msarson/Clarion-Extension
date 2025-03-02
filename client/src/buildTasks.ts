@@ -2,10 +2,10 @@ import { workspace, window, tasks, Task, ShellExecution, TaskScope, TaskProcessE
 import { globalSolutionFile, globalSettings } from "./globals";
 import * as path from "path";
 import * as fs from "fs";
-import logger from "./logger";
 import processBuildErrors from "./processBuildErrors";
 import { SolutionParser } from "./Parser/SolutionParser";
-
+import LoggerManager from './logger';
+const logger = LoggerManager.getLogger("BuildTasks");
 /**
  * Main entry point for the Clarion build process
  */

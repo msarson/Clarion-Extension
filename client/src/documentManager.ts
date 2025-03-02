@@ -18,7 +18,8 @@ import * as path from 'path';
 
 import { globalSettings } from './globals';
 import { SolutionParser } from './Parser/SolutionParser';
-import logger from './logger';
+import LoggerManager from './logger';
+const logger = LoggerManager.getLogger("DocumentManager");
 
 interface DocumentInfo {
     statementLocations: ClarionLocation[];

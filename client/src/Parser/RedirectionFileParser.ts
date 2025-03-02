@@ -2,7 +2,8 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { globalSettings } from '../globals';
 import { workspace } from 'vscode';
-import logger from '../logger';
+import LoggerManager from '../logger';
+const logger = LoggerManager.getLogger("RedurectionParser");
 
 
 // Import global variables from the extension

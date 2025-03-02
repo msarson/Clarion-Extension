@@ -15,10 +15,11 @@ import { parseStringPromise } from 'xml2js';
 import * as fs from 'fs';
 import { RedirectionFileParser } from './Parser/RedirectionFileParser';
 import { SolutionParser } from './Parser/SolutionParser';
-import logger from './logger';
+
 import { exec } from 'child_process';
 import { runClarionBuild } from './buildTasks';
-
+import LoggerManager from './logger';
+const logger = LoggerManager.getLogger("Extension");
 
 let client: LanguageClient | undefined;
 let solutionParser: SolutionParser | undefined;

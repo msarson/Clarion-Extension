@@ -1,5 +1,5 @@
-import logger from "./logger.js";
-
+import LoggerManager from './logger';
+const logger = LoggerManager.getLogger("Tokenizer");
 export enum TokenType {
     Comment,
     String,
@@ -82,10 +82,14 @@ export class ClarionTokenizer {
                 for (const tokenType of orderedTokenTypes) {
                     const pattern = tokenPatterns[tokenType];
                     if (!pattern) continue;
+                 
                     if (tokenType === TokenType.Label && column !== 0) continue; // ✅ Labels must be in column 0
 
                     let match = pattern.exec(substring);
                     if (match && match.index === 0) {
+                        if (tokenType == TokenType.EndStatement) {
+                            logger.warn(`🔍 End Statement Detected: at Line ${lineNumber} ${line}`);
+                        }
                         let newToken: Token = {
                             type: tokenType,
                             value: match[0].trim(),
@@ -118,7 +122,7 @@ export class ClarionTokenizer {
 
         for (let i = 0; i < this.tokens.length; i++) {
             const token = this.tokens[i];
-
+           
             // ✅ Detect STRUCTURES
             if (token.type === TokenType.Structure) {
                 logger.info(`🔍 [Tokenizer] Structure Detected: '${token.value}' at Line ${token.line}, Ends at ${token.structureFinishesAt ?? "UNKNOWN"}`);
@@ -159,6 +163,7 @@ export class ClarionTokenizer {
                     }
                     token.isProcedure = true;
                     procedureStack.push({ tokenIndex: i, startLine: token.line });
+                    logger.warn(`🔍 Procedure Detected at Line ${token.line}, Ends at ${token.procedureFinishesAt ?? "UNKNOWN"}`);
                 } else {
                     // ✅ Ensure PROCEDURE inside class/map is explicitly NOT marked
                     token.isProcedure = false;

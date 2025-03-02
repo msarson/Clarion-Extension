@@ -1,6 +1,7 @@
 import { FoldingRange, FoldingRangeKind } from "vscode-languageserver-types";
 import { Token, TokenType } from "./ClarionTokenizer.js";
-import logger from "./logger.js";
+import LoggerManager from './logger';
+const logger = LoggerManager.getLogger("FoldingProvider");
 
 
 

@@ -7,7 +7,8 @@ import { ClarionProject, ClarionSourcerFile } from './ClarionProject';
 import { ClarionSolution } from './ClarionSolution';
 import { RedirectionFileParser } from './RedirectionFileParser';
 import { globalSettings } from '../globals';
-import logger from '../logger';
+import LoggerManager from '../logger';
+const logger = LoggerManager.getLogger("SolutionParser");
 
 
 export class SolutionParser {
