@@ -58,7 +58,7 @@ class ClarionStructureExtractor {
             name: "Unnamed",
             type: token.value.toUpperCase(),
             start: token.line,
-            end: token.structureFinishesAt ?? null,
+            end: token.finishesAt ?? null,
             tokens: [],
             children: []
         };
@@ -75,21 +75,21 @@ class ClarionStructureExtractor {
 
         // ✅ Find all child structures inside this structure
         let childStructures = this.tokens.filter(t =>
-            t.isStructure &&
-            t.line > token.line && t.line < (token.structureFinishesAt ?? Number.MAX_VALUE)
+            t.subType === TokenType.Structure &&
+            t.line > token.line && t.line < (token.finishesAt ?? Number.MAX_VALUE)
         );
 
         logger.info(`🔍 [ExtractStructures] Found ${childStructures.length} child structures inside '${structureNode.type}'`);
 
         // ✅ Extract tokens, excluding those inside child structures
         structureNode.tokens = this.tokens.filter(t => {
-            if (t.line < token.line || t.line > (token.structureFinishesAt ?? Number.MAX_VALUE)) {
+            if (t.line < token.line || t.line > (token.finishesAt ?? Number.MAX_VALUE)) {
                 return false;
             }
 
             // ✅ Exclude tokens that belong to child structures
             const isInsideChild = childStructures.some(child =>
-                t.line >= child.line && t.line <= (child.structureFinishesAt ?? Number.MAX_VALUE)
+                t.line >= child.line && t.line <= (child.finishesAt ?? Number.MAX_VALUE)
             );
 
             if (isInsideChild) {

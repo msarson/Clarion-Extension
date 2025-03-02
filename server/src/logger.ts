@@ -2,7 +2,7 @@ class Logger {
     private level: "debug" | "info" | "warn" | "error";
     private name: string;
 
-    constructor(name: string, level: "debug" | "info" | "warn" | "error" = "debug") {
+    constructor(name: string, level: "debug" | "info" | "warn" | "error" = "error") {
         this.name = name;
         this.level = level;
     }

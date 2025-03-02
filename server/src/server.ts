@@ -20,9 +20,8 @@ import { ClarionFoldingRangeProvider } from './ClarionFoldingRangeProvider';
 import { ClarionTokenizer, Token } from './ClarionTokenizer';
 
 import LoggerManager from './logger';
-import { log } from 'console';
 const logger = LoggerManager.getLogger("Server");
-logger.setLevel("info");
+// logger.setLevel("info");
 // ✅ Initialize Providers
 const clarionFoldingProvider = new ClarionFoldingRangeProvider();
 const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider();

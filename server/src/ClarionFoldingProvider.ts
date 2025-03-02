@@ -30,19 +30,19 @@ class ClarionFoldingProvider {
 
     /** 🔹 First pass: Process structures for folding */
     private foldStructures(): void {
-        const structureTokens = this.tokens.filter(t => t.isStructure);
+        const structureTokens = this.tokens.filter(t => t.subType === TokenType.Structure);
         for (const token of structureTokens) {
             
 
             logger.info(`🔹 [FoldinfProvider] Found STRUCTURE '${token.value}' at Line ${token.line}`);
-            if (token.structureFinishesAt !== undefined && token.line < token.structureFinishesAt) {
+            if (token.finishesAt !== undefined && token.line < token.finishesAt) {
                 this.foldingRanges.push({
                     startLine: token.line,
-                    endLine: token.structureFinishesAt,
+                    endLine: token.finishesAt,
                     kind: FoldingRangeKind.Region
                 });
     
-                logger.info(`✅ [FoldinfProvider] Folded STRUCTURE '${token.value}' from Line ${token.line} to ${token.structureFinishesAt}`);
+                logger.info(`✅ [FoldinfProvider] Folded STRUCTURE '${token.value}' from Line ${token.line} to ${token.finishesAt}`);
             } else {
                 logger.info(`🚫 [FoldinfProvider] Skipping STRUCTURE '${token.value}' at Line ${token.line} (No valid folding range or same line)`);
             }
@@ -53,29 +53,29 @@ class ClarionFoldingProvider {
     /** 🔹 Second pass: Process PROCEDURE, ROUTINE, and REGIONS */
     private foldProceduresAndRegions(): void {
         // ✅ Fold PROCEDURES
-        const procedureTokens = this.tokens.filter(t => t.procedureFinishesAt !== undefined);
+        const procedureTokens = this.tokens.filter(t => t.subType === TokenType.Procedure && t.finishesAt !== undefined);
     
         for (const token of procedureTokens) {
             this.foldingRanges.push({
                 startLine: token.line,
-                endLine: token.procedureFinishesAt!,
+                endLine: token.finishesAt!,
                 kind: FoldingRangeKind.Region
             });
     
-            logger.info(`✅ [FoldinfProvider] Folded PROCEDURE '${token.value}' from Line ${token.line} to ${token.procedureFinishesAt}`);
+            logger.info(`✅ [FoldingProvider] Folded PROCEDURE '${token.value}' from Line ${token.line} to ${token.finishesAt}`);
         }
     
         // ✅ Fold ROUTINES
-        const routineTokens = this.tokens.filter(t => t.routineFinishesAt !== undefined);
+        const routineTokens = this.tokens.filter(t => t.subType === TokenType.Routine && t.finishesAt !== undefined);
     
         for (const token of routineTokens) {
             this.foldingRanges.push({
                 startLine: token.line,
-                endLine: token.routineFinishesAt!,
+                endLine: token.finishesAt!,
                 kind: FoldingRangeKind.Region
             });
     
-            logger.info(`✅ [FoldinfProvider] Folded ROUTINE '${token.value}' from Line ${token.line} to ${token.routineFinishesAt}`);
+            logger.info(`✅ [FoldingProvider] Folded ROUTINE '${token.value}' from Line ${token.line} to ${token.finishesAt}`);
         }
     
         // ✅ Fold REGIONS (unchanged)
@@ -90,7 +90,7 @@ class ClarionFoldingProvider {
                 const label = labelMatch ? labelMatch[1] : undefined;
                 regionStack.push({ startLine: token.line, label });
     
-                logger.info(`🔹 [FoldinfProvider] Region START detected at Line ${token.line} (${label ?? "No Label"})`);
+                logger.info(`🔹 [FoldingProvider] Region START detected at Line ${token.line} (${label ?? "No Label"})`);
             }
     
             // ✅ Detect `!endregion` and close last opened REGION
@@ -103,7 +103,7 @@ class ClarionFoldingProvider {
                         kind: FoldingRangeKind.Region
                     });
     
-                    logger.info(`🔹 [FoldinfProvider] Region END detected from Line ${lastRegion.startLine} to ${token.line}`);
+                    logger.info(`🔹 [FoldingProvider] Region END detected from Line ${lastRegion.startLine} to ${token.line}`);
                 }
             }
         }
@@ -117,9 +117,10 @@ class ClarionFoldingProvider {
                 kind: FoldingRangeKind.Region
             });
     
-            logger.warn(`⚠️ [FoldinfProvider] Region END (at EOF) from Line ${lastRegion?.startLine ?? 0} to EOF`);
+            logger.warn(`⚠️ [FoldingProvider] Region END (at EOF) from Line ${lastRegion?.startLine ?? 0} to EOF`);
         }
     }
+    
     
 }
 
