@@ -52,7 +52,7 @@ export class ClarionDocumentSymbolProvider {
         for (const token of tokens) {
             const { type, value, line, subType, finishesAt } = token;
     
-            // ✅ Detect CLASS and other structures
+            // ✅ Detect CLASS, QUEUE, and other structures
             if (type === TokenType.Label) {
                 const nextToken = tokens[tokens.indexOf(token) + 1];
                 if (nextToken && ["QUEUE", "GROUP", "CLASS"].includes(nextToken.value.toUpperCase())) {
@@ -84,18 +84,18 @@ export class ClarionDocumentSymbolProvider {
             if (type === TokenType.Label && currentStructure) {
                 const nextToken = tokens[tokens.indexOf(token) + 1];
     
-                // 🔥 Capture full type definition (e.g., STRING(80), CLASS(WindowManager))
+                // 🔥 Capture full type definition (e.g., STRING(80), CLASS(WindowManager), &SomeType)
                 let variableType = nextToken?.value || "UnknownType";
                 let lookaheadIndex = tokens.indexOf(nextToken) + 1;
                 while (lookaheadIndex < tokens.length) {
                     const lookaheadToken = tokens[lookaheadIndex];
     
-                    if (lookaheadToken.value.startsWith("(")) {
+                    if (lookaheadToken.value.startsWith("(") || lookaheadToken.value.startsWith("&")) {
                         variableType += lookaheadToken.value;
                     } else if (lookaheadToken.value.endsWith(")")) {
                         variableType += lookaheadToken.value;
                         break;
-                    } else if (variableType.includes("(")) {
+                    } else if (variableType.includes("(") || variableType.startsWith("&")) {
                         variableType += lookaheadToken.value;
                     } else {
                         break;
@@ -114,18 +114,20 @@ export class ClarionDocumentSymbolProvider {
     
                 if (structureNodes.has(currentStructure)) {
                     structureNodes.get(currentStructure)!.children!.push(varSymbol);
-                    logger.info(`✅ Added Property '${value}' to '${currentStructure}'`);
+                    logger.info(`✅ Added Property '${value}' with Type '${variableType}' to '${currentStructure}'`);
                 }
                 continue;
             }
     
-            // ✅ Detect PROCEDURES & METHODS
+            // ✅ Detect ROOT PROCEDURES (Standalone ones)
             if (subType === TokenType.Procedure && finishesAt !== undefined) {
                 logger.info(`🔍 Found Procedure '${value}' at line ${line}`);
     
                 // ✅ Extract procedure name
                 const prevToken = tokens[tokens.indexOf(token) - 1];
                 let procedureName = prevToken?.type === TokenType.Label ? prevToken.value : "UnnamedProcedure";
+                let procedureType = value; // 🔥 Ensure we capture 'PROCEDURE()' details
+    
                 let parentNode: DocumentSymbol[];
     
                 if (procedureName.includes(".")) {
@@ -152,10 +154,10 @@ export class ClarionDocumentSymbolProvider {
                     parentNode = rootSymbol ? rootSymbol.children! : symbols;
                 }
     
-                // ✅ Create procedure symbol
+                // ✅ Create root procedure symbol with its type (PROCEDURE())
                 currentProcedure = DocumentSymbol.create(
                     procedureName,
-                    "",
+                    procedureType,
                     ClarionSymbolKind.Procedure,
                     this.getTokenRange(tokens, line, finishesAt),
                     this.getTokenRange(tokens, line, finishesAt),
@@ -208,6 +210,7 @@ export class ClarionDocumentSymbolProvider {
         logger.info(`🔍 [DocumentSymbolProvider] Finished processing tokens for document symbols.`);
         return symbols;
     }
+    
     
     
 
