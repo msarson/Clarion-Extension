@@ -83,20 +83,38 @@ export class ClarionDocumentSymbolProvider {
             // ✅ Detect CLASS Properties (Inside QUEUE/GROUP/CLASS)
             if (type === TokenType.Label && currentStructure) {
                 const nextToken = tokens[tokens.indexOf(token) + 1];
-                if (nextToken) {
-                    const varSymbol = DocumentSymbol.create(
-                        value,
-                        nextToken.value,
-                        ClarionSymbolKind.Variable,
-                        this.getTokenRange(tokens, line, line),
-                        this.getTokenRange(tokens, line, line),
-                        []
-                    );
     
-                    if (structureNodes.has(currentStructure)) {
-                        structureNodes.get(currentStructure)!.children!.push(varSymbol);
-                        logger.info(`✅ Added Property '${value}' to '${currentStructure}'`);
+                // 🔥 Capture full type definition (e.g., STRING(80), CLASS(WindowManager))
+                let variableType = nextToken?.value || "UnknownType";
+                let lookaheadIndex = tokens.indexOf(nextToken) + 1;
+                while (lookaheadIndex < tokens.length) {
+                    const lookaheadToken = tokens[lookaheadIndex];
+    
+                    if (lookaheadToken.value.startsWith("(")) {
+                        variableType += lookaheadToken.value;
+                    } else if (lookaheadToken.value.endsWith(")")) {
+                        variableType += lookaheadToken.value;
+                        break;
+                    } else if (variableType.includes("(")) {
+                        variableType += lookaheadToken.value;
+                    } else {
+                        break;
                     }
+                    lookaheadIndex++;
+                }
+    
+                const varSymbol = DocumentSymbol.create(
+                    value,
+                    variableType,
+                    ClarionSymbolKind.Variable,
+                    this.getTokenRange(tokens, line, line),
+                    this.getTokenRange(tokens, line, line),
+                    []
+                );
+    
+                if (structureNodes.has(currentStructure)) {
+                    structureNodes.get(currentStructure)!.children!.push(varSymbol);
+                    logger.info(`✅ Added Property '${value}' to '${currentStructure}'`);
                 }
                 continue;
             }
@@ -130,14 +148,6 @@ export class ClarionDocumentSymbolProvider {
     
                     parentNode = classNodes.get(className)!.children!;
                     procedureName = methodName;
-                    structureNodes.set(procedureName, DocumentSymbol.create(
-                        procedureName,
-                        "Method",
-                        ClarionSymbolKind.Procedure,
-                        this.getTokenRange(tokens, line, finishesAt),
-                        this.getTokenRange(tokens, line, finishesAt),
-                        []
-                    ));
                 } else {
                     parentNode = rootSymbol ? rootSymbol.children! : symbols;
                 }
@@ -158,6 +168,29 @@ export class ClarionDocumentSymbolProvider {
                 continue;
             }
     
+            // ✅ Detect ROUTINES inside the current procedure/method
+            if (subType === TokenType.Routine && finishesAt !== undefined && currentProcedure) {
+                const prevToken = tokens[tokens.indexOf(token) - 1];
+                const routineLabel = prevToken?.type === TokenType.Label ? prevToken.value : "UnnamedRoutine";
+    
+                const routSymbol = DocumentSymbol.create(
+                    routineLabel,
+                    "Routine",
+                    ClarionSymbolKind.Routine,
+                    this.getTokenRange(tokens, line, finishesAt),
+                    this.getTokenRange(tokens, line, finishesAt),
+                    []
+                );
+    
+                // ✅ Attach routine inside the current procedure
+                currentProcedure.children!.push(routSymbol);
+                insideDataBlock = false;
+                insideRoutine = true;
+    
+                logger.info(`✅ Added Routine '${routineLabel}' inside Procedure '${currentProcedure.name}'`);
+                continue;
+            }
+    
             // ✅ Detect END statement to properly close CLASS or QUEUE
             if (type === TokenType.EndStatement && currentStructure) {
                 logger.info(`✅ Closing ${structureNodes.get(currentStructure)?.detail} '${currentStructure}' at Line ${line}`);
@@ -175,6 +208,7 @@ export class ClarionDocumentSymbolProvider {
         logger.info(`🔍 [DocumentSymbolProvider] Finished processing tokens for document symbols.`);
         return symbols;
     }
+    
     
 
 
