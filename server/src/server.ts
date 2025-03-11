@@ -30,6 +30,9 @@ const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider();
 const connection = createConnection(ProposedFeatures.all);
 const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
 
+
+export let globalClarionSettings: any = {};
+
 // ✅ Token Cache for Performance
 
 
@@ -96,7 +99,7 @@ connection.onDocumentSymbol((params: DocumentSymbolParams) => {
 
     logger.info(`📂  Computing fresh document symbols for: ${document.uri}`);
     const tokens = getTokens(document);
-    return clarionDocumentSymbolProvider.provideDocumentSymbols(tokens);
+    return clarionDocumentSymbolProvider.provideDocumentSymbols(tokens, document.uri);
 });
 
 
@@ -109,6 +112,7 @@ documents.onDidClose(event => {
 // ✅ Server Initialization
 connection.onInitialize((params: InitializeParams): InitializeResult => {
     logger.info("⚡  Received onInitialize request from VS Code.");
+    globalClarionSettings = params.initializationOptions || {};
     return {
         capabilities: {
             foldingRangeProvider: true,
@@ -117,7 +121,7 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
     };
 });
 
-let serverInitialized = false;
+export let serverInitialized = false;
 
 // ✅ Server Fully Initialized
 connection.onInitialized(() => {

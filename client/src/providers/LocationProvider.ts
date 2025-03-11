@@ -1,15 +1,12 @@
 import { commands, TextDocument, window, Position, workspace, ViewColumn } from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { ClarionProjectClass } from '../UtilityClasses/ClarionProject';
-
-import { globalSettings } from '../globals';
+import { ClarionProject } from '../Parser/ClarionProject';
 import { SolutionParser } from '../Parser/SolutionParser';
 import LoggerManager from '../logger';
+
 const logger = LoggerManager.getLogger("LocationProvider");
-
-
-// Import global variables from extension.ts
+logger.setLevel("error");
 
 export interface ClarionLocation {
     fullFileName: string;
@@ -28,63 +25,48 @@ interface CustomRegExpMatch extends RegExpExecArray {
  * Provides functionality for locating file and section positions within the Clarion project.
  */
 export class LocationProvider {
-    private clarionProject: ClarionProjectClass;
     private solutionParser: SolutionParser | undefined;
     
     constructor(solutionParser: SolutionParser) {
-        this.clarionProject = new ClarionProjectClass();
         this.solutionParser = solutionParser;
     }
-
-    // async initialize(solutionParser: SolutionParser) {
-    //     this.solutionParser = solutionParser;
-    // }
 
     /**
      * Scans the provided document for occurrences of a specified pattern and returns an array of corresponding locations.
      */
     public getLocationFromPattern(document: TextDocument, pattern: RegExp): ClarionLocation[] | null {
-        const documentDirectory = path.dirname(document.uri.fsPath);
-    
-        // ✅ Restore the original way of determining the project directory
-        this.clarionProject.properties = this.clarionProject.findProjectOrSolutionDirectory(documentDirectory);
-    
         const matches = this.getRegexMatches(document, pattern);
         if (!matches) return null;
-    
+
         const locations: ClarionLocation[] = [];
         const customMatches: CustomRegExpMatch[] = matches;
-        customMatches.sort((a, b) => a.lineIndex - b.lineIndex);  // ✅ Ensure correct order
-    
+        customMatches.sort((a, b) => a.lineIndex - b.lineIndex);  
+
         for (const match of customMatches) {
-            const fileName = this.getFullPath(match[1], path.basename(document.uri.fsPath));
+            const fileName = this.getFullPath(match[1], document.uri.fsPath);
             if (!fileName || !fs.existsSync(fileName)) {
                 continue;
             }
-    
-            // ✅ Calculate the position where the match occurs
+
             const valueToFind = match[1]; 
             const valueStart = match.index + match[0].indexOf(valueToFind);
             const valueEnd = valueStart + valueToFind.length;
             const sectionName = match[2] || ''; 
             const sectionLineNumber = this.findSectionLineNumber(fileName, sectionName);
-    
-            // ✅ Ensure location object has all necessary properties
+
             const location: ClarionLocation = {
                 fullFileName: fileName,
                 sectionLineLocation: new Position(sectionLineNumber, 0),
                 linePosition: new Position(match.lineIndex, valueStart),
                 linePositionEnd: new Position(match.lineIndex, valueEnd),
-                statementType: '',  // Statement type is handled separately
+                statementType: '',
                 result: match,
             };
-    
+
             locations.push(location);
         }
         return locations;
     }
-    
-    
     
     private getRegexMatches(document: TextDocument, pattern: RegExp): CustomRegExpMatch[] {
         const matches: CustomRegExpMatch[] = [];
@@ -99,37 +81,78 @@ export class LocationProvider {
         return matches;
     }
 
+    /**
+     * Resolves the full path of a file using **pre-parsed project-specific search paths**.
+     */
     public getFullPath(fileName: string, documentFrom: string): string | null {
         if (!this.solutionParser) {
             logger.info('❌ No solution parser available');
             return null;
         }
-    
+        
         logger.info(`🔎 Searching for file: ${fileName} (from ${documentFrom})`);
-    
-        // 🔹 Find the project dynamically based on the current file
+
+        // 🔹 Find the project that contains `documentFrom`
         const project = this.solutionParser.findProjectForFile(documentFrom);
         
         if (project) {
             logger.info(`📂 Using project-specific paths for ${fileName}`);
-            const fullPath = this.solutionParser.findFileInRedirectionPaths(fileName, project.pathsToLookin, project.path);
+
+            // ✅ Use the project's own search paths (`pathsToLookin`)
+            const fullPath = this.findFileInProjectPaths(fileName, project);
             
             if (fullPath) {
                 logger.info(`✅ Found in project paths: ${fullPath}`);
                 return fullPath;
             }
         } else {
-            logger.warn(`⚠️ No project association found for ${documentFrom}, falling back to global redirection.`);
+            logger.warn(`⚠️ No project association found for ${documentFrom}, falling back to global paths.`);
         }
-    
-        // 🔹 Fall back to global paths
+
+        // 🔹 Fallback to global settings, but ensure `solutionParser` has pre-parsed paths
         const globalFile = this.solutionParser.findFileWithExtension(fileName);
         if (globalFile !== "") {
             logger.info(`✅ Resolved via global redirection: ${globalFile}`);
             return globalFile;
         }
-    
+
         logger.error(`❌ Could not resolve file: ${fileName}`);
+        return null;
+    }
+
+    /**
+     * Searches for the given file using a **project's pre-parsed redirection paths**.
+     */
+    private findFileInProjectPaths(fileName: string, project: ClarionProject): string | null {
+        logger.info(`🔍 Searching in project redirection paths for: ${fileName}`);
+    
+        const fileExt = path.extname(fileName).toLowerCase();
+        
+        // 🔹 Use `getSearchPaths(fileExt)` from `ClarionProject`
+        const searchPaths = project.getSearchPaths(fileExt);
+    
+        if (searchPaths.length === 0) {
+            logger.warn(`⚠️ No search paths found for extension: ${fileExt}`);
+            return null;
+        }
+    
+        for (const searchPath of searchPaths) {
+            const resolvedSearchPath = path.isAbsolute(searchPath)
+                ? path.normalize(searchPath)
+                : path.join(project.path, searchPath); // ✅ Ensure relative paths are resolved
+    
+            const fullPath = path.join(resolvedSearchPath, fileName);
+            const normalizedFullPath = path.normalize(fullPath);
+    
+            logger.info(`🔎 Checking: ${normalizedFullPath}`);
+    
+            if (fs.existsSync(normalizedFullPath)) {
+                logger.info(`✅ File found: ${normalizedFullPath}`);
+                return normalizedFullPath;
+            }
+        }
+    
+        logger.error(`❌ File "${fileName}" not found in project paths`);
         return null;
     }
     
@@ -158,34 +181,6 @@ export class LocationProvider {
             return 0;
         }
     }
-
-    // public async inspectFullPath(documentDirectory: string) {
-    //     const panel = window.createWebviewPanel(
-    //         'inspectionPanel',
-    //         'Inspection Details',
-    //         ViewColumn.One,
-    //         {}
-    //     );
-        
-    //     const editor = window.activeTextEditor;
-    //     if (editor) {
-    //         const redirectionFileParser = new RedirectionFileParser(this.clarionProject.properties?.compileMode!);
-    //         const fileName = editor.document.fileName;
-    //         const fileExtension = path.extname(fileName);
-    //         const searchPaths = redirectionFileParser.getSearchPaths(
-    //             fileExtension,
-    //             this.clarionProject.properties?.directory ?? null
-    //         );
-    //         const fullPath = await this.getFullPath(fileName, documentDirectory);
-
-    //         panel.webview.html = `
-    //             <h2>Inspection Details</h2>
-    //             <p><strong>File Name:</strong> ${fileName}</p>
-    //             <p><strong>Search Paths:</strong> ${searchPaths}</p>
-    //             <p><strong>Full Path:</strong> ${fullPath || 'File not found'}</p>
-    //         `;
-    //     }
-    // }
 }
 
 export default LocationProvider;

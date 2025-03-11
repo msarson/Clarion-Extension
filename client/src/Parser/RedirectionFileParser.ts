@@ -5,27 +5,36 @@ import { workspace } from 'vscode';
 import LoggerManager from '../logger';
 const logger = LoggerManager.getLogger("RedurectionParser");
 
-
+logger.setLevel("info"); // Set the log level to error
 // Import global variables from the extension
 
 /**
  * Parses a Clarion redirection file to extract and resolve file paths for the project.
  */
+export interface RedirectionEntry {
+    redFile: string;   // Which red file this entry came from
+    section: string;   // Section name (Debug, Release, Common, etc.)
+    extension: string; // File extension (e.g., *.clw, *.inc)
+    paths: string[];   // List of resolved paths
+}
+
+
+
 export class RedirectionFileParser {
     private compileMode: string | null = null;
     private readonly projectPath: string;
     private readonly redirectionFile: string;
     private readonly macros: Record<string, string>;
-    
+
     constructor(compileMode: string | null, projectPath: string) {
         this.compileMode = compileMode;
         this.projectPath = projectPath; // Store the project path
-    
+
         // ✅ Determine the correct redirection file
-    
+
         const projectRedFile = path.join(this.projectPath, globalSettings.redirectionFile);
         const globalRedFile = path.join(globalSettings.redirectionPath, globalSettings.redirectionFile);
-    
+
         if (fs.existsSync(projectRedFile)) {
             this.redirectionFile = projectRedFile;
         } else if (fs.existsSync(globalRedFile)) {
@@ -34,12 +43,12 @@ export class RedirectionFileParser {
             this.redirectionFile = ""; // ✅ Ensure it's empty if no valid redirection file is found
             logger.warn("⚠️ No valid redirection file found. Defaulting to empty.");
         }
-    
+
         this.macros = globalSettings.macros;
-        
+
         logger.info(`🔹 Using Redirection File for Project: ${this.redirectionFile || "None Found"}`);
     }
-    
+
 
     /**
      * Checks if a file exists at the specified path.
@@ -49,112 +58,9 @@ export class RedirectionFileParser {
     }
 
     /**
-     * Retrieves search paths by locating the redirection file.
-     */
-    getSearchPaths(fileExtension: string, foundProjectPath: string | null): string[] {
-        logger.info("🔍 Resolving search paths for extension:", fileExtension);
-        const paths: string[] = [];
-        let redFileToParse: string;
-
-        // ✅ Determine the redirection file location (Project-specific → Global fallback)
-        if (foundProjectPath) {
-            const projectRedFile = path.resolve(foundProjectPath, this.redirectionFile);
-
-            if (this.fileExists(projectRedFile)) {
-                redFileToParse = projectRedFile;
-                logger.info(`📌 Using project-specific redirection file: ${projectRedFile}`);
-            } else {
-                redFileToParse = globalSettings.redirectionPath;
-                logger.warn(`⚠️ No project-specific redirection file found, using global redirection file: ${redFileToParse}`);
-            }
-        } else {
-            redFileToParse = this.redirectionFile;
-            logger.warn(`⚠️ No project path provided, defaulting to global redirection file: ${redFileToParse}`);
-        }
-
-        // ✅ Parse the determined redirection file
-        const redResult = this.parseRedFile(redFileToParse, fileExtension);
-
-        // ✅ Add the directory containing the redirection file to search paths
-        paths.push(path.dirname(redFileToParse));
-        paths.push(...redResult);
-
-        return Array.from(new Set(paths));  // ✅ Remove duplicates
-    }
-    
-
-
-
-    /**
      * Parses a redirection file and returns an array of resolved paths.
      */
-    public parseRedFile(redFile: string, fileExtension: string): string[] {
-        if (!fs.existsSync(redFile)) {
-            logger.warn(`⚠️ Redirection file not found: ${redFile}`);
-            return [];
-        }
-    
-        logger.info(`📂 Parsing redirection file: ${redFile} (Looking for: *.${fileExtension})`);
-        const content: string = fs.readFileSync(redFile, 'utf-8');
-        const redPath = path.dirname(redFile);
-        const paths: string[] = [];
-    
-        // ✅ Ensure '.' is added FIRST for each extension when parsing starts
-        if (!paths.includes('.')) {
-            paths.push('.');  // 🔥 Adds project root first
-            logger.info(`📌 Added project root '.' to search paths for .${fileExtension}`);
-        }
-        const lines = content.split('\n');
-        let foundSection = "";
-    
-        for (const line of lines) {
-            const trimmedLine = line.trim();
-            if (trimmedLine.startsWith('--') || trimmedLine === '') continue; // Skip comments/empty lines
-    
-            // ✅ Detect Section Headers and Set Active Section
-            const sectionMatch = this.extractSection(trimmedLine);
-            if (sectionMatch) {
-                foundSection = sectionMatch;
-                if (foundSection.toLowerCase() !== "common" && (foundSection.toLowerCase() !== globalSettings.configuration.toLowerCase())) {
-                    logger.info(`🔹 Skipping Section: [${foundSection}] (Looking for: *.${fileExtension})`);
-                    continue;
-                }
-                logger.info(`🔹 Found Section: [${foundSection}] (Looking for: *.${fileExtension})`);
-            }
-            // ✅ Process `{include ...}` in order where they appear
-            else if (trimmedLine.startsWith('{include')) {
-                logger.info(`🔄 Processing included redirection file for *.${fileExtension}: ${trimmedLine}`);
-                const pathsMap: Record<string, string[]> = { [fileExtension]: paths };
-    
-                this.processIncludedRedirection(redPath, trimmedLine, fileExtension, pathsMap);
-            }
-            // ✅ Process Paths for the Active Section
-            else if (trimmedLine.includes('=') && foundSection) {
-                logger.info(`📌 Processing line in [${foundSection}] for *.${fileExtension}: ${trimmedLine}`);
-    
-                const extractedPaths = this.processLine(foundSection, trimmedLine, redPath, fileExtension, {});
-    
-                if (extractedPaths.length > 0) {
-                    logger.info(`📌 Extracted paths from [${foundSection}] for *.${fileExtension}: (${extractedPaths.length})`);
-                    extractedPaths.forEach((path, index) =>  logger.info(`   ${index + 1}. ${path}`));
-                }
-                paths.push(...extractedPaths); // ✅ Append paths immediately in order
-            }
-        }
-    
-        globalSettings.libsrcPaths.forEach(libPath => paths.push(libPath));
-    
-        // ✅ Remove duplicates while preserving order
-        const uniquePaths = paths.filter((path, index) => paths.indexOf(path) === index);
-        
-        // ✅ Log the final ordered list without duplicates
-        logger.info(`✅ Completed parsing redirection file: ${redFile} (Looking for: *.${fileExtension})`);
-        logger.info(`📂 Final ordered paths for *.${fileExtension}: (${uniquePaths.length})`);
-        uniquePaths.forEach((path, index) =>  logger.info(`   ${index + 1}. ${path}`));
-        
-        return uniquePaths; // ✅ Return de-duplicated list
-    }
-    
+  
 
 
     private extractSection(trimmedLine: string): string | null {
@@ -162,65 +68,165 @@ export class RedirectionFileParser {
         return sectionMatch ? sectionMatch[1].trim() : null;
     }
 
-
-
-
-    private processIncludedRedirection(redPath: string, line: string, fileExtension: string, pathsMap: Record<string, string[]>): void {
-        logger.info(`🔄 Processing Included File:`, line);
-
-        const includePathMatches = line.match(/\{include\s+([^}]+)\}/i);
-        if (includePathMatches && includePathMatches[1]) {
-            const resolvedPaths = this.resolveMacro(includePathMatches[1]); // May return a string or array
-
-            logger.info(`📂 Resolved Include Paths:`, resolvedPaths);
-
-            // Ensure `resolvedPaths` is always an array
-            const resolvedPathsArray = Array.isArray(resolvedPaths) ? resolvedPaths : [resolvedPaths];
-
-            // Process each resolved path
-            for (const resolvedPath of resolvedPathsArray) {
-                if (typeof resolvedPath === "string") {
-                    const normalizedPath = path.isAbsolute(resolvedPath)
-                        ? path.normalize(resolvedPath)
-                        : path.join(globalSettings.redirectionPath, resolvedPath);
-
-                        logger.info(`🔍 Checking Include Path:`, normalizedPath);
-
-                    if (fs.existsSync(normalizedPath)) {
-                        logger.info(`✅ Found and Parsing Included File:`, normalizedPath);
-                        const includedPaths = this.parseRedFile(normalizedPath, fileExtension);
-                        pathsMap[fileExtension] = pathsMap[fileExtension] || [];
-                        pathsMap[fileExtension].push(...includedPaths);
-                    } else {
-                        logger.warn(`⚠️ Include File Not Found:`, normalizedPath);
-                    }
-                } else {
-                    logger.warn(`⚠️ Unexpected resolved path type:`, resolvedPath);
+    public parseRedFile(projectPath: string): RedirectionEntry[] {
+        let redFileToParse: string;
+        const redirectionEntries: RedirectionEntry[] = [];
+        let isFirstRedFile = true; // ✅ Tracks if we're parsing the root red file
+    
+        // ✅ Determine whether to use the project-specific redirection file or the global fallback
+        const projectRedFile = path.join(projectPath, globalSettings.redirectionFile);
+        if (fs.existsSync(projectRedFile)) {
+            redFileToParse = projectRedFile;
+            logger.info(`📌 Using project-specific redirection file: ${projectRedFile}`);
+        } else {
+            redFileToParse = path.join(globalSettings.redirectionPath, globalSettings.redirectionFile);
+            logger.warn(`⚠️ No project-specific redirection file found, using global redirection file: ${redFileToParse}`);
+        }
+    
+        return this.parseRedFileRecursive(redFileToParse, redirectionEntries, isFirstRedFile);
+    }
+    
+    private parseRedFileRecursive(
+        redFileToParse: string,
+        redirectionEntries: RedirectionEntry[],
+        isFirstRedFile: boolean
+    ): RedirectionEntry[] {
+        if (!fs.existsSync(redFileToParse)) {
+            logger.error(`❌ Redirection file not found: ${redFileToParse}`);
+            return redirectionEntries;
+        }
+    
+        logger.info(`📂 Parsing redirection file: ${redFileToParse}`);
+        const content: string = fs.readFileSync(redFileToParse, 'utf-8');
+        const redPath = path.dirname(redFileToParse);
+        let currentSection: string | null = null;
+    
+        // ✅ Only add `*.* = '.'` **once** at the start (for the first red file)
+        if (isFirstRedFile) {
+            redirectionEntries.push({
+                redFile: redFileToParse,
+                section: "Common",
+                extension: "*.*",
+                paths: ["."]
+            });
+            logger.info(`📌 Added default *.* = '.' to redirection entries`);
+            isFirstRedFile = false;
+        }
+    
+        const lines = content.split('\n');
+    
+        for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (trimmedLine.startsWith('--') || trimmedLine === '') continue; // Skip comments/empty lines
+    
+            // ✅ Detect and set section headers
+            const sectionMatch = this.extractSection(trimmedLine);
+            if (sectionMatch) {
+                currentSection = sectionMatch;
+                logger.info(`📌 Entering section: [${sectionMatch}]`);
+                continue;
+            }
+    
+            // ✅ If no section is set, classify entries as [Common]
+            if (!currentSection) {
+                currentSection = "Common";
+            }
+    
+            // ✅ Process `{include}` at the exact position it appears
+            if (trimmedLine.startsWith('{include')) {
+                let includePath = this.resolveMacro(trimmedLine.match(/\{include\s+([^}]+)\}/i)?.[1] || "");
+                includePath = path.isAbsolute(includePath) ? includePath : path.resolve(redPath, includePath);
+    
+                logger.info(`🔄 Processing Include: ${includePath}`);
+    
+                // ✅ Recursively parse included files **at the current position**
+                this.parseRedFileRecursive(includePath, redirectionEntries, false);
+                continue;
+            }
+    
+            // ✅ Process valid redirection lines
+            if (trimmedLine.includes('=') && currentSection) {
+                logger.info(`📌 Processing entry in [${currentSection}]: ${trimmedLine}`);
+    
+                const [fileMask, rawPaths] = trimmedLine.split('=').map(p => p.trim());
+                const resolvedPaths = rawPaths.split(';').map(p => this.resolveMacro(p.trim()));
+    
+                if (resolvedPaths.length > 0) {
+                    logger.info(`✅ Extracted paths for ${fileMask}: (${resolvedPaths.length})`);
+                    resolvedPaths.forEach((p, index) => logger.info(`   ${index + 1}. ${p}`));
+    
+                    // ✅ Maintain exact parsing order
+                    redirectionEntries.push({
+                        redFile: redFileToParse,
+                        section: currentSection, // ✅ If no section, defaults to "Common"
+                        extension: fileMask,
+                        paths: resolvedPaths
+                    });
                 }
             }
         }
+    
+        return redirectionEntries;
     }
 
+    
+
+    // private processIncludedRedirection(redPath: string, line: string, fileExtension: string, pathsMap: Record<string, string[]>): void {
+    //     logger.info(`🔄 Processing Included File:`, line);
+
+    //     const includePathMatches = line.match(/\{include\s+([^}]+)\}/i);
+    //     if (includePathMatches && includePathMatches[1]) {
+    //         const resolvedPaths = this.resolveMacro(includePathMatches[1]); // May return a string or array
+
+    //         logger.info(`📂 Resolved Include Paths:`, resolvedPaths);
+
+    //         // Ensure `resolvedPaths` is always an array
+    //         const resolvedPathsArray = Array.isArray(resolvedPaths) ? resolvedPaths : [resolvedPaths];
+
+    //         // Process each resolved path
+    //         for (const resolvedPath of resolvedPathsArray) {
+    //             if (typeof resolvedPath === "string") {
+    //                 const normalizedPath = path.isAbsolute(resolvedPath)
+    //                     ? path.normalize(resolvedPath)
+    //                     : path.join(globalSettings.redirectionPath, resolvedPath);
+
+    //                 logger.info(`🔍 Checking Include Path:`, normalizedPath);
+
+    //                 if (fs.existsSync(normalizedPath)) {
+    //                     logger.info(`✅ Found and Parsing Included File:`, normalizedPath);
+    //                     const includedPaths = this.parseRedFile(normalizedPath, fileExtension);
+    //                     pathsMap[fileExtension] = pathsMap[fileExtension] || [];
+    //                     pathsMap[fileExtension].push(...includedPaths);
+    //                 } else {
+    //                     logger.warn(`⚠️ Include File Not Found:`, normalizedPath);
+    //                 }
+    //             } else {
+    //                 logger.warn(`⚠️ Unexpected resolved path type:`, resolvedPath);
+    //             }
+    //         }
+    //     }
+    // }
 
 
 
-    private processLine(foundSection: string, trimmedLine: string, redPath: string, fileExtension: string, pathsMap: Record<string, string[]>): string[] {
-        const parts = trimmedLine.split('=');
-        const fileMask = parts[0].trim();
-        const includeFileTypes = ['*.clw', '*.inc', '*.equ', '*.int'];
 
-        if (!this.shouldProcessFileType(fileMask, includeFileTypes)) return [];
+    // private processLine(foundSection: string, trimmedLine: string, redPath: string, fileExtension: string, pathsMap: Record<string, string[]>): string[] {
+    //     const parts = trimmedLine.split('=');
+    //     const fileMask = parts[0].trim();
+    //     const includeFileTypes = ['*.clw', '*.inc', '*.equ', '*.int'];
 
-        const resolvedPaths = this.resolvePaths(parts[1], redPath);
-        const fileTypeResolvedPaths = this.filterResolvedPaths(resolvedPaths);
+    //     if (!this.shouldProcessFileType(fileMask, includeFileTypes)) return [];
 
-        if (fileMask === '*.*' || fileMask.toLowerCase().includes(fileExtension.toLowerCase())) {
-            pathsMap[fileMask] = pathsMap[fileMask] || [];
-            pathsMap[fileMask].push(...fileTypeResolvedPaths);
-        }
+    //     const resolvedPaths = this.resolvePaths(parts[1], redPath);
+    //     const fileTypeResolvedPaths = this.filterResolvedPaths(resolvedPaths);
 
-        return fileTypeResolvedPaths; // ✅ Ensure it returns resolved paths
-    }
+    //     if (fileMask === '*.*' || fileMask.toLowerCase().includes(fileExtension.toLowerCase())) {
+    //         pathsMap[fileMask] = pathsMap[fileMask] || [];
+    //         pathsMap[fileMask].push(...fileTypeResolvedPaths);
+    //     }
+
+    //     return fileTypeResolvedPaths; // ✅ Ensure it returns resolved paths
+    // }
 
 
     private filterResolvedPaths(paths: string[]): string[] {
@@ -300,16 +306,4 @@ export class RedirectionFileParser {
 
         return resolvedPath;
     }
-
-
-
-
-
-
-
-
-
 }
-
-
-

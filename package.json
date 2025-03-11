@@ -83,7 +83,8 @@
             "explorer": [
                 {
                     "id": "solutionView",
-                    "name": "Solution View"
+                    "name": "Solution View",
+                    "icon": "icon/sv57x57.png"
                 }
             ]
         },

@@ -1,4 +1,4 @@
-﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, QuickPickItem, ThemeIcon, TextEditor, window as vscodeWindow, Diagnostic, DiagnosticSeverity, Range, Position, Terminal, Selection } from 'vscode';
+﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, QuickPickItem, ThemeIcon, TextEditor, window as vscodeWindow, Diagnostic, DiagnosticSeverity, Range, Position, Terminal, Selection, StatusBarItem, StatusBarAlignment } from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } from 'vscode-languageclient/node';
 
 import * as path from 'path';
@@ -20,14 +20,25 @@ import { exec } from 'child_process';
 import { runClarionBuild } from './buildTasks';
 import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("Extension");
-
+logger.setLevel("error");
 let client: LanguageClient | undefined;
 let solutionParser: SolutionParser | undefined;
 let treeView: TreeView<TreeNode> | undefined;
 let solutionTreeDataProvider: SolutionTreeDataProvider | undefined;
 let documentManager: DocumentManager | undefined;
 
+let configStatusBarItem: StatusBarItem;
 
+export function updateConfigurationStatusBar(configuration: string) {
+    if (!configStatusBarItem) {
+        configStatusBarItem = window.createStatusBarItem(StatusBarAlignment.Left, 100);
+        configStatusBarItem.command = 'clarion.setConfiguration'; // ✅ Clicking will open the config picker
+    }
+
+    configStatusBarItem.text = `$(gear) Clarion: ${configuration}`; // ✅ Show config with gear icon
+    configStatusBarItem.tooltip = "Click to change Clarion configuration";
+    configStatusBarItem.show();
+}
 
 export async function activate(context: ExtensionContext): Promise<void> {
     const disposables: Disposable[] = [];
@@ -59,7 +70,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
     context.subscriptions.push(
         commands.registerCommand("clarion.buildSolution", runClarionBuild)
     );
-    
+
     context.subscriptions.push(commands.registerCommand("clarion.quickOpen", async () => {
         if (!workspace.isTrusted) {
             vscodeWindow.showWarningMessage("Clarion features require a trusted workspace.");
@@ -120,7 +131,7 @@ async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: D
     disposables.forEach(disposable => disposable.dispose());
     disposables.length = 0;
 
-  
+
 
     // ✅ Only initialize if a solution exists in settings
     if (globalSolutionFile && globalClarionPropertiesFile && globalClarionVersion) {
@@ -144,20 +155,40 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
         return;
     }
 
-    // ✅ Ensure SolutionParser and DocumentManager are initialized
+    // ✅ Get configurations from the solution file
+    const solutionFileContent = fs.readFileSync(globalSolutionFile, 'utf-8');
+    const availableConfigs = extractConfigurationsFromSolution(solutionFileContent);
+
+    // ✅ Step 2: Validate the stored configuration
+    if (!availableConfigs.includes(globalSettings.configuration)) {
+        logger.warn(`⚠️ Invalid configuration detected: ${globalSettings.configuration}. Asking user to select a valid one.`);
+
+        // ✅ Step 3: Prompt user to select a valid configuration
+        const selectedConfig = await vscodeWindow.showQuickPick(availableConfigs, {
+            placeHolder: "Invalid configuration detected. Select a valid configuration:",
+        });
+
+        if (!selectedConfig) {
+            vscodeWindow.showWarningMessage("No valid configuration selected. Using 'Debug' as a fallback.");
+            globalSettings.configuration = "Debug"; // ⬅️ Safe fallback
+        } else {
+            globalSettings.configuration = selectedConfig;
+        }
+
+        // ✅ Save the new selection
+        await workspace.getConfiguration().update("clarion.configuration", globalSettings.configuration, ConfigurationTarget.Workspace);
+        logger.info(`✅ Updated configuration: ${globalSettings.configuration}`);
+    }
+
+    // ✅ Continue initializing the solution parser
     documentManager = await reinitializeEnvironment(refreshDocs);
-
-    // ✅ Now that the solution is initialized, create the tree view
     createSolutionTreeView();
-
-    // ✅ Register language features
     registerLanguageFeatures(context);
-
-    // ✅ Mark the solution as open in the VS Code context
     await commands.executeCommand("setContext", "clarion.solutionOpen", true);
-
+    updateConfigurationStatusBar(globalSettings.configuration);
     vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(globalSolutionFile)}`);
 }
+
 
 
 async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<DocumentManager> {
@@ -312,23 +343,45 @@ async function refreshOpenDocuments() {
     logger.info(`✅ Successfully refreshed ${openDocuments.length} open documents.`);
 }
 async function registerOpenCommand(context: ExtensionContext) {
-    commands.getCommands().then((cmds) => {
-        if (!cmds.includes('clarion.openFile')) {
-            context.subscriptions.push(commands.registerCommand('clarion.openFile', async (filePath: string) => {
+    const existingCommands = await commands.getCommands();
+
+    if (!existingCommands.includes('clarion.openFile')) {
+        context.subscriptions.push(
+            commands.registerCommand('clarion.openFile', async (filePath: string | Uri) => {
                 if (!filePath) {
                     vscodeWindow.showErrorMessage("❌ No file path provided.");
                     return;
                 }
+
+                // ✅ Ensure filePath is a string
+                const filePathStr = filePath instanceof Uri ? filePath.fsPath : String(filePath);
+
+                if (!filePathStr.trim()) {
+                    vscodeWindow.showErrorMessage("❌ No valid file path provided.");
+                    return;
+                }
+
                 try {
-                    const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(workspace.rootPath || "", filePath);
+                    // 🔹 Ensure absolute path resolution
+                    let absolutePath = path.isAbsolute(filePathStr)
+                        ? filePathStr
+                        : path.join(workspace.workspaceFolders?.[0]?.uri.fsPath || "", filePathStr);
+
+                    if (!fs.existsSync(absolutePath)) {
+                        vscodeWindow.showErrorMessage(`❌ File not found: ${absolutePath}`);
+                        return;
+                    }
+
                     const doc = await workspace.openTextDocument(Uri.file(absolutePath));
                     await vscodeWindow.showTextDocument(doc);
+                    vscodeWindow.showInformationMessage(`✅ Opened file: ${absolutePath}`);
                 } catch (error) {
-                    vscodeWindow.showErrorMessage(`❌ Failed to open file: ${filePath}`);
+                    vscodeWindow.showErrorMessage(`❌ Failed to open file: ${filePathStr}`);
+                    console.error(`❌ Error opening file: ${filePathStr}`, error);
                 }
-            }));
-        }
-    });
+            })
+        );
+    }
 }
 
 
@@ -430,9 +483,31 @@ export async function openClarionSolution(context: ExtensionContext) {
             }
         }
 
+        // ✅ Step 4: Determine available configurations before creating the parser
+        // ✅ Step 4: Determine available configurations before creating the parser
+        const solutionFileContent = fs.readFileSync(solutionFilePath, 'utf-8');
+        const availableConfigs = extractConfigurationsFromSolution(solutionFileContent);
+
+        // ✅ Prompt the user **only if multiple configurations exist**
+        if (availableConfigs.length > 1) {
+            const selectedConfig = await vscodeWindow.showQuickPick(availableConfigs, {
+                placeHolder: "Select Clarion Configuration",
+            });
+
+            if (!selectedConfig) {
+                vscodeWindow.showWarningMessage("Configuration selection canceled. Using 'Debug' as fallback.");
+                globalSettings.configuration = "Debug"; // ⬅️ Safe fallback
+            } else {
+                globalSettings.configuration = selectedConfig;
+            }
+        } else {
+            globalSettings.configuration = availableConfigs[0] || "Debug"; // ⬅️ Single config or fallback
+        }
+
         // ✅ Step 4: Save final selections to workspace settings
         await setGlobalClarionSelection(solutionFilePath, globalClarionPropertiesFile, globalClarionVersion, globalSettings.configuration);
-        logger.info("✅ Solution, properties, and version successfully selected and saved.");
+        logger.info(`⚙️ Selected configuration: ${globalSettings.configuration}`);
+
 
         // ✅ Step 5: Initialize the Solution Parser
         solutionParser = await SolutionParser.create(solutionFilePath);
@@ -472,9 +547,28 @@ export async function openClarionSolution(context: ExtensionContext) {
     }
 }
 
-export async function showClarionQuickOpen(): Promise<void> {
+function extractConfigurationsFromSolution(solutionContent: string): string[] {
+    const configPattern = /GlobalSection\(SolutionConfigurationPlatforms\) = preSolution([\s\S]*?)EndGlobalSection/g;
+    const match = configPattern.exec(solutionContent);
 
-    // ✅ Prevent execution if no Clarion solution is open
+    if (!match) {
+        logger.warn("⚠️ No configurations found in solution file. Defaulting to Debug/Release.");
+        return ["Debug", "Release"];
+    }
+
+    const configurations = match[1]
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line && !line.startsWith("GlobalSection")) // ✅ Remove section header
+        .map(line => line.split('=')[0].trim()) // ✅ Extract left-hand side (config name)
+        .map(config => config.replace("|Win32", "").trim()) // ✅ Remove "|Win32"
+        .filter(config => config.length > 0); // ✅ Ensure only valid names remain
+
+    logger.info(`📂 Extracted configurations from solution: ${JSON.stringify(configurations)}`);
+    return configurations.length > 0 ? configurations : ["Debug", "Release"];
+}
+
+export async function showClarionQuickOpen(): Promise<void> {
     if (!globalSolutionFile) {
         logger.warn("⚠️ No Clarion solution is open. Using default VS Code Quick Open.");
         await commands.executeCommand("workbench.action.quickOpen");
@@ -482,19 +576,24 @@ export async function showClarionQuickOpen(): Promise<void> {
     }
 
     const fileItems: QuickPickItem[] = [];
-    const seenFiles = new Set<string>(); // ✅ Prevent duplicates
+    const seenFiles = new Set<string>();
 
-    // ✅ Get allowed file extensions (normalized to lowercase)
+    // ✅ Use allowed file extensions from global settings
     const defaultSourceExtensions = [".clw", ".inc", ".equ", ".eq", ".int"];
-    const allowedExtensions = [...defaultSourceExtensions, ...globalSettings.fileSearchExtensions.map(ext => ext.toLowerCase())];
+    const allowedExtensions = [
+        ...defaultSourceExtensions, 
+        ...globalSettings.fileSearchExtensions.map(ext => ext.toLowerCase())
+    ];
 
     logger.info(`🔍 Searching for files with extensions: ${JSON.stringify(allowedExtensions)}`);
+
     let searchPaths: string[] = [];
 
+    // ✅ Collect search paths from all projects in the solution
     solutionParser?.solution.projects.forEach(project => {
-        const redirectionParser = new RedirectionFileParser(globalSettings.configuration, project.path);
         allowedExtensions.forEach(ext => {
-            const pathsForExt = redirectionParser.getSearchPaths(ext, globalSettings.redirectionPath);
+            // 🔹 Use `getSearchPaths` instead of `pathsToLookin`
+            const pathsForExt = project.getSearchPaths(ext);
             searchPaths.push(...pathsForExt);
         });
     });
@@ -506,7 +605,6 @@ export async function showClarionQuickOpen(): Promise<void> {
     const workspaceFiles = await workspace.findFiles(`**/*.*`);
     const redirectionFiles: Uri[] = [];
 
-    // ✅ Process each search path
     for (const searchPath of searchPaths) {
         try {
             if (workspace.rootPath && searchPath.startsWith(workspace.rootPath)) {
@@ -544,16 +642,16 @@ export async function showClarionQuickOpen(): Promise<void> {
     function getIconForFile(fileExt: string): string {
         switch (fileExt) {
             case ".clw":
-                return "$(file-code)"; // Source Code File
+                return "$(file-code)";
             case ".inc":
-                return "$(symbol-namespace)"; // Include File
+                return "$(symbol-namespace)";
             case ".equ":
             case ".eq":
-                return "$(symbol-constant)"; // Equations/Constants File
+                return "$(symbol-constant)";
             case ".int":
-                return "$(symbol-interface)"; // Interface File
+                return "$(symbol-interface)";
             default:
-                return "$(file)"; // Default File Icon
+                return "$(file)";
         }
     }
 
@@ -561,9 +659,8 @@ export async function showClarionQuickOpen(): Promise<void> {
         const filePath = file.fsPath;
         const fileExt = path.extname(filePath).toLowerCase();
 
-        // ✅ Ensure the file extension is allowed
         if (!allowedExtensions.includes(fileExt)) {
-            return; // ⛔ Skip files not in the allowed list
+            return;
         }
 
         if (!seenFiles.has(filePath)) {
@@ -580,15 +677,12 @@ export async function showClarionQuickOpen(): Promise<void> {
         const filePath = file.fsPath;
         const fileExt = path.extname(filePath).toLowerCase();
 
-        // ✅ Ensure the file extension is allowed
         if (!allowedExtensions.includes(fileExt)) {
-            return; // ⛔ Skip files not in the allowed list
+            return;
         }
 
         if (!seenFiles.has(filePath)) {
             seenFiles.add(filePath);
-
-            // Get relative path for redirection clarity
             const relativeRedirectionPath = path.relative(globalSettings.redirectionPath, path.dirname(filePath));
 
             fileItems.push({
@@ -604,12 +698,11 @@ export async function showClarionQuickOpen(): Promise<void> {
         return;
     }
 
-    // ✅ Ensure Quick Pick UI does not close on accidental Ctrl+P
     const quickPick = vscodeWindow.createQuickPick();
     quickPick.items = fileItems;
     quickPick.matchOnDescription = true;
     quickPick.matchOnDetail = false;
-    quickPick.ignoreFocusOut = true; // ✅ Prevents Quick Pick from closing on blur
+    quickPick.ignoreFocusOut = true;
     quickPick.title = "Clarion File Search";
 
     quickPick.onDidAccept(async () => {
@@ -624,10 +717,21 @@ export async function showClarionQuickOpen(): Promise<void> {
     quickPick.show();
 }
 
-async function setConfiguration() {
-    const options = ["Debug", "Release"];
 
-    const selectedConfig = await vscodeWindow.showQuickPick(options, {
+
+async function setConfiguration() {
+    if (!solutionParser) {
+        vscodeWindow.showErrorMessage("No Clarion solution loaded.");
+        return;
+    }
+
+    const availableConfigs = solutionParser.getAvailableConfigurations();
+    if (availableConfigs.length === 0) {
+        vscodeWindow.showErrorMessage("No configurations found in the solution.");
+        return;
+    }
+
+    const selectedConfig = await vscodeWindow.showQuickPick(availableConfigs, {
         placeHolder: "Select Clarion Configuration"
     });
 
@@ -636,7 +740,9 @@ async function setConfiguration() {
     globalSettings.configuration = selectedConfig;
     await workspace.getConfiguration().update("clarion.configuration", selectedConfig, ConfigurationTarget.Workspace);
     vscodeWindow.showInformationMessage(`Clarion configuration set to ${selectedConfig}`);
+    updateConfigurationStatusBar(globalSettings.configuration);
 }
+
 
 export function deactivate(): Thenable<void> | undefined {
     return stopClientServer();
@@ -722,7 +828,7 @@ function startClientServer(context: ExtensionContext, documentManager: DocumentM
     };
 
     client = new LanguageClient("ClarionLanguageServer", "Clarion Language Server", serverOptions, clientOptions);
-    
+
     // Start the client and handle the promise
     client.start();
 }

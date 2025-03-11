@@ -69,7 +69,9 @@ export class DocumentManager implements Disposable {
     //added detection for extensions
     private readonly modulePattern = /MODULE\s*\(\s*'([^']+\.[a-zA-Z0-9]+)'\s*(?:,\s*'([^']+\.[a-zA-Z0-9]+)'\s*)?\)/ig;
     private readonly includePattern = /INCLUDE\s*\(\s*'([^']+\.[a-zA-Z0-9]+)'\s*(?:,\s*'([^']+\.[a-zA-Z0-9]+)'\s*)?(?:,\s*ONCE)?\)/ig;
-    private readonly memberPattern = /MEMBER\s*\(\s*'([^']+\.[a-zA-Z0-9]+)'\s*\)/ig;
+    private readonly memberPattern = /\bMEMBER\s*\(\s*'([^']+\.[a-zA-Z0-9]+)'\s*\).*?/ig;
+
+//    private readonly memberPattern = /MEMBER\s*\(\s*'([^']+\.[a-zA-Z0-9]+)'\s*\)/ig;
     private readonly linkPattern = /LINK\s*\(\s*'([^']+\.[a-zA-Z0-9]+)'\s*\)/ig;
 
 

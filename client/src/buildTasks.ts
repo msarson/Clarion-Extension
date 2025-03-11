@@ -57,12 +57,12 @@ function validateBuildEnvironment(): boolean {
 async function loadSolutionParser(): Promise<SolutionParser | null> {
     try {
         const solutionParser = await SolutionParser.create(globalSolutionFile);
-        
+
         if (solutionParser.solution.projects.length === 0) {
             window.showErrorMessage("❌ No projects found in the solution.");
             return null;
         }
-        
+
         return solutionParser;
     } catch (error) {
         window.showErrorMessage(`❌ Failed to parse solution file: ${error}`);
@@ -92,11 +92,11 @@ async function determineBuildTarget(solutionParser: SolutionParser): Promise<{
     }
 
     const buildOptions = ["Build Full Solution"];
-    
+
     if (currentProject) {
         buildOptions.push(`Build Current Project: ${currentProject.name}`);
     }
-    
+
     buildOptions.push("Cancel");
 
     // Ask user what to build
@@ -120,14 +120,14 @@ async function determineBuildTarget(solutionParser: SolutionParser): Promise<{
  */
 function findCurrentProject(solutionParser: SolutionParser) {
     const activeEditor: TextEditor | undefined = window.activeTextEditor;
-    
+
     if (!activeEditor) {
         return undefined;
     }
-    
+
     const activeFilePath = activeEditor.document.uri.fsPath;
     const activeFileName = path.basename(activeFilePath);
-    
+
     return solutionParser.findProjectForFile(activeFileName);
 }
 
@@ -148,18 +148,21 @@ function prepareBuildParameters(buildConfig: {
     const msBuildPath = "C:\\Windows\\Microsoft.NET\\Framework\\v4.0.30319\\msbuild.exe";
     const buildLogPath = path.join(solutionDir, "build_output.log");
 
+    const selectedConfig = globalSettings.configuration || "Debug"; // Ensure a fallback
+
     const buildArgs = [
         "/property:GenerateFullPaths=true",
         "/t:build",
         "/m",
         "/consoleloggerparameters:ErrorsOnly",
-        "/property:Configuration=Debug",
-        "/property:clarion_Sections=Debug",
+        `/property:Configuration=${selectedConfig}`,
+        `/property:clarion_Sections=${selectedConfig}`,
         `/property:ClarionBinPath="${clarionBinPath}"`,
         "/property:NoDependency=true",
         "/property:Verbosity=detailed",
         "/property:WarningLevel=5"
     ];
+
 
     if (buildConfig.buildTarget === "Solution") {
         buildArgs.push(`/property:SolutionDir="${globalSolutionFile}"`);
@@ -180,10 +183,10 @@ async function executeBuildTask(params: {
     buildLogPath: string;
 }): Promise<void> {
     const { solutionDir, msBuildPath, buildArgs, buildLogPath } = params;
-    
+
     // Create the shell execution
     const execution = new ShellExecution(
-        `${msBuildPath} ${buildArgs.join(" ")} > "${buildLogPath}" 2>&1`, 
+        `${msBuildPath} ${buildArgs.join(" ")} > "${buildLogPath}" 2>&1`,
         { cwd: solutionDir }
     );
 
@@ -215,6 +218,12 @@ function createBuildTask(execution: ShellExecution): Task {
         "clarionBuildMatcher"
     );
 
+    // ✅ Set the actual command explicitly
+    task.definition = {
+        type: "shell",
+        command: execution.commandLine // <-- Ensures the command is properly assigned
+    };
+
     // Hide terminal output
     task.presentationOptions = {
         reveal: TaskRevealKind.Never,
@@ -225,6 +234,7 @@ function createBuildTask(execution: ShellExecution): Task {
 
     return task;
 }
+
 
 /**
  * Sets up the handler for build completion

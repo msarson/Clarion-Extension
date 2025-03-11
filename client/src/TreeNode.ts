@@ -1,18 +1,17 @@
-import { TreeItem, TreeItemCollapsibleState } from 'vscode';
+import { TreeItemCollapsibleState } from "vscode";
 
+export class TreeNode {
+    label: string;
+    collapsibleState: TreeItemCollapsibleState;
+    children: TreeNode[];
+    data: any;
+    parent?: TreeNode; // ✅ Add parent property
 
-export class TreeNode extends TreeItem {
-    public children: TreeNode[];
-    public data?: any;
-
-    constructor(
-        label: string | undefined,
-        collapsibleState: TreeItemCollapsibleState = TreeItemCollapsibleState.None,
-        data?: any,
-        children: TreeNode[] = []
-    ) {
-        super(label ?? "Unknown Node", collapsibleState); // ✅ Ensure label is valid
-        this.children = children;
+    constructor(label: string, collapsibleState: TreeItemCollapsibleState, data: any, parent?: TreeNode) {
+        this.label = label;
+        this.collapsibleState = collapsibleState;
+        this.children = [];
         this.data = data;
+        this.parent = parent; // ✅ Store parent reference
     }
 }
