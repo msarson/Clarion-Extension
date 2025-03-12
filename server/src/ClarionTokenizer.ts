@@ -31,7 +31,8 @@ export enum TokenType {
     Procedure,
     Routine, 
     ExecutionMarker,
-    Region // Added for identifying region comments
+    Region,
+    ConditionalContinuation
 }
 
 export interface Token {
@@ -161,7 +162,7 @@ private analyzeTokenRelationships(): void {
                 logger.warn(`⚠️[WARNING] Unmatched END at Line ${token.line}`);
             }
         }
-
+       
         // ✅ Detect PROCEDURE declarations
         if (token.type === TokenType.Keyword && token.value.toUpperCase() === "PROCEDURE") {
             logger.warn(`🛠 PROCEDURE detected at Line ${token.line} | Depth: ${insideClassOrInterfaceOrMapDepth}`);
@@ -261,11 +262,13 @@ private analyzeTokenRelationships(): void {
 const orderedTokenTypes: TokenType[] = [
     TokenType.Comment, TokenType.ClarionDocument, TokenType.ExecutionMarker, TokenType.Label, TokenType.LineContinuation, TokenType.String, TokenType.ReferenceVariable,
     TokenType.Type, TokenType.PointerParameter, TokenType.FieldEquateLabel, TokenType.Property,
-    TokenType.PropertyFunction, TokenType.EndStatement, TokenType.Keyword, TokenType.Structure, TokenType.FunctionArgumentParameter,
-    TokenType.TypeAnnotation, TokenType.Function, TokenType.Directive, TokenType.Number,
+    TokenType.PropertyFunction, TokenType.EndStatement, TokenType.Keyword, TokenType.Structure,
+    TokenType.ConditionalContinuation,  // ✅ Placed after Structure, before FunctionArgumentParameter
+    TokenType.FunctionArgumentParameter, TokenType.TypeAnnotation, TokenType.Function, TokenType.Directive, TokenType.Number,
     TokenType.Operator, TokenType.Class, TokenType.Attribute, TokenType.Constant, TokenType.Variable,
     TokenType.ImplicitVariable, TokenType.Delimiter, TokenType.Unknown
 ];
+
 const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     MODULE: /^\s*MODULE\b/i,  // MODULE should be the first word on the line
     APPLICATION: /\bAPPLICATION\b/i,
@@ -314,7 +317,9 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.PointerParameter]: /\*\s*\b[A-Za-z_][A-Za-z0-9_]*\b/i,
     [TokenType.FieldEquateLabel]: /\?[A-Za-z_][A-Za-z0-9_]*/i,
     [TokenType.ClarionDocument]: /\b(?:PROGRAM|MEMBER)\b/i,
-    [TokenType.Keyword]: /\b(?:RETURN|OF|ELSE|THEN|UNTIL|EXIT|NEW|PROCEDURE|ROUTINE|PROC|BREAK|CODE)\b/i,
+    [TokenType.ConditionalContinuation]: /\b(?:ELSE|ELSIF|OF)\b/i,  // ✅ New type for ELSE and ELSIF
+    [TokenType.Keyword]: /\b(?:RETURN|THEN|UNTIL|EXIT|NEW|PROCEDURE|ROUTINE|PROC|BREAK)\b/i,
+
     [TokenType.Structure]: new RegExp(
         Object.values(STRUCTURE_PATTERNS).map(r => r.source).join("|"), "i"
     ),
