@@ -25,7 +25,7 @@ interface CustomRegExpMatch extends RegExpExecArray {
  * Provides functionality for locating file and section positions within the Clarion project.
  */
 export class LocationProvider {
-    private solutionParser: SolutionParser | undefined;
+    public solutionParser: SolutionParser | undefined;
     
     constructor(solutionParser: SolutionParser) {
         this.solutionParser = solutionParser;
@@ -156,7 +156,22 @@ export class LocationProvider {
         return null;
     }
     
-    
+    /**
+     * Resolves a file path using the solution parser
+     */
+    resolveFilePath(filename: string): string | null {
+        if (!this.solutionParser) return null;
+        
+        // First check if this is a source file in any project
+        const sourceFile = this.solutionParser.findSourceInProject(filename);
+        if (sourceFile) {
+            // Use the enhanced ClarionSourcerFile to get the absolute path
+            return sourceFile.getAbsolutePath();
+        }
+        
+        // Fall back to the traditional approach
+        return this.solutionParser.findFileWithExtension(filename);
+    }
 
     private findSectionLineNumber(fullPath: string, targetSection: string): number {
         const matchingDocument = workspace.textDocuments.find(document => document.uri.fsPath === fullPath);

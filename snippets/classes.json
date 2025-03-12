@@ -5,7 +5,7 @@
             "${1:ClassName}\tCLASS,TYPE,MODULE('${1:ClassName}.clw'),LINK('${1:ClassName}.clw')",
             "Constrict\t\tPROCEDURE()",
             "Destruct\t\tPROCEDURE()",
-            "$0",
+            "${0}",
             "\t\t\t\tEND"
         ],
         "description": "Create the definition of a new\r\nclarion class swith constructor\r\nand destructor"
@@ -14,7 +14,7 @@
         "prefix": "DCLASS",
         "body": [
             "${1:ClassName}\tCLASS,TYPE,MODULE('${1:ClassName}.clw'),LINK('${1:ClassName}.clw')",
-            "$0",
+            "${0}",
             "\t\t\tEND"
         ],
         "description": "Create the definition of a new\r\nclarion class"
@@ -38,7 +38,7 @@
             "",
             "\tCODE",
             "",
-            "$0"
+            "${0}"
         ],
         "description": "Implenent the module code for a new\r\nclarion class with constructor\r\nand destructor "
     },
@@ -52,18 +52,17 @@
             "\tMAP",
             "\tEND",
             "",
-            "$0"
+            "${0}"
         ],
         "description": "Implenent the module code for a new\r\nclarion class"
     },
     "Clarion.Implement.Method": {
         "prefix": "METHOD",
         "body": [
-            "${1:ClassName}.${2:MethodName}      PROCEDURE($0)",
+            "${1:ClassName}.${2:MethodName}      PROCEDURE(${0})",
             "",
             "\tCODE",
             ""
-            
         ],
         "description": "Create new class method for class module"
     }

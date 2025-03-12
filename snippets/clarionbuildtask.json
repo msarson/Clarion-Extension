@@ -5,7 +5,7 @@
             "{",
             "    \"label\": \"build\",",
             "    \"type\": \"shell\",",
-            "    \"command\": \"${1:C:\\\\\\\\Windows\\\\\\\\Microsoft.NET\\\\\\\\Framework\\\\\\\\v4.0.30319\\\\\\\\msbuild}\",",
+            "    \"command\": \"${1:C:\\\\Windows\\\\Microsoft.NET\\\\Framework\\\\v4.0.30319\\\\msbuild}\",",
             "    \"args\": [",
             "        \"/property:GenerateFullPaths=true\",",
             "        \"/t:build\",",
@@ -13,7 +13,7 @@
             "        \"/consoleloggerparameters:NoSummary\",",
             "        \"/property:Configuration=Debug\",",
             "        \"/property:clarion_Sections=Debug\",",
-            "        \"/property:SolutionDir=${WORKSPACE_FOLDER.replace(/\\\\/g, '\\\\\\\\')}\",",
+            "        \"/property:SolutionDir=\\${WORKSPACE_FOLDER}\",",
             "        \"/property:ClarionBinPath=${2:Path to Clarion Bin Folder}\",",
             "        \"/property:NoDependency=true\",",
             "        \"/property:Verbosity=diagnostic\",",
@@ -26,7 +26,7 @@
             "    \"presentation\": {",
             "        \"reveal\": \"always\"",
             "    },",
-            "    \"problemMatcher\": \"$msCompile\"",
+            "    \"problemMatcher\": \"\\$msCompile\"",
             "}"
         ],
         "description": "Create the MSBuild settings for clarion"

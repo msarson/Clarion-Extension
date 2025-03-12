@@ -2,7 +2,7 @@
     "Clarion.If": {
         "prefix": "IF",
         "body": [
-            "IF $0 THEN",
+            "IF ${0} THEN",
             "\t",
             "END"
         ],
@@ -11,7 +11,7 @@
     "Clarion.If.Then.Else": {
         "prefix": "IFE",
         "body": [
-            "IF $0 THEN",
+            "IF ${0} THEN",
             "\t",
             "ELSE",
             "\t",
@@ -23,7 +23,7 @@
         "prefix": "MAP",
         "body": [
             "MAP",
-            "\t$0",
+            "\t${0}",
             "END"
         ],
         "description": "MAP block"
@@ -32,7 +32,7 @@
         "prefix": "MODULE",
         "body": [
             "MODULE('${1:ModuleName}')",
-            "\t$0",
+            "\t${0}",
             "END"
         ],
         "description": "MODULE block"
@@ -40,7 +40,7 @@
     "Clarion.Loop": {
         "prefix": "LOOP",
         "body": [
-            "LOOP$0",
+            "LOOP${0}",
             "\t",
             "END"
         ],
@@ -50,7 +50,7 @@
         "prefix": "LOOPFT",
         "body": [
             "LOOP ${1:Variable} = ${2:From} TO ${3:To}",
-            "\t$0",
+            "\t${0}",
             "END"
         ],
         "description": "LOOP From - To Blcok"
@@ -59,7 +59,7 @@
         "prefix": "LOOPFILE",
         "body": [
             "LOOP UNTIL ACCESS:${1:FileName}.NEXT()",
-            "\t$0",
+            "\t${0}",
             "END"
         ],
         "description": "LOOP through file block"
@@ -74,8 +74,7 @@
     "Clarion.Debug.Value": {
         "prefix": "DEBUG",
         "body": [
-            "'${1:Text} [' & ${2:value} & ']'$0"
-
+            "'${1:Text} [' & ${2:value} & ']'${0}"
         ],
         "description": "Debug a value"
     }

@@ -1,4 +1,4 @@
-﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, QuickPickItem, ThemeIcon, TextEditor, window as vscodeWindow, Diagnostic, DiagnosticSeverity, Range, Position, Terminal, Selection, StatusBarItem, StatusBarAlignment } from 'vscode';
+﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, QuickPickItem, TextEditor, window as vscodeWindow, Diagnostic, DiagnosticSeverity, Range, Position, Selection, StatusBarItem, StatusBarAlignment } from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } from 'vscode-languageclient/node';
 
 import * as path from 'path';
@@ -11,14 +11,12 @@ import { DocumentManager } from './documentManager';
 import { SolutionTreeDataProvider } from './SolutionTreeDataProvider';
 import { TreeNode } from './TreeNode';
 import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile, setGlobalClarionSelection } from './globals';
-import { parseStringPromise } from 'xml2js';
 import * as fs from 'fs';
-import { RedirectionFileParser } from './Parser/RedirectionFileParser';
 import { SolutionParser } from './Parser/SolutionParser';
 
-import { exec } from 'child_process';
 import { runClarionBuild } from './buildTasks';
 import LoggerManager from './logger';
+import { ClarionProject } from './Parser/ClarionProject';
 const logger = LoggerManager.getLogger("Extension");
 logger.setLevel("error");
 let client: LanguageClient | undefined;
@@ -67,10 +65,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
     await globalSettings.initializeFromWorkspace();
 
     registerOpenCommand(context);
-    context.subscriptions.push(
-        commands.registerCommand("clarion.buildSolution", runClarionBuild)
-    );
-
+    
     context.subscriptions.push(commands.registerCommand("clarion.quickOpen", async () => {
         if (!workspace.isTrusted) {
             vscodeWindow.showWarningMessage("Clarion features require a trusted workspace.");
@@ -80,24 +75,26 @@ export async function activate(context: ExtensionContext): Promise<void> {
         await showClarionQuickOpen();
     }));
 
-    context.subscriptions.push(commands.registerCommand("clarion.openSolution", async () => {
+    // Helper function to check workspace trust before executing commands
+    const withTrustedWorkspace = (callback: () => Promise<void>) => async () => {
         if (!workspace.isTrusted) {
             vscodeWindow.showWarningMessage("Clarion features require a trusted workspace.");
             return;
         }
-
-        await openClarionSolution(context);
-    }));
-
-    context.subscriptions.push(commands.registerCommand("clarion.setConfiguration", async () => {
-        if (!workspace.isTrusted) {
-            vscodeWindow.showWarningMessage("Clarion features require a trusted workspace.");
-            return;
-        }
-
-        await setConfiguration();
-    }));
-
+        await callback();
+    };
+    
+    // Register commands with workspace trust check
+    const commandsRequiringTrust = [
+        { id: "clarion.openSolution", handler: openClarionSolution.bind(null, context) },
+        { id: "clarion.setConfiguration", handler: setConfiguration }
+    ];
+    
+    commandsRequiringTrust.forEach(command => {
+        context.subscriptions.push(
+            commands.registerCommand(command.id, withTrustedWorkspace(command.handler))
+        );
+    });
 
     // ✅ Watch for changes in Clarion configuration settings
     context.subscriptions.push(
@@ -118,6 +115,24 @@ export async function activate(context: ExtensionContext): Promise<void> {
     }
 
     context.subscriptions.push(...disposables);
+
+    context.subscriptions.push(
+        // Add solution build command
+        commands.registerCommand('clarion.buildSolution', async () => {
+            // Call the existing build function with solution as target
+            await buildSolutionOrProject("Solution");
+        }),
+        
+        // Add project build command
+        commands.registerCommand('clarion.buildProject', async (node) => {
+            // The node parameter is passed automatically from the treeview
+            if (node && node.data instanceof ClarionProject) {
+                await buildSolutionOrProject("Project", node.data);
+            } else {
+                window.showErrorMessage("Cannot determine which project to build.");
+            }
+        })
+    );
 }
 
 async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: Disposable[]): Promise<void> {
@@ -840,4 +855,27 @@ function stopClientServer() {
         return client.stop();
     }
     return undefined;
+}
+
+async function buildSolutionOrProject(buildTarget: "Solution" | "Project", project?: ClarionProject) {
+    const buildConfig = {
+        buildTarget: buildTarget,
+        selectedProjectPath: project ? project.path : "",
+        projectObject: project // Pass the entire project object
+    };
+    
+    // Import the build tasks module functions
+    const { validateBuildEnvironment, loadSolutionParser, prepareBuildParameters, executeBuildTask } = require('./buildTasks');
+    
+    if (!validateBuildEnvironment()) {
+        return;
+    }
+    
+    const solutionParser = await loadSolutionParser();
+    if (!solutionParser) {
+        return;
+    }
+    
+    const buildParams = prepareBuildParameters(buildConfig);
+    await executeBuildTask(buildParams);
 }

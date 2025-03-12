@@ -30,7 +30,8 @@ export enum TokenType {
     ClarionDocument, // ✅ PROGRAM / MEMBER token type
     Procedure,
     Routine, 
-    ExecutionMarker
+    ExecutionMarker,
+    Region // Added for identifying region comments
 }
 
 export interface Token {
@@ -313,7 +314,7 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.PointerParameter]: /\*\s*\b[A-Za-z_][A-Za-z0-9_]*\b/i,
     [TokenType.FieldEquateLabel]: /\?[A-Za-z_][A-Za-z0-9_]*/i,
     [TokenType.ClarionDocument]: /\b(?:PROGRAM|MEMBER)\b/i,
-    [TokenType.Keyword]: /\b(?:RETURN|OF|ELSE|THEN|UNTIL|EXIT|NEW|PROCEDURE|ROUTINE|PROC|BREAK)\b/i,
+    [TokenType.Keyword]: /\b(?:RETURN|OF|ELSE|THEN|UNTIL|EXIT|NEW|PROCEDURE|ROUTINE|PROC|BREAK|CODE)\b/i,
     [TokenType.Structure]: new RegExp(
         Object.values(STRUCTURE_PATTERNS).map(r => r.source).join("|"), "i"
     ),

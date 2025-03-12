@@ -19,6 +19,7 @@ import * as path from 'path';
 import { globalSettings } from './globals';
 import { SolutionParser } from './Parser/SolutionParser';
 import LoggerManager from './logger';
+import { ClarionSourcerFile } from './Parser/ClarionSourcerFile';
 const logger = LoggerManager.getLogger("DocumentManager");
 
 interface DocumentInfo {
@@ -295,12 +296,42 @@ export class DocumentManager implements Disposable {
 
         logger.info(`📄 Updating document info: ${document.uri.fsPath}`);
 
-        // 🔹 Reprocess links
+        // Try to find a corresponding ClarionSourcerFile for this document
+        const documentPath = document.uri.fsPath;
+        const fileName = path.basename(documentPath);
+        let sourceFile: ClarionSourcerFile | undefined;
+        
+        // Find which project this file belongs to
+        if (this.locationProvider.solutionParser) {
+            sourceFile = this.locationProvider.solutionParser.findSourceInProject(fileName);
+        }
+
         const statementLocations: ClarionLocation[] = [];
-        statementLocations.push(...this.processPattern(document, this.includePattern, "INCLUDE"));
-        statementLocations.push(...this.processPattern(document, this.modulePattern, "MODULE"));
-        statementLocations.push(...this.processPattern(document, this.memberPattern, "MEMBER"));
-        statementLocations.push(...this.processPattern(document, this.linkPattern, "LINK"));
+
+        if (sourceFile) {
+            // If we have a ClarionSourcerFile, use its cached content if possible
+            logger.info(`📄 Found ClarionSourcerFile for ${fileName}`);
+            
+            // Invalidate cache if document has been edited
+            if (document.isDirty) {
+                sourceFile.invalidateCache();
+            }
+            
+            // Use the new pattern matching functionality
+            const includeMatches = sourceFile.findPatternMatches(this.includePattern);
+            const moduleMatches = sourceFile.findPatternMatches(this.modulePattern);
+            const memberMatches = sourceFile.findPatternMatches(this.memberPattern);
+            const linkMatches = sourceFile.findPatternMatches(this.linkPattern);
+            
+            // Process the matches (convert to ClarionLocation objects)
+            // ...process matches using the LocationProvider...
+        } else {
+            // Fallback to the existing pattern processing for files outside the project
+            statementLocations.push(...this.processPattern(document, this.includePattern, "INCLUDE"));
+            statementLocations.push(...this.processPattern(document, this.modulePattern, "MODULE"));
+            statementLocations.push(...this.processPattern(document, this.memberPattern, "MEMBER"));
+            statementLocations.push(...this.processPattern(document, this.linkPattern, "LINK"));
+        }
 
         // 🔹 Only store document info if there are statement locations
         if (statementLocations.length > 0) {

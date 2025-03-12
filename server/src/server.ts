@@ -5,6 +5,7 @@ import {
 } from 'vscode-languageserver/node';
 
 import {
+    DocumentFormattingParams,
     DocumentSymbol,
     DocumentSymbolParams,
     FoldingRange,
@@ -20,6 +21,7 @@ import { ClarionFoldingRangeProvider } from './ClarionFoldingRangeProvider';
 import { ClarionTokenizer, Token } from './ClarionTokenizer';
 
 import LoggerManager from './logger';
+import ClarionFormatter from './ClarionFormatter';
 const logger = LoggerManager.getLogger("Server");
 // logger.setLevel("info");
 // ✅ Initialize Providers
@@ -83,7 +85,34 @@ documents.onDidChangeContent(event => {
     }, 300);
 });
 
+// ✅ Handle Document Formatting (Uses Cached Tokens & Caches Results)
+connection.onDocumentFormatting((params: DocumentFormattingParams) => {
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return [];
 
+    if (!serverInitialized) {
+        logger.warn(`⚠️  [DELAY] Server not initialized yet, delaying formatting request for ${document.uri}`);
+        return [];
+    }
+
+    logger.info(`📝  Formatting document: ${document.uri}`);
+
+    // 🔍 Tokenize document
+    const tokens = getTokens(document);
+
+    // ✨ Format using the ClarionFormatter
+    const formatter = new ClarionFormatter(tokens, document.getText());
+    const formattedText = formatter.formatDocument();
+    
+    // Convert the formatted text to a TextEdit
+    return [{
+        range: {
+            start: { line: 0, character: 0 },
+            end: { line: document.lineCount - 1, character: document.getText().length - document.getText().lastIndexOf('\n') - 1 }
+        },
+        newText: formattedText
+    }];
+});
 
 
 // ✅ Handle Document Symbols (Uses Cached Tokens & Caches Results)
@@ -116,7 +145,8 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
     return {
         capabilities: {
             foldingRangeProvider: true,
-            documentSymbolProvider: true
+            documentSymbolProvider: true,
+            documentFormattingProvider: true
         }
     };
 });

@@ -55,21 +55,33 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
 
         if (element.data instanceof ClarionSolution) {
             treeItem.iconPath = new ThemeIcon('file-symlink-directory');
+            treeItem.contextValue = 'clarionSolution';
+            
+            // Add ability to open the solution file when clicked
+            if (this.solutionParser && this.solutionParser.solutionFilePath) {
+                treeItem.command = {
+                    title: 'Open Solution File',
+                    command: 'clarion.openFile',
+                    arguments: [this.solutionParser.solutionFilePath]
+                };
+            }
         } else if (element.data instanceof ClarionProject) {
             treeItem.iconPath = new ThemeIcon('project');
+            treeItem.contextValue = 'clarionProject';
+            
+            // Add ability to open the project file when clicked
+            const projectFile = path.join(element.data.path, `${element.data.name}.cwproj`);
+            treeItem.command = {
+                title: 'Open Project File',
+                command: 'clarion.openFile',
+                arguments: [projectFile]
+            };
         } else if (element.data instanceof ClarionSourcerFile) {
             treeItem.iconPath = new ThemeIcon('file-code');
             treeItem.command = {
                 title: 'Open File',
                 command: 'clarion.openFile',
                 arguments: [element.data.relativePath]
-            };
-        } else if (this.isRedirectionEntry(element.data)) { 
-            treeItem.iconPath = new ThemeIcon('file-code');
-            treeItem.command = {
-                title: 'Open Redirection File',
-                command: 'clarion.openFile',
-                arguments: [element.data.redFile]
             };
         }
 
@@ -86,98 +98,29 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         }
 
         const solution = this.solutionParser.solution;
-        const projectNodes: TreeNode[] = [];
-
+        
+        // Create root solution node
+        const solutionNode = new TreeNode(
+            solution.name || "Solution", 
+            TreeItemCollapsibleState.Expanded, 
+            solution
+        );
+        
+        // Add projects as children of solution node
         for (const project of solution.projects) {
             logger.info(`📂 Processing project: ${project.name}`);
 
-            const projectNode = new TreeNode(project.name, TreeItemCollapsibleState.Expanded, project);
+            const projectNode = new TreeNode(project.name, TreeItemCollapsibleState.Expanded, project, solutionNode);
 
-            // ✅ Add source files
+            // Add source files
             const sourceFileNodes = project.sourceFiles.map((sourceFile) => 
-                new TreeNode(sourceFile.name, TreeItemCollapsibleState.None, sourceFile)
+                new TreeNode(sourceFile.name, TreeItemCollapsibleState.None, sourceFile, projectNode)
             );
             projectNode.children.push(...sourceFileNodes);
 
-            // ✅ Add redirection files
-            const redirectionRootNode = this.getRedirectionFilesNode(project, projectNode);
-            if (redirectionRootNode.children.length > 0) {
-                projectNode.children.push(redirectionRootNode);
-            }
-
-            projectNodes.push(projectNode);
+            solutionNode.children.push(projectNode);
         }
 
-        return projectNodes;
+        return [solutionNode]; // Return an array with just the solution node as the root
     }
-
-    /**
-     * ✅ Creates a tree representation of redirection files for a given project.
-     */
-    private getRedirectionFilesNode(project: ClarionProject, parentNode: TreeNode): TreeNode {
-        if (project.getRedirectionEntries().length === 0) {
-            logger.warn(`⚠️ No redirection files found for project ${project.name}`);
-            return new TreeNode("Redirection Files", TreeItemCollapsibleState.None, null, parentNode);
-        }
-    
-        const redirectionEntries = project.getRedirectionEntries();
-        const rootRedFile = redirectionEntries[0].redFile;
-        logger.info(`📌 Root Redirection File: ${rootRedFile}`);
-    
-        const rootNode = new TreeNode(
-            path.basename(rootRedFile),
-            TreeItemCollapsibleState.Collapsed,
-            { type: "redirectionFile", path: rootRedFile },
-            parentNode
-        );
-    
-        const redirectionMap: Map<string, TreeNode> = new Map();
-        redirectionMap.set(rootRedFile, rootNode);
-    
-        for (const entry of redirectionEntries) {
-            if (!entry.redFile) continue;
-    
-            let redFileNode = redirectionMap.get(entry.redFile);
-            if (!redFileNode) {
-                // ✅ Add included redirection files as children
-                logger.info(`📄 Found Included Redirection File: ${entry.redFile}`);
-                redFileNode = new TreeNode(
-                    path.basename(entry.redFile),
-                    TreeItemCollapsibleState.Collapsed,
-                    { type: "redirectionFile", path: entry.redFile },
-                    rootNode
-                );
-                redirectionMap.set(entry.redFile, redFileNode);
-                rootNode.children.push(redFileNode);
-            }
-    
-            // ✅ Organize by Section (Debug, Release, Common, etc.)
-            let sectionNode = redFileNode.children.find(node => node.label === `[${entry.section}]`);
-            if (!sectionNode) {
-                sectionNode = new TreeNode(
-                    `[${entry.section}]`,
-                    TreeItemCollapsibleState.Collapsed,
-                    { type: "section", name: entry.section },
-                    redFileNode
-                );
-                redFileNode.children.push(sectionNode);
-            }
-    
-            // ✅ Attach file extension + paths under the correct section
-            for (const resolvedPath of entry.paths) {
-                const label = `[${entry.extension}] ${resolvedPath}`;
-                sectionNode.children.push(
-                    new TreeNode(
-                        label,
-                        TreeItemCollapsibleState.None,
-                        { type: "redirectionPath", path: resolvedPath },
-                        sectionNode
-                    )
-                );
-            }
-        }
-    
-        return rootNode;
-    }
-    
 }

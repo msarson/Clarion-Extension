@@ -44,13 +44,31 @@
                 "fileLocation": [
                     "absolute"
                 ],
-                "pattern": {
-                    "regexp": "^\\s*\\d*>?\\s*(.+\\.clw)\\((\\d+),(\\d+)\\):\\s+(error|warning)\\s*:\\s*(.*)\\s+\\[.*\\]$",
-                    "file": 1,
-                    "line": 2,
-                    "column": 3,
-                    "message": 4
-                }
+                "pattern": [
+                    {
+                        "regexp": "^\\s*\\d*>?\\s*(.+\\.clw)\\((\\d+),(\\d+)\\):\\s+(error|warning)\\s*:\\s*(.*)\\s+\\[.*\\]$",
+                        "file": 1,
+                        "line": 2,
+                        "column": 3,
+                        "severity": 4,
+                        "message": 5
+                    },
+                    {
+                        "regexp": "^\\s*(?:MSBUILD|.*)\\s*:\\s+(error|warning)\\s+([A-Z0-9]+):\\s+(.+)\\s+\\[(.+)\\]$",
+                        "severity": 1,
+                        "code": 2,
+                        "message": 3,
+                        "file": 4
+                    },
+                    {
+                        "regexp": "^\\s*\\d*>?\\s*(.+)\\((\\d+)\\):\\s+Solution file error\\s+([A-Z0-9]+):\\s+(.+)$",
+                        "file": 1,
+                        "line": 2,
+                        "code": 3,
+                        "severity": 1,
+                        "message": 4
+                    }
+                ]
             }
         ],
         "keybindings": [
@@ -113,8 +131,30 @@
                 "command": "clarion.setConfiguration",
                 "title": "Clarion: Set Configuration",
                 "when": "clarion.solutionOpen"
+            },
+            {
+                "command": "clarion.buildSolution",
+                "title": "Build Solution"
+            },
+            {
+                "command": "clarion.buildProject",
+                "title": "Build Project"
             }
         ],
+        "menus": {
+            "view/item/context": [
+                {
+                    "command": "clarion.buildSolution",
+                    "when": "view == solutionView && viewItem == clarionSolution",
+                    "group": "build"
+                },
+                {
+                    "command": "clarion.buildProject", 
+                    "when": "view == solutionView && viewItem == clarionProject",
+                    "group": "build"
+                }
+            ]
+        },
         "snippets": [
             {
                 "language": "clarion",
@@ -147,6 +187,10 @@
             {
                 "language": "jsonc",
                 "path": "./snippets/clarionbuildtask.json"
+            },
+            {
+                "language": "clarion",
+                "path": "./snippets/override.json"
             }
         ],
         "configuration": {

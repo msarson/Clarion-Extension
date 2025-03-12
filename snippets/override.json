@@ -1,0 +1,40 @@
+{
+    "OtherExtension.ProblematicSnippet": {
+        "prefix": "problem-prefix",
+        "body": [
+            "Properly formatted version of the snippet",
+            "with correct tabbing and spacing"
+        ],
+        "description": "Override of a snippet from another extension"
+    },
+    "class": {
+        "prefix": "class",
+        "body": [
+            "",
+            "${1:ctYada}\tCLASS,TYPE,MODULE('${1:ctYada}.clw'),LINK('${1:ctYada}.clw')",
+            "!------------------------",
+            "CONSTRUCT\tPROCEDURE()",
+            "DESTRUCT\tPROCEDURE()",
+            "\tEND",
+            "",
+            "",
+            "",
+            "  !for the '${1:ctYada}.clw'",
+            "",
+            "\tMEMBER()",
+            "\tINCLUDE('${1:ctYada}.inc'),ONCE",
+            "\tMAP",
+            "\tEND",
+            "",
+            "",
+            "${1:ctYada}.CONSTRUCT\tPROCEDURE()",
+            "\tCODE",
+            "",
+            "${1:ctYada}.DESTRUCT\tPROCEDURE()",
+            "\tCODE",
+            ""
+        ],
+        "description": "Class with proper tab formatting (improved version)",
+        "scope": "clarion"
+    }
+}

@@ -160,5 +160,34 @@ export class ClarionProject {
         return null;
     }
 
+    /**
+     * Analyzes source files to find dependencies and relationships
+     */
+    public analyzeDependencies(): Map<string, string[]> {
+        const dependencies = new Map<string, string[]>();
+        
+        for (const sourceFile of this.sourceFiles) {
+            // Skip files that don't exist
+            if (!sourceFile.exists()) continue;
+            
+            const content = sourceFile.getContent();
+            if (!content) continue;
+            
+            // Look for INCLUDE statements
+            const includePattern = /INCLUDE\s*\(\s*'([^']+\.[a-zA-Z0-9]+)'/ig;
+            const includes = [];
+            
+            const matches = sourceFile.findPatternMatches(includePattern);
+            for (const match of matches) {
+                includes.push(match[1]);
+            }
+            
+            if (includes.length > 0) {
+                dependencies.set(sourceFile.name, includes);
+            }
+        }
+        
+        return dependencies;
+    }
 
 }
