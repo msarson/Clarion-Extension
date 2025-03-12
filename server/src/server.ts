@@ -23,7 +23,7 @@ import { ClarionTokenizer, Token } from './ClarionTokenizer';
 import LoggerManager from './logger';
 import ClarionFormatter from './ClarionFormatter';
 const logger = LoggerManager.getLogger("Server");
-// logger.setLevel("info");
+ logger.setLevel("error");
 // ✅ Initialize Providers
 const clarionFoldingProvider = new ClarionFoldingRangeProvider();
 const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider();
@@ -103,16 +103,36 @@ connection.onDocumentFormatting((params: DocumentFormattingParams) => {
     // ✨ Format using the ClarionFormatter
     const formatter = new ClarionFormatter(tokens, document.getText());
     const formattedText = formatter.formatDocument();
+
+    // 🚨 Debug: Log the differences between old and new text
+    const originalText = document.getText();
+    if (originalText === formattedText) {
+        logger.warn(`⚠️ WARNING: No changes detected in formatting. VS Code might ignore the formatting request.`);
+    } else {
+        logger.info(`✅ Changes detected, applying formatting.`);
+        
+        // 🔍 Detailed character-by-character diff
+        for (let i = 0; i < Math.max(originalText.length, formattedText.length); i++) {
+            const originalChar = originalText.charCodeAt(i) || "EOF";
+            const formattedChar = formattedText.charCodeAt(i) || "EOF";
     
+            if (originalChar !== formattedChar) {
+                logger.warn(`🔍 [Mismatch] Index ${i}: Original='${originalText[i] || "EOF"}' (${originalChar}), Formatted='${formattedText[i] || "EOF"}' (${formattedChar})`);
+            }
+        }
+    }
+    
+
     // Convert the formatted text to a TextEdit
     return [{
         range: {
             start: { line: 0, character: 0 },
-            end: { line: document.lineCount - 1, character: document.getText().length - document.getText().lastIndexOf('\n') - 1 }
+            end: { line: document.lineCount - 1, character: document.getText().length }
         },
         newText: formattedText
     }];
 });
+
 
 
 // ✅ Handle Document Symbols (Uses Cached Tokens & Caches Results)
