@@ -11,7 +11,10 @@ import {
     FoldingRange,
     FoldingRangeParams,
     InitializeParams,
-    InitializeResult
+    InitializeResult,
+    TextEdit,
+    Range,
+    Position
 } from 'vscode-languageserver-protocol';
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
@@ -86,54 +89,46 @@ documents.onDidChangeContent(event => {
 });
 
 // ✅ Handle Document Formatting (Uses Cached Tokens & Caches Results)
-connection.onDocumentFormatting((params: DocumentFormattingParams) => {
-    const document = documents.get(params.textDocument.uri);
-    if (!document) return [];
-
-    if (!serverInitialized) {
-        logger.warn(`⚠️  [DELAY] Server not initialized yet, delaying formatting request for ${document.uri}`);
-        return [];
-    }
-
-    logger.info(`📝  Formatting document: ${document.uri}`);
-
-    // 🔍 Tokenize document
-    const tokens = getTokens(document);
-
-    // ✨ Format using the ClarionFormatter
-    const formatter = new ClarionFormatter(tokens, document.getText());
-    const formattedText = formatter.formatDocument();
-
-    // 🚨 Debug: Log the differences between old and new text
-    const originalText = document.getText();
-    if (originalText === formattedText) {
-        logger.warn(`⚠️ WARNING: No changes detected in formatting. VS Code might ignore the formatting request.`);
-    } else {
-        logger.info(`✅ Changes detected, applying formatting.`);
+connection.onDocumentFormatting(
+    (params: DocumentFormattingParams): TextEdit[] => {
+        const document = documents.get(params.textDocument.uri);
+        if (!document) {
+            return [];
+        }
         
-        // 🔍 Detailed character-by-character diff
-        for (let i = 0; i < Math.max(originalText.length, formattedText.length); i++) {
-            const originalChar = originalText.charCodeAt(i) || "EOF";
-            const formattedChar = formattedText.charCodeAt(i) || "EOF";
-    
-            if (originalChar !== formattedChar) {
-                logger.warn(`🔍 [Mismatch] Index ${i}: Original='${originalText[i] || "EOF"}' (${originalChar}), Formatted='${formattedText[i] || "EOF"}' (${formattedChar})`);
+        const text = document.getText();
+        
+        try {
+            // Pass the VS Code formatting options to the tokenizer and formatter
+            const tokenizer = new ClarionTokenizer(text);
+            const tokens = tokenizer.tokenize();
+            
+            const formatter = new ClarionFormatter(tokens, text, {
+                formattingOptions: params.options // Pass VS Code's formatting options
+            });
+            
+            const formattedText = formatter.formatDocument();
+            
+            if (formattedText !== text) {
+                return [
+                    TextEdit.replace(
+                        Range.create(
+                            Position.create(0, 0),
+                            Position.create(document.lineCount, 0)
+                        ),
+                        formattedText
+                    )
+                ];
+            } else {
+                return [];
             }
+        } catch (error) {
+            // Handle errors...
+            // ...existing code...
+            return [];
         }
     }
-    
-
-    // Convert the formatted text to a TextEdit
-    return [{
-        range: {
-            start: { line: 0, character: 0 },
-            end: { line: document.lineCount - 1, character: document.getText().length }
-        },
-        newText: formattedText
-    }];
-});
-
-
+);
 
 // ✅ Handle Document Symbols (Uses Cached Tokens & Caches Results)
 connection.onDocumentSymbol((params: DocumentSymbolParams) => {

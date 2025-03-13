@@ -1,5 +1,6 @@
 import { Token, TokenType } from "./ClarionTokenizer";
 import LoggerManager from "./logger";
+import { FormattingOptions } from 'vscode-languageserver';
 
 const logger = LoggerManager.getLogger("Formatter");
 logger.setLevel("info");
@@ -8,7 +9,7 @@ class ClarionFormatter {
     private tokens: Token[];
     private text: string;
     private lines: string[];
-    private indentSize: number = 4;
+    private indentSize: number = 4; // Default indent size
     private labelLines: Set<number> = new Set();
     private structureStartColumns: Map<number, number> = new Map();
     private structureEndLines: Map<number, number> = new Map();
@@ -22,13 +23,19 @@ class ClarionFormatter {
     private readonly BASE_STRUCTURE_INDENT = 2;
     // private readonly STATEMENT_INDENT_OFFSET = 2;
 
-    constructor(tokens: Token[], text: string, options?: { indentSize?: number }) {
+    constructor(tokens: Token[], text: string, options?: { indentSize?: number, formattingOptions?: FormattingOptions }) {
         this.tokens = tokens;
         this.text = text;
         this.lines = text.split(/\r?\n/);
 
-        if (options?.indentSize) {
+        // First check for explicit indentSize
+        if (options?.indentSize !== undefined) {
             this.indentSize = options.indentSize;
+        }
+        // Then check for VS Code formatting options
+        else if (options?.formattingOptions?.tabSize !== undefined) {
+            this.indentSize = options.formattingOptions.tabSize;
+            logger.info(`Using editor tab size: ${this.indentSize}`);
         }
 
         this.identifyLabelLines();
@@ -46,9 +53,9 @@ class ClarionFormatter {
     }
 
     private identifyExecutionCodeSections(): void {
-        // Track procedure and routine boundaries
-        const procedureBoundaries: { start: number, end: number }[] = [];
-        const routineBoundaries: { start: number, end: number, hasDataMarker: boolean }[] = [];
+        // Track procedure and routine boundaries and their CODE marker positions
+        const procedureBoundaries: { start: number, end: number, codeMarkerIndent?: number }[] = [];
+        const routineBoundaries: { start: number, end: number, hasDataMarker: boolean, codeMarkerIndent?: number }[] = [];
         
         // First pass: identify all procedures and routines
         for (let i = 0; i < this.tokens.length; i++) {
@@ -93,6 +100,10 @@ class ClarionFormatter {
             const token = this.tokens[i];
             
             if (token.type === TokenType.ExecutionMarker && token.value.toUpperCase() === "CODE") {
+                // Use BASE_STRUCTURE_INDENT for execution code statements that aren't in structures
+                // This ensures they align with the procedure level
+                const codeMarkerIndent = this.BASE_STRUCTURE_INDENT;
+                
                 // Find which procedure/routine this CODE marker belongs to
                 let belongsToProcedure = false;
                 let belongsToRoutine = false;
@@ -103,7 +114,8 @@ class ClarionFormatter {
                     if (token.line > proc.start && token.line < proc.end) {
                         belongsToProcedure = true;
                         endLine = proc.end;
-                        logger.info(`📊 Found CODE marker at line ${token.line} in PROCEDURE (ends at ${endLine})`);
+                        proc.codeMarkerIndent = codeMarkerIndent; // Store CODE indentation
+                        logger.info(`📊 Found CODE marker at line ${token.line} with indent ${codeMarkerIndent} in PROCEDURE (ends at ${endLine})`);
                         break;
                     }
                 }
@@ -114,7 +126,8 @@ class ClarionFormatter {
                         if (token.line > routine.start && token.line < routine.end) {
                             belongsToRoutine = true;
                             endLine = routine.end;
-                            logger.info(`📊 Found CODE marker at line ${token.line} in ROUTINE (ends at ${endLine})`);
+                            routine.codeMarkerIndent = codeMarkerIndent; // Store CODE indentation
+                            logger.info(`📊 Found CODE marker at line ${token.line} with indent ${codeMarkerIndent} in ROUTINE (ends at ${endLine})`);
                             break;
                         }
                     }
@@ -125,7 +138,10 @@ class ClarionFormatter {
                     const startLine = token.line + 1;
                     for (let line = startLine; line < endLine; line++) {
                         this.executionCodeSections.add(line);
-                        logger.info(`📊 Marked line ${line} as execution code after CODE marker`);
+                        // Always set default indentation for execution code to the base indent
+                        // Specific structures inside the code section will override this as needed
+                        this.statementIndentation.set(line, codeMarkerIndent);
+                        logger.info(`📊 Marked line ${line} as execution code after CODE marker, default indent: ${codeMarkerIndent}`);
                     }
                 }
             }
@@ -138,10 +154,15 @@ class ClarionFormatter {
                 // The first line after the ROUTINE declaration is execution code
                 const startLine = routine.start + 1;
                 
+                // Use base structure indent for routine execution code
+                const routineIndent = this.BASE_STRUCTURE_INDENT;
+                
                 // Mark all lines in the routine as execution code
                 for (let line = startLine; line < routine.end; line++) {
                     this.executionCodeSections.add(line);
-                    logger.info(`📊 Marked line ${line} as execution code in ROUTINE without DATA/CODE marker`);
+                    // Set default indentation for execution code to base indent
+                    this.statementIndentation.set(line, routineIndent);
+                    logger.info(`📊 Marked line ${line} as execution code in ROUTINE without DATA/CODE marker, default indent: ${routineIndent}`);
                 }
             }
         }
@@ -268,10 +289,10 @@ class ClarionFormatter {
                 
                 // Calculate proper indentation based on the longest label in the structure
                 // We want the structure keyword (like CLASS) to be aligned one indent after the longest label
-                structureIndent = longestLabelLength + this.indentSize;
+                // Round to the nearest multiple of indentSize
+                structureIndent = Math.round((longestLabelLength + 2) / this.indentSize) * this.indentSize;
                 
-                // Log this decision with details
-                logger.info(`📏 Structure '${type}' at line ${startLine} aligns after longest label (${longestLabelLength} chars), indent: ${structureIndent}`);
+                logger.info(`📏 Structure '${type}' at line ${startLine} aligns after longest label (${longestLabelLength} chars), rounded indent: ${structureIndent}`);
             } 
             // No label - use parent structure's indent or longest label within structure
             else if (parent) {
@@ -282,14 +303,16 @@ class ClarionFormatter {
                     const parentIndent = this.structureStartColumns.get(parentStructure.startLine) || 0;
                     structureIndent = parentIndent + this.indentSize;
                     
-                    // If this structure has labels inside it, use max label length if needed
+                    // If this structure has labels inside it, consider max label length
                     if (maxLabelLength > 0) {
-                        structureIndent = Math.max(structureIndent, maxLabelLength + this.indentSize);
+                        // Ensure it's a multiple of indentSize
+                        const labelBasedIndent = Math.ceil((maxLabelLength + 2) / this.indentSize) * this.indentSize;
+                        structureIndent = Math.max(structureIndent, labelBasedIndent);
                     }
                     
                     logger.info(`📏 Structure '${type}' at line ${startLine} aligns with parent plus indent: ${structureIndent}`);
                 } else {
-                    // Fallback if parent structure not found
+                    // Fallback if parent structure not found - ensure multiple of indentSize
                     structureIndent = this.indentSize * nestingLevel;
                 }
             } 
@@ -298,21 +321,30 @@ class ClarionFormatter {
                 // Different handling for execution code vs. data section structures
                 if (isInExecutionCode) {
                     // Structures in execution code sections need at least the base indent
-                    structureIndent = Math.max(this.BASE_STRUCTURE_INDENT, this.indentSize * nestingLevel);
+                    // Round to nearest multiple of indentSize
+                    structureIndent = Math.max(
+                        this.BASE_STRUCTURE_INDENT, 
+                        Math.round(this.indentSize * nestingLevel / this.indentSize) * this.indentSize
+                    );
                     logger.info(`📏 Execution code structure '${type}' at line ${startLine} uses indent: ${structureIndent}`);
                 } else {
-                    // Keep the original logic for data sections
+                    // Keep the original logic for data sections but ensure multiple of indentSize
                     structureIndent = this.indentSize * nestingLevel;
                     
                     // If this structure has labels inside it, use max label length if needed
                     if (maxLabelLength > 0) {
-                        structureIndent = Math.max(structureIndent, maxLabelLength + this.indentSize);
-                        logger.info(`📏 Structure '${type}' at line ${startLine} aligns with longest label: ${structureIndent}`);
+                        // Round up to nearest multiple of indentSize
+                        const labelBasedIndent = Math.ceil((maxLabelLength + 2) / this.indentSize) * this.indentSize;
+                        structureIndent = Math.max(structureIndent, labelBasedIndent);
+                        logger.info(`📏 Structure '${type}' at line ${startLine} aligns with longest label: ${structureIndent} (rounded)`);
                     } else {
                         logger.info(`📏 Structure '${type}' at line ${startLine} uses base indent: ${structureIndent}`);
                     }
                 }
             }
+            
+            // Ensure structure indent is a multiple of indentSize (use exact multiples, no rounding up)
+            structureIndent = Math.floor(structureIndent / this.indentSize) * this.indentSize;
             
             // Store structure indent
             this.structureStartColumns.set(startLine, structureIndent);
@@ -387,22 +419,68 @@ class ClarionFormatter {
                 const isStructureStart = this.structureStartColumns.has(line);
                 const isStructureEnd = this.structureEndLines.has(line);
                 const hasLabel = this.labelLines.has(line);
-                const hasIndentation = this.statementIndentation.has(line);
                 
-                // Don't override existing structure indentation, but set default for regular statements
-                if (!isStructureStart && !isStructureEnd && !hasLabel && !hasIndentation) {
+                // Don't override existing structure indentation, but handle other execution code
+                if (!isStructureStart && !isStructureEnd && !hasLabel) {
                     // Find the containing structure for proper indentation
                     const containingStructure = this.findContainingStructure(line);
                     
-                    if (containingStructure && containingStructure.column !== undefined) {
-                        // Use the structure's indentation + offset for execution code
+                    // Check if this is inside an IF, CASE or other execution control structure
+                    const isInControlStructure = containingStructure && 
+                        ["IF", "CASE", "LOOP", "EXECUTE"].includes(containingStructure.type?.toUpperCase() || "");
+                    
+                    if (containingStructure && containingStructure.column !== undefined && isInControlStructure) {
+                        // Only adjust indent if we're in a control structure like IF, CASE, etc.
                         const executionIndent = containingStructure.column + this.indentSize;
                         this.statementIndentation.set(line, executionIndent);
-                        logger.info(`📊 Execution code line ${line} in structure - indent: ${executionIndent}`);
+                        logger.info(`📊 Execution code line ${line} in control structure ${containingStructure.type} - indent: ${executionIndent}`);
                     } else {
-                        // No containing structure, use base indent
+                        // Not in a control structure - use base indent for procedure level statements
                         this.statementIndentation.set(line, this.BASE_STRUCTURE_INDENT);
-                        logger.info(`📊 Execution code line ${line} - base indent: ${this.BASE_STRUCTURE_INDENT}`);
+                        logger.info(`📊 Execution code line ${line} at procedure level - using base indent: ${this.BASE_STRUCTURE_INDENT}`);
+                    }
+                }
+            }
+        }
+        
+        // Final pass: Check procedure-level statements in execution code sections
+        for (let line = 0; line < this.lines.length; line++) {
+            // Find statements that came after the END of the main structure in a procedure/routine
+            if (this.executionCodeSections.has(line)) {
+                // Only for lines that have indentation set too deeply
+                if (this.statementIndentation.has(line) && this.statementIndentation.get(line)! > this.BASE_STRUCTURE_INDENT * 2) {
+                    // Check if we're after an END statement (not just the immediate next line)
+                    // Find the nearest preceding END statement
+                    let foundEnd = false;
+                    for (let prevLine = line - 1; prevLine >= 0 && prevLine >= line - 5; prevLine--) {
+                        if (this.structureEndLines.has(prevLine)) {
+                            foundEnd = true;
+                            break;
+                        }
+                        
+                        // If we hit a structure start before finding an END, then break
+                        if (this.structureStartColumns.has(prevLine) && 
+                            !this.tokens.some(t => t.line === prevLine && t.type === TokenType.ConditionalContinuation)) {
+                            break;
+                        }
+                    }
+                    
+                    // If we found an END statement in the preceding few lines
+                    if (foundEnd) {
+                        // Check if this looks like a procedure-level statement (RETURN, etc.)
+                        const lineText = this.lines[line].trim().toUpperCase();
+                        
+                        // Reset indentation for procedure-level statements
+                        if (lineText.startsWith('RETURN') || 
+                            lineText === 'END' ||
+                            lineText.startsWith('SELF.') ||
+                            lineText.startsWith('PARENT.') ||
+                            (lineText.length > 0 && !lineText.startsWith('!'))) {
+                            
+                            // Reset to procedure level indentation
+                            this.statementIndentation.set(line, this.BASE_STRUCTURE_INDENT);
+                            logger.info(`📊 Fixed over-indented line ${line} after END structure to base indent: ${this.BASE_STRUCTURE_INDENT}`);
+                        }
                     }
                 }
             }
@@ -475,6 +553,8 @@ class ClarionFormatter {
                     }
 
                     // Calculate spaces needed after the label
+                    // Ensure statementIndent is an exact multiple of indentSize
+                    statementIndent = Math.floor(statementIndent / this.indentSize) * this.indentSize;
                     const spaceCount = Math.max(2, statementIndent - labelPart.length);
                     return labelPart + " ".repeat(spaceCount) + statementPart;
                 }
@@ -488,27 +568,59 @@ class ClarionFormatter {
             // ✅ Apply indentation from structure calculations
             if (isConditionalContinuation && this.structureStartColumns.has(index)) {
                 finalIndent = this.structureStartColumns.get(index) || 0;
+                // Ensure it's an exact multiple of indentSize
+                finalIndent = Math.floor(finalIndent / this.indentSize) * this.indentSize;
                 logger.info(`🔹 ELSE/ELSIF line ${index}, indent: ${finalIndent}`);
             }
             else if (this.structureStartColumns.has(index)) {
                 finalIndent = this.structureStartColumns.get(index) || 0;
+                // Ensure it's an exact multiple of indentSize
+                finalIndent = Math.floor(finalIndent / this.indentSize) * this.indentSize;
                 logger.info(`🔹 Structure line ${index}, indent: ${finalIndent}`);
             } 
             else if (this.structureEndLines.has(index)) {
                 finalIndent = this.structureEndLines.get(index) || 0;
+                // Ensure it's an exact multiple of indentSize
+                finalIndent = Math.floor(finalIndent / this.indentSize) * this.indentSize;
                 logger.info(`🔹 END line ${index}, indent: ${finalIndent}`);
             } 
             else if (this.statementIndentation.has(index)) {
                 finalIndent = this.statementIndentation.get(index) || 0;
+                
+                // Enhanced check for procedure-level statements that should have base indentation
+                if (this.executionCodeSections.has(index)) {
+                    const trimmedUpperLine = line.trim().toUpperCase();
+                    
+                    // If this is a return statement or other procedure-level statement
+                    // and is indented too deeply, fix it
+                    if ((trimmedUpperLine.startsWith('RETURN') || 
+                         trimmedUpperLine === 'END' ||
+                         trimmedUpperLine.startsWith('SELF.') ||
+                         trimmedUpperLine.startsWith('PARENT.')) && 
+                        finalIndent > this.BASE_STRUCTURE_INDENT * 2) {
+                        
+                        finalIndent = this.BASE_STRUCTURE_INDENT;
+                        logger.info(`🔹 Fixing procedure-level statement at line ${index} to base indent`);
+                    }
+                }
+                
+                // Ensure it's an exact multiple of indentSize
+                finalIndent = Math.floor(finalIndent / this.indentSize) * this.indentSize;
                 logger.info(`🔹 Statement line ${index}, indent: ${finalIndent}`);
             } 
             else if (this.executionCodeSections.has(index)) {
-                finalIndent = this.BASE_STRUCTURE_INDENT;
-                logger.info(`🔹 Execution code line ${index}, base indent: ${finalIndent}`);
+                finalIndent = this.statementIndentation.has(index) ? 
+                    this.statementIndentation.get(index)! : this.BASE_STRUCTURE_INDENT;
+                    
+                // Ensure it's an exact multiple of indentSize
+                finalIndent = Math.floor(finalIndent / this.indentSize) * this.indentSize;
+                logger.info(`🔹 Execution code line ${index} with indent: ${finalIndent}`);
             }
             else {
                 logger.warn(`⚠️ Using default indentation for line ${index}`);
                 finalIndent = this.BASE_STRUCTURE_INDENT;
+                // Ensure it's an exact multiple of indentSize
+                finalIndent = Math.floor(finalIndent / this.indentSize) * this.indentSize;
             }
 
             let formattedLine = " ".repeat(finalIndent) + trimmedLine;
@@ -525,8 +637,8 @@ class ClarionFormatter {
     }
     
     // Helper to find which structure contains a given line
-    private findContainingStructure(lineIndex: number): { maxLabelLength: number, column: number } | undefined {
-        // Update return type to include the column property
+    private findContainingStructure(lineIndex: number): { maxLabelLength: number, column: number, type?: string } | undefined {
+        // Update return type to include the structure type
         
         // Sort structures by most specific (innermost) first
         const sortedStructures = [...this.structureStack].sort((a, b) => {
@@ -546,7 +658,8 @@ class ClarionFormatter {
             if (structure.startLine <= lineIndex) {
                 return {
                     maxLabelLength: structure.maxLabelLength,
-                    column: structure.column
+                    column: structure.column,
+                    type: structure.type // Return the structure type
                 };
             }
         }
