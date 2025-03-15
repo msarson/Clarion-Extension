@@ -107,7 +107,7 @@ connection.onDocumentFormatting(
                 formattingOptions: params.options // Pass VS Code's formatting options
             });
             
-            const formattedText = formatter.formatDocument();
+            const formattedText = formatter.format();
             
             if (formattedText !== text) {
                 return [
@@ -142,6 +142,7 @@ connection.onDocumentSymbol((params: DocumentSymbolParams) => {
     }
 
     logger.info(`📂  Computing fresh document symbols for: ${document.uri}`);
+    
     const tokens = getTokens(document);
     return clarionDocumentSymbolProvider.provideDocumentSymbols(tokens, document.uri);
 });

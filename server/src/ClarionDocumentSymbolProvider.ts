@@ -1,10 +1,11 @@
 import { DocumentSymbol, Range, SymbolKind } from 'vscode-languageserver-types';
-import { Token, TokenType } from './ClarionTokenizer.js';
+
 import ClarionFileParser from './ClarionFileParser.js';
 import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("ClarionDocumentSymbolProvider");
 logger.setLevel("error");
 import { globalClarionSettings, serverInitialized } from './server.js';
+import { Token, TokenType } from './ClarionTokenizer.js';
 // ✅ Convert enum to const object for direct compatibility
 const ClarionSymbolKind = {
     Root: SymbolKind.Module,

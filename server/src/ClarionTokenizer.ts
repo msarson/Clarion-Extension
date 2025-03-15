@@ -29,7 +29,7 @@ export enum TokenType {
     EndStatement,
     ClarionDocument, // ✅ PROGRAM / MEMBER token type
     Procedure,
-    Routine, 
+    Routine,
     ExecutionMarker,
     Region,
     ConditionalContinuation
@@ -37,24 +37,33 @@ export enum TokenType {
 
 export interface Token {
     type: TokenType;
-    subType?: TokenType; // To replace isProcedure, isRoutine, etc.
+    subType?: TokenType;
     value: string;
     line: number;
     start: number;
-    finishesAt?: number;  // Unified field for structure, procedure, method, routine
+    finishesAt?: number;
+    parent?: Token;
+    children?: Token[];
+    executionMarker?: Token;  // ✅ First explicit "CODE" statement (if present)
+    hasLocalData?: boolean;   // ✅ True if "DATA" exists before "CODE"
+    inferredCode?: boolean;   // ✅ True if "CODE" is implied (not explicitly written)
 }
+
 
 
 export class ClarionTokenizer {
     private text: string;
     private tokens: Token[];
     private lines: string[];
-    constructor(text: string) {
+    private tabSize: number;  // ✅ Store tabSize
+
+    constructor(text: string, tabSize: number = 2) {  // ✅ Default to 2 if not provided
         this.text = text;
         this.tokens = [];
         this.lines = [];
-        
+        this.tabSize = tabSize;  // ✅ Store the provided or default value
     }
+
 
     /** ✅ Public method to tokenize text */
     public tokenize(): Token[] {
@@ -78,7 +87,8 @@ export class ClarionTokenizer {
             if (line.trim() === "") continue; // ✅ Skip blank lines
 
             let position = 0;
-            let column = line.match(/^(\s*)/)?.[0].length || 0;
+            let expandedLine = this.expandTabs(line);
+            let column = expandedLine.match(/^(\s*)/)?.[0].length || 0;
 
             while (position < line.length) {
                 const substring = line.slice(position);
@@ -101,10 +111,9 @@ export class ClarionTokenizer {
                             line: lineNumber,
                             start: column
                         };
-
                         this.tokens.push(newToken);
-                            logger.info(`Detected: Token Type: ${newToken.type} Token Value: '${newToken.value}' at Line ${newToken.line}, Column ${newToken.start}`);
-                            logger.info(`Line: ${line}`);
+                        logger.info(`Detected: Token Type: ${newToken.type} Token Value: '${newToken.value}' at Line ${newToken.line}, Column ${newToken.start}`);
+                        logger.info(`Line: ${line}`);
 
                         position += match[0].length;
                         column += match[0].length;
@@ -124,139 +133,236 @@ export class ClarionTokenizer {
     }
 
     /** ✅ Step 2: Analyze Token Relationships */
-   /** ✅ Step 2: Analyze Token Relationships */
-private analyzeTokenRelationships(): void {
-    let structureStack: { tokenIndex: number, type: string, startLine: number }[] = [];
-    let procedureStack: { tokenIndex: number, startLine: number, subType: TokenType }[] = [];
-    let routineStack: { tokenIndex: number, startLine: number }[] = [];
-    let insideClassOrInterfaceOrMapDepth = 0; // Track nesting levels
+    private analyzeTokenRelationships(): void {
+        let structureStack: Token[] = [];
+        let procedureStack: Token[] = [];
+        let routineStack: Token[] = [];
+        let insideRoutine: Token | null = null;  // ✅ Tracks the current routine
+        let foundData = false;  // ✅ Tracks if "DATA" has been found inside a routine
+        let insideClassOrInterfaceOrMapDepth = 0; // ✅ Track nesting levels for CLASS/MAP/INTERFACE
+        let structureIndentMap: Map<Token, number> = new Map(); // ✅ Stores indentation per structure
 
-    for (let i = 0; i < this.tokens.length; i++) {
-        const token = this.tokens[i];
+        let maxLabelWidth = 0;  // ✅ Track max label length for proper indentation
 
-        // ✅ Detect STRUCTURES (CLASS, MAP, INTERFACE, etc.)
-        if (token.type === TokenType.Structure) {
-            logger.warn(`🔍 Structure Detected: '${token.value}' at Line ${token.line}, Ends at ${token.finishesAt ?? "UNKNOWN"}`);
-
-            token.subType = TokenType.Structure;
-            structureStack.push({ tokenIndex: i, type: token.value.trim(), startLine: token.line });
-
-            if (["CLASS", "MAP", "INTERFACE"].includes(token.value.toUpperCase())) {
-                insideClassOrInterfaceOrMapDepth++;
-                logger.warn(`🛠  >>>> ${token.value}, Depth: ${insideClassOrInterfaceOrMapDepth}`);
+        // ✅ First Pass: Identify Labels & Compute Max Label Length
+        for (const token of this.tokens) {
+            if (token.start === 0 && token.type !== TokenType.Comment) {
+                token.type = TokenType.Label;
+                maxLabelWidth = Math.max(maxLabelWidth, token.value.length);
+                logger.info(`📌 Label '${token.value}' detected at Line ${token.line}, forced to column 0.`);
             }
         }
 
-        // ✅ Detect END statement for structures
-        if (token.type === TokenType.EndStatement) {
-            const lastStructure = structureStack.pop();
-            if (lastStructure) {
-                this.tokens[lastStructure.tokenIndex].finishesAt = token.line;
-                logger.warn(`✅ [CHECK] Structure '${lastStructure.type}' starts at Line ${lastStructure.startLine} ends at Line ${token.line}`);
+        // ✅ Second Pass: Process Token Relationships
+        for (let i = 0; i < this.tokens.length; i++) {
+            const token = this.tokens[i];
 
-                if (["CLASS", "MAP", "INTERFACE"].includes(lastStructure.type.toUpperCase())) {
-                    insideClassOrInterfaceOrMapDepth = Math.max(0, insideClassOrInterfaceOrMapDepth - 1);
-                    logger.warn(`🛠  <<<< ${lastStructure.type}, Depth: ${insideClassOrInterfaceOrMapDepth}`);
+            // ✅ Detect STRUCTURES (CLASS, MAP, INTERFACE, etc.)
+            if (token.type === TokenType.Structure) {
+                logger.warn(`🔍 Structure Detected: '${token.value}' at Line ${token.line}, Ends at ${token.finishesAt ?? "UNKNOWN"}`);
+
+                token.subType = TokenType.Structure;
+
+                // ✅ If there's an open structure, assign this as a child
+                if (structureStack.length > 0) {
+                    let parent = structureStack[structureStack.length - 1];
+                    token.parent = parent;
+                    parent.children = parent.children || [];
+                    parent.children.push(token);
                 }
+
+                // ✅ Store indentation for this structure (right after max label width)
+                let indentLevel = maxLabelWidth + 2;
+                structureIndentMap.set(token, indentLevel);
+                logger.info(`📌 Structure '${token.value}' at Line ${token.line} assigned indent ${indentLevel}`);
+
+                structureStack.push(token);
+
+                if (["CLASS", "MAP", "INTERFACE"].includes(token.value.toUpperCase())) {
+                    insideClassOrInterfaceOrMapDepth++;
+                    logger.warn(`🛠 >>>> ${token.value}, Depth: ${insideClassOrInterfaceOrMapDepth}`);
+                }
+            }
+
+            // ✅ Detect END statement for structures
+            if (token.type === TokenType.EndStatement) {
+                const lastStructure = structureStack.pop();
+                if (lastStructure) {
+                    lastStructure.finishesAt = token.line;
+                    token.start = structureIndentMap.get(lastStructure) || 0;  // Align END with its parent structure
+                    logger.info(`✅ END at Line ${token.line} aligned with '${lastStructure.value}' at indent ${token.start}`);
+
+                    if (["CLASS", "MAP", "INTERFACE"].includes(lastStructure.value.toUpperCase())) {
+                        insideClassOrInterfaceOrMapDepth = Math.max(0, insideClassOrInterfaceOrMapDepth - 1);
+                        logger.warn(`🛠 <<<< ${lastStructure.value}, Depth: ${insideClassOrInterfaceOrMapDepth}`);
+                    }
+                } else {
+                    logger.warn(`⚠️ [WARNING] Unmatched END at Line ${token.line}`);
+                }
+            }
+
+            // ✅ Detect PROCEDURE declarations
+            if (token.type === TokenType.Keyword && token.value.toUpperCase() === "PROCEDURE") {
+                logger.warn(`🛠 PROCEDURE detected at Line ${token.line} | Depth: ${insideClassOrInterfaceOrMapDepth}`);
+
+                if (insideClassOrInterfaceOrMapDepth > 0) {
+                    logger.warn(`🚫 Ignored PROCEDURE at Line ${token.line} (Inside CLASS/MAP/INTERFACE)`);
+                    continue;
+                }
+
+                // ✅ Check if the previous token on the same line is a class reference
+                let prevToken = this.tokens[i - 1];
+                let isClassMethod = prevToken && prevToken.type === TokenType.Class;
+
+                // ✅ Close previous PROCEDURE before opening a new one
+                if (procedureStack.length > 0) {
+                    const lastProcedure = procedureStack.pop();
+                    if (lastProcedure) {
+                        lastProcedure.finishesAt = token.line - 1;
+                        logger.warn(`✅ [Closed] PROCEDURE '${lastProcedure.value}' Ends at Line ${token.line - 1}`);
+                    }
+                }
+
+                // ✅ Close all ROUTINEs since they're only valid inside their PROCEDURE
+                while (routineStack.length > 0) {
+                    const lastRoutine = routineStack.pop();
+                    if (lastRoutine) {
+                        lastRoutine.finishesAt = token.line - 1;
+                        logger.warn(`✅ [Closed] ROUTINE Ends at Line ${token.line - 1}`);
+                    }
+                }
+
+                // ✅ Assign parent-child relationship (if inside a structure)
+                if (structureStack.length > 0) {
+                    let parent = structureStack[structureStack.length - 1];
+                    token.parent = parent;
+                    parent.children = parent.children || [];
+                    parent.children.push(token);
+                }
+
+                // ✅ Set subType correctly for class methods vs global procedures
+                token.subType = isClassMethod ? TokenType.Class : TokenType.Procedure;
+
+                if (isClassMethod) {
+                    logger.warn(`📌 Class Method Implementation Detected: '${prevToken.value}.${token.value}' at Line ${token.line}`);
+                } else {
+                    logger.warn(`🔍 New PROCEDURE '${token.value}' at Line ${token.line}, Ends at UNKNOWN`);
+                }
+
+                // ✅ Push onto the procedure stack
+                procedureStack.push(token);
+            }
+
+
+            // ✅ Detect ROUTINE declarations
+            if (token.type === TokenType.Keyword && token.value.toUpperCase() === "ROUTINE") {
+                logger.warn(`🛠 ROUTINE detected at Line ${token.line}`);
+
+                if (procedureStack.length === 0) {
+                    logger.warn(`⚠️ WARNING: ROUTINE declared without a PROCEDURE! Ignoring...`);
+                    continue;
+                }
+
+                // ✅ Close the last ROUTINE before opening a new one
+                if (routineStack.length > 0) {
+                    const lastRoutine = routineStack.pop();
+                    if (lastRoutine) {
+                        lastRoutine.finishesAt = token.line - 1;
+                        logger.warn(`✅ [Closed] Previous ROUTINE Ends at Line ${token.line - 1}`);
+                    }
+                }
+
+                // ✅ Assign parent-child relationship (inside a procedure)
+                let parentProcedure = procedureStack[procedureStack.length - 1];
+                token.parent = parentProcedure;
+                parentProcedure.children = parentProcedure.children || [];
+                parentProcedure.children.push(token);
+
+                // ✅ Track this routine for DATA/CODE detection
+                insideRoutine = token;
+                foundData = false;
+                token.subType = TokenType.Routine;
+                routineStack.push(token);
+
+                logger.warn(`🔍 New ROUTINE '${token.value}' at Line ${token.line}, Ends at UNKNOWN`);
+            }
+
+            // ✅ Detect DATA inside a ROUTINE (but not PROCEDURE)
+            if (token.type === TokenType.ExecutionMarker && token.value.toUpperCase() === "DATA") {
+                if (insideRoutine) {
+                    insideRoutine.hasLocalData = true;
+                    foundData = true;
+                    logger.warn(`📌 [INFO] DATA detected inside ROUTINE at Line ${token.line}`);
+                }
+            }
+
+            // ✅ Detect CODE inside a ROUTINE or PROCEDURE
+            if (token.type === TokenType.ExecutionMarker && token.value.toUpperCase() === "CODE") {
+                if (insideRoutine) {
+                    insideRoutine.executionMarker = token;
+                    logger.warn(`📌 [INFO] Explicit CODE detected inside ROUTINE at Line ${token.line}`);
+                } else if (procedureStack.length > 0) {
+                    let parentProcedure = procedureStack[procedureStack.length - 1];
+                    parentProcedure.executionMarker = token;
+                    logger.warn(`📌 [INFO] Explicit CODE detected inside PROCEDURE at Line ${token.line}`);
+                }
+            }
+
+            // ✅ If we reach the end of a routine without explicit CODE, assume it's inferred
+            if (insideRoutine && (i === this.tokens.length - 1 || this.tokens[i + 1].type === TokenType.Keyword)) {
+                if (!insideRoutine.executionMarker) {
+                    insideRoutine.inferredCode = true;
+                    logger.warn(`📌 [INFO] ROUTINE '${insideRoutine.value}' has inferred CODE.`);
+                }
+                insideRoutine = null;
+            }
+        }
+        // ✅ At EOF, close any remaining open PROCEDUREs
+        while (procedureStack.length > 0) {
+            const lastProcedure = procedureStack.pop();
+            if (lastProcedure) {
+                lastProcedure.finishesAt = this.tokens[this.tokens.length - 1]?.line ?? 0;
+                logger.warn(`⚠️ [EOF] PROCEDURE '${lastProcedure.value}' closed at Line ${lastProcedure.finishesAt}`);
+            }
+        }
+
+        // ✅ Also close any remaining ROUTINEs at EOF
+        while (routineStack.length > 0) {
+            const lastRoutine = routineStack.pop();
+            if (lastRoutine) {
+                lastRoutine.finishesAt = this.tokens[this.tokens.length - 1]?.line ?? 0;
+                logger.warn(`⚠️ [EOF] ROUTINE '${lastRoutine.value}' closed at Line ${lastRoutine.finishesAt}`);
+            }
+        }
+
+    }
+
+
+    /** ✅ Expand tabs into spaces for correct alignment */
+    private expandTabs(line: string): string {
+        let expanded = "";
+        let currentColumn = 0;
+
+        for (let char of line) {
+            if (char === "\t") {
+              let nextTabStop = Math.ceil((currentColumn + 1) / this.tabSize) * this.tabSize;
+                let spacesToAdd = nextTabStop - currentColumn; // ✅ Correct calculation
+                expanded += " ".repeat(spacesToAdd);
+                currentColumn = nextTabStop;
             } else {
-                logger.warn(`⚠️[WARNING] Unmatched END at Line ${token.line}`);
+                expanded += char;
+                currentColumn++;
             }
         }
-       
-        // ✅ Detect PROCEDURE declarations
-        if (token.type === TokenType.Keyword && token.value.toUpperCase() === "PROCEDURE") {
-            logger.warn(`🛠 PROCEDURE detected at Line ${token.line} | Depth: ${insideClassOrInterfaceOrMapDepth}`);
 
-            if (insideClassOrInterfaceOrMapDepth > 0) {
-                logger.warn(`🚫 Ignored PROCEDURE at Line ${token.line} (Inside CLASS/MAP/INTERFACE)`);
-                continue;
-            }
-
-            // ✅ Close previous PROCEDURE before opening a new one
-            if (procedureStack.length > 0) {
-                const lastProcedure = procedureStack.pop();
-                if (lastProcedure) {
-                    this.tokens[lastProcedure.tokenIndex].finishesAt = token.line - 1;
-                    logger.warn(`✅ [Closed] ${this.tokens[lastProcedure.tokenIndex].value} Ends at Line ${token.line - 1}`);
-                }
-            }
-
-            // ✅ Close all ROUTINEs since they're only valid inside their PROCEDURE
-            while (routineStack.length > 0) {
-                const lastRoutine = routineStack.pop();
-                if (lastRoutine) {
-                    this.tokens[lastRoutine.tokenIndex].finishesAt = token.line - 1;
-                    logger.warn(`✅ [Closed] ROUTINE Ends at Line ${token.line - 1}`);
-                }
-                logger.warn(`✅ [Closed] ROUTINE Ends at Line ${token.line - 1}`);
-            }
-
-            // ✅ Push new PROCEDURE onto the stack
-            token.subType = TokenType.Procedure;
-            procedureStack.push({ tokenIndex: i, startLine: token.line, subType: TokenType.Procedure });
-
-            logger.warn(`🔍 New PROCEDURE at Line ${token.line}, Ends at UNKNOWN`);
-        }
-
-        // ✅ Detect ROUTINE declarations
-        if (token.type === TokenType.Keyword && token.value.toUpperCase() === "ROUTINE") {
-            logger.warn(`🛠 ROUTINE detected at Line ${token.line}`);
-
-            if (procedureStack.length === 0) {
-                logger.warn(`⚠️ WARNING: ROUTINE declared without a PROCEDURE! Ignoring...`);
-                continue;
-            }
-
-            // ✅ Close the last ROUTINE before opening a new one
-            if (routineStack.length > 0) {
-                const lastRoutine = routineStack.pop();
-                if (lastRoutine) {
-                    this.tokens[lastRoutine.tokenIndex].finishesAt = token.line - 1;
-                    logger.warn(`✅ [Closed] Previous ROUTINE Ends at Line ${token.line - 1}`);
-                }
-                
-            }
-
-            // ✅ Push new ROUTINE onto the stack
-            token.subType = TokenType.Routine;
-            routineStack.push({ tokenIndex: i, startLine: token.line });
-
-            logger.warn(`🔍 New ROUTINE at Line ${token.line}, Ends at UNKNOWN`);
-        }
+        return expanded;
     }
-
-    // ✅ Close remaining PROCEDURES at EOF
-    while (procedureStack.length > 0) {
-        const lastProcedure = procedureStack.pop();
-        if (lastProcedure) {
-            this.tokens[lastProcedure.tokenIndex].finishesAt = this.lines.length;
-            logger.warn(`⚠️ Procedure '${this.tokens[lastProcedure.tokenIndex].value}' had no explicit END, closing at line ${this.lines.length}.`);
-        }
-    }
-
-    // ✅ Close remaining ROUTINES at EOF
-    while (routineStack.length > 0) {
-        const lastRoutine = routineStack.pop();
-        if (lastRoutine) {
-            this.tokens[lastRoutine.tokenIndex].finishesAt = this.lines.length;
-            logger.warn(`⚠️ Routine '${this.tokens[lastRoutine.tokenIndex].value}' had no explicit END, closing at line ${this.lines.length}.`);
-        }
-    }
-
-    // ✅ Final Logging
-    for (const token of this.tokens) {
-        if (token.subType !== undefined && !token.finishesAt) {
-            logger.warn(`⚠️ Structure '${token.value}' at Line ${token.line} is missing an end marker!`);
-        } else if (token.subType !== undefined) {
-            logger.warn(`✅ Structure '${token.value}' at Line ${token.line} marked with subtype ${token.subType} and finishes at ${token.finishesAt}!`);
-        }
-    }
-}
 
 
 
 
 }
+
 
 /** ✅ Ordered token types */
 const orderedTokenTypes: TokenType[] = [
