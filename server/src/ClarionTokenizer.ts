@@ -1,3 +1,4 @@
+import { DocumentStructure } from './DocumentStructure';
 import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("Tokenizer");
 export enum TokenType {
@@ -47,6 +48,7 @@ export interface Token {
     executionMarker?: Token;  // ✅ First explicit "CODE" statement (if present)
     hasLocalData?: boolean;   // ✅ True if "DATA" exists before "CODE"
     inferredCode?: boolean;   // ✅ True if "CODE" is implied (not explicitly written)
+    maxLabelLength: number;  // ✅ Store max label length
 }
 
 
@@ -56,6 +58,9 @@ export class ClarionTokenizer {
     private tokens: Token[];
     private lines: string[];
     private tabSize: number;  // ✅ Store tabSize
+    maxLabelWidth: number = 0;
+
+    
 
     constructor(text: string, tabSize: number = 2) {  // ✅ Default to 2 if not provided
         this.text = text;
@@ -74,7 +79,7 @@ export class ClarionTokenizer {
 
 
         this.tokenizeLines(this.lines); // ✅ Step 1: Tokenize all lines
-        this.analyzeTokenRelationships(); // ✅ Step 2: Process relationships
+        this.processDocumentStructure(); // ✅ Step 2: Process relationships
 
         logger.info("🔍 Tokenization complete.");
         return this.tokens;
@@ -109,7 +114,8 @@ export class ClarionTokenizer {
                             type: tokenType,
                             value: match[0].trim(),
                             line: lineNumber,
-                            start: column
+                            start: column,
+                            maxLabelLength: 0
                         };
                         this.tokens.push(newToken);
                         logger.info(`Detected: Token Type: ${newToken.type} Token Value: '${newToken.value}' at Line ${newToken.line}, Column ${newToken.start}`);
@@ -130,210 +136,20 @@ export class ClarionTokenizer {
                 }
             }
         }
+ 
+        
+        
     }
 
-    /** ✅ Step 2: Analyze Token Relationships */
-    private analyzeTokenRelationships(): void {
-        let structureStack: Token[] = [];
-        let procedureStack: Token[] = [];
-        let routineStack: Token[] = [];
-        let insideRoutine: Token | null = null;  // ✅ Tracks the current routine
-        let foundData = false;  // ✅ Tracks if "DATA" has been found inside a routine
-        let insideClassOrInterfaceOrMapDepth = 0; // ✅ Track nesting levels for CLASS/MAP/INTERFACE
-        let structureIndentMap: Map<Token, number> = new Map(); // ✅ Stores indentation per structure
 
-        let maxLabelWidth = 0;  // ✅ Track max label length for proper indentation
 
+    private processDocumentStructure(): void {
         // ✅ First Pass: Identify Labels & Compute Max Label Length
-        for (const token of this.tokens) {
-            if (token.start === 0 && token.type !== TokenType.Comment) {
-                token.type = TokenType.Label;
-                maxLabelWidth = Math.max(maxLabelWidth, token.value.length);
-                logger.info(`📌 Label '${token.value}' detected at Line ${token.line}, forced to column 0.`);
-            }
-        }
-
+       
         // ✅ Second Pass: Process Token Relationships
-        for (let i = 0; i < this.tokens.length; i++) {
-            const token = this.tokens[i];
-
-            // ✅ Detect STRUCTURES (CLASS, MAP, INTERFACE, etc.)
-            if (token.type === TokenType.Structure) {
-                logger.warn(`🔍 Structure Detected: '${token.value}' at Line ${token.line}, Ends at ${token.finishesAt ?? "UNKNOWN"}`);
-
-                token.subType = TokenType.Structure;
-
-                // ✅ If there's an open structure, assign this as a child
-                if (structureStack.length > 0) {
-                    let parent = structureStack[structureStack.length - 1];
-                    token.parent = parent;
-                    parent.children = parent.children || [];
-                    parent.children.push(token);
-                }
-
-                // ✅ Store indentation for this structure (right after max label width)
-                let indentLevel = maxLabelWidth + 2;
-                structureIndentMap.set(token, indentLevel);
-                logger.info(`📌 Structure '${token.value}' at Line ${token.line} assigned indent ${indentLevel}`);
-
-                structureStack.push(token);
-
-                if (["CLASS", "MAP", "INTERFACE"].includes(token.value.toUpperCase())) {
-                    insideClassOrInterfaceOrMapDepth++;
-                    logger.warn(`🛠 >>>> ${token.value}, Depth: ${insideClassOrInterfaceOrMapDepth}`);
-                }
-            }
-
-            // ✅ Detect END statement for structures
-            if (token.type === TokenType.EndStatement) {
-                const lastStructure = structureStack.pop();
-                if (lastStructure) {
-                    lastStructure.finishesAt = token.line;
-                    token.start = structureIndentMap.get(lastStructure) || 0;  // Align END with its parent structure
-                    logger.info(`✅ END at Line ${token.line} aligned with '${lastStructure.value}' at indent ${token.start}`);
-
-                    if (["CLASS", "MAP", "INTERFACE"].includes(lastStructure.value.toUpperCase())) {
-                        insideClassOrInterfaceOrMapDepth = Math.max(0, insideClassOrInterfaceOrMapDepth - 1);
-                        logger.warn(`🛠 <<<< ${lastStructure.value}, Depth: ${insideClassOrInterfaceOrMapDepth}`);
-                    }
-                } else {
-                    logger.warn(`⚠️ [WARNING] Unmatched END at Line ${token.line}`);
-                }
-            }
-
-            // ✅ Detect PROCEDURE declarations
-            if (token.type === TokenType.Keyword && token.value.toUpperCase() === "PROCEDURE") {
-                logger.warn(`🛠 PROCEDURE detected at Line ${token.line} | Depth: ${insideClassOrInterfaceOrMapDepth}`);
-
-                if (insideClassOrInterfaceOrMapDepth > 0) {
-                    logger.warn(`🚫 Ignored PROCEDURE at Line ${token.line} (Inside CLASS/MAP/INTERFACE)`);
-                    continue;
-                }
-
-                // ✅ Check if the previous token on the same line is a class reference
-                let prevToken = this.tokens[i - 1];
-                let isClassMethod = prevToken && prevToken.type === TokenType.Class;
-
-                // ✅ Close previous PROCEDURE before opening a new one
-                if (procedureStack.length > 0) {
-                    const lastProcedure = procedureStack.pop();
-                    if (lastProcedure) {
-                        lastProcedure.finishesAt = token.line - 1;
-                        logger.warn(`✅ [Closed] PROCEDURE '${lastProcedure.value}' Ends at Line ${token.line - 1}`);
-                    }
-                }
-
-                // ✅ Close all ROUTINEs since they're only valid inside their PROCEDURE
-                while (routineStack.length > 0) {
-                    const lastRoutine = routineStack.pop();
-                    if (lastRoutine) {
-                        lastRoutine.finishesAt = token.line - 1;
-                        logger.warn(`✅ [Closed] ROUTINE Ends at Line ${token.line - 1}`);
-                    }
-                }
-
-                // ✅ Assign parent-child relationship (if inside a structure)
-                if (structureStack.length > 0) {
-                    let parent = structureStack[structureStack.length - 1];
-                    token.parent = parent;
-                    parent.children = parent.children || [];
-                    parent.children.push(token);
-                }
-
-                // ✅ Set subType correctly for class methods vs global procedures
-                token.subType = isClassMethod ? TokenType.Class : TokenType.Procedure;
-
-                if (isClassMethod) {
-                    logger.warn(`📌 Class Method Implementation Detected: '${prevToken.value}.${token.value}' at Line ${token.line}`);
-                } else {
-                    logger.warn(`🔍 New PROCEDURE '${token.value}' at Line ${token.line}, Ends at UNKNOWN`);
-                }
-
-                // ✅ Push onto the procedure stack
-                procedureStack.push(token);
-            }
-
-
-            // ✅ Detect ROUTINE declarations
-            if (token.type === TokenType.Keyword && token.value.toUpperCase() === "ROUTINE") {
-                logger.warn(`🛠 ROUTINE detected at Line ${token.line}`);
-
-                if (procedureStack.length === 0) {
-                    logger.warn(`⚠️ WARNING: ROUTINE declared without a PROCEDURE! Ignoring...`);
-                    continue;
-                }
-
-                // ✅ Close the last ROUTINE before opening a new one
-                if (routineStack.length > 0) {
-                    const lastRoutine = routineStack.pop();
-                    if (lastRoutine) {
-                        lastRoutine.finishesAt = token.line - 1;
-                        logger.warn(`✅ [Closed] Previous ROUTINE Ends at Line ${token.line - 1}`);
-                    }
-                }
-
-                // ✅ Assign parent-child relationship (inside a procedure)
-                let parentProcedure = procedureStack[procedureStack.length - 1];
-                token.parent = parentProcedure;
-                parentProcedure.children = parentProcedure.children || [];
-                parentProcedure.children.push(token);
-
-                // ✅ Track this routine for DATA/CODE detection
-                insideRoutine = token;
-                foundData = false;
-                token.subType = TokenType.Routine;
-                routineStack.push(token);
-
-                logger.warn(`🔍 New ROUTINE '${token.value}' at Line ${token.line}, Ends at UNKNOWN`);
-            }
-
-            // ✅ Detect DATA inside a ROUTINE (but not PROCEDURE)
-            if (token.type === TokenType.ExecutionMarker && token.value.toUpperCase() === "DATA") {
-                if (insideRoutine) {
-                    insideRoutine.hasLocalData = true;
-                    foundData = true;
-                    logger.warn(`📌 [INFO] DATA detected inside ROUTINE at Line ${token.line}`);
-                }
-            }
-
-            // ✅ Detect CODE inside a ROUTINE or PROCEDURE
-            if (token.type === TokenType.ExecutionMarker && token.value.toUpperCase() === "CODE") {
-                if (insideRoutine) {
-                    insideRoutine.executionMarker = token;
-                    logger.warn(`📌 [INFO] Explicit CODE detected inside ROUTINE at Line ${token.line}`);
-                } else if (procedureStack.length > 0) {
-                    let parentProcedure = procedureStack[procedureStack.length - 1];
-                    parentProcedure.executionMarker = token;
-                    logger.warn(`📌 [INFO] Explicit CODE detected inside PROCEDURE at Line ${token.line}`);
-                }
-            }
-
-            // ✅ If we reach the end of a routine without explicit CODE, assume it's inferred
-            if (insideRoutine && (i === this.tokens.length - 1 || this.tokens[i + 1].type === TokenType.Keyword)) {
-                if (!insideRoutine.executionMarker) {
-                    insideRoutine.inferredCode = true;
-                    logger.warn(`📌 [INFO] ROUTINE '${insideRoutine.value}' has inferred CODE.`);
-                }
-                insideRoutine = null;
-            }
-        }
-        // ✅ At EOF, close any remaining open PROCEDUREs
-        while (procedureStack.length > 0) {
-            const lastProcedure = procedureStack.pop();
-            if (lastProcedure) {
-                lastProcedure.finishesAt = this.tokens[this.tokens.length - 1]?.line ?? 0;
-                logger.warn(`⚠️ [EOF] PROCEDURE '${lastProcedure.value}' closed at Line ${lastProcedure.finishesAt}`);
-            }
-        }
-
-        // ✅ Also close any remaining ROUTINEs at EOF
-        while (routineStack.length > 0) {
-            const lastRoutine = routineStack.pop();
-            if (lastRoutine) {
-                lastRoutine.finishesAt = this.tokens[this.tokens.length - 1]?.line ?? 0;
-                logger.warn(`⚠️ [EOF] ROUTINE '${lastRoutine.value}' closed at Line ${lastRoutine.finishesAt}`);
-            }
-        }
+          // ✅ Create a DocumentStructure instance and process the tokens
+        const documentStructure = new DocumentStructure(this.tokens);
+        documentStructure.process();
 
     }
 

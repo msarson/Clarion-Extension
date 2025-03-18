@@ -42,7 +42,7 @@ class Logger {
 
     setLevel(newLevel: "debug" | "info" | "warn" | "error") {
         this.level = newLevel;
-        console.log(`[${this.getTimestamp()}] [${this.name}] 🔄 LOG LEVEL SET TO: ${newLevel.toUpperCase()}`);
+      //  console.log(`[${this.getTimestamp()}] [${this.name}] 🔄 LOG LEVEL SET TO: ${newLevel.toUpperCase()}`);
     }
 }
 
