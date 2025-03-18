@@ -5,7 +5,7 @@ import { workspace } from 'vscode';
 import LoggerManager from '../logger';
 const logger = LoggerManager.getLogger("RedurectionParser");
 
-logger.setLevel("info"); // Set the log level to error
+logger.setLevel("error"); // Set the log level to error
 // Import global variables from the extension
 
 /**

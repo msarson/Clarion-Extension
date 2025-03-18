@@ -27,16 +27,25 @@ let documentManager: DocumentManager | undefined;
 
 let configStatusBarItem: StatusBarItem;
 
-export function updateConfigurationStatusBar(configuration: string) {
+export async function updateConfigurationStatusBar(configuration: string) {
     if (!configStatusBarItem) {
         configStatusBarItem = window.createStatusBarItem(StatusBarAlignment.Left, 100);
         configStatusBarItem.command = 'clarion.setConfiguration'; // ✅ Clicking will open the config picker
     }
 
-    configStatusBarItem.text = `$(gear) Clarion: ${configuration}`; // ✅ Show config with gear icon
+    configStatusBarItem.text = `$(gear) Clarion: ${configuration}`;
     configStatusBarItem.tooltip = "Click to change Clarion configuration";
     configStatusBarItem.show();
+
+    // ✅ Ensure the setting is updated
+    const currentConfig = workspace.getConfiguration().get<string>("clarion.configuration");
+
+    if (currentConfig !== configuration) {
+        logger.info(`🔄 Updating workspace configuration: clarion.configuration = ${configuration}`);
+        await workspace.getConfiguration().update("clarion.configuration", configuration, ConfigurationTarget.Workspace);
+    }
 }
+
 
 export async function activate(context: ExtensionContext): Promise<void> {
     const disposables: Disposable[] = [];
@@ -99,11 +108,12 @@ export async function activate(context: ExtensionContext): Promise<void> {
     // ✅ Watch for changes in Clarion configuration settings
     context.subscriptions.push(
         workspace.onDidChangeConfiguration(async (event) => {
-            if (event.affectsConfiguration("clarion.defaultLookupExtensions")) {
-                logger.info("🔄 Clarion defaultLookupExtensions changed. Refreshing document links...");
+            if (event.affectsConfiguration("clarion.defaultLookupExtensions") || event.affectsConfiguration("clarion.configuration")) {
+                logger.info("🔄 Clarion configuration changed. Refreshing the solution parser...");
                 await handleSettingsChange(context);
             }
         })
+        
     );
 
     // ✅ Ensure all restored tabs are properly indexed (if workspace is already trusted)
@@ -228,8 +238,9 @@ async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<Do
         await refreshOpenDocuments();
     }
 
-    return documentManager; // ✅ Return documentManager instead of registering language features
+    return documentManager;
 }
+
 
 
 
@@ -281,17 +292,20 @@ export async function getAllOpenDocuments(): Promise<TextDocument[]> {
 
 
 async function handleSettingsChange(context: ExtensionContext) {
+    logger.info("🔄 Updating settings from workspace...");
 
-    // ✅ Reinitialize global settings from workspace settings.json
+    // Reinitialize global settings from workspace settings.json
     await globalSettings.initializeFromWorkspace();
-    logger.info(`🔄 Settings updated! New lookup extensions: ${JSON.stringify(globalSettings.defaultLookupExtensions)}`);
 
-    // ✅ Reinitialize the Solution Environment
+    // Reinitialize the Solution Parser and Document Manager
     await reinitializeEnvironment(true);
 
-    // ✅ Re-register language features (this ensures links update properly)
+    // Re-register language features (ensuring links update properly)
     registerLanguageFeatures(context);
+
+    vscodeWindow.showInformationMessage("Clarion configuration updated. Solution parser refreshed.");
 }
+
 
 let hoverProviderDisposable: Disposable | null = null;
 let documentLinkProviderDisposable: Disposable | null = null;

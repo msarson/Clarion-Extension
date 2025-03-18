@@ -8,7 +8,7 @@ import { ClarionSourcerFile } from './ClarionSourcerFile';
 import { RedirectionFileParser, RedirectionEntry } from '../Parser/RedirectionFileParser';
 
 const logger = LoggerManager.getLogger("ClarionProject");
-logger.setLevel("info");
+logger.setLevel("error");
 
 export class ClarionProject {
     sourceFiles: ClarionSourcerFile[] = [];

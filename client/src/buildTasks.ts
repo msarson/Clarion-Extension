@@ -7,7 +7,7 @@ import { SolutionParser } from "./Parser/SolutionParser";
 import LoggerManager from './logger';
 import { ClarionProject } from "./Parser/ClarionProject";
 const logger = LoggerManager.getLogger("BuildTasks");
-logger.setLevel("info");
+logger.setLevel("error");
 /**
  * Main entry point for the Clarion build process
  */

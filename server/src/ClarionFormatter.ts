@@ -7,7 +7,7 @@ type StructureToken = Token & {
 };
 
 const logger = LoggerManager.getLogger("Formatter");
-logger.setLevel("info");
+logger.setLevel("error");
 
 class ClarionFormatter {
     private tokens: Token[];

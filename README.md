@@ -1,4 +1,4 @@
-# Clarion Extension
+**# Clarion Extension**
 
 ## Table of Contents
 
@@ -6,7 +6,7 @@
 - [Features](#features)
 - [Installation](#installation)
 - [Marketplace](#marketplace-information)
-- [Changelog](#changelog-whats-new-in-v0411)
+- [Changelog](#changelog-whats-new-in-v050)
 - [Getting Started](#getting-started)
 - [Troubleshooting](#troubleshooting)
 - [Contributing and Feedback](#contributing-and-feedback)
@@ -23,6 +23,10 @@ For a quick reference, check out the [Cheat Sheet](https://github.com/msarson/Cl
 
 A special thanks to [Mark Goldberg](https://github.com/MarkGoldberg) for his contributions to code folding and [Allen Zhu](https://github.com/celeron533) for Document Outline support.
 
+### This is an active project looking for contributors!
+
+This extension is under **active development** and we need your **help**! Whether you are a **Clarion developer**, a **VS Code enthusiast**, or just interested in **open-source projects**, your contributions, bug reports, and feedback are welcome. Check out our **[GitHub Issues](https://github.com/msarson/Clarion-Extension/issues)** to get involved!
+
 ---
 
 ## Features
@@ -30,12 +34,15 @@ A special thanks to [Mark Goldberg](https://github.com/MarkGoldberg) for his con
 - **Solution Explorer View**: Navigate Clarion projects directly inside VS Code.
 - **Automatic Solution Parsing**: Detects all projects and redirection files in your solution.
 - **Enhanced "Go To Definition"**: Supports `INCLUDE` and `MODULE` statements, with redirection-aware searches.
-- **Code Folding**: Introduces a tokenizer-based folding provider for better code readability.
+- **Code Folding**: Tokenizer-based folding provider for improved code readability.
 - **Hover Provider**: Displays previews of referenced files when hovering over `INCLUDE` or `MODULE` statements.
 - **Build Configuration Support**: Easily switch between Release and Debug builds with `Clarion: Set Configuration`.
 - **Redirection-Aware File Searching**: `Ctrl+P` respects local and global redirection files.
 - **Document Outlining & Breadcrumbs**: Improves navigation within large Clarion files.
 - **Experimental Tokenizer**: Future-ready for additional features like code formatting and diagnostics.
+- **New Document Formatter**: Format Clarion source files with `Shift+Alt+F`.
+- **Token Caching**: Improves performance by caching tokens unless the document changes.
+- **Updated Folding and Symbol Provider**: Provides better structure recognition.
 
 ---
 
@@ -60,33 +67,33 @@ A special thanks to [Mark Goldberg](https://github.com/MarkGoldberg) for his con
 ## Marketplace Information
 
 - **Identifier**: `msarson.clarion-extensions`
-- **Version**: `0.4.11`
+- **Version**: `0.5.0`
 - **Published**: 2018-08-19
-- **Last Release**: 2025-02-23
+- **Last Release**: 2025-03-18
 
 [View on Marketplace](https://marketplace.visualstudio.com/items?itemName=msarson.clarion-extensions)
 
 ---
 
-## Changelog (What's New in v0.4.11?)
+## Changelog (What's New in v0.5.0?)
 
 ### Added
-- **Re-enabled Language Server Protocol (LSP)** for document outlining and navigation.
-- **New tokenizer-based code folding** for better structure recognition.
-- **Solution Explorer View**: Navigate Clarion projects inside VS Code.
-- **Enhanced "Go To Definition"** now supports `INCLUDE` and `MODULE` statements with redirection-aware searches.
-- **Build Configuration Support**: Easily switch between Release and Debug builds with `Clarion: Set Configuration`.
-- **Redirection-Aware File Searching**: `Ctrl+P` now respects local and global redirection files.
-- **Hover Provider**: Displays previews of referenced files when hovering over `INCLUDE` or `MODULE` statements.
+- **Complete re-write of redirection handling** for better solution and project parsing.
+- **Status Bar Configuration Switching**: Users can now change build configurations (`Release`, `Debug`, etc.) directly from the VS Code status bar.
+- **Solution Explorer View Enhancements**: Projects are now properly structured under solutions.
+- **Context Menu for Compilation**: Right-click to compile solutions/projects.
+- **Build via `Ctrl+Shift+B`**: If multiple projects exist, users will be prompted to choose.
+- **New Document Formatter (`Shift+Alt+F`)** for source code formatting.
+- **Token Caching** to improve performance.
+- **Updated Folding Provider** with better structure handling.
+- **Improved Symbol Provider** (though more work is needed, contributions welcome!).
 
 ### Changed
-- **Updated documentation** with improved structure, adding a Table of Contents and making it more readable.
+- **Updated Symbol Provider**: Still needs work, but improvements have been made.
+- **Folding Provider is more stable**: Should handle complex code better.
 
 ### Fixed
-- **"Go To Definition" respects redirection paths** for improved accuracy.
-- **New logging features** added to help track extension issues.
-
-For full details, visit the [GitHub Changelog](https://github.com/msarson/Clarion-Extension/blob/master/CHANGELOG.md).
+- **General stability fixes** across the extension.
 
 ---
 
@@ -126,8 +133,13 @@ If snippets are not appearing correctly, update your VS Code settings:
 
 ## Contributing and Feedback
 
-This project is actively evolving! Your feedback helps improve the extension.  
-Report issues or contribute on [GitHub Issues](https://github.com/msarson/Clarion-Extension/issues).
+This is an **active open-source project** that needs community help! 🚀
+
+- **Report issues**: [GitHub Issues](https://github.com/msarson/Clarion-Extension/issues)
+- **Submit pull requests**: Contributions are welcome!
+- **Join the discussion**: Share your ideas on improving the extension.
+
+If you use this extension and find it useful, please consider contributing back! 💙
 
 ---
 
