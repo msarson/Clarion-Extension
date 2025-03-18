@@ -12,7 +12,7 @@ Bar String(10)
 **RV{variable type}** if you want to define a reference variable:
 example **RVS** to declare a reference varialbe to a string
 ```clarion
-Bar   &Sttring
+Bar   &String
 ```
 **PV{variable type}** if you want to define a procedure variable:
 example **PVS** to declare a string parameter
