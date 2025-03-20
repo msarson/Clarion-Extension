@@ -1,184 +1,171 @@
-import { DocumentSymbol, Range, SymbolKind } from 'vscode-languageserver-types';
+import {
+    DocumentSymbol,
+    SymbolKind,
+    Range
+} from "vscode-languageserver";
 
-import ClarionFileParser from './ClarionFileParser.js';
-import LoggerManager from './logger';
-const logger = LoggerManager.getLogger("ClarionDocumentSymbolProvider");
+import { Token, TokenType } from "./ClarionTokenizer";
+import { ExecutionRangeProvider } from "./ExecutionRangeProvider";
+import LoggerManager from "./logger";
+const logger = LoggerManager.getLogger("DocumentSymbolProvider");
 logger.setLevel("info");
-import { globalClarionSettings, serverInitialized } from './server.js';
-import { Token, TokenType } from './ClarionTokenizer.js';
-// ✅ Convert enum to const object for direct compatibility
-const ClarionSymbolKind = {
-    Root: SymbolKind.Module,
-    Procedure: SymbolKind.Method,
-    Routine: SymbolKind.Property,
-    Variable: SymbolKind.Variable,
-    Table: SymbolKind.Struct,
-    TablesGroup: SymbolKind.Namespace,
-    Property: SymbolKind.Function // ✅ Added Property as Function (Can be changed)
-} as const;
-
-
 export class ClarionDocumentSymbolProvider {
-    public extractStringContents(rawString: string): string {
-        const match = rawString.match(/'([^']+)'/);  // ✅ Extract text inside single quotes
-        return match ? match[1] : rawString;         // ✅ Return extracted name or fallback to raw value
+    private getEnumName(value: number): string | undefined {
+        return Object.entries(TokenType).find(([key, val]) => val === value)?.[0];
     }
-
-    
     public provideDocumentSymbols(tokens: Token[], documentUri: string): DocumentSymbol[] {
-        if (!serverInitialized) {
-            logger.warn(`⚠️ Server not initialized, skipping document symbols for: ${documentUri}`);
-            return [];
-        }
-    
+        logger.info(`🔍 Processing document symbols for ${documentUri}`);
         const symbols: DocumentSymbol[] = [];
-        const parentStack: DocumentSymbol[] = [];  // ✅ Tracks structure nesting
-        let currentStructure: DocumentSymbol | null = null;
-        let currentProcedure: DocumentSymbol | null = null;
-        let insideDefinitionBlock: boolean = false; // ✅ Track if we're inside a definition block
-    
-        logger.info(`🔍 Processing ${tokens.length} tokens for document symbols in ${documentUri}.`);
-    
-        for (const token of tokens) {
-            const { type, value, line, subType, finishesAt, executionMarker } = token;
-    
-            // ✅ Detect the start of a procedure definition block (before CODE)
-            if (executionMarker && executionMarker.value.toUpperCase() === "CODE") {
-                logger.info(`🚀 Entering execution block at Line ${executionMarker.line}. Definitions end here.`);
-                insideDefinitionBlock = false; // ✅ Now we're in actual executable code
-            }
-    
-            // ✅ Handle STRUCTURES (APPLICATION, QUEUE, GROUP, CLASS, etc.)
-            if (type === TokenType.Structure) {
-                logger.info(`📌 Found Structure '${value}' at Line ${line}`);
-    
-                // ✅ Use previous token as label if it's a Label
-                const prevToken = tokens[tokens.indexOf(token) - 1];
-                let labelName = prevToken?.type === TokenType.Label ? prevToken.value : null;
-    
-                // ✅ If no label, check for a TokenType.String after the structure
-                if (!labelName) {
-                    const nextToken = tokens[tokens.indexOf(token) + 1];
-                    if (nextToken?.type === TokenType.String) {
-                        labelName = this.extractStringContents(nextToken.value);
-                    }
-                }
-    
-                // ✅ Ensure correct formatting "STRUCTURE_TYPE (Label)"
-                let structureName = `${value} (${labelName || "Unnamed"})`;
-    
-                const structureSymbol = DocumentSymbol.create(
-                    structureName,  
-                    "",
-                    ClarionSymbolKind.TablesGroup,  
-                    this.getTokenRange(tokens, line, finishesAt ?? line),
-                    this.getTokenRange(tokens, line, finishesAt ?? line),
-                    []
-                );
-    
-                // ✅ If we have a parent structure, add this as a child
-                if (currentStructure) {
-                    currentStructure.children!.push(structureSymbol);
-                    logger.info(`🔗 Nested '${structureName}' inside '${currentStructure.name}'`);
-                } else {
-                    symbols.push(structureSymbol);
-                }
-    
-                // ✅ Push this structure onto the stack
-                parentStack.push(structureSymbol);
-                currentStructure = structureSymbol;
-                continue;
-            }
-    
-            // ✅ Handle PROCEDURES (Identified as `TokenType.Keyword` with value "PROCEDURE")
-            if (type === TokenType.Keyword && value.toUpperCase() === "PROCEDURE" && finishesAt !== undefined) {
-                logger.info(`📌 Found Procedure '${value}' at Line ${line}`);
-    
-                // ✅ Use previous token (if it’s a Label) as the Procedure name
-                const prevToken = tokens[tokens.indexOf(token) - 1];
-                let procedureName = prevToken?.type === TokenType.Label ? prevToken.value : "UnnamedProcedure";
-    
-                const procedureSymbol = DocumentSymbol.create(
-                    procedureName,
-                    "Procedure",
-                    ClarionSymbolKind.Procedure,
-                    this.getTokenRange(tokens, line, finishesAt),
-                    this.getTokenRange(tokens, line, finishesAt),
-                    []
-                );
-    
-                // ✅ If inside a CLASS, nest it under the CLASS
-                if (currentStructure) {
-                    currentStructure.children!.push(procedureSymbol);
-                    logger.info(`🔗 Nested Procedure '${procedureName}' inside '${currentStructure.name}'`);
+        const stack: DocumentSymbol[] = [];
+
+        // ✅ Track execution ranges
+        const documentLineCount = tokens.length > 0 ? tokens[tokens.length - 1].line : 0;
+        const executionProvider = new ExecutionRangeProvider(tokens, documentLineCount);
+
+
+        // ✅ Track procedure/methods with their start and finish lines
+        const procedures: { symbol: DocumentSymbol, start: number, finish: number }[] = [];
+
+        // ✅ First pass - Collect all procedures & methods
+        for (let i = 0; i < tokens.length; i++) {
+            const token = tokens[i];
+            if (executionProvider.isInsideExecution(token.line)) continue; // Skip execution code
+
+            if (token.type === TokenType.Keyword && token.value.toUpperCase() === "PROCEDURE") {
+                if (token.finishesAt === undefined) continue;
+
+                const procedureName = i > 0 ? tokens[i - 1].value : "UnnamedProcedure";
+                const isMethod = i > 0 && tokens[i - 1].type === TokenType.ClassLabel;
+                logger.info(`🔍 Processing ${isMethod ? "method" : "procedure"} ${procedureName}`);
+                const procedureSymbol: DocumentSymbol = {
+                    name: procedureName,
+                    detail: isMethod ? "Class Method" : "Procedure",
+                    kind: isMethod ? SymbolKind.Method : SymbolKind.Function,
+                    range: this.createRange(token.line, token.finishesAt),
+                    selectionRange: this.createRange(token.line, token.finishesAt),
+                    children: []
+                };
+
+                procedures.push({ symbol: procedureSymbol, start: token.line, finish: token.finishesAt });
+
+                if (stack.length > 0 && !isMethod) {
+                    stack[stack.length - 1].children?.push(procedureSymbol);
                 } else {
                     symbols.push(procedureSymbol);
                 }
-    
-                currentProcedure = procedureSymbol;  // ✅ Track current procedure
-                insideDefinitionBlock = true; // ✅ Mark that we are inside a definition block
-                continue;
+
+                stack.push(procedureSymbol);
             }
-    
-            // ✅ Handle PROCEDURE DEFINITIONS inside a PROCEDURE (Before CODE)
-            if (insideDefinitionBlock && type === TokenType.Keyword && value.toUpperCase() === "PROCEDURE") {
-                const prevToken = tokens[tokens.indexOf(token) - 1];
-                const procedureDefName = prevToken?.type === TokenType.Label ? prevToken.value : "UnnamedDefinition";
-    
-                const procedureDefSymbol = DocumentSymbol.create(
-                    procedureDefName,
-                    "Procedure Definition",
-                    ClarionSymbolKind.Property,  // ✅ Treat procedure definitions as properties
-                    this.getTokenRange(tokens, line, finishesAt ?? line),
-                    this.getTokenRange(tokens, line, finishesAt ?? line),
-                    []
-                );
-    
-                // ✅ Ensure it is correctly nested inside the **procedure**
-                if (currentProcedure) {
-                    currentProcedure.children!.push(procedureDefSymbol);
-                    logger.info(`✅ Added Procedure Definition '${procedureDefName}' inside Procedure '${currentProcedure.name}'`);
+        }
+
+        // ✅ Second pass - Process other tokens & assign them to correct parents
+        for (let i = 0; i < tokens.length; i++) {
+            const token = tokens[i];
+
+            if (executionProvider.isInsideExecution(token.line)) continue; // Skip execution code
+
+            let parentProcedure = procedures.find(proc => token.line >= proc.start && token.line <= proc.finish);
+            logger.info(` 📌 Token ${token.value} ${this.getEnumName(token.type)} is inside ${parentProcedure?.symbol.name}`);
+            const previousToken = i > 0 ? tokens[i - 1] : undefined;
+
+
+            const validTypes = new Set([TokenType.Type, TokenType.Variable, TokenType.ReferenceVariable]);
+            if (validTypes.has(token.type) && previousToken?.type === TokenType.Label) {
+                logger.info(`🔍 Processing type ${token.value}`);
+                const typeSymbol: DocumentSymbol = {
+                    name: previousToken.value,
+                    detail: token.value + this.extractTypeLength(tokens, i),
+                    kind: SymbolKind.Variable,
+                    range: this.createRange(token.line, token.finishesAt),
+                    selectionRange: this.createRange(token.line, token.finishesAt),
+                    children: []
+                };
+                if (parentProcedure) {
+                    parentProcedure.symbol.children?.push(typeSymbol);
                 } else {
-                    logger.warn(`⚠️ Procedure Definition '${procedureDefName}' found but no currentProcedure set!`);
-                    symbols.push(procedureDefSymbol);
+                    symbols.push(typeSymbol);
                 }
-                continue;
             }
-    
-            // ✅ Handle END statements (closing a structure or procedure)
-            if (type === TokenType.EndStatement) {
-                if (parentStack.length > 0) {
-                    const finishedStructure = parentStack.pop();
-                    logger.info(`✅ Closing Structure '${finishedStructure!.name}' at Line ${line}`);
-                    currentStructure = parentStack.length > 0 ? parentStack[parentStack.length - 1] : null;
+            if (token.type === TokenType.Structure) {
+                logger.info(`🔍 Processing structure ${token.value}`);
+                const structureSymbol: DocumentSymbol = {
+                    name: token.value,
+                    detail: "Structure",
+                    kind: SymbolKind.Struct,
+                    range: this.createRange(token.line, token.finishesAt),
+                    selectionRange: this.createRange(token.line, token.finishesAt),
+                    children: []
+                };
+
+                if (parentProcedure) {
+                    parentProcedure.symbol.children?.push(structureSymbol);
                 } else {
-                    currentProcedure = null;  // ✅ Close the current procedure
+                    symbols.push(structureSymbol);
+                }
+
+                if (token.children) {
+                    for (const childToken of token.children) {
+                        this.processNestedToken(structureSymbol, childToken);
+                    }
+                }
+                else {
+                    logger.info(`🔍 No children found for structure ${token.value}`);
+
                 }
             }
         }
-    
-        logger.info(`✅ Finished processing tokens. ${symbols.length} top-level structures detected.`);
+
         return symbols;
     }
-    
-
-    
-    
-
-
-
-
-
-
-    private getTokenRange(tokens: Token[], startLine: number, endLine: number): Range {
-        const startToken = tokens.find((t: Token) => t.line === startLine);
-        const endToken = [...tokens].reverse().find((t: Token) => t.line === endLine);
-
-        if (!startToken || !endToken) {
-            logger.info(`⚠️ [DocumentSymbolProvider] getTokenRange: Unable to find tokens for range (${startLine}-${endLine})`);
-            return Range.create(startLine, 0, endLine, 0);
+    /**
+     * ✅ Extracts the length declaration (e.g., `(100)`) after a type token.
+     * @param tokens The token array
+     * @param tokenIndex The index of the type token in the array
+     * @returns The extracted length (e.g., "(100)") or an empty string if none exists.
+     */
+    private extractTypeLength(tokens: Token[], tokenIndex: number): string {
+        if (tokenIndex < 0 || tokenIndex >= tokens.length - 2) {
+            return ""; // ✅ Invalid position or not enough tokens to check
         }
 
-        return Range.create(startToken.line, startToken.start, endToken.line, endToken.start + endToken.value.length);
+        const openParen = tokens[tokenIndex + 1];
+        const numberToken = tokens[tokenIndex + 2];
+        const closeParen = tokens[tokenIndex + 3];
+
+        if (
+            openParen?.type === TokenType.Delimiter && openParen.value === "(" &&
+            numberToken?.type === TokenType.Number &&
+            closeParen?.type === TokenType.Delimiter && closeParen.value === ")"
+        ) {
+            return `(${numberToken.value})`; // ✅ Successfully extracted length
+        }
+
+        return ""; // ❌ No valid length declaration found
+    }
+
+    private processNestedToken(parent: DocumentSymbol, token: Token): void {
+        const nestedSymbol: DocumentSymbol = {
+            name: token.value,
+            detail: "Nested Structure",
+            kind: SymbolKind.Struct,
+            range: this.createRange(token.line, token.finishesAt),
+            selectionRange: this.createRange(token.line, token.finishesAt),
+            children: []
+        };
+        logger.info(`🔍 Processing nested token ${token.value}`);
+        parent.children?.push(nestedSymbol);
+
+        if (token.children) {
+            for (const child of token.children) {
+                this.processNestedToken(nestedSymbol, child);
+            }
+        }
+    }
+
+    private createRange(startLine: number, endLine: number | undefined): Range {
+        return {
+            start: { line: startLine, character: 0 },
+            end: { line: endLine ?? startLine, character: 0 }
+        };
     }
 }

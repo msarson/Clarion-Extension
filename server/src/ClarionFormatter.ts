@@ -74,7 +74,7 @@ class ClarionFormatter {
             }
 
             // ✅ Only process the first token per line
-            if (token.type === TokenType.Label || token.type === TokenType.Variable || token.subType === TokenType.Routine || token.type === TokenType.Class) {
+            if (token.type === TokenType.Label || token.type === TokenType.Variable || token.subType === TokenType.Routine || token.type === TokenType.ClassLabel) {
                 possibleLabels.add(token.line);
                 this.labelLines.add(token.line);
                 logger.info(`📌 Possible label detected: '${token.value}' at line ${token.line}`);

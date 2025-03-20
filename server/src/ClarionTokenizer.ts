@@ -10,7 +10,7 @@ export enum TokenType {
     Variable,
     Number,
     Operator,
-    Class,
+    ClassLabel,
     Attribute,
     Property,
     Constant,
@@ -182,12 +182,12 @@ export class ClarionTokenizer {
 
 /** ✅ Ordered token types */
 const orderedTokenTypes: TokenType[] = [
-    TokenType.Comment, TokenType.ClarionDocument, TokenType.ExecutionMarker, TokenType.Label, TokenType.LineContinuation, TokenType.String, TokenType.ReferenceVariable,
+    TokenType.Comment, TokenType.ClarionDocument, TokenType.ExecutionMarker, TokenType.ClassLabel, TokenType.Label, TokenType.LineContinuation, TokenType.String, TokenType.ReferenceVariable,
     TokenType.Type, TokenType.PointerParameter, TokenType.FieldEquateLabel, TokenType.Property,
     TokenType.PropertyFunction, TokenType.EndStatement, TokenType.Keyword, TokenType.Structure,
     TokenType.ConditionalContinuation,  // ✅ Placed after Structure, before FunctionArgumentParameter
     TokenType.FunctionArgumentParameter, TokenType.TypeAnnotation, TokenType.Function, TokenType.Directive, TokenType.Number,
-    TokenType.Operator, TokenType.Class, TokenType.Attribute, TokenType.Constant, TokenType.Variable,
+    TokenType.Operator,  TokenType.Attribute, TokenType.Constant, TokenType.Variable,
     TokenType.ImplicitVariable, TokenType.Delimiter, TokenType.Unknown
 ];
 
@@ -258,7 +258,7 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     // ✅ Added support for Binary, Octal, Hex constants
     [TokenType.Number]: /[+-]?(?:\d+\.\d+|\d+(?!\.\d)|\d+[bBoOhH]|\h*[A-Fa-f0-9]+[hH])/,
     [TokenType.Operator]: /[+\-*/=<>!&]/i,
-    [TokenType.Class]: /^[A-Za-z_][A-Za-z0-9_:]*\.[A-Za-z_][A-Za-z0-9_:.]*\s/i,
+    [TokenType.ClassLabel]: /^[A-Za-z_][A-Za-z0-9_:]*\.[A-Za-z_][A-Za-z0-9_:.]*\s/i,
     [TokenType.Attribute]: /\b(?:ABOVE|ABSOLUTE|AUTO|BINDABLE|CONST|DERIVED|DIM|EXTEND|EXTERNAL|GLOBALCLASS|IMM|IMPLEMENTS|INCLUDE|INS|LATE|MODULE|NOBAR|NOCASE|NOFRAME|NOMEMO|NOMERGE|NOSHEET|OPT|OVER|OVR|OWNER|PRIVATE|PROTECTED|PUBLIC|STATIC|THREAD|TYPE|VIRTUAL)\b/i,
     [TokenType.Constant]: /\b(?:TRUE|FALSE|NULL|STD:*)\b/i,
     // ✅ NEW: Detects QUEUE, GROUP, RECORD when used as parameters
@@ -266,6 +266,6 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Type]: /\b(?:ANY|ASTRING|BFLOAT4|BFLOAT8|BLOB|MEMO|BOOL|BSTRING|BYTE|CSTRING|DATE|DECIMAL|DOUBLE|FLOAT4|LONG|LIKE|PDECIMAL|PSTRING|REAL|SHORT|SIGNED|SREAL|STRING|TIME|ULONG|UNSIGNED|USHORT|VARIANT)\b/i,
     [TokenType.ImplicitVariable]: /\b[A-Za-z][A-Za-z0-9_]+(?:\$|#|")\b/i,
     [TokenType.Delimiter]: /[,():]/i,  // ❌ Remove "." from here
-    [TokenType.ReferenceVariable]: /&([A-Za-z_][A-Za-z0-9_]*):([A-Za-z_][A-Za-z0-9_]*(:\d+)?)/i,
+    [TokenType.ReferenceVariable]: /&(?:[A-Za-z_][A-Za-z0-9_]*:)?[A-Za-z_][A-Za-z0-9_]*/i,
     [TokenType.Unknown]: /\S+/i
 };

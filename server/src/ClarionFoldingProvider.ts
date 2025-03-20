@@ -3,7 +3,7 @@ import { Token, TokenType } from "./ClarionTokenizer.js";
 import LoggerManager from './logger';
 
 const logger = LoggerManager.getLogger("FoldingProvider");
-
+logger.setLevel("info");
 class ClarionFoldingProvider {
     private tokens: Token[];
     private foldingRanges: FoldingRange[];
@@ -102,6 +102,7 @@ class ClarionFoldingProvider {
 
         // ✅ Recursively process children
         if (token.children && token.children.length > 0) {
+            logger.info(`🔹 [FoldingProvider] Processing children of '${token.value}'`);
             for (const child of token.children) {
                 this.processFolding(child);
             }
