@@ -7,10 +7,15 @@
 		"lib": ["ES2019"],
 		"outDir": "out",
 		"rootDir": "./src",
-		"sourceMap": true
+		"sourceMap": true,
+		"skipLibCheck": true,
+		"resolveJsonModule": true,
+        "esModuleInterop": true,  // Allows easier imports from ANTLR
+        "allowSyntheticDefaultImports": true  // Helps with ANTLR imports
 	},
     "include": [
-		"src"
+		"src",
+		"server/parser/**/*.ts"  // Include ANTLR-generated files
 	],
     "exclude": [
 		"node_modules",

@@ -7,16 +7,90 @@ import {
 import { Token, TokenType } from "./ClarionTokenizer";
 import { ExecutionRangeProvider } from "./ExecutionRangeProvider";
 import LoggerManager from "./logger";
+import { ASTNode, DocumentAST } from "./DocumentAst";
 const logger = LoggerManager.getLogger("DocumentSymbolProvider");
 logger.setLevel("info");
+let astLogged: boolean = false;
 export class ClarionDocumentSymbolProvider {
     private getEnumName(value: number): string | undefined {
         return Object.entries(TokenType).find(([key, val]) => val === value)?.[0];
     }
+
+
+    /** ✅ Converts AST Nodes to Document Symbols */
+    // private convertASTToSymbols(node: ASTNode, symbols: DocumentSymbol[]): void {
+    //     const symbolKind = this.getSymbolKindForASTType(node.type);
+
+    //     const symbol: DocumentSymbol = {
+    //         name: node.name,
+    //         detail: node.type,
+    //         kind: symbolKind,
+    //         range: this.createRange(node.line, node.finishesAt ?? node.line),
+    //         selectionRange: this.createRange(node.line, node.finishesAt ?? node.line),
+    //         children: []
+    //     };
+
+    //     for (const child of node.children) {
+    //         this.convertASTToSymbols(child, symbol.children!);
+    //     }
+
+    //     symbols.push(symbol);
+    // }
+
+    /** ✅ Determines the correct SymbolKind for AST Nodes */
+    private getSymbolKindForASTType(type: string): SymbolKind {
+        switch (type) {
+            case "Procedure":
+                return SymbolKind.Method;
+            case "Routine":
+                return SymbolKind.Property;
+            case "Class":
+                return SymbolKind.Class;
+            case "Variable":
+                return SymbolKind.Variable;
+            case "Struct":
+                return SymbolKind.Struct;
+            case "Namespace":
+                return SymbolKind.Namespace;
+            default:
+                return SymbolKind.Object;
+        }
+    }
+
+    /** ✅ Logs the AST structure recursively */
+    private logAST(node: ASTNode, depth: number): void {
+        
+        const indent = " ".repeat(depth * 2);
+        logger.info(`${indent}🔹 ${node.type} - ${node.name} (Line: ${node.start}, Ends: ${node.end ?? 'Unknown'})`);
+        for (const child of node.children) {
+            this.logAST(child, depth + 1);
+        }
+        
+    }
+
     public provideDocumentSymbols(tokens: Token[], documentUri: string): DocumentSymbol[] {
+
+
+
+
         logger.info(`🔍 Processing document symbols for ${documentUri}`);
         const symbols: DocumentSymbol[] = [];
         const stack: DocumentSymbol[] = [];
+        if (!astLogged) {
+            logger.info('Start if ast logging');
+            const ast = new DocumentAST(tokens);
+            const astRoot = ast.getAST();
+
+            // ✅ Log AST structure
+            this.logAST(astRoot, 0);
+            astLogged = true;
+            logger.info('End of AST logging');
+        }
+
+        // ✅ Convert AST to Document Symbols
+        // this.convertASTToSymbols(astRoot, symbols);
+
+
 
         // ✅ Track execution ranges
         const documentLineCount = tokens.length > 0 ? tokens[tokens.length - 1].line : 0;
@@ -65,7 +139,7 @@ export class ClarionDocumentSymbolProvider {
             if (executionProvider.isInsideExecution(token.line)) continue; // Skip execution code
 
             let parentProcedure = procedures.find(proc => token.line >= proc.start && token.line <= proc.finish);
-            logger.info(` 📌 Token ${token.value} ${this.getEnumName(token.type)} is inside ${parentProcedure?.symbol.name}`);
+            //  logger.info(` 📌 Token ${token.value} ${this.getEnumName(token.type)} is inside ${parentProcedure?.symbol.name}`);
             const previousToken = i > 0 ? tokens[i - 1] : undefined;
 
 

@@ -149,7 +149,7 @@
                     "group": "build"
                 },
                 {
-                    "command": "clarion.buildProject", 
+                    "command": "clarion.buildProject",
                     "when": "view == solutionView && viewItem == clarionProject",
                     "group": "build"
                 }
@@ -286,6 +286,7 @@
         "@types/vscode": "^1.97.0",
         "@typescript-eslint/parser": "^8.25.0",
         "@vscode/test-electron": "^2.4.1",
+        "antlr4ng": "^3.0.16",
         "eslint": "^9.21.0",
         "glob": "^11.0.1",
         "mocha": "^11.1.0",
