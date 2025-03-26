@@ -16,48 +16,58 @@ class ClarionFoldingProvider {
     public computeFoldingRanges(): FoldingRange[] {
         this.foldingRanges = [];
     
-        // ✅ Process only top-level structures, procedures, and routines
-        const topLevelTokens = this.tokens.filter(t =>
-            !t.parent && (
-                t.subType === TokenType.Procedure ||
-                t.subType === TokenType.Structure ||
-                t.subType === TokenType.Routine
-            )
+        // ✅ Include all PROCEDUREs, STRUCTUREs, and ROUTINEs (not just top-level)
+        const foldableTokens = this.tokens.filter(t =>
+            t.subType === TokenType.Procedure ||
+            t.subType === TokenType.Structure ||
+            t.subType === TokenType.Routine ||
+            t.subType === TokenType.Class
         );
     
-        // 🔍 Infer missing finishesAt for top-level PROCEDUREs
-        for (let i = 0; i < topLevelTokens.length; i++) {
-            const token = topLevelTokens[i];
+        // 🔍 Infer missing finishesAt for PROCEDUREs
+        for (let i = 0; i < foldableTokens.length; i++) {
+            const token = foldableTokens[i];
     
             if (token.subType === TokenType.Procedure && token.finishesAt == null) {
-                // 🔄 Look for next top-level procedure to infer end
-                for (let j = i + 1; j < topLevelTokens.length; j++) {
-                    const next = topLevelTokens[j];
-                    if (next.subType === TokenType.Procedure) {
-                        token.finishesAt = next.line - 1;
-                        break;
-                    }
-                }
-    
-                // 📌 If still no end found, use EOF
-                if (token.finishesAt == null) {
-                    const lastLine = this.tokens[this.tokens.length - 1]?.line ?? token.line;
-                    token.finishesAt = lastLine;
-                }
-    
-                logger.info(`📌 [FoldingProvider] Inferred finishesAt for '${token.value}' as Line ${token.finishesAt}`);
+                this.inferProcedureEnd(token, foldableTokens);
             }
         }
+
+        for (const t of foldableTokens) {
+            const subTypeName = t.subType !== undefined ? TokenType[t.subType] : TokenType[t.type];
+            logger.info(`[DEBUG] Foldable: ${t.value} (${subTypeName}) Line ${t.line}–${t.finishesAt}`);
+
+        }
+        
     
-        for (const token of topLevelTokens) {
+        // 🧩 Process folds for all structures/procedures/routines
+        for (const token of foldableTokens) {
             this.processFolding(token);
         }
     
         // ✅ Process REGIONS separately
         this.foldRegions();
-        logger.info(`📏 [FOLDING] Returning ${this.foldingRanges.length} ranges`);
     
+        logger.info(`📏 [FOLDING] Returning ${this.foldingRanges.length} ranges`);
         return this.foldingRanges;
+    }
+    
+    private inferProcedureEnd(token: Token, procedures: Token[]): void {
+        const index = procedures.indexOf(token);
+    
+        for (let j = index + 1; j < procedures.length; j++) {
+            const next = procedures[j];
+            if (next.subType === TokenType.Procedure && next.line > token.line) {
+                token.finishesAt = next.line - 1;
+                return;
+            }
+        }
+    
+        // 📌 Fallback to EOF if no next procedure found
+        const lastLine = this.tokens[this.tokens.length - 1]?.line ?? token.line;
+        token.finishesAt = lastLine;
+    
+        logger.info(`📌 [FoldingProvider] Inferred finishesAt for '${token.value}' as Line ${token.finishesAt}`);
     }
     
 
