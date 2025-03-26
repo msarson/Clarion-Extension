@@ -28,7 +28,7 @@ import ClarionFormatter from './ClarionFormatter';
 
 import { LexEnum } from './LexEnum';
 const logger = LoggerManager.getLogger("Server");
-logger.setLevel("error");
+logger.setLevel("info");
 // ✅ Initialize Providers
 const clarionFoldingProvider = new ClarionFoldingRangeProvider();
 const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider();
@@ -37,7 +37,12 @@ const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider();
 const connection = createConnection(ProposedFeatures.all);
 const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
 // ✅ Global Token Cache
-const tokenCache = new Map<string, Token[]>();
+interface CachedTokenData {
+    version: number;
+    tokens: Token[];
+}
+
+const tokenCache = new Map<string, CachedTokenData>();
 
 export let globalClarionSettings: any = {};
 
@@ -52,33 +57,19 @@ let debounceTimeout: NodeJS.Timeout | null = null;
 const parsedDocuments = new Map<string, boolean>(); // Track parsed state per document
 
 function getTokens(document: TextDocument): Token[] {
-    if (!serverInitialized) {
-        logger.info(`⚠️  [DELAY] Server not initialized yet, delaying tokenization for ${document.uri}`);
-        return [];
+    const cached = tokenCache.get(document.uri);
+    if (cached && cached.version === document.version) {
+        logger.info(`🟢 Using cached tokens for ${document.uri} (version ${document.version})`);
+        return cached.tokens;
     }
 
-    logger.info(`🔍 Checking token cache for ${document.uri}`);
-
-    // ✅ Always log tokenization results, even if cached
-    if (tokenCache.has(document.uri)) {
-        logger.info(`🟢 Using cached NEW tokenizer results for ${document.uri}`);
-
-        // 🚀 Print cached tokens before returning
-
-        return tokenCache.get(document.uri) || []; // Return standard tokenizer’s cached tokens
-    }
-
-    logger.info(`🟢 Running tokenizer for ${document.uri}`);
-
-
-
-    // ✅ Run the standard tokenizer (ClarionTokenizer) and cache its results
+    logger.info(`🟢 Running tokenizer for ${document.uri} (version ${document.version})`);
     const tokenizer = new ClarionTokenizer(document.getText());
     const tokens = tokenizer.tokenize();
-    tokenCache.set(document.uri, tokens);
-
+    tokenCache.set(document.uri, { version: document.version, tokens });
     return tokens;
 }
+
 
 
 
@@ -96,23 +87,26 @@ connection.onFoldingRanges((params: FoldingRangeParams) => {
     logger.info(`📂  Computing fresh folding ranges for: ${document.uri}`);
 
     const tokens = getTokens(document);  // ✅ No need for async/wrapping in Promise.resolve
-    return clarionFoldingProvider.provideFoldingRanges(tokens);
+    let ranges = clarionFoldingProvider.provideFoldingRanges(tokens);
+    return ranges;
 });
 
 
 // ✅ Handle Content Changes (Recompute Tokens)
 documents.onDidChangeContent(event => {
+    const document = event.document;
+
+    tokenCache.delete(document.uri); // 🔥 Always delete immediately
+
     if (debounceTimeout) clearTimeout(debounceTimeout);
 
     debounceTimeout = setTimeout(() => {
-        const document = event.document;
-
-        logger.info(`🔄 [CACHE REFRESH] Document changed: ${document.uri}, recomputing tokens...`);
-
-        // ✅ Recompute tokens and cache the result
-        getTokens(document);
+        logger.info(`[REFRESH] Re-parsing tokens after edit: ${document.uri}`);
+        getTokens(document); // ⬅️ refreshes the cache
     }, 300);
 });
+
+
 
 // ✅ Handle Document Formatting (Uses Cached Tokens & Caches Results)
 connection.onDocumentFormatting((params: DocumentFormattingParams): TextEdit[] => {

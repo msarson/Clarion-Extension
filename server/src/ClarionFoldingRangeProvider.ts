@@ -1,7 +1,5 @@
 import { FoldingRange } from "vscode-languageserver-protocol";
-import { TextDocument } from "vscode-languageserver-textdocument";
-import { DocumentSymbol, Range } from "vscode-languageserver-types";
-import { ClarionTokenizer, Token } from "./ClarionTokenizer.js";
+import { Token } from "./ClarionTokenizer.js";
 import ClarionFoldingProvider from "./ClarionFoldingProvider.js";
 import logger from "./logger.js";
 

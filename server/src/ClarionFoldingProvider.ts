@@ -24,6 +24,7 @@ class ClarionFoldingProvider {
 
         // ✅ Process REGIONS separately
         this.foldRegions();
+        logger.info(`📏 [FOLDING] Returning ${this.foldingRanges.length} ranges`);
 
         return this.foldingRanges;
     }
