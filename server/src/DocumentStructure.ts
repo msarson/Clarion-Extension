@@ -17,62 +17,62 @@ export class DocumentStructure {
         this.maxLabelWidth = this.processLabels();
     }
 
-   /** 🚀 Process token relationships and update tokens */
-public process(): void {
-    for (let i = 0; i < this.tokens.length; i++) {
-        const token = this.tokens[i];
+    /** 🚀 Process token relationships and update tokens */
+    public process(): void {
+        for (let i = 0; i < this.tokens.length; i++) {
+            const token = this.tokens[i];
 
-        if (token.type === TokenType.Keyword || token.type === TokenType.ExecutionMarker) {
-            switch (token.value.toUpperCase()) {
-                case "PROCEDURE":
-                    this.handleProcedureToken(token, i);
-                    break;
-                case "ROUTINE":
-                    this.handleRoutineToken(token, i);
-                    break;
-                case "CODE":
-                case "DATA":
-                    this.handleExecutionMarker(token);
-                    break;
+            if (token.type === TokenType.Keyword || token.type === TokenType.ExecutionMarker) {
+                switch (token.value.toUpperCase()) {
+                    case "PROCEDURE":
+                        this.handleProcedureToken(token, i);
+                        break;
+                    case "ROUTINE":
+                        this.handleRoutineToken(token, i);
+                        break;
+                    case "CODE":
+                    case "DATA":
+                        this.handleExecutionMarker(token);
+                        break;
+                }
+            } else if (token.type === TokenType.Structure) {
+                this.handleStructureToken(token);
+            } else if (token.type === TokenType.EndStatement) {
+                this.handleEndStatementForStructure(token);
             }
-        } else if (token.type === TokenType.Structure) {
-            this.handleStructureToken(token);
-        } else if (token.type === TokenType.EndStatement) {
-            this.handleEndStatementForStructure(token);
         }
-    }
 
-    this.closeRemainingProcedures();
-    this.assignMaxLabelLengths();
+        this.closeRemainingProcedures();
+        this.assignMaxLabelLengths();
 
-    // ✅ Step: Re-parent class method implementations
-    for (const token of this.tokens) {
-        if (token.subType === TokenType.Class) {
-            const classNameMatch = token.value.match(/^(\w+)\.(\w+)$/);
-            if (classNameMatch) {
-                const [_, classLabel, _methodName] = classNameMatch;
+        // ✅ Step: Re-parent class method implementations
+        for (const token of this.tokens) {
+            if (token.subType === TokenType.Class) {
+                const classNameMatch = token.value.match(/^(\w+)\.(\w+)$/);
+                if (classNameMatch) {
+                    const [_, classLabel, _methodName] = classNameMatch;
 
-                // 🔍 Find the CLASS structure with that label
-                const classDef = this.tokens.find(t =>
-                    t.type === TokenType.Structure &&
-                    t.value.toUpperCase() === "CLASS" &&
-                    t.parent?.value === classLabel
-                );
+                    // 🔍 Find the CLASS structure with that label
+                    const classDef = this.tokens.find(t =>
+                        t.type === TokenType.Structure &&
+                        t.value.toUpperCase() === "CLASS" &&
+                        t.parent?.value === classLabel
+                    );
 
-                // ✅ Reassign method’s parent to the owning PROCEDURE
-                if (classDef && classDef.parent?.subType === TokenType.Procedure) {
-                    const owningProc = classDef.parent;
+                    // ✅ Reassign method’s parent to the owning PROCEDURE
+                    if (classDef && classDef.parent?.subType === TokenType.Procedure) {
+                        const owningProc = classDef.parent;
 
-                    token.parent = owningProc;
-                    owningProc.children = owningProc.children || [];
-                    owningProc.children.push(token);
+                        token.parent = owningProc;
+                        owningProc.children = owningProc.children || [];
+                        owningProc.children.push(token);
 
-                    logger.info(`🔁 Bound class method '${token.value}' to owning procedure '${owningProc.value}'`);
+                        logger.info(`🔁 Bound class method '${token.value}' to owning procedure '${owningProc.value}'`);
+                    }
                 }
             }
         }
     }
-}
 
 
     private handleExecutionMarker(token: Token): void {
@@ -139,7 +139,7 @@ public process(): void {
             let maxLabelLength = 0;
 
             const topLabel = this.tokens.find(t =>
-                t.type === TokenType.Label && 
+                t.type === TokenType.Label &&
                 t.line === token.line &&
                 t.start === 0
             );
@@ -200,30 +200,35 @@ public process(): void {
 
     private handleProcedureToken(token: Token, index: number): void {
         if (this.insideClassOrInterfaceOrMapDepth > 0) return;
-    
+
         const prevToken = this.tokens[index - 1];
         const isMethodImplementation = prevToken && prevToken.type === TokenType.Label && prevToken.value.includes(".");
-    
-        this.handleProcedureClosure(token.line - 1);
-    
+
+        // 🧠 Always close the previous procedure/method before starting a new one
+        const lastProc = this.procedureStack[this.procedureStack.length - 1];
+        if (lastProc && lastProc.subType === (isMethodImplementation ? TokenType.Class : TokenType.Procedure)) {
+            this.handleProcedureClosure(token.line - 1);
+        }
+
+
         token.subType = isMethodImplementation ? TokenType.Class : TokenType.Procedure;
         token.value = prevToken?.value ?? "AnonymousProcedure";
 
-    
         if (isMethodImplementation) {
-            // ⛳ Skip assigning parent — we fix that in post-processing if needed
+            // ⛳ Skip assigning parent — we fix that in post-processing
         } else if (this.structureStack.length > 0) {
             const parent = this.structureStack[this.structureStack.length - 1];
             token.parent = parent;
             parent.children = parent.children || [];
             parent.children.push(token);
         }
-    
+
         this.procedureStack.push(token);
     }
-    
- 
-    
+
+
+
+
 
     private handleRoutineToken(token: Token, index: number): void {
         if (this.procedureStack.length === 0) return;
@@ -246,13 +251,13 @@ public process(): void {
             logger.info(`📤 Closed ${lastProcedure.subType} ${lastProcedure.value} at line ${endLine}`);
             lastProcedure.finishesAt = endLine;
         }
-    
+
         while (this.routineStack.length > 0) {
             this.handleRoutineClosure(endLine);
         }
     }
-    
-    
+
+
 
     private handleRoutineClosure(endLine: number): void {
         if (this.routineStack.length > 0) {
