@@ -3,7 +3,7 @@ import { Token, TokenType } from "./ClarionTokenizer.js";
 import LoggerManager from './logger';
 
 const logger = LoggerManager.getLogger("FoldingProvider");
-
+logger.setLevel("info");
 class ClarionFoldingProvider {
     private tokens: Token[];
     private foldingRanges: FoldingRange[];
@@ -15,19 +15,51 @@ class ClarionFoldingProvider {
 
     public computeFoldingRanges(): FoldingRange[] {
         this.foldingRanges = [];
-
+    
         // ✅ Process only top-level structures, procedures, and routines
-        const topLevelTokens = this.tokens.filter(t => !t.parent);
+        const topLevelTokens = this.tokens.filter(t =>
+            !t.parent && (
+                t.subType === TokenType.Procedure ||
+                t.subType === TokenType.Structure ||
+                t.subType === TokenType.Routine
+            )
+        );
+    
+        // 🔍 Infer missing finishesAt for top-level PROCEDUREs
+        for (let i = 0; i < topLevelTokens.length; i++) {
+            const token = topLevelTokens[i];
+    
+            if (token.subType === TokenType.Procedure && token.finishesAt == null) {
+                // 🔄 Look for next top-level procedure to infer end
+                for (let j = i + 1; j < topLevelTokens.length; j++) {
+                    const next = topLevelTokens[j];
+                    if (next.subType === TokenType.Procedure) {
+                        token.finishesAt = next.line - 1;
+                        break;
+                    }
+                }
+    
+                // 📌 If still no end found, use EOF
+                if (token.finishesAt == null) {
+                    const lastLine = this.tokens[this.tokens.length - 1]?.line ?? token.line;
+                    token.finishesAt = lastLine;
+                }
+    
+                logger.info(`📌 [FoldingProvider] Inferred finishesAt for '${token.value}' as Line ${token.finishesAt}`);
+            }
+        }
+    
         for (const token of topLevelTokens) {
             this.processFolding(token);
         }
-
+    
         // ✅ Process REGIONS separately
         this.foldRegions();
         logger.info(`📏 [FOLDING] Returning ${this.foldingRanges.length} ranges`);
-
+    
         return this.foldingRanges;
     }
+    
 
     /** 🔹 Recursively process structures, procedures, and routines */
     private processFolding(token: Token): void {
@@ -38,7 +70,8 @@ class ClarionFoldingProvider {
         let startLine = token.line;
 
         // ✅ Fold entire PROCEDURE block
-        if (token.subType === TokenType.Procedure) {
+        if (token.subType === TokenType.Procedure || token.subType === TokenType.Class) {
+
             this.foldingRanges.push({
                 startLine: token.line,
                 endLine: token.finishesAt,

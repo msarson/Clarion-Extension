@@ -203,7 +203,7 @@ const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     JOIN: /\bJOIN\b/i,
     LOOP: /\bLOOP\b/i,
     MAP: /\bMAP\b/i,
-    MENU: /\bMENU\b/i,
+    MENU: /\bMENU\s*(\(|,)/i,
     MENUBAR: /\bMENUBAR\b/i,
     //QUEUE: /\bQUEUE(?![:\(])\b/i,  // Prevents detecting Queue:Browse as a structure
     QUEUE: /\s+\bQUEUE\b(?!:)/i,

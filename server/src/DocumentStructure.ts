@@ -2,23 +2,21 @@ import { Token, TokenType } from "./ClarionTokenizer";
 import LoggerManager from "./logger";
 
 const logger = LoggerManager.getLogger("DocumentStructure");
-logger.setLevel("error");
+logger.setLevel("info");
 
 export class DocumentStructure {
     private structureStack: Token[] = [];
     private procedureStack: Token[] = [];
     private routineStack: Token[] = [];
-    private insideRoutine: Token | null = null;
     private foundData: boolean = false;
     private insideClassOrInterfaceOrMapDepth: number = 0;
     private structureIndentMap: Map<Token, number> = new Map();
     private maxLabelWidth: number = 0;
 
     constructor(private tokens: Token[]) {
-        this.maxLabelWidth = this.processLabels(); // ✅ Process labels at initialization
+        this.maxLabelWidth = this.processLabels();
     }
 
-    /** 🚀 Process token relationships and update tokens */
     public process(): void {
         for (let i = 0; i < this.tokens.length; i++) {
             const token = this.tokens[i];
@@ -44,52 +42,60 @@ export class DocumentStructure {
         }
 
         this.closeRemainingProcedures();
-        this.assignMaxLabelLengths(); // ✅ Restore the function to ensure labels align correctly
+        this.assignMaxLabelLengths();
+
+        for (const token of this.tokens) {
+            if (
+                (token.subType !== undefined &&
+                 [TokenType.Structure, TokenType.Procedure, TokenType.Routine, TokenType.Class].includes(token.subType)) ||
+                (token.children && token.children.length > 0)
+            ) {
+                const parentLabel = token.parent?.value || "None";
+                const type = token.subType ?? token.type;
+                const childCount = token.children?.length || 0;
+                logger.debug(`🔸 [${TokenType[type]}] '${token.value}' (Line ${token.line}) → Parent: ${parentLabel}, Children: ${childCount}`);
+            }
+        }
     }
 
-    /** ✅ Handles Execution Markers (DATA and CODE) */
     private handleExecutionMarker(token: Token): void {
+        const currentProcedure = this.procedureStack[this.procedureStack.length - 1] ?? null;
+        const currentRoutine = this.routineStack[this.routineStack.length - 1] ?? null;
+
         if (token.value.toUpperCase() === "DATA") {
-            if (this.insideRoutine) {
-                this.insideRoutine.hasLocalData = true;
+            if (currentRoutine) {
+                currentRoutine.hasLocalData = true;
                 this.foundData = true;
-            } else if (this.procedureStack.length > 0) {
-                let parentProcedure = this.procedureStack[this.procedureStack.length - 1];
-                parentProcedure.hasLocalData = true;
+            } else if (currentProcedure) {
+                currentProcedure.hasLocalData = true;
                 this.foundData = true;
             }
         }
 
         if (token.value.toUpperCase() === "CODE") {
-            if (this.insideRoutine) {
-                this.insideRoutine.executionMarker = token;
-                logger.info(`🚀 CODE execution marker set for ROUTINE '${this.insideRoutine.value}' at Line ${token.line}`);
-            } else if (this.procedureStack.length > 0) {
-                let parentProcedure = this.procedureStack[this.procedureStack.length - 1];
-                parentProcedure.executionMarker = token;
-                logger.info(`🚀 CODE execution marker set for PROCEDURE '${parentProcedure.value}' at Line ${token.line}`);
+            if (currentRoutine) {
+                currentRoutine.executionMarker = token;
+                logger.info(`🚀 CODE execution marker set for ROUTINE '${currentRoutine.value}' at Line ${token.line}`);
+            } else if (currentProcedure) {
+                currentProcedure.executionMarker = token;
+                logger.info(`🚀 CODE execution marker set for PROCEDURE '${currentProcedure.value}' at Line ${token.line}`);
             } else {
                 logger.warn(`⚠️ CODE statement found at Line ${token.line}, but no valid procedure or routine to assign it to.`);
             }
         }
-
     }
 
-
-    /** ✅ Process Labels, but only if outside execution code */
     private processLabels(): number {
         let maxLabelWidth = 0;
 
         for (const token of this.tokens) {
-            const insideExecutionCode = this.insideRoutine !== null || this.procedureStack.length > 0;
+            const insideExecutionCode = this.procedureStack.length > 0;
 
-            // ✅ Only process labels if outside execution code
             if (!insideExecutionCode && token.start === 0 && token.type !== TokenType.Comment) {
                 token.type = TokenType.Label;
                 maxLabelWidth = Math.max(maxLabelWidth, token.value.length);
                 logger.info(`📌 Label '${token.value}' detected at Line ${token.line}, forced to column 0.`);
 
-                // ✅ Assign label to the nearest enclosing structure
                 if (this.structureStack.length > 0) {
                     let parentStructure = this.structureStack[this.structureStack.length - 1];
                     parentStructure.maxLabelLength = Math.max(parentStructure.maxLabelLength || 0, token.value.length);
@@ -100,116 +106,66 @@ export class DocumentStructure {
         return maxLabelWidth;
     }
 
-
     private assignMaxLabelLengths(): void {
-        logger.info("📜 STRUCTURE MAP BEFORE PROCESSING:");
-    
-        for (const token of this.tokens) {
-            if (token.type === TokenType.Structure) {
-                logger.info(`🔹 ${token.value} (Line: ${token.line}) | Parent: ${token.parent?.value || "None"} | Execution Marker: ${token.parent?.executionMarker?.line ?? "No"} | Children: ${token.children?.length || 0}`);
-            }
-        }
-    
         for (const token of this.tokens) {
             if (token.type !== TokenType.Structure) continue;
-    
-            // ✅ Ignore nested structures – only compute maxLabelLength for top-level ones
-            if (token.parent && token.parent.type === TokenType.Structure) {
-                logger.info(`⏩ Skipping '${token.value}' (Nested Structure) at Line ${token.line}`);
-                continue;
-            }
-    
-            // ✅ Ensure Procedures and Routines are NOT treated as structures
-            if (token.subType === TokenType.Procedure || token.subType === TokenType.Routine) {
-                logger.info(`⏩ Skipping '${token.value}' (Procedure/Routine) at Line ${token.line}`);
-                continue;
-            }
-    
-            // ✅ Retrieve execution marker from parent (if available)
+
+            if (token.parent && token.parent.type === TokenType.Structure) continue;
+            if (token.subType === TokenType.Procedure || token.subType === TokenType.Routine) continue;
+
             const executionMarkerLine = token.parent?.executionMarker?.line ?? null;
-    
-            // ✅ If this token appears *after* an execution marker, it's inside execution code
             if (executionMarkerLine !== null && token.line > executionMarkerLine) {
-                logger.info(`⏩ Ignoring '${token.value}' inside execution code at Line ${token.line} (CODE starts at ${executionMarkerLine})`);
                 token.maxLabelLength = 0;
                 continue;
             }
-    
-            // ✅ Start maxLabelLength calculation from 0
+
             let maxLabelLength = 0;
-            logger.info(`🔍 Checking '${token.value}' (Line ${token.line}) - Initial maxLabelLength: ${maxLabelLength}`);
-            
-            // ✅ Find the topmost label for this structure (on the same line)
-            const topLabel = this.tokens.find(t => 
+
+            const topLabel = this.tokens.find(t =>
                 t.type === TokenType.Label && 
                 t.line === token.line &&
-                t.start === 0 // Ensure it's a proper column 0 label
+                t.start === 0
             );
-            
-            // ✅ If structure has its own label, consider its length first
+
             if (topLabel) {
                 maxLabelLength = topLabel.value.length;
-                logger.info(`📌 Structure's own label '${topLabel.value}' sets baseline: ${maxLabelLength}`);
             }
-    
-            // ✅ Find **all tokens inside this structure** that could have labels
-            let structureTokens = this.tokens.filter(
-                t => t.parent === token
-            );
-    
-            if (structureTokens.length === 0 && !topLabel) {
-                logger.info(`📌 No child tokens found for '${token.value}' at Line ${token.line}`);
-            }
-    
+
+            let structureTokens = this.tokens.filter(t => t.parent === token);
             for (const childToken of structureTokens) {
                 if (childToken.type === TokenType.Label) {
-                    logger.info(`📌 Label '${childToken.value}' contributes: ${childToken.value.length} (Line ${childToken.line})`);
                     maxLabelLength = Math.max(maxLabelLength, childToken.value.length);
                 }
             }
-    
-            // ✅ Ensure we account for **KEYs, FIELDS, or other non-structure elements**
+
             let inlineLabels = this.tokens.filter(t =>
-                t.line > token.line &&  // ✅ Must be inside the structure
-                t.start === 0 &&        // ✅ Must be at column 0
+                t.line > token.line &&
+                t.start === 0 &&
                 t.type === TokenType.Label &&
-                t.parent === token // ✅ Must belong to this structure
+                t.parent === token
             );
-    
+
             for (const label of inlineLabels) {
-                logger.info(`📌 Inline Label '${label.value}' contributes: ${label.value.length} (Line ${label.line})`);
                 maxLabelLength = Math.max(maxLabelLength, label.value.length);
             }
-    
-            // ✅ Store max label length ONLY for **top-level structures**
+
             token.maxLabelLength = maxLabelLength;
-            logger.info(`📏 Final maxLabelLength for '${token.value}' (Line ${token.line}) is ${maxLabelLength}`);
         }
     }
-    
 
-
-
-
-
-
-
-    /** ✅ Handles STRUCTURES (CLASS, MAP, INTERFACE, etc.) */
     private handleStructureToken(token: Token): void {
         token.subType = TokenType.Structure;
-        token.maxLabelLength = 0; // Initialize max label length for this structure
+        token.maxLabelLength = 0;
         this.structureStack.push(token);
 
         if (["CLASS", "MAP", "INTERFACE"].includes(token.value.toUpperCase())) {
             this.insideClassOrInterfaceOrMapDepth++;
         }
 
-        // ✅ Store indentation for this structure
         let indentLevel = this.maxLabelWidth;
         this.structureIndentMap.set(token, indentLevel);
     }
 
-    /** ✅ Handles END statements */
     private handleEndStatementForStructure(token: Token): void {
         const lastStructure = this.structureStack.pop();
         if (lastStructure) {
@@ -222,48 +178,46 @@ export class DocumentStructure {
         }
     }
 
-    /** ✅ Handles PROCEDURE declarations */
     private handleProcedureToken(token: Token, index: number): void {
         if (this.insideClassOrInterfaceOrMapDepth > 0) return;
-
-        let prevToken = this.tokens[index - 1];
-        let isClassMethod = prevToken && prevToken.type === TokenType.Class;
-
-        // ✅ Close previous procedure before opening a new one
+    
+        const prevToken = this.tokens[index - 1];
+        const isMethodImplementation = prevToken && prevToken.type === TokenType.Label && prevToken.value.includes(".");
+    
         this.handleProcedureClosure(token.line - 1);
+    
+        token.subType = isMethodImplementation ? TokenType.Class : TokenType.Procedure;
+        token.value = prevToken?.value ?? "AnonymousProcedure";
 
-        // ✅ Assign parent-child relationship (if inside a structure)
-        if (this.structureStack.length > 0) {
-            let parent = this.structureStack[this.structureStack.length - 1];
+    
+        if (isMethodImplementation) {
+            // ⛳ Skip assigning parent — we fix that in post-processing if needed
+        } else if (this.structureStack.length > 0) {
+            const parent = this.structureStack[this.structureStack.length - 1];
             token.parent = parent;
             parent.children = parent.children || [];
             parent.children.push(token);
         }
-
-        token.subType = isClassMethod ? TokenType.Class : TokenType.Procedure;
+    
         this.procedureStack.push(token);
     }
+    
 
-    /** ✅ Handles ROUTINE declarations */
     private handleRoutineToken(token: Token, index: number): void {
         if (this.procedureStack.length === 0) return;
 
-        // ✅ Close previous routine before opening a new one
         this.handleRoutineClosure(token.line - 1);
 
-        // ✅ Assign parent-child relationship (inside a procedure)
         let parentProcedure = this.procedureStack[this.procedureStack.length - 1];
         token.parent = parentProcedure;
         parentProcedure.children = parentProcedure.children || [];
         parentProcedure.children.push(token);
 
-        this.insideRoutine = token;
-        this.foundData = false;
         token.subType = TokenType.Routine;
         this.routineStack.push(token);
+        this.foundData = false;
     }
 
-    /** ✅ Closes previous PROCEDUREs */
     private handleProcedureClosure(endLine: number): void {
         if (this.procedureStack.length > 0) {
             const lastProcedure = this.procedureStack.pop();
@@ -277,7 +231,6 @@ export class DocumentStructure {
         }
     }
 
-    /** ✅ Closes previous ROUTINEs */
     private handleRoutineClosure(endLine: number): void {
         if (this.routineStack.length > 0) {
             const lastRoutine = this.routineStack.pop();
@@ -287,7 +240,6 @@ export class DocumentStructure {
         }
     }
 
-    /** ✅ Closes any remaining open PROCEDUREs and ROUTINEs */
     public closeRemainingProcedures(): void {
         while (this.procedureStack.length > 0) {
             const lastProcedure = this.procedureStack.pop();

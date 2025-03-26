@@ -28,7 +28,7 @@ import ClarionFormatter from './ClarionFormatter';
 
 import { LexEnum } from './LexEnum';
 const logger = LoggerManager.getLogger("Server");
-logger.setLevel("info");
+logger.setLevel("error");
 // ✅ Initialize Providers
 const clarionFoldingProvider = new ClarionFoldingRangeProvider();
 const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider();
