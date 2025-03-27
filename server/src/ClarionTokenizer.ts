@@ -193,7 +193,7 @@ const orderedTokenTypes: TokenType[] = [
 
 const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     MODULE: /^\s*MODULE\b/i,  // MODULE should be the first word on the line
-    APPLICATION: /\bAPPLICATION\b/i,
+    APPLICATION: /\bAPPLICATION\s*(\(|,)/i,
     CASE: /\bCASE\b/i,
     CLASS: /\bCLASS\b/i,
     GROUP: /\bGROUP\b/i,
@@ -216,7 +216,7 @@ const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     TAB: /\bTAB\b/i,
     TOOLBAR: /\bTOOLBAR\b/i,
     VIEW: /\sVIEW\b/i,
-    WINDOW: /\bWINDOW\b/i,
+    WINDOW: /\bWINDOW\s*(\(|,)/i,
     OPTION: /\bOPTION\b/i,
     ITEMIZE: /\bITEMIZE\b/i,
     EXECUTE: /\bEXECUTE\b/i,
@@ -266,6 +266,6 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Type]: /\b(?:ANY|ASTRING|BFLOAT4|BFLOAT8|BLOB|MEMO|BOOL|BSTRING|BYTE|CSTRING|DATE|DECIMAL|DOUBLE|FLOAT4|LONG|LIKE|PDECIMAL|PSTRING|REAL|SHORT|SIGNED|SREAL|STRING|TIME|ULONG|UNSIGNED|USHORT|VARIANT)\b/i,
     [TokenType.ImplicitVariable]: /\b[A-Za-z][A-Za-z0-9_]+(?:\$|#|")\b/i,
     [TokenType.Delimiter]: /[,():]/i,  // ❌ Remove "." from here
-    [TokenType.ReferenceVariable]: /&([A-Za-z_][A-Za-z0-9_]*):([A-Za-z_][A-Za-z0-9_]*(:\d+)?)/i,
+    [TokenType.ReferenceVariable]: /&[A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*(?::\d+)?)?/i,
     [TokenType.Unknown]: /\S+/i
 };

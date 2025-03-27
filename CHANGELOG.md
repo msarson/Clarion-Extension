@@ -1,6 +1,13 @@
 # Change Log  
 All notable changes to the "clarion-extension" extension will be documented in this file.
 
+## [0.5.1] - 2025-03-27
+
+### Bug Fixes and Feature Improvements
+- **Fixed folding behavior**: Resolved an issue where `MODULE` was incorrectly detected as a foldable region within class definitions.
+- **Enhanced symbol provider**: Major improvements to the Outline view, with better symbol organization and handling for various Clarion structures.
+
+
 ## [0.5.0] - 2025-03-18  
 
 ### Added  

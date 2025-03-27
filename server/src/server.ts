@@ -110,7 +110,7 @@ documents.onDidChangeContent(event => {
 
 // ✅ Handle Document Formatting (Uses Cached Tokens & Caches Results)
 connection.onDocumentFormatting((params: DocumentFormattingParams): TextEdit[] => {
-    logger.info(`📐 Received onDocumentFormatting request for: ${params.textDocument.uri}`) ;
+    logger.info(`📐 Received onDocumentFormatting request for: ${params.textDocument.uri}`);
     const document = documents.get(params.textDocument.uri);
     if (!document) return [];
 
@@ -149,9 +149,20 @@ connection.onDocumentSymbol((params: DocumentSymbolParams) => {
     }
 
     logger.info(`📂  Computing fresh document symbols for: ${document.uri}`);
-    tokenCache.delete(document.uri);
     const tokens = getTokens(document);  // ✅ No need for async
-    return clarionDocumentSymbolProvider.provideDocumentSymbols(tokens, document.uri);
+    const symbols = clarionDocumentSymbolProvider.provideDocumentSymbols(tokens, document.uri);
+    logger.info(`🧩 Returned ${symbols.length} document symbols`);
+
+    logger.info(`✅ Finished processing tokens. ${symbols.length} top-level symbols`);
+
+    for (const s of symbols) {
+        logger.info(`🪵 Top-level: ${s.name}, children: ${s.children?.length ?? 0}`);
+        s.children?.forEach(child => {
+            logger.info(`   ↪️ Child: ${child.name}`);
+        });
+    }
+    return symbols;
+
 });
 
 

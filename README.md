@@ -67,13 +67,21 @@ This extension is under **active development** and we need your **help**! Whethe
 ## Marketplace Information
 
 - **Identifier**: `msarson.clarion-extensions`
-- **Version**: `0.5.0`
+- **Version**: `0.5.1`
 - **Published**: 2018-08-19
-- **Last Release**: 2025-03-18
+- **Last Release**: 2025-03-27
 
 [View on Marketplace](https://marketplace.visualstudio.com/items?itemName=msarson.clarion-extensions)
 
 ---
+
+## Changelog (What's New in v0.5.1)
+
+### Bug Fixes and Feature Improvements
+- **Fixed folding behavior**: Resolved an issue where `MODULE` was incorrectly detected as a foldable region within class definitions.
+- **Enhanced symbol provider**: Major improvements to the Outline view, with better symbol organization and handling for various Clarion structures.
+
+
 
 ## Changelog (What's New in v0.5.0?)
 

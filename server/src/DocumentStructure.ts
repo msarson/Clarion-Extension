@@ -2,7 +2,7 @@ import { Token, TokenType } from "./ClarionTokenizer";
 import LoggerManager from "./logger";
 
 const logger = LoggerManager.getLogger("DocumentStructure");
-logger.setLevel("info");
+logger.setLevel("error");
 
 export class DocumentStructure {
     private structureStack: Token[] = [];
@@ -111,7 +111,7 @@ export class DocumentStructure {
             if (!insideExecutionCode && token.start === 0 && token.type !== TokenType.Comment) {
                 token.type = TokenType.Label;
                 maxLabelWidth = Math.max(maxLabelWidth, token.value.length);
-                logger.info(`📌 Label '${token.value}' detected at Line ${token.line}, forced to column 0.`);
+               // logger.info(`📌 Label '${token.value}' detected at Line ${token.line}, forced to column 0.`);
 
                 if (this.structureStack.length > 0) {
                     let parentStructure = this.structureStack[this.structureStack.length - 1];
@@ -174,23 +174,73 @@ export class DocumentStructure {
         if (!token.subType) {
             token.subType = TokenType.Structure;
         }
+    
+        // 🛑 Special handling: Skip MODULE structures that are part of CLASS attribute list
+        if (token.value.toUpperCase() === "MODULE") {
+            const sameLine = this.tokens.filter(t => t.line === token.line);
+            const currentIndex = sameLine.findIndex(t => t === token);
+    
+            for (let j = currentIndex - 1; j >= 0; j--) {
+                const prev = sameLine[j];
+                if (prev.value === ',') {
+                    logger.info(`📛 Skipping MODULE at line ${token.line} – part of CLASS attribute list`);
+                    return;
+                }
+                if (prev.value === '(' || prev.type === TokenType.Structure || prev.type === TokenType.Keyword) {
+                    break;
+                }
+            }
+        }
+    
         token.maxLabelLength = 0;
         this.structureStack.push(token);
-
-        if (["CLASS", "MAP", "INTERFACE"].includes(token.value.toUpperCase())) {
-            this.insideClassOrInterfaceOrMapDepth++;
+    
+        const tokenIndex = this.tokens.indexOf(token);
+        let lName = "";
+        if (tokenIndex > 0) {
+            lName = this.tokens[tokenIndex - 1].value;
         }
-
+        logger.info(`🧱 Opened ${token.value} at Line ${token.line} ${lName}`);
+    
+        if (["CLASS", "MAP", "INTERFACE"].includes(token.value.toUpperCase())) {
+            logger.info(`Checking if CLASS is inline`);
+            const sameLine = this.tokens.filter(t => t.line === token.line);
+            logger.info(`Same line tokens: ${sameLine.map(t => t.value).join(", ")}`);
+            const currentIndex = sameLine.findIndex(t => t === token);
+            let isInlineAttribute = false;
+    
+            for (let j = currentIndex - 1; j >= 0; j--) {
+                const prev = sameLine[j];
+                if (prev.value === ',') {
+                    isInlineAttribute = true;
+                    break;
+                }
+                if (prev.value === '(' || prev.type === TokenType.Structure || prev.type === TokenType.Keyword) {
+                    break;
+                }
+            }
+    
+            logger.info(`Is inline attribute: ${isInlineAttribute}`);
+    
+            if (!isInlineAttribute) {
+                this.insideClassOrInterfaceOrMapDepth++;
+            } else {
+                logger.info('Skipping module line');
+                return;
+            }
+        }
+    
         let indentLevel = this.maxLabelWidth;
         this.structureIndentMap.set(token, indentLevel);
     }
+    
 
     private handleEndStatementForStructure(token: Token): void {
         const lastStructure = this.structureStack.pop();
         if (lastStructure) {
             lastStructure.finishesAt = token.line;
             token.start = this.structureIndentMap.get(lastStructure) || 0;
-
+            logger.info(`🔚 Closed ${lastStructure.value} at Line ${token.line}`);
             if (["CLASS", "MAP", "INTERFACE"].includes(lastStructure.value.toUpperCase())) {
                 this.insideClassOrInterfaceOrMapDepth = Math.max(0, this.insideClassOrInterfaceOrMapDepth - 1);
             }
