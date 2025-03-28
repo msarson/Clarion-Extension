@@ -13,8 +13,7 @@ import { TreeNode } from './TreeNode';
 import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile, setGlobalClarionSelection } from './globals';
 import * as fs from 'fs';
 import { SolutionParser } from './Parser/SolutionParser';
-
-import { runClarionBuild } from './buildTasks';
+import * as buildTasks from './buildTasks'; 
 import LoggerManager from './logger';
 import { ClarionProject } from './Parser/ClarionProject';
 const logger = LoggerManager.getLogger("Extension");
@@ -871,25 +870,25 @@ function stopClientServer() {
     return undefined;
 }
 
+
+
 async function buildSolutionOrProject(buildTarget: "Solution" | "Project", project?: ClarionProject) {
     const buildConfig = {
-        buildTarget: buildTarget,
-        selectedProjectPath: project ? project.path : "",
-        projectObject: project // Pass the entire project object
+        buildTarget,
+        selectedProjectPath: project?.path ?? "",
+        projectObject: project
     };
-    
-    // Import the build tasks module functions
-    const { validateBuildEnvironment, loadSolutionParser, prepareBuildParameters, executeBuildTask } = require('./buildTasks');
-    
-    if (!validateBuildEnvironment()) {
+
+    if (!buildTasks.validateBuildEnvironment()) {
         return;
     }
-    
-    const solutionParser = await loadSolutionParser();
+
+    const solutionParser = await buildTasks.loadSolutionParser();
     if (!solutionParser) {
         return;
     }
-    
-    const buildParams = prepareBuildParameters(buildConfig);
-    await executeBuildTask(buildParams);
+
+    const buildParams = buildTasks.prepareBuildParameters(buildConfig);
+    await buildTasks.executeBuildTask(buildParams);
 }
+

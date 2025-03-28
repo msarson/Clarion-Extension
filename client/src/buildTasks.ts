@@ -6,6 +6,7 @@ import processBuildErrors from "./processBuildErrors";
 import { SolutionParser } from "./Parser/SolutionParser";
 import LoggerManager from './logger';
 import { ClarionProject } from "./Parser/ClarionProject";
+import { PlatformUtils } from "./platformUtils";
 const logger = LoggerManager.getLogger("BuildTasks");
 logger.setLevel("error");
 /**
@@ -42,6 +43,11 @@ export async function runClarionBuild() {
 export function validateBuildEnvironment(): boolean {
     if (!workspace.isTrusted) {
         window.showWarningMessage("Clarion features require a trusted workspace.");
+        return false;
+    }
+
+    if (!PlatformUtils.isWindows()) {
+        window.showErrorMessage("❌ Clarion build is only supported on Windows.");
         return false;
     }
 
