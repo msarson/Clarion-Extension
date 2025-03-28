@@ -14,19 +14,25 @@ import {
     InitializeResult,
     TextEdit,
     Range,
-    Position
+    Position,
+    DocumentColorParams,
+    ColorInformation,
+    Color,
+    ColorPresentationParams,
+    ColorPresentation
 } from 'vscode-languageserver-protocol';
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
 import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
 import { ClarionFoldingRangeProvider } from './ClarionFoldingRangeProvider';
-import { ClarionTokenizer, Token } from './ClarionTokenizer';
+import { ClarionTokenizer, Token, TokenType } from './ClarionTokenizer';
 
 import LoggerManager from './logger';
 import ClarionFormatter from './ClarionFormatter';
 
 import { LexEnum } from './LexEnum';
+import { ClarionColorResolver } from './ClarionColorResolver';
 const logger = LoggerManager.getLogger("Server");
 logger.setLevel("error");
 // ✅ Initialize Providers
@@ -166,6 +172,22 @@ connection.onDocumentSymbol((params: DocumentSymbolParams) => {
 });
 
 
+connection.onDocumentColor((params: DocumentColorParams): ColorInformation[] => {
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return [];
+
+    const tokens = getTokens(document);
+    return ClarionColorResolver.provideDocumentColors(tokens, document);
+});
+
+connection.onColorPresentation((params: ColorPresentationParams): ColorPresentation[] => {
+    const { color, range } = params;
+    return ClarionColorResolver.provideColorPresentations(color, range);
+});
+
+
+
+
 // ✅ Handle Save (Ensure Cached Tokens Are Up-To-Date)
 documents.onDidSave(event => {
     const document = event.document;
@@ -193,7 +215,8 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
         capabilities: {
             foldingRangeProvider: true,
             documentSymbolProvider: true,
-            documentFormattingProvider: true
+            documentFormattingProvider: true,
+            colorProvider: true
         }
     };
 });

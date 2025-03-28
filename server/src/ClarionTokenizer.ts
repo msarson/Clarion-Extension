@@ -1,6 +1,8 @@
+import { start } from 'repl';
 import { DocumentStructure } from './DocumentStructure';
 import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("Tokenizer");
+logger.setLevel("info");
 export enum TokenType {
     Comment,
     String,
@@ -33,10 +35,12 @@ export enum TokenType {
     Routine,
     ExecutionMarker,
     Region,
-    ConditionalContinuation
+    ConditionalContinuation,
+    ColorValue
 }
 
 export interface Token {
+    colorParams?: string[];
     type: TokenType;
     subType?: TokenType;
     value: string;
@@ -60,7 +64,7 @@ export class ClarionTokenizer {
     private tabSize: number;  // ✅ Store tabSize
     maxLabelWidth: number = 0;
 
-    
+
 
     constructor(text: string, tabSize: number = 2) {  // ✅ Default to 2 if not provided
         this.text = text;
@@ -72,7 +76,7 @@ export class ClarionTokenizer {
 
     /** ✅ Public method to tokenize text */
     public tokenize(): Token[] {
-        logger.setLevel("error");
+        
         logger.info("🔍 Starting tokenization...");
         this.lines = this.text.split(/\r?\n/);
 
@@ -107,9 +111,8 @@ export class ClarionTokenizer {
 
                     let match = pattern.exec(substring);
                     if (match && match.index === 0) {
-                        if (tokenType == TokenType.EndStatement) {
-                            logger.warn(`🔍 End Statement Detected: at Line ${lineNumber} ${line}`);
-                        }
+                      
+                        
                         let newToken: Token = {
                             type: tokenType,
                             value: match[0].trim(),
@@ -118,6 +121,60 @@ export class ClarionTokenizer {
                             maxLabelLength: 0
                         };
                         this.tokens.push(newToken);
+                        // 🌈 Special handling for COLOR(...)
+                        if (tokenType === TokenType.Function && match[0].toUpperCase() === "COLOR") {
+                            // Look ahead for '(' and extract the contents
+                            const parenStart = line.indexOf("(", position);
+                            if (parenStart > -1) {
+                                let parenDepth = 1;
+                                let currentPos = parenStart + 1;
+                                let paramString = "";
+
+                                while (currentPos < line.length && parenDepth > 0) {
+                                    const char = line[currentPos];
+                                    if (char === "(") parenDepth++;
+                                    else if (char === ")") parenDepth--;
+
+                                    if (parenDepth > 0) {
+                                        paramString += char;
+                                    }
+                                    currentPos++;
+                                }
+
+                                // Split param string into arguments
+                                const rawParams = paramString.split(",").map(s => s.trim()).filter(Boolean);
+                                // Store parsed COLOR(...) arguments
+                                newToken.colorParams = [];
+
+                                for (const param of rawParams) {
+                                    const isEquate = /^COLOR:[A-Za-z0-9]+$/i.test(param);
+                                    const isRGBHex = /^(-)?([0-9A-F]+)H$/i.test(param);
+
+                                    if (isEquate || isRGBHex) {
+                                        this.tokens.push({
+                                            type: TokenType.ColorValue,
+                                            value: param,
+                                            line: lineNumber,
+                                            start: column, // You could refine this based on match position
+                                            maxLabelLength: 0
+                                        });
+                                        
+                                        logger.info(`🌈 COLOR param tokenized: ${param} ${column}`);
+                                        
+                                    }
+
+                                    newToken.colorParams.push(param);
+                                }
+
+                                // Store as custom metadata
+                                newToken.colorParams = rawParams;
+                                logger.info(`🎨 Parsed COLOR params at line ${lineNumber}: ${rawParams.join(", ")}`);
+                            }
+                        }
+                        else if (match[0].toUpperCase() === "COLOR") {
+                            logger.info(`🌈 COLOR name detected at line ${lineNumber} ${tokenType}`);
+                        }
+                        
                         logger.info(`Detected: Token Type: ${newToken.type} Token Value: '${newToken.value}' at Line ${newToken.line}, Column ${newToken.start}`);
                         logger.info(`Line: ${line}`);
 
@@ -136,18 +193,18 @@ export class ClarionTokenizer {
                 }
             }
         }
- 
-        
-        
+
+
+
     }
 
 
 
     private processDocumentStructure(): void {
         // ✅ First Pass: Identify Labels & Compute Max Label Length
-       
+
         // ✅ Second Pass: Process Token Relationships
-          // ✅ Create a DocumentStructure instance and process the tokens
+        // ✅ Create a DocumentStructure instance and process the tokens
         const documentStructure = new DocumentStructure(this.tokens);
         documentStructure.process();
 
@@ -161,7 +218,7 @@ export class ClarionTokenizer {
 
         for (let char of line) {
             if (char === "\t") {
-              let nextTabStop = Math.ceil((currentColumn + 1) / this.tabSize) * this.tabSize;
+                let nextTabStop = Math.ceil((currentColumn + 1) / this.tabSize) * this.tabSize;
                 let spacesToAdd = nextTabStop - currentColumn; // ✅ Correct calculation
                 expanded += " ".repeat(spacesToAdd);
                 currentColumn = nextTabStop;
@@ -185,8 +242,8 @@ const orderedTokenTypes: TokenType[] = [
     TokenType.Comment, TokenType.ClarionDocument, TokenType.ExecutionMarker, TokenType.Label, TokenType.LineContinuation, TokenType.String, TokenType.ReferenceVariable,
     TokenType.Type, TokenType.PointerParameter, TokenType.FieldEquateLabel, TokenType.Property,
     TokenType.PropertyFunction, TokenType.EndStatement, TokenType.Keyword, TokenType.Structure,
-    TokenType.ConditionalContinuation,  // ✅ Placed after Structure, before FunctionArgumentParameter
-    TokenType.FunctionArgumentParameter, TokenType.TypeAnnotation, TokenType.Function, TokenType.Directive, TokenType.Number,
+    TokenType.ConditionalContinuation, TokenType.Function, // ✅ Placed after Structure, before FunctionArgumentParameter
+    TokenType.FunctionArgumentParameter, TokenType.TypeAnnotation,  TokenType.Directive, TokenType.Number,
     TokenType.Operator, TokenType.Class, TokenType.Attribute, TokenType.Constant, TokenType.Variable,
     TokenType.ImplicitVariable, TokenType.Delimiter, TokenType.Unknown
 ];
