@@ -1,14 +1,22 @@
+/**
+ * Clarion Build Tasks
+ *
+ * This module handles the Clarion build process, now using the server-side implementation
+ * for project and solution management. It communicates with the server through the SolutionCache
+ * to get project information and build the solution or individual projects.
+ */
+
 import { workspace, window, tasks, Task, ShellExecution, TaskScope, TaskProcessEndEvent, TaskRevealKind, TaskPanelKind, TextEditor, Diagnostic, DiagnosticSeverity, Range, languages, Uri } from "vscode";
 import { globalSolutionFile, globalSettings } from "./globals";
 import * as path from "path";
 import * as fs from "fs";
 import processBuildErrors from "./processBuildErrors";
 import LoggerManager from './logger';
-import { ClarionProject } from "./Parser/ClarionProject";
 import { PlatformUtils } from "./platformUtils";
 import { SolutionCache } from "./SolutionCache";
+import { ClarionProjectInfo } from "../../common/types";
 const logger = LoggerManager.getLogger("BuildTasks");
-logger.setLevel("error");
+logger.setLevel("info"); // Changed from "error" to "info" to see more detailed logs
 /**
  * Main entry point for the Clarion build process
  */
@@ -61,10 +69,15 @@ export function validateBuildEnvironment(): boolean {
 
 /**
  * Gets the solution information from the SolutionCache
+ * This now uses the server-side solution information
  */
 export async function loadSolutionInfo(): Promise<{ solutionInfo: any } | null> {
     try {
         const solutionCache = SolutionCache.getInstance();
+        
+        // Ensure we have the latest solution information from the server
+        await solutionCache.refresh();
+        
         const solutionInfo = solutionCache.getSolutionInfo();
 
         if (!solutionInfo) {
@@ -77,6 +90,7 @@ export async function loadSolutionInfo(): Promise<{ solutionInfo: any } | null> 
             return null;
         }
 
+        logger.info(`✅ Loaded solution information with ${solutionInfo.projects.length} projects from server`);
         return { solutionInfo };
     } catch (error) {
         window.showErrorMessage(`❌ Failed to get solution information: ${error}`);
@@ -90,11 +104,11 @@ export async function loadSolutionInfo(): Promise<{ solutionInfo: any } | null> 
 async function determineBuildTarget(solutionInfo: any): Promise<{
     buildTarget: "Solution" | "Project";
     selectedProjectPath: string;
-    projectObject?: ClarionProject;
+    projectObject?: ClarionProjectInfo;
 } | null> {
     let buildTarget: "Solution" | "Project" = "Solution";
     let selectedProjectPath = "";
-    let projectObject: ClarionProject | undefined = undefined;
+    let projectObject: ClarionProjectInfo | undefined = undefined;
 
     if (solutionInfo.projects.length <= 1) {
         // Only one project, use solution build
@@ -108,7 +122,7 @@ async function determineBuildTarget(solutionInfo: any): Promise<{
     const currentProject = findCurrentProject(solutionInfo);
     if (currentProject) {
         selectedProjectPath = currentProject.path;
-        projectObject = currentProject as ClarionProject;
+        projectObject = currentProject as ClarionProjectInfo;
     }
 
     const buildOptions = ["Build Full Solution"];
@@ -137,6 +151,7 @@ async function determineBuildTarget(solutionInfo: any): Promise<{
 
 /**
  * Finds the project that contains the file in the active editor
+ * This now uses the SolutionCache's findProjectForFile method
  */
 function findCurrentProject(solutionInfo: any) {
     const activeEditor: TextEditor | undefined = window.activeTextEditor;
@@ -148,27 +163,27 @@ function findCurrentProject(solutionInfo: any) {
     const activeFilePath = activeEditor.document.uri.fsPath;
     const activeFileName = path.basename(activeFilePath);
 
-    // Find the project that contains this file
-    for (const project of solutionInfo.projects) {
-        const foundSourceFile = project.sourceFiles.find((sourceFile: any) =>
-            sourceFile.name.toLowerCase() === activeFileName.toLowerCase()
-        );
-        
-        if (foundSourceFile) {
-            return project;
-        }
+    // Use SolutionCache to find the project for the active file
+    const solutionCache = SolutionCache.getInstance();
+    const project = solutionCache.findProjectForFile(activeFileName);
+    
+    if (project) {
+        logger.info(`✅ Found project ${project.name} for file ${activeFileName} using server-side solution cache`);
+        return project;
     }
 
+    logger.info(`❌ No project found for file ${activeFileName}`);
     return undefined;
 }
 
 /**
  * Prepares build parameters
+ * This now works with the ClarionProjectInfo returned from the server
  */
 export function prepareBuildParameters(buildConfig: {
     buildTarget: "Solution" | "Project";
     selectedProjectPath: string;
-    projectObject?: ClarionProject; // Add this parameter
+    projectObject?: ClarionProjectInfo;
 }): {
     solutionDir: string;
     msBuildPath: string;
@@ -188,8 +203,8 @@ export function prepareBuildParameters(buildConfig: {
         targetName = path.basename(globalSolutionFile);
     } else {
         // Use the project object's name if available, otherwise extract from path
-        targetName = buildConfig.projectObject ? 
-            buildConfig.projectObject.name : 
+        targetName = buildConfig.projectObject ?
+            buildConfig.projectObject.name :
             path.basename(path.dirname(buildConfig.selectedProjectPath)); // Use directory name
     }
 
@@ -208,17 +223,23 @@ export function prepareBuildParameters(buildConfig: {
         "/property:WarningLevel=5"
     ];
 
+    // Log the build configuration
+    logger.info(`🔄 Preparing build for ${buildConfig.buildTarget === "Solution" ? "solution" : "project"}: ${targetName}`);
+    logger.info(`🔹 Using configuration: ${selectedConfig}`);
+    logger.info(`🔹 Clarion bin path: ${clarionBinPath}`);
 
     if (buildConfig.buildTarget === "Solution") {
         buildArgs.push(`/property:SolutionDir="${globalSolutionFile}"`);
+        logger.info(`🔹 Solution directory: ${globalSolutionFile}`);
     } else if (buildConfig.buildTarget === "Project") {
         buildArgs.push(`/property:ProjectPath="${buildConfig.selectedProjectPath}"`);
+        logger.info(`🔹 Project path: ${buildConfig.selectedProjectPath}`);
     }
 
-    return { 
-        solutionDir, 
-        msBuildPath, 
-        buildArgs, 
+    return {
+        solutionDir,
+        msBuildPath,
+        buildArgs,
         buildLogPath,
         buildTarget: buildConfig.buildTarget,
         targetName
@@ -227,6 +248,7 @@ export function prepareBuildParameters(buildConfig: {
 
 /**
  * Executes the build task and processes results
+ * Enhanced with additional logging
  */
 export async function executeBuildTask(params: {
     solutionDir: string;
@@ -237,6 +259,11 @@ export async function executeBuildTask(params: {
     targetName: string;
 }): Promise<void> {
     const { solutionDir, msBuildPath, buildArgs, buildLogPath, buildTarget, targetName } = params;
+
+    logger.info(`🔄 Executing build task for ${buildTarget === "Solution" ? "solution" : "project"}: ${targetName}`);
+    logger.info(`🔹 Working directory: ${solutionDir}`);
+    logger.info(`🔹 MSBuild path: ${msBuildPath}`);
+    logger.info(`🔹 Build log path: ${buildLogPath}`);
 
     // Create the shell execution - restore log file redirection
     const execution = new ShellExecution(
@@ -249,8 +276,8 @@ export async function executeBuildTask(params: {
 
     try {
         // Show a more specific message based on what's being built
-        const buildTypeMessage = buildTarget === "Solution" 
-            ? `🔄 Building Clarion Solution: ${targetName}` 
+        const buildTypeMessage = buildTarget === "Solution"
+            ? `🔄 Building Clarion Solution: ${targetName}`
             : `🔄 Building Clarion Project: ${targetName}.cwproj`;
         
         window.showInformationMessage(buildTypeMessage);
@@ -258,6 +285,7 @@ export async function executeBuildTask(params: {
         // Pass the target info to the completion handler
         const disposable = setupBuildCompletionHandler(buildLogPath, buildTarget, targetName);
 
+        logger.info(`✅ Executing build task: ${execution.commandLine}`);
         await tasks.executeTask(task);
     } catch (error) {
         window.showErrorMessage("❌ Failed to start Clarion build task.");
@@ -317,12 +345,41 @@ function processTaskCompletion(event: TaskProcessEndEvent, buildLogPath: string,
             logger.info("Captured Build Output");
             logger.info(data);
             
-            // Process the build errors
-            processBuildErrors(data);
+            // Process the build errors and get counts
+            const { errorCount, warningCount } = processBuildErrors(data);
             
             // If build failed, also check for MSBuild errors
             if (event.exitCode !== 0) {
-                processGeneralMSBuildErrors(data);
+                const msbuildErrors = processGeneralMSBuildErrors(data);
+                
+                // Show toast with error and warning counts
+                const totalErrors = errorCount + (msbuildErrors ? 1 : 0); // Add 1 if there are MSBuild errors
+                
+                // Format the build target name for the message
+                const targetInfo = buildTarget === "Solution"
+                    ? `Solution: ${targetName}`
+                    : `Project: ${targetName}`;
+                
+                // Create a detailed message with both errors and warnings
+                let message = `❌ Build Failed (${targetInfo}): `;
+                
+                if (totalErrors > 0) {
+                    message += `${totalErrors} error${totalErrors !== 1 ? 's' : ''}`;
+                    if (warningCount > 0) {
+                        message += ` and ${warningCount} warning${warningCount !== 1 ? 's' : ''}`;
+                    }
+                    message += ` found. Check the Problems Panel!`;
+                } else {
+                    // If we have warnings but no errors (unusual for a failed build)
+                    if (warningCount > 0) {
+                        message += `${warningCount} warning${warningCount !== 1 ? 's' : ''} found. Check the Problems Panel!`;
+                    } else {
+                        // Generic error message if no specific errors or warnings were detected
+                        message += `Check the Problems Panel for details.`;
+                    }
+                }
+                
+                window.showErrorMessage(message);
             }
         }
 
@@ -343,20 +400,17 @@ function processTaskCompletion(event: TaskProcessEndEvent, buildLogPath: string,
             : `✅ Building Clarion Project Complete: ${targetName}.cwproj`;
             
         window.showInformationMessage(successMessage);
-    } else {
-        // Show error message with target details
-        const errorMessage = buildTarget === "Solution"
-            ? `❌ Solution Build Failed: ${targetName}`
-            : `❌ Project Build Failed: ${targetName}`;
-            
-        window.showErrorMessage(`${errorMessage}. Check the Problems Panel!`);
     }
+    // Note: We don't show a generic error message here anymore
+    // The error message with error count is now shown in the file processing section above
 }
 
 /**
  * Process general MSBuild errors that don't match the standard Clarion error format
+ * @param output The build output to process
+ * @returns boolean indicating whether any MSBuild errors were found
  */
-function processGeneralMSBuildErrors(output: string) {
+function processGeneralMSBuildErrors(output: string): boolean {
     const diagnostics: { [key: string]: Diagnostic[] } = {};
     const diagnosticCollection = languages.createDiagnosticCollection("msbuild-errors");
     

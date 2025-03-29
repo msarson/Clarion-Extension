@@ -5,7 +5,7 @@ const logger = LoggerManager.getLogger("ProcessBuildErrors");
 
 const diagnosticCollection: DiagnosticCollection = languages.createDiagnosticCollection("clarion");
 
-function processBuildErrors(buildOutput: string) {
+function processBuildErrors(buildOutput: string): { errorCount: number, warningCount: number } {
     logger.info("🔍 Processing build output for errors and warnings...");
     logger.info("📝 Raw Build Output:\n", buildOutput);
 
@@ -14,6 +14,8 @@ function processBuildErrors(buildOutput: string) {
 
     const diagnostics: Map<string, Diagnostic[]> = new Map();
     const seenMessages = new Set<string>(); // ✅ Prevent duplicates
+    let errorCount = 0;
+    let warningCount = 0;
 
     let match;
     while ((match = errorPattern.exec(buildOutput)) !== null) {
@@ -38,6 +40,13 @@ function processBuildErrors(buildOutput: string) {
         const severity = type === "error" ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning;
         const diagnostic = new Diagnostic(new Range(startPosition, endPosition), message, severity);
 
+        // Increment the appropriate counter
+        if (type === "error") {
+            errorCount++;
+        } else {
+            warningCount++;
+        }
+
         logger.info(`📌 Creating ${type.toUpperCase()} diagnostic for file: ${filePath}`);
         logger.info(`🔹 Line: ${line}, Column: ${column}`);
         logger.info(`💬 Message: ${message}`);
@@ -58,8 +67,10 @@ function processBuildErrors(buildOutput: string) {
             logger.info(`📌 Adding ${diagArray.length} diagnostics for ${file}`);
             diagnosticCollection.set(Uri.file(file), diagArray);
         });
-        logger.info("✅ Errors and warnings processed and added to Problems panel.");
+        logger.info(`✅ Processed ${errorCount} errors and ${warningCount} warnings and added to Problems panel.`);
     }, 100);
+    
+    return { errorCount, warningCount };
 }
 
 export default processBuildErrors;
