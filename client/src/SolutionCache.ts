@@ -145,6 +145,89 @@ export class SolutionCache {
     }
 
     /**
+     * Gets search paths from the server for a specific project and file extension
+     */
+    public async getSearchPathsFromServer(projectName: string, extension: string): Promise<string[]> {
+        if (!this.client || this.client.needsStart()) {
+            logger.warn("⚠️ Language client not available or not ready. Cannot get search paths from server.");
+            return [];
+        }
+        
+        try {
+            logger.info(`🔍 Requesting search paths from server for project ${projectName} and extension ${extension}`);
+            
+            // Use a promise with timeout to prevent hanging
+            const timeoutPromise = new Promise<string[]>((resolve) => {
+                setTimeout(() => {
+                    logger.warn(`⚠️ Server request timed out for search paths: ${projectName}, ${extension}`);
+                    resolve([]);
+                }, 5000); // 5 second timeout
+            });
+            
+            // Race between the actual request and the timeout
+            const paths = await Promise.race([
+                this.client.sendRequest<string[]>('clarion/getSearchPaths', {
+                    projectName,
+                    extension
+                }),
+                timeoutPromise
+            ]);
+            
+            if (paths && paths.length) {
+                logger.info(`✅ Received ${paths.length} search paths from server`);
+                return paths;
+            } else {
+                logger.warn(`⚠️ No search paths returned from server for ${projectName} and ${extension}`);
+                return [];
+            }
+        } catch (error) {
+            logger.error(`❌ Error getting search paths from server: ${error instanceof Error ? error.message : String(error)}`);
+            return [];
+        }
+    }
+
+    /**
+     * Gets included redirection files from the server for a specific project path
+     */
+    public async getIncludedRedirectionFilesFromServer(projectPath: string): Promise<string[]> {
+        if (!this.client || this.client.needsStart()) {
+            logger.warn("⚠️ Language client not available or not ready. Cannot get included redirection files from server.");
+            return [];
+        }
+        
+        try {
+            logger.info(`🔍 Requesting included redirection files from server for project at ${projectPath}`);
+            
+            // Use a promise with timeout to prevent hanging
+            const timeoutPromise = new Promise<string[]>((resolve) => {
+                setTimeout(() => {
+                    logger.warn(`⚠️ Server request timed out for included redirection files: ${projectPath}`);
+                    resolve([]);
+                }, 5000); // 5 second timeout
+            });
+            
+            // Race between the actual request and the timeout
+            const redFiles = await Promise.race([
+                this.client.sendRequest<string[]>('clarion/getIncludedRedirectionFiles', {
+                    projectPath
+                }),
+                timeoutPromise
+            ]);
+            
+            if (redFiles && redFiles.length) {
+                logger.info(`✅ Received ${redFiles.length} included redirection files from server`);
+                return redFiles;
+            } else {
+                logger.warn(`⚠️ No included redirection files returned from server for ${projectPath}`);
+                return [];
+            }
+        } catch (error) {
+            logger.error(`❌ Error getting included redirection files from server: ${error instanceof Error ? error.message : String(error)}`);
+            return [];
+        }
+    }
+
+    /**
      * Finds a project that contains the specified file
      */
     public findProjectForFile(fileName: string): ClarionProjectInfo | undefined {

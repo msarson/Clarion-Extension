@@ -1,4 +1,4 @@
-﻿﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, QuickPickItem, TextEditor, window as vscodeWindow, Diagnostic, DiagnosticSeverity, Range, Position, Selection, StatusBarItem, StatusBarAlignment } from 'vscode';
+﻿﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, TextEditor, window as vscodeWindow, Diagnostic, DiagnosticSeverity, Range, StatusBarItem, StatusBarAlignment } from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, ErrorAction, CloseAction } from 'vscode-languageclient/node';
 
 import * as path from 'path';
@@ -14,9 +14,9 @@ import { TreeNode } from './TreeNode';
 import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile, setGlobalClarionSelection } from './globals';
 import * as buildTasks from './buildTasks'; 
 import LoggerManager from './logger';
-import { setLanguageClient } from './lspconnection';
 import { SolutionCache } from './SolutionCache';
-import { ClarionProject } from './Parser/ClarionProject';
+
+import { ClarionProjectInfo } from 'common/types';
 
 const logger = LoggerManager.getLogger("Extension");
 logger.setLevel("info");
@@ -46,6 +46,132 @@ export async function updateConfigurationStatusBar(configuration: string) {
     }
 }
 
+
+// Helper function to escape special characters in file paths for RegExp
+function escapeRegExp(string: string): string {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Create file watchers for solution-specific files
+async function createSolutionFileWatchers(context: ExtensionContext) {
+    // Dispose any existing watchers
+    const fileWatchers = context.subscriptions.filter(d => (d as any)._isFileWatcher);
+    for (const watcher of fileWatchers) {
+        watcher.dispose();
+    }
+    
+    if (!globalSolutionFile) {
+        logger.warn("⚠️ No solution file set, skipping file watcher creation");
+        return;
+    }
+    
+    const solutionDir = path.dirname(globalSolutionFile);
+    logger.info(`🔍 Creating file watchers for solution directory: ${solutionDir}`);
+    
+    // Create watchers for the solution file itself
+    const solutionWatcher = workspace.createFileSystemWatcher(globalSolutionFile);
+    
+    // Mark as a file watcher for cleanup
+    (solutionWatcher as any)._isFileWatcher = true;
+    
+    solutionWatcher.onDidChange(async (uri) => {
+        logger.info(`🔄 Solution file changed: ${uri.fsPath}`);
+        await handleSolutionFileChange(context);
+    });
+    
+    context.subscriptions.push(solutionWatcher);
+    
+    // Get the solution cache to access project information
+    const solutionCache = SolutionCache.getInstance();
+    const solutionInfo = solutionCache.getSolutionInfo();
+    
+    if (solutionInfo && solutionInfo.projects) {
+        // Create watchers for each project file
+        for (const project of solutionInfo.projects) {
+            const projectFilePath = path.join(project.path, `${project.name}.cwproj`);
+            
+            if (fs.existsSync(projectFilePath)) {
+                const projectWatcher = workspace.createFileSystemWatcher(projectFilePath);
+                
+                // Mark as a file watcher for cleanup
+                (projectWatcher as any)._isFileWatcher = true;
+                
+                projectWatcher.onDidChange(async (uri) => {
+                    logger.info(`🔄 Project file changed: ${uri.fsPath}`);
+                    await handleProjectFileChange(context, uri);
+                });
+                
+                context.subscriptions.push(projectWatcher);
+                logger.info(`✅ Added watcher for project file: ${projectFilePath}`);
+            }
+            
+            // Create watchers for redirection files in this project
+            const projectRedFile = path.join(project.path, globalSettings.redirectionFile);
+            
+            if (fs.existsSync(projectRedFile)) {
+                const redFileWatcher = workspace.createFileSystemWatcher(projectRedFile);
+                
+                // Mark as a file watcher for cleanup
+                (redFileWatcher as any)._isFileWatcher = true;
+                
+                redFileWatcher.onDidChange(async (uri) => {
+                    logger.info(`🔄 Redirection file changed: ${uri.fsPath}`);
+                    await handleRedirectionFileChange(context);
+                });
+                
+                context.subscriptions.push(redFileWatcher);
+                logger.info(`✅ Added watcher for redirection file: ${projectRedFile}`);
+                
+                // Get included redirection files from the server
+                try {
+                    // Get the solution cache to access the server
+                    const solutionCache = SolutionCache.getInstance();
+                    
+                    // Get included redirection files from the server
+                    const includedRedFiles = await solutionCache.getIncludedRedirectionFilesFromServer(project.path);
+                    
+                    // Create watchers for each included redirection file
+                    for (const redFile of includedRedFiles) {
+                        if (redFile !== projectRedFile && fs.existsSync(redFile)) {
+                            const includedRedWatcher = workspace.createFileSystemWatcher(redFile);
+                            
+                            // Mark as a file watcher for cleanup
+                            (includedRedWatcher as any)._isFileWatcher = true;
+                            
+                            includedRedWatcher.onDidChange(async (uri) => {
+                                logger.info(`🔄 Included redirection file changed: ${uri.fsPath}`);
+                                await handleRedirectionFileChange(context);
+                            });
+                            
+                            context.subscriptions.push(includedRedWatcher);
+                            logger.info(`✅ Added watcher for included redirection file: ${redFile}`);
+                        }
+                    }
+                } catch (error) {
+                    logger.error(`❌ Error getting included redirection files for ${projectRedFile}: ${error instanceof Error ? error.message : String(error)}`);
+                }
+            }
+        }
+    }
+    
+    // Also watch the global redirection file if it exists
+    const globalRedFile = path.join(globalSettings.redirectionPath, globalSettings.redirectionFile);
+    
+    if (fs.existsSync(globalRedFile)) {
+        const globalRedWatcher = workspace.createFileSystemWatcher(globalRedFile);
+        
+        // Mark as a file watcher for cleanup
+        (globalRedWatcher as any)._isFileWatcher = true;
+        
+        globalRedWatcher.onDidChange(async (uri) => {
+            logger.info(`🔄 Global redirection file changed: ${uri.fsPath}`);
+            await handleRedirectionFileChange(context);
+        });
+        
+        context.subscriptions.push(globalRedWatcher);
+        logger.info(`✅ Added watcher for global redirection file: ${globalRedFile}`);
+    }
+}
 
 export async function activate(context: ExtensionContext): Promise<void> {
     const disposables: Disposable[] = [];
@@ -111,6 +237,22 @@ export async function activate(context: ExtensionContext): Promise<void> {
             if (event.affectsConfiguration("clarion.defaultLookupExtensions") || event.affectsConfiguration("clarion.configuration")) {
                 logger.info("🔄 Clarion configuration changed. Refreshing the solution cache...");
                 await handleSettingsChange(context);
+            }
+        })
+    );
+    
+    // Create the file watchers initially
+    if (globalSolutionFile) {
+        await createSolutionFileWatchers(context);
+    }
+    
+    // Re-create file watchers when the solution changes
+    context.subscriptions.push(
+        workspace.onDidChangeConfiguration(async (event) => {
+            if (event.affectsConfiguration("clarion.redirectionFile") ||
+                event.affectsConfiguration("clarion.redirectionPath")) {
+                logger.info("🔄 Redirection settings changed. Recreating file watchers...");
+                await createSolutionFileWatchers(context);
             }
         })
     );
@@ -228,6 +370,9 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
     await commands.executeCommand("setContext", "clarion.solutionOpen", true);
     updateConfigurationStatusBar(globalSettings.configuration);
     
+    // Create file watchers for the solution, project, and redirection files
+    await createSolutionFileWatchers(context);
+    
     // Force refresh all open documents to ensure links are generated
     await refreshOpenDocuments();
     
@@ -310,6 +455,66 @@ export async function getAllOpenDocuments(): Promise<TextDocument[]> {
 
     logger.info(`🔍 Found ${openDocuments.length} open documents.`);
     return openDocuments;
+}
+
+/**
+ * Handles changes to redirection files (.red)
+ * Refreshes the solution cache and updates the UI
+ */
+async function handleRedirectionFileChange(context: ExtensionContext) {
+    logger.info("🔄 Redirection file changed. Refreshing environment...");
+    
+    // Reinitialize the Solution Cache and Document Manager
+    await reinitializeEnvironment(true);
+    
+    // Refresh the solution tree view
+    await createSolutionTreeView();
+    
+    // Re-register language features
+    registerLanguageFeatures(context);
+    
+    vscodeWindow.showInformationMessage("Redirection file updated. Solution cache refreshed.");
+}
+
+/**
+ * Handles changes to solution files (.sln)
+ * Refreshes the solution cache and updates the UI
+ */
+async function handleSolutionFileChange(context: ExtensionContext) {
+    logger.info("🔄 Solution file changed. Refreshing environment...");
+    
+    // If the current solution file is the one that changed, refresh it
+    if (globalSolutionFile) {
+        // Reinitialize the Solution Cache and Document Manager
+        await reinitializeEnvironment(true);
+        
+        // Refresh the solution tree view
+        await createSolutionTreeView();
+        
+        // Re-register language features
+        registerLanguageFeatures(context);
+        
+        vscodeWindow.showInformationMessage("Solution file updated. Solution cache refreshed.");
+    }
+}
+
+/**
+ * Handles changes to project files (.cwproj)
+ * Refreshes the solution cache and updates the UI
+ */
+async function handleProjectFileChange(context: ExtensionContext, uri: Uri) {
+    logger.info(`🔄 Project file changed: ${uri.fsPath}. Refreshing environment...`);
+    
+    // Reinitialize the Solution Cache and Document Manager
+    await reinitializeEnvironment(true);
+    
+    // Refresh the solution tree view
+    await createSolutionTreeView();
+    
+    // Re-register language features
+    registerLanguageFeatures(context);
+    
+    vscodeWindow.showInformationMessage("Project file updated. Solution cache refreshed.");
 }
 
 async function handleSettingsChange(context: ExtensionContext) {
@@ -598,37 +803,127 @@ export async function showClarionQuickOpen(): Promise<void> {
 
     // Collect all source files from all projects
     const allFiles: { label: string; description: string; path: string }[] = [];
+    const seenFiles = new Set<string>();
     
+    // ✅ Use allowed file extensions from global settings
+    const defaultSourceExtensions = [".clw", ".inc", ".equ", ".eq", ".int"];
+    const allowedExtensions = [
+        ...defaultSourceExtensions,
+        ...globalSettings.fileSearchExtensions.map(ext => ext.toLowerCase())
+    ];
+
+    logger.info(`🔍 Searching for files with extensions: ${JSON.stringify(allowedExtensions)}`);
+    
+    // First add all source files from projects
     for (const project of solutionInfo.projects) {
         for (const sourceFile of project.sourceFiles) {
             const fullPath = path.join(project.path, sourceFile.relativePath || "");
             
-            allFiles.push({
-                label: getIconForFile(sourceFile.name) + " " + sourceFile.name,
-                description: project.name,
-                path: fullPath
-            });
+            if (!seenFiles.has(fullPath)) {
+                seenFiles.add(fullPath);
+                allFiles.push({
+                    label: getIconForFile(sourceFile.name) + " " + sourceFile.name,
+                    description: project.name,
+                    path: fullPath
+                });
+            }
         }
     }
 
-    // Add additional files from the solution directory
+    // Get search paths from the server for each project and extension
+    const searchPaths: string[] = [];
+    
+    try {
+        logger.info("🔍 Requesting search paths from server...");
+        
+        // Request search paths for each project and extension
+        for (const project of solutionInfo.projects) {
+            for (const ext of allowedExtensions) {
+                const paths = await solutionCache.getSearchPathsFromServer(project.name, ext);
+                if (paths.length > 0) {
+                    logger.info(`✅ Received ${paths.length} search paths for ${project.name} and ${ext}`);
+                    searchPaths.push(...paths);
+                }
+            }
+        }
+    } catch (error) {
+        logger.error(`❌ Error requesting search paths: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    
+    // Remove duplicates from search paths
+    const uniqueSearchPaths = [...new Set(searchPaths)];
+    logger.info(`📂 Using search paths: ${JSON.stringify(uniqueSearchPaths)}`);
+    
+    // Add files from the solution directory
     const solutionDir = path.dirname(solutionInfo.path);
     const additionalFiles = listFilesRecursively(solutionDir)
         .filter(file => {
             const ext = path.extname(file).toLowerCase();
-            return ['.clw', '.inc', '.equ', '.eq', '.int'].includes(ext);
+            return allowedExtensions.includes(ext);
         })
         .map(file => {
             const relativePath = path.relative(solutionDir, file);
-            return {
-                label: getIconForFile(file) + " " + path.basename(file),
-                description: relativePath,
-                path: file
-            };
-        });
+            const filePath = file;
+            
+            if (!seenFiles.has(filePath)) {
+                seenFiles.add(filePath);
+                return {
+                    label: getIconForFile(file) + " " + path.basename(file),
+                    description: relativePath,
+                    path: filePath
+                };
+            }
+            return null;
+        })
+        .filter(item => item !== null) as { label: string; description: string; path: string }[];
+    
+    // Add files from redirection paths
+    const redirectionFiles: { label: string; description: string; path: string }[] = [];
+    
+    for (const searchPath of uniqueSearchPaths) {
+        try {
+            if (workspace.rootPath && searchPath.startsWith(workspace.rootPath)) {
+                // If the path is inside the workspace, use VS Code's findFiles
+                const files = await workspace.findFiles(`${searchPath}/**/*.*`);
+                
+                for (const file of files) {
+                    const filePath = file.fsPath;
+                    const ext = path.extname(filePath).toLowerCase();
+                    
+                    if (allowedExtensions.includes(ext) && !seenFiles.has(filePath)) {
+                        seenFiles.add(filePath);
+                        redirectionFiles.push({
+                            label: getIconForFile(filePath) + " " + path.basename(filePath),
+                            description: `Redirection: ${path.relative(searchPath, path.dirname(filePath))}`,
+                            path: filePath
+                        });
+                    }
+                }
+            } else {
+                // If the path is outside the workspace, use recursive file listing
+                logger.info(`📌 Searching manually outside workspace: ${searchPath}`);
+                const externalFiles = listFilesRecursively(searchPath);
+                
+                for (const filePath of externalFiles) {
+                    const ext = path.extname(filePath).toLowerCase();
+                    
+                    if (allowedExtensions.includes(ext) && !seenFiles.has(filePath)) {
+                        seenFiles.add(filePath);
+                        redirectionFiles.push({
+                            label: getIconForFile(filePath) + " " + path.basename(filePath),
+                            description: `Redirection: ${path.relative(searchPath, path.dirname(filePath))}`,
+                            path: filePath
+                        });
+                    }
+                }
+            }
+        } catch (error) {
+            logger.warn(`⚠️ Error accessing search path: ${searchPath} - ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
 
     // Combine and sort all files
-    const combinedFiles = [...allFiles, ...additionalFiles]
+    const combinedFiles = [...allFiles, ...additionalFiles, ...redirectionFiles]
         .sort((a, b) => a.label.localeCompare(b.label));
 
     // Show quick pick
@@ -791,13 +1086,21 @@ function startClientServer(context: ExtensionContext) {
     // Create file watcher pattern for all extensions
     const fileWatcherPattern = `**/*.{${lookupExtensions.map(ext => ext.replace('.', '')).join(',')}}`;
     
+    // Create file watcher pattern for redirection, solution, and project files
+    const projectFileWatcherPattern = "**/*.{red,sln,cwproj}";
+    
     let clientOptions: LanguageClientOptions = {
         documentSelector: documentSelectors,
         initializationOptions: {
             settings: workspace.getConfiguration('clarion'),
             lookupExtensions: lookupExtensions
         },
-        synchronize: { fileEvents: workspace.createFileSystemWatcher(fileWatcherPattern) },
+        synchronize: {
+            fileEvents: [
+                workspace.createFileSystemWatcher(fileWatcherPattern),
+                workspace.createFileSystemWatcher(projectFileWatcherPattern)
+            ],
+        },
         // Add error handling options
         errorHandler: {
             error: (error, message, count) => {
@@ -833,7 +1136,7 @@ function startClientServer(context: ExtensionContext) {
         }
     }, 5000); // Check after 5 seconds
 }
-async function buildSolutionOrProject(buildTarget: "Solution" | "Project", project?: ClarionProject) {
+async function buildSolutionOrProject(buildTarget: "Solution" | "Project", project?: ClarionProjectInfo) {
     const buildConfig = {
         buildTarget,
         selectedProjectPath: project?.path ?? "",

@@ -46,6 +46,7 @@ import { serverSettings } from './serverSettings';
 import { ClarionSolutionServer } from './solution/clarionSolutionServer';
 import { buildClarionSolution, initializeSolutionManager } from './solution/buildClarionSolution';
 import { SolutionManager } from './solution/solutionManager';
+import { RedirectionFileParserServer } from './solution/redirectionFileParserServer';
 import path = require('path');
 import { ClarionSolutionInfo } from 'common/types';
 const logger = LoggerManager.getLogger("Server");
@@ -379,6 +380,58 @@ connection.onRequest('clarion/findFile', (params: { filename: string }): string 
     }
     
     return "";
+});
+
+// Add a handler for getting search paths for a project and extension
+connection.onRequest('clarion/getSearchPaths', (params: { projectName: string, extension: string }): string[] => {
+    logger.info(`🔍 Received request for search paths for project ${params.projectName} and extension ${params.extension}`);
+    
+    try {
+        const solutionManager = SolutionManager.getInstance();
+        if (solutionManager) {
+            // Find the project by name
+            const project = solutionManager.solution.projects.find(p => p.name === params.projectName);
+            
+            if (project) {
+                // Get search paths for the extension
+                const searchPaths = project.getSearchPaths(params.extension);
+                logger.info(`✅ Found ${searchPaths.length} search paths for ${params.projectName} and ${params.extension}`);
+                return searchPaths;
+            } else {
+                logger.warn(`⚠️ Project not found: ${params.projectName}`);
+            }
+        } else {
+            logger.warn(`⚠️ No SolutionManager instance available to get search paths`);
+        }
+    } catch (error) {
+        logger.error(`❌ Error getting search paths for ${params.projectName} and ${params.extension}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    
+    return [];
+});
+
+// Add a handler for getting included redirection files for a project
+connection.onRequest('clarion/getIncludedRedirectionFiles', (params: { projectPath: string }): string[] => {
+    logger.info(`🔍 Received request for included redirection files for project at ${params.projectPath}`);
+    
+    try {
+        const redParser = new RedirectionFileParserServer();
+        const redirectionEntries = redParser.parseRedFile(params.projectPath);
+        
+        // Extract all unique redirection files
+        const redFiles = new Set<string>();
+        for (const entry of redirectionEntries) {
+            redFiles.add(entry.redFile);
+        }
+        
+        const result = Array.from(redFiles);
+        logger.info(`✅ Found ${result.length} redirection files for project at ${params.projectPath}`);
+        return result;
+    } catch (error) {
+        logger.error(`❌ Error getting included redirection files for ${params.projectPath}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    
+    return [];
 });
 
 // ✅ Server Initialization
