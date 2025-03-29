@@ -804,6 +804,7 @@ export async function showClarionQuickOpen(): Promise<void> {
     // Collect all source files from all projects
     const allFiles: { label: string; description: string; path: string }[] = [];
     const seenFiles = new Set<string>();
+    const seenBaseNames = new Set<string>(); // Track base filenames to avoid duplicates
     
     // ✅ Use allowed file extensions from global settings
     const defaultSourceExtensions = [".clw", ".inc", ".equ", ".eq", ".int"];
@@ -818,9 +819,11 @@ export async function showClarionQuickOpen(): Promise<void> {
     for (const project of solutionInfo.projects) {
         for (const sourceFile of project.sourceFiles) {
             const fullPath = path.join(project.path, sourceFile.relativePath || "");
+            const baseName = sourceFile.name.toLowerCase();
             
             if (!seenFiles.has(fullPath)) {
                 seenFiles.add(fullPath);
+                seenBaseNames.add(baseName); // Track the base filename
                 allFiles.push({
                     label: getIconForFile(sourceFile.name) + " " + sourceFile.name,
                     description: project.name,
@@ -865,8 +868,10 @@ export async function showClarionQuickOpen(): Promise<void> {
             const relativePath = path.relative(solutionDir, file);
             const filePath = file;
             
-            if (!seenFiles.has(filePath)) {
+            const baseName = path.basename(file).toLowerCase();
+            if (!seenFiles.has(filePath) && !seenBaseNames.has(baseName)) {
                 seenFiles.add(filePath);
+                seenBaseNames.add(baseName); // Add to seenBaseNames set
                 return {
                     label: getIconForFile(file) + " " + path.basename(file),
                     description: relativePath,
@@ -890,7 +895,8 @@ export async function showClarionQuickOpen(): Promise<void> {
                     const filePath = file.fsPath;
                     const ext = path.extname(filePath).toLowerCase();
                     
-                    if (allowedExtensions.includes(ext) && !seenFiles.has(filePath)) {
+                    const baseName = path.basename(filePath).toLowerCase();
+                    if (allowedExtensions.includes(ext) && !seenFiles.has(filePath) && !seenBaseNames.has(baseName)) {
                         seenFiles.add(filePath);
                         redirectionFiles.push({
                             label: getIconForFile(filePath) + " " + path.basename(filePath),
@@ -907,7 +913,8 @@ export async function showClarionQuickOpen(): Promise<void> {
                 for (const filePath of externalFiles) {
                     const ext = path.extname(filePath).toLowerCase();
                     
-                    if (allowedExtensions.includes(ext) && !seenFiles.has(filePath)) {
+                    const baseName = path.basename(filePath).toLowerCase();
+                    if (allowedExtensions.includes(ext) && !seenFiles.has(filePath) && !seenBaseNames.has(baseName)) {
                         seenFiles.add(filePath);
                         redirectionFiles.push({
                             label: getIconForFile(filePath) + " " + path.basename(filePath),

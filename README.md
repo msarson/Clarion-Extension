@@ -6,7 +6,7 @@
 - [Features](#features)
 - [Installation](#installation)
 - [Marketplace](#marketplace-information)
-- [Changelog](#changelog-whats-new-in-v050)
+- [Changelog](#changelog-whats-new-in-v052)
 - [Getting Started](#getting-started)
 - [Troubleshooting](#troubleshooting)
 - [Contributing and Feedback](#contributing-and-feedback)
@@ -67,13 +67,20 @@ This extension is under **active development** and we need your **help**! Whethe
 ## Marketplace Information
 
 - **Identifier**: `msarson.clarion-extensions`
-- **Version**: `0.5.1`
+- **Version**: `0.5.2`
 - **Published**: 2018-08-19
-- **Last Release**: 2025-03-27
+- **Last Release**: 2025-03-29
 
 [View on Marketplace](https://marketplace.visualstudio.com/items?itemName=msarson.clarion-extensions)
 
 ---
+
+## Changelog (What's New in v0.5.2)
+
+### Added
+- **COLOR Keyword Enhancement**: Added color patch visualization and color picker for COLOR keywords.
+- **Solution Parsing Refactoring**: Moved client-side solution parsing to the language server side for improved performance and reliability.
+- **Quick Open Improvements**: Enhanced Ctrl+P quick open functionality for better file navigation.
 
 ## Changelog (What's New in v0.5.1)
 
@@ -106,6 +113,8 @@ This extension is under **active development** and we need your **help**! Whethe
 ---
 
 ## Getting Started
+
+For a comprehensive guide on using all features of the Clarion Extension, please refer to our [Getting Started Guide](https://github.com/msarson/Clarion-Extension/blob/master/GettingStarted.md).
 
 ### Opening a Clarion Solution in VS Code
 
@@ -161,6 +170,8 @@ This extension builds upon the work of:
 ---
 
 ## Additional Resources
+
+📚 **[Getting Started Guide](https://github.com/msarson/Clarion-Extension/blob/master/GettingStarted.md)** – Comprehensive guide to all extension features.
 
 📚 **[Cheat Sheet](https://github.com/msarson/Clarion-Extension/blob/master/docs/CheatSheet.md)** – Quick reference for features and usage.
 
