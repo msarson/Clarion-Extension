@@ -3,10 +3,10 @@ import { globalSolutionFile, globalSettings } from "./globals";
 import * as path from "path";
 import * as fs from "fs";
 import processBuildErrors from "./processBuildErrors";
-import { SolutionParser } from "./Parser/SolutionParser";
 import LoggerManager from './logger';
 import { ClarionProject } from "./Parser/ClarionProject";
 import { PlatformUtils } from "./platformUtils";
+import { SolutionCache } from "./SolutionCache";
 const logger = LoggerManager.getLogger("BuildTasks");
 logger.setLevel("error");
 /**
@@ -17,14 +17,14 @@ export async function runClarionBuild() {
         return;
     }
 
-    // Load the solution parser
-    const solutionParser = await loadSolutionParser();
-    if (!solutionParser) {
+    // Load the solution information
+    const solutionData = await loadSolutionInfo();
+    if (!solutionData) {
         return;
     }
 
     // Determine what to build
-    const buildConfig = await determineBuildTarget(solutionParser);
+    const buildConfig = await determineBuildTarget(solutionData.solutionInfo);
     if (!buildConfig) {
         window.showInformationMessage("⏹ Build cancelled.");
         return;
@@ -60,20 +60,26 @@ export function validateBuildEnvironment(): boolean {
 }
 
 /**
- * Loads the solution parser
+ * Gets the solution information from the SolutionCache
  */
-export async function loadSolutionParser(): Promise<SolutionParser | null> {
+export async function loadSolutionInfo(): Promise<{ solutionInfo: any } | null> {
     try {
-        const solutionParser = await SolutionParser.create(globalSolutionFile);
+        const solutionCache = SolutionCache.getInstance();
+        const solutionInfo = solutionCache.getSolutionInfo();
 
-        if (solutionParser.solution.projects.length === 0) {
+        if (!solutionInfo) {
+            window.showErrorMessage("❌ No solution information available. Please open a solution first.");
+            return null;
+        }
+
+        if (!solutionInfo.projects || solutionInfo.projects.length === 0) {
             window.showErrorMessage("❌ No projects found in the solution.");
             return null;
         }
 
-        return solutionParser;
+        return { solutionInfo };
     } catch (error) {
-        window.showErrorMessage(`❌ Failed to parse solution file: ${error}`);
+        window.showErrorMessage(`❌ Failed to get solution information: ${error}`);
         return null;
     }
 }
@@ -81,22 +87,28 @@ export async function loadSolutionParser(): Promise<SolutionParser | null> {
 /**
  * Determines what to build (full solution or specific project)
  */
-async function determineBuildTarget(solutionParser: SolutionParser): Promise<{
+async function determineBuildTarget(solutionInfo: any): Promise<{
     buildTarget: "Solution" | "Project";
     selectedProjectPath: string;
+    projectObject?: ClarionProject;
 } | null> {
     let buildTarget: "Solution" | "Project" = "Solution";
     let selectedProjectPath = "";
+    let projectObject: ClarionProject | undefined = undefined;
 
-    if (solutionParser.solution.projects.length <= 1) {
+    if (solutionInfo.projects.length <= 1) {
         // Only one project, use solution build
+        if (solutionInfo.projects.length === 1) {
+            selectedProjectPath = solutionInfo.projects[0].path;
+        }
         return { buildTarget, selectedProjectPath };
     }
 
     // Try to find the project for the active file
-    const currentProject = findCurrentProject(solutionParser);
+    const currentProject = findCurrentProject(solutionInfo);
     if (currentProject) {
         selectedProjectPath = currentProject.path;
+        projectObject = currentProject as ClarionProject;
     }
 
     const buildOptions = ["Build Full Solution"];
@@ -120,13 +132,13 @@ async function determineBuildTarget(solutionParser: SolutionParser): Promise<{
         buildTarget = "Project";
     }
 
-    return { buildTarget, selectedProjectPath };
+    return { buildTarget, selectedProjectPath, projectObject };
 }
 
 /**
  * Finds the project that contains the file in the active editor
  */
-function findCurrentProject(solutionParser: SolutionParser) {
+function findCurrentProject(solutionInfo: any) {
     const activeEditor: TextEditor | undefined = window.activeTextEditor;
 
     if (!activeEditor) {
@@ -136,7 +148,18 @@ function findCurrentProject(solutionParser: SolutionParser) {
     const activeFilePath = activeEditor.document.uri.fsPath;
     const activeFileName = path.basename(activeFilePath);
 
-    return solutionParser.findProjectForFile(activeFileName);
+    // Find the project that contains this file
+    for (const project of solutionInfo.projects) {
+        const foundSourceFile = project.sourceFiles.find((sourceFile: any) =>
+            sourceFile.name.toLowerCase() === activeFileName.toLowerCase()
+        );
+        
+        if (foundSourceFile) {
+            return project;
+        }
+    }
+
+    return undefined;
 }
 
 /**

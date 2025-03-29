@@ -2,7 +2,7 @@ import { start } from 'repl';
 import { DocumentStructure } from './DocumentStructure';
 import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("Tokenizer");
-logger.setLevel("info");
+logger.setLevel("error");
 export enum TokenType {
     Comment,
     String,

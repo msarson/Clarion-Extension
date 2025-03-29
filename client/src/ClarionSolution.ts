@@ -1,4 +1,4 @@
-import { ClarionProject } from './ClarionProject';
+import { ClarionProject } from './Parser/ClarionProject';
 
 
 export class ClarionSolution {

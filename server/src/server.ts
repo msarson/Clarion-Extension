@@ -4,11 +4,20 @@ import {
     ProposedFeatures
 } from 'vscode-languageserver/node';
 
+// Add global error handlers to prevent crashes
+process.on('uncaughtException', (error) => {
+    console.error('Uncaught Exception:', error);
+    // Don't exit the process
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+    // Don't exit the process
+});
+
 import {
     DocumentFormattingParams,
-    DocumentSymbol,
     DocumentSymbolParams,
-    FoldingRange,
     FoldingRangeParams,
     InitializeParams,
     InitializeResult,
@@ -17,7 +26,6 @@ import {
     Position,
     DocumentColorParams,
     ColorInformation,
-    Color,
     ColorPresentationParams,
     ColorPresentation
 } from 'vscode-languageserver-protocol';
@@ -25,23 +33,32 @@ import {
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
 import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
-import { ClarionFoldingRangeProvider } from './ClarionFoldingRangeProvider';
-import { ClarionTokenizer, Token, TokenType } from './ClarionTokenizer';
+
+import { ClarionTokenizer, Token } from './ClarionTokenizer';
 
 import LoggerManager from './logger';
 import ClarionFormatter from './ClarionFormatter';
 
-import { LexEnum } from './LexEnum';
 import { ClarionColorResolver } from './ClarionColorResolver';
+import ClarionFoldingProvider from './ClarionFoldingProvider';
+import { serverSettings } from './serverSettings';
+
+import { ClarionSolutionServer } from './solution/clarionSolutionServer';
+import { buildClarionSolution, initializeSolutionManager } from './solution/buildClarionSolution';
+import { SolutionManager } from './solution/solutionManager';
+import path = require('path');
+import { ClarionSolutionInfo } from 'common/types';
 const logger = LoggerManager.getLogger("Server");
-logger.setLevel("error");
+logger.setLevel("info");
 // ✅ Initialize Providers
-const clarionFoldingProvider = new ClarionFoldingRangeProvider();
+
 const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider();
 
 // ✅ Create Connection and Documents Manager
 const connection = createConnection(ProposedFeatures.all);
 const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
+let globalSolution: ClarionSolutionInfo | null = null;
+
 // ✅ Global Token Cache
 interface CachedTokenData {
     version: number;
@@ -81,21 +98,21 @@ function getTokens(document: TextDocument): Token[] {
 
 // ✅ Handle Folding Ranges (Uses Cached Tokens & Caches Results)
 connection.onFoldingRanges((params: FoldingRangeParams) => {
-    logger.info(`📂  Received onFoldingRanges request for: ${params.textDocument.uri}`);
     const document = documents.get(params.textDocument.uri);
     if (!document) return [];
 
     if (!serverInitialized) {
-        logger.info(`⚠️  [DELAY] Server not initialized yet, delaying folding range request for ${document.uri}`);
+        logger.info(`⚠️  [DELAY] Server not initialized yet, delaying folding range request for ${params.textDocument.uri}`);
         return [];
     }
 
-    logger.info(`📂  Computing fresh folding ranges for: ${document.uri}`);
+    logger.info(`📂  Computing fresh folding ranges for: ${params.textDocument.uri}`);
 
-    const tokens = getTokens(document);  // ✅ No need for async/wrapping in Promise.resolve
-    let ranges = clarionFoldingProvider.provideFoldingRanges(tokens);
-    return ranges;
+    const tokens = getTokens(document);
+    const foldingProvider = new ClarionFoldingProvider(tokens);
+    return foldingProvider.computeFoldingRanges();
 });
+
 
 
 // ✅ Handle Content Changes (Recompute Tokens)
@@ -161,12 +178,7 @@ connection.onDocumentSymbol((params: DocumentSymbolParams) => {
 
     logger.info(`✅ Finished processing tokens. ${symbols.length} top-level symbols`);
 
-    for (const s of symbols) {
-        logger.info(`🪵 Top-level: ${s.name}, children: ${s.children?.length ?? 0}`);
-        s.children?.forEach(child => {
-            logger.info(`   ↪️ Child: ${child.name}`);
-        });
-    }
+   
     return symbols;
 
 });
@@ -207,6 +219,168 @@ documents.onDidClose(event => {
     tokenCache.delete(event.document.uri);
 });
 
+
+connection.onNotification('clarion/updatePaths', async (params: {
+    redirectionPaths: string[];
+    projectPaths: string[];
+    configuration: string;
+    clarionVersion: string;
+    redirectionFile: string;
+    macros: Record<string, string>;
+    libsrcPaths: string[];
+}) => {
+    try {
+        // Update server settings
+        serverSettings.redirectionPaths = params.redirectionPaths || [];
+        serverSettings.projectPaths = params.projectPaths || [];
+        serverSettings.configuration = params.configuration || "Debug";
+        serverSettings.clarionVersion = params.clarionVersion || "";
+        serverSettings.macros = params.macros || {};
+        serverSettings.libsrcPaths = params.libsrcPaths || [];
+        serverSettings.redirectionFile = params.redirectionFile || "";
+
+        // ✅ Initialize the solution manager before building the solution
+        const solutionPath = params.projectPaths?.[0];
+        if (!solutionPath) {
+            logger.error("❌ No projectPaths provided. Cannot initialize SolutionManager.");
+            return;
+        }
+
+        // Register handlers for the solution manager first, so they're available even if initialization fails
+        const existingSolutionManager = SolutionManager.getInstance();
+        if (existingSolutionManager) {
+            existingSolutionManager.registerHandlers(connection);
+            logger.info("✅ SolutionManager handlers registered from existing instance");
+        }
+
+        // Initialize the solution manager
+        await initializeSolutionManager(solutionPath);
+        
+        // Register handlers again if we have a new instance
+        const solutionManager = SolutionManager.getInstance();
+        if (solutionManager && solutionManager !== existingSolutionManager) {
+            solutionManager.registerHandlers(connection);
+            logger.info("✅ SolutionManager handlers registered from new instance");
+        }
+        
+        // Build the solution after registering handlers
+        try {
+            globalSolution = await buildClarionSolution();
+        } catch (buildError: any) {
+            logger.error(`❌ Error building solution: ${buildError.message || buildError}`);
+            // Create a minimal solution info to avoid null references
+            globalSolution = {
+                name: path.basename(solutionPath),
+                path: solutionPath,
+                projects: []
+            };
+        }
+
+        logger.info("🔁 Clarion paths updated:");
+        logger.info("🔹 Project Paths:", serverSettings.projectPaths);
+        logger.info("🔹 Redirection Paths:", serverSettings.redirectionPaths);
+        logger.info("🔹 Redirection File:", serverSettings.redirectionFile);
+        logger.info("🔹 Macros:", Object.keys(serverSettings.macros).length);
+        logger.info("🔹 Clarion Version:", serverSettings.clarionVersion);
+        logger.info("🔹 Configuration:", serverSettings.configuration);
+
+    } catch (error: any) {
+        logger.error(`❌ Failed to initialize and build solution: ${error.message || error}`);
+        // Ensure we have a valid globalSolution even after errors
+        if (!globalSolution) {
+            globalSolution = {
+                name: "Error",
+                path: params.projectPaths?.[0] || "",
+                projects: []
+            };
+        }
+    }
+});
+
+
+connection.onRequest('clarion/getSolutionTree', async (): Promise<ClarionSolutionInfo> => {
+    logger.info("📂 Received request for solution tree");
+    
+    try {
+        // First try to get the solution from the SolutionManager
+        const solutionManager = SolutionManager.getInstance();
+        if (solutionManager) {
+            try {
+                logger.info(`🔍 SolutionManager instance found, getting solution tree...`);
+                const solutionTree = solutionManager.getSolutionTree();
+                
+                if (solutionTree && solutionTree.projects && solutionTree.projects.length > 0) {
+                    logger.info(`✅ Returning solution tree from SolutionManager with ${solutionTree.projects.length} projects`);
+                    logger.info(`🔹 Solution name: ${solutionTree.name}`);
+                    logger.info(`🔹 Solution path: ${solutionTree.path}`);
+                    solutionTree.projects.forEach(project => {
+                        logger.info(`🔹 Project: ${project.name} with ${project.sourceFiles?.length || 0} source files`);
+                    });
+                    return solutionTree;
+                } else {
+                    logger.warn(`⚠️ SolutionManager returned empty or invalid solution tree`);
+                }
+            } catch (error) {
+                logger.error(`❌ Error getting solution tree from SolutionManager: ${error instanceof Error ? error.message : String(error)}`);
+                // Fall through to use globalSolution
+            }
+        } else {
+            logger.warn(`⚠️ No SolutionManager instance available`);
+        }
+        
+        // Fall back to the cached globalSolution
+        if (globalSolution && globalSolution.projects && globalSolution.projects.length > 0) {
+            logger.info(`✅ Returning cached solution with ${globalSolution.projects.length} projects`);
+            logger.info(`🔹 Solution name: ${globalSolution.name}`);
+            logger.info(`🔹 Solution path: ${globalSolution.path}`);
+            return globalSolution;
+        } else if (globalSolution) {
+            logger.warn(`⚠️ Global solution exists but has no projects`);
+        } else {
+            logger.warn(`⚠️ No global solution available`);
+        }
+        
+        // If all else fails, return an empty solution
+        logger.warn("⚠️ No solution available to return, creating empty solution");
+        return {
+            name: "No Solution",
+            path: "",
+            projects: []
+        };
+    } catch (error) {
+        logger.error(`❌ Unexpected error in getSolutionTree: ${error instanceof Error ? error.message : String(error)}`);
+        return {
+            name: "Error",
+            path: "",
+            projects: []
+        };
+    }
+});
+
+// Add a handler for finding files using the server-side redirection parser
+connection.onRequest('clarion/findFile', (params: { filename: string }): string => {
+    logger.info(`🔍 Received request to find file: ${params.filename}`);
+    
+    try {
+        const solutionManager = SolutionManager.getInstance();
+        if (solutionManager) {
+            const filePath = solutionManager.findFileWithExtension(params.filename);
+            if (filePath) {
+                logger.info(`✅ Found file: ${filePath}`);
+                return filePath;
+            } else {
+                logger.warn(`⚠️ File not found: ${params.filename}`);
+            }
+        } else {
+            logger.warn(`⚠️ No SolutionManager instance available to find file: ${params.filename}`);
+        }
+    } catch (error) {
+        logger.error(`❌ Error finding file ${params.filename}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    
+    return "";
+});
+
 // ✅ Server Initialization
 connection.onInitialize((params: InitializeParams): InitializeResult => {
     logger.info("⚡  Received onInitialize request from VS Code.");
@@ -227,6 +401,15 @@ export let serverInitialized = false;
 connection.onInitialized(() => {
     logger.info("✅  Clarion Language Server fully initialized.");
     serverInitialized = true;
+    
+    // Register SolutionManager handlers if it exists
+    const solutionManager = SolutionManager.getInstance();
+    if (solutionManager) {
+        solutionManager.registerHandlers(connection);
+        logger.info("✅ SolutionManager handlers registered");
+    } else {
+        logger.info("⚠️ SolutionManager not initialized yet, handlers will be registered later");
+    }
 });
 
 // ✅ Start Listening

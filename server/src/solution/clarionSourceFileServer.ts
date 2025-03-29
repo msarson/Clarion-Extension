@@ -1,38 +1,33 @@
 import * as path from 'path';
 import * as fs from 'fs';
-import { Uri } from 'vscode';
-import { ClarionProject } from './ClarionProject';
+import { ClarionProjectServer } from './clarionProjectServer';
 import { ClarionSourcerFileInfo } from 'common/types';
 
 
 
-export class ClarionSourcerFile {
+
+
+
+
+export class ClarionSourcerFileServer {
     private fileContent: string | null = null;
 
     constructor(
         public name: string,
         public relativePath: string,
-        public project?: ClarionProject
+        public project?: ClarionProjectServer
     ) {}
 
-    // ✅ Add this factory method
-    public static fromInfo(info: ClarionSourcerFileInfo, projectMap: Map<string, ClarionProject>): ClarionSourcerFile {
-        const matchingProject = info.project ? projectMap.get(info.project.guid) : undefined;
-        return new ClarionSourcerFile(info.name, info.relativePath, matchingProject);
-    }
-
-    public toInfo(): ClarionSourcerFileInfo {
+    toInfo(): ClarionSourcerFileInfo {
         return {
             name: this.name,
             relativePath: this.relativePath,
-            project: this.project
-                ? {
-                      name: this.project.name,
-                      type: this.project.type,
-                      path: this.project.path,
-                      guid: this.project.guid
-                  }
-                : undefined
+            project: this.project ? {
+                name: this.project.name,
+                type: this.project.type,
+                path: this.project.path,
+                guid: this.project.guid
+            } : undefined
         };
     }
 
@@ -56,11 +51,6 @@ export class ClarionSourcerFile {
         }
 
         return null;
-    }
-
-    getUri(): Uri | null {
-        const absolutePath = this.getAbsolutePath();
-        return absolutePath ? Uri.file(absolutePath) : null;
     }
 
     exists(): boolean {

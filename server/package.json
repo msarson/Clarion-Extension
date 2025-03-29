@@ -14,7 +14,8 @@
     "dependencies": {
         "vscode-languageserver": "^7.0.0",
         "vscode-languageserver-protocol-foldingprovider": "^2.0.1",
-        "vscode-languageserver-textdocument": "^1.0.1"
+        "vscode-languageserver-textdocument": "^1.0.1",
+        "xml2js": "^0.6.2"
     },
     "resolutions": {
         "mocha": "^11.1.0",
@@ -22,5 +23,8 @@
         "minimatch": "^10.0.1",
         "minimist": "^1.2.6"
     },
-    "scripts": {}
+    "scripts": {},
+    "devDependencies": {
+        "@types/xml2js": "^0.4.14"
+    }
 }

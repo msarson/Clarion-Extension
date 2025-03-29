@@ -51,4 +51,4 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
 
         return hoverMessage;
     }
-} 
+}

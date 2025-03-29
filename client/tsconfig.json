@@ -1,15 +1,11 @@
 {
+	"extends": "../tsconfig.base.json",
 	"compilerOptions": {
-		"forceConsistentCasingInFileNames": true,
-		"strict": true,
-		"module": "commonjs",
-		"target": "es2019",
-		"lib": ["ES2019"],
-		"outDir": "out",
-		"rootDir": "src",
-		"sourceMap": true,
-		"types": ["@types/vscode"]  // <-- Add this line
+	  "outDir": "../out",
+	  "rootDir": "..",
+	  "types": ["@types/vscode"]
 	},
-	"include": ["src"],
+	"include": ["src/**/*", "../common/src/**/*"],
 	"exclude": ["node_modules", "vscode-test"]
-}
+  }
+  

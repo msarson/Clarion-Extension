@@ -1,25 +1,9 @@
+// tsconfig.json
 {
-	"compilerOptions": {
-		"forceConsistentCasingInFileNames": true,
-		"strict": true,
-		"module": "commonjs",
-		"target": "es2019",
-		"lib": ["ES2019"],
-		"outDir": "out",
-		"rootDir": "src",
-		"sourceMap": true,
-		"types": ["@types/vscode"]  // <-- Add this line
-	},
-	"include": [
-		"src"
-	],
-	"exclude": [ 
-		"node_modules",
-		"**/node_modules/*",
-		"vscode-test"
-	],
+	"files": [],
 	"references": [
-		{"path": "client" },
-		{ "path": "server"}
+	  { "path": "client" },
+	  { "path": "server" }
 	]
-}
+  }
+  

@@ -1,7 +1,8 @@
-﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, QuickPickItem, TextEditor, window as vscodeWindow, Diagnostic, DiagnosticSeverity, Range, Position, Selection, StatusBarItem, StatusBarAlignment } from 'vscode';
-import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } from 'vscode-languageclient/node';
+﻿﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, QuickPickItem, TextEditor, window as vscodeWindow, Diagnostic, DiagnosticSeverity, Range, Position, Selection, StatusBarItem, StatusBarAlignment } from 'vscode';
+import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, ErrorAction, CloseAction } from 'vscode-languageclient/node';
 
 import * as path from 'path';
+import * as fs from 'fs';
 
 import { ClarionExtensionCommands } from './ClarionExtensionCommands';
 import { ClarionHoverProvider } from './providers/hoverProvider';
@@ -11,15 +12,15 @@ import { DocumentManager } from './documentManager';
 import { SolutionTreeDataProvider } from './SolutionTreeDataProvider';
 import { TreeNode } from './TreeNode';
 import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile, setGlobalClarionSelection } from './globals';
-import * as fs from 'fs';
-import { SolutionParser } from './Parser/SolutionParser';
 import * as buildTasks from './buildTasks'; 
 import LoggerManager from './logger';
+import { setLanguageClient } from './lspconnection';
+import { SolutionCache } from './SolutionCache';
 import { ClarionProject } from './Parser/ClarionProject';
+
 const logger = LoggerManager.getLogger("Extension");
-logger.setLevel("error");
+logger.setLevel("info");
 let client: LanguageClient | undefined;
-let solutionParser: SolutionParser | undefined;
 let treeView: TreeView<TreeNode> | undefined;
 let solutionTreeDataProvider: SolutionTreeDataProvider | undefined;
 let documentManager: DocumentManager | undefined;
@@ -54,7 +55,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
     if (!client) {
         logger.info("🚀 Starting Clarion Language Server...");
-        startClientServer(context, documentManager!);
+        startClientServer(context);
     }
 
     // ✅ Step 1: Ensure a workspace is saved
@@ -108,11 +109,10 @@ export async function activate(context: ExtensionContext): Promise<void> {
     context.subscriptions.push(
         workspace.onDidChangeConfiguration(async (event) => {
             if (event.affectsConfiguration("clarion.defaultLookupExtensions") || event.affectsConfiguration("clarion.configuration")) {
-                logger.info("🔄 Clarion configuration changed. Refreshing the solution parser...");
+                logger.info("🔄 Clarion configuration changed. Refreshing the solution cache...");
                 await handleSettingsChange(context);
             }
         })
-        
     );
 
     // ✅ Ensure all restored tabs are properly indexed (if workspace is already trusted)
@@ -135,7 +135,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
         // Add project build command
         commands.registerCommand('clarion.buildProject', async (node) => {
             // The node parameter is passed automatically from the treeview
-            if (node && node.data instanceof ClarionProject) {
+            if (node && node.data && node.data.path) {
                 await buildSolutionOrProject("Project", node.data);
             } else {
                 window.showErrorMessage("Cannot determine which project to build.");
@@ -155,8 +155,6 @@ async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: D
     disposables.forEach(disposable => disposable.dispose());
     disposables.length = 0;
 
-
-
     // ✅ Only initialize if a solution exists in settings
     if (globalSolutionFile && globalClarionPropertiesFile && globalClarionVersion) {
         logger.info("✅ Existing solution settings found. Automatically initializing Clarion Solution...");
@@ -168,8 +166,6 @@ async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: D
         logger.warn("⚠️ No solution found in settings. Solution View will not be created.");
     }
 }
-
-
 
 async function initializeSolution(context: ExtensionContext, refreshDocs: boolean = false): Promise<void> {
     logger.info("🔄 Initializing Clarion Solution...");
@@ -204,33 +200,64 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
         logger.info(`✅ Updated configuration: ${globalSettings.configuration}`);
     }
 
-    // ✅ Continue initializing the solution parser
+    // ✅ Send paths/config/version to the language server first
+    if (client) {
+        // Get the solution directory
+        const solutionDir = path.dirname(globalSolutionFile);
+        
+        // Send notification to initialize the server-side solution manager
+        client.sendNotification('clarion/updatePaths', {
+            redirectionPaths: [globalSettings.redirectionPath],
+            projectPaths: [solutionDir],
+            configuration: globalSettings.configuration,
+            clarionVersion: globalClarionVersion,
+            redirectionFile: globalSettings.redirectionFile,
+            macros: globalSettings.macros,
+            libsrcPaths: globalSettings.libsrcPaths
+        });
+        logger.info("✅ Clarion paths/config/version sent to the language server.");
+    }
+    
+    // Wait a moment for the server to initialize the solution
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // ✅ Continue initializing the solution cache and document manager
     documentManager = await reinitializeEnvironment(refreshDocs);
-    createSolutionTreeView();
+    await createSolutionTreeView();
     registerLanguageFeatures(context);
     await commands.executeCommand("setContext", "clarion.solutionOpen", true);
     updateConfigurationStatusBar(globalSettings.configuration);
+    
+    // Force refresh all open documents to ensure links are generated
+    await refreshOpenDocuments();
+    
     vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(globalSolutionFile)}`);
 }
 
-
-
 async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<DocumentManager> {
-    logger.info("🔄 Reinitializing SolutionParser and DocumentManager...");
+    logger.info("🔄 Initializing SolutionCache and DocumentManager...");
 
-    if (solutionParser) {
-        logger.info("🔄 Disposing of existing SolutionParser instance...");
-        solutionParser = undefined;
+    // Get the SolutionCache singleton
+    const solutionCache = SolutionCache.getInstance();
+    
+    // Set the language client in the solution cache
+    if (client) {
+        solutionCache.setLanguageClient(client);
+    } else {
+        logger.error("❌ Language client not available. Cannot initialize SolutionCache properly.");
     }
-
-    solutionParser = await SolutionParser.create(globalSolutionFile);
+    
+    // Initialize the solution cache with the solution file path
+    await solutionCache.initialize(globalSolutionFile);
 
     if (documentManager) {
         logger.info("🔄 Disposing of existing DocumentManager instance...");
+        documentManager.dispose();
         documentManager = undefined;
     }
 
-    documentManager = await DocumentManager.create(solutionParser);
+    // Create a new DocumentManager (no longer needs SolutionParser)
+    documentManager = await DocumentManager.create();
 
     if (refreshDocs) {
         logger.info("🔄 Refreshing open documents...");
@@ -239,9 +266,6 @@ async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<Do
 
     return documentManager;
 }
-
-
-
 
 /**
  * Retrieves all open documents across all tab groups.
@@ -282,13 +306,11 @@ export async function getAllOpenDocuments(): Promise<TextDocument[]> {
     } else {
         logger.warn("⚠️ `tabGroups` API not available, falling back to `visibleTextEditors`.");
         return vscodeWindow.visibleTextEditors.map((editor: TextEditor) => editor.document);
-
     }
 
     logger.info(`🔍 Found ${openDocuments.length} open documents.`);
     return openDocuments;
 }
-
 
 async function handleSettingsChange(context: ExtensionContext) {
     logger.info("🔄 Updating settings from workspace...");
@@ -296,21 +318,22 @@ async function handleSettingsChange(context: ExtensionContext) {
     // Reinitialize global settings from workspace settings.json
     await globalSettings.initializeFromWorkspace();
 
-    // Reinitialize the Solution Parser and Document Manager
+    // Reinitialize the Solution Cache and Document Manager
     await reinitializeEnvironment(true);
+    
+    // Refresh the solution tree view
+    await createSolutionTreeView();
 
     // Re-register language features (ensuring links update properly)
     registerLanguageFeatures(context);
 
-    vscodeWindow.showInformationMessage("Clarion configuration updated. Solution parser refreshed.");
+    vscodeWindow.showInformationMessage("Clarion configuration updated. Solution cache refreshed.");
 }
-
 
 let hoverProviderDisposable: Disposable | null = null;
 let documentLinkProviderDisposable: Disposable | null = null;
 
 function registerLanguageFeatures(context: ExtensionContext) {
-
     if (!documentManager) {
         logger.warn("⚠️ Cannot register language features: documentManager is undefined!");
         return;
@@ -322,11 +345,24 @@ function registerLanguageFeatures(context: ExtensionContext) {
     }
 
     logger.info("🔗 Registering Document Link Provider...");
-    documentLinkProviderDisposable = languages.registerDocumentLinkProvider(
+    
+    // Get the default lookup extensions from settings
+    const lookupExtensions = globalSettings.defaultLookupExtensions || [".clw", ".inc", ".equ", ".eq", ".int"];
+    
+    // Create document selectors for all Clarion file extensions
+    const documentSelectors = [
         { scheme: "file", language: "clarion" },
+        ...lookupExtensions.map(ext => ({ scheme: "file", pattern: `**/*${ext}` }))
+    ];
+    
+    // Register the document link provider for all selectors
+    documentLinkProviderDisposable = languages.registerDocumentLinkProvider(
+        documentSelectors,
         new ClarionDocumentLinkProvider(documentManager)
     );
     context.subscriptions.push(documentLinkProviderDisposable);
+    
+    logger.info(`📄 Registered Document Link Provider for extensions: ${lookupExtensions.join(', ')}`);
 
     // ✅ Fix: Ensure only one Hover Provider is registered
     if (hoverProviderDisposable) {
@@ -335,17 +371,15 @@ function registerLanguageFeatures(context: ExtensionContext) {
 
     logger.info("📝 Registering Hover Provider...");
     hoverProviderDisposable = languages.registerHoverProvider(
-        { scheme: "file", language: "clarion" },
+        documentSelectors,
         new ClarionHoverProvider(documentManager)
     );
     context.subscriptions.push(hoverProviderDisposable);
+    
+    logger.info(`📄 Registered Hover Provider for extensions: ${lookupExtensions.join(', ')}`);
 }
 
-
 async function refreshOpenDocuments() {
-
-
-
     logger.info("🔄 Refreshing all open documents...");
 
     const defaultLookupExtensions = globalSettings.defaultLookupExtensions;
@@ -370,6 +404,7 @@ async function refreshOpenDocuments() {
 
     logger.info(`✅ Successfully refreshed ${openDocuments.length} open documents.`);
 }
+
 async function registerOpenCommand(context: ExtensionContext) {
     const existingCommands = await commands.getCommands();
 
@@ -412,42 +447,16 @@ async function registerOpenCommand(context: ExtensionContext) {
     }
 }
 
-
-function createSolutionTreeView() {
-    if (!solutionParser) {
-        logger.error("❌ Solution parser is not initialized.");
-        return;
-    }
-
+async function createSolutionTreeView() {
     // ✅ If the tree view already exists, just refresh its data
     if (treeView && solutionTreeDataProvider) {
         logger.info("🔄 Refreshing existing solution tree...");
-        solutionTreeDataProvider.refresh();
+        await solutionTreeDataProvider.refresh();
         return;
     }
 
     // ✅ Create the solution tree provider
-    solutionTreeDataProvider = new SolutionTreeDataProvider(solutionParser);
-
-    // ✅ Ensure `clarion.openFile` is properly registered
-    // commands.getCommands().then((cmds) => {
-    //     if (!cmds.includes('clarion.openFile')) {
-    //         commands.registerCommand('clarion.openFile', async (filePath: string) => {
-    //             if (!filePath) {
-    //                 vscodeWindow.showErrorMessage("❌ No file path provided.");
-    //                 return;
-    //             }
-    //             try {
-    //                 const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(workspace.rootPath || "", filePath);
-    //                 const doc = await workspace.openTextDocument(Uri.file(absolutePath));
-    //                 await vscodeWindow.showTextDocument(doc);
-    //             } catch (error) {
-    //                 logger.error(`❌ Failed to open file: ${filePath}`, error);
-    //                 vscodeWindow.showErrorMessage(`❌ Failed to open file: ${filePath}`);
-    //             }
-    //         });
-    //     }
-    // });
+    solutionTreeDataProvider = new SolutionTreeDataProvider();
 
     try {
         // ✅ Create the tree view only if it doesn't exist
@@ -455,12 +464,15 @@ function createSolutionTreeView() {
             treeDataProvider: solutionTreeDataProvider,
             showCollapseAll: true
         });
-        logger.info("✅ Solution tree view successfully registered.");
+        
+        // Initial refresh to load data
+        await solutionTreeDataProvider.refresh();
+        
+        logger.info("✅ Solution tree view successfully registered and populated.");
     } catch (error) {
         logger.error("❌ Error registering solution tree view:", error);
     }
 }
-
 
 export async function openClarionSolution(context: ExtensionContext) {
     try {
@@ -511,8 +523,7 @@ export async function openClarionSolution(context: ExtensionContext) {
             }
         }
 
-        // ✅ Step 4: Determine available configurations before creating the parser
-        // ✅ Step 4: Determine available configurations before creating the parser
+        // ✅ Step 4: Determine available configurations
         const solutionFileContent = fs.readFileSync(solutionFilePath, 'utf-8');
         const availableConfigs = extractConfigurationsFromSolution(solutionFileContent);
 
@@ -536,35 +547,10 @@ export async function openClarionSolution(context: ExtensionContext) {
         await setGlobalClarionSelection(solutionFilePath, globalClarionPropertiesFile, globalClarionVersion, globalSettings.configuration);
         logger.info(`⚙️ Selected configuration: ${globalSettings.configuration}`);
 
+        // ✅ Step 5: Initialize the Solution
+        await initializeSolution(context, true);
 
-        // ✅ Step 5: Initialize the Solution Parser
-        solutionParser = await SolutionParser.create(solutionFilePath);
-
-        // ✅ Step 6: Update the Solution Tree Data Provider and Refresh
-        if (solutionTreeDataProvider) {
-            solutionTreeDataProvider.solutionParser = solutionParser;
-            solutionTreeDataProvider.refresh();
-        } else {
-            // If the data provider is not initialized, create it
-            solutionTreeDataProvider = new SolutionTreeDataProvider(solutionParser);
-            treeView = vscodeWindow.createTreeView("solutionView", {
-                treeDataProvider: solutionTreeDataProvider,
-                showCollapseAll: true
-            });
-        }
-
-        // // ✅ Step 7: Ensure the Solution View is Open
-        // const registeredCommands = await commands.getCommands();
-        // if (registeredCommands.includes("workbench.view.extension.solutionView")) {
-        //     await commands.executeCommand("workbench.view.extension.solutionView");
-        // } else {
-        //     vscodeWindow.showErrorMessage("Solution View failed to register. Please restart VS Code.");
-        // }
-        initializeSolution(context, true);
-        // ✅ Step 8: Register Language Features
-        registerLanguageFeatures(context);
-
-        // ✅ Step 9: Mark solution as open
+        // ✅ Step 6: Mark solution as open
         await commands.executeCommand("setContext", "clarion.solutionOpen", true);
         vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(globalSolutionFile)}`);
 
@@ -597,251 +583,195 @@ function extractConfigurationsFromSolution(solutionContent: string): string[] {
 }
 
 export async function showClarionQuickOpen(): Promise<void> {
-    if (!globalSolutionFile) {
-        logger.warn("⚠️ No Clarion solution is open. Using default VS Code Quick Open.");
-        await commands.executeCommand("workbench.action.quickOpen");
+    if (!workspace.workspaceFolders) {
+        vscodeWindow.showWarningMessage("No workspace is open.");
         return;
     }
 
-    const fileItems: QuickPickItem[] = [];
-    const seenFiles = new Set<string>();
+    const solutionCache = SolutionCache.getInstance();
+    const solutionInfo = solutionCache.getSolutionInfo();
 
-    // ✅ Use allowed file extensions from global settings
-    const defaultSourceExtensions = [".clw", ".inc", ".equ", ".eq", ".int"];
-    const allowedExtensions = [
-        ...defaultSourceExtensions, 
-        ...globalSettings.fileSearchExtensions.map(ext => ext.toLowerCase())
-    ];
+    if (!solutionInfo) {
+        vscodeWindow.showWarningMessage("No Clarion solution is loaded.");
+        return;
+    }
 
-    logger.info(`🔍 Searching for files with extensions: ${JSON.stringify(allowedExtensions)}`);
+    // Collect all source files from all projects
+    const allFiles: { label: string; description: string; path: string }[] = [];
+    
+    for (const project of solutionInfo.projects) {
+        for (const sourceFile of project.sourceFiles) {
+            const fullPath = path.join(project.path, sourceFile.relativePath || "");
+            
+            allFiles.push({
+                label: getIconForFile(sourceFile.name) + " " + sourceFile.name,
+                description: project.name,
+                path: fullPath
+            });
+        }
+    }
 
-    let searchPaths: string[] = [];
-
-    // ✅ Collect search paths from all projects in the solution
-    solutionParser?.solution.projects.forEach(project => {
-        allowedExtensions.forEach(ext => {
-            // 🔹 Use `getSearchPaths` instead of `pathsToLookin`
-            const pathsForExt = project.getSearchPaths(ext);
-            searchPaths.push(...pathsForExt);
+    // Add additional files from the solution directory
+    const solutionDir = path.dirname(solutionInfo.path);
+    const additionalFiles = listFilesRecursively(solutionDir)
+        .filter(file => {
+            const ext = path.extname(file).toLowerCase();
+            return ['.clw', '.inc', '.equ', '.eq', '.int'].includes(ext);
+        })
+        .map(file => {
+            const relativePath = path.relative(solutionDir, file);
+            return {
+                label: getIconForFile(file) + " " + path.basename(file),
+                description: relativePath,
+                path: file
+            };
         });
+
+    // Combine and sort all files
+    const combinedFiles = [...allFiles, ...additionalFiles]
+        .sort((a, b) => a.label.localeCompare(b.label));
+
+    // Show quick pick
+    const selectedFile = await vscodeWindow.showQuickPick(combinedFiles, {
+        placeHolder: "Select a Clarion file to open",
     });
 
-    searchPaths = [...new Set(searchPaths)]; // ✅ Remove duplicates
-    logger.info(`📂 Using search paths: ${JSON.stringify(searchPaths)}`);
-
-    // ✅ Fetch workspace files
-    const workspaceFiles = await workspace.findFiles(`**/*.*`);
-    const redirectionFiles: Uri[] = [];
-
-    for (const searchPath of searchPaths) {
+    if (selectedFile) {
         try {
-            if (workspace.rootPath && searchPath.startsWith(workspace.rootPath)) {
-                const files = await workspace.findFiles(`${searchPath}/**/*.*`);
-                redirectionFiles.push(...files);
-            } else {
-                logger.info(`📌 Searching manually outside workspace: ${searchPath}`);
-                const externalFiles = listFilesRecursively(searchPath);
-                redirectionFiles.push(...externalFiles.map(f => Uri.file(f)));
-            }
+            const doc = await workspace.openTextDocument(selectedFile.path);
+            await vscodeWindow.showTextDocument(doc);
         } catch (error) {
-            logger.warn(`⚠️ Error accessing search path: ${searchPath} - ${error instanceof Error ? error.message : String(error)}`);
+            vscodeWindow.showErrorMessage(`Failed to open file: ${selectedFile.path}`);
         }
     }
 
     function listFilesRecursively(dir: string): string[] {
-        let results: string[] = [];
+        const files: string[] = [];
+        
         try {
-            const list = fs.readdirSync(dir);
-            for (const file of list) {
-                const filePath = path.join(dir, file);
-                const stat = fs.statSync(filePath);
-                if (stat && stat.isDirectory()) {
-                    results = results.concat(listFilesRecursively(filePath));
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            
+            for (const entry of entries) {
+                const fullPath = path.join(dir, entry.name);
+                
+                if (entry.isDirectory()) {
+                    // Skip certain directories
+                    if (!['node_modules', '.git', 'bin', 'obj'].includes(entry.name)) {
+                        files.push(...listFilesRecursively(fullPath));
+                    }
                 } else {
-                    results.push(filePath);
+                    files.push(fullPath);
                 }
             }
-        } catch (err) {
-            logger.warn(`⚠️ Skipping inaccessible folder: ${dir}`);
+        } catch (error) {
+            logger.error(`Error reading directory ${dir}:`, error);
         }
-        return results;
+        
+        return files;
     }
 
     function getIconForFile(fileExt: string): string {
-        switch (fileExt) {
-            case ".clw":
-                return "$(file-code)";
-            case ".inc":
-                return "$(symbol-namespace)";
-            case ".equ":
-            case ".eq":
-                return "$(symbol-constant)";
-            case ".int":
-                return "$(symbol-interface)";
-            default:
-                return "$(file)";
+        const ext = path.extname(fileExt).toLowerCase();
+        
+        switch (ext) {
+            case '.clw': return '$(file-code)';
+            case '.inc': return '$(file-submodule)';
+            case '.equ':
+            case '.eq': return '$(symbol-constant)';
+            case '.int': return '$(symbol-interface)';
+            default: return '$(file)';
         }
     }
-
-    workspaceFiles.forEach(file => {
-        const filePath = file.fsPath;
-        const fileExt = path.extname(filePath).toLowerCase();
-
-        if (!allowedExtensions.includes(fileExt)) {
-            return;
-        }
-
-        if (!seenFiles.has(filePath)) {
-            seenFiles.add(filePath);
-            fileItems.push({
-                label: `${getIconForFile(fileExt)} ${path.basename(filePath)}`,
-                description: "Workspace",
-                detail: filePath,
-            });
-        }
-    });
-
-    redirectionFiles.forEach(file => {
-        const filePath = file.fsPath;
-        const fileExt = path.extname(filePath).toLowerCase();
-
-        if (!allowedExtensions.includes(fileExt)) {
-            return;
-        }
-
-        if (!seenFiles.has(filePath)) {
-            seenFiles.add(filePath);
-            const relativeRedirectionPath = path.relative(globalSettings.redirectionPath, path.dirname(filePath));
-
-            fileItems.push({
-                label: `${getIconForFile(fileExt)} ${path.basename(filePath)}  [${relativeRedirectionPath}]`,
-                description: "Redirection",
-                detail: filePath,
-            });
-        }
-    });
-
-    if (fileItems.length === 0) {
-        vscodeWindow.showErrorMessage("No matching Clarion files found in the workspace.");
-        return;
-    }
-
-    const quickPick = vscodeWindow.createQuickPick();
-    quickPick.items = fileItems;
-    quickPick.matchOnDescription = true;
-    quickPick.matchOnDetail = false;
-    quickPick.ignoreFocusOut = true;
-    quickPick.title = "Clarion File Search";
-
-    quickPick.onDidAccept(async () => {
-        const selection = quickPick.selectedItems[0];
-        if (selection?.detail) {
-            const doc = await workspace.openTextDocument(Uri.file(selection.detail));
-            await vscodeWindow.showTextDocument(doc);
-        }
-        quickPick.hide();
-    });
-
-    quickPick.show();
 }
 
-
-
 async function setConfiguration() {
-    if (!solutionParser) {
-        vscodeWindow.showErrorMessage("No Clarion solution loaded.");
+    if (!globalSolutionFile) {
+        vscodeWindow.showWarningMessage("No Clarion solution is loaded.");
         return;
     }
 
-    const availableConfigs = solutionParser.getAvailableConfigurations();
+    const solutionCache = SolutionCache.getInstance();
+    const availableConfigs = solutionCache.getAvailableConfigurations();
+    
     if (availableConfigs.length === 0) {
-        vscodeWindow.showErrorMessage("No configurations found in the solution.");
+        vscodeWindow.showWarningMessage("No configurations found in the solution file.");
         return;
     }
 
     const selectedConfig = await vscodeWindow.showQuickPick(availableConfigs, {
-        placeHolder: "Select Clarion Configuration"
+        placeHolder: "Select a configuration",
     });
 
-    if (!selectedConfig) return;
-
-    globalSettings.configuration = selectedConfig;
-    await workspace.getConfiguration().update("clarion.configuration", selectedConfig, ConfigurationTarget.Workspace);
-    vscodeWindow.showInformationMessage(`Clarion configuration set to ${selectedConfig}`);
-    updateConfigurationStatusBar(globalSettings.configuration);
+    if (selectedConfig) {
+        globalSettings.configuration = selectedConfig;
+        await workspace.getConfiguration().update("clarion.configuration", selectedConfig, ConfigurationTarget.Workspace);
+        updateConfigurationStatusBar(selectedConfig);
+        vscodeWindow.showInformationMessage(`Configuration set to: ${selectedConfig}`);
+    }
 }
-
 
 export function deactivate(): Thenable<void> | undefined {
-    return stopClientServer();
+    if (!client) {
+        return undefined;
+    }
+    return client.stop();
 }
 
-const diagnosticCollection = languages.createDiagnosticCollection("clarion-build");
-
-
-
-
+// Error handling for build output
 function showErrorMessages(errors: { file: string; line: number; message: string }[]) {
-    errors.forEach((err) => {
-        const fileUri = Uri.file(err.file);
-        const message = `❌ Error: ${err.message} (File: ${err.file}, Line: ${err.line})`;
-
-        window.showErrorMessage(message, "Open File").then((selection) => {
-            if (selection === "Open File") {
-                workspace.openTextDocument(fileUri).then((doc) => {
-                    window.showTextDocument(doc, { preview: false }).then((editor) => {
-                        const position = new Position(err.line - 1, 0);
-                        editor.selection = new Selection(position, position);
-                        editor.revealRange(new Range(position, position));
-                    });
-                });
-            }
-        });
-    });
-}
-/**
- * Parses MSBuild output to extract errors and warnings.
- */
-function parseBuildOutput(output: string) {
-    const diagnostics: { [key: string]: Diagnostic[] } = {};
-    diagnosticCollection.clear();
-
-    // Regex to match MSBuild errors: file(line,column): error code: message
-    const errorRegex = /(.+?)\((\d+),(\d+)\): (error|warning) (\w+): (.+)/g;
-    let match;
-
-    while ((match = errorRegex.exec(output)) !== null) {
-        const [_, filePath, line, column, type, errorCode, message] = match;
-        const severity = type === "error" ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning;
-
-        const uri = Uri.file(filePath);
-        const range = new Range(new Position(parseInt(line) - 1, parseInt(column) - 1), new Position(parseInt(line) - 1, parseInt(column) + 10));
-        const diagnostic = new Diagnostic(range, `${errorCode}: ${message}`, severity);
-
-        if (!diagnostics[filePath]) {
-            diagnostics[filePath] = [];
+    // Create diagnostics collection
+    const diagnosticCollection = languages.createDiagnosticCollection('clarion');
+    
+    // Group errors by file
+    const errorsByFile = new Map<string, Diagnostic[]>();
+    
+    for (const error of errors) {
+        const uri = Uri.file(error.file);
+        const diagnostic = new Diagnostic(
+            new Range(error.line - 1, 0, error.line - 1, 100),
+            error.message,
+            DiagnosticSeverity.Error
+        );
+        
+        if (!errorsByFile.has(uri.toString())) {
+            errorsByFile.set(uri.toString(), []);
         }
-        diagnostics[filePath].push(diagnostic);
+        
+        errorsByFile.get(uri.toString())!.push(diagnostic);
     }
-
-    Object.keys(diagnostics).forEach(file => {
-        diagnosticCollection.set(Uri.file(file), diagnostics[file]);
-    });
-
-    if (Object.keys(diagnostics).length > 0) {
-        vscodeWindow.showWarningMessage("❌ Build completed with errors. See the Problems panel.");
-    } else {
-        vscodeWindow.showInformationMessage("✅ Build successful! No errors detected.");
+    
+    // Set diagnostics
+    diagnosticCollection.clear();
+    for (const [uriString, diagnostics] of errorsByFile.entries()) {
+        diagnosticCollection.set(Uri.parse(uriString), diagnostics);
     }
 }
 
-
-
-
-
-function startClientServer(context: ExtensionContext, documentManager: DocumentManager) {
+// Parse build output for errors
+function parseBuildOutput(output: string) {
+    const errors: { file: string; line: number; message: string }[] = [];
+    const lines = output.split('\n');
+    
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        
+        // Match Clarion error patterns
+        const errorMatch = line.match(/^Error\s+(\d+):\s+(.+?)\((\d+)\)\s*:\s*(.+)$/i);
+        if (errorMatch) {
+            const [, , file, lineNum, message] = errorMatch;
+            errors.push({
+                file,
+                line: parseInt(lineNum, 10),
+                message: message.trim()
+            });
+        }
+    }
+    
+    return errors;
+}
+function startClientServer(context: ExtensionContext) {
     logger.info("Starting Clarion Language Server...");
-    let serverModule = context.asAbsolutePath(path.join('server', 'out', 'server.js'));
+    let serverModule = context.asAbsolutePath(path.join('out', 'server', 'src', 'server.js'));
     let debugOptions = { execArgv: ['--nolazy', '--inspect=6009'] };
 
     let serverOptions: ServerOptions = {
@@ -849,29 +779,60 @@ function startClientServer(context: ExtensionContext, documentManager: DocumentM
         debug: { module: serverModule, transport: TransportKind.ipc, options: debugOptions }
     };
 
+    // Get the default lookup extensions from settings
+    const lookupExtensions = globalSettings.defaultLookupExtensions || [".clw", ".inc", ".equ", ".eq", ".int"];
+    
+    // Create document selectors for all Clarion file extensions
+    const documentSelectors = [
+        { scheme: 'file', language: 'clarion' },
+        ...lookupExtensions.map(ext => ({ scheme: 'file', pattern: `**/*${ext}` }))
+    ];
+    
+    // Create file watcher pattern for all extensions
+    const fileWatcherPattern = `**/*.{${lookupExtensions.map(ext => ext.replace('.', '')).join(',')}}`;
+    
     let clientOptions: LanguageClientOptions = {
-        documentSelector: [{ scheme: 'file', language: 'clarion' }],
-        initializationOptions: { settings: workspace.getConfiguration('clarion') },
-        synchronize: { fileEvents: workspace.createFileSystemWatcher('**/*.{clw,inc}') }
+        documentSelector: documentSelectors,
+        initializationOptions: {
+            settings: workspace.getConfiguration('clarion'),
+            lookupExtensions: lookupExtensions
+        },
+        synchronize: { fileEvents: workspace.createFileSystemWatcher(fileWatcherPattern) },
+        // Add error handling options
+        errorHandler: {
+            error: (error, message, count) => {
+                logger.error(`Language server error: ${error.message || error}`);
+                return ErrorAction.Continue;
+            },
+            closed: () => {
+                logger.warn("Language server connection closed");
+                // Always try to restart the server
+                return CloseAction.Restart;
+            }
+        }
     };
+    
+    logger.info(`📄 Configured Language Client for extensions: ${lookupExtensions.join(', ')}`);
 
     client = new LanguageClient("ClarionLanguageServer", "Clarion Language Server", serverOptions, clientOptions);
 
-    // Start the client and handle the promise
-    client.start();
+    // Start the client
+    const disposable = client.start();
+    
+    // Add error handling for client startup
+    context.subscriptions.push(disposable);
+    
+    // Set a timeout to check if the client is ready
+    setTimeout(() => {
+        if (client && !client.needsStart()) {
+            logger.info("✅ Language client started successfully");
+        } else {
+            logger.error("❌ Language client failed to start properly");
+            // If the client fails to start, set it to null so we can try again later
+            client = undefined;
+        }
+    }, 5000); // Check after 5 seconds
 }
-
-
-
-function stopClientServer() {
-    if (client) {
-        return client.stop();
-    }
-    return undefined;
-}
-
-
-
 async function buildSolutionOrProject(buildTarget: "Solution" | "Project", project?: ClarionProject) {
     const buildConfig = {
         buildTarget,
@@ -883,8 +844,12 @@ async function buildSolutionOrProject(buildTarget: "Solution" | "Project", proje
         return;
     }
 
-    const solutionParser = await buildTasks.loadSolutionParser();
-    if (!solutionParser) {
+    // Get solution info from the SolutionCache instead of loading a SolutionParser
+    const solutionCache = SolutionCache.getInstance();
+    const solutionInfo = solutionCache.getSolutionInfo();
+    
+    if (!solutionInfo) {
+        vscodeWindow.showErrorMessage("No solution information available. Please open a solution first.");
         return;
     }
 
