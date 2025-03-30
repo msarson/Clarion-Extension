@@ -6,6 +6,8 @@ import { ClarionSolutionServer } from './clarionSolutionServer';
 import LoggerManager from '../logger';
 import { ClarionProjectServer } from './clarionProjectServer';
 import { Connection } from 'vscode-languageserver';
+import { Token } from '../ClarionTokenizer';
+import { TokenCache } from '../TokenCache';
 
 const logger = LoggerManager.getLogger("SolutionManager");
 logger.setLevel("info");
@@ -14,6 +16,7 @@ export class SolutionManager {
     public solution: ClarionSolutionServer;
     public solutionFilePath: string;
     private static instance: SolutionManager | null = null;
+    private fileCache: Map<string, string> = new Map();
 
     private constructor(filePath: string) {
         this.solutionFilePath = filePath;
@@ -21,6 +24,25 @@ export class SolutionManager {
         this.solution = new ClarionSolutionServer(solutionName, filePath);
         logger.info(`📂 Created SolutionManager for ${solutionName}`);
     }
+
+    public getAllSourceFiles(): { fullPath: string, tokens: Token[] }[] {
+        const allFiles: { fullPath: string, tokens: Token[] }[] = [];
+    
+        for (const project of this.solution.projects) {
+            for (const file of project.sourceFiles) {
+                const fullPath = path.join(project.path, file.relativePath);
+                const documentUri = `file:///${fullPath.replace(/\\/g, "/")}`;
+                const document = project.getTextDocumentByPath?.(fullPath);
+                if (!document) continue;
+    
+                const tokens = TokenCache.getInstance().getTokens(document);
+                allFiles.push({ fullPath, tokens });
+            }
+        }
+    
+        return allFiles;
+    }
+    
 
     public static async create(filePath: string): Promise<SolutionManager> {
         const stat = fs.statSync(filePath);
@@ -109,6 +131,18 @@ export class SolutionManager {
     }
 
     public findFileWithExtension(filename: string): string {
+        // Check cache first
+        if (this.fileCache.has(filename)) {
+            const cachedPath = this.fileCache.get(filename);
+            if (cachedPath && fs.existsSync(cachedPath)) {
+                logger.info(`✅ Using cached file path for ${filename}: ${cachedPath}`);
+                return cachedPath;
+            } else {
+                // Remove invalid cache entry
+                this.fileCache.delete(filename);
+            }
+        }
+        
         logger.info(`🔍 Searching for file: ${filename}`);
         const ext = path.extname(filename).toLowerCase();
         
@@ -122,6 +156,7 @@ export class SolutionManager {
                 const fullPath = path.join(project.path, sourceFile.relativePath);
                 if (fs.existsSync(fullPath)) {
                     logger.info(`✅ Found file in project source files: ${fullPath}`);
+                    this.fileCache.set(filename, fullPath);
                     return fullPath;
                 }
             }
@@ -136,6 +171,7 @@ export class SolutionManager {
                 const fullPath = path.join(searchPath, filename);
                 if (fs.existsSync(fullPath)) {
                     logger.info(`✅ Found file in search path: ${fullPath}`);
+                    this.fileCache.set(filename, fullPath);
                     return fullPath;
                 }
             }
@@ -155,6 +191,7 @@ export class SolutionManager {
             const fullPath = path.join(standardPath, filename);
             if (fs.existsSync(fullPath)) {
                 logger.info(`✅ Found file in standard path: ${fullPath}`);
+                this.fileCache.set(filename, fullPath);
                 return fullPath;
             }
         }

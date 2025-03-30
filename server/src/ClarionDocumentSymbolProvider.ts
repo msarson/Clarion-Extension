@@ -113,7 +113,6 @@ export class ClarionDocumentSymbolProvider {
                 currentProcedure = result.currentProcedure;
             }
         }
-        const lastToken = tokens.at(-1);
 
         // No need for final sorting here since we're sorting as symbols are added
         // This ensures symbols are already in the correct order when VS Code renders the outline
@@ -196,7 +195,7 @@ export class ClarionDocumentSymbolProvider {
             }
         }
 
-        const labelName = this.findStructureLabelName(tokens, index);
+        const labelName = token.label ? token.label : "";// this.findStructureLabelName(tokens, index);
         const upperValue = value.toUpperCase();
         const structureKind = clarionStructureKindMap[upperValue] ?? ClarionSymbolKind.TablesGroup;
 
@@ -419,7 +418,7 @@ export class ClarionDocumentSymbolProvider {
         const token = tokens[index];
         const { line, finishesAt, parent } = token;
         const prevToken = tokens[index - 1];
-        const procedureDefName = prevToken?.type === TokenType.Label ? prevToken.value : "UnnamedDefinition";
+        const procedureDefName = token.label ? token.label : "UnnamedDefinition";// prevToken?.type === TokenType.Label ? prevToken.value : "UnnamedDefinition";
 
         // 🔍 Extract the definition detail — e.g. "(string newValue), virtual"
         // 🔍 Extract the definition detail — e.g. "(string newValue), virtual"

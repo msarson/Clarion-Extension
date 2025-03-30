@@ -12,7 +12,7 @@ import { DocumentManager } from './documentManager';
 import { SolutionTreeDataProvider } from './SolutionTreeDataProvider';
 import { TreeNode } from './TreeNode';
 import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile, setGlobalClarionSelection } from './globals';
-import * as buildTasks from './buildTasks'; 
+import * as buildTasks from './buildTasks';
 import LoggerManager from './logger';
 import { SolutionCache } from './SolutionCache';
 
@@ -59,90 +59,90 @@ async function createSolutionFileWatchers(context: ExtensionContext) {
     for (const watcher of fileWatchers) {
         watcher.dispose();
     }
-    
+
     if (!globalSolutionFile) {
         logger.warn("⚠️ No solution file set, skipping file watcher creation");
         return;
     }
-    
+
     const solutionDir = path.dirname(globalSolutionFile);
     logger.info(`🔍 Creating file watchers for solution directory: ${solutionDir}`);
-    
+
     // Create watchers for the solution file itself
     const solutionWatcher = workspace.createFileSystemWatcher(globalSolutionFile);
-    
+
     // Mark as a file watcher for cleanup
     (solutionWatcher as any)._isFileWatcher = true;
-    
+
     solutionWatcher.onDidChange(async (uri) => {
         logger.info(`🔄 Solution file changed: ${uri.fsPath}`);
         await handleSolutionFileChange(context);
     });
-    
+
     context.subscriptions.push(solutionWatcher);
-    
+
     // Get the solution cache to access project information
     const solutionCache = SolutionCache.getInstance();
     const solutionInfo = solutionCache.getSolutionInfo();
-    
+
     if (solutionInfo && solutionInfo.projects) {
         // Create watchers for each project file
         for (const project of solutionInfo.projects) {
             const projectFilePath = path.join(project.path, `${project.name}.cwproj`);
-            
+
             if (fs.existsSync(projectFilePath)) {
                 const projectWatcher = workspace.createFileSystemWatcher(projectFilePath);
-                
+
                 // Mark as a file watcher for cleanup
                 (projectWatcher as any)._isFileWatcher = true;
-                
+
                 projectWatcher.onDidChange(async (uri) => {
                     logger.info(`🔄 Project file changed: ${uri.fsPath}`);
                     await handleProjectFileChange(context, uri);
                 });
-                
+
                 context.subscriptions.push(projectWatcher);
                 logger.info(`✅ Added watcher for project file: ${projectFilePath}`);
             }
-            
+
             // Create watchers for redirection files in this project
             const projectRedFile = path.join(project.path, globalSettings.redirectionFile);
-            
+
             if (fs.existsSync(projectRedFile)) {
                 const redFileWatcher = workspace.createFileSystemWatcher(projectRedFile);
-                
+
                 // Mark as a file watcher for cleanup
                 (redFileWatcher as any)._isFileWatcher = true;
-                
+
                 redFileWatcher.onDidChange(async (uri) => {
                     logger.info(`🔄 Redirection file changed: ${uri.fsPath}`);
                     await handleRedirectionFileChange(context);
                 });
-                
+
                 context.subscriptions.push(redFileWatcher);
                 logger.info(`✅ Added watcher for redirection file: ${projectRedFile}`);
-                
+
                 // Get included redirection files from the server
                 try {
                     // Get the solution cache to access the server
                     const solutionCache = SolutionCache.getInstance();
-                    
+
                     // Get included redirection files from the server
                     const includedRedFiles = await solutionCache.getIncludedRedirectionFilesFromServer(project.path);
-                    
+
                     // Create watchers for each included redirection file
                     for (const redFile of includedRedFiles) {
                         if (redFile !== projectRedFile && fs.existsSync(redFile)) {
                             const includedRedWatcher = workspace.createFileSystemWatcher(redFile);
-                            
+
                             // Mark as a file watcher for cleanup
                             (includedRedWatcher as any)._isFileWatcher = true;
-                            
+
                             includedRedWatcher.onDidChange(async (uri) => {
                                 logger.info(`🔄 Included redirection file changed: ${uri.fsPath}`);
                                 await handleRedirectionFileChange(context);
                             });
-                            
+
                             context.subscriptions.push(includedRedWatcher);
                             logger.info(`✅ Added watcher for included redirection file: ${redFile}`);
                         }
@@ -153,21 +153,21 @@ async function createSolutionFileWatchers(context: ExtensionContext) {
             }
         }
     }
-    
+
     // Also watch the global redirection file if it exists
     const globalRedFile = path.join(globalSettings.redirectionPath, globalSettings.redirectionFile);
-    
+
     if (fs.existsSync(globalRedFile)) {
         const globalRedWatcher = workspace.createFileSystemWatcher(globalRedFile);
-        
+
         // Mark as a file watcher for cleanup
         (globalRedWatcher as any)._isFileWatcher = true;
-        
+
         globalRedWatcher.onDidChange(async (uri) => {
             logger.info(`🔄 Global redirection file changed: ${uri.fsPath}`);
             await handleRedirectionFileChange(context);
         });
-        
+
         context.subscriptions.push(globalRedWatcher);
         logger.info(`✅ Added watcher for global redirection file: ${globalRedFile}`);
     }
@@ -200,7 +200,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
     await globalSettings.initializeFromWorkspace();
 
     registerOpenCommand(context);
-    
+
     context.subscriptions.push(commands.registerCommand("clarion.quickOpen", async () => {
         if (!workspace.isTrusted) {
             vscodeWindow.showWarningMessage("Clarion features require a trusted workspace.");
@@ -218,13 +218,13 @@ export async function activate(context: ExtensionContext): Promise<void> {
         }
         await callback();
     };
-    
+
     // Register commands with workspace trust check
     const commandsRequiringTrust = [
         { id: "clarion.openSolution", handler: openClarionSolution.bind(null, context) },
         { id: "clarion.setConfiguration", handler: setConfiguration }
     ];
-    
+
     commandsRequiringTrust.forEach(command => {
         context.subscriptions.push(
             commands.registerCommand(command.id, withTrustedWorkspace(command.handler))
@@ -240,12 +240,12 @@ export async function activate(context: ExtensionContext): Promise<void> {
             }
         })
     );
-    
+
     // Create the file watchers initially
     if (globalSolutionFile) {
         await createSolutionFileWatchers(context);
     }
-    
+
     // Re-create file watchers when the solution changes
     context.subscriptions.push(
         workspace.onDidChangeConfiguration(async (event) => {
@@ -273,7 +273,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
             // Call the existing build function with solution as target
             await buildSolutionOrProject("Solution");
         }),
-        
+
         // Add project build command
         commands.registerCommand('clarion.buildProject', async (node) => {
             // The node parameter is passed automatically from the treeview
@@ -346,7 +346,7 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
     if (client) {
         // Get the solution directory
         const solutionDir = path.dirname(globalSolutionFile);
-        
+
         // Send notification to initialize the server-side solution manager
         client.sendNotification('clarion/updatePaths', {
             redirectionPaths: [globalSettings.redirectionPath],
@@ -359,23 +359,23 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
         });
         logger.info("✅ Clarion paths/config/version sent to the language server.");
     }
-    
+
     // Wait a moment for the server to initialize the solution
     await new Promise(resolve => setTimeout(resolve, 1000));
-    
+
     // ✅ Continue initializing the solution cache and document manager
     documentManager = await reinitializeEnvironment(refreshDocs);
     await createSolutionTreeView();
     registerLanguageFeatures(context);
     await commands.executeCommand("setContext", "clarion.solutionOpen", true);
     updateConfigurationStatusBar(globalSettings.configuration);
-    
+
     // Create file watchers for the solution, project, and redirection files
     await createSolutionFileWatchers(context);
-    
+
     // Force refresh all open documents to ensure links are generated
     await refreshOpenDocuments();
-    
+
     vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(globalSolutionFile)}`);
 }
 
@@ -384,14 +384,14 @@ async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<Do
 
     // Get the SolutionCache singleton
     const solutionCache = SolutionCache.getInstance();
-    
+
     // Set the language client in the solution cache
     if (client) {
         solutionCache.setLanguageClient(client);
     } else {
         logger.error("❌ Language client not available. Cannot initialize SolutionCache properly.");
     }
-    
+
     // Initialize the solution cache with the solution file path
     await solutionCache.initialize(globalSolutionFile);
 
@@ -463,16 +463,16 @@ export async function getAllOpenDocuments(): Promise<TextDocument[]> {
  */
 async function handleRedirectionFileChange(context: ExtensionContext) {
     logger.info("🔄 Redirection file changed. Refreshing environment...");
-    
+
     // Reinitialize the Solution Cache and Document Manager
     await reinitializeEnvironment(true);
-    
+
     // Refresh the solution tree view
     await createSolutionTreeView();
-    
+
     // Re-register language features
     registerLanguageFeatures(context);
-    
+
     vscodeWindow.showInformationMessage("Redirection file updated. Solution cache refreshed.");
 }
 
@@ -482,18 +482,18 @@ async function handleRedirectionFileChange(context: ExtensionContext) {
  */
 async function handleSolutionFileChange(context: ExtensionContext) {
     logger.info("🔄 Solution file changed. Refreshing environment...");
-    
+
     // If the current solution file is the one that changed, refresh it
     if (globalSolutionFile) {
         // Reinitialize the Solution Cache and Document Manager
         await reinitializeEnvironment(true);
-        
+
         // Refresh the solution tree view
         await createSolutionTreeView();
-        
+
         // Re-register language features
         registerLanguageFeatures(context);
-        
+
         vscodeWindow.showInformationMessage("Solution file updated. Solution cache refreshed.");
     }
 }
@@ -504,16 +504,16 @@ async function handleSolutionFileChange(context: ExtensionContext) {
  */
 async function handleProjectFileChange(context: ExtensionContext, uri: Uri) {
     logger.info(`🔄 Project file changed: ${uri.fsPath}. Refreshing environment...`);
-    
+
     // Reinitialize the Solution Cache and Document Manager
     await reinitializeEnvironment(true);
-    
+
     // Refresh the solution tree view
     await createSolutionTreeView();
-    
+
     // Re-register language features
     registerLanguageFeatures(context);
-    
+
     vscodeWindow.showInformationMessage("Project file updated. Solution cache refreshed.");
 }
 
@@ -525,7 +525,7 @@ async function handleSettingsChange(context: ExtensionContext) {
 
     // Reinitialize the Solution Cache and Document Manager
     await reinitializeEnvironment(true);
-    
+
     // Refresh the solution tree view
     await createSolutionTreeView();
 
@@ -550,23 +550,23 @@ function registerLanguageFeatures(context: ExtensionContext) {
     }
 
     logger.info("🔗 Registering Document Link Provider...");
-    
+
     // Get the default lookup extensions from settings
     const lookupExtensions = globalSettings.defaultLookupExtensions || [".clw", ".inc", ".equ", ".eq", ".int"];
-    
+
     // Create document selectors for all Clarion file extensions
     const documentSelectors = [
         { scheme: "file", language: "clarion" },
         ...lookupExtensions.map(ext => ({ scheme: "file", pattern: `**/*${ext}` }))
     ];
-    
+
     // Register the document link provider for all selectors
     documentLinkProviderDisposable = languages.registerDocumentLinkProvider(
         documentSelectors,
         new ClarionDocumentLinkProvider(documentManager)
     );
     context.subscriptions.push(documentLinkProviderDisposable);
-    
+
     logger.info(`📄 Registered Document Link Provider for extensions: ${lookupExtensions.join(', ')}`);
 
     // ✅ Fix: Ensure only one Hover Provider is registered
@@ -580,7 +580,7 @@ function registerLanguageFeatures(context: ExtensionContext) {
         new ClarionHoverProvider(documentManager)
     );
     context.subscriptions.push(hoverProviderDisposable);
-    
+
     logger.info(`📄 Registered Hover Provider for extensions: ${lookupExtensions.join(', ')}`);
 }
 
@@ -669,10 +669,10 @@ async function createSolutionTreeView() {
             treeDataProvider: solutionTreeDataProvider,
             showCollapseAll: true
         });
-        
+
         // Initial refresh to load data
         await solutionTreeDataProvider.refresh();
-        
+
         logger.info("✅ Solution tree view successfully registered and populated.");
     } catch (error) {
         logger.error("❌ Error registering solution tree view:", error);
@@ -805,7 +805,7 @@ export async function showClarionQuickOpen(): Promise<void> {
     const allFiles: { label: string; description: string; path: string }[] = [];
     const seenFiles = new Set<string>();
     const seenBaseNames = new Set<string>(); // Track base filenames to avoid duplicates
-    
+
     // ✅ Use allowed file extensions from global settings
     const defaultSourceExtensions = [".clw", ".inc", ".equ", ".eq", ".int"];
     const allowedExtensions = [
@@ -814,13 +814,13 @@ export async function showClarionQuickOpen(): Promise<void> {
     ];
 
     logger.info(`🔍 Searching for files with extensions: ${JSON.stringify(allowedExtensions)}`);
-    
+
     // First add all source files from projects
     for (const project of solutionInfo.projects) {
         for (const sourceFile of project.sourceFiles) {
             const fullPath = path.join(project.path, sourceFile.relativePath || "");
             const baseName = sourceFile.name.toLowerCase();
-            
+
             if (!seenFiles.has(fullPath)) {
                 seenFiles.add(fullPath);
                 seenBaseNames.add(baseName); // Track the base filename
@@ -835,10 +835,10 @@ export async function showClarionQuickOpen(): Promise<void> {
 
     // Get search paths from the server for each project and extension
     const searchPaths: string[] = [];
-    
+
     try {
         logger.info("🔍 Requesting search paths from server...");
-        
+
         // Request search paths for each project and extension
         for (const project of solutionInfo.projects) {
             for (const ext of allowedExtensions) {
@@ -852,11 +852,11 @@ export async function showClarionQuickOpen(): Promise<void> {
     } catch (error) {
         logger.error(`❌ Error requesting search paths: ${error instanceof Error ? error.message : String(error)}`);
     }
-    
+
     // Remove duplicates from search paths
     const uniqueSearchPaths = [...new Set(searchPaths)];
     logger.info(`📂 Using search paths: ${JSON.stringify(uniqueSearchPaths)}`);
-    
+
     // Add files from the solution directory
     const solutionDir = path.dirname(solutionInfo.path);
     const additionalFiles = listFilesRecursively(solutionDir)
@@ -867,7 +867,7 @@ export async function showClarionQuickOpen(): Promise<void> {
         .map(file => {
             const relativePath = path.relative(solutionDir, file);
             const filePath = file;
-            
+
             const baseName = path.basename(file).toLowerCase();
             if (!seenFiles.has(filePath) && !seenBaseNames.has(baseName)) {
                 seenFiles.add(filePath);
@@ -881,20 +881,20 @@ export async function showClarionQuickOpen(): Promise<void> {
             return null;
         })
         .filter(item => item !== null) as { label: string; description: string; path: string }[];
-    
+
     // Add files from redirection paths
     const redirectionFiles: { label: string; description: string; path: string }[] = [];
-    
+
     for (const searchPath of uniqueSearchPaths) {
         try {
             if (workspace.rootPath && searchPath.startsWith(workspace.rootPath)) {
                 // If the path is inside the workspace, use VS Code's findFiles
                 const files = await workspace.findFiles(`${searchPath}/**/*.*`);
-                
+
                 for (const file of files) {
                     const filePath = file.fsPath;
                     const ext = path.extname(filePath).toLowerCase();
-                    
+
                     const baseName = path.basename(filePath).toLowerCase();
                     if (allowedExtensions.includes(ext) && !seenFiles.has(filePath) && !seenBaseNames.has(baseName)) {
                         seenFiles.add(filePath);
@@ -909,10 +909,10 @@ export async function showClarionQuickOpen(): Promise<void> {
                 // If the path is outside the workspace, use recursive file listing
                 logger.info(`📌 Searching manually outside workspace: ${searchPath}`);
                 const externalFiles = listFilesRecursively(searchPath);
-                
+
                 for (const filePath of externalFiles) {
                     const ext = path.extname(filePath).toLowerCase();
-                    
+
                     const baseName = path.basename(filePath).toLowerCase();
                     if (allowedExtensions.includes(ext) && !seenFiles.has(filePath) && !seenBaseNames.has(baseName)) {
                         seenFiles.add(filePath);
@@ -949,13 +949,13 @@ export async function showClarionQuickOpen(): Promise<void> {
 
     function listFilesRecursively(dir: string): string[] {
         const files: string[] = [];
-        
+
         try {
             const entries = fs.readdirSync(dir, { withFileTypes: true });
-            
+
             for (const entry of entries) {
                 const fullPath = path.join(dir, entry.name);
-                
+
                 if (entry.isDirectory()) {
                     // Skip certain directories
                     if (!['node_modules', '.git', 'bin', 'obj'].includes(entry.name)) {
@@ -968,13 +968,13 @@ export async function showClarionQuickOpen(): Promise<void> {
         } catch (error) {
             logger.error(`Error reading directory ${dir}:`, error);
         }
-        
+
         return files;
     }
 
     function getIconForFile(fileExt: string): string {
         const ext = path.extname(fileExt).toLowerCase();
-        
+
         switch (ext) {
             case '.clw': return '$(file-code)';
             case '.inc': return '$(file-submodule)';
@@ -994,7 +994,7 @@ async function setConfiguration() {
 
     const solutionCache = SolutionCache.getInstance();
     const availableConfigs = solutionCache.getAvailableConfigurations();
-    
+
     if (availableConfigs.length === 0) {
         vscodeWindow.showWarningMessage("No configurations found in the solution file.");
         return;
@@ -1023,10 +1023,10 @@ export function deactivate(): Thenable<void> | undefined {
 function showErrorMessages(errors: { file: string; line: number; message: string }[]) {
     // Create diagnostics collection
     const diagnosticCollection = languages.createDiagnosticCollection('clarion');
-    
+
     // Group errors by file
     const errorsByFile = new Map<string, Diagnostic[]>();
-    
+
     for (const error of errors) {
         const uri = Uri.file(error.file);
         const diagnostic = new Diagnostic(
@@ -1034,14 +1034,14 @@ function showErrorMessages(errors: { file: string; line: number; message: string
             error.message,
             DiagnosticSeverity.Error
         );
-        
+
         if (!errorsByFile.has(uri.toString())) {
             errorsByFile.set(uri.toString(), []);
         }
-        
+
         errorsByFile.get(uri.toString())!.push(diagnostic);
     }
-    
+
     // Set diagnostics
     diagnosticCollection.clear();
     for (const [uriString, diagnostics] of errorsByFile.entries()) {
@@ -1053,10 +1053,10 @@ function showErrorMessages(errors: { file: string; line: number; message: string
 function parseBuildOutput(output: string) {
     const errors: { file: string; line: number; message: string }[] = [];
     const lines = output.split('\n');
-    
+
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
-        
+
         // Match Clarion error patterns
         const errorMatch = line.match(/^Error\s+(\d+):\s+(.+?)\((\d+)\)\s*:\s*(.+)$/i);
         if (errorMatch) {
@@ -1068,7 +1068,7 @@ function parseBuildOutput(output: string) {
             });
         }
     }
-    
+
     return errors;
 }
 function startClientServer(context: ExtensionContext) {
@@ -1083,19 +1083,19 @@ function startClientServer(context: ExtensionContext) {
 
     // Get the default lookup extensions from settings
     const lookupExtensions = globalSettings.defaultLookupExtensions || [".clw", ".inc", ".equ", ".eq", ".int"];
-    
+
     // Create document selectors for all Clarion file extensions
     const documentSelectors = [
         { scheme: 'file', language: 'clarion' },
         ...lookupExtensions.map(ext => ({ scheme: 'file', pattern: `**/*${ext}` }))
     ];
-    
+
     // Create file watcher pattern for all extensions
     const fileWatcherPattern = `**/*.{${lookupExtensions.map(ext => ext.replace('.', '')).join(',')}}`;
-    
+
     // Create file watcher pattern for redirection, solution, and project files
     const projectFileWatcherPattern = "**/*.{red,sln,cwproj}";
-    
+
     let clientOptions: LanguageClientOptions = {
         documentSelector: documentSelectors,
         initializationOptions: {
@@ -1121,27 +1121,24 @@ function startClientServer(context: ExtensionContext) {
             }
         }
     };
-    
+
     logger.info(`📄 Configured Language Client for extensions: ${lookupExtensions.join(', ')}`);
 
     client = new LanguageClient("ClarionLanguageServer", "Clarion Language Server", serverOptions, clientOptions);
-
-    // Start the client
+    // Start the language client
     const disposable = client.start();
-    
-    // Add error handling for client startup
     context.subscriptions.push(disposable);
-    
-    // Set a timeout to check if the client is ready
-    setTimeout(() => {
-        if (client && !client.needsStart()) {
-            logger.info("✅ Language client started successfully");
-        } else {
-            logger.error("❌ Language client failed to start properly");
-            // If the client fails to start, set it to null so we can try again later
+
+    // Wait for the language client to become ready
+    client.onReady()
+        .then(() => {
+            logger.info("✅ Language client started and is ready");
+        })
+        .catch((err) => {
+            logger.error("❌ Language client failed to start properly", err);
             client = undefined;
-        }
-    }, 5000); // Check after 5 seconds
+        });
+
 }
 async function buildSolutionOrProject(buildTarget: "Solution" | "Project", project?: ClarionProjectInfo) {
     const buildConfig = {
@@ -1157,7 +1154,7 @@ async function buildSolutionOrProject(buildTarget: "Solution" | "Project", proje
     // Get solution info from the SolutionCache instead of loading a SolutionParser
     const solutionCache = SolutionCache.getInstance();
     const solutionInfo = solutionCache.getSolutionInfo();
-    
+
     if (!solutionInfo) {
         vscodeWindow.showErrorMessage("No solution information available. Please open a solution first.");
         return;

@@ -6,7 +6,7 @@ import LoggerManager from "../logger";
 import { serverSettings } from "../serverSettings";
 
 const logger = LoggerManager.getLogger("RedirectionParserServer");
-logger.setLevel("error");
+logger.setLevel("info");
 
 export interface RedirectionEntry {
   redFile: string;
@@ -17,12 +17,22 @@ export interface RedirectionEntry {
 
 export class RedirectionFileParserServer {
   private readonly macros: Record<string, string>;
+  private static redFileCache: Map<string, RedirectionEntry[]> = new Map();
+  private entries: RedirectionEntry[] = [];
 
   constructor() {
     this.macros = serverSettings.macros;
   }
 
   public parseRedFile(projectPath: string): RedirectionEntry[] {
+    // Check if we have cached entries for this project path
+    const cacheKey = projectPath;
+    if (RedirectionFileParserServer.redFileCache.has(cacheKey)) {
+      logger.info(`✅ Using cached redirection entries for project: ${projectPath}`);
+      this.entries = RedirectionFileParserServer.redFileCache.get(cacheKey) || [];
+      return this.entries;
+    }
+
     const projectRedFile = path.join(projectPath, serverSettings.redirectionFile);
     const globalRedFile = path.join(serverSettings.primaryRedirectionPath, serverSettings.redirectionFile);
 
@@ -35,10 +45,17 @@ export class RedirectionFileParserServer {
       logger.warn(`Project-specific redirection file not found. Using global: ${globalRedFile}`);
     } else {
       logger.error("No valid redirection file found.");
-      return [];
+      this.entries = [];
+      return this.entries;
     }
 
-    return this.parseRedFileRecursive(redFileToParse, [], true);
+    this.entries = this.parseRedFileRecursive(redFileToParse, [], true);
+    
+    // Cache the result
+    RedirectionFileParserServer.redFileCache.set(cacheKey, this.entries);
+    logger.info(`✅ Cached ${this.entries.length} redirection entries for project: ${projectPath}`);
+    
+    return this.entries;
   }
 
   private parseRedFileRecursive(
@@ -138,5 +155,33 @@ export class RedirectionFileParserServer {
     }
 
     return path.normalize(resolved);
+  }
+
+  /**
+   * Finds a file in the redirection paths
+   * @param filename The filename to find
+   * @returns The full path to the file if found, null otherwise
+   */
+  public findFile(filename: string): string | null {
+    for (const entry of this.entries) {
+      if (this.matchesMask(entry.extension, filename)) {
+        for (const dir of entry.paths) {
+          const candidate = path.join(dir, filename);
+          if (fs.existsSync(candidate)) return path.normalize(candidate);
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Checks if a filename matches a mask
+   * @param mask The mask to check against (e.g., "*.inc")
+   * @param filename The filename to check
+   * @returns True if the filename matches the mask
+   */
+  private matchesMask(mask: string, filename: string): boolean {
+    if (mask === "*.*") return true;
+    return filename.toLowerCase().endsWith(mask.toLowerCase().replace("*", ""));
   }
 }

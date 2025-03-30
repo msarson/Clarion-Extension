@@ -161,7 +161,7 @@ export class SolutionCache {
                 setTimeout(() => {
                     logger.warn(`⚠️ Server request timed out for search paths: ${projectName}, ${extension}`);
                     resolve([]);
-                }, 5000); // 5 second timeout
+                }, 15000); // 15 second timeout
             });
             
             // Race between the actual request and the timeout
@@ -203,7 +203,7 @@ export class SolutionCache {
                 setTimeout(() => {
                     logger.warn(`⚠️ Server request timed out for included redirection files: ${projectPath}`);
                     resolve([]);
-                }, 5000); // 5 second timeout
+                }, 15000); // 15 second timeout
             });
             
             // Race between the actual request and the timeout
@@ -332,7 +332,7 @@ export class SolutionCache {
                     setTimeout(() => {
                         logger.warn(`⚠️ Server request timed out for file: ${filename}`);
                         resolve("");
-                    }, 5000); // 5 second timeout
+                    }, 15000); // 15 second timeout
                 });
                 
                 // Race between the actual request and the timeout
