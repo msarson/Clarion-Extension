@@ -98,11 +98,11 @@
             ]
         },
         "views": {
-            "explorer": [
+            "clarionViews": [
                 {
                     "id": "solutionView",
                     "name": "Solution View",
-                    "icon": "icon/sv57x57.png"
+                    "icon": "images/sv57x57.png"
                 }
             ]
         },
@@ -120,7 +120,20 @@
             },
             {
                 "command": "clarion.openSolution",
-                "title": "Clarion: Open Solution"
+                "title": "Clarion: Open Solution",
+                "icon": {
+                    "light": "images/folder-open-dot.svg",
+                    "dark": "images/folder-open-dot.svg"
+                }
+            },
+            {
+                "command": "clarion.closeSolution",
+                "title": "Clarion: Close Solution",
+                "when": "clarion.solutionOpen",
+                "icon": {
+                    "light": "images/folder-closed.svg",
+                    "dark": "images/folder-closed.svg"
+                }
             },
             {
                 "command": "clarion.quickOpen",
@@ -139,6 +152,11 @@
             {
                 "command": "clarion.buildProject",
                 "title": "Build Project"
+            },
+            {
+                "command": "clarion.reinitializeSolution",
+                "title": "Clarion: Reinitialize Solution",
+                "when": "clarion.solutionOpen"
             }
         ],
         "menus": {
@@ -152,6 +170,25 @@
                     "command": "clarion.buildProject",
                     "when": "view == solutionView && viewItem == clarionProject",
                     "group": "build"
+                },
+                {
+                    "command": "clarion.closeSolution",
+                    "when": "view == solutionView && viewItem == clarionSolution",
+                    "group": "navigation"
+                }
+            ],
+            "view/title": [
+                {
+                    "command": "clarion.openSolution",
+                    "when": "view == solutionView && !clarion.solutionOpen",
+                    "group": "navigation@1",
+                    "icon": "$(folder-opened)"
+                },
+                {
+                    "command": "clarion.closeSolution",
+                    "when": "view == solutionView && clarion.solutionOpen",
+                    "group": "navigation@1",
+                    "icon": "$(close)"
                 }
             ]
         },
@@ -293,6 +330,7 @@
         "typescript": "^4.2.4"
     },
     "dependencies": {
+        "lucide": "^0.363.0",
         "minimatch": "^10.0.1",
         "minimist": "^1.2.6",
         "mkdirp": "^3.0.1",

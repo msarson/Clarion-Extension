@@ -354,9 +354,22 @@ export class DocumentStructure {
         }
     }
 
-
+    private handleProcedureInsideDefinition(token: Token, index: number): void {
+        const prevToken = this.tokens[index - 1];
+        if (prevToken?.type === TokenType.Label) {
+            token.label = prevToken.value;
+         //   token.subType = TokenType.Procedure; // optional but useful
+            logger.info(`📌 Found method definition '${token.label}' at line ${token.line} inside CLASS/MAP`);
+        }
+    }
+    
     private handleProcedureToken(token: Token, index: number): void {
-        if (this.insideClassOrInterfaceOrMapDepth > 0) return;
+        if (this.insideClassOrInterfaceOrMapDepth > 0 ) {
+            
+            this.handleProcedureInsideDefinition(token, index);
+            return;
+        }
+
 
         const prevToken = this.tokens[index - 1];
         const isMethodImplementation = prevToken && prevToken.type === TokenType.Label && prevToken.value.includes(".");

@@ -21,7 +21,7 @@ export async function setGlobalClarionSelection(
     clarionVersion: string,
     clarionConfiguration: string
 ) {
-     logger.info("🔄 Updating global settings:", {
+    logger.info("🔄 Updating global settings:", {
         solutionFile,
         clarionPropertiesFile,
         clarionVersion,
@@ -33,6 +33,13 @@ export async function setGlobalClarionSelection(
     globalClarionPropertiesFile = clarionPropertiesFile;
     globalClarionVersion = clarionVersion;
     _globalClarionConfiguration = clarionConfiguration;
+
+    // Log the updated global variables
+    logger.info(`✅ Global variables updated:
+        - globalSolutionFile: ${globalSolutionFile || 'not set'}
+        - globalClarionPropertiesFile: ${globalClarionPropertiesFile || 'not set'}
+        - globalClarionVersion: ${globalClarionVersion || 'not set'}
+        - _globalClarionConfiguration: ${_globalClarionConfiguration || 'not set'}`);
 
     // ✅ Only save to workspace if all required values are set
     if (solutionFile && clarionPropertiesFile && clarionVersion) {
@@ -145,12 +152,19 @@ export const globalSettings = {
 
     /** ✅ Load settings from workspace.json */
     async initializeFromWorkspace() {
+        logger.info("🔄 Loading settings from workspace.json...");
 
         // ✅ Read workspace settings
         const solutionFile = workspace.getConfiguration().get<string>("clarion.solutionFile", "") || "";
         const clarionPropertiesFile = workspace.getConfiguration().get<string>("clarion.propertiesFile", "") || "";
         const clarionVersion = workspace.getConfiguration().get<string>("clarion.version", "") || "";
         const clarionConfiguration = workspace.getConfiguration().get<string>("clarion.configuration", "") || "Release";
+
+        logger.info(`🔍 Read from workspace settings:
+            - clarion.solutionFile: ${solutionFile || 'not set'}
+            - clarion.propertiesFile: ${clarionPropertiesFile || 'not set'}
+            - clarion.version: ${clarionVersion || 'not set'}
+            - clarion.configuration: ${clarionConfiguration || 'not set'}`);
 
         // ✅ Set global variables
         await setGlobalClarionSelection(solutionFile, clarionPropertiesFile, clarionVersion, clarionConfiguration);

@@ -1,12 +1,18 @@
-import { TreeDataProvider, TreeItem, Event, EventEmitter, TreeItemCollapsibleState, ThemeIcon } from 'vscode';
+import { TreeDataProvider, TreeItem, Event, EventEmitter, TreeItemCollapsibleState, ThemeIcon, Command } from 'vscode';
 import { TreeNode } from './TreeNode';
 import { ClarionSolutionInfo, ClarionProjectInfo, ClarionSourcerFileInfo } from 'common/types';
 import LoggerManager from './logger';
 import * as path from 'path';
 import { SolutionCache } from './SolutionCache';
+import { globalSolutionFile } from './globals';
 
 const logger = LoggerManager.getLogger("SolutionTreeDataProvider");
 logger.setLevel("info");
+
+// Special node type for when no solution is open
+interface NoSolutionNodeData {
+    type: 'noSolution';
+}
 
 export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     private _onDidChangeTreeData: EventEmitter<void> = new EventEmitter<void>();
@@ -23,6 +29,22 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         logger.info("🔄 Refreshing solution tree...");
         
         try {
+            // Check if a solution file is set
+            if (!globalSolutionFile) {
+                logger.info("ℹ️ No solution file set. Showing 'Open Solution' node.");
+                
+                // Create a special node for when no solution is open
+                const noSolutionNode = new TreeNode(
+                    "Open Solution",
+                    TreeItemCollapsibleState.None,
+                    { type: 'noSolution' }
+                );
+                
+                this._root = [noSolutionNode];
+                this._onDidChangeTreeData.fire();
+                return;
+            }
+            
             // Refresh the solution cache first
             await this.solutionCache.refresh();
             
@@ -61,6 +83,22 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
 
         const data = element.data;
 
+        // Handle the special "No Solution Open" node
+        if ((data as any)?.type === 'noSolution') {
+            treeItem.iconPath = new ThemeIcon('folder-opened');
+            treeItem.description = "Click to open a solution";
+            treeItem.tooltip = "No Clarion solution is currently open. Click to open one.";
+            treeItem.command = {
+                title: 'Open Solution',
+                command: 'clarion.openSolution',
+                arguments: []
+            };
+            // Make the item more prominent
+            treeItem.label = "Open Solution";
+            logger.info(`⚠️ getTreeItem(): No Solution Open node`);
+            return treeItem;
+        }
+
         if ((data as any)?.guid) {
             const project = data as ClarionProjectInfo;
             treeItem.iconPath = new ThemeIcon('project');
@@ -85,11 +123,21 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             const solution = data as ClarionSolutionInfo;
             treeItem.iconPath = new ThemeIcon('file-symlink-directory');
             treeItem.contextValue = 'clarionSolution';
+            treeItem.tooltip = "Right-click for more options";
+            
+            // Add a command to open the solution file
             treeItem.command = {
                 title: 'Open Solution File',
                 command: 'clarion.openFile',
                 arguments: [solution.path]
             };
+            
+            // Add a close button to the solution node
+            treeItem.description = "Close Solution";
+            
+            // Add a close button to the solution node's context menu
+            treeItem.contextValue = 'clarionSolution';
+            
             logger.info(`🧩 getTreeItem(): Solution – ${solution.name}`);
         }
 
@@ -99,6 +147,22 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     async getTreeItems(): Promise<TreeNode[]> {
         try {
             logger.info("🔄 Getting solution tree from cache...");
+            
+            // Check if a solution file is set
+            if (!globalSolutionFile) {
+                logger.info("ℹ️ No solution file set. Showing 'Open Solution' node.");
+                
+                // Create a special node for when no solution is open
+                const noSolutionNode = new TreeNode(
+                    "Open Solution",
+                    TreeItemCollapsibleState.None,
+                    { type: 'noSolution' }
+                );
+                
+                this._root = [noSolutionNode];
+                this._onDidChangeTreeData.fire();
+                return this._root;
+            }
             
             // Try to refresh the solution cache first
             try {
