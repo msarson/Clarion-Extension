@@ -229,6 +229,7 @@ connection.onNotification('clarion/updatePaths', async (params: {
     redirectionFile: string;
     macros: Record<string, string>;
     libsrcPaths: string[];
+    solutionFile?: string; // Add optional solutionFile parameter
 }) => {
     try {
         // Update server settings
@@ -240,12 +241,16 @@ connection.onNotification('clarion/updatePaths', async (params: {
         serverSettings.libsrcPaths = params.libsrcPaths || [];
         serverSettings.redirectionFile = params.redirectionFile || "";
 
-        // ✅ Initialize the solution manager before building the solution
-        const solutionPath = params.projectPaths?.[0];
-        if (!solutionPath) {
-            logger.error("❌ No projectPaths provided. Cannot initialize SolutionManager.");
+        // ✅ Initialize the solution manager with the specific solution file
+        if (!params.solutionFile) {
+            logger.error("❌ No solution file provided. Cannot initialize SolutionManager.");
             return;
         }
+        
+        logger.info(`🔄 Using solution file: ${params.solutionFile}`);
+        
+        // Initialize the solution manager with the specific solution file
+        await initializeSolutionManager(params.solutionFile);
 
         // Register handlers for the solution manager first, so they're available even if initialization fails
         const existingSolutionManager = SolutionManager.getInstance();
@@ -253,9 +258,6 @@ connection.onNotification('clarion/updatePaths', async (params: {
             existingSolutionManager.registerHandlers(connection);
             logger.info("✅ SolutionManager handlers registered from existing instance");
         }
-
-        // Initialize the solution manager
-        await initializeSolutionManager(solutionPath);
         
         // Register handlers again if we have a new instance
         const solutionManager = SolutionManager.getInstance();
@@ -271,8 +273,8 @@ connection.onNotification('clarion/updatePaths', async (params: {
             logger.error(`❌ Error building solution: ${buildError.message || buildError}`);
             // Create a minimal solution info to avoid null references
             globalSolution = {
-                name: path.basename(solutionPath),
-                path: solutionPath,
+                name: path.basename(params.solutionFile),
+                path: params.solutionFile,
                 projects: []
             };
         }
@@ -291,7 +293,7 @@ connection.onNotification('clarion/updatePaths', async (params: {
         if (!globalSolution) {
             globalSolution = {
                 name: "Error",
-                path: params.projectPaths?.[0] || "",
+                path: params.solutionFile || "",
                 projects: []
             };
         }
@@ -432,6 +434,27 @@ connection.onRequest('clarion/getIncludedRedirectionFiles', (params: { projectPa
     }
     
     return [];
+});
+
+// Add a handler for checking if the server is ready
+connection.onRequest('clarion/serverReady', () => {
+    logger.info("📡 Received server readiness check request");
+    
+    // Check if the solution manager is initialized
+    const solutionManager = SolutionManager.getInstance();
+    if (!solutionManager) {
+        logger.warn("⚠️ SolutionManager not initialized yet");
+        throw new Error("SolutionManager not initialized");
+    }
+    
+    // Check if the solution has been built
+    if (!globalSolution || !globalSolution.projects) {
+        logger.warn("⚠️ Solution not built yet");
+        throw new Error("Solution not built");
+    }
+    
+    logger.info("✅ Server is ready with initialized solution");
+    return true;
 });
 
 // ✅ Server Initialization

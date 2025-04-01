@@ -77,6 +77,8 @@ This extension is under **active development** and we need your **help**! Whethe
 ## Changelog (What's New in v0.5.3)
 ### BUG
 - **V0.5.2 was not working when shipped**: Updated .vscodeignore as it was not publishing packages required for extension
+- **V0.5.2 would not open a file when clicked on in solution view**
+- **V0.5.2 random  issues with startup initialization**
 
 ## Changelog (What's New in v0.5.2)
 

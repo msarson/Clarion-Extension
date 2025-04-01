@@ -179,9 +179,16 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
     logger.info("🔄 Activating Clarion extension...");
 
+    // Start the language client and wait for it to be ready
+    let clientReady = false;
     if (!client) {
         logger.info("🚀 Starting Clarion Language Server...");
-        startClientServer(context);
+        clientReady = await startClientServer(context);
+        if (!clientReady) {
+            logger.error("❌ Failed to start language client. Some features may not work correctly.");
+        }
+    } else {
+        clientReady = true;
     }
 
     // ✅ Step 1: Ensure a workspace is saved
@@ -308,13 +315,22 @@ async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: D
         logger.warn("⚠️ No solution found in settings. Solution View will not be created.");
     }
 }
-
 async function initializeSolution(context: ExtensionContext, refreshDocs: boolean = false): Promise<void> {
     logger.info("🔄 Initializing Clarion Solution...");
 
     if (!globalSolutionFile || !globalClarionPropertiesFile || !globalClarionVersion) {
         logger.warn("⚠️ Missing required settings (solution file, properties file, or version). Initialization aborted.");
         return;
+    }
+
+    // Ensure client is ready before proceeding
+    if (!client) {
+        logger.warn("⚠️ Language client not available. Attempting to start it...");
+        const clientReady = await startClientServer(context);
+        if (!clientReady) {
+            vscodeWindow.showErrorMessage("Failed to start Clarion Language Server. Solution initialization aborted.");
+            return;
+        }
     }
 
     // ✅ Get configurations from the solution file
@@ -351,16 +367,30 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
         client.sendNotification('clarion/updatePaths', {
             redirectionPaths: [globalSettings.redirectionPath],
             projectPaths: [solutionDir],
+            solutionFile: globalSolutionFile, // Send the full solution file path
             configuration: globalSettings.configuration,
             clarionVersion: globalClarionVersion,
             redirectionFile: globalSettings.redirectionFile,
             macros: globalSettings.macros,
             libsrcPaths: globalSettings.libsrcPaths
         });
-        logger.info("✅ Clarion paths/config/version sent to the language server.");
+        logger.info(`✅ Clarion paths/config/version sent to the language server. Solution file: ${globalSolutionFile}`);
+        
+        // Wait for server to process the notification
+        try {
+            // Use a custom request to ensure the server has processed the paths
+            await client.sendRequest('clarion/serverReady');
+            logger.info("✅ Server confirmed it has processed the solution information");
+        } catch (error) {
+            logger.warn(`⚠️ Error checking server readiness: ${error instanceof Error ? error.message : String(error)}`);
+            // Fall back to a timeout if the request fails
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            logger.info("⏱️ Used fallback timeout for server initialization");
+        }
+    } else {
+        logger.error("❌ Language client not available. Cannot initialize server-side solution manager.");
+        vscodeWindow.showErrorMessage("Failed to communicate with Clarion Language Server. Some features may not work correctly.");
     }
-    
-    // Wait a moment for the server to initialize the solution
     await new Promise(resolve => setTimeout(resolve, 1000));
     
     // ✅ Continue initializing the solution cache and document manager
@@ -630,10 +660,32 @@ async function registerOpenCommand(context: ExtensionContext) {
                 }
 
                 try {
-                    // 🔹 Ensure absolute path resolution
-                    let absolutePath = path.isAbsolute(filePathStr)
-                        ? filePathStr
-                        : path.join(workspace.workspaceFolders?.[0]?.uri.fsPath || "", filePathStr);
+                    let absolutePath: string;
+                    
+                    // For .clw files, use redirection to find the actual file
+                    if (filePathStr.toLowerCase().endsWith('.clw')) {
+                        logger.info(`🔍 Using SolutionCache to resolve .clw file: ${filePathStr}`);
+                        const solutionCache = SolutionCache.getInstance();
+                        const fileName = path.basename(filePathStr);
+                        
+                        // Try to find the file using redirection
+                        absolutePath = await solutionCache.findFileWithExtension(fileName);
+                        
+                        if (absolutePath && fs.existsSync(absolutePath)) {
+                            logger.info(`✅ Found file via redirection: ${absolutePath}`);
+                        } else {
+                            logger.warn(`⚠️ Redirection failed for ${fileName}, falling back to direct path resolution`);
+                            // Fall back to direct path resolution if redirection fails
+                            absolutePath = path.isAbsolute(filePathStr)
+                                ? filePathStr
+                                : path.join(workspace.workspaceFolders?.[0]?.uri.fsPath || "", filePathStr);
+                        }
+                    } else {
+                        // For non-.clw files, use direct path resolution
+                        absolutePath = path.isAbsolute(filePathStr)
+                            ? filePathStr
+                            : path.join(workspace.workspaceFolders?.[0]?.uri.fsPath || "", filePathStr);
+                    }
 
                     if (!fs.existsSync(absolutePath)) {
                         vscodeWindow.showErrorMessage(`❌ File not found: ${absolutePath}`);
@@ -1071,7 +1123,7 @@ function parseBuildOutput(output: string) {
     
     return errors;
 }
-function startClientServer(context: ExtensionContext) {
+async function startClientServer(context: ExtensionContext): Promise<boolean> {
     logger.info("Starting Clarion Language Server...");
     let serverModule = context.asAbsolutePath(path.join('out', 'server', 'src', 'server.js'));
     let debugOptions = { execArgv: ['--nolazy', '--inspect=6009'] };
@@ -1126,22 +1178,21 @@ function startClientServer(context: ExtensionContext) {
 
     client = new LanguageClient("ClarionLanguageServer", "Clarion Language Server", serverOptions, clientOptions);
 
-    // Start the client
-    const disposable = client.start();
-    
-    // Add error handling for client startup
-    context.subscriptions.push(disposable);
-    
-    // Set a timeout to check if the client is ready
-    setTimeout(() => {
-        if (client && !client.needsStart()) {
-            logger.info("✅ Language client started successfully");
-        } else {
-            logger.error("❌ Language client failed to start properly");
-            // If the client fails to start, set it to null so we can try again later
-            client = undefined;
-        }
-    }, 5000); // Check after 5 seconds
+    // Start the client and wait for it to be ready
+    try {
+        // Add error handling for client startup
+        const disposable = client.start();
+        context.subscriptions.push(disposable);
+        
+        // Wait for client to be ready
+        await client.onReady();
+        logger.info("✅ Language client started and ready");
+        return true;
+    } catch (error) {
+        logger.error(`❌ Language client failed to start: ${error instanceof Error ? error.message : String(error)}`);
+        client = undefined;
+        return false;
+    }
 }
 async function buildSolutionOrProject(buildTarget: "Solution" | "Project", project?: ClarionProjectInfo) {
     const buildConfig = {
