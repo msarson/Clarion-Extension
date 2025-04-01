@@ -67,13 +67,16 @@ This extension is under **active development** and we need your **help**! Whethe
 ## Marketplace Information
 
 - **Identifier**: `msarson.clarion-extensions`
-- **Version**: `0.5.2`
+- **Version**: `0.5.3`
 - **Published**: 2018-08-19
-- **Last Release**: 2025-03-29
+- **Last Release**: 2025-04-01
 
 [View on Marketplace](https://marketplace.visualstudio.com/items?itemName=msarson.clarion-extensions)
 
 ---
+## Changelog (What's New in v0.5.3)
+### BUG
+- **V0.5.2 was not working when shipped**: Updated .vscodeignore as it was not publishing packages required for extension
 
 ## Changelog (What's New in v0.5.2)
 
