@@ -8,7 +8,7 @@ import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
-logger.setLevel("info");
+logger.setLevel("error");
 
 /**
  * Provides goto definition functionality for Clarion files

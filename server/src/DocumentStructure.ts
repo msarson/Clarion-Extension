@@ -2,7 +2,7 @@ import { Token, TokenType } from "./ClarionTokenizer";
 import LoggerManager from "./logger";
 
 const logger = LoggerManager.getLogger("DocumentStructure");
-logger.setLevel("error");
+logger.setLevel("info");
 
 export class DocumentStructure {
     private structureStack: Token[] = [];
@@ -18,10 +18,67 @@ export class DocumentStructure {
     }
 
     /** 🚀 Process token relationships and update tokens */
+    // public process(): void {
+    //     for (let i = 0; i < this.tokens.length; i++) {
+    //         const token = this.tokens[i];
+
+    //         if (token.type === TokenType.Keyword || token.type === TokenType.ExecutionMarker) {
+    //             switch (token.value.toUpperCase()) {
+    //                 case "PROCEDURE":
+    //                     this.handleProcedureToken(token, i);
+    //                     break;
+    //                 case "ROUTINE":
+    //                     this.handleRoutineToken(token, i);
+    //                     break;
+    //                 case "CODE":
+    //                 case "DATA":
+    //                     this.handleExecutionMarker(token);
+    //                     break;
+    //             }
+    //         } else if (token.type === TokenType.Structure) {
+    //             this.handleStructureToken(token);
+    //         } else if (token.type === TokenType.EndStatement) {
+    //             this.handleEndStatementForStructure(token);
+    //         }
+    //     }
+
+    //     this.closeRemainingProcedures();
+    //     this.assignMaxLabelLengths();
+
+    //     // ✅ Step: Re-parent class method implementations
+    //     for (const token of this.tokens) {
+    //         if (token.subType === TokenType.Class) {
+    //             const classNameMatch = token.value.match(/^(\w+)\.(\w+)$/);
+    //             if (classNameMatch) {
+    //                 const [_, classLabel, _methodName] = classNameMatch;
+
+    //                 // 🔍 Find the CLASS structure with that label
+    //                 const classDef = this.tokens.find(t =>
+    //                     t.type === TokenType.Structure &&
+    //                     t.value.toUpperCase() === "CLASS" &&
+    //                     t.parent?.value === classLabel
+    //                 );
+
+    //                 // ✅ Reassign method’s parent to the owning PROCEDURE
+    //                 if (classDef && classDef.parent?.subType === TokenType.Procedure) {
+    //                     const owningProc = classDef.parent;
+
+    //                     token.parent = owningProc;
+    //                     owningProc.children = owningProc.children || [];
+    //                     owningProc.children.push(token);
+
+    //                     logger.info(`🔁 Bound class method '${token.value}' to owning procedure '${owningProc.value}'`);
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
+
     public process(): void {
         for (let i = 0; i < this.tokens.length; i++) {
             const token = this.tokens[i];
-
+    
+            // ✅ Always prioritize structure tokens first
             if (token.type === TokenType.Keyword || token.type === TokenType.ExecutionMarker) {
                 switch (token.value.toUpperCase()) {
                     case "PROCEDURE":
@@ -40,41 +97,10 @@ export class DocumentStructure {
             } else if (token.type === TokenType.EndStatement) {
                 this.handleEndStatementForStructure(token);
             }
-        }
-
-        this.closeRemainingProcedures();
-        this.assignMaxLabelLengths();
-
-        // ✅ Step: Re-parent class method implementations
-        for (const token of this.tokens) {
-            if (token.subType === TokenType.Class) {
-                const classNameMatch = token.value.match(/^(\w+)\.(\w+)$/);
-                if (classNameMatch) {
-                    const [_, classLabel, _methodName] = classNameMatch;
-
-                    // 🔍 Find the CLASS structure with that label
-                    const classDef = this.tokens.find(t =>
-                        t.type === TokenType.Structure &&
-                        t.value.toUpperCase() === "CLASS" &&
-                        t.parent?.value === classLabel
-                    );
-
-                    // ✅ Reassign method’s parent to the owning PROCEDURE
-                    if (classDef && classDef.parent?.subType === TokenType.Procedure) {
-                        const owningProc = classDef.parent;
-
-                        token.parent = owningProc;
-                        owningProc.children = owningProc.children || [];
-                        owningProc.children.push(token);
-
-                        logger.info(`🔁 Bound class method '${token.value}' to owning procedure '${owningProc.value}'`);
-                    }
-                }
-            }
+            
         }
     }
-
-
+    
     private handleExecutionMarker(token: Token): void {
         const currentProcedure = this.procedureStack[this.procedureStack.length - 1] ?? null;
         const currentRoutine = this.routineStack[this.routineStack.length - 1] ?? null;
@@ -362,40 +388,96 @@ export class DocumentStructure {
             logger.info(`📌 Found method definition '${token.label}' at line ${token.line} inside CLASS/MAP`);
         }
     }
-    
+
     private handleProcedureToken(token: Token, index: number): void {
-        if (this.insideClassOrInterfaceOrMapDepth > 0 ) {
-            
-            this.handleProcedureInsideDefinition(token, index);
-            return;
-        }
-
-
         const prevToken = this.tokens[index - 1];
-        const isMethodImplementation = prevToken && prevToken.type === TokenType.Label && prevToken.value.includes(".");
-
-        // 🧠 Always close the previous procedure/method before starting a new one
+    
+        // 🧠 Always close the previous procedure first
         const lastProc = this.procedureStack[this.procedureStack.length - 1];
-        if (lastProc && lastProc.subType === (isMethodImplementation ? TokenType.Class : TokenType.Procedure)) {
+        if (lastProc) {
             this.handleProcedureClosure(token.line - 1);
         }
-
-
-        token.subType = isMethodImplementation ? TokenType.Class : TokenType.Procedure;
+    
+        // 🧠 Determine token type based on context
+        if (this.insideClassOrInterfaceOrMapDepth > 0) {
+            // It's a declaration inside CLASS, MAP, or INTERFACE
+            const parent = this.structureStack[this.structureStack.length - 1];
+            const parentType = parent?.value.toUpperCase();
+            token.label = prevToken?.value ?? "AnonymousMethod";
+        
+            token.type = TokenType.Procedure; // ✅ Always keep as Procedure
+            if (parentType === "CLASS") {
+                token.subType = TokenType.MethodDeclaration;
+            } else if (parentType === "MAP") {
+                token.subType = TokenType.MapProcedure;
+            } else if (parentType === "INTERFACE") {
+                token.subType = TokenType.InterfaceMethod;
+            } else {
+                token.subType = TokenType.MethodDeclaration; // fallback
+            }
+        
+            token.parent = parent;
+            parent.children = parent.children || [];
+            parent.children.push(token);
+        
+            logger.info(`📌 Declared ${TokenType[token.subType]} '${token.label}' inside ${parentType} at line ${token.line}`);
+            return;
+        }
+        
+        const isMethodImpl = prevToken?.type === TokenType.Label && prevToken.value.includes(".");
+        
         token.label = prevToken?.value ?? "AnonymousProcedure";
-        // token.value = prevToken?.value ?? "AnonymousProcedure";
-
-        if (isMethodImplementation) {
-            // ⛳ Skip assigning parent — we fix that in post-processing
-        } else if (this.structureStack.length > 0) {
+        token.type = TokenType.Procedure; // ✅ Always keep as Procedure
+        token.subType = isMethodImpl ? TokenType.MethodImplementation : TokenType.GlobalProcedure;
+        
+        // Skip assigning parent for method implementations — handled in postprocessing
+        if (!isMethodImpl && this.structureStack.length > 0) {
             const parent = this.structureStack[this.structureStack.length - 1];
             token.parent = parent;
             parent.children = parent.children || [];
             parent.children.push(token);
         }
-
+        
         this.procedureStack.push(token);
+        
+        logger.info(`📌 Registered ${TokenType[token.subType]} '${token.label}' at line ${token.line}`);
+        
     }
+    
+    
+    // private handleProcedureToken(token: Token, index: number): void {
+    //     if (this.insideClassOrInterfaceOrMapDepth > 0 ) {
+            
+    //         this.handleProcedureInsideDefinition(token, index);
+    //         return;
+    //     }
+
+
+    //     const prevToken = this.tokens[index - 1];
+    //     const isMethodImplementation = prevToken && prevToken.type === TokenType.Label && prevToken.value.includes(".");
+
+    //     // 🧠 Always close the previous procedure/method before starting a new one
+    //     const lastProc = this.procedureStack[this.procedureStack.length - 1];
+    //     if (lastProc && lastProc.subType === (isMethodImplementation ? TokenType.Class : TokenType.Procedure)) {
+    //         this.handleProcedureClosure(token.line - 1);
+    //     }
+
+
+    //     token.subType = isMethodImplementation ? TokenType.Class : TokenType.Procedure;
+    //     token.label = prevToken?.value ?? "AnonymousProcedure";
+    //     // token.value = prevToken?.value ?? "AnonymousProcedure";
+
+    //     if (isMethodImplementation) {
+    //         // ⛳ Skip assigning parent — we fix that in post-processing
+    //     } else if (this.structureStack.length > 0) {
+    //         const parent = this.structureStack[this.structureStack.length - 1];
+    //         token.parent = parent;
+    //         parent.children = parent.children || [];
+    //         parent.children.push(token);
+    //     }
+
+    //     this.procedureStack.push(token);
+    // }
 
 
 

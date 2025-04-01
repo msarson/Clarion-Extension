@@ -38,7 +38,13 @@ export enum TokenType {
     ConditionalContinuation,
     ColorValue,
     StructureField,   // ✅ Field within a structure
-    StructurePrefix   // ✅ Prefix notation for structure fields (e.g., INV:Customer)
+    StructurePrefix,   // ✅ Prefix notation for structure fields (e.g., INV:Customer)
+    // ✅ New Subtypes for PROCEDURE tokens
+    GlobalProcedure,           // PROCEDURE declared at global level (with CODE)
+    MethodDeclaration,         // PROCEDURE inside a CLASS/MAP/INTERFACE (definition only, no CODE)
+    MethodImplementation,      // e.g., ThisWindow.Init PROCEDURE (with CODE)
+    MapProcedure,              // Optional: inside MAP structure
+    InterfaceMethod           // Optional: inside INTERFACE structure
 }
 
 export interface Token {
@@ -267,13 +273,13 @@ export class ClarionTokenizer {
 
 /** ✅ Ordered token types */
 const orderedTokenTypes: TokenType[] = [
-    TokenType.Comment, TokenType.ClarionDocument, TokenType.ExecutionMarker, TokenType.Label, TokenType.LineContinuation, TokenType.String, TokenType.ReferenceVariable,
+    TokenType.Directive,TokenType.Comment, TokenType.ClarionDocument, TokenType.ExecutionMarker, TokenType.Label, TokenType.LineContinuation, TokenType.String, TokenType.ReferenceVariable,
     TokenType.Type, TokenType.PointerParameter, TokenType.FieldEquateLabel, TokenType.Property,
     TokenType.PropertyFunction, TokenType.EndStatement, TokenType.Keyword, TokenType.Structure,
     // ✅ Add StructurePrefix and StructureField before other variable types
     TokenType.StructurePrefix, TokenType.StructureField,
-    TokenType.ConditionalContinuation, TokenType.Function, // ✅ Placed after Structure, before FunctionArgumentParameter
-    TokenType.FunctionArgumentParameter, TokenType.TypeAnnotation,  TokenType.Directive, TokenType.Number,
+    TokenType.ConditionalContinuation, TokenType.Function,  // ✅ Placed after Structure, before FunctionArgumentParameter
+    TokenType.FunctionArgumentParameter, TokenType.TypeAnnotation, TokenType.Number,
     TokenType.Operator, TokenType.Class, TokenType.Attribute, TokenType.Constant, TokenType.Variable,
     TokenType.ImplicitVariable, TokenType.Delimiter, TokenType.Unknown
 ];
@@ -335,7 +341,7 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.ExecutionMarker]: /^\s*(CODE|DATA)\s*$/i,  // ✅ Matches `CODE` or `DATA` only at start of line
 
     [TokenType.Function]: /\b(?:COLOR|LINK|DLL)\b(?=\s*\()/i,
-    [TokenType.Directive]: /\b(?:ASSERT|BEGIN|COMPILE|EQUATE|INCLUDE|ITEMIZE|OMIT|ONCE|SECTION|SIZE)\b(?=\s*\()/i,
+    [TokenType.Directive]: /\b(?:ASSERT|BEGIN|COMPILE|EQUATE|INCLUDE|ITEMIZE|OMIT|ONCE|SECTION|SIZE)\b(?=\s*(\(|,))/i,
     [TokenType.Property]: /\b(?:HVSCROLL|SEPARATOR|LIST|RESIZE|DEFAULT|CENTER|MAX|SYSTEM|IMM|DRIVER|PROP|PROPLIST|EVENT|CREATE|BRUSH|LEVEL|STD|CURSOR|BEEP|REJECT|CHARSET|PEN|LISTZONE|BUTTON|MSGMODE|TEXT|FREEZE|DDE|FF_|OCX|DOCK|MATCH|PAPER|DRIVEROP|DATATYPE|GradientTypes|STD|ITEM|MDI|GRAY|HLP)\b/i,
     [TokenType.PropertyFunction]: /\b(?:FORMAT|FONT|USE|ICON|STATUS|MSG|TIP|AT|PROJECT|PRE|FROM|NAME|DLL)\b(?=\s*\()/i,
     //[TokenType.Label]: /^\s*([A-Za-z_][A-Za-z0-9_:]*)\b/i,

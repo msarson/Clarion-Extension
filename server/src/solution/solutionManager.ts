@@ -10,7 +10,7 @@ import { Token } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 
 const logger = LoggerManager.getLogger("SolutionManager");
-logger.setLevel("info");
+logger.setLevel("error");
 
 export class SolutionManager {
     public solution: ClarionSolutionServer;

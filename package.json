@@ -92,7 +92,7 @@
             "activitybar": [
                 {
                     "id": "clarionViews",
-                    "title": "Clarion",
+                    "title": "Clarion Tools",
                     "icon": "images/sv57x57.png"
                 }
             ]
@@ -103,7 +103,12 @@
                     "id": "solutionView",
                     "name": "Solution View",
                     "icon": "images/sv57x57.png"
-                }
+                },
+                {
+                    "id": "clarionStructureView",
+                    "name": "Structure",
+                    "icon": "symbol-structure"
+                  }
             ]
         },
         "commands": [
@@ -120,20 +125,14 @@
             },
             {
                 "command": "clarion.openSolution",
-                "title": "Clarion: Open Solution",
-                "icon": {
-                    "light": "images/folder-open-dot.svg",
-                    "dark": "images/folder-open-dot.svg"
-                }
+                "title": "Open Solution"
+                
             },
             {
                 "command": "clarion.closeSolution",
-                "title": "Clarion: Close Solution",
-                "when": "clarion.solutionOpen",
-                "icon": {
-                    "light": "images/folder-closed.svg",
-                    "dark": "images/folder-closed.svg"
-                }
+                "title": "Close Solution",
+                "when": "clarion.solutionOpen"
+                
             },
             {
                 "command": "clarion.quickOpen",
@@ -181,14 +180,12 @@
                 {
                     "command": "clarion.openSolution",
                     "when": "view == solutionView && !clarion.solutionOpen",
-                    "group": "navigation@1",
-                    "icon": "$(folder-opened)"
+                    "group": "navigation@1"
                 },
                 {
                     "command": "clarion.closeSolution",
                     "when": "view == solutionView && clarion.solutionOpen",
-                    "group": "navigation@1",
-                    "icon": "$(close)"
+                    "group": "navigation@1"
                 }
             ]
         },

@@ -51,8 +51,11 @@ import { RedirectionFileParserServer } from './solution/redirectionFileParserSer
 import { DefinitionProvider } from './providers/DefinitionProvider';
 import path = require('path');
 import { ClarionSolutionInfo } from 'common/types';
+
+import * as fs from 'fs';
+import { URI } from 'vscode-languageserver';
 const logger = LoggerManager.getLogger("Server");
-logger.setLevel("info");
+logger.setLevel("error");
 // ✅ Initialize Providers
 
 const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider();
@@ -419,6 +422,45 @@ connection.onRequest('clarion/getIncludedRedirectionFiles', (params: { projectPa
     
     return [];
 });
+connection.onRequest('clarion/documentSymbols', async (params: { uri: string }) => {
+    let document = documents.get(params.uri);
+
+    if (!document) {
+        logger.warn(`⚠️ Document not open, attempting to locate on disk: ${params.uri}`);
+
+        try {
+            const solutionManager = SolutionManager.getInstance();
+            if (solutionManager) {
+                const fileName = decodeURIComponent(params.uri.split('/').pop() || '');
+                const filePath = solutionManager.findFileWithExtension(fileName);
+
+                if (filePath && fs.existsSync(filePath)) {
+                    const fileContent = fs.readFileSync(filePath, 'utf8');
+                    document = TextDocument.create(params.uri, 'clarion', 1, fileContent);
+                    logger.info(`✅ Successfully loaded file from disk: ${filePath}`);
+                } else {
+                    logger.warn(`⚠️ Could not find file on disk: ${fileName}`);
+                    return [];
+                }
+            } else {
+                logger.warn(`⚠️ No SolutionManager instance available for symbol request.`);
+                return [];
+            }
+        } catch (err) {
+            logger.error(`❌ Error reading file for documentSymbols: ${params.uri} — ${err instanceof Error ? err.message : String(err)}`);
+            return [];
+        }
+    }
+
+    logger.info(`📜 [Server] Handling documentSymbols request for ${params.uri}`);
+    const tokens = getTokens(document);
+    const symbols = clarionDocumentSymbolProvider.provideDocumentSymbols(tokens, params.uri);
+    logger.info(`✅ [Server] Returning ${symbols.length} symbols`);
+    return symbols;
+});
+
+
+
 
 // ✅ Server Initialization
 connection.onInitialize((params: InitializeParams): InitializeResult => {

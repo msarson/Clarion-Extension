@@ -10,6 +10,7 @@ import { ClarionDocumentLinkProvider } from './providers/documentLinkProvier';
 import { DocumentManager } from './documentManager';
 
 import { SolutionTreeDataProvider } from './SolutionTreeDataProvider';
+import { StructureViewProvider } from './StructureViewProvider';
 import { TreeNode } from './TreeNode';
 import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile, setGlobalClarionSelection } from './globals';
 import * as buildTasks from './buildTasks';
@@ -19,10 +20,12 @@ import { SolutionCache } from './SolutionCache';
 import { ClarionProjectInfo } from 'common/types';
 
 const logger = LoggerManager.getLogger("Extension");
-logger.setLevel("info");
+logger.setLevel("error");
 let client: LanguageClient | undefined;
 let treeView: TreeView<TreeNode> | undefined;
 let solutionTreeDataProvider: SolutionTreeDataProvider | undefined;
+let structureViewProvider: StructureViewProvider | undefined;
+let structureView: TreeView<any> | undefined;
 let documentManager: DocumentManager | undefined;
 
 let configStatusBarItem: StatusBarItem;
@@ -304,6 +307,11 @@ export async function activate(context: ExtensionContext): Promise<void> {
     context.subscriptions.push(...disposables);
 
     context.subscriptions.push(
+        // Register the goToSymbol command
+        commands.registerCommand('clarion.goToSymbol', (uri: Uri, range: Range) => {
+            vscodeWindow.showTextDocument(uri, { selection: range });
+        }),
+        
         // Add solution build command
         commands.registerCommand('clarion.buildSolution', async () => {
             // Call the existing build function with solution as target
@@ -826,6 +834,33 @@ async function createSolutionTreeView() {
         logger.info("✅ Solution tree view successfully registered and populated.");
     } catch (error) {
         logger.error("❌ Error registering solution tree view:", error);
+    }
+    
+    // Create the structure view if it doesn't exist
+    await createStructureView();
+}
+
+async function createStructureView() {
+    // If the structure view already exists, just refresh its data
+    if (structureView && structureViewProvider) {
+        logger.info("🔄 Refreshing existing structure view...");
+        structureViewProvider.refresh();
+        return;
+    }
+
+    // Create the structure view provider
+    structureViewProvider = new StructureViewProvider();
+
+    try {
+        // Create the tree view only if it doesn't exist
+        structureView = vscodeWindow.createTreeView('clarionStructureView', {
+            treeDataProvider: structureViewProvider,
+            showCollapseAll: true
+        });
+
+        logger.info("✅ Structure view successfully registered.");
+    } catch (error) {
+        logger.error("❌ Error registering structure view:", error);
     }
 }
 

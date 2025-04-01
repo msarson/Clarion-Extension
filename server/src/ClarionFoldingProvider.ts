@@ -21,8 +21,12 @@ class ClarionFoldingProvider {
             t.subType === TokenType.Procedure ||
             t.subType === TokenType.Structure ||
             t.subType === TokenType.Routine ||
-            t.subType === TokenType.Class
+            t.subType === TokenType.Class ||
+            t.subType === TokenType.MapProcedure ||         // <-- Add this
+            t.subType === TokenType.InterfaceMethod ||      // <-- Optional: INTERFACE methods
+            t.subType === TokenType.MethodDeclaration       // <-- Optional: CLASS methods
         );
+        
     
         // 🔍 Infer missing finishesAt for PROCEDUREs
         for (let i = 0; i < foldableTokens.length; i++) {
@@ -71,79 +75,78 @@ class ClarionFoldingProvider {
     }
     
 
-    /** 🔹 Recursively process structures, procedures, and routines */
     private processFolding(token: Token): void {
         if (!token.finishesAt || token.line >= token.finishesAt) {
             return; // Skip invalid or single-line elements
         }
-
+    
+        // Only fold these subtypes:
+        const foldableSubTypes = [
+            TokenType.Procedure,
+            TokenType.GlobalProcedure,
+            TokenType.MethodImplementation,
+            TokenType.Routine,
+            TokenType.Class,
+            TokenType.Structure
+        ];
+    
+        if (token.subType === undefined || !foldableSubTypes.includes(token.subType)) {
+            return;
+        }
+    
         let startLine = token.line;
-
-        // ✅ Fold entire PROCEDURE block
-        if (token.subType === TokenType.Procedure || token.subType === TokenType.Class) {
-
-            this.foldingRanges.push({
-                startLine: token.line,
-                endLine: token.finishesAt,
-                kind: FoldingRangeKind.Region
-            });
-
-            logger.info(`✅ [FoldingProvider] Folded entire PROCEDURE '${token.value}' from Line ${token.line} to ${token.finishesAt}`);
-
-            // ✅ Also fold from the `CODE` statement if present
-            if (token.executionMarker) {
-                startLine = token.executionMarker.line;
-                this.foldingRanges.push({
-                    startLine,
-                    endLine: token.finishesAt,
-                    kind: FoldingRangeKind.Region
-                });
-                logger.info(`✅ [FoldingProvider] PROCEDURE '${token.value}' execution folded from Line ${startLine} to ${token.finishesAt}`);
-            }
-        }
-
-        // ✅ Fold entire ROUTINE block
-        else if (token.subType === TokenType.Routine) {
-            this.foldingRanges.push({
-                startLine: token.line,
-                endLine: token.finishesAt,
-                kind: FoldingRangeKind.Region
-            });
-
-            logger.info(`✅ [FoldingProvider] Folded entire ROUTINE '${token.value}' from Line ${token.line} to ${token.finishesAt}`);
-
-            // ✅ If the routine has local DATA, fold from DATA or CODE
-            if (token.hasLocalData) {
-                startLine = token.executionMarker ? token.executionMarker.line : token.line;
-                this.foldingRanges.push({
-                    startLine,
-                    endLine: token.finishesAt,
-                    kind: FoldingRangeKind.Region
-                });
-                logger.info(`✅ [FoldingProvider] ROUTINE '${token.value}' execution folded from Line ${startLine} to ${token.finishesAt}`);
-            } 
-            // ✅ If inferred CODE, start from the declaration
-            else if (token.inferredCode) {
-                this.foldingRanges.push({
-                    startLine: token.line,
-                    endLine: token.finishesAt,
-                    kind: FoldingRangeKind.Region
-                });
-                logger.info(`✅ [FoldingProvider] ROUTINE '${token.value}' with inferred CODE folded from Line ${token.line} to ${token.finishesAt}`);
-            }
-        }
-
-        // ✅ Handle STRUCTURES (CLASS, MAP, INTERFACE, etc.)
-        else if (token.subType === TokenType.Structure) {
+    
+        this.foldingRanges.push({
+            startLine,
+            endLine: token.finishesAt,
+            kind: FoldingRangeKind.Region
+        });
+    
+        logger.info(`✅ [FoldingProvider] Folded '${token.value}' (${TokenType[token.subType]}) from Line ${token.line} to ${token.finishesAt}`);
+    
+        // ✅ Fold CODE block if applicable
+        if (
+            (token.subType === TokenType.Procedure ||
+             token.subType === TokenType.GlobalProcedure ||
+             token.subType === TokenType.MethodImplementation ||
+             token.subType === TokenType.Routine) &&
+            token.executionMarker
+        ) {
+            startLine = token.executionMarker.line;
+    
             this.foldingRanges.push({
                 startLine,
                 endLine: token.finishesAt,
                 kind: FoldingRangeKind.Region
             });
-
-            logger.info(`✅ [FoldingProvider] Folded STRUCTURE '${token.value}' from Line ${token.line} to ${token.finishesAt}`);
+    
+            logger.info(`✅ [FoldingProvider] Execution fold for '${token.value}' from Line ${startLine} to ${token.finishesAt}`);
         }
-
+    
+        // ✅ Extra fold if routine has local DATA
+        if (token.subType === TokenType.Routine && token.hasLocalData) {
+            startLine = token.executionMarker ? token.executionMarker.line : token.line;
+    
+            this.foldingRanges.push({
+                startLine,
+                endLine: token.finishesAt,
+                kind: FoldingRangeKind.Region
+            });
+    
+            logger.info(`✅ [FoldingProvider] ROUTINE '${token.value}' with local DATA folded from Line ${startLine} to ${token.finishesAt}`);
+        }
+    
+        // ✅ Extra fold if routine has inferred CODE (even without DATA)
+        if (token.subType === TokenType.Routine && token.inferredCode) {
+            this.foldingRanges.push({
+                startLine: token.line,
+                endLine: token.finishesAt,
+                kind: FoldingRangeKind.Region
+            });
+    
+            logger.info(`✅ [FoldingProvider] ROUTINE '${token.value}' with inferred CODE folded from Line ${token.line} to ${token.finishesAt}`);
+        }
+    
         // ✅ Recursively process children
         if (token.children && token.children.length > 0) {
             for (const child of token.children) {
@@ -151,6 +154,8 @@ class ClarionFoldingProvider {
             }
         }
     }
+    
+    
 
     /** 🔹 Process REGIONS separately */
     private foldRegions(): void {
