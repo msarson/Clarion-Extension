@@ -6,7 +6,7 @@
 - [Features](#features)
 - [Installation](#installation)
 - [Marketplace](#marketplace-information)
-- [Changelog](#changelog-whats-new-in-v052)
+- [Changelog](#changelog-whats-new-in-v054)
 - [Getting Started](#getting-started)
 - [Troubleshooting](#troubleshooting)
 - [Contributing and Feedback](#contributing-and-feedback)
@@ -43,6 +43,9 @@ This extension is under **active development** and we need your **help**! Whethe
 - **New Document Formatter**: Format Clarion source files with `Shift+Alt+F`.
 - **Token Caching**: Improves performance by caching tokens unless the document changes.
 - **Updated Folding and Symbol Provider**: Provides better structure recognition.
+- **Welcome Screen**: Easily open or reopen Clarion solutions in your workspace.
+- **Multi-Solution Workspace Support**: Open and manage multiple Clarion solutions in the same VS Code workspace.
+- **Clarion Tools Sidebar**: A dedicated view in the activity bar for managing solutions, projects, and files.
 
 ---
 
@@ -67,13 +70,28 @@ This extension is under **active development** and we need your **help**! Whethe
 ## Marketplace Information
 
 - **Identifier**: `msarson.clarion-extensions`
-- **Version**: `0.5.2`
+- **Version**: `0.5.4`
 - **Published**: 2018-08-19
-- **Last Release**: 2025-03-29
+- **Last Release**: 2025-04-02
 
 [View on Marketplace](https://marketplace.visualstudio.com/items?itemName=msarson.clarion-extensions)
 
 ---
+
+## Changelog (What's New in v0.5.4)
+
+### Bug Fix
+- **Missing Packaged Files**: Fixed an issue where critical files were excluded due to an incorrect setting in `.vscodeignore`, causing required modules not to be bundled with the extension.
+
+### New
+- **Clarion Tools View**: A new sidebar view titled **Clarion Tools** is now available in the Activity Bar for quick access to solutions and features.
+- **Welcome Screen**: Improved user experience with a welcome screen for opening or reopening Clarion solutions.
+- **Multi-Solution Support**: Workspaces can now contain **multiple Clarion solutions**.
+
+### Fixes
+- **Build Actions**: Fixed issues where **Build Solution** and **Build Project** could fail unexpectedly.
+- **Problem Panel Integration**: Compilation problems are now correctly displayed in the **Problems panel**.
+- **Solution Closing**: You can now close solutions from the Solution View.
 
 ## Changelog (What's New in v0.5.2)
 
@@ -87,8 +105,6 @@ This extension is under **active development** and we need your **help**! Whethe
 ### Bug Fixes and Feature Improvements
 - **Fixed folding behavior**: Resolved an issue where `MODULE` was incorrectly detected as a foldable region within class definitions.
 - **Enhanced symbol provider**: Major improvements to the Outline view, with better symbol organization and handling for various Clarion structures.
-
-
 
 ## Changelog (What's New in v0.5.0?)
 
@@ -165,7 +181,7 @@ If you use this extension and find it useful, please consider contributing back!
 This extension builds upon the work of:
 - [Mark Goldberg](https://github.com/MarkGoldberg) – Code folding.
 - [Allen Zhu](https://github.com/celeron533) – Document Outline support.
-- **Brahn Partridge** (1974-2021) – Early work on textmate language definitions.
+- **Brahn Partridge** (1974–2021) – Early work on textmate language definitions.
 
 ---
 

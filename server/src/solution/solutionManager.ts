@@ -276,6 +276,7 @@ export class SolutionManager {
                     type: project.type,
                     path: project.path,
                     guid: project.guid,
+                    filename: project.filename,
                     sourceFiles: (project.sourceFiles || []).map(file => {
                         if (!file) {
                             logger.warn(`⚠️ Found null or undefined source file in project ${project.name}`);
@@ -286,7 +287,8 @@ export class SolutionManager {
                                     name: project.name,
                                     type: project.type,
                                     path: project.path,
-                                    guid: project.guid
+                                    guid: project.guid,
+                                    filename: project.filename
                                 }
                             };
                         }
@@ -297,7 +299,8 @@ export class SolutionManager {
                                 name: project.name,
                                 type: project.type,
                                 path: project.path,
-                                guid: project.guid
+                                guid: project.guid,
+                                filename: project.filename
                             }
                         };
                     })

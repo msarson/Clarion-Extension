@@ -37,6 +37,12 @@
         "fushnisoft.clarion"
     ],
     "contributes": {
+        "submenus": [
+            {
+                "id": "clarion.solutionMenu",
+                "label": "Solution"
+            }
+        ],
         "problemMatchers": [
             {
                 "name": "clarionBuildMatcher",
@@ -108,7 +114,7 @@
                     "id": "clarionStructureView",
                     "name": "Structure",
                     "icon": "symbol-structure"
-                  }
+                }
             ]
         },
         "commands": [
@@ -125,14 +131,24 @@
             },
             {
                 "command": "clarion.openSolution",
-                "title": "Open Solution"
-                
+                "title": "Open Solution",
+                "icon": "$(folder-opened)"
+            },
+            {
+                "command": "clarion.openSolutionFromList",
+                "title": "Open Solution List",
+                "icon": "$(list-selection)"
+            },
+            {
+                "command": "clarion.openSolutionMenu",
+                "title": "Open Solution...",
+                "icon": "$(folder-opened)"
             },
             {
                 "command": "clarion.closeSolution",
                 "title": "Close Solution",
-                "when": "clarion.solutionOpen"
-                
+                "when": "clarion.solutionOpen",
+                "icon": "$(close)"
             },
             {
                 "command": "clarion.quickOpen",
@@ -201,9 +217,48 @@
                     "command": "clarion.closeSolution",
                     "when": "view == solutionView && clarion.solutionOpen",
                     "group": "navigation@1"
+                },
+                {
+                    "command": "clarion.openSolutionFromList",
+                    "when": "view == solutionView",
+                    "group": "navigation@2"
+                }
+            ],
+            "commandPalette": [
+                {
+                    "command": "clarion.openSolutionFromList",
+                    "when": "true"
+                },
+                {
+                    "command": "clarion.openSolutionMenu",
+                    "when": "false"
+                }
+            ],
+            "viewContainer/context": [
+                {
+                    "submenu": "clarion.solutionMenu",
+                    "when": "viewContainer == clarionViews",
+                    "group": "navigation@1"
+                }
+            ],
+            "clarion.solutionMenu": [
+                {
+                    "command": "clarion.openSolution",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "clarion.openSolutionFromList",
+                    "group": "navigation@2"
                 }
             ]
         },
+        "viewsWelcome": [
+            {
+                "view": "solutionView",
+                "contents": "No solution is currently open.\n[Open Solution](command:clarion.openSolution)\n[Open Solution from List](command:clarion.openSolutionFromList)\n[Getting Started](https://github.com/msarson/Clarion-Extension/blob/master/GettingStarted.md) | [Report an Issue](https://github.com/msarson/Clarion-Extension/issues)",
+                "when": "!clarion.solutionOpen"
+            }
+        ],
         "snippets": [
             {
                 "language": "clarion",

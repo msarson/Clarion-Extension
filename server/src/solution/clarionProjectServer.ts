@@ -18,7 +18,8 @@ export class ClarionProjectServer {
         public name: string,
         public type: string,
         public path: string,
-        public guid: string
+        public guid: string,
+        public filename: string = `${name}.cwproj`
     ) {
         logger.info(`📁 Initializing ClarionProjectServer: ${name}`);
     }

@@ -235,8 +235,10 @@ export async function activate(context: ExtensionContext): Promise<void> {
     // Register commands with workspace trust check
     const commandsRequiringTrust = [
         { id: "clarion.openSolution", handler: openClarionSolution.bind(null, context) },
+        { id: "clarion.openSolutionFromList", handler: openSolutionFromList.bind(null, context) },
         { id: "clarion.closeSolution", handler: closeClarionSolution.bind(null, context) },
-        { id: "clarion.setConfiguration", handler: setConfiguration }
+        { id: "clarion.setConfiguration", handler: setConfiguration },
+        { id: "clarion.openSolutionMenu", handler: async () => Promise.resolve() } // Empty handler for the submenu
     ];
 
     commandsRequiringTrust.forEach(command => {
@@ -275,6 +277,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
     if (workspace.isTrusted && !isRefreshingRef.value) {
         await refreshOpenDocuments();
 
+        // Initialize the solution open context variable
+        await commands.executeCommand("setContext", "clarion.solutionOpen", !!globalSolutionFile);
+        
         // Always create the solution tree view, even if no solution is open
         await createSolutionTreeView();
 
@@ -834,7 +839,6 @@ async function registerOpenCommand(context: ExtensionContext) {
         );
     }
 }
-
 async function createSolutionTreeView() {
     // ✅ If the tree view already exists, just refresh its data
     if (treeView && solutionTreeDataProvider) {
@@ -928,6 +932,76 @@ export async function closeClarionSolution(context: ExtensionContext) {
         vscodeWindow.showErrorMessage(`Error closing Clarion solution: ${errMessage}`);
     }
 }
+/**
+ * Opens a solution from the list of available solutions in the workspace
+ * If a solution is already open, it will be closed first
+ */
+export async function openSolutionFromList(context: ExtensionContext) {
+    try {
+        // Get the list of solutions from workspace settings
+        const config = workspace.getConfiguration("clarion");
+        const solutions = config.get<ClarionSolutionSettings[]>("solutions", []);
+        
+        // Filter out the current solution if it's open
+        const otherSolutions = solutions.filter(s => s.solutionFile !== globalSolutionFile);
+        
+        // If there are no other solutions, show the regular open dialog
+        if (otherSolutions.length === 0) {
+            // No other solutions found, redirect to regular open solution dialog
+            vscodeWindow.showInformationMessage("No other solutions found. Opening solution selection dialog.");
+            await openClarionSolution(context);
+            return;
+        }
+        
+        // Create quick pick items for the solutions
+        const quickPickItems = otherSolutions.map(s => ({
+            label: `$(file) ${path.basename(s.solutionFile)}`,
+            description: path.dirname(s.solutionFile),
+            solution: s
+        }));
+        
+        // Show the quick pick
+        const selectedItem = await vscodeWindow.showQuickPick(quickPickItems, {
+            placeHolder: "Select a solution to open",
+        });
+        
+        if (!selectedItem) {
+            return; // User cancelled
+        }
+        
+        // Check if a solution is already open
+        if (globalSolutionFile) {
+            logger.info(`🔄 Closing current solution before opening: ${selectedItem.solution.solutionFile}`);
+            await closeClarionSolution(context);
+        }
+        
+        // Open the selected solution
+        logger.info(`📂 Opening solution: ${selectedItem.solution.solutionFile}`);
+        
+        // Set environment variable for the server to use
+        process.env.CLARION_SOLUTION_FILE = selectedItem.solution.solutionFile;
+        logger.info(`✅ Set CLARION_SOLUTION_FILE environment variable: ${selectedItem.solution.solutionFile}`);
+        
+        // Set global variables
+        await setGlobalClarionSelection(
+            selectedItem.solution.solutionFile,
+            selectedItem.solution.propertiesFile,
+            selectedItem.solution.version,
+            selectedItem.solution.configuration
+        );
+        
+        // Initialize the Solution
+        await initializeSolution(context, true);
+        
+        // Mark solution as open
+        await commands.executeCommand("setContext", "clarion.solutionOpen", true);
+        vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(selectedItem.solution.solutionFile)}`);
+    } catch (error) {
+        const errMessage = error instanceof Error ? error.message : String(error);
+        logger.error("❌ Error opening solution from list:", error);
+        vscodeWindow.showErrorMessage(`Error opening Clarion solution: ${errMessage}`);
+    }
+}
 
 export async function openClarionSolution(context: ExtensionContext) {
     try {
@@ -991,6 +1065,7 @@ export async function openClarionSolution(context: ExtensionContext) {
                 
                 // Mark solution as open
                 await commands.executeCommand("setContext", "clarion.solutionOpen", true);
+                
                 vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(selectedItem.solution.solutionFile)}`);
                 
                 return;
@@ -1073,6 +1148,7 @@ export async function openClarionSolution(context: ExtensionContext) {
 
         // ✅ Step 6: Mark solution as open
         await commands.executeCommand("setContext", "clarion.solutionOpen", true);
+        
         vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(globalSolutionFile)}`);
 
     } catch (error) {

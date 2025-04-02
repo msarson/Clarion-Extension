@@ -28,7 +28,8 @@ export async function buildClarionSolution(): Promise<ClarionSolutionInfo> {
                 name: project.name,
                 type: project.type,
                 path: project.path,
-                guid: project.guid
+                guid: project.guid,
+                filename: project.filename
             }
         }));
 
@@ -38,6 +39,7 @@ export async function buildClarionSolution(): Promise<ClarionSolutionInfo> {
             type: project.type,
             path: project.path,
             guid: project.guid,
+            filename: project.filename,
             sourceFiles
         };
     });

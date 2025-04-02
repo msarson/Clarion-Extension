@@ -241,8 +241,9 @@ export function prepareBuildParameters(buildConfig: {
         logger.info(`🔹 Project directory: ${projectDir}`);
         
         // Explicitly specify the project file to build
-        const projectFile = path.basename(buildConfig.selectedProjectPath);
-        buildArgs.push(`"${buildConfig.selectedProjectPath}"`);
+        const projectFile = buildConfig.projectObject?.filename || path.basename(buildConfig.selectedProjectPath);
+        const projectFilePath = path.join(buildConfig.selectedProjectPath, projectFile);
+        buildArgs.push(`"${projectFilePath}"`);
         logger.info(`🔹 Project file: ${projectFile}`);
     }
 
@@ -288,7 +289,7 @@ export async function executeBuildTask(params: {
         // Show a more specific message based on what's being built
         const buildTypeMessage = buildTarget === "Solution"
             ? `🔄 Building Clarion Solution: ${targetName}`
-            : `🔄 Building Clarion Project: ${targetName}.cwproj`;
+            : `🔄 Building Clarion Project: ${targetName}`;
         
         window.showInformationMessage(buildTypeMessage);
 
@@ -407,7 +408,7 @@ function processTaskCompletion(event: TaskProcessEndEvent, buildLogPath: string,
         // Show success message with target details
         const successMessage = buildTarget === "Solution"
             ? `✅ Building Clarion Solution Complete: ${targetName}`
-            : `✅ Building Clarion Project Complete: ${targetName}.cwproj`;
+            : `✅ Building Clarion Project Complete: ${targetName}`;
             
         window.showInformationMessage(successMessage);
     }
