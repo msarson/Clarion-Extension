@@ -34,7 +34,8 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 
 import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
 
-import { ClarionTokenizer, Token } from './ClarionTokenizer';
+import { Token } from './ClarionTokenizer';
+import { TokenCache } from './TokenCache';
 
 import LoggerManager from './logger';
 import ClarionFormatter from './ClarionFormatter';
@@ -47,32 +48,30 @@ import { ClarionSolutionServer } from './solution/clarionSolutionServer';
 import { buildClarionSolution, initializeSolutionManager } from './solution/buildClarionSolution';
 import { SolutionManager } from './solution/solutionManager';
 import { RedirectionFileParserServer } from './solution/redirectionFileParserServer';
+import { DefinitionProvider } from './providers/DefinitionProvider';
 import path = require('path');
 import { ClarionSolutionInfo } from 'common/types';
+
+import * as fs from 'fs';
+import { URI } from 'vscode-languageserver';
 const logger = LoggerManager.getLogger("Server");
-logger.setLevel("info");
+logger.setLevel("error");
 // ✅ Initialize Providers
 
 const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider();
+const definitionProvider = new DefinitionProvider();
 
 // ✅ Create Connection and Documents Manager
 const connection = createConnection(ProposedFeatures.all);
 const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
 let globalSolution: ClarionSolutionInfo | null = null;
 
-// ✅ Global Token Cache
-interface CachedTokenData {
-    version: number;
-    tokens: Token[];
-}
-
-const tokenCache = new Map<string, CachedTokenData>();
+// ✅ Initialize the token cache
+const tokenCache = TokenCache.getInstance();
 
 export let globalClarionSettings: any = {};
 
 // ✅ Token Cache for Performance
-
-
 
 let debounceTimeout: NodeJS.Timeout | null = null;
 /**
@@ -81,17 +80,7 @@ let debounceTimeout: NodeJS.Timeout | null = null;
 const parsedDocuments = new Map<string, boolean>(); // Track parsed state per document
 
 function getTokens(document: TextDocument): Token[] {
-    const cached = tokenCache.get(document.uri);
-    if (cached && cached.version === document.version) {
-        logger.info(`🟢 Using cached tokens for ${document.uri} (version ${document.version})`);
-        return cached.tokens;
-    }
-
-    logger.info(`🟢 Running tokenizer for ${document.uri} (version ${document.version})`);
-    const tokenizer = new ClarionTokenizer(document.getText());
-    const tokens = tokenizer.tokenize();
-    tokenCache.set(document.uri, { version: document.version, tokens });
-    return tokens;
+    return tokenCache.getTokens(document);
 }
 
 
@@ -120,7 +109,7 @@ connection.onFoldingRanges((params: FoldingRangeParams) => {
 documents.onDidChangeContent(event => {
     const document = event.document;
 
-    tokenCache.delete(document.uri); // 🔥 Always delete immediately
+    tokenCache.clearTokens(document.uri); // 🔥 Always clear immediately
 
     if (debounceTimeout) clearTimeout(debounceTimeout);
 
@@ -216,8 +205,8 @@ documents.onDidSave(event => {
 documents.onDidClose(event => {
     logger.info(`🗑️  [CACHE CLEAR] Removing cached data for ${event.document.uri}`);
 
-    // ✅ Remove tokens from both caches to free memory
-    tokenCache.delete(event.document.uri);
+    // ✅ Remove tokens from cache to free memory
+    tokenCache.clearTokens(event.document.uri);
 });
 
 
@@ -229,6 +218,7 @@ connection.onNotification('clarion/updatePaths', async (params: {
     redirectionFile: string;
     macros: Record<string, string>;
     libsrcPaths: string[];
+    solutionFilePath?: string; // Add optional solution file path
 }) => {
     try {
         // Update server settings
@@ -239,6 +229,14 @@ connection.onNotification('clarion/updatePaths', async (params: {
         serverSettings.macros = params.macros || {};
         serverSettings.libsrcPaths = params.libsrcPaths || [];
         serverSettings.redirectionFile = params.redirectionFile || "";
+        serverSettings.solutionFilePath = params.solutionFilePath || ""; // Store solution file path
+
+        // Log the solution file path
+        if (params.solutionFilePath) {
+            logger.info(`🔍 Received solution file path: ${params.solutionFilePath}`);
+        } else {
+            logger.warn("⚠️ No solution file path provided in updatePaths notification");
+        }
 
         // ✅ Initialize the solution manager before building the solution
         const solutionPath = params.projectPaths?.[0];
@@ -433,6 +431,45 @@ connection.onRequest('clarion/getIncludedRedirectionFiles', (params: { projectPa
     
     return [];
 });
+connection.onRequest('clarion/documentSymbols', async (params: { uri: string }) => {
+    let document = documents.get(params.uri);
+
+    if (!document) {
+        logger.warn(`⚠️ Document not open, attempting to locate on disk: ${params.uri}`);
+
+        try {
+            const solutionManager = SolutionManager.getInstance();
+            if (solutionManager) {
+                const fileName = decodeURIComponent(params.uri.split('/').pop() || '');
+                const filePath = solutionManager.findFileWithExtension(fileName);
+
+                if (filePath && fs.existsSync(filePath)) {
+                    const fileContent = fs.readFileSync(filePath, 'utf8');
+                    document = TextDocument.create(params.uri, 'clarion', 1, fileContent);
+                    logger.info(`✅ Successfully loaded file from disk: ${filePath}`);
+                } else {
+                    logger.warn(`⚠️ Could not find file on disk: ${fileName}`);
+                    return [];
+                }
+            } else {
+                logger.warn(`⚠️ No SolutionManager instance available for symbol request.`);
+                return [];
+            }
+        } catch (err) {
+            logger.error(`❌ Error reading file for documentSymbols: ${params.uri} — ${err instanceof Error ? err.message : String(err)}`);
+            return [];
+        }
+    }
+
+    logger.info(`📜 [Server] Handling documentSymbols request for ${params.uri}`);
+    const tokens = getTokens(document);
+    const symbols = clarionDocumentSymbolProvider.provideDocumentSymbols(tokens, params.uri);
+    logger.info(`✅ [Server] Returning ${symbols.length} symbols`);
+    return symbols;
+});
+
+
+
 
 // ✅ Server Initialization
 connection.onInitialize((params: InitializeParams): InitializeResult => {
@@ -444,8 +481,38 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
             documentSymbolProvider: true,
             documentFormattingProvider: true,
             colorProvider: true
+            //definitionProvider: true
         }
     };
+});
+
+// Handle definition requests
+connection.onDefinition(async (params) => {
+    logger.info(`📂 Received definition request for: ${params.textDocument.uri} at position ${params.position.line}:${params.position.character}`);
+    
+    if (!serverInitialized) {
+        logger.info(`⚠️ [DELAY] Server not initialized yet, delaying definition request`);
+        return null;
+    }
+    
+    const document = documents.get(params.textDocument.uri);
+    if (!document) {
+        logger.info(`⚠️ Document not found: ${params.textDocument.uri}`);
+        return null;
+    }
+    
+    try {
+        const definition = await definitionProvider.provideDefinition(document, params.position);
+        if (definition) {
+            logger.info(`✅ Found definition for ${params.textDocument.uri}`);
+        } else {
+            logger.info(`⚠️ No definition found for ${params.textDocument.uri}`);
+        }
+        return definition;
+    } catch (error) {
+        logger.error(`❌ Error providing definition: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+    }
 });
 
 export let serverInitialized = false;

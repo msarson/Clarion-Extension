@@ -31,7 +31,8 @@ const clarionStructureKindMap: Record<string, SymbolKind> = {
     TOOLBAR: SymbolKind.Object,         // 🧱
     MENUBAR: SymbolKind.Object,         // 🧱
     MENU: SymbolKind.Enum,              // 📜
-    OPTION: SymbolKind.Constant         // 🔘
+    OPTION: SymbolKind.Constant,         // 🔘
+    ROUTINE: SymbolKind.Method
 };
 export class ClarionDocumentSymbolProvider {
     classSymbolMap: Map<string, DocumentSymbol> = new Map();
@@ -47,26 +48,43 @@ export class ClarionDocumentSymbolProvider {
         }
         this.classSymbolMap.clear();
         const symbols: DocumentSymbol[] = [];
-        const parentStack: DocumentSymbol[] = [];
+
+        // Enhanced parent stack that tracks finishesAt for each symbol
+        const parentStack: Array<{ symbol: DocumentSymbol, finishesAt: number | undefined }> = [];
         let currentStructure: DocumentSymbol | null = null;
-
-
         let currentProcedure: DocumentSymbol | null = null;
         let currentClassImplementation: DocumentSymbol | null = null;
         let insideDefinitionBlock = false;
+        let lastProcessedLine = -1;
 
+        // Track if we have method implementations in the file
+        let hasMethodImplementations = false;
 
         for (let i = 0; i < tokens.length; i++) {
             const token = tokens[i];
             const { type, value, line, subType, finishesAt, executionMarker } = token;
+
+            // Check if we've moved to a new line
+            if (line > lastProcessedLine) {
+                // Check if any structures should be popped based on finishesAt
+                this.checkAndPopCompletedStructures(parentStack, line, symbols);
+
+                // Update current structure and procedure references
+                currentStructure = parentStack.length > 0 ? parentStack[parentStack.length - 1].symbol : null;
+
+                // Update the procedure reference if the current structure is a procedure
+                currentProcedure = currentStructure?.kind === ClarionSymbolKind.Procedure ? currentStructure : null;
+
+                lastProcessedLine = line;
+            }
+
             if (executionMarker?.value.toUpperCase() === "CODE") {
                 insideDefinitionBlock = false;
             }
 
             if (type === TokenType.Structure) {
-
                 this.handleStructureToken(tokens, i, symbols, parentStack, currentStructure);
-                currentStructure = parentStack[parentStack.length - 1] ?? null;
+                currentStructure = parentStack.length > 0 ? parentStack[parentStack.length - 1].symbol : null;
                 continue;
             }
             if (type === TokenType.PropertyFunction && value.toUpperCase() === "PROJECT") {
@@ -79,11 +97,45 @@ export class ClarionDocumentSymbolProvider {
                 const isImplementation = token.executionMarker?.value.toUpperCase() === "CODE";
                 if (isImplementation || token.finishesAt !== undefined) {
                     const result = this.handleProcedureOrClassToken(tokens, i, symbols, currentStructure);
-                    currentProcedure = result.procedureSymbol;
-                    currentClassImplementation = result.classImplementation;
+
+                    // Check if this is a method implementation (e.g., ThisWindow.Init)
+                    const isMethodImplementation = (result.procedureSymbol as any)._isMethodImplementation;
+
+                    if (isMethodImplementation) {
+                        // For method implementations, we don't change the current procedure
+                        // This ensures method implementations don't break procedure scope
+                        currentClassImplementation = result.classImplementation;
+                    } else {
+                        // For regular procedures, update the current procedure and structure
+                        currentProcedure = result.procedureSymbol;
+                        currentClassImplementation = result.classImplementation;
+
+                        // Add procedure to parent stack with its finishesAt value if available
+                        if ((result.procedureSymbol as any)._finishesAt !== undefined) {
+                            parentStack.push({
+                                symbol: result.procedureSymbol,
+                                finishesAt: (result.procedureSymbol as any)._finishesAt
+                            });
+                            // Update current structure reference
+                            currentStructure = result.procedureSymbol;
+                        }
+                    }
+
                     insideDefinitionBlock = true;
                 } else {
                     this.handleProcedureDefinitionToken(tokens, i, symbols, currentStructure);
+
+                    // Check if we need to add this procedure definition to the parent stack
+                    // This would be the case for procedure definitions with a finishesAt value
+                    const procedureDefSymbol = symbols[symbols.length - 1];
+                    if ((procedureDefSymbol as any)._finishesAt !== undefined) {
+                        parentStack.push({
+                            symbol: procedureDefSymbol,
+                            finishesAt: (procedureDefSymbol as any)._finishesAt
+                        });
+                        // Update current structure reference
+                        currentStructure = procedureDefSymbol;
+                    }
                 }
                 continue;
             }
@@ -99,6 +151,99 @@ export class ClarionDocumentSymbolProvider {
                 value.toUpperCase() === "PROCEDURE") {
 
                 this.handleProcedureDefinitionToken(tokens, i, symbols, currentStructure);
+
+                // Check if we need to add this procedure definition to the parent stack
+                // This would be the case for procedure definitions with a finishesAt value
+                const procedureDefSymbol = symbols[symbols.length - 1];
+                if ((procedureDefSymbol as any)._finishesAt !== undefined) {
+                    parentStack.push({
+                        symbol: procedureDefSymbol,
+                        finishesAt: (procedureDefSymbol as any)._finishesAt
+                    });
+                    // Update current structure reference
+                    currentStructure = procedureDefSymbol;
+                }
+
+                continue;
+            }
+            // 🧠 ROUTINE block inside a PROCEDURE or METHOD
+            if (type === TokenType.Keyword && value.toUpperCase() === "ROUTINE") {
+                const labelToken = tokens[i - 1];
+                const routineName = labelToken?.type === TokenType.Label ? labelToken.value : "UnnamedRoutine";
+                const endLine = token.finishesAt ?? token.line;
+
+                // Create the routine symbol
+                const routineSymbol = DocumentSymbol.create(
+                    routineName,
+                    "Routine",
+                    ClarionSymbolKind.Routine,
+                    this.getTokenRange(tokens, token.line, endLine),
+                    this.getTokenRange(tokens, token.line, endLine),
+                    []
+                );
+
+                // IMPORTANT: Determine the correct parent for this ROUTINE
+                // Check if we're between method implementations
+                let routineParent: DocumentSymbol | null = null;
+
+                // Look ahead to find the next method implementation or procedure
+                let nextMethodOrProcedure: Token | null = null;
+                let prevMethodOrProcedure: Token | null = null;
+
+                // Find the previous method/procedure
+                for (let j = i - 1; j >= 0; j--) {
+                    const t = tokens[j];
+                    if ((t.subType === TokenType.Procedure || t.subType === TokenType.Class) &&
+                        (t.executionMarker?.value.toUpperCase() === "CODE" || t.finishesAt !== undefined)) {
+                        prevMethodOrProcedure = t;
+                        break;
+                    }
+                }
+
+                // Find the next method/procedure
+                for (let j = i + 1; j < tokens.length; j++) {
+                    const t = tokens[j];
+                    if ((t.subType === TokenType.Procedure || t.subType === TokenType.Class) &&
+                        (t.executionMarker?.value.toUpperCase() === "CODE" || t.finishesAt !== undefined)) {
+                        nextMethodOrProcedure = t;
+                        break;
+                    }
+                }
+
+                // If we have a previous method implementation and it's a class method
+                if (prevMethodOrProcedure && prevMethodOrProcedure.label?.includes('.')) {
+                    // This ROUTINE belongs to the previous class method implementation
+                    const className = prevMethodOrProcedure.label.split('.')[0];
+
+                    // Find the class implementation container
+                    for (const symbol of symbols) {
+                        if (symbol.name === `${className} (Implementation)`) {
+                            // Found the class implementation container
+                            routineParent = symbol;
+                            break;
+                        }
+                    }
+                }
+
+                // If we couldn't find a class implementation container, use the current procedure
+                if (!routineParent) {
+                    routineParent = currentProcedure;
+                }
+
+                // Add the routine to its parent
+                if (routineParent) {
+                    routineParent.children!.push(routineSymbol);
+                } else {
+                    // If we couldn't find a parent, add to top level
+                    symbols.push(routineSymbol);
+                }
+
+                // Add to parent stack
+                parentStack.push({
+                    symbol: routineSymbol,
+                    finishesAt: token.finishesAt
+                });
+
                 continue;
             }
 
@@ -108,12 +253,16 @@ export class ClarionDocumentSymbolProvider {
             }
 
             if (type === TokenType.EndStatement) {
-                const result = this.handleEndStatementToken(parentStack, line);
-                currentStructure = result.currentStructure;
-                currentProcedure = result.currentProcedure;
+                // We'll handle END statements differently now - they're just markers
+                // The actual structure popping happens based on finishesAt lines
+                // But we'll still use this to handle cases where finishesAt isn't available
+                this.handleEndStatementToken(parentStack, line);
+                currentStructure = parentStack.length > 0 ? parentStack[parentStack.length - 1].symbol : null;
+                currentProcedure = currentStructure?.kind === ClarionSymbolKind.Procedure ? currentStructure : null;
             }
         }
-        const lastToken = tokens.at(-1);
+      
+
 
         // No need for final sorting here since we're sorting as symbols are added
         // This ensures symbols are already in the correct order when VS Code renders the outline
@@ -167,11 +316,102 @@ export class ClarionDocumentSymbolProvider {
 
 
 
+    /**
+     * Checks if any structures in the parent stack have been completed based on their finishesAt line
+     * and pops them from the stack if needed.
+     *
+     * Special rule: Method implementations (className.MethodName) don't end procedure scope.
+     * Procedure scope only ends when another procedure is found that is not a method or EOF.
+     */
+    private checkAndPopCompletedStructures(
+        parentStack: Array<{ symbol: DocumentSymbol, finishesAt: number | undefined }>,
+        currentLine: number,
+        symbols: DocumentSymbol[]
+    ): void {
+        // If the stack is empty, nothing to do
+        if (parentStack.length === 0) {
+            return;
+        }
+
+        // CRITICAL CHANGE: Never pop the root procedure if it contains method implementations
+        // This ensures the root procedure scope is maintained throughout the file
+
+        // Find the root procedure in the stack (if any)
+        let rootProcedureIndex = -1;
+
+        // First, find if there's a root procedure (not a method implementation) in the stack
+        for (let i = 0; i < parentStack.length; i++) {
+            const entry = parentStack[i];
+            const isRootProcedure = entry.symbol.kind === SymbolKind.Function &&
+                !(entry.symbol as any)._isMethodImplementation &&
+                !entry.symbol.name.includes('.');
+
+            if (isRootProcedure) {
+                rootProcedureIndex = i;
+                break;
+            }
+        }
+
+        // If we found a root procedure, check if it contains any method implementations
+        if (rootProcedureIndex >= 0) {
+            // Check if we have any method implementations in the symbols
+            let hasMethodImplementations = false;
+
+            // Helper function to recursively check for method implementations
+            const checkForMethodImplementations = (symbolList: DocumentSymbol[]): boolean => {
+                for (const sym of symbolList) {
+                    if ((sym as any)._isMethodImplementation || sym.name.includes('.')) {
+                        return true;
+                    }
+                    if (sym.children && sym.children.length > 0) {
+                        if (checkForMethodImplementations(sym.children)) {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            };
+
+            hasMethodImplementations = checkForMethodImplementations(symbols);
+
+            // If we have method implementations, NEVER pop the root procedure
+            if (hasMethodImplementations) {
+                // Process the stack, but skip the root procedure
+                let i = parentStack.length - 1;
+                while (i >= 0) {
+                    // Skip the root procedure
+                    if (i === rootProcedureIndex) {
+                        i--;
+                        continue;
+                    }
+
+                    const entry = parentStack[i];
+                    // Pop if we've passed the finishesAt line
+                    if (entry.finishesAt !== undefined && currentLine > entry.finishesAt) {
+                        parentStack.splice(i, 1);
+                    }
+                    i--;
+                }
+                return;
+            }
+        }
+
+        // Standard case: pop structures based on their finishesAt line
+        let i = parentStack.length - 1;
+        while (i >= 0) {
+            const entry = parentStack[i];
+            if (entry.finishesAt !== undefined && currentLine > entry.finishesAt) {
+                parentStack.splice(i, 1);
+            }
+            i--;
+        }
+    }
+
     private handleStructureToken(
         tokens: Token[],
         index: number,
         symbols: DocumentSymbol[],
-        parentStack: DocumentSymbol[],
+        parentStack: Array<{ symbol: DocumentSymbol, finishesAt: number | undefined }>,
         currentStructure: DocumentSymbol | null
     ): void {
         const token = tokens[index];
@@ -196,7 +436,7 @@ export class ClarionDocumentSymbolProvider {
             }
         }
 
-        const labelName = this.findStructureLabelName(tokens, index);
+        const labelName = token.label ? token.label : "";// this.findStructureLabelName(tokens, index);
         const upperValue = value.toUpperCase();
         const structureKind = clarionStructureKindMap[upperValue] ?? ClarionSymbolKind.TablesGroup;
 
@@ -267,7 +507,11 @@ export class ClarionDocumentSymbolProvider {
 
 
         this.addSymbolToParent(structureSymbol, currentStructure, symbols);
-        parentStack.push(structureSymbol);
+        // Push to the parent stack with finishesAt information
+        parentStack.push({
+            symbol: structureSymbol,
+            finishesAt: finishesAt
+        });
     }
 
 
@@ -324,34 +568,89 @@ export class ClarionDocumentSymbolProvider {
         const procedureName = prevToken?.type === TokenType.Label ? prevToken.value : "UnnamedProcedure";
         const classMatch = procedureName.includes('.') ? procedureName.split('.')[0] : null;
 
-        let container: DocumentSymbol | null = currentStructure;
+        let container: DocumentSymbol | null = null;
         let classImplementation: DocumentSymbol | null = null;
 
-        // New: Check if method line is inside any class range
-        for (const classSymbol of this.classSymbolMap.values()) {
-            const classStart = classSymbol.range.start.line;
-            const classEnd = classSymbol.range.end.line;
-            if (line >= classStart && line <= classEnd) {
-                container = classSymbol;
-                break;
+        // IMPORTANT: For method implementations, we need to handle them differently
+        // to ensure they don't break procedure scope
+        if (classMatch) {
+            // This is a method implementation (e.g., ThisWindow.Init)
+
+            // Find or create a class implementation container at the top level
+            // This ensures method implementations are grouped by class
+            for (const symbol of symbols) {
+                if (symbol.name === `${classMatch} (Implementation)`) {
+                    classImplementation = symbol;
+                    break;
+                }
             }
+
+            if (!classImplementation) {
+                // Create a new class implementation container
+                classImplementation = DocumentSymbol.create(
+                    `${classMatch} (Implementation)`,
+                    "Class Method Implementation",
+                    SymbolKind.Class,
+                    this.getTokenRange(tokens, line, finishesAt ?? line),
+                    this.getTokenRange(tokens, line, finishesAt ?? line),
+                    []
+                );
+
+                // Add methods container
+                const methodsContainer = DocumentSymbol.create(
+                    "Methods",
+                    "",
+                    SymbolKind.Method,
+                    classImplementation.range,
+                    classImplementation.selectionRange,
+                    []
+                );
+
+                classImplementation.children!.push(methodsContainer);
+                (classImplementation as any).$clarionMethods = methodsContainer;
+
+                // Add to top-level symbols
+                symbols.push(classImplementation);
+            }
+
+            // Use the methods container as the parent
+            const methodsContainer = (classImplementation as any).$clarionMethods || classImplementation;
+            container = methodsContainer;
+
+            // Mark this as a method implementation
+            (token as any)._isMethodImplementation = true;
+        } else {
+            // For regular procedures (not class methods), use the current structure
+            container = currentStructure;
         }
 
-        // Fallback: old behavior if no range match but name exists
-        if (!container && classMatch) {
-            classImplementation = this.findOrCreateClassImplementation(
-                symbols, classMatch, tokens, line, finishesAt ?? line
-            );
-            container = classImplementation;
-        }
-
-
+        // Extract the method name without the class prefix
         const shortName = classMatch ? procedureName.replace(`${classMatch}.`, "") : procedureName;
         const procedureSymbol = this.createProcedureSymbol(
             tokens, shortName, classMatch, line, finishesAt ?? line
         );
 
-        this.addSymbolToParent(procedureSymbol, container, symbols);
+        // For method implementations, mark the symbol
+        if (classMatch) {
+            (procedureSymbol as any)._isMethodImplementation = true;
+        }
+
+        // Add the procedure to its container
+        if (classMatch) {
+            // For method implementations, add directly to the container
+            container!.children!.push(procedureSymbol);
+        } else {
+            // For regular procedures, use addSymbolToParent
+            this.addSymbolToParent(procedureSymbol, container, symbols);
+        }
+
+        // Add procedure to parent stack with its finishesAt value
+        // This ensures procedures are properly scoped and their children are attached correctly
+        if (finishesAt !== undefined) {
+            // We need to add this to the parentStack in the main method
+            // We'll return it and let the caller add it to the stack
+            (procedureSymbol as any)._finishesAt = finishesAt;
+        }
 
         return { procedureSymbol, classImplementation };
     }
@@ -365,6 +664,7 @@ export class ClarionDocumentSymbolProvider {
     ): DocumentSymbol {
         const fullName = `${className} (Implementation)`;
 
+        // First, check if we already have a class implementation container at the top level
         const search = (list: DocumentSymbol[]): DocumentSymbol | null => {
             for (const symbol of list) {
                 if (symbol.name === fullName) return symbol;
@@ -377,6 +677,7 @@ export class ClarionDocumentSymbolProvider {
         let classImplementation = search(symbols);
 
         if (!classImplementation) {
+            // Create a new class implementation container
             classImplementation = DocumentSymbol.create(
                 fullName,
                 "Class Method Implementation",
@@ -385,7 +686,34 @@ export class ClarionDocumentSymbolProvider {
                 this.getTokenRange(tokens, startLine, endLine),
                 []
             );
+
+            // Add methods container for organization
+            const methodsContainer = DocumentSymbol.create(
+                "Methods",
+                "",
+                SymbolKind.Method,
+                classImplementation.range,
+                classImplementation.range,
+                []
+            );
+            (methodsContainer as any).sortText = "0001";
+
+            // Store the methods container for easy access
+            (classImplementation as any).$clarionMethods = methodsContainer;
+            classImplementation.children!.push(methodsContainer);
+
+            // Add to top-level symbols
             symbols.push(classImplementation);
+        }
+
+        // Update the range to encompass all methods
+        if (startLine < classImplementation.range.start.line) {
+            classImplementation.range.start.line = startLine;
+            classImplementation.selectionRange.start.line = startLine;
+        }
+        if (endLine > classImplementation.range.end.line) {
+            classImplementation.range.end.line = endLine;
+            classImplementation.selectionRange.end.line = endLine;
         }
 
         return classImplementation;
@@ -419,7 +747,7 @@ export class ClarionDocumentSymbolProvider {
         const token = tokens[index];
         const { line, finishesAt, parent } = token;
         const prevToken = tokens[index - 1];
-        const procedureDefName = prevToken?.type === TokenType.Label ? prevToken.value : "UnnamedDefinition";
+        const procedureDefName = token.label ? token.label : "UnnamedDefinition";// prevToken?.type === TokenType.Label ? prevToken.value : "UnnamedDefinition";
 
         // 🔍 Extract the definition detail — e.g. "(string newValue), virtual"
         // 🔍 Extract the definition detail — e.g. "(string newValue), virtual"
@@ -429,7 +757,7 @@ export class ClarionDocumentSymbolProvider {
         while (j < tokens.length) {
             const t = tokens[j];
             if (t.line !== line) break;
-            if (t.type === TokenType.EndStatement || t.type === TokenType.Structure ) break;
+            if (t.type === TokenType.EndStatement || t.type === TokenType.Structure) break;
             detail += t.value;
             j++;
         }
@@ -451,6 +779,11 @@ export class ClarionDocumentSymbolProvider {
             this.getTokenRange(tokens, line, finishesAt ?? line),
             []
         );
+
+        // Store finishesAt value for procedure definitions if available
+        if (finishesAt !== undefined) {
+            (procedureDefSymbol as any)._finishesAt = finishesAt;
+        }
 
         // ✅ Prefer attaching to MODULE if that's the current structure
         if (_currentStructure?.name?.startsWith("MODULE")) {
@@ -567,23 +900,19 @@ export class ClarionDocumentSymbolProvider {
     }
 
     private handleEndStatementToken(
-        parentStack: DocumentSymbol[],
+        parentStack: Array<{ symbol: DocumentSymbol, finishesAt: number | undefined }>,
         line: number
-    ): { currentStructure: DocumentSymbol | null, currentProcedure: DocumentSymbol | null } {
+    ): void {
+        // Only pop structures that don't have a finishesAt value
+        // (Those with finishesAt are handled by checkAndPopCompletedStructures)
         if (parentStack.length > 0) {
-            const finishedStructure = parentStack.pop();
+            const top = parentStack[parentStack.length - 1];
 
-
-
-            return {
-                currentStructure: parentStack[parentStack.length - 1] ?? null,
-                currentProcedure: null
-            };
-        } else {
-            return {
-                currentStructure: null,
-                currentProcedure: null
-            };
+            // If this structure doesn't have a finishesAt value, pop it when END is encountered
+            if (top.finishesAt === undefined) {
+                parentStack.pop();
+            }
+            // Otherwise, we'll let checkAndPopCompletedStructures handle it
         }
     }
 
@@ -597,30 +926,49 @@ export class ClarionDocumentSymbolProvider {
 
         if (parent) {
             const isVariable = symbol.kind === ClarionSymbolKind.Variable;
-            const isMethod = symbol.kind === ClarionSymbolKind.Method;
+            // Check if this is a method - either explicitly marked as Method kind or
+            // it's a procedure with "Method" in its detail
+            const isMethod = symbol.kind === SymbolKind.Function &&
+                (symbol.name.includes('.') || symbol.detail?.includes("Method"));
+            const isClassImplementation = parent.name.includes(" (Implementation)");
 
             // Set sortText for all symbols based on name
             (symbol as any).sortText = symbol.name.toLowerCase();
 
+            // Handle class properties
             if (isVariable && (parent as any).$clarionProps) {
                 const propsContainer = (parent as any).$clarionProps;
                 // Add to properties container
                 propsContainer.children!.push(symbol);
-
                 // Sort immediately after adding
                 this.sortContainerChildren(propsContainer);
-            } else if (isMethod && (parent as any).$clarionMethods) {
-                const methodsContainer = (parent as any).$clarionMethods;
+            }
+            // Handle class methods - either in a regular class or in a class implementation container
+            else if (isMethod && ((parent as any).$clarionMethods || isClassImplementation)) {
+                let methodsContainer;
+
+                if ((parent as any).$clarionMethods) {
+                    // Use the dedicated methods container if available
+                    methodsContainer = (parent as any).$clarionMethods;
+                } else if (isClassImplementation) {
+                    // For class implementation containers, find or use the first child as methods container
+                    methodsContainer = parent.children!.find(c => c.name === "Methods") || parent;
+                } else {
+                    // Fallback to parent
+                    methodsContainer = parent;
+                }
+
                 // Add to methods container
                 methodsContainer.children!.push(symbol);
 
                 // Sort immediately after adding
-                this.sortContainerChildren(methodsContainer);
+                if (methodsContainer !== parent) {
+                    this.sortContainerChildren(methodsContainer);
+                }
             } else {
                 // Add to regular parent
                 parent.children!.push(symbol);
             }
-
         } else {
             // Top-level symbol
             symbols.push(symbol);

@@ -10,7 +10,7 @@ function processBuildErrors(buildOutput: string): { errorCount: number, warningC
     logger.info("📝 Raw Build Output:\n", buildOutput);
 
     // ✅ Updated regex to capture both errors and warnings without breaking existing matches
-    const errorPattern = /^.*?>([A-Z]:\\.*?\.clw)\((\d+),(\d+)\):\s+(error|warning)\s*:\s*(.*?)\s+\[.*\]$/gm;
+    const errorPattern = /^.*?>([A-Za-z]:\\.*?\.clw)\((\d+),(\d+)\):\s+(error|warning)\s*:?\s*(.*?)(?:\s+\[.*\])?$/gm;
 
     const diagnostics: Map<string, Diagnostic[]> = new Map();
     const seenMessages = new Set<string>(); // ✅ Prevent duplicates
@@ -32,13 +32,23 @@ function processBuildErrors(buildOutput: string): { errorCount: number, warningC
             continue;
         }
         seenMessages.add(uniqueKey);
+        // Convert line and column to zero-based indices for VS Code
+        const lineNum = parseInt(line, 10) - 1;
+        const colNum = parseInt(column, 10) - 1;
 
-        const startPosition = new Position(parseInt(line, 10) - 1, parseInt(column, 10) - 1);
-        const endPosition = new Position(parseInt(line, 10) - 1, parseInt(column, 10) + 10);
+        // Create a range that covers the entire line for better visibility
+        const startPosition = new Position(lineNum, colNum);
+        const endPosition = new Position(lineNum, colNum + 50); // Extend range to make error more visible
 
         // ✅ Determine severity (Error or Warning)
         const severity = type === "error" ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning;
-        const diagnostic = new Diagnostic(new Range(startPosition, endPosition), message, severity);
+
+        // Create a more descriptive message that includes the error type
+        const formattedMessage = `Clarion ${type}: ${message}`;
+        const diagnostic = new Diagnostic(new Range(startPosition, endPosition), formattedMessage, severity);
+
+        // Set the source to "Clarion" for better identification in the Problems panel
+        diagnostic.source = "Clarion";
 
         // Increment the appropriate counter
         if (type === "error") {

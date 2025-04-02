@@ -2,6 +2,7 @@ import { SolutionManager } from './solutionManager';
 import { ClarionSourcerFileServer } from './clarionSourceFileServer';
 import { ClarionProjectInfo, ClarionSolutionInfo, ClarionSourcerFileInfo } from 'common/types';
 import LoggerManager from '../logger';
+import { serverSettings } from '../serverSettings';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -27,7 +28,8 @@ export async function buildClarionSolution(): Promise<ClarionSolutionInfo> {
                 name: project.name,
                 type: project.type,
                 path: project.path,
-                guid: project.guid
+                guid: project.guid,
+                filename: project.filename
             }
         }));
 
@@ -37,6 +39,7 @@ export async function buildClarionSolution(): Promise<ClarionSolutionInfo> {
             type: project.type,
             path: project.path,
             guid: project.guid,
+            filename: project.filename,
             sourceFiles
         };
     });
@@ -56,28 +59,24 @@ export async function initializeSolutionManager(solutionPath: string): Promise<v
     logger.info(`🔄 Initializing SolutionManager with path: ${solutionPath}`);
     
     try {
-        // Check if the path is a directory
-        const stat = fs.statSync(solutionPath);
-        if (stat.isDirectory()) {
-            logger.info(`Path is a directory, looking for .sln files in: ${solutionPath}`);
-            
-            // Find a .sln file in the directory
-            const files = fs.readdirSync(solutionPath);
-            const slnFiles = files.filter((file: string) => file.toLowerCase().endsWith('.sln'));
-            
-            if (slnFiles.length > 0) {
-                // Use the first .sln file found
-                const solutionFile = path.join(solutionPath, slnFiles[0]);
-                logger.info(`Found solution file: ${solutionFile}`);
-                await SolutionManager.create(solutionFile);
-            } else {
-                logger.error(`No .sln files found in directory: ${solutionPath}`);
-                throw new Error(`No .sln files found in directory: ${solutionPath}`);
-            }
-        } else {
-            // Path is already a file
-            await SolutionManager.create(solutionPath);
+        // Always use the solution file path from server settings if available
+        if (serverSettings.solutionFilePath && fs.existsSync(serverSettings.solutionFilePath) &&
+            serverSettings.solutionFilePath.toLowerCase().endsWith('.sln')) {
+            logger.info(`Using solution file from server settings: ${serverSettings.solutionFilePath}`);
+            await SolutionManager.create(serverSettings.solutionFilePath);
+            return;
         }
+        
+        // Fallback to the provided path if it's a file
+        if (fs.existsSync(solutionPath) && !fs.statSync(solutionPath).isDirectory()) {
+            logger.info(`Using provided solution file path: ${solutionPath}`);
+            await SolutionManager.create(solutionPath);
+            return;
+        }
+        
+        // If we get here, we don't have a valid solution file
+        logger.error(`No valid solution file found`);
+        throw new Error(`No valid solution file found`);
         
         logger.info("✅ SolutionManager initialized");
     } catch (error) {

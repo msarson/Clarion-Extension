@@ -6,7 +6,7 @@ import { ClarionSolutionTreeNode, ClarionSolutionInfo, ClarionProjectInfo, Clari
 import LoggerManager from './logger';
 
 const logger = LoggerManager.getLogger("SolutionCache");
-logger.setLevel("info");
+logger.setLevel("error");
 
 /**
  * SolutionCache is a singleton class that caches the solution tree returned from the language server.
@@ -46,12 +46,12 @@ export class SolutionCache {
      */
     public async initialize(solutionFilePath: string): Promise<boolean> {
         this.solutionFilePath = solutionFilePath;
-        
+
         try {
             // Check if client is ready before trying to use it
             if (this.client && !this.client.needsStart()) {
                 logger.info("🔄 Fetching solution tree from server...");
-                
+
                 try {
                     // Set a timeout to prevent hanging if the server doesn't respond
                     const timeoutPromise = new Promise<null>((resolve) => {
@@ -60,13 +60,13 @@ export class SolutionCache {
                             resolve(null);
                         }, 15000); // 15 second timeout
                     });
-                    
+
                     // Race between the actual request and the timeout
                     this.solutionInfo = await Promise.race([
                         this.client.sendRequest<ClarionSolutionInfo | null>('clarion/getSolutionTree'),
                         timeoutPromise
                     ]);
-                    
+
                     if (this.solutionInfo) {
                         logger.info(`✅ Solution tree fetched with ${this.solutionInfo.projects.length} projects`);
                         return true;
@@ -96,7 +96,7 @@ export class SolutionCache {
                 } else {
                     logger.warn("⚠️ Language client not available");
                 }
-                
+
                 // Create an empty solution info
                 this.solutionInfo = {
                     name: path.basename(this.solutionFilePath),
@@ -107,7 +107,7 @@ export class SolutionCache {
             }
         } catch (error) {
             logger.error(`❌ Error initializing solution cache: ${error instanceof Error ? error.message : String(error)}`);
-            
+
             // Create an empty solution info
             this.solutionInfo = {
                 name: path.basename(this.solutionFilePath),
@@ -126,7 +126,7 @@ export class SolutionCache {
             logger.error("❌ Solution file path not set. Cannot refresh SolutionCache.");
             return false;
         }
-        
+
         return this.initialize(this.solutionFilePath);
     }
 
@@ -152,18 +152,18 @@ export class SolutionCache {
             logger.warn("⚠️ Language client not available or not ready. Cannot get search paths from server.");
             return [];
         }
-        
+
         try {
             logger.info(`🔍 Requesting search paths from server for project ${projectName} and extension ${extension}`);
-            
+
             // Use a promise with timeout to prevent hanging
             const timeoutPromise = new Promise<string[]>((resolve) => {
                 setTimeout(() => {
                     logger.warn(`⚠️ Server request timed out for search paths: ${projectName}, ${extension}`);
                     resolve([]);
-                }, 5000); // 5 second timeout
+                }, 15000); // 15 second timeout
             });
-            
+
             // Race between the actual request and the timeout
             const paths = await Promise.race([
                 this.client.sendRequest<string[]>('clarion/getSearchPaths', {
@@ -172,7 +172,7 @@ export class SolutionCache {
                 }),
                 timeoutPromise
             ]);
-            
+
             if (paths && paths.length) {
                 logger.info(`✅ Received ${paths.length} search paths from server`);
                 return paths;
@@ -194,18 +194,18 @@ export class SolutionCache {
             logger.warn("⚠️ Language client not available or not ready. Cannot get included redirection files from server.");
             return [];
         }
-        
+
         try {
             logger.info(`🔍 Requesting included redirection files from server for project at ${projectPath}`);
-            
+
             // Use a promise with timeout to prevent hanging
             const timeoutPromise = new Promise<string[]>((resolve) => {
                 setTimeout(() => {
                     logger.warn(`⚠️ Server request timed out for included redirection files: ${projectPath}`);
                     resolve([]);
-                }, 5000); // 5 second timeout
+                }, 15000); // 15 second timeout
             });
-            
+
             // Race between the actual request and the timeout
             const redFiles = await Promise.race([
                 this.client.sendRequest<string[]>('clarion/getIncludedRedirectionFiles', {
@@ -213,7 +213,7 @@ export class SolutionCache {
                 }),
                 timeoutPromise
             ]);
-            
+
             if (redFiles && redFiles.length) {
                 logger.info(`✅ Received ${redFiles.length} included redirection files from server`);
                 return redFiles;
@@ -232,23 +232,23 @@ export class SolutionCache {
      */
     public findProjectForFile(fileName: string): ClarionProjectInfo | undefined {
         if (!this.solutionInfo) return undefined;
-        
+
         logger.info(`🔍 Searching for project containing file: ${fileName}`);
-        
+
         // Extract just the filename from the full path
         const baseFileName = path.basename(fileName).toLowerCase();
-        
+
         for (const project of this.solutionInfo.projects) {
             const foundSourceFile = project.sourceFiles.find(sourceFile =>
                 sourceFile.name.toLowerCase() === baseFileName
             );
-            
+
             if (foundSourceFile) {
                 logger.info(`✅ Found project for file: ${baseFileName} in project ${project.name}`);
                 return project;
             }
         }
-        
+
         logger.info(`❌ File "${baseFileName}" not found in any project.`);
         return undefined;
     }
@@ -258,26 +258,26 @@ export class SolutionCache {
      */
     public findSourceInProject(filePath: string): ClarionSourcerFileInfo | undefined {
         if (!this.solutionInfo) return undefined;
-        
+
         try {
             // Try to match by relative path or filename
             const baseFileName = path.basename(filePath).toLowerCase();
-            
+
             for (const project of this.solutionInfo.projects) {
                 // First try to match by relative path
                 const foundByPath = project.sourceFiles.find(sourceFile =>
                     sourceFile.relativePath?.toLowerCase() === filePath.toLowerCase()
                 );
-                
+
                 if (foundByPath) {
                     return foundByPath;
                 }
-                
+
                 // Then try to match by filename
                 const foundByName = project.sourceFiles.find(sourceFile =>
                     sourceFile.name.toLowerCase() === baseFileName
                 );
-                
+
                 if (foundByName) {
                     return foundByName;
                 }
@@ -285,7 +285,7 @@ export class SolutionCache {
         } catch (error) {
             logger.info(String(error));
         }
-        
+
         return undefined;
     }
 
@@ -297,22 +297,22 @@ export class SolutionCache {
             logger.info(`❌ No solution info available when searching for ${filename}`);
             return "";
         }
-        
+
         if (!this.solutionFilePath || this.solutionFilePath.trim() === "") {
             logger.info(`❌ No solution file path set when searching for ${filename}`);
             return "";
         }
-        
+
         logger.info(`🔍 Searching for file: ${filename}`);
         const extension = path.extname(filename).toLowerCase();
         const solutionFolder = path.dirname(this.solutionFilePath);
-        
+
         // First check if the file exists in any project's source files
         for (const project of this.solutionInfo.projects) {
             const sourceFile = project.sourceFiles.find(sf =>
                 sf.name.toLowerCase() === path.basename(filename).toLowerCase()
             );
-            
+
             if (sourceFile && sourceFile.relativePath) {
                 const fullPath = path.join(solutionFolder, sourceFile.relativePath);
                 if (fs.existsSync(fullPath)) {
@@ -321,26 +321,26 @@ export class SolutionCache {
                 }
             }
         }
-        
+
         // Try to get the file path from the server using the language client
         if (this.client && !this.client.needsStart()) {
             try {
                 logger.info(`🔄 Requesting file path from server for: ${filename}`);
-                
+
                 // Use a promise with timeout to prevent hanging
                 const timeoutPromise = new Promise<string>((resolve) => {
                     setTimeout(() => {
                         logger.warn(`⚠️ Server request timed out for file: ${filename}`);
                         resolve("");
-                    }, 5000); // 5 second timeout
+                    }, 15000); // 15 second timeout
                 });
-                
+
                 // Race between the actual request and the timeout
                 const serverPath = await Promise.race([
                     this.client.sendRequest<string>('clarion/findFile', { filename }),
                     timeoutPromise
                 ]);
-                
+
                 if (serverPath && fs.existsSync(serverPath)) {
                     logger.info(`✅ File found by server: ${serverPath}`);
                     return serverPath;
@@ -351,25 +351,25 @@ export class SolutionCache {
                 logger.error(`❌ Error requesting file from server: ${error instanceof Error ? error.message : String(error)}`);
             }
         }
-        
+
         // Then check in project search paths
         for (const project of this.solutionInfo.projects) {
             logger.info(`🔍 Searching for '${filename}' in project: ${project.name}`);
-            
+
             // Get search paths for this extension
             const searchPaths = this.getProjectSearchPaths(project, extension);
-            
+
             for (const searchPath of searchPaths) {
                 let resolvedPath = searchPath === '.' ? solutionFolder : searchPath;
                 const fullPath = path.join(resolvedPath, filename);
-                
+
                 if (fs.existsSync(fullPath)) {
                     logger.info(`✅ File found: ${fullPath}`);
                     return fullPath;
                 }
             }
         }
-        
+
         // Try standard Clarion include directories
         const standardPaths = [
             path.join(solutionFolder, 'include'),
@@ -377,7 +377,7 @@ export class SolutionCache {
             path.join(solutionFolder, '..', 'include'),
             path.join(solutionFolder, '..', 'libsrc')
         ];
-        
+
         for (const standardPath of standardPaths) {
             const fullPath = path.join(standardPath, filename);
             if (fs.existsSync(fullPath)) {
@@ -385,7 +385,7 @@ export class SolutionCache {
                 return fullPath;
             }
         }
-        
+
         logger.info(`❌ File '${filename}' not found in any project paths.`);
         return "";
     }
@@ -422,4 +422,24 @@ export class SolutionCache {
 
         return Array.from(configurations);
     }
+    /**
+ * Gets document symbols for a specific file by calling the language server.
+ */
+    public async getSymbolsForFile(filePath: string): Promise<any[]> {
+        if (!this.client || this.client.needsStart()) {
+            logger.warn("⚠️ Language client not ready. Cannot retrieve symbols.");
+            return [];
+        }
+
+        try {
+            const uri = Uri.file(filePath).toString();
+            const symbols = await this.client.sendRequest('clarion/documentSymbols', { uri });
+            return Array.isArray(symbols) ? symbols : [];
+        } catch (error) {
+            logger.error(`❌ Error fetching document symbols for ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+            return [];
+        }
+    }
+    
+
 }

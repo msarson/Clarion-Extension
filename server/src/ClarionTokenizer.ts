@@ -36,10 +36,19 @@ export enum TokenType {
     ExecutionMarker,
     Region,
     ConditionalContinuation,
-    ColorValue
+    ColorValue,
+    StructureField,   // ✅ Field within a structure
+    StructurePrefix,   // ✅ Prefix notation for structure fields (e.g., INV:Customer)
+    // ✅ New Subtypes for PROCEDURE tokens
+    GlobalProcedure,           // PROCEDURE declared at global level (with CODE)
+    MethodDeclaration,         // PROCEDURE inside a CLASS/MAP/INTERFACE (definition only, no CODE)
+    MethodImplementation,      // e.g., ThisWindow.Init PROCEDURE (with CODE)
+    MapProcedure,              // Optional: inside MAP structure
+    InterfaceMethod           // Optional: inside INTERFACE structure
 }
 
 export interface Token {
+    label?: string; // ✅ Store label for the token
     colorParams?: string[];
     type: TokenType;
     subType?: TokenType;
@@ -52,7 +61,11 @@ export interface Token {
     executionMarker?: Token;  // ✅ First explicit "CODE" statement (if present)
     hasLocalData?: boolean;   // ✅ True if "DATA" exists before "CODE"
     inferredCode?: boolean;   // ✅ True if "CODE" is implied (not explicitly written)
-    maxLabelLength: number;  // ✅ Store max label length
+    maxLabelLength: number;   // ✅ Store max label length
+    structurePrefix?: string; // ✅ Store structure prefix (e.g., "INV" from PRE(INV))
+    isStructureField?: boolean; // ✅ Flag to identify structure fields
+    structureParent?: Token;  // ✅ Reference to the parent structure token
+    nestedLabel?: string;     // ✅ Store the label of the nesting structure (e.g., "Queue:Browse:1" for fields inside it)
 }
 
 
@@ -120,6 +133,27 @@ export class ClarionTokenizer {
                             start: column,
                             maxLabelLength: 0
                         };
+                        
+                        // ✅ Special handling for structure field references
+                        if (tokenType === TokenType.StructureField) {
+                            // Extract structure and field parts from dot notation (e.g., Invoice.Customer or Queue:Browse:1.ViewPosition)
+                            const dotIndex = match[0].lastIndexOf('.');
+                            if (dotIndex > 0) {
+                                const structurePart = match[0].substring(0, dotIndex);
+                                const fieldPart = match[0].substring(dotIndex + 1);
+                                logger.info(`🔍 Detected structure field reference: ${structurePart}.${fieldPart}`);
+                            }
+                        } else if (tokenType === TokenType.StructurePrefix) {
+                            // Extract prefix and field parts from prefix notation (e.g., INV:Customer)
+                            // For complex cases like Queue:Browse:1:Field, we need to find the last colon
+                            const colonIndex = match[0].lastIndexOf(':');
+                            if (colonIndex > 0) {
+                                const prefixPart = match[0].substring(0, colonIndex);
+                                const fieldPart = match[0].substring(colonIndex + 1);
+                                logger.info(`🔍 Detected structure prefix reference: ${prefixPart}:${fieldPart}`);
+                            }
+                        }
+                        
                         this.tokens.push(newToken);
                         // 🌈 Special handling for COLOR(...)
                         if (tokenType === TokenType.Function && match[0].toUpperCase() === "COLOR") {
@@ -239,18 +273,20 @@ export class ClarionTokenizer {
 
 /** ✅ Ordered token types */
 const orderedTokenTypes: TokenType[] = [
-    TokenType.Comment, TokenType.ClarionDocument, TokenType.ExecutionMarker, TokenType.Label, TokenType.LineContinuation, TokenType.String, TokenType.ReferenceVariable,
+    TokenType.Directive,TokenType.Comment, TokenType.ClarionDocument, TokenType.ExecutionMarker, TokenType.Label, TokenType.LineContinuation, TokenType.String, TokenType.ReferenceVariable,
     TokenType.Type, TokenType.PointerParameter, TokenType.FieldEquateLabel, TokenType.Property,
     TokenType.PropertyFunction, TokenType.EndStatement, TokenType.Keyword, TokenType.Structure,
-    TokenType.ConditionalContinuation, TokenType.Function, // ✅ Placed after Structure, before FunctionArgumentParameter
-    TokenType.FunctionArgumentParameter, TokenType.TypeAnnotation,  TokenType.Directive, TokenType.Number,
+    // ✅ Add StructurePrefix and StructureField before other variable types
+    TokenType.StructurePrefix, TokenType.StructureField,
+    TokenType.ConditionalContinuation, TokenType.Function,  // ✅ Placed after Structure, before FunctionArgumentParameter
+    TokenType.FunctionArgumentParameter, TokenType.TypeAnnotation, TokenType.Number,
     TokenType.Operator, TokenType.Class, TokenType.Attribute, TokenType.Constant, TokenType.Variable,
     TokenType.ImplicitVariable, TokenType.Delimiter, TokenType.Unknown
 ];
 
 const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     MODULE: /^\s*MODULE\b/i,  // MODULE should be the first word on the line
-    APPLICATION: /\bAPPLICATION\s*(\(|,)/i,
+    APPLICATION: /\bAPPLICATION\b(?=\s*(\(|,))/i,
     CASE: /\bCASE\b/i,
     CLASS: /\bCLASS\b/i,
     GROUP: /\bGROUP\b/i,
@@ -260,7 +296,7 @@ const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     JOIN: /\bJOIN\b/i,
     LOOP: /\bLOOP\b/i,
     MAP: /\bMAP\b/i,
-    MENU: /\bMENU\s*(\(|,)/i,
+    MENU: /\bMENU\b(?=\s*(\(|,))/i,
     MENUBAR: /\bMENUBAR\b/i,
     //QUEUE: /\bQUEUE(?![:\(])\b/i,  // Prevents detecting Queue:Browse as a structure
     QUEUE: /\s+\bQUEUE\b(?!:)/i,
@@ -273,7 +309,7 @@ const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     TAB: /\bTAB\b/i,
     TOOLBAR: /\bTOOLBAR\b/i,
     VIEW: /\sVIEW\b/i,
-    WINDOW: /\bWINDOW\s*(\(|,)/i,
+    WINDOW: /\bWINDOW\b(?=\s*(\(|,))/i,
     OPTION: /\bOPTION\b/i,
     ITEMIZE: /\bITEMIZE\b/i,
     EXECUTE: /\bEXECUTE\b/i,
@@ -297,7 +333,7 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.FieldEquateLabel]: /\?[A-Za-z_][A-Za-z0-9_]*/i,
     [TokenType.ClarionDocument]: /\b(?:PROGRAM|MEMBER)\b/i,
     [TokenType.ConditionalContinuation]: /\b(?:ELSE|ELSIF|OF)\b/i,  // ✅ New type for ELSE and ELSIF
-    [TokenType.Keyword]: /\b(?:RETURN|THEN|UNTIL|EXIT|NEW|PROCEDURE|ROUTINE|PROC|BREAK)\b/i,
+    [TokenType.Keyword]: /\b(?:RETURN|THEN|UNTIL|EXIT|NEW|PROCEDURE|ROUTINE|PROC|BREAK|KEY)\b/i, // Added KEY to keywords
 
     [TokenType.Structure]: new RegExp(
         Object.values(STRUCTURE_PATTERNS).map(r => r.source).join("|"), "i"
@@ -305,11 +341,19 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.ExecutionMarker]: /^\s*(CODE|DATA)\s*$/i,  // ✅ Matches `CODE` or `DATA` only at start of line
 
     [TokenType.Function]: /\b(?:COLOR|LINK|DLL)\b(?=\s*\()/i,
-    [TokenType.Directive]: /\b(?:ASSERT|BEGIN|COMPILE|EQUATE|INCLUDE|ITEMIZE|OMIT|ONCE|SECTION|SIZE)\b(?=\s*\()/i,
+    [TokenType.Directive]: /\b(?:ASSERT|BEGIN|COMPILE|EQUATE|INCLUDE|ITEMIZE|OMIT|ONCE|SECTION|SIZE)\b(?=\s*(\(|,))/i,
     [TokenType.Property]: /\b(?:HVSCROLL|SEPARATOR|LIST|RESIZE|DEFAULT|CENTER|MAX|SYSTEM|IMM|DRIVER|PROP|PROPLIST|EVENT|CREATE|BRUSH|LEVEL|STD|CURSOR|BEEP|REJECT|CHARSET|PEN|LISTZONE|BUTTON|MSGMODE|TEXT|FREEZE|DDE|FF_|OCX|DOCK|MATCH|PAPER|DRIVEROP|DATATYPE|GradientTypes|STD|ITEM|MDI|GRAY|HLP)\b/i,
     [TokenType.PropertyFunction]: /\b(?:FORMAT|FONT|USE|ICON|STATUS|MSG|TIP|AT|PROJECT|PRE|FROM|NAME|DLL)\b(?=\s*\()/i,
     //[TokenType.Label]: /^\s*([A-Za-z_][A-Za-z0-9_:]*)\b/i,
     [TokenType.Label]: /^\s*([A-Za-z_][A-Za-z0-9_:.]*)\b/i,
+
+    // ✅ Add pattern for structure prefix notation (e.g., INV:Customer)
+    // Updated to handle complex prefixes like Queue:Browse:1:Field
+    [TokenType.StructurePrefix]: /\b[A-Za-z_][A-Za-z0-9_:]*:[A-Za-z_][A-Za-z0-9_]*\b/i,
+    
+    // ✅ Add pattern for structure field with dot notation (e.g., Invoice.Customer)
+    // Updated to handle complex structure names like Queue:Browse:1.Field
+    [TokenType.StructureField]: /\b[A-Za-z_][A-Za-z0-9_:]*\.[A-Za-z_][A-Za-z0-9_]*\b/i,
 
     [TokenType.Variable]: /&?[A-Za-z_][A-Za-z0-9_]*\s*(?:&[A-Za-z_][A-Za-z0-9_]*)?/i,
     // ✅ Added support for Binary, Octal, Hex constants

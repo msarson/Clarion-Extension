@@ -26,7 +26,8 @@ export class ClarionSourcerFileServer {
                 name: this.project.name,
                 type: this.project.type,
                 path: this.project.path,
-                guid: this.project.guid
+                guid: this.project.guid,
+                filename: this.project.filename
             } : undefined
         };
     }

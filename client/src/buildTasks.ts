@@ -110,12 +110,12 @@ async function determineBuildTarget(solutionInfo: any): Promise<{
     let selectedProjectPath = "";
     let projectObject: ClarionProjectInfo | undefined = undefined;
 
-    if (solutionInfo.projects.length <= 1) {
-        // Only one project, use solution build
-        if (solutionInfo.projects.length === 1) {
-            selectedProjectPath = solutionInfo.projects[0].path;
-        }
-        return { buildTarget, selectedProjectPath };
+    // Even if there's only one project, we still want to allow building it individually
+    // This ensures the "Build Project" context menu item appears for single-project solutions
+    if (solutionInfo.projects.length === 1) {
+        selectedProjectPath = solutionInfo.projects[0].path;
+        projectObject = solutionInfo.projects[0] as ClarionProjectInfo;
+        // We don't return here, allowing the user to choose between solution and project build
     }
 
     // Try to find the project for the active file
@@ -229,11 +229,22 @@ export function prepareBuildParameters(buildConfig: {
     logger.info(`🔹 Clarion bin path: ${clarionBinPath}`);
 
     if (buildConfig.buildTarget === "Solution") {
-        buildArgs.push(`/property:SolutionDir="${globalSolutionFile}"`);
-        logger.info(`🔹 Solution directory: ${globalSolutionFile}`);
+        buildArgs.push(`/property:SolutionDir="${path.dirname(globalSolutionFile)}"`);
+        logger.info(`🔹 Solution directory: ${path.dirname(globalSolutionFile)}`);
+        
+        // Explicitly specify the solution file to build
+        buildArgs.push(`"${globalSolutionFile}"`);
+        logger.info(`🔹 Solution file: ${path.basename(globalSolutionFile)}`);
     } else if (buildConfig.buildTarget === "Project") {
-        buildArgs.push(`/property:ProjectPath="${buildConfig.selectedProjectPath}"`);
-        logger.info(`🔹 Project path: ${buildConfig.selectedProjectPath}`);
+        const projectDir = path.dirname(buildConfig.selectedProjectPath);
+        buildArgs.push(`/property:ProjectPath="${projectDir}"`);
+        logger.info(`🔹 Project directory: ${projectDir}`);
+        
+        // Explicitly specify the project file to build
+        const projectFile = buildConfig.projectObject?.filename || path.basename(buildConfig.selectedProjectPath);
+        const projectFilePath = path.join(buildConfig.selectedProjectPath, projectFile);
+        buildArgs.push(`"${projectFilePath}"`);
+        logger.info(`🔹 Project file: ${projectFile}`);
     }
 
     return {
@@ -278,7 +289,7 @@ export async function executeBuildTask(params: {
         // Show a more specific message based on what's being built
         const buildTypeMessage = buildTarget === "Solution"
             ? `🔄 Building Clarion Solution: ${targetName}`
-            : `🔄 Building Clarion Project: ${targetName}.cwproj`;
+            : `🔄 Building Clarion Project: ${targetName}`;
         
         window.showInformationMessage(buildTypeMessage);
 
@@ -397,7 +408,7 @@ function processTaskCompletion(event: TaskProcessEndEvent, buildLogPath: string,
         // Show success message with target details
         const successMessage = buildTarget === "Solution"
             ? `✅ Building Clarion Solution Complete: ${targetName}`
-            : `✅ Building Clarion Project Complete: ${targetName}.cwproj`;
+            : `✅ Building Clarion Project Complete: ${targetName}`;
             
         window.showInformationMessage(successMessage);
     }

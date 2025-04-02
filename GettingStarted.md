@@ -5,7 +5,7 @@ This guide will help you get up and running with the Clarion Extension for VS Co
 ## Table of Contents
 
 - [Installation](#installation)
-- [Opening a Clarion Solution](#opening-a-clarion-solution)
+- [Welcome Screen and Opening a Clarion Solution](#welcome-screen-and-opening-a-clarion-solution)
 - [Solution Explorer View](#solution-explorer-view)
 - [Document Symbols and Navigation](#document-symbols-and-navigation)
 - [Editor Features](#editor-features)
@@ -33,33 +33,50 @@ To install the Clarion Extension:
 
 > **Note:** The Fushnisoft Clarion Extension, which provides base language support, will be automatically installed as a dependency.
 
-## Opening a Clarion Solution
+## Welcome Screen and Opening a Clarion Solution
 
-> **Important:** The Clarion Extension requires a saved workspace before you can open a solution. Make sure to save your workspace using `File > Save Workspace As...` before attempting to open a Clarion solution.
+The new **Welcome Screen** provides a friendly landing page when no Clarion solution is open. From here you can:
 
-To open a Clarion solution in VS Code:
+- **Open a New Solution** – Browse for a `ClarionProperties.xml` file and select the Clarion version you're using.
+- **Open Solution from List** – Quickly reopen a solution that’s already associated with your saved workspace.
+- Access helpful links like the **Getting Started** guide.
 
-1. **Open the Solution Folder**
-   - Open the **root folder** where your `.sln` file is located using `File > Open Folder`
-   - Save the workspace using `File > Save Workspace As...`
+### How to Use the Welcome Screen
 
-2. **Select the Clarion Properties File**
-   - Open the **Command Palette** (`Ctrl+Shift+P`)
-   - Search for **"Clarion: Open Solution"**
-   - Choose `ClarionProperties.xml` from `%appdata%\SoftVelocity\ClarionVersion\ClarionProperties.xml`
+1. **Open the Welcome Screen**
+   - It appears automatically if no solution is open.
+   - If it doesn’t, you can refresh the Clarion sidebar or reload the window.
 
-3. **Select the Clarion Version**
-   - Choose the **Clarion version** used for compilation
+2. **Open a New Solution**
+   - Click **"Open a New Solution"**.
+   - Browse to your `ClarionProperties.xml` file (usually in `%appdata%\SoftVelocity\ClarionVersion\`).
+   - Select your Clarion version.
+   - Done! The solution and its projects will now appear in the Solution Explorer.
 
-4. **Save Workspace**
-   - Save the workspace using `File > Save Workspace As...` (this step is required for the extension to function properly)
+3. **Open Solution from List**
+   - Click **"Open Solution from List"**.
+   - Select a previously opened solution from the current VS Code workspace.
+   - This is the quickest way to resume work.
+
+4. **Workspace Requirement**
+   - The extension requires a saved VS Code workspace (`.code-workspace` file) to function properly.
+   - Use **File > Save Workspace As...** to save one if you haven’t already.
+
+### Welcome Panel Image
+
+![Welcome Panel](./WelcomePanel.png)
+
+If you do not see the Welcome screen, make sure no solution is currently open and try refreshing the Clarion sidebar view.
+
+
+---
 
 ## Solution Explorer View
 
 The Solution Explorer View provides a hierarchical view of your Clarion solution, projects, and source files:
 
 1. **Accessing the Solution Explorer**
-   - Click on the Clarion icon in the Activity Bar (left side of VS Code)
+   - Click on the **Clarion Tools** icon in the Activity Bar (left side of VS Code)
    - Or use the Command Palette (`Ctrl+Shift+P`) and search for "Clarion: Show Solution Explorer"
 
 2. **Navigating the Solution Structure**
@@ -71,12 +88,13 @@ The Solution Explorer View provides a hierarchical view of your Clarion solution
    - Right-click on a solution to build the entire solution
    - Right-click on a project to build just that project
    - Right-click on a file to open it
+   - Solutions can also be **closed** from the tree view
 
 ## Document Symbols and Navigation
 
 The Clarion Extension provides powerful navigation features to help you move around your codebase efficiently:
 
-1. **Document Outline View**
+1. **Structure View**
    - Access the Outline view by clicking the "Outline" button in the Explorer sidebar
    - The Outline view shows the structure of your Clarion file, including:
      - Procedures

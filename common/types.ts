@@ -6,6 +6,7 @@ export interface ClarionSourcerFileInfo {
         type: string;
         path: string;
         guid: string;
+        filename?: string;
     };
 }
 
@@ -16,12 +17,12 @@ export interface ClarionSolutionTreeNode {
     type: 'solution' | 'project' | 'file';
     children?: ClarionSolutionTreeNode[];
 }
-
 export interface ClarionProjectInfo {
     name: string;
     type: string;
     path: string;
     guid: string;
+    filename: string;
     sourceFiles: ClarionSourcerFileInfo[];
 }
 
