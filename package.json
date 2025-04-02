@@ -2,7 +2,7 @@
     "name": "clarion-extensions",
     "displayName": "Clarion Extensions",
     "description": "Extension for Clarion Language",
-    "version": "0.5.2",
+    "version": "0.5.4",
     "publisher": "msarson",
     "repository": {
         "type": "git",
@@ -166,8 +166,23 @@
                     "group": "build"
                 },
                 {
+                    "command": "clarion.buildSolution",
+                    "when": "view == solutionView && viewItem == clarionProject",
+                    "group": "build"
+                },
+                {
+                    "command": "clarion.buildSolution",
+                    "when": "view == solutionView && viewItem == clarionFile",
+                    "group": "build"
+                },
+                {
                     "command": "clarion.buildProject",
                     "when": "view == solutionView && viewItem == clarionProject",
+                    "group": "build"
+                },
+                {
+                    "command": "clarion.buildProject",
+                    "when": "view == solutionView && viewItem == clarionFile",
                     "group": "build"
                 },
                 {
@@ -277,6 +292,37 @@
                     "default": "",
                     "description": "Selected Clarion configuration."
                 },
+                "clarion.currentSolution": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Path to the currently selected Clarion solution file."
+                },
+                "clarion.solutions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "solutionFile": {
+                                "type": "string",
+                                "description": "Path to the Clarion solution (.sln) file."
+                            },
+                            "propertiesFile": {
+                                "type": "string",
+                                "description": "Path to the ClarionProperties.xml file."
+                            },
+                            "version": {
+                                "type": "string",
+                                "description": "Selected Clarion version."
+                            },
+                            "configuration": {
+                                "type": "string",
+                                "description": "Selected Clarion configuration."
+                            }
+                        }
+                    },
+                    "default": [],
+                    "description": "Array of Clarion solution settings."
+                },
                 "clarion.maxNumberOfProblems": {
                     "scope": "resource",
                     "type": "number",
@@ -327,7 +373,6 @@
         "typescript": "^4.2.4"
     },
     "dependencies": {
-        "lucide": "^0.363.0",
         "minimatch": "^10.0.1",
         "minimist": "^1.2.6",
         "mkdirp": "^3.0.1",

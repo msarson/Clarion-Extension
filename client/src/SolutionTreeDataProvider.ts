@@ -8,7 +8,7 @@ import { globalSolutionFile } from './globals';
 import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("SolutionTreeDataProvider");
-logger.setLevel("error");
+logger.setLevel("info");
 
 // Special node type for when no solution is open
 interface NoSolutionNodeData {
@@ -41,8 +41,16 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 this._onDidChangeTreeData.fire();
                 return;
             }
+// Only refresh the solution cache if the solution file path is set in the cache
+const currentSolutionPath = this.solutionCache.getSolutionFilePath();
+if (currentSolutionPath) {
+    await this.solutionCache.refresh();
+} else if (globalSolutionFile) {
+    // Initialize with the global solution file if it's set but not in the cache
+    await this.solutionCache.initialize(globalSolutionFile);
+}
 
-            await this.solutionCache.refresh();
+await this.getTreeItems();
             await this.getTreeItems();
 
             if (!this._root) {
@@ -170,7 +178,9 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         const label = element.label || "Unnamed Item";
         const treeItem = new TreeItem(label, element.collapsibleState);
         const data = element.data;
-
+        logger.info(`🏗 Processing item with label: ${label}`);
+        logger.info(JSON.stringify(data, null, 2));
+    
         if ((data as any)?.type === 'noSolution') {
             treeItem.iconPath = new ThemeIcon('folder-opened');
             treeItem.description = "Click to open a solution";
@@ -184,7 +194,7 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             logger.info(`⚠️ getTreeItem(): No Solution Open node`);
             return treeItem;
         }
-
+    
         if ((data as any)?.type === 'closeSolution') {
             treeItem.iconPath = new ThemeIcon('x');
             treeItem.description = "Click to close the current solution";
@@ -198,22 +208,27 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             logger.info(`❌ getTreeItem(): Close Solution node`);
             return treeItem;
         }
-
+    
         if ((data as any)?.guid) {
             const project = data as ClarionProjectInfo;
             treeItem.iconPath = new ThemeIcon('repo');
             treeItem.contextValue = 'clarionProject';
             const projectFile = path.join(project.path, `${project.name}.cwproj`);
+            logger.info(`🔍 Project file path: ${projectFile}`);
             treeItem.command = {
                 title: 'Open Project File',
                 command: 'clarion.openFile',
                 arguments: [projectFile]
             };
             logger.info(`📂 getTreeItem(): Project – ${project.name}`);
-        } else if ((data as any)?.relativePath) {
+            return treeItem;
+        }
+    
+        if ((data as any)?.relativePath) {
             const file = data as ClarionSourcerFileInfo;
             treeItem.iconPath = new ThemeIcon('file-code');
-        
+            treeItem.contextValue = 'clarionFile';
+    
             const solutionCache = SolutionCache.getInstance();
             solutionCache.findFileWithExtension(file.relativePath).then(fullPath => {
                 if (fullPath) {
@@ -230,9 +245,9 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             }).catch(err => {
                 logger.error(`❌ getTreeItem(): Error finding file for ${file.relativePath}: ${err}`);
             });
+            return treeItem;
         }
-        
-
+    
         if ((data as any)?.type === 'procedureSymbol') {
             treeItem.iconPath = new ThemeIcon('symbol-function');
             treeItem.contextValue = 'clarionProcedureSymbol';
@@ -244,21 +259,23 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             treeItem.tooltip = `Go to ${data.name}`;
             logger.info(`🔹 getTreeItem(): Procedure – ${data.name}`);
             return treeItem;
-        } else {
-            const solution = data as ClarionSolutionInfo;
-            treeItem.iconPath = new ThemeIcon('symbol-class');
-            treeItem.contextValue = 'clarionSolution';
-            treeItem.tooltip = "Right-click for more options";
-            treeItem.command = {
-                title: 'Open Solution File',
-                command: 'clarion.openFile',
-                arguments: [solution.path]
-            };
-            logger.info(`🧩 getTreeItem(): Solution – ${solution.name}`);
         }
-
+    
+        // ⬇️ Only fall back to solution node if none of the above matched
+        const solution = data as ClarionSolutionInfo;
+        treeItem.iconPath = new ThemeIcon('symbol-class');
+        treeItem.contextValue = 'clarionSolution';
+        treeItem.tooltip = "Right-click for more options";
+        treeItem.command = {
+            title: 'Open Solution File',
+            command: 'clarion.openFile',
+            arguments: [solution.path]
+        };
+        logger.info(`🧩 getTreeItem(): Solution – ${solution.name}`);
+    
         return treeItem;
     }
+    
 
     async getTreeItems(): Promise<TreeNode[]> {
         try {

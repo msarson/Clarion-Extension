@@ -12,7 +12,7 @@ import { DocumentManager } from './documentManager';
 import { SolutionTreeDataProvider } from './SolutionTreeDataProvider';
 import { StructureViewProvider } from './StructureViewProvider';
 import { TreeNode } from './TreeNode';
-import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile, setGlobalClarionSelection } from './globals';
+import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile, setGlobalClarionSelection, ClarionSolutionSettings } from './globals';
 import * as buildTasks from './buildTasks';
 import LoggerManager from './logger';
 import { SolutionCache } from './SolutionCache';
@@ -22,6 +22,7 @@ import { ClarionProjectInfo } from 'common/types';
 const logger = LoggerManager.getLogger("Extension");
 logger.setLevel("error");
 let client: LanguageClient | undefined;
+let clientReady: boolean = false;
 let treeView: TreeView<TreeNode> | undefined;
 let solutionTreeDataProvider: SolutionTreeDataProvider | undefined;
 let structureViewProvider: StructureViewProvider | undefined;
@@ -187,7 +188,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
     if (!client) {
         logger.info("🚀 Starting Clarion Language Server...");
-        startClientServer(context);
+        await startClientServer(context);
     }
 
     // ✅ Step 1: Ensure a workspace is saved
@@ -285,15 +286,20 @@ export async function activate(context: ExtensionContext): Promise<void> {
             if (client) {
                 logger.info("⏳ Waiting for language client to be ready before initializing solution...");
                 
-                // Set up a listener for when the client is ready
-                client.onReady().then(async () => {
-                    logger.info("✅ Language client is ready. Proceeding with solution initialization...");
-                    // ✅ **Re-added workspaceHasBeenTrusted!**
+                if (clientReady) {
+                    logger.info("✅ Language client is already ready. Proceeding with solution initialization...");
                     await workspaceHasBeenTrusted(context, disposables);
-                }).catch(error => {
-                    logger.error(`❌ Error waiting for language client: ${error instanceof Error ? error.message : String(error)}`);
-                    vscodeWindow.showErrorMessage("Error initializing Clarion solution: Language client failed to start.");
-                });
+                } else {
+                    // Set up a listener for when the client is ready
+                    client.onReady().then(async () => {
+                        logger.info("✅ Language client is ready. Proceeding with solution initialization...");
+                        // ✅ **Re-added workspaceHasBeenTrusted!**
+                        await workspaceHasBeenTrusted(context, disposables);
+                    }).catch(error => {
+                        logger.error(`❌ Error waiting for language client: ${error instanceof Error ? error.message : String(error)}`);
+                        vscodeWindow.showErrorMessage("Error initializing Clarion solution: Language client failed to start.");
+                    });
+                }
             } else {
                 logger.error("❌ Language client is not available.");
                 vscodeWindow.showErrorMessage("Error initializing Clarion solution: Language client is not available.");
@@ -321,8 +327,17 @@ export async function activate(context: ExtensionContext): Promise<void> {
         // Add project build command
         commands.registerCommand('clarion.buildProject', async (node) => {
             // The node parameter is passed automatically from the treeview
-            if (node && node.data && node.data.path) {
-                await buildSolutionOrProject("Project", node.data);
+            if (node && node.data) {
+                // If this is a file node, get the parent project node
+                if (node.data.relativePath && node.parent && node.parent.data && node.parent.data.path) {
+                    // This is a file node, use its parent project
+                    await buildSolutionOrProject("Project", node.parent.data);
+                } else if (node.data.path) {
+                    // This is a project node
+                    await buildSolutionOrProject("Project", node.data);
+                } else {
+                    window.showErrorMessage("Cannot determine which project to build.");
+                }
             } else {
                 window.showErrorMessage("Cannot determine which project to build.");
             }
@@ -337,7 +352,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
                     logger.info("⏳ Waiting for language client to be ready before reinitializing solution...");
                     
                     try {
-                        if (client.needsStart()) {
+                        if (!clientReady) {
                             await client.onReady();
                             logger.info("✅ Language client is now ready for reinitialization.");
                         }
@@ -371,6 +386,12 @@ async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: D
     // Load settings from workspace.json
     await globalSettings.initialize();
     await globalSettings.initializeFromWorkspace();
+    
+    // Set environment variable for the server to use if we have a solution file
+    if (solutionFileFromSettings && fs.existsSync(solutionFileFromSettings)) {
+        process.env.CLARION_SOLUTION_FILE = solutionFileFromSettings;
+        logger.info(`✅ Set CLARION_SOLUTION_FILE environment variable from workspace settings: ${solutionFileFromSettings}`);
+    }
 
     // Log the current state of global variables
     logger.info(`🔍 Global settings state after initialization:
@@ -478,10 +499,9 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
         await workspace.getConfiguration().update("clarion.configuration", globalSettings.configuration, ConfigurationTarget.Workspace);
         logger.info(`✅ Updated configuration: ${globalSettings.configuration}`);
     }
-
     // ✅ Wait for the language client to be ready before proceeding
     if (client) {
-        if (client.needsStart()) {
+        if (!clientReady) {
             logger.info("⏳ Waiting for language client to be ready...");
             try {
                 await client.onReady();
@@ -500,6 +520,7 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
         client.sendNotification('clarion/updatePaths', {
             redirectionPaths: [globalSettings.redirectionPath],
             projectPaths: [solutionDir],
+            solutionFilePath: globalSolutionFile, // Send the full solution file path
             configuration: globalSettings.configuration,
             clarionVersion: globalClarionVersion,
             redirectionFile: globalSettings.redirectionFile,
@@ -546,7 +567,11 @@ async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<Do
     }
 
     // Initialize the solution cache with the solution file path
-    await solutionCache.initialize(globalSolutionFile);
+    if (globalSolutionFile) {
+        await solutionCache.initialize(globalSolutionFile);
+    } else {
+        logger.warn("⚠️ No solution file path available. SolutionCache will not be initialized.");
+    }
 
     if (documentManager) {
         logger.info("🔄 Disposing of existing DocumentManager instance...");
@@ -871,8 +896,16 @@ export async function closeClarionSolution(context: ExtensionContext) {
         // Clear solution-related settings from workspace
         await workspace.getConfiguration().update("clarion.solutionFile", "", ConfigurationTarget.Workspace);
         
+        // Clear the current solution setting
+        await workspace.getConfiguration().update("clarion.currentSolution", "", ConfigurationTarget.Workspace);
+        logger.info("✅ Cleared current solution setting");
+        
         // Reset global variables
         await setGlobalClarionSelection("", globalClarionPropertiesFile, globalClarionVersion, "");
+        
+        // Clear the environment variable
+        process.env.CLARION_SOLUTION_FILE = "";
+        logger.info("✅ Cleared CLARION_SOLUTION_FILE environment variable");
         
         // Hide the configuration status bar if it exists
         if (configStatusBarItem) {
@@ -904,7 +937,69 @@ export async function openClarionSolution(context: ExtensionContext) {
         const previousVersion = globalClarionVersion;
         const previousConfiguration = globalSettings.configuration;
 
-        // ✅ Step 1: Ask the user to select a `.sln` file
+        // ✅ Step 1: Check if we should use an existing solution from the solutions array
+        const config = workspace.getConfiguration("clarion");
+        const solutions = config.get<ClarionSolutionSettings[]>("solutions", []);
+        
+        // If we have solutions in the array, offer them as quick picks
+        let solutionFilePath = "";
+        
+        if (solutions.length > 0) {
+            // Define the types for our quick pick items
+            type NewSolutionQuickPickItem = { label: string; description: string; solution?: undefined };
+            type ExistingSolutionQuickPickItem = { label: string; description: string; solution: ClarionSolutionSettings };
+            type SolutionQuickPickItem = NewSolutionQuickPickItem | ExistingSolutionQuickPickItem;
+            
+            // Create quick pick items for existing solutions and a "New Solution" option
+            const quickPickItems: SolutionQuickPickItem[] = [
+                { label: "$(add) New Solution...", description: "Select a new Clarion solution file" },
+                ...solutions.map(s => ({
+                    label: `$(file) ${path.basename(s.solutionFile)}`,
+                    description: path.dirname(s.solutionFile),
+                    solution: s
+                }))
+            ];
+            
+            const selectedItem = await vscodeWindow.showQuickPick(quickPickItems, {
+                placeHolder: "Select an existing solution or create a new one",
+            });
+            
+            if (!selectedItem) {
+                vscodeWindow.showWarningMessage("Solution selection canceled. Restoring previous settings.");
+                await setGlobalClarionSelection(previousSolutionFile, previousPropertiesFile, previousVersion, previousConfiguration);
+                return;
+            }
+            
+            // If user selected an existing solution
+            if (selectedItem.solution) {
+                logger.info(`📂 Selected existing Clarion solution: ${selectedItem.solution.solutionFile}`);
+                
+                // Use the existing solution settings
+                await setGlobalClarionSelection(
+                    selectedItem.solution.solutionFile,
+                    selectedItem.solution.propertiesFile,
+                    selectedItem.solution.version,
+                    selectedItem.solution.configuration
+                );
+                
+                // Set environment variable for the server to use
+                process.env.CLARION_SOLUTION_FILE = selectedItem.solution.solutionFile;
+                logger.info(`✅ Set CLARION_SOLUTION_FILE environment variable: ${selectedItem.solution.solutionFile}`);
+                
+                // Initialize the Solution
+                await initializeSolution(context, true);
+                
+                // Mark solution as open
+                await commands.executeCommand("setContext", "clarion.solutionOpen", true);
+                vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(selectedItem.solution.solutionFile)}`);
+                
+                return;
+            }
+            
+            // If we get here, user selected "New Solution..."
+        }
+        
+        // Ask the user to select a new .sln file
         const selectedFileUri = await vscodeWindow.showOpenDialog({
             canSelectFiles: true,
             canSelectFolders: false,
@@ -918,8 +1013,8 @@ export async function openClarionSolution(context: ExtensionContext) {
             return;
         }
 
-        const solutionFilePath = selectedFileUri[0].fsPath;
-        logger.info(`📂 Selected Clarion solution: ${solutionFilePath}`);
+        solutionFilePath = selectedFileUri[0].fsPath;
+        logger.info(`📂 Selected new Clarion solution: ${solutionFilePath}`);
 
         // ✅ Step 2: Select or retrieve ClarionProperties.xml
         if (!globalClarionPropertiesFile || !fs.existsSync(globalClarionPropertiesFile)) {
@@ -968,6 +1063,10 @@ export async function openClarionSolution(context: ExtensionContext) {
         // ✅ Step 4: Save final selections to workspace settings
         await setGlobalClarionSelection(solutionFilePath, globalClarionPropertiesFile, globalClarionVersion, globalSettings.configuration);
         logger.info(`⚙️ Selected configuration: ${globalSettings.configuration}`);
+        
+        // ✅ Set environment variable for the server to use
+        process.env.CLARION_SOLUTION_FILE = solutionFilePath;
+        logger.info(`✅ Set CLARION_SOLUTION_FILE environment variable: ${solutionFilePath}`);
 
         // ✅ Step 5: Initialize the Solution
         await initializeSolution(context, true);
@@ -1214,6 +1313,14 @@ async function setConfiguration() {
     }
 
     const solutionCache = SolutionCache.getInstance();
+    
+    // Check if the solution file path is set in the SolutionCache
+    const currentSolutionPath = solutionCache.getSolutionFilePath();
+    if (!currentSolutionPath && globalSolutionFile) {
+        // Initialize the SolutionCache with the global solution file
+        await solutionCache.initialize(globalSolutionFile);
+    }
+    
     const availableConfigs = solutionCache.getAvailableConfigurations();
 
     if (availableConfigs.length === 0) {
@@ -1292,7 +1399,7 @@ function parseBuildOutput(output: string) {
 
     return errors;
 }
-function startClientServer(context: ExtensionContext) {
+async function startClientServer(context: ExtensionContext): Promise<void> {
     logger.info("Starting Clarion Language Server...");
     let serverModule = context.asAbsolutePath(path.join('out', 'server', 'src', 'server.js'));
     let debugOptions = { execArgv: ['--nolazy', '--inspect=6009'] };
@@ -1346,19 +1453,24 @@ function startClientServer(context: ExtensionContext) {
     logger.info(`📄 Configured Language Client for extensions: ${lookupExtensions.join(', ')}`);
 
     client = new LanguageClient("ClarionLanguageServer", "Clarion Language Server", serverOptions, clientOptions);
+    
     // Start the language client
     const disposable = client.start();
     context.subscriptions.push(disposable);
 
-    // Wait for the language client to become ready
-    client.onReady()
-        .then(() => {
-            logger.info("✅ Language client started and is ready");
-        })
-        .catch((err) => {
-            logger.error("❌ Language client failed to start properly", err);
-            client = undefined;
-        });
+    // Reset client ready state
+    clientReady = false;
+
+    try {
+        // Wait for the language client to become ready
+        await client.onReady();
+        logger.info("✅ Language client started and is ready");
+        clientReady = true;
+    } catch (err) {
+        logger.error("❌ Language client failed to start properly", err);
+        vscodeWindow.showWarningMessage("Clarion Language Server had issues during startup. Some features may not work correctly.");
+        client = undefined;
+    }
 
 }
 async function buildSolutionOrProject(buildTarget: "Solution" | "Project", project?: ClarionProjectInfo) {

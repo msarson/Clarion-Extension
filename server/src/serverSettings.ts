@@ -3,6 +3,7 @@ export const serverSettings = {
     projectPaths: [] as string[],
     configuration: "Default",
     clarionVersion: "0.0",
+    solutionFilePath: "", // Add solution file path
 
     macros: {} as Record<string, string>,
     libsrcPaths: [] as string[],

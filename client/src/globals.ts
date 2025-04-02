@@ -3,8 +3,16 @@ import * as fs from 'fs';
 import { parseStringPromise } from 'xml2js';
 import { ClarionExtensionCommands } from './ClarionExtensionCommands';
 import LoggerManager from './logger';
+import * as path from 'path';
 const logger = LoggerManager.getLogger("Globals");
 
+// Interface for solution settings
+export interface ClarionSolutionSettings {
+    solutionFile: string;
+    propertiesFile: string;
+    version: string;
+    configuration: string;
+}
 
 // ✅ These are stored in workspace settings
 export let globalSolutionFile: string = "";
@@ -44,10 +52,18 @@ export async function setGlobalClarionSelection(
     // ✅ Only save to workspace if all required values are set
     if (solutionFile && clarionPropertiesFile && clarionVersion) {
         logger.info("✅ All required settings are set. Saving to workspace settings...");
+        
+        // Update the current solution settings
         await workspace.getConfiguration().update('clarion.solutionFile', solutionFile, ConfigurationTarget.Workspace);
         await workspace.getConfiguration().update('clarion.propertiesFile', clarionPropertiesFile, ConfigurationTarget.Workspace);
         await workspace.getConfiguration().update('clarion.version', clarionVersion, ConfigurationTarget.Workspace);
         await workspace.getConfiguration().update('clarion.configuration', clarionConfiguration, ConfigurationTarget.Workspace);
+        
+        // Update the current solution in the solutions array
+        await updateSolutionsArray(solutionFile, clarionPropertiesFile, clarionVersion, clarionConfiguration);
+        
+        // Set the current solution
+        await workspace.getConfiguration().update('clarion.currentSolution', solutionFile, ConfigurationTarget.Workspace);
 
         // ✅ Ensure lookup extensions are written ONLY when a valid solution exists
         const config = workspace.getConfiguration("clarion");
@@ -72,6 +88,47 @@ export async function setGlobalClarionSelection(
     } else {
         logger.warn("⚠️ Not saving to workspace settings: One or more required values are missing.");
     }
+}
+
+/**
+ * Updates the solutions array in workspace settings
+ */
+async function updateSolutionsArray(
+    solutionFile: string,
+    clarionPropertiesFile: string,
+    clarionVersion: string,
+    clarionConfiguration: string
+) {
+    if (!solutionFile) return;
+    
+    // Get the current solutions array
+    const config = workspace.getConfiguration("clarion");
+    const solutions = config.get<ClarionSolutionSettings[]>("solutions", []);
+    
+    // Check if this solution is already in the array
+    const solutionIndex = solutions.findIndex(s => s.solutionFile === solutionFile);
+    
+    if (solutionIndex >= 0) {
+        // Update existing solution
+        solutions[solutionIndex] = {
+            solutionFile,
+            propertiesFile: clarionPropertiesFile,
+            version: clarionVersion,
+            configuration: clarionConfiguration
+        };
+    } else {
+        // Add new solution
+        solutions.push({
+            solutionFile,
+            propertiesFile: clarionPropertiesFile,
+            version: clarionVersion,
+            configuration: clarionConfiguration
+        });
+    }
+    
+    // Save the updated solutions array
+    await config.update("solutions", solutions, ConfigurationTarget.Workspace);
+    logger.info(`✅ Updated solutions array with ${solutions.length} solutions`);
 }
 
 
@@ -150,15 +207,88 @@ export const globalSettings = {
         }
     },
 
+    /**
+     * Migrates existing settings to the solutions array
+     */
+    async migrateToSolutionsArray() {
+        logger.info("🔄 Checking if migration to solutions array is needed...");
+        
+        const config = workspace.getConfiguration("clarion");
+        
+        // Check if we already have a solutions array
+        const solutions = config.get<ClarionSolutionSettings[]>("solutions", []);
+        
+        // Check if we have a current solution setting
+        const currentSolution = config.get<string>("currentSolution", "");
+        
+        // Get the existing settings
+        const solutionFile = config.get<string>("solutionFile", "");
+        const propertiesFile = config.get<string>("propertiesFile", "");
+        const version = config.get<string>("version", "");
+        const configuration = config.get<string>("configuration", "Release");
+        
+        // If we have a solution file but no solutions array or current solution, migrate
+        if (solutionFile && (!solutions.length || !currentSolution)) {
+            logger.info("✅ Migration needed. Creating solutions array from existing settings.");
+            
+            // Create a new solution entry
+            const newSolution: ClarionSolutionSettings = {
+                solutionFile,
+                propertiesFile,
+                version,
+                configuration
+            };
+            
+            // Add to solutions array if not already there
+            if (!solutions.some(s => s.solutionFile === solutionFile)) {
+                solutions.push(newSolution);
+                await config.update("solutions", solutions, ConfigurationTarget.Workspace);
+                logger.info(`✅ Added solution to solutions array: ${solutionFile}`);
+            }
+            
+            // Set current solution if not already set
+            if (!currentSolution) {
+                await config.update("currentSolution", solutionFile, ConfigurationTarget.Workspace);
+                logger.info(`✅ Set current solution to: ${solutionFile}`);
+            }
+            
+            logger.info("✅ Migration to solutions array completed successfully.");
+        } else {
+            logger.info("✅ No migration needed or already migrated.");
+        }
+    },
+    
     /** ✅ Load settings from workspace.json */
     async initializeFromWorkspace() {
         logger.info("🔄 Loading settings from workspace.json...");
 
+        // Check if we need to migrate existing settings to the solutions array
+        await this.migrateToSolutionsArray();
+
+        // Get the current solution from settings
+        const currentSolution = workspace.getConfiguration().get<string>("clarion.currentSolution", "");
+        
         // ✅ Read workspace settings
-        const solutionFile = workspace.getConfiguration().get<string>("clarion.solutionFile", "") || "";
-        const clarionPropertiesFile = workspace.getConfiguration().get<string>("clarion.propertiesFile", "") || "";
-        const clarionVersion = workspace.getConfiguration().get<string>("clarion.version", "") || "";
-        const clarionConfiguration = workspace.getConfiguration().get<string>("clarion.configuration", "") || "Release";
+        let solutionFile = workspace.getConfiguration().get<string>("clarion.solutionFile", "") || "";
+        let clarionPropertiesFile = workspace.getConfiguration().get<string>("clarion.propertiesFile", "") || "";
+        let clarionVersion = workspace.getConfiguration().get<string>("clarion.version", "") || "";
+        let clarionConfiguration = workspace.getConfiguration().get<string>("clarion.configuration", "") || "Release";
+
+        // If we have a current solution, try to find it in the solutions array
+        if (currentSolution) {
+            const solutions = workspace.getConfiguration().get<ClarionSolutionSettings[]>("clarion.solutions", []);
+            const solution = solutions.find(s => s.solutionFile === currentSolution);
+            
+            if (solution) {
+                logger.info(`✅ Found current solution in solutions array: ${solution.solutionFile}`);
+                solutionFile = solution.solutionFile;
+                clarionPropertiesFile = solution.propertiesFile;
+                clarionVersion = solution.version;
+                clarionConfiguration = solution.configuration;
+            } else {
+                logger.warn(`⚠️ Current solution ${currentSolution} not found in solutions array`);
+            }
+        }
 
         logger.info(`🔍 Read from workspace settings:
             - clarion.solutionFile: ${solutionFile || 'not set'}

@@ -218,6 +218,7 @@ connection.onNotification('clarion/updatePaths', async (params: {
     redirectionFile: string;
     macros: Record<string, string>;
     libsrcPaths: string[];
+    solutionFilePath?: string; // Add optional solution file path
 }) => {
     try {
         // Update server settings
@@ -228,6 +229,14 @@ connection.onNotification('clarion/updatePaths', async (params: {
         serverSettings.macros = params.macros || {};
         serverSettings.libsrcPaths = params.libsrcPaths || [];
         serverSettings.redirectionFile = params.redirectionFile || "";
+        serverSettings.solutionFilePath = params.solutionFilePath || ""; // Store solution file path
+
+        // Log the solution file path
+        if (params.solutionFilePath) {
+            logger.info(`🔍 Received solution file path: ${params.solutionFilePath}`);
+        } else {
+            logger.warn("⚠️ No solution file path provided in updatePaths notification");
+        }
 
         // ✅ Initialize the solution manager before building the solution
         const solutionPath = params.projectPaths?.[0];
