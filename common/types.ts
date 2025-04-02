@@ -7,6 +7,10 @@ export interface ClarionSourcerFileInfo {
         path: string;
         guid: string;
         filename?: string;
+        fileDrivers?: string[];
+        libraries?: string[];
+        projectReferences?: { name: string, project: string }[];
+        noneFiles?: string[];
     };
 }
 
@@ -24,6 +28,10 @@ export interface ClarionProjectInfo {
     guid: string;
     filename: string;
     sourceFiles: ClarionSourcerFileInfo[];
+    fileDrivers?: string[];
+    libraries?: string[];
+    projectReferences?: { name: string, project: string }[];
+    noneFiles?: string[];
 }
 
 export interface ClarionSolutionInfo {

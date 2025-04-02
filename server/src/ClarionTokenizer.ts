@@ -89,14 +89,33 @@ export class ClarionTokenizer {
 
     /** ✅ Public method to tokenize text */
     public tokenize(): Token[] {
-        
-        logger.info("🔍 Starting tokenization...");
-        this.lines = this.text.split(/\r?\n/);
+        try {
+            logger.info("🔍 [DEBUG] Starting tokenization...");
+            
+            // Check if the text is XML
+            if (this.text.trim().startsWith('<?xml') || this.text.trim().startsWith('<Project')) {
+                logger.warn("⚠️ [DEBUG] Detected XML content, skipping tokenization");
+                return [];
+            }
+            
+            logger.info(`🔍 [DEBUG] Splitting text into lines (length: ${this.text.length})`);
+            this.lines = this.text.split(/\r?\n/);
+            logger.info(`🔍 [DEBUG] Split into ${this.lines.length} lines`);
 
-
-
-        this.tokenizeLines(this.lines); // ✅ Step 1: Tokenize all lines
-        this.processDocumentStructure(); // ✅ Step 2: Process relationships
+            logger.info("🔍 [DEBUG] Tokenizing lines...");
+            this.tokenizeLines(this.lines); // ✅ Step 1: Tokenize all lines
+            logger.info(`🔍 [DEBUG] Tokenized ${this.tokens.length} tokens`);
+            
+            logger.info("🔍 [DEBUG] Processing document structure...");
+            this.processDocumentStructure(); // ✅ Step 2: Process relationships
+            logger.info("🔍 [DEBUG] Document structure processed");
+            
+            logger.info(`🔍 [DEBUG] Returning ${this.tokens.length} tokens`);
+            return this.tokens;
+        } catch (error) {
+            logger.error(`❌ [DEBUG] Error in tokenize: ${error instanceof Error ? error.message : String(error)}`);
+            return [];
+        }
 
         logger.info("🔍 Tokenization complete.");
         return this.tokens;

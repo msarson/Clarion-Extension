@@ -1,4 +1,4 @@
-﻿﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, TextEditor, window as vscodeWindow, Diagnostic, DiagnosticSeverity, Range, StatusBarItem, StatusBarAlignment } from 'vscode';
+﻿﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, TextEditor, window as vscodeWindow, Diagnostic, DiagnosticSeverity, Range, StatusBarItem, StatusBarAlignment, extensions } from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, ErrorAction, CloseAction } from 'vscode-languageclient/node';
 
 import * as path from 'path';
@@ -183,12 +183,24 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
     logger.info("🔄 Activating Clarion extension...");
 
+    // Check for open XML files to avoid conflicts with redhat.vscode-xml extension
+    const openXmlFiles = workspace.textDocuments.filter(doc =>
+        doc.languageId === 'xml' || doc.fileName.toLowerCase().endsWith('.xml')
+    );
+    
+    if (openXmlFiles.length > 0) {
+        logger.warn(`⚠️ Found ${openXmlFiles.length} open XML files. This may cause conflicts with the XML extension.`);
+        logger.warn("⚠️ Consider closing XML files before using Clarion features to avoid conflicts.");
+        // We'll still continue activation, but with a longer delay to allow XML extension to initialize
+    }
+
     // Icons are already in the images directory
     logger.info("✅ Using SVG icons from images directory");
 
     if (!client) {
         logger.info("🚀 Starting Clarion Language Server...");
-        await startClientServer(context);
+        // Use a longer delay if XML files are open
+        await startClientServer(context, openXmlFiles.length > 0);
     }
 
     // ✅ Step 1: Ensure a workspace is saved
@@ -317,10 +329,206 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
     context.subscriptions.push(...disposables);
 
+    // Register the commands programmatically to avoid conflicts with other extensions
+    context.subscriptions.push(
+        commands.registerCommand('clarion.addSourceFile', async (node) => {
+            logger.info(`🔄 Executing clarion.addSourceFile command`);
+            
+            try {
+                // Get the project node
+                let projectNode = node;
+                let projectData: ClarionProjectInfo | null = null;
+                
+                // If this is a file node or section node, get the parent project node
+                if (node && node.parent && node.parent.data && node.parent.data.guid) {
+                    // This is a child node, use its parent project
+                    projectNode = node.parent;
+                }
+                
+                if (projectNode && projectNode.data && projectNode.data.guid) {
+                    projectData = projectNode.data as ClarionProjectInfo;
+                }
+                
+                if (!projectData) {
+                    // If no node was provided or it's not a valid project node,
+                    // show a quick pick to select a project
+                    const solutionCache = SolutionCache.getInstance();
+                    const solution = solutionCache.getSolutionInfo();
+                    
+                    if (!solution || !solution.projects || solution.projects.length === 0) {
+                        window.showErrorMessage("No projects available in the current solution.");
+                        return;
+                    }
+                    
+                    const projectItems = solution.projects.map(p => ({
+                        label: p.name,
+                        description: p.path,
+                        project: p
+                    }));
+                    
+                    const selectedProject = await window.showQuickPick(projectItems, {
+                        placeHolder: "Select a project to add the source file to"
+                    });
+                    
+                    if (!selectedProject) {
+                        return; // User cancelled
+                    }
+                    
+                    projectData = selectedProject.project;
+                }
+                
+                // Prompt for the file name
+                const fileName = await window.showInputBox({
+                    prompt: "Enter the name of the source file to add (e.g., someclwfile.clw)",
+                    placeHolder: "someclwfile.clw",
+                    validateInput: (value) => {
+                        if (!value) {
+                            return "File name is required";
+                        }
+                        if (!value.toLowerCase().endsWith('.clw')) {
+                            return "File name must have a .clw extension";
+                        }
+                        return null; // Valid input
+                    }
+                });
+                
+                if (!fileName) {
+                    return; // User cancelled
+                }
+                
+                // Add the source file to the project
+                const solutionCache = SolutionCache.getInstance();
+                const result = await solutionCache.addSourceFile(projectData.guid, fileName);
+                
+                if (result) {
+                    window.showInformationMessage(`Successfully added ${fileName} to project ${projectData.name}.`);
+                    
+                    // Refresh the solution tree view
+                    if (solutionTreeDataProvider) {
+                        await solutionTreeDataProvider.refresh();
+                    }
+                } else {
+                    window.showErrorMessage(`Failed to add ${fileName} to project ${projectData.name}.`);
+                }
+            } catch (error) {
+                logger.error(`❌ Error in clarion.addSourceFile command: ${error instanceof Error ? error.message : String(error)}`);
+                window.showErrorMessage(`Error adding source file: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }),
+        
+        commands.registerCommand('clarion.removeSourceFile', async (node) => {
+            logger.info(`🔄 Executing clarion.removeSourceFile command`);
+            
+            try {
+                // Check if this is a source file node
+                if (!node || !node.data || !node.data.name || !node.data.name.toLowerCase().endsWith('.clw')) {
+                    window.showErrorMessage("Please select a CLW file to remove.");
+                    return;
+                }
+                
+                // Get the parent project node
+                if (!node.parent || !node.parent.data || !node.parent.data.guid) {
+                    window.showErrorMessage("Cannot determine which project this file belongs to.");
+                    return;
+                }
+                
+                const projectData = node.parent.data as ClarionProjectInfo;
+                const fileName = node.data.name;
+                
+                // Confirm with the user
+                const confirmation = await window.showWarningMessage(
+                    `Are you sure you want to remove ${fileName} from project ${projectData.name}?`,
+                    { modal: true },
+                    "Yes",
+                    "No"
+                );
+                
+                if (confirmation !== "Yes") {
+                    return; // User cancelled
+                }
+                
+                // Remove the source file from the project
+                const solutionCache = SolutionCache.getInstance();
+                const result = await solutionCache.removeSourceFile(projectData.guid, fileName);
+                
+                if (result) {
+                    window.showInformationMessage(`Successfully removed ${fileName} from project ${projectData.name}.`);
+                    
+                    // Refresh the solution tree view
+                    if (solutionTreeDataProvider) {
+                        await solutionTreeDataProvider.refresh();
+                    }
+                } else {
+                    window.showErrorMessage(`Failed to remove ${fileName} from project ${projectData.name}.`);
+                }
+            } catch (error) {
+                logger.error(`❌ Error in clarion.removeSourceFile command: ${error instanceof Error ? error.message : String(error)}`);
+                window.showErrorMessage(`Error removing source file: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        })
+    );
+
     context.subscriptions.push(
         // Register the goToSymbol command
         commands.registerCommand('clarion.goToSymbol', (uri: Uri, range: Range) => {
             vscodeWindow.showTextDocument(uri, { selection: range });
+        }),
+
+        // Add command to navigate to a project in the solution tree
+        commands.registerCommand('clarion.navigateToProject', async (projectGuid: string) => {
+            if (!projectGuid) {
+                logger.warn("⚠️ No project GUID provided for navigation");
+                return;
+            }
+
+            logger.info(`🔍 Navigating to project with GUID: ${projectGuid}`);
+            
+            // Get the solution cache to find the project
+            const solutionCache = SolutionCache.getInstance();
+            const solution = solutionCache.getSolutionInfo();
+            
+            if (!solution || !solution.projects) {
+                logger.warn("⚠️ No solution available for project navigation");
+                return;
+            }
+            
+            // Find the project by GUID
+            const project = solution.projects.find(p => p.guid === projectGuid);
+            if (!project) {
+                logger.warn(`⚠️ Project with GUID ${projectGuid} not found in solution`);
+                return;
+            }
+            
+            logger.info(`✅ Found project: ${project.name}`);
+            
+            // Reveal the project in the solution tree view
+            if (treeView && solutionTreeDataProvider) {
+                // Refresh the tree view to ensure it's up to date
+                await solutionTreeDataProvider.refresh();
+                
+                // Find the project node in the tree
+                const rootNodes = await solutionTreeDataProvider.getChildren();
+                if (rootNodes && rootNodes.length > 0) {
+                    const solutionNode = rootNodes[0];
+                    const projectNodes = await solutionTreeDataProvider.getChildren(solutionNode);
+                    
+                    // Find the project node with matching GUID
+                    const projectNode = projectNodes.find(node =>
+                        node.data && (node.data as ClarionProjectInfo).guid === projectGuid
+                    );
+                    
+                    if (projectNode) {
+                        // Reveal the project node in the tree view
+                        treeView.reveal(projectNode, { select: true, focus: true });
+                        
+                        // Open the project file
+                        const projectFilePath = path.join(project.path, project.filename);
+                        if (fs.existsSync(projectFilePath)) {
+                            await commands.executeCommand('clarion.openFile', projectFilePath);
+                        }
+                    }
+                }
+            }
         }),
         
         // Add solution build command
@@ -377,7 +585,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
                 await createSolutionTreeView();
                 vscodeWindow.showInformationMessage("No solution is currently open. Use the 'Open Solution' button in the Solution View.");
             }
-        })
+        }),
+
+        // Commands for adding/removing source files are already registered above
     );
 }
 
@@ -538,23 +748,27 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
         vscodeWindow.showErrorMessage("Error initializing Clarion solution: Language client is not available.");
         return;
     }
-
+    logger.info("🔄 before timeout");
     // Wait a moment for the server to process the notification
     await new Promise(resolve => setTimeout(resolve, 1000));
-
+    logger.info("🔄 before reinitalizeEnvironment");
     // ✅ Continue initializing the solution cache and document manager
     documentManager = await reinitializeEnvironment(refreshDocs);
+    logger.info("🔄 before createSolutionTreeView");
     await createSolutionTreeView();
+    logger.info("🔄 before registerLanguageFeatures")   ;
     registerLanguageFeatures(context);
+    logger.info("🔄 before setContext");
     await commands.executeCommand("setContext", "clarion.solutionOpen", true);
+    logger.info("🔄 before updateConfigurationStatusBar");
     updateConfigurationStatusBar(globalSettings.configuration);
-
+    logger.info("🔄 before createSolutionFileWatchers");
     // Create file watchers for the solution, project, and redirection files
     await createSolutionFileWatchers(context);
-
+    logger.info("🔄 before refreshOpenDocuments");
     // Force refresh all open documents to ensure links are generated
     await refreshOpenDocuments();
-
+    logger.info("🔄 before showInformationMessage");
     vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(globalSolutionFile)}`);
 }
 
@@ -1475,8 +1689,61 @@ function parseBuildOutput(output: string) {
 
     return errors;
 }
-async function startClientServer(context: ExtensionContext): Promise<void> {
-    logger.info("Starting Clarion Language Server...");
+async function startClientServer(context: ExtensionContext, hasOpenXmlFiles: boolean = false): Promise<void> {
+    try {
+        logger.info("🔍 [DEBUG] Starting Clarion Language Server...");
+        
+        // Log XML extension status
+        try {
+            const xmlExtension = extensions.getExtension('redhat.vscode-xml');
+            logger.info(`🔍 [DEBUG] XML extension status: ${xmlExtension ? (xmlExtension.isActive ? 'active' : 'inactive') : 'not installed'}`);
+        } catch (xmlError) {
+            logger.error(`🔍 [DEBUG] Error checking XML extension: ${xmlError instanceof Error ? xmlError.message : String(xmlError)}`);
+        }
+        
+        // Log open documents
+        try {
+            const openDocs = workspace.textDocuments;
+            logger.info(`🔍 [DEBUG] Open documents (${openDocs.length}): ${openDocs.map(d => d.fileName).join(', ')}`);
+            
+            // Check for XML files and log details
+            for (const doc of openDocs) {
+                if (doc.fileName.toLowerCase().endsWith('.xml') || doc.fileName.toLowerCase().endsWith('.cwproj')) {
+                    logger.info(`🔍 [DEBUG] XML file details: ${doc.fileName}, language: ${doc.languageId}, version: ${doc.version}`);
+                }
+            }
+        } catch (docsError) {
+            logger.error(`🔍 [DEBUG] Error checking open documents: ${docsError instanceof Error ? docsError.message : String(docsError)}`);
+        }
+        
+        // Skip the delay if there are XML files open
+        if (hasOpenXmlFiles) {
+            logger.info(`🔍 [DEBUG] XML files are open, skipping delay and proceeding with initialization...`);
+        } else {
+            // Add a shorter delay to allow other extensions to initialize first
+            const delayTime = 1000; // Use a shorter delay
+            logger.info(`🔍 [DEBUG] Waiting for other extensions to initialize (${delayTime}ms delay)...`);
+            
+            // Use a different approach for the delay
+            const startTime = Date.now();
+            let elapsedTime = 0;
+            
+            while (elapsedTime < delayTime) {
+                // Check every 100ms
+                await new Promise(resolve => setTimeout(resolve, 100));
+                elapsedTime = Date.now() - startTime;
+                
+                // Log progress every 500ms
+                if (elapsedTime % 500 < 100) {
+                    logger.info(`🔍 [DEBUG] Delay progress: ${elapsedTime}ms / ${delayTime}ms`);
+                }
+            }
+            
+            logger.info("🔍 [DEBUG] Delay completed. Continuing with Clarion Language Server initialization...");
+        }
+    } catch (startupError) {
+        logger.error(`🔍 [DEBUG] Error during startup delay: ${startupError instanceof Error ? startupError.message : String(startupError)}`);
+    }
     let serverModule = context.asAbsolutePath(path.join('out', 'server', 'src', 'server.js'));
     let debugOptions = { execArgv: ['--nolazy', '--inspect=6009'] };
 

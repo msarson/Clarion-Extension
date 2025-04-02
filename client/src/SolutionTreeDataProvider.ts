@@ -8,7 +8,7 @@ import { globalSolutionFile } from './globals';
 import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("SolutionTreeDataProvider");
-logger.setLevel("info");
+logger.setLevel("error");
 
 // Special node type for when no solution is open
 interface NoSolutionNodeData {
@@ -18,6 +18,10 @@ interface NoSolutionNodeData {
 export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     private _onDidChangeTreeData: EventEmitter<void> = new EventEmitter<void>();
     readonly onDidChangeTreeData: Event<void> = this._onDidChangeTreeData.event;
+
+    // Add a new emitter for selecting nodes
+    private _onDidSelectNode: EventEmitter<TreeNode> = new EventEmitter<TreeNode>();
+    readonly onDidSelectNode: Event<TreeNode> = this._onDidSelectNode.event;
 
     private _root: TreeNode[] | null = null;
     private solutionCache: SolutionCache;
@@ -61,134 +65,36 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     }
     async getChildren(element?: TreeNode): Promise<TreeNode[]> {
         if (element) {
+            logger.info(`🔍 Getting children for element: ${element.label}`);
+            logger.info(`  - Children count: ${element.children?.length || 0}`);
+            
+            if (element.children && element.children.length > 0) {
+                logger.info(`  - First few children: ${element.children.slice(0, 5).map(c => c.label).join(', ')}${element.children.length > 5 ? '...' : ''}`);
+            }
+            
             return element.children;
         }
     
         // ✅ If no solution is loaded, return empty list (shows welcome screen)
         if (!globalSolutionFile) {
+            logger.info(`🔍 No solution file, returning empty children list`);
             return [];
         }
     
         // ✅ Otherwise load your normal root tree (project/solution items)
+        logger.info(`🔍 Returning root nodes: ${this._root?.length || 0} items`);
+        if (this._root && this._root.length > 0) {
+            logger.info(`  - Root node: ${this._root[0].label}`);
+            logger.info(`  - Root children count: ${this._root[0].children?.length || 0}`);
+            
+            if (this._root[0].children && this._root[0].children.length > 0) {
+                logger.info(`  - First few children: ${this._root[0].children.slice(0, 5).map(c => c.label).join(', ')}${this._root[0].children.length > 5 ? '...' : ''}`);
+            }
+        }
+        
         return this._root || [];
     }
     
-    
-
-    // async getChildren(element?: TreeNode): Promise<TreeNode[]> {
-    //     if (element) {
-    //         if (
-    //             element.data &&
-    //             (element.data as any).relativePath &&
-    //             (element.data as any).relativePath.toLowerCase().endsWith('.clw')
-    //         ) {
-    //             logger.info(`🔄 Fetching symbols for source file: ${element.data.relativePath}`);
-    //             if (!element.children || element.children.length === 0) {
-    //                 try {
-    //                     const sourceFile = element.data as ClarionSourcerFileInfo;
-    //                     const projectNode = element.parent;
-    //                     const projectPath =
-    //                         projectNode && projectNode.data && (projectNode.data as ClarionProjectInfo).path || '';
-    //                     const relativePath = sourceFile.relativePath || '';
-
-    //                     if (!relativePath) {
-    //                         logger.error(`❌ No relative path provided for source file`);
-    //                         return element.children;
-    //                     }
-
-    //                     const solutionCache = SolutionCache.getInstance();
-    //                     const fullPath = await solutionCache.findFileWithExtension(relativePath);
-
-    //                     logger.info(`🔍 Constructed full path: ${fullPath}`);
-    //                     logger.info(`🔍 Fetching symbols from language server for ${fullPath}`);
-    //                     const symbols = await this.getSymbolsFromLanguageServer(fullPath);
-    //                     logger.info(`✅ Found ${symbols.length} top-level procedures from language server`);
-
-    //                     for (const proc of symbols) {
-    //                         try {
-    //                             const procNode = new TreeNode(
-    //                                 proc.name,
-    //                                 TreeItemCollapsibleState.None,
-    //                                 {
-    //                                     type: 'procedureSymbol',
-    //                                     file: sourceFile.relativePath,
-    //                                     name: proc.name,
-    //                                     line: proc.line || 0
-    //                                 },
-    //                                 element
-    //                             );
-    //                             element.children.push(procNode);
-    //                         } catch (err) {
-    //                             logger.error(`❌ Error creating tree node for procedure ${proc.name}: ${err instanceof Error ? err.message : String(err)}`);
-    //                         }
-    //                     }
-    //                 } catch (error) {
-    //                     logger.error(`❌ Error fetching symbols: ${error instanceof Error ? error.message : String(error)}`);
-    //                 }
-    //             }
-    //         }
-
-    //         return element.children;
-    //     }
-
-    //     // ✅ If no solution is loaded, return empty list (shows welcome screen)
-    //     if (!globalSolutionFile) {
-    //         return [];
-    //     }
-
-    //     // ✅ Otherwise load your normal root tree (project/solution items)
-    //     return this.getTreeItems();
-    // }
-
-
-    // private async getSymbolsFromLanguageServer(filePath: string): Promise<any[]> {
-    //     try {
-    //         if (!filePath) {
-    //             logger.error(`❌ No file path provided`);
-    //             return [];
-    //         }
-
-    //         logger.info(`🔍 Requesting document symbols for ${filePath}`);
-
-    //         if (!fs.existsSync(filePath)) {
-    //             logger.error(`❌ File not found: ${filePath}`);
-    //             return [];
-    //         }
-
-    //         const content = fs.readFileSync(filePath, 'utf-8');
-    //         const lines = content.split(/\r?\n/);
-    //         logger.info(`🔍 File has ${lines.length} lines`);
-
-    //         const documentSymbols = await this.solutionCache.getSymbolsForFile(filePath);
-
-    //         if (documentSymbols && documentSymbols.length > 0) {
-    //             logger.info(`🔎 Received ${documentSymbols.length} symbols from server for ${filePath}`);
-
-    //             const procedures = documentSymbols.filter((symbol: any) => {
-    //                 const isProcedure = symbol.kind === 12; // SymbolKind.Function
-    //                 const isMethod = (symbol as any)._isMethodImplementation === true;
-    //                 const isImplementationContainer = symbol.name?.endsWith('(Implementation)');
-
-    //                 const include = isProcedure && !isMethod && !isImplementationContainer;
-
-    //                 logger.info(`  • ${symbol.name} [kind=${symbol.kind}] [container=${symbol.containerName ?? '<none>'}] [isMethod=${isMethod}] [isImplementationContainer=${isImplementationContainer}]`);
-    //                 logger.info(`    ${include ? '✅ Included as top-level procedure' : '❌ Excluded'}`);
-
-    //                 return include;
-    //             });
-
-    //             logger.info(`✅ Total top-level procedures found: ${procedures.length}`);
-    //             return procedures;
-    //         } else {
-    //             logger.warn(`⚠️ No symbols received from language server for ${filePath}`);
-    //             return [];
-    //         }
-    //     } catch (error) {
-    //         logger.error(`❌ Error getting symbols: ${error instanceof Error ? error.message : String(error)}`);
-    //         return [];
-    //     }
-    // }
-
     getTreeItem(element: TreeNode): TreeItem {
         const label = element.label || "Unnamed Item";
         const treeItem = new TreeItem(label, element.collapsibleState);
@@ -221,6 +127,75 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             };
             treeItem.label = "Close Solution";
             logger.info(`❌ getTreeItem(): Close Solution node`);
+            return treeItem;
+        }
+        
+        // Handle section nodes
+        if ((data as any)?.type === 'section') {
+            const sectionType = (data as any).sectionType;
+            switch (sectionType) {
+                case 'fileDrivers':
+                    treeItem.iconPath = new ThemeIcon('database');
+                    break;
+                case 'libraries':
+                    treeItem.iconPath = new ThemeIcon('library');
+                    break;
+                case 'projectReferences':
+                    treeItem.iconPath = new ThemeIcon('references');
+                    break;
+                case 'noneFiles':
+                    treeItem.iconPath = new ThemeIcon('files');
+                    break;
+                default:
+                    treeItem.iconPath = new ThemeIcon('folder');
+            }
+            treeItem.contextValue = `clarion${sectionType.charAt(0).toUpperCase() + sectionType.slice(1)}Section`;
+            return treeItem;
+        }
+        
+        // Handle specific item types
+        if ((data as any)?.type === 'fileDriver') {
+            treeItem.iconPath = new ThemeIcon('database');
+            treeItem.contextValue = 'clarionFileDriver';
+            return treeItem;
+        }
+        
+        if ((data as any)?.type === 'library') {
+            treeItem.iconPath = new ThemeIcon('library');
+            treeItem.contextValue = 'clarionLibrary';
+            return treeItem;
+        }
+        
+        if ((data as any)?.type === 'projectReference') {
+            treeItem.iconPath = new ThemeIcon('references');
+            treeItem.contextValue = 'clarionProjectReference';
+            
+            // Add command to navigate to the referenced project
+            const projectGuid = (data as any).project;
+            if (projectGuid) {
+                // Find the referenced project in the solution
+                const solution = this.solutionCache.getSolutionInfo();
+                if (solution && solution.projects) {
+                    const referencedProject = solution.projects.find(p => p.guid === projectGuid);
+                    if (referencedProject) {
+                        logger.info(`Found referenced project: ${referencedProject.name}`);
+                        // Create command to navigate to the project
+                        treeItem.command = {
+                            title: 'Go to Project',
+                            command: 'clarion.navigateToProject',
+                            arguments: [projectGuid]
+                        };
+                        treeItem.tooltip = `Navigate to ${referencedProject.name}`;
+                    }
+                }
+            }
+            
+            return treeItem;
+        }
+        
+        if ((data as any)?.type === 'noneFile') {
+            treeItem.iconPath = new ThemeIcon('file');
+            treeItem.contextValue = 'clarionNoneFile';
             return treeItem;
         }
 
@@ -276,7 +251,6 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             return treeItem;
         }
 
-        // ⬇️ Only fall back to solution node if none of the above matched
         const solution = data as ClarionSolutionInfo;
         treeItem.iconPath = new ThemeIcon('symbol-class');
         treeItem.contextValue = 'clarionSolution';
@@ -291,6 +265,44 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         return treeItem;
     }
 
+    // Add a new method to find and select a project by GUID
+    findProjectNodeByGuid(projectGuid: string): TreeNode | null {
+        if (!this._root || this._root.length === 0) {
+            logger.warn("Cannot find project - no root nodes available");
+            return null;
+        }
+
+        // Get the solution node (should be the first root node)
+        const solutionNode = this._root[0];
+        if (!solutionNode || !solutionNode.children) {
+            logger.warn("Cannot find project - invalid solution node");
+            return null;
+        }
+
+        // Find project node with matching GUID
+        for (const projectNode of solutionNode.children) {
+            const projectData = projectNode.data as ClarionProjectInfo;
+            if (projectData && projectData.guid === projectGuid) {
+                logger.info(`Found project node for GUID: ${projectGuid}, name: ${projectNode.label}`);
+                return projectNode;
+            }
+        }
+
+        logger.warn(`Project with GUID ${projectGuid} not found in solution tree`);
+        return null;
+    }
+
+    // Method to reveal a project in the tree
+    revealProject(projectGuid: string): boolean {
+        const projectNode = this.findProjectNodeByGuid(projectGuid);
+        if (projectNode) {
+            // Emit an event to notify that this node should be selected
+            this._onDidSelectNode.fire(projectNode);
+            logger.info(`Revealed project: ${projectNode.label}`);
+            return true;
+        }
+        return false;
+    }
 
     async getTreeItems(): Promise<TreeNode[]> {
         try {
@@ -329,6 +341,20 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
 
             logger.info(`🌲 Building tree for solution: ${solution.name}`);
             logger.info(`📁 Projects in solution: ${solution.projects.length}`);
+            
+            // Log detailed project information
+            logger.info(`📊 Solution tree details in getTreeItems:`);
+            for (let i = 0; i < solution.projects.length; i++) {
+                const project = solution.projects[i];
+                logger.info(`📂 Project ${i+1}/${solution.projects.length}: ${project.name}`);
+                logger.info(`  - Path: ${project.path}`);
+                logger.info(`  - GUID: ${project.guid}`);
+                logger.info(`  - Source Files: ${project.sourceFiles?.length || 0}`);
+                logger.info(`  - File Drivers: ${project.fileDrivers?.length || 0}`);
+                logger.info(`  - Libraries: ${project.libraries?.length || 0}`);
+                logger.info(`  - Project References: ${project.projectReferences?.length || 0}`);
+                logger.info(`  - None Files: ${project.noneFiles?.length || 0}`);
+            }
 
             const solutionNode = new TreeNode(
                 solution.name || "Solution",
@@ -337,14 +363,116 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             );
 
             for (const project of solution.projects.filter(Boolean)) {
+                // Log project details to help diagnose issues
+                logger.info(`Processing project: ${project.name}`);
+                logger.info(`  Source Files: ${project.sourceFiles?.length || 0}`);
+                logger.info(`  File Drivers: ${project.fileDrivers?.length || 0} - ${project.fileDrivers?.join(', ') || 'none'}`);
+                logger.info(`  Libraries: ${project.libraries?.length || 0} - ${project.libraries?.join(', ') || 'none'}`);
+                logger.info(`  Project References: ${project.projectReferences?.length || 0} - ${project.projectReferences?.map(r => r.name).join(', ') || 'none'}`);
+                logger.info(`  None Files: ${project.noneFiles?.length || 0} - ${project.noneFiles?.join(', ') || 'none'}`);
+                
                 const projectNode = new TreeNode(
                     project.name || "Unnamed Project",
-                    TreeItemCollapsibleState.Expanded,
+                    TreeItemCollapsibleState.Collapsed,
                     project,
                     solutionNode
                 );
 
-                if (project.sourceFiles && Array.isArray(project.sourceFiles)) {
+                // Add File Drivers section if available
+                if (project.fileDrivers && project.fileDrivers.length > 0) {
+                    const fileDriversNode = new TreeNode(
+                        "File Drivers",
+                        TreeItemCollapsibleState.Collapsed,
+                        { type: 'section', sectionType: 'fileDrivers' },
+                        projectNode
+                    );
+
+                    for (const driver of project.fileDrivers) {
+                        const driverNode = new TreeNode(
+                            driver,
+                            TreeItemCollapsibleState.None,
+                            { type: 'fileDriver', name: driver },
+                            fileDriversNode
+                        );
+                        fileDriversNode.children.push(driverNode);
+                    }
+
+                    projectNode.children.push(fileDriversNode);
+                    logger.info(`     ✅ Added ${project.fileDrivers.length} file drivers to project ${project.name || 'unnamed'}`);
+                }
+
+                // Add Libraries, Objects and Resource Files section if available
+                if (project.libraries && project.libraries.length > 0) {
+                    const librariesNode = new TreeNode(
+                        "Libraries, Objects and Resource Files",
+                        TreeItemCollapsibleState.Collapsed,
+                        { type: 'section', sectionType: 'libraries' },
+                        projectNode
+                    );
+
+                    for (const lib of project.libraries) {
+                        const libNode = new TreeNode(
+                            lib,
+                            TreeItemCollapsibleState.None,
+                            { type: 'library', name: lib },
+                            librariesNode
+                        );
+                        librariesNode.children.push(libNode);
+                    }
+
+                    projectNode.children.push(librariesNode);
+                    logger.info(`     ✅ Added ${project.libraries.length} libraries to project ${project.name || 'unnamed'}`);
+                }
+
+                // Add Referenced Projects section if available
+                if (project.projectReferences && project.projectReferences.length > 0) {
+                    const referencesNode = new TreeNode(
+                        "Referenced Projects",
+                        TreeItemCollapsibleState.Collapsed,
+                        { type: 'section', sectionType: 'projectReferences' },
+                        projectNode
+                    );
+
+                    for (const ref of project.projectReferences) {
+                        const refNode = new TreeNode(
+                            ref.name,
+                            TreeItemCollapsibleState.None,
+                            { type: 'projectReference', name: ref.name, project: ref.project },
+                            referencesNode
+                        );
+                        referencesNode.children.push(refNode);
+                    }
+
+                    projectNode.children.push(referencesNode);
+                    logger.info(`     ✅ Added ${project.projectReferences.length} project references to project ${project.name || 'unnamed'}`);
+                }
+
+                // Add Other Files section if available
+                if (project.noneFiles && project.noneFiles.length > 0) {
+                    const noneFilesNode = new TreeNode(
+                        "Other Files",
+                        TreeItemCollapsibleState.Collapsed,
+                        { type: 'section', sectionType: 'noneFiles' },
+                        projectNode
+                    );
+
+                    for (const file of project.noneFiles) {
+                        const fileNode = new TreeNode(
+                            file,
+                            TreeItemCollapsibleState.None,
+                            { type: 'noneFile', name: file },
+                            noneFilesNode
+                        );
+                        noneFilesNode.children.push(fileNode);
+                    }
+
+                    projectNode.children.push(noneFilesNode);
+                    logger.info(`     ✅ Added ${project.noneFiles.length} other files to project ${project.name || 'unnamed'}`);
+                }
+
+                // Add source files directly under the project node (as they were originally)
+                // Now added at the end so they appear after the section nodes
+                if (project.sourceFiles && Array.isArray(project.sourceFiles) && project.sourceFiles.length > 0) {
                     for (const sourceFile of project.sourceFiles.filter(Boolean)) {
                         const sourceFileNode = new TreeNode(
                             sourceFile.name || "Unnamed File",
@@ -352,10 +480,6 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                             sourceFile,
                             projectNode
                         );
-
-                        // if (sourceFile.relativePath?.toLowerCase().endsWith(".clw")) {
-                        //     logger.info(`     💤 Deferring procedure discovery for ${sourceFile.name}`);
-                        // }
 
                         logger.info(`     📄 ${sourceFile.name || 'unnamed'} — ${sourceFile.relativePath || 'no path'}`);
                         projectNode.children.push(sourceFileNode);
@@ -367,8 +491,10 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 }
 
                 solutionNode.children.push(projectNode);
+                logger.info(`✅ Added project ${project.name} to solution tree with ${projectNode.children.length} child nodes`);
             }
 
+            logger.info(`✅ Added ${solutionNode.children.length} projects to solution tree`);
             this._root = [solutionNode];
             this._onDidChangeTreeData.fire();
             logger.info("✅ Solution tree updated successfully");

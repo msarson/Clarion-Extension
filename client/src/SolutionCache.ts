@@ -69,6 +69,31 @@ export class SolutionCache {
 
                     if (this.solutionInfo) {
                         logger.info(`✅ Solution tree fetched with ${this.solutionInfo.projects.length} projects`);
+                        
+                        // Log detailed project information
+                        logger.info(`📊 Solution tree details:`);
+                        for (let i = 0; i < this.solutionInfo.projects.length; i++) {
+                            const project = this.solutionInfo.projects[i];
+                            logger.info(`📂 Project ${i+1}/${this.solutionInfo.projects.length}: ${project.name}`);
+                            logger.info(`  - Path: ${project.path}`);
+                            logger.info(`  - GUID: ${project.guid}`);
+                            logger.info(`  - Source Files: ${project.sourceFiles?.length || 0}`);
+                            logger.info(`  - File Drivers: ${project.fileDrivers?.length || 0}`);
+                            logger.info(`  - Libraries: ${project.libraries?.length || 0}`);
+                            logger.info(`  - Project References: ${project.projectReferences?.length || 0}`);
+                            logger.info(`  - None Files: ${project.noneFiles?.length || 0}`);
+                        }
+                        
+                        // Log detailed project information
+                        for (const project of this.solutionInfo.projects) {
+                            logger.info(`Project: ${project.name}`);
+                            logger.info(`  Source Files: ${project.sourceFiles?.length || 0}`);
+                            logger.info(`  File Drivers: ${project.fileDrivers?.length || 0} - ${project.fileDrivers?.join(', ') || 'none'}`);
+                            logger.info(`  Libraries: ${project.libraries?.length || 0} - ${project.libraries?.join(', ') || 'none'}`);
+                            logger.info(`  Project References: ${project.projectReferences?.length || 0} - ${project.projectReferences?.map(r => r.name).join(', ') || 'none'}`);
+                            logger.info(`  None Files: ${project.noneFiles?.length || 0} - ${project.noneFiles?.join(', ') || 'none'}`);
+                        }
+                        
                         return true;
                     } else {
                         logger.warn("⚠️ Server returned null solution tree");
@@ -314,10 +339,27 @@ export class SolutionCache {
             );
 
             if (sourceFile && sourceFile.relativePath) {
-                const fullPath = path.join(solutionFolder, sourceFile.relativePath);
-                if (fs.existsSync(fullPath)) {
-                    logger.info(`✅ File found in project source files: ${fullPath}`);
-                    return fullPath;
+                // Try multiple approaches to find the file
+                
+                // 1. Try the full path relative to the solution folder
+                const fullPathFromSolution = path.join(solutionFolder, sourceFile.relativePath);
+                if (fs.existsSync(fullPathFromSolution)) {
+                    logger.info(`✅ File found in project source files (solution relative): ${fullPathFromSolution}`);
+                    return fullPathFromSolution;
+                }
+                
+                // 2. Try the path relative to the project folder
+                const fullPathFromProject = path.join(project.path, sourceFile.relativePath);
+                if (fs.existsSync(fullPathFromProject)) {
+                    logger.info(`✅ File found in project source files (project relative): ${fullPathFromProject}`);
+                    return fullPathFromProject;
+                }
+                
+                // 3. Try just the filename in the project folder
+                const fileInProjectFolder = path.join(project.path, path.basename(sourceFile.relativePath));
+                if (fs.existsSync(fileInProjectFolder)) {
+                    logger.info(`✅ File found in project folder: ${fileInProjectFolder}`);
+                    return fileInProjectFolder;
                 }
             }
         }
@@ -345,6 +387,26 @@ export class SolutionCache {
                     logger.info(`✅ File found by server: ${serverPath}`);
                     return serverPath;
                 } else if (serverPath) {
+                    // If the server returned a path but it doesn't exist, try to fix it
+                    // This can happen if the server is using different path separators or has a different base path
+                    
+                    // Try to normalize the path
+                    const normalizedPath = path.normalize(serverPath);
+                    if (fs.existsSync(normalizedPath)) {
+                        logger.info(`✅ File found after normalizing server path: ${normalizedPath}`);
+                        return normalizedPath;
+                    }
+                    
+                    // Try to extract just the filename and search in project folders
+                    const serverFileName = path.basename(serverPath);
+                    for (const project of this.solutionInfo.projects) {
+                        const projectFilePath = path.join(project.path, serverFileName);
+                        if (fs.existsSync(projectFilePath)) {
+                            logger.info(`✅ File found in project folder using server filename: ${projectFilePath}`);
+                            return projectFilePath;
+                        }
+                    }
+                    
                     logger.warn(`⚠️ Server returned path but file doesn't exist: ${serverPath}`);
                 }
             } catch (error) {
@@ -364,18 +426,24 @@ export class SolutionCache {
                 const fullPath = path.join(resolvedPath, filename);
 
                 if (fs.existsSync(fullPath)) {
-                    logger.info(`✅ File found: ${fullPath}`);
+                    logger.info(`✅ File found in search path: ${fullPath}`);
                     return fullPath;
                 }
             }
+            // Try directly in the project folder
+            // This is especially important for .clw files in project subdirectories
+            const projectFolder = project.path;
+            const projectFilePath = path.join(projectFolder, filename);
+            if (fs.existsSync(projectFilePath)) {
+                logger.info(`✅ File found directly in project folder: ${projectFilePath}`);
+                return projectFilePath;
+            }
         }
 
-        // Try standard Clarion include directories
+        // Only check the solution folder as a last resort
+        // All other paths should come from redirection
         const standardPaths = [
-            path.join(solutionFolder, 'include'),
-            path.join(solutionFolder, 'libsrc'),
-            path.join(solutionFolder, '..', 'include'),
-            path.join(solutionFolder, '..', 'libsrc')
+            solutionFolder
         ];
 
         for (const standardPath of standardPaths) {
@@ -394,8 +462,7 @@ export class SolutionCache {
      * Gets the search paths for a project and extension
      */
     private getProjectSearchPaths(project: ClarionProjectInfo, extension: string): string[] {
-        // For now, return a basic set of search paths
-        // In a more complete implementation, we would get this from the server
+        // Minimal set of paths - let the server handle most path resolution through redirection
         return [
             '.',
             project.path
@@ -422,6 +489,103 @@ export class SolutionCache {
 
         return Array.from(configurations);
     }
+
+    /**
+     * Removes a source file from a project
+     * @param projectGuid The GUID of the project to remove the file from
+     * @param fileName The name of the source file to remove (e.g., "someclwfile.clw")
+     * @returns True if the file was removed successfully, false otherwise
+     */
+    public async removeSourceFile(projectGuid: string, fileName: string): Promise<boolean> {
+        if (!this.client || this.client.needsStart()) {
+            logger.warn("⚠️ Language client not ready. Cannot remove source file.");
+            return false;
+        }
+
+        try {
+            logger.info(`🔄 Requesting to remove source file ${fileName} from project with GUID ${projectGuid}`);
+
+            // Use a promise with timeout to prevent hanging
+            const timeoutPromise = new Promise<boolean>((resolve) => {
+                setTimeout(() => {
+                    logger.warn(`⚠️ Server request timed out for removing source file: ${fileName}`);
+                    resolve(false);
+                }, 15000); // 15 second timeout
+            });
+
+            // Race between the actual request and the timeout
+            const result = await Promise.race([
+                this.client.sendRequest<boolean>('clarion/removeSourceFile', {
+                    projectGuid,
+                    fileName
+                }),
+                timeoutPromise
+            ]);
+
+            if (result) {
+                logger.info(`✅ Successfully removed source file ${fileName} from project`);
+                
+                // Refresh the solution cache to get the updated project information
+                await this.refresh();
+                return true;
+            } else {
+                logger.warn(`⚠️ Failed to remove source file ${fileName} from project`);
+                return false;
+            }
+        } catch (error) {
+            logger.error(`❌ Error removing source file: ${error instanceof Error ? error.message : String(error)}`);
+            return false;
+        }
+    }
+    
+    /**
+     * Adds a new source file to a project
+     * @param projectGuid The GUID of the project to add the file to
+     * @param fileName The name of the source file to add (e.g., "someclwfile.clw")
+     * @returns True if the file was added successfully, false otherwise
+     */
+    public async addSourceFile(projectGuid: string, fileName: string): Promise<boolean> {
+        if (!this.client || this.client.needsStart()) {
+            logger.warn("⚠️ Language client not ready. Cannot add source file.");
+            return false;
+        }
+
+        try {
+            logger.info(`🔄 Requesting to add source file ${fileName} to project with GUID ${projectGuid}`);
+
+            // Use a promise with timeout to prevent hanging
+            const timeoutPromise = new Promise<boolean>((resolve) => {
+                setTimeout(() => {
+                    logger.warn(`⚠️ Server request timed out for adding source file: ${fileName}`);
+                    resolve(false);
+                }, 15000); // 15 second timeout
+            });
+
+            // Race between the actual request and the timeout
+            const result = await Promise.race([
+                this.client.sendRequest<boolean>('clarion/addSourceFile', {
+                    projectGuid,
+                    fileName
+                }),
+                timeoutPromise
+            ]);
+
+            if (result) {
+                logger.info(`✅ Successfully added source file ${fileName} to project`);
+                
+                // Refresh the solution cache to get the updated project information
+                await this.refresh();
+                return true;
+            } else {
+                logger.warn(`⚠️ Failed to add source file ${fileName} to project`);
+                return false;
+            }
+        } catch (error) {
+            logger.error(`❌ Error adding source file: ${error instanceof Error ? error.message : String(error)}`);
+            return false;
+        }
+    }
+    
     /**
  * Gets document symbols for a specific file by calling the language server.
  */

@@ -1,17 +1,19 @@
 class Logger {
     private level: "debug" | "info" | "warn" | "error";
     private name: string;
+    public fullDebugging: boolean = false; // default is false, toggle externally if needed
 
-    constructor(name: string, level: "debug" | "info" | "warn" | "error" = "debug") {
+    constructor(name: string, level: "debug" | "info" | "warn" | "error" = "error") {
         this.name = name;
         this.level = level;
     }
 
     private getTimestamp(): string {
-        return new Date().toISOString(); // ✅ ISO Timestamp
+        return new Date().toISOString();
     }
 
     private shouldLog(level: "debug" | "info" | "warn" | "error"): boolean {
+        if (this.fullDebugging) return true;
         const levels = ["debug", "info", "warn", "error"];
         return levels.indexOf(level) >= levels.indexOf(this.level);
     }
@@ -42,11 +44,9 @@ class Logger {
 
     setLevel(newLevel: "debug" | "info" | "warn" | "error") {
         this.level = newLevel;
-        console.log(`[${this.getTimestamp()}] [${this.name}] 🔄 LOG LEVEL SET TO: ${newLevel.toUpperCase()}`);
     }
 }
 
-// ✅ Logger Manager to store multiple logger instances
 class LoggerManager {
     private static loggers: Map<string, Logger> = new Map();
 

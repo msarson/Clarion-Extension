@@ -16,7 +16,7 @@ import { PlatformUtils } from "./platformUtils";
 import { SolutionCache } from "./SolutionCache";
 import { ClarionProjectInfo } from "../../common/types";
 const logger = LoggerManager.getLogger("BuildTasks");
-logger.setLevel("info"); // Changed from "error" to "info" to see more detailed logs
+logger.setLevel("error"); // Changed from "error" to "info" to see more detailed logs
 /**
  * Main entry point for the Clarion build process
  */

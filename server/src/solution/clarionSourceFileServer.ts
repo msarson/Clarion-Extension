@@ -27,7 +27,11 @@ export class ClarionSourcerFileServer {
                 type: this.project.type,
                 path: this.project.path,
                 guid: this.project.guid,
-                filename: this.project.filename
+                filename: this.project.filename,
+                fileDrivers: this.project.fileDrivers || [],
+                libraries: this.project.libraries || [],
+                projectReferences: this.project.projectReferences || [],
+                noneFiles: this.project.noneFiles || []
             } : undefined
         };
     }

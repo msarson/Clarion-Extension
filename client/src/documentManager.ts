@@ -21,7 +21,7 @@ import { globalSettings } from './globals';
 import LoggerManager from './logger';
 import { SolutionCache } from './SolutionCache';
 const logger = LoggerManager.getLogger("DocumentManager");
-
+logger.setLevel("error");
 interface DocumentInfo {
     statementLocations: ClarionLocation[];
 }
@@ -98,9 +98,15 @@ export class DocumentManager implements Disposable {
 
         // ✅ Manually process currently open documents
         for (const document of workspace.textDocuments) {
+            const ext = path.extname(document.uri.fsPath).toLowerCase();
+            if (ext === '.xml' || ext === '.cwproj') {
+                logger.info(`⚠ Skipping open XML-like file during startup: ${document.uri.fsPath}`);
+                continue;
+            }
+        
             await this.updateDocumentInfo(document);
         }
-
+        
         logger.info("✅ DocumentManager event listeners registered.");
     }
 
@@ -260,12 +266,21 @@ export class DocumentManager implements Disposable {
             return;
         }
 
-        // Check if this is a Clarion file
+        // Early exit for XML-related files to avoid triggering Red Hat XML extension
+    const ext = path.extname(document.uri.fsPath).toLowerCase();
+    if (ext === '.xml' || ext === '.cwproj') {
+        logger.info(`⚠ Skipping XML-related file to avoid extension conflict: ${document.uri.fsPath}`);
+        return;
+    }
+
+        // Check if this is a Clarion file based on the extension
         const fileExt = path.extname(document.uri.fsPath).toLowerCase();
+        
+        // Only process files with extensions in the lookupExtensions array from workspace settings
         const isClarionFile = lookupExtensions.some(ext => ext.toLowerCase() === fileExt);
         
-        if (!isClarionFile && !document.uri.fsPath.toLowerCase().endsWith('.clw')) {
-            logger.info(`⚠ Skipping non-Clarion file: ${document.uri.fsPath}`);
+        if (!isClarionFile) {
+            logger.info(`⚠ Skipping non-Clarion file: ${document.uri.fsPath} (extension not in lookupExtensions)`);
             return;
         }
 

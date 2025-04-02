@@ -118,6 +118,7 @@
             ]
         },
         "commands": [
+            
             {
                 "command": "clarion.buildSolution",
                 "title": "Build Clarion Solution",
@@ -161,16 +162,27 @@
                 "when": "clarion.solutionOpen"
             },
             {
-                "command": "clarion.buildSolution",
-                "title": "Build Solution"
-            },
-            {
                 "command": "clarion.buildProject",
                 "title": "Build Project"
             },
             {
                 "command": "clarion.reinitializeSolution",
                 "title": "Clarion: Reinitialize Solution",
+                "when": "clarion.solutionOpen"
+            },
+            {
+                "command": "clarion.navigateToProject",
+                "title": "Navigate to Project",
+                "when": "clarion.solutionOpen"
+            },
+            {
+                "command": "clarion.addSourceFile",
+                "title": "Add Source File",
+                "when": "clarion.solutionOpen"
+            },
+            {
+                "command": "clarion.removeSourceFile",
+                "title": "Remove Source File",
                 "when": "clarion.solutionOpen"
             }
         ],
@@ -205,6 +217,34 @@
                     "command": "clarion.closeSolution",
                     "when": "view == solutionView && viewItem == clarionSolution",
                     "group": "navigation"
+                },
+                {
+                    "command": "clarion.addSourceFile",
+                    "when": "view == solutionView && viewItem == clarionProject",
+                    "group": "1_modification"
+                },
+                {
+                    "command": "clarion.removeSourceFile",
+                    "when": "view == solutionView && viewItem == clarionFile",
+                    "group": "1_modification"
+                }
+            ],
+            "commandPalette": [
+                {
+                    "command": "clarion.addSourceFile",
+                    "when": "false"
+                },
+                {
+                    "command": "clarion.removeSourceFile",
+                    "when": "false"
+                },
+                {
+                    "command": "clarion.openSolutionFromList",
+                    "when": "true"
+                },
+                {
+                    "command": "clarion.openSolutionMenu",
+                    "when": "false"
                 }
             ],
             "view/title": [
@@ -222,16 +262,6 @@
                     "command": "clarion.openSolutionFromList",
                     "when": "view == solutionView",
                     "group": "navigation@2"
-                }
-            ],
-            "commandPalette": [
-                {
-                    "command": "clarion.openSolutionFromList",
-                    "when": "true"
-                },
-                {
-                    "command": "clarion.openSolutionMenu",
-                    "when": "false"
                 }
             ],
             "viewContainer/context": [

@@ -81,6 +81,12 @@ export class SolutionManager {
 
             try {
                 const content = fs.readFileSync(this.solutionFilePath, 'utf-8');
+                logger.info(`📂 Solution file content length: ${content.length} bytes`);
+                
+                // Count the number of project entries in the solution file
+                const projectCount = (content.match(/Project\("/g) || []).length;
+                logger.info(`📂 Found ${projectCount} project entries in solution file`);
+                
                 const regex = /Project\("([^\"]+)"\) = "([^\"]+)", "([^\"]+)", "([^\"]+)"/g;
                 let match: RegExpExecArray | null;
                 
@@ -110,6 +116,11 @@ export class SolutionManager {
                     } catch (matchError) {
                         logger.error(`❌ Error processing project match: ${matchError instanceof Error ? matchError.message : String(matchError)}`);
                     }
+                }
+
+                logger.info(`📂 Finished parsing solution file. Found ${solution.projects.length} projects.`);
+                for (const project of solution.projects) {
+                    logger.info(`📂 Project: ${project.name} (${project.path})`);
                 }
 
                 return solution;
@@ -271,18 +282,42 @@ export class SolutionManager {
             return {
                 name: this.solution.name,
                 path: this.solutionFilePath,
-                projects: validProjects.map(project => ({
-                    name: project.name,
-                    type: project.type,
-                    path: project.path,
-                    guid: project.guid,
-                    filename: project.filename,
-                    sourceFiles: (project.sourceFiles || []).map(file => {
-                        if (!file) {
-                            logger.warn(`⚠️ Found null or undefined source file in project ${project.name}`);
+                projects: validProjects.map(project => {
+                    logger.info(`Processing project ${project.name} for solution tree`);
+                    logger.info(`  File Drivers: ${project.fileDrivers?.length || 0}`);
+                    logger.info(`  Libraries: ${project.libraries?.length || 0}`);
+                    logger.info(`  Project References: ${project.projectReferences?.length || 0}`);
+                    logger.info(`  None Files: ${project.noneFiles?.length || 0}`);
+                    
+                    return {
+                        name: project.name,
+                        type: project.type,
+                        path: project.path,
+                        guid: project.guid,
+                        filename: project.filename,
+                        // Include the additional project information
+                        fileDrivers: project.fileDrivers || [],
+                        libraries: project.libraries || [],
+                        projectReferences: project.projectReferences || [],
+                        noneFiles: project.noneFiles || [],
+                        sourceFiles: (project.sourceFiles || []).map(file => {
+                            if (!file) {
+                                logger.warn(`⚠️ Found null or undefined source file in project ${project.name}`);
+                                return {
+                                    name: "unknown",
+                                    relativePath: "",
+                                    project: {
+                                        name: project.name,
+                                        type: project.type,
+                                        path: project.path,
+                                        guid: project.guid,
+                                        filename: project.filename
+                                    }
+                                };
+                            }
                             return {
-                                name: "unknown",
-                                relativePath: "",
+                                name: file.name,
+                                relativePath: file.relativePath,
                                 project: {
                                     name: project.name,
                                     type: project.type,
@@ -291,20 +326,9 @@ export class SolutionManager {
                                     filename: project.filename
                                 }
                             };
-                        }
-                        return {
-                            name: file.name,
-                            relativePath: file.relativePath,
-                            project: {
-                                name: project.name,
-                                type: project.type,
-                                path: project.path,
-                                guid: project.guid,
-                                filename: project.filename
-                            }
-                        };
-                    })
-                }))
+                        })
+                    };
+                })
             };
         } catch (error) {
             logger.error(`Error creating solution tree: ${error instanceof Error ? error.message : String(error)}`);

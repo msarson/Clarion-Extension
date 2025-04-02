@@ -7,7 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("BuildClarionSolution");
-logger.setLevel("info");
+logger.setLevel("error");
 
 export async function buildClarionSolution(): Promise<ClarionSolutionInfo> {
     const solutionManagerInstance = SolutionManager.getInstance();
@@ -19,8 +19,22 @@ export async function buildClarionSolution(): Promise<ClarionSolutionInfo> {
 
     logger.info(`🔄 Building Clarion solution from ${solutionManagerInstance.solutionFilePath}`);
     const solution = solutionManagerInstance.solution;
+    
+    logger.info(`📊 Solution has ${solution.projects.length} projects`);
+    for (let i = 0; i < solution.projects.length; i++) {
+        const project = solution.projects[i];
+        logger.info(`  - Project ${i+1}/${solution.projects.length}: ${project.name}`);
+        logger.info(`    - Path: ${project.path}`);
+        logger.info(`    - GUID: ${project.guid}`);
+        logger.info(`    - Source Files: ${project.sourceFiles.length}`);
+        logger.info(`    - File Drivers: ${project.fileDrivers.length}`);
+        logger.info(`    - Libraries: ${project.libraries.length}`);
+        logger.info(`    - Project References: ${project.projectReferences.length}`);
+        logger.info(`    - None Files: ${project.noneFiles.length}`);
+    }
 
-    const projects: ClarionProjectInfo[] = solution.projects.map(project => {
+    const projects: ClarionProjectInfo[] = solution.projects.map((project, index) => {
+        logger.info(`🔄 Processing project ${index+1}/${solution.projects.length}: ${project.name}`);
         const sourceFiles: ClarionSourcerFileInfo[] = project.sourceFiles.map((file: ClarionSourcerFileServer) => ({
             name: file.name,
             relativePath: file.relativePath,

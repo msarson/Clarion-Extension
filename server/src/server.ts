@@ -27,7 +27,8 @@ import {
     DocumentColorParams,
     ColorInformation,
     ColorPresentationParams,
-    ColorPresentation
+    ColorPresentation,
+    TextDocumentSyncKind
 } from 'vscode-languageserver-protocol';
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
@@ -56,6 +57,10 @@ import * as fs from 'fs';
 import { URI } from 'vscode-languageserver';
 const logger = LoggerManager.getLogger("Server");
 logger.setLevel("error");
+
+// Track server initialization state
+export let serverInitialized = false;
+
 // ✅ Initialize Providers
 
 const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider();
@@ -63,7 +68,148 @@ const definitionProvider = new DefinitionProvider();
 
 // ✅ Create Connection and Documents Manager
 const connection = createConnection(ProposedFeatures.all);
+
+// Add global error handling
+process.on('uncaughtException', (error: Error) => {
+    logger.error(`❌ [CRITICAL] Uncaught exception: ${error.message}`, error);
+});
+
+process.on('unhandledRejection', (reason: any) => {
+    logger.error(`❌ [CRITICAL] Unhandled rejection: ${reason instanceof Error ? reason.message : String(reason)}`);
+});
+// Log all incoming requests and notifications
+connection.onInitialize((params) => {
+    try {
+        logger.info(`📥 [CRITICAL] Initialize request received`);
+        logger.info(`📥 [CRITICAL] Client capabilities: ${JSON.stringify(params.capabilities)}`);
+        logger.info(`📥 [CRITICAL] Client info: ${JSON.stringify(params.clientInfo)}`);
+        logger.info(`📥 [CRITICAL] Initialization options: ${JSON.stringify(params.initializationOptions)}`);
+        
+        // Log workspace folders
+        if (params.workspaceFolders) {
+            logger.info(`📥 [CRITICAL] Workspace folders: ${JSON.stringify(params.workspaceFolders)}`);
+        } else {
+            logger.info(`📥 [CRITICAL] No workspace folders provided`);
+        }
+        
+        // Log process ID
+        if (params.processId) {
+            logger.info(`📥 [CRITICAL] Client process ID: ${params.processId}`);
+        } else {
+            logger.info(`📥 [CRITICAL] No client process ID provided`);
+        }
+        
+        // Log root URI
+        if (params.rootUri) {
+            logger.info(`📥 [CRITICAL] Root URI: ${params.rootUri}`);
+        } else if (params.rootPath) {
+            logger.info(`📥 [CRITICAL] Root path: ${params.rootPath}`);
+        } else {
+            logger.info(`📥 [CRITICAL] No root URI or path provided`);
+        }
+        
+        logger.info(`📥 [CRITICAL] Responding with server capabilities`);
+        
+        // Return server capabilities
+        return {
+            capabilities: {
+                textDocumentSync: TextDocumentSyncKind.Incremental,
+                documentFormattingProvider: true,
+                documentSymbolProvider: true,
+                foldingRangeProvider: true,
+                colorProvider: true,
+                definitionProvider: true
+            }
+        };
+    } catch (error) {
+        logger.error(`❌ [CRITICAL] Error in onInitialize: ${error instanceof Error ? error.message : String(error)}`);
+        logger.error(`❌ [CRITICAL] Error stack: ${error instanceof Error && error.stack ? error.stack : 'No stack available'}`);
+        
+        // Return minimal capabilities to avoid crashing
+        return {
+            capabilities: {
+                textDocumentSync: TextDocumentSyncKind.Incremental
+            }
+        };
+    }
+});
+
+// Handle initialized notification
+connection.onInitialized(() => {
+    try {
+        logger.info(`📥 [CRITICAL] Server initialized notification received`);
+        logger.info(`📥 [CRITICAL] Server is now fully initialized`);
+        
+        // Set the serverInitialized flag
+        serverInitialized = true;
+        
+        // Log server process information
+        logger.info(`📥 [CRITICAL] Server process ID: ${process.pid}`);
+        logger.info(`📥 [CRITICAL] Server platform: ${process.platform}`);
+        logger.info(`📥 [CRITICAL] Server architecture: ${process.arch}`);
+        logger.info(`📥 [CRITICAL] Node.js version: ${process.version}`);
+        
+        // Log memory usage
+        const memoryUsage = process.memoryUsage();
+        logger.info(`📥 [CRITICAL] Memory usage:
+            - RSS: ${Math.round(memoryUsage.rss / 1024 / 1024)} MB
+            - Heap total: ${Math.round(memoryUsage.heapTotal / 1024 / 1024)} MB
+            - Heap used: ${Math.round(memoryUsage.heapUsed / 1024 / 1024)} MB
+        `);
+    } catch (error) {
+        logger.error(`❌ [CRITICAL] Error in onInitialized: ${error instanceof Error ? error.message : String(error)}`);
+        logger.error(`❌ [CRITICAL] Error stack: ${error instanceof Error && error.stack ? error.stack : 'No stack available'}`);
+    }
+});
+
+// Log all incoming notifications
+connection.onNotification((method, params) => {
+    logger.info(`📥 [INCOMING] Notification received: ${method}`);
+});
+
+// Create the text documents manager
 const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
+
+// Add event listener to filter out XML files
+documents.onDidOpen((event) => {
+    try {
+        const document = event.document;
+        const uri = document.uri;
+        
+        // Log all document details
+        logger.info(`📂 [CRITICAL] Document opened: ${uri}`);
+        logger.info(`📂 [CRITICAL] Document details:
+            - URI: ${uri}
+            - Language ID: ${document.languageId}
+            - Version: ${document.version}
+            - Line Count: ${document.lineCount}
+            - Content Length: ${document.getText().length}
+            - First 100 chars: ${document.getText().substring(0, 100).replace(/\n/g, '\\n')}
+        `);
+        
+        if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
+            logger.info(`🔍 [CRITICAL] XML file detected: ${uri}`);
+            logger.info(`🔍 [CRITICAL] XML file content (first 200 chars): ${document.getText().substring(0, 200).replace(/\n/g, '\\n')}`);
+            
+            // Try to parse the XML to see if it's valid
+            try {
+                // Just check if it starts with XML declaration or a root element
+                const content = document.getText();
+                if (content.trim().startsWith('<?xml') || content.trim().startsWith('<')) {
+                    logger.info(`🔍 [CRITICAL] File appears to be valid XML: ${uri}`);
+                } else {
+                    logger.warn(`⚠️ [CRITICAL] File doesn't appear to be valid XML despite extension: ${uri}`);
+                }
+            } catch (xmlError) {
+                logger.error(`❌ [CRITICAL] Error checking XML content: ${xmlError instanceof Error ? xmlError.message : String(xmlError)}`);
+            }
+        }
+    } catch (error) {
+        logger.error(`❌ [CRITICAL] Error in onDidOpen: ${error instanceof Error ? error.message : String(error)}`);
+        logger.error(`❌ [CRITICAL] Error stack: ${error instanceof Error && error.stack ? error.stack : 'No stack available'}`);
+    }
+});
+
 let globalSolution: ClarionSolutionInfo | null = null;
 
 // ✅ Initialize the token cache
@@ -80,7 +226,27 @@ let debounceTimeout: NodeJS.Timeout | null = null;
 const parsedDocuments = new Map<string, boolean>(); // Track parsed state per document
 
 function getTokens(document: TextDocument): Token[] {
-    return tokenCache.getTokens(document);
+    try {
+        // Log document details for debugging
+        logger.info(`🔍 [DEBUG] getTokens called for document: ${document.uri}`);
+        logger.info(`🔍 [DEBUG] Document language ID: ${document.languageId}`);
+        
+        // Skip XML files to prevent crashes
+        const fileExt = document.uri.toLowerCase();
+        if (fileExt.endsWith('.xml') || fileExt.endsWith('.cwproj')) {
+            logger.info(`⚠️ [DEBUG] Skipping tokenization for XML file: ${document.uri}`);
+            return [];
+        }
+        
+        // Log before getting tokens
+        logger.info(`🔍 [DEBUG] Getting tokens from cache for: ${document.uri}`);
+        const tokens = tokenCache.getTokens(document);
+        logger.info(`🔍 [DEBUG] Successfully got ${tokens.length} tokens for: ${document.uri}`);
+        return tokens;
+    } catch (error) {
+        logger.error(`❌ [DEBUG] Error in getTokens: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
+    }
 }
 
 
@@ -88,49 +254,126 @@ function getTokens(document: TextDocument): Token[] {
 
 // ✅ Handle Folding Ranges (Uses Cached Tokens & Caches Results)
 connection.onFoldingRanges((params: FoldingRangeParams) => {
-    const document = documents.get(params.textDocument.uri);
-    if (!document) return [];
+    try {
+        logger.info(`📂 [DEBUG] Received onFoldingRanges request for: ${params.textDocument.uri}`);
+        const document = documents.get(params.textDocument.uri);
+        if (!document) {
+            logger.warn(`⚠️ [DEBUG] Document not found for folding: ${params.textDocument.uri}`);
+            return [];
+        }
 
-    if (!serverInitialized) {
-        logger.info(`⚠️  [DELAY] Server not initialized yet, delaying folding range request for ${params.textDocument.uri}`);
+        const uri = document.uri;
+        
+        // Skip XML files
+        if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
+            logger.info(`🔍 [DEBUG] Skipping XML file in onFoldingRanges: ${uri}`);
+            return [];
+        }
+
+        if (!serverInitialized) {
+            logger.info(`⚠️ [DEBUG] Server not initialized yet, delaying folding range request for ${uri}`);
+            return [];
+        }
+
+        logger.info(`📂 [DEBUG] Computing folding ranges for: ${uri}, language: ${document.languageId}`);
+        
+        const tokens = getTokens(document);
+        logger.info(`🔍 [DEBUG] Got ${tokens.length} tokens for folding ranges`);
+        
+        const foldingProvider = new ClarionFoldingProvider(tokens);
+        const ranges = foldingProvider.computeFoldingRanges();
+        logger.info(`📂 [DEBUG] Computed ${ranges.length} folding ranges for: ${uri}`);
+        
+        return ranges;
+    } catch (error) {
+        logger.error(`❌ [DEBUG] Error computing folding ranges: ${error instanceof Error ? error.message : String(error)}`);
         return [];
     }
-
-    logger.info(`📂  Computing fresh folding ranges for: ${params.textDocument.uri}`);
-
-    const tokens = getTokens(document);
-    const foldingProvider = new ClarionFoldingProvider(tokens);
-    return foldingProvider.computeFoldingRanges();
 });
 
 
 
 // ✅ Handle Content Changes (Recompute Tokens)
 documents.onDidChangeContent(event => {
-    const document = event.document;
+    try {
+        const document = event.document;
+        const uri = document.uri;
+        
+        // Log all document details
+        logger.info(`📝 [CRITICAL] Document content changed: ${uri}`);
+        logger.info(`📝 [CRITICAL] Document details:
+            - URI: ${uri}
+            - Language ID: ${document.languageId}
+            - Version: ${document.version}
+            - Line Count: ${document.lineCount}
+            - Content Length: ${document.getText().length}
+            - First 100 chars: ${document.getText().substring(0, 100).replace(/\n/g, '\\n')}
+        `);
+        
+        // Skip XML files
+        if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
+            logger.info(`🔍 [CRITICAL] XML file content changed: ${uri}`);
+            logger.info(`🔍 [CRITICAL] XML file content (first 200 chars): ${document.getText().substring(0, 200).replace(/\n/g, '\\n')}`);
+            return;
+        }
 
-    tokenCache.clearTokens(document.uri); // 🔥 Always clear immediately
+        // Clear tokens from cache
+        logger.info(`🔍 [CRITICAL] Clearing tokens for changed document: ${uri}`);
+        try {
+            tokenCache.clearTokens(document.uri); // 🔥 Always clear immediately
+            logger.info(`🔍 [CRITICAL] Successfully cleared tokens for document: ${uri}`);
+        } catch (cacheError) {
+            logger.error(`❌ [CRITICAL] Error clearing tokens: ${cacheError instanceof Error ? cacheError.message : String(cacheError)}`);
+        }
 
-    if (debounceTimeout) clearTimeout(debounceTimeout);
+        // Set up debounced token refresh
+        if (debounceTimeout) {
+            logger.info(`🔍 [CRITICAL] Clearing existing debounce timeout for: ${uri}`);
+            clearTimeout(debounceTimeout);
+        }
 
-    debounceTimeout = setTimeout(() => {
-        logger.info(`[REFRESH] Re-parsing tokens after edit: ${document.uri}`);
-        getTokens(document); // ⬅️ refreshes the cache
-    }, 300);
+        logger.info(`🔍 [CRITICAL] Setting up debounced token refresh for: ${uri}`);
+        debounceTimeout = setTimeout(() => {
+            try {
+                logger.info(`🔍 [CRITICAL] Debounce timeout triggered, refreshing tokens for: ${uri}`);
+                const tokens = getTokens(document); // ⬅️ refreshes the cache
+                logger.info(`🔍 [CRITICAL] Successfully refreshed tokens after edit: ${uri}, got ${tokens.length} tokens`);
+            } catch (tokenError) {
+                logger.error(`❌ [CRITICAL] Error refreshing tokens in debounce: ${tokenError instanceof Error ? tokenError.message : String(tokenError)}`);
+            }
+        }, 300);
+    } catch (error) {
+        logger.error(`❌ [CRITICAL] Error in onDidChangeContent: ${error instanceof Error ? error.message : String(error)}`);
+        logger.error(`❌ [CRITICAL] Error stack: ${error instanceof Error && error.stack ? error.stack : 'No stack available'}`);
+    }
 });
 
 
 
 // ✅ Handle Document Formatting (Uses Cached Tokens & Caches Results)
 connection.onDocumentFormatting((params: DocumentFormattingParams): TextEdit[] => {
-    logger.info(`📐 Received onDocumentFormatting request for: ${params.textDocument.uri}`);
-    const document = documents.get(params.textDocument.uri);
-    if (!document) return [];
-
-    const text = document.getText();
     try {
+        logger.info(`📐 [DEBUG] Received onDocumentFormatting request for: ${params.textDocument.uri}`);
+        const document = documents.get(params.textDocument.uri);
+        if (!document) {
+            logger.warn(`⚠️ [DEBUG] Document not found for formatting: ${params.textDocument.uri}`);
+            return [];
+        }
+
+        const uri = document.uri;
+        
+        // Skip XML files
+        if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
+            logger.info(`🔍 [DEBUG] Skipping XML file in onDocumentFormatting: ${uri}`);
+            return [];
+        }
+
+        const text = document.getText();
+        logger.info(`🔍 [DEBUG] Getting tokens for formatting document: ${uri}, language: ${document.languageId}`);
+        
         // ✅ Use getTokens() instead of manually tokenizing
         const tokens = getTokens(document);
+        logger.info(`🔍 [DEBUG] Got ${tokens.length} tokens for formatting`);
 
         const formatter = new ClarionFormatter(tokens, text, {
             formattingOptions: params.options
@@ -138,53 +381,98 @@ connection.onDocumentFormatting((params: DocumentFormattingParams): TextEdit[] =
 
         const formattedText = formatter.format();
         if (formattedText !== text) {
+            logger.info(`🔍 [DEBUG] Document formatting changed text: ${uri}`);
             return [TextEdit.replace(
                 Range.create(Position.create(0, 0), Position.create(document.lineCount, 0)),
                 formattedText
             )];
         }
+        logger.info(`🔍 [DEBUG] Document formatting made no changes: ${uri}`);
         return [];
     } catch (error) {
-        logger.error(`❌ Error formatting document: ${error}`);
+        logger.error(`❌ [DEBUG] Error formatting document: ${error instanceof Error ? error.message : String(error)}`);
         return [];
     }
 });
 
 
 connection.onDocumentSymbol((params: DocumentSymbolParams) => {
-    logger.info(`📂  Received onDocumentSymbol request for: ${params.textDocument.uri}`);
-    const document = documents.get(params.textDocument.uri);
-    if (!document) return [];
+    try {
+        logger.info(`📂 [DEBUG] Received onDocumentSymbol request for: ${params.textDocument.uri}`);
+        const document = documents.get(params.textDocument.uri);
+        if (!document) {
+            logger.warn(`⚠️ [DEBUG] Document not found for symbols: ${params.textDocument.uri}`);
+            return [];
+        }
 
-    if (!serverInitialized) {
-        logger.info(`⚠️  [DELAY] Server not initialized yet, delaying document symbol request for ${document.uri}`);
+        const uri = document.uri;
+        
+        // Skip XML files
+        if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
+            logger.info(`🔍 [DEBUG] Skipping XML file in onDocumentSymbol: ${uri}`);
+            return [];
+        }
+
+        if (!serverInitialized) {
+            logger.info(`⚠️ [DEBUG] Server not initialized yet, delaying document symbol request for ${uri}`);
+            return [];
+        }
+
+        logger.info(`📂 [DEBUG] Computing document symbols for: ${uri}, language: ${document.languageId}`);
+        const tokens = getTokens(document);  // ✅ No need for async
+        logger.info(`🔍 [DEBUG] Got ${tokens.length} tokens for document symbols`);
+        
+        const symbols = clarionDocumentSymbolProvider.provideDocumentSymbols(tokens, uri);
+        logger.info(`🧩 [DEBUG] Returned ${symbols.length} document symbols for ${uri}`);
+
+        return symbols;
+    } catch (error) {
+        logger.error(`❌ [DEBUG] Error providing document symbols: ${error instanceof Error ? error.message : String(error)}`);
         return [];
     }
-
-    logger.info(`📂  Computing fresh document symbols for: ${document.uri}`);
-    const tokens = getTokens(document);  // ✅ No need for async
-    const symbols = clarionDocumentSymbolProvider.provideDocumentSymbols(tokens, document.uri);
-    logger.info(`🧩 Returned ${symbols.length} document symbols`);
-
-    logger.info(`✅ Finished processing tokens. ${symbols.length} top-level symbols`);
-
-   
-    return symbols;
-
 });
 
 
 connection.onDocumentColor((params: DocumentColorParams): ColorInformation[] => {
-    const document = documents.get(params.textDocument.uri);
-    if (!document) return [];
+    try {
+        logger.info(`🎨 [DEBUG] Received onDocumentColor request for: ${params.textDocument.uri}`);
+        const document = documents.get(params.textDocument.uri);
+        if (!document) {
+            logger.warn(`⚠️ [DEBUG] Document not found for colors: ${params.textDocument.uri}`);
+            return [];
+        }
 
-    const tokens = getTokens(document);
-    return ClarionColorResolver.provideDocumentColors(tokens, document);
+        const uri = document.uri;
+        
+        // Skip XML files
+        if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
+            logger.info(`🔍 [DEBUG] Skipping XML file in onDocumentColor: ${uri}`);
+            return [];
+        }
+
+        logger.info(`🎨 [DEBUG] Getting tokens for document colors: ${uri}`);
+        const tokens = getTokens(document);
+        const colors = ClarionColorResolver.provideDocumentColors(tokens, document);
+        logger.info(`🎨 [DEBUG] Found ${colors.length} colors in document: ${uri}`);
+        
+        return colors;
+    } catch (error) {
+        logger.error(`❌ [DEBUG] Error providing document colors: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
+    }
 });
 
 connection.onColorPresentation((params: ColorPresentationParams): ColorPresentation[] => {
-    const { color, range } = params;
-    return ClarionColorResolver.provideColorPresentations(color, range);
+    try {
+        logger.info(`🎨 [DEBUG] Received onColorPresentation request`);
+        const { color, range } = params;
+        const presentations = ClarionColorResolver.provideColorPresentations(color, range);
+        logger.info(`🎨 [DEBUG] Provided ${presentations.length} color presentations`);
+        return presentations;
+    } catch (error) {
+        logger.error(`❌ [DEBUG] Error providing color presentations: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
+    }
 });
 
 
@@ -192,21 +480,73 @@ connection.onColorPresentation((params: ColorPresentationParams): ColorPresentat
 
 // ✅ Handle Save (Ensure Cached Tokens Are Up-To-Date)
 documents.onDidSave(event => {
-    const document = event.document;
-
-    logger.info(`💾 [SAVE] Document saved: ${document.uri}, ensuring tokens are fresh...`);
-
-    // ✅ Refresh token cache after save
-    getTokens(document);
+    try {
+        const document = event.document;
+        const uri = document.uri;
+        
+        // Log all document details
+        logger.info(`💾 [CRITICAL] Document saved: ${uri}`);
+        logger.info(`💾 [CRITICAL] Document details:
+            - URI: ${uri}
+            - Language ID: ${document.languageId}
+            - Version: ${document.version}
+            - Line Count: ${document.lineCount}
+            - Content Length: ${document.getText().length}
+            - First 100 chars: ${document.getText().substring(0, 100).replace(/\n/g, '\\n')}
+        `);
+        
+        // Skip XML files
+        if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
+            logger.info(`🔍 [CRITICAL] XML file saved: ${uri}`);
+            logger.info(`🔍 [CRITICAL] XML file content (first 200 chars): ${document.getText().substring(0, 200).replace(/\n/g, '\\n')}`);
+            return;
+        }
+        
+        // Ensure tokens are up-to-date
+        logger.info(`🔍 [CRITICAL] Refreshing tokens for saved document: ${uri}`);
+        try {
+            const tokens = getTokens(document);
+            logger.info(`🔍 [CRITICAL] Successfully refreshed tokens for saved document: ${uri}, got ${tokens.length} tokens`);
+        } catch (tokenError) {
+            logger.error(`❌ [CRITICAL] Error getting tokens for saved document: ${tokenError instanceof Error ? tokenError.message : String(tokenError)}`);
+        }
+    } catch (error) {
+        logger.error(`❌ [CRITICAL] Error in onDidSave: ${error instanceof Error ? error.message : String(error)}`);
+        logger.error(`❌ [CRITICAL] Error stack: ${error instanceof Error && error.stack ? error.stack : 'No stack available'}`);
+    }
 });
 
 // ✅ Clear Cache When Document Closes
-// ✅ Clear Cache When Document Closes
 documents.onDidClose(event => {
-    logger.info(`🗑️  [CACHE CLEAR] Removing cached data for ${event.document.uri}`);
-
-    // ✅ Remove tokens from cache to free memory
-    tokenCache.clearTokens(event.document.uri);
+    try {
+        const document = event.document;
+        const uri = document.uri;
+        
+        // Log all document details
+        logger.info(`🗑️ [CRITICAL] Document closed: ${uri}`);
+        logger.info(`🗑️ [CRITICAL] Document details:
+            - URI: ${uri}
+            - Language ID: ${document.languageId}
+            - Version: ${document.version}
+            - Line Count: ${document.lineCount}
+        `);
+        
+        if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
+            logger.info(`🔍 [CRITICAL] XML file closed: ${uri}`);
+        }
+        
+        // Always clear tokens for any document type
+        logger.info(`🔍 [CRITICAL] Clearing tokens for document: ${uri}`);
+        try {
+            tokenCache.clearTokens(uri);
+            logger.info(`🔍 [CRITICAL] Successfully cleared tokens for document: ${uri}`);
+        } catch (cacheError) {
+            logger.error(`❌ [CRITICAL] Error clearing tokens: ${cacheError instanceof Error ? cacheError.message : String(cacheError)}`);
+        }
+    } catch (error) {
+        logger.error(`❌ [CRITICAL] Error in onDidClose: ${error instanceof Error ? error.message : String(error)}`);
+        logger.error(`❌ [CRITICAL] Error stack: ${error instanceof Error && error.stack ? error.stack : 'No stack available'}`);
+    }
 });
 
 
@@ -253,7 +593,37 @@ connection.onNotification('clarion/updatePaths', async (params: {
         }
 
         // Initialize the solution manager
-        await initializeSolutionManager(solutionPath);
+        logger.info(`🔄 Initializing solution manager with path: ${solutionPath}`);
+        try {
+            await initializeSolutionManager(solutionPath);
+            logger.info(`✅ Solution manager initialized successfully`);
+            
+            // Log the solution manager state
+            const solutionManager = SolutionManager.getInstance();
+            if (solutionManager) {
+                logger.info(`📊 Solution manager state:`);
+                logger.info(`  - Solution file path: ${solutionManager.solutionFilePath}`);
+                logger.info(`  - Solution name: ${solutionManager.solution.name}`);
+                logger.info(`  - Projects count: ${solutionManager.solution.projects.length}`);
+                
+                // Log each project
+                for (let i = 0; i < solutionManager.solution.projects.length; i++) {
+                    const project = solutionManager.solution.projects[i];
+                    logger.info(`  - Project ${i+1}/${solutionManager.solution.projects.length}: ${project.name}`);
+                    logger.info(`    - Path: ${project.path}`);
+                    logger.info(`    - GUID: ${project.guid}`);
+                    logger.info(`    - Source Files: ${project.sourceFiles.length}`);
+                    logger.info(`    - File Drivers: ${project.fileDrivers.length}`);
+                    logger.info(`    - Libraries: ${project.libraries.length}`);
+                    logger.info(`    - Project References: ${project.projectReferences.length}`);
+                    logger.info(`    - None Files: ${project.noneFiles.length}`);
+                }
+            } else {
+                logger.warn(`⚠️ Solution manager is null after initialization`);
+            }
+        } catch (error) {
+            logger.error(`❌ Error initializing solution manager: ${error instanceof Error ? error.message : String(error)}`);
+        }
         
         // Register handlers again if we have a new instance
         const solutionManager = SolutionManager.getInstance();
@@ -264,7 +634,22 @@ connection.onNotification('clarion/updatePaths', async (params: {
         
         // Build the solution after registering handlers
         try {
+            logger.info(`🔄 Building solution...`);
             globalSolution = await buildClarionSolution();
+            logger.info(`✅ Solution built successfully with ${globalSolution.projects.length} projects`);
+            
+            // Log each project in the global solution
+            for (let i = 0; i < globalSolution.projects.length; i++) {
+                const project = globalSolution.projects[i];
+                logger.info(`  - Project ${i+1}/${globalSolution.projects.length}: ${project.name}`);
+                logger.info(`    - Path: ${project.path}`);
+                logger.info(`    - GUID: ${project.guid}`);
+                logger.info(`    - Source Files: ${project.sourceFiles.length}`);
+                logger.info(`    - File Drivers: ${project.fileDrivers?.length || 0}`);
+                logger.info(`    - Libraries: ${project.libraries?.length || 0}`);
+                logger.info(`    - Project References: ${project.projectReferences?.length || 0}`);
+                logger.info(`    - None Files: ${project.noneFiles?.length || 0}`);
+            }
         } catch (buildError: any) {
             logger.error(`❌ Error building solution: ${buildError.message || buildError}`);
             // Create a minimal solution info to avoid null references
@@ -408,6 +793,88 @@ connection.onRequest('clarion/getSearchPaths', (params: { projectName: string, e
     return [];
 });
 
+// Add a handler for removing a source file from a project
+connection.onRequest('clarion/removeSourceFile', async (params: { projectGuid: string, fileName: string }): Promise<boolean> => {
+    logger.info(`🔄 Received request to remove source file ${params.fileName} from project with GUID ${params.projectGuid}`);
+    
+    try {
+        const solutionManager = SolutionManager.getInstance();
+        if (!solutionManager) {
+            logger.warn(`⚠️ No SolutionManager instance available to remove source file`);
+            return false;
+        }
+        
+        // Find the project by GUID
+        const project = solutionManager.solution.projects.find(p => p.guid === params.projectGuid);
+        if (!project) {
+            logger.warn(`⚠️ Project with GUID ${params.projectGuid} not found`);
+            return false;
+        }
+        
+        // Remove the source file from the project
+        const result = await project.removeSourceFile(params.fileName);
+        if (result) {
+            logger.info(`✅ Successfully removed source file ${params.fileName} from project ${project.name}`);
+            
+            // Rebuild the solution to reflect the changes
+            try {
+                globalSolution = await buildClarionSolution();
+                logger.info(`✅ Solution rebuilt successfully after removing source file`);
+            } catch (buildError: any) {
+                logger.error(`❌ Error rebuilding solution after removing source file: ${buildError.message || buildError}`);
+            }
+        } else {
+            logger.warn(`⚠️ Failed to remove source file ${params.fileName} from project ${project.name}`);
+        }
+        
+        return result;
+    } catch (error) {
+        logger.error(`❌ Error removing source file: ${error instanceof Error ? error.message : String(error)}`);
+        return false;
+    }
+});
+
+// Add a handler for adding a new source file to a project
+connection.onRequest('clarion/addSourceFile', async (params: { projectGuid: string, fileName: string }): Promise<boolean> => {
+    logger.info(`🔄 Received request to add source file ${params.fileName} to project with GUID ${params.projectGuid}`);
+    
+    try {
+        const solutionManager = SolutionManager.getInstance();
+        if (!solutionManager) {
+            logger.warn(`⚠️ No SolutionManager instance available to add source file`);
+            return false;
+        }
+        
+        // Find the project by GUID
+        const project = solutionManager.solution.projects.find(p => p.guid === params.projectGuid);
+        if (!project) {
+            logger.warn(`⚠️ Project with GUID ${params.projectGuid} not found`);
+            return false;
+        }
+        
+        // Add the source file to the project
+        const result = await project.addSourceFile(params.fileName);
+        if (result) {
+            logger.info(`✅ Successfully added source file ${params.fileName} to project ${project.name}`);
+            
+            // Rebuild the solution to reflect the changes
+            try {
+                globalSolution = await buildClarionSolution();
+                logger.info(`✅ Solution rebuilt successfully after adding source file`);
+            } catch (buildError: any) {
+                logger.error(`❌ Error rebuilding solution after adding source file: ${buildError.message || buildError}`);
+            }
+        } else {
+            logger.warn(`⚠️ Failed to add source file ${params.fileName} to project ${project.name}`);
+        }
+        
+        return result;
+    } catch (error) {
+        logger.error(`❌ Error adding source file: ${error instanceof Error ? error.message : String(error)}`);
+        return false;
+    }
+});
+
 // Add a handler for getting included redirection files for a project
 connection.onRequest('clarion/getIncludedRedirectionFiles', (params: { projectPath: string }): string[] => {
     logger.info(`🔍 Received request for included redirection files for project at ${params.projectPath}`);
@@ -514,8 +981,6 @@ connection.onDefinition(async (params) => {
         return null;
     }
 });
-
-export let serverInitialized = false;
 
 // ✅ Server Fully Initialized
 connection.onInitialized(() => {
