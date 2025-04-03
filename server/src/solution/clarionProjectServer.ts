@@ -5,7 +5,8 @@ import LoggerManager from '../logger';
 import { RedirectionEntry, RedirectionFileParserServer } from './redirectionFileParserServer';
 import { serverSettings } from '../serverSettings';
 import { ClarionSourcerFileServer } from './clarionSourceFileServer';
-import { TextDocument } from 'vscode-languageserver-protocol';
+import { TextDocument } from 'vscode-languageserver-textdocument';
+
 
 const logger = LoggerManager.getLogger("ClarionProjectServer");
 

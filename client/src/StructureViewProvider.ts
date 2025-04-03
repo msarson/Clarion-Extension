@@ -7,12 +7,10 @@ import {
     ThemeIcon,
     window,
     workspace,
-    Uri,
     SymbolKind as VSCodeSymbolKind,
     TextEditor,
     commands,
-    Range,
-    Position
+    Range
 } from 'vscode';
 import { DocumentSymbol, SymbolKind as LSPSymbolKind } from 'vscode-languageserver-types';
 import LoggerManager from './logger';

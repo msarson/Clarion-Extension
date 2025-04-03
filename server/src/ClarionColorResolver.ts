@@ -1,5 +1,6 @@
-import { Color, ColorInformation, ColorPresentation, Position, Range, TextDocument } from 'vscode-languageserver-protocol';
+import { Color, ColorInformation, ColorPresentation, Position, Range } from 'vscode-languageserver-protocol';
 import { Token, TokenType } from './ClarionTokenizer';
+import { TextDocument } from 'vscode-languageserver-textdocument';
 
 export interface ClarionRGB {
     r: number;
