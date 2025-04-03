@@ -147,21 +147,6 @@ export class LocationProvider {
             logger.info(`⚠️ No project association found for ${documentBaseName}, falling back to global paths.`);
         }
 
-        // Try to find the file in standard Clarion include directories
-        const standardPaths = [
-            path.dirname(documentFrom),
-            path.join(path.dirname(documentFrom), '..'),
-            path.join(path.dirname(documentFrom), '..', 'include'),
-            path.join(path.dirname(documentFrom), '..', 'libsrc')
-        ];
-
-        for (const standardPath of standardPaths) {
-            const fullPath = path.join(standardPath, fileName);
-            if (fs.existsSync(fullPath)) {
-                logger.info(`✅ Found in standard path: ${fullPath}`);
-                return fullPath;
-            }
-        }
 
         // 🔹 Fallback to global settings - this will use the server-side redirection parser
         const globalFile = await this.solutionCache.findFileWithExtension(fileName);
@@ -204,31 +189,7 @@ export class LocationProvider {
         }
         
         // Fallback to basic search paths
-        const searchPaths = [
-            '.',
-            project.path,
-            path.join(project.path, 'include'),
-            path.join(project.path, 'libsrc'),
-            path.join(project.path, '..', 'include'),
-            path.join(project.path, '..', 'libsrc')
-        ];
-    
-        for (const searchPath of searchPaths) {
-            const resolvedSearchPath = path.isAbsolute(searchPath)
-                ? path.normalize(searchPath)
-                : path.join(project.path, searchPath); // ✅ Ensure relative paths are resolved
-    
-            const fullPath = path.join(resolvedSearchPath, fileName);
-            const normalizedFullPath = path.normalize(fullPath);
-    
-            logger.info(`🔎 Checking: ${normalizedFullPath}`);
-    
-            if (fs.existsSync(normalizedFullPath)) {
-                logger.info(`✅ File found: ${normalizedFullPath}`);
-                return normalizedFullPath;
-            }
-        }
-    
+       
         logger.info(`❌ File "${fileName}" not found in project paths`);
         return null;
     }

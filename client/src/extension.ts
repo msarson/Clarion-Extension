@@ -447,12 +447,66 @@ export async function activate(context: ExtensionContext): Promise<void> {
                     return; // User cancelled
                 }
                 
-                // Remove the source file from the project
+                // Ask if the user wants to move the file to the Recycle Bin
+                const moveToRecycleBin = await window.showWarningMessage(
+                    `Do you want to move ${fileName} to the Recycle Bin?`,
+                    { modal: true },
+                    "Yes",
+                    "No"
+                );
+                
+                // Get the solution cache
                 const solutionCache = SolutionCache.getInstance();
+                
+                // First, try to find the file path BEFORE removing it from the project
+                let filePath = "";
+                
+                // Try multiple methods to find the file
+                try {
+                    // Method 1: Try to find the source file in the project
+                    const sourceFile = solutionCache.findSourceInProject(fileName);
+                    if (sourceFile && sourceFile.project) {
+                        // Get the absolute path using the project's path and relative path
+                        const possiblePath = path.join(sourceFile.project.path, sourceFile.relativePath);
+                        if (fs.existsSync(possiblePath)) {
+                            filePath = possiblePath;
+                            logger.info(`✅ Found file using project path: ${filePath}`);
+                        }
+                    }
+                    
+                    // Method 2: If not found, try using findFileWithExtension
+                    if (!filePath || !fs.existsSync(filePath)) {
+                        const resolvedPath = await solutionCache.findFileWithExtension(fileName);
+                        if (resolvedPath && resolvedPath.trim() !== "" && fs.existsSync(resolvedPath)) {
+                            filePath = resolvedPath;
+                            logger.info(`✅ Found file using findFileWithExtension: ${filePath}`);
+                        }
+                    }
+                    
+                    logger.info(`🔍 File path resolution result for ${fileName}: ${filePath || 'Not found'}`);
+                } catch (pathError) {
+                    logger.error(`❌ Error finding file path: ${pathError instanceof Error ? pathError.message : String(pathError)}`);
+                }
+                
+                // Now remove the source file from the project
                 const result = await solutionCache.removeSourceFile(projectData.guid, fileName);
                 
                 if (result) {
-                    window.showInformationMessage(`Successfully removed ${fileName} from project ${projectData.name}.`);
+                    // If user wants to move the file to the Recycle Bin
+                    if (moveToRecycleBin === "Yes" && filePath && fs.existsSync(filePath)) {
+                        try {
+                            // Use VS Code's workspace.fs.delete API to move the file to the Recycle Bin
+                            await workspace.fs.delete(Uri.file(filePath), { useTrash: true });
+                            window.showInformationMessage(`Successfully removed ${fileName} from project and moved to Recycle Bin.`);
+                        } catch (recycleError) {
+                            logger.error(`❌ Error moving file to Recycle Bin: ${recycleError instanceof Error ? recycleError.message : String(recycleError)}`);
+                            window.showWarningMessage(`Removed ${fileName} from project but failed to move to Recycle Bin: ${recycleError instanceof Error ? recycleError.message : String(recycleError)}`);
+                        }
+                    } else if (moveToRecycleBin === "Yes") {
+                        window.showWarningMessage(`Removed ${fileName} from project but could not find the file on disk.`);
+                    } else {
+                        window.showInformationMessage(`Successfully removed ${fileName} from project ${projectData.name}.`);
+                    }
                     
                     // Refresh the solution tree view
                     if (solutionTreeDataProvider) {
@@ -740,7 +794,8 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
             clarionVersion: globalClarionVersion,
             redirectionFile: globalSettings.redirectionFile,
             macros: globalSettings.macros,
-            libsrcPaths: globalSettings.libsrcPaths
+            libsrcPaths: globalSettings.libsrcPaths,
+            defaultLookupExtensions: globalSettings.defaultLookupExtensions // Add default lookup extensions
         });
         logger.info("✅ Clarion paths/config/version sent to the language server.");
     } else {
@@ -1125,6 +1180,11 @@ export async function closeClarionSolution(context: ExtensionContext) {
         process.env.CLARION_SOLUTION_FILE = "";
         logger.info("✅ Cleared CLARION_SOLUTION_FILE environment variable");
         
+        // Clear the solution cache to remove any stored locations
+        const solutionCache = SolutionCache.getInstance();
+        solutionCache.clear();
+        logger.info("✅ Cleared solution cache");
+        
         // Hide the configuration status bar if it exists
         if (configStatusBarItem) {
             configStatusBarItem.hide();
@@ -1132,6 +1192,20 @@ export async function closeClarionSolution(context: ExtensionContext) {
         
         // Mark solution as closed
         await commands.executeCommand("setContext", "clarion.solutionOpen", false);
+        
+        // Clear document link provider
+        if (documentLinkProviderDisposable) {
+            documentLinkProviderDisposable.dispose();
+            documentLinkProviderDisposable = null;
+            logger.info("✅ Cleared document link provider");
+        }
+        
+        // Clear hover provider
+        if (hoverProviderDisposable) {
+            hoverProviderDisposable.dispose();
+            hoverProviderDisposable = null;
+            logger.info("✅ Cleared hover provider");
+        }
         
         // Refresh the solution tree view to show the "Open Solution" button
         await createSolutionTreeView();

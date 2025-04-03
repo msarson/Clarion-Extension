@@ -220,21 +220,77 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             treeItem.contextValue = 'clarionFile';
 
             const solutionCache = SolutionCache.getInstance();
+            logger.setLevel("info"); // Temporarily increase log level for debugging
+            logger.info(`🔍 Looking for file: ${file.relativePath}`);
+            
+            // Get the parent project node to help with debugging
+            let projectNode = element.parent;
+            let projectName = "unknown";
+            let projectPath = "unknown";
+            
+            if (projectNode && projectNode.data && (projectNode.data as any).guid) {
+                const projectData = projectNode.data as ClarionProjectInfo;
+                projectName = projectData.name || "unnamed";
+                projectPath = projectData.path || "unknown";
+                logger.info(`🔍 File belongs to project: ${projectName}, path: ${projectPath}`);
+                logger.info(`🔍 Full relative path: ${path.join(projectPath, file.relativePath)}`);
+                
+                // Try direct path first as a quick check
+                const directPath = path.join(projectPath, file.relativePath);
+                if (fs.existsSync(directPath)) {
+                    logger.info(`✅ File found immediately using direct path: ${directPath}`);
+                    treeItem.command = {
+                        title: 'Open File',
+                        command: 'clarion.openFile',
+                        arguments: [directPath]
+                    };
+                    treeItem.tooltip = `File: ${file.name}\nPath: ${directPath} (direct)`;
+                    logger.setLevel("error"); // Reset log level
+                    return treeItem;
+                }
+            }
+            
+            // If direct path didn't work, try server resolution
             solutionCache.findFileWithExtension(file.relativePath).then(fullPath => {
-                if (fullPath) {
+                logger.info(`🔍 Result from findFileWithExtension: ${fullPath}`);
+                
+                if (fullPath && fullPath !== "") {
                     treeItem.command = {
                         title: 'Open File',
                         command: 'clarion.openFile',
                         arguments: [fullPath]
                     };
                     logger.info(`📄 getTreeItem(): File – ${file.name} (${fullPath})`);
+                    
+                    // Add tooltip with file path for debugging
+                    treeItem.tooltip = `File: ${file.name}\nPath: ${fullPath}`;
                 } else {
-                    treeItem.tooltip = `⚠️ File not found: ${file.relativePath}`;
-                    logger.warn(`⚠️ getTreeItem(): File not found for ${file.relativePath}`);
+                    // Try with full path as fallback
+                    if (projectNode && projectNode.data && (projectNode.data as any).guid) {
+                        const projectData = projectNode.data as ClarionProjectInfo;
+                        const fullFilePath = path.join(projectData.path, file.relativePath);
+                        
+                        if (fs.existsSync(fullFilePath)) {
+                            logger.info(`✅ File found using direct path: ${fullFilePath}`);
+                            treeItem.command = {
+                                title: 'Open File',
+                                command: 'clarion.openFile',
+                                arguments: [fullFilePath]
+                            };
+                            treeItem.tooltip = `File: ${file.name}\nPath: ${fullFilePath} (direct)`;
+                        } else {
+                            treeItem.tooltip = `⚠️ File not found: ${file.relativePath}`;
+                            logger.warn(`⚠️ getTreeItem(): File not found for ${file.relativePath}`);
+                        }
+                    } else {
+                        treeItem.tooltip = `⚠️ File not found: ${file.relativePath}`;
+                        logger.warn(`⚠️ getTreeItem(): File not found for ${file.relativePath}`);
+                    }
                 }
             }).catch(err => {
                 logger.error(`❌ getTreeItem(): Error finding file for ${file.relativePath}: ${err}`);
             });
+            logger.setLevel("error"); // Reset log level
             return treeItem;
         }
 

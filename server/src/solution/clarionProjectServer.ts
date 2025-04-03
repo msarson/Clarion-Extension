@@ -202,6 +202,9 @@ export class ClarionProjectServer {
 
         // ✅ Ensure the directory containing the redirection file is included
         paths.push(path.dirname(this.path));
+        
+        // ✅ Ensure the project path is included
+        paths.push(this.path);
 
         const uniquePaths = Array.from(new Set(paths));
 
@@ -218,6 +221,15 @@ export class ClarionProjectServer {
 
 
     private findFileInProjectPaths(fileName: string): string | null {
+        // First try using the redirection parser directly
+        const redParser = this.getRedirectionParser();
+        const redResult = redParser.findFile(fileName);
+        if (redResult && redResult.path) {
+            logger.info(`✅ Found file through redirection: ${redResult.path} (source: ${redResult.source})`);
+            return redResult.path;
+        }
+        
+        // Fallback to search paths
         const ext = path.extname(fileName).toLowerCase();
         const searchPaths = this.getSearchPaths(ext);
 
@@ -225,6 +237,29 @@ export class ClarionProjectServer {
             const full = path.normalize(path.join(spath, fileName));
             if (fs.existsSync(full)) {
                 return full;
+            }
+        }
+
+        // If no extension is provided, try with default lookup extensions
+        if (!ext) {
+            for (const defaultExt of serverSettings.defaultLookupExtensions) {
+                const fileNameWithExt = `${fileName}${defaultExt}`;
+                
+                // Try with redirection parser first
+                const redResultWithExt = redParser.findFile(fileNameWithExt);
+                if (redResultWithExt && redResultWithExt.path) {
+                    logger.info(`✅ Found file with added extension through redirection: ${redResultWithExt.path} (source: ${redResultWithExt.source})`);
+                    return redResultWithExt.path;
+                }
+                
+                // Then try search paths
+                for (const spath of searchPaths) {
+                    const full = path.normalize(path.join(spath, fileNameWithExt));
+                    if (fs.existsSync(full)) {
+                        logger.info(`✅ Found file with added extension in search path: ${full}`);
+                        return full;
+                    }
+                }
             }
         }
 
@@ -319,14 +354,139 @@ export class ClarionProjectServer {
                 return false;
             }
 
+            // Determine where to create the file on disk
+            let fileCreated = false;
+            
+            // Create a proper template for the new .clw file
+            let template = '';
+            
+            // Find the first .clw file in the project to reference in the MEMBER statement
+            try {
+                const projectFile = path.join(this.path, `${this.name}.cwproj`);
+                const xmlContent = fs.readFileSync(projectFile, 'utf-8');
+                const projectData = await xml2js.parseStringPromise(xmlContent);
+                
+                let firstClwFile = '';
+                
+                // Search for the first .clw file in the project
+                if (projectData?.Project?.ItemGroup) {
+                    for (const group of projectData.Project.ItemGroup) {
+                        if (group.Compile) {
+                            for (const file of group.Compile) {
+                                const includeFile = file.$.Include;
+                                if (includeFile.toLowerCase().endsWith('.clw') &&
+                                    includeFile.toLowerCase() !== fileName.toLowerCase()) {
+                                    firstClwFile = includeFile;
+                                    break;
+                                }
+                            }
+                        }
+                        if (firstClwFile) break;
+                    }
+                }
+                
+                if (firstClwFile) {
+                    logger.info(`✅ Found first CLW file in project: ${firstClwFile}`);
+                    template = `  MEMBER('${firstClwFile}')\n\n`;
+                } else {
+                    // If this is the first .clw file in the project, use PROGRAM template
+                    logger.info(`⚠️ No existing CLW files found in project, using PROGRAM template`);
+                    template = `  PROGRAM\n\n  MAP\n  END\n\n  CODE\n  RETURN\n`;
+                }
+            } catch (templateError) {
+                logger.error(`❌ Error creating template: ${templateError instanceof Error ? templateError.message : String(templateError)}`);
+                // Fallback to basic template
+                template = `  PROGRAM\n\n  MAP\n  END\n\n  CODE\n  RETURN\n`;
+            }
+            let filePath = '';
+            
+            // Get the file extension
+            const ext = path.extname(fileName).toLowerCase();
+            
+            // Get the redirection entries for this project
+            const redParser = this.getRedirectionParser();
+            const redirectionEntries = redParser.parseRedFile(this.path);
+            
+            // Find specific entries for .clw files in the current configuration or Common section
+            const clwEntries = redirectionEntries.filter(entry =>
+                (entry.section === "Common" || entry.section === serverSettings.configuration) &&
+                (entry.extension.toLowerCase() === "*.clw" || entry.extension === "*.*")
+            );
+            
+            logger.info(`🔍 Found ${clwEntries.length} redirection entries for .clw files`);
+            
+            // If we have specific entries for .clw files, use the first one
+            if (clwEntries.length > 0) {
+                // Sort entries to prioritize specific *.clw over general *.*
+                clwEntries.sort((a, b) => {
+                    if (a.extension.toLowerCase() === "*.clw" && b.extension !== "*.clw") return -1;
+                    if (b.extension.toLowerCase() === "*.clw" && a.extension !== "*.clw") return 1;
+                    return 0;
+                });
+                
+                // Try each path from the first matching entry
+                const firstEntry = clwEntries[0];
+                logger.info(`🔍 Using redirection entry: ${firstEntry.extension} from section [${firstEntry.section}]`);
+                
+                for (const entryPath of firstEntry.paths) {
+                    try {
+                        // Resolve the path relative to the project directory if it's not absolute
+                        const resolvedPath = path.isAbsolute(entryPath)
+                            ? entryPath
+                            : path.resolve(this.path, entryPath);
+                            
+                        filePath = path.join(resolvedPath, fileName);
+                        const dirPath = path.dirname(filePath);
+                        
+                        logger.info(`🔍 Trying to create file at: ${filePath}`);
+                        
+                        // Create directory if it doesn't exist
+                        if (!fs.existsSync(dirPath)) {
+                            fs.mkdirSync(dirPath, { recursive: true });
+                            logger.info(`✅ Created directory: ${dirPath}`);
+                        }
+                        
+                        // Create the file with the template if it doesn't exist
+                        if (!fs.existsSync(filePath)) {
+                            fs.writeFileSync(filePath, template, 'utf-8');
+                            logger.info(`✅ Created new CLW file on disk: ${filePath}`);
+                            fileCreated = true;
+                            break;
+                        } else {
+                            logger.info(`⚠️ File already exists on disk: ${filePath}`);
+                            fileCreated = true;
+                            break;
+                        }
+                    } catch (fileError) {
+                        logger.error(`❌ Error creating file at ${filePath}: ${fileError instanceof Error ? fileError.message : String(fileError)}`);
+                        // Continue to try the next path
+                    }
+                }
+            } else {
+                logger.info(`⚠️ No specific redirection entries found for .clw files, falling back to project directory`);
+            }
+            
+            // If no valid path was found from redirection entries, create the file in the project directory
+            if (!fileCreated) {
+                try {
+                    filePath = path.join(this.path, fileName);
+                    logger.info(`🔍 Creating file in project directory: ${filePath}`);
+                    
+                    fs.writeFileSync(filePath, template, 'utf-8');
+                    logger.info(`✅ Created new CLW file in project directory: ${filePath}`);
+                    fileCreated = true;
+                } catch (fileError) {
+                    logger.error(`❌ Error creating file in project directory: ${fileError instanceof Error ? fileError.message : String(fileError)}`);
+                }
+            }
+
             // Add the file to the sourceFiles collection
-            const resolvedPath = this.findFileInProjectPaths(fileName);
-            if (resolvedPath) {
-                const relativePath = path.relative(this.path, resolvedPath);
+            if (fileCreated) {
+                const relativePath = path.relative(this.path, filePath);
                 this.sourceFiles.push(new ClarionSourcerFileServer(fileName, relativePath, this));
                 logger.info(`✅ Added source file: ${fileName} (${relativePath})`);
             } else {
-                // Even if we can't resolve the path, still add the file to the collection
+                // Even if we couldn't create the file, still add it to the collection
                 this.sourceFiles.push(new ClarionSourcerFileServer(fileName, fileName, this));
                 logger.info(`✅ Added source file: ${fileName} (path not resolved)`);
             }

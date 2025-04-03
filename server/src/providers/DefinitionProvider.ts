@@ -827,15 +827,15 @@ export class DefinitionProvider {
             
             // Use the project's redirection parser to resolve the actual file path
             const redirectionParser = project.getRedirectionParser();
-            const includePath = redirectionParser.findFile(includeFileName);
+            const resolvedPath = redirectionParser.findFile(includeFileName);
             
-            if (includePath && fs.existsSync(includePath)) {
-                logger.info(`Resolved INCLUDE file path: ${includePath}`);
+            if (resolvedPath && resolvedPath.path && fs.existsSync(resolvedPath.path)) {
+                logger.info(`Resolved INCLUDE file path: ${resolvedPath.path} (source: ${resolvedPath.source})`);
                 
                 // Recursively search in the included file
-                const result = await this.findDefinitionInIncludes(word, includePath, visited);
+                const result = await this.findDefinitionInIncludes(word, resolvedPath.path, visited);
                 if (result) {
-                    logger.info(`Found definition in included file: ${includePath}`);
+                    logger.info(`Found definition in included file: ${resolvedPath.path}`);
                     return result;
                 }
             } else {
@@ -851,15 +851,15 @@ export class DefinitionProvider {
             
             // Resolve the member file path
             const redirectionParser = project.getRedirectionParser();
-            const memberPath = redirectionParser.findFile(memberFileName);
+            const resolvedMember = redirectionParser.findFile(memberFileName);
             
-            if (memberPath && fs.existsSync(memberPath) && !visited.has(memberPath)) {
-                logger.info(`Resolved MEMBER file path: ${memberPath}`);
+            if (resolvedMember && resolvedMember.path && fs.existsSync(resolvedMember.path) && !visited.has(resolvedMember.path)) {
+                logger.info(`Resolved MEMBER file path: ${resolvedMember.path} (source: ${resolvedMember.source})`);
                 
                 // Recursively search in the member file
-                const result = await this.findDefinitionInIncludes(word, memberPath, visited);
+                const result = await this.findDefinitionInIncludes(word, resolvedMember.path, visited);
                 if (result) {
-                    logger.info(`Found definition in member file: ${memberPath}`);
+                    logger.info(`Found definition in member file: ${resolvedMember.path}`);
                     return result;
                 }
             } else {
@@ -916,10 +916,10 @@ export class DefinitionProvider {
     
         // 🔁 Step 2: Fallback — search all redirection paths
         logger.info(`↪️ Fallback: searching via redirection for ${word}`);
-        const candidatePath = solutionManager.findFileWithExtension(`${word}.CLW`);
-        if (candidatePath && fs.existsSync(candidatePath) && !visited.has(candidatePath)) {
-            const contents = await fs.promises.readFile(candidatePath, "utf-8");
-            const doc = TextDocument.create(`file:///${candidatePath.replace(/\\/g, "/")}`, "clarion", 1, contents);
+        const resolvedCandidate = solutionManager.findFileWithExtension(`${word}.CLW`);
+        if (resolvedCandidate && resolvedCandidate.path && fs.existsSync(resolvedCandidate.path) && !visited.has(resolvedCandidate.path)) {
+            const contents = await fs.promises.readFile(resolvedCandidate.path, "utf-8");
+            const doc = TextDocument.create(`file:///${resolvedCandidate.path.replace(/\\/g, "/")}`, "clarion", 1, contents);
             const tokens = this.tokenCache.getTokens(doc);
     
             const label = tokens.find(t =>
@@ -929,7 +929,7 @@ export class DefinitionProvider {
             );
     
             if (label) {
-                logger.info(`✅ Found global label via redirection: ${label.value} at line ${label.line} in ${candidatePath}`);
+                logger.info(`✅ Found global label via redirection: ${label.value} at line ${label.line} in ${resolvedCandidate.path} (source: ${resolvedCandidate.source})`);
                 return Location.create(doc.uri, {
                     start: { line: label.line, character: label.start },
                     end: { line: label.line, character: label.start + label.value.length }
@@ -961,67 +961,23 @@ export class DefinitionProvider {
         const documentPath = documentUri.replace('file:///', '').replace(/\//g, '\\');
         logger.info(`Document path: ${documentPath}`);
 
-        // Find the project that contains the current document
-        const project = solutionManager.findProjectForFile(documentPath);
-
-        // If the fileName doesn't have an extension, try common Clarion extensions
+        // Use the SolutionManager's findFileWithExtension method which now returns path and source
+        const result = solutionManager.findFileWithExtension(fileName);
         let filePath = '';
-        if (!path.extname(fileName)) {
-            const commonExtensions = ['.clw', '.inc', '.txa', '.tpl', '.tpw', '.trn', '.int', '.equ', '.def'];
-            for (const ext of commonExtensions) {
-                const fileWithExt = fileName + ext;
-
-                // First try to find the file in the current project's search paths
-                if (project) {
-                    const searchPaths = project.getSearchPaths(ext);
-                    for (const searchPath of searchPaths) {
-                        const fullPath = path.join(searchPath, fileWithExt);
-                        if (fs.existsSync(fullPath)) {
-                            filePath = fullPath;
-                            logger.info(`Found file in project search paths: ${filePath}`);
-                            break;
-                        }
-                    }
-
-                    if (filePath) break;
-                }
-
-                // If not found in project paths, try the global solution search
-                if (!filePath) {
-                    filePath = solutionManager.findFileWithExtension(fileWithExt);
-                    if (filePath) {
-                        logger.info(`Found file with extension ${ext} in solution: ${filePath}`);
-                        break;
-                    }
-                }
-            }
-        } else {
-            // First try to find the file in the current project's search paths
-            if (project) {
-                const ext = path.extname(fileName);
-                const searchPaths = project.getSearchPaths(ext);
-                for (const searchPath of searchPaths) {
-                    const fullPath = path.join(searchPath, fileName);
-                    if (fs.existsSync(fullPath)) {
-                        filePath = fullPath;
-                        logger.info(`Found file in project search paths: ${filePath}`);
-                        break;
-                    }
-                }
-            }
-
-            // If not found in project paths, try the global solution search
-            if (!filePath) {
-                filePath = solutionManager.findFileWithExtension(fileName);
-            }
+        
+        if (result && result.path) {
+            filePath = result.path;
+            logger.info(`Found file: ${filePath} (source: ${result.source})`);
+        } else if (!path.extname(fileName)) {
+            // If no extension was provided and no file was found, try with server's defaultLookupExtensions
+            // This is now handled by the SolutionManager's findFileWithExtension method
+            logger.info(`No file found with name ${fileName}, SolutionManager should have tried with default extensions`);
         }
 
         if (!filePath || !fs.existsSync(filePath)) {
             logger.warn(`File not found: ${fileName}`);
             return null;
         }
-
-        logger.info(`Found file: ${filePath}`);
 
         // Convert file path to URI format
         const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;

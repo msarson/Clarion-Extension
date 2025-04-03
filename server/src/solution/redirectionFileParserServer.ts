@@ -8,6 +8,24 @@ import { serverSettings } from "../serverSettings";
 const logger = LoggerManager.getLogger("RedirectionParserServer");
 logger.setLevel("error");
 
+/**
+ * Represents the source of a resolved file path
+ */
+export enum FilePathSource {
+  Redirected = "redirected",
+  Project = "project",
+  Solution = "solution"
+}
+
+/**
+ * Represents a resolved file path with its source
+ */
+export interface ResolvedFilePath {
+  path: string;
+  source: FilePathSource;
+  entry?: RedirectionEntry;
+}
+
 export interface RedirectionEntry {
   redFile: string;
   section: string;
@@ -160,14 +178,20 @@ export class RedirectionFileParserServer {
   /**
    * Finds a file in the redirection paths
    * @param filename The filename to find
-   * @returns The full path to the file if found, null otherwise
+   * @returns The resolved file path info if found, null otherwise
    */
-  public findFile(filename: string): string | null {
+  public findFile(filename: string): ResolvedFilePath | null {
     for (const entry of this.entries) {
       if (this.matchesMask(entry.extension, filename)) {
         for (const dir of entry.paths) {
           const candidate = path.join(dir, filename);
-          if (fs.existsSync(candidate)) return path.normalize(candidate);
+          if (fs.existsSync(candidate)) {
+            return {
+              path: path.normalize(candidate),
+              source: FilePathSource.Redirected,
+              entry: entry
+            };
+          }
         }
       }
     }

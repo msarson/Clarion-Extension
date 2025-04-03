@@ -1,5 +1,3 @@
-// Server-side version of the SolutionParser (SolutionManager)
-
 import * as fs from 'fs';
 import * as path from 'path';
 import { ClarionSolutionServer } from './clarionSolutionServer';
@@ -141,13 +139,13 @@ export class SolutionManager {
         );
     }
 
-    public findFileWithExtension(filename: string): string {
+    public findFileWithExtension(filename: string): { path: string, source: string } {
         // Check cache first
         if (this.fileCache.has(filename)) {
-            const cachedPath = this.fileCache.get(filename);
-            if (cachedPath && fs.existsSync(cachedPath)) {
-                logger.info(`✅ Using cached file path for ${filename}: ${cachedPath}`);
-                return cachedPath;
+            const cachedPath = this.fileCache.get(filename)!;
+            if (fs.existsSync(cachedPath)) {
+                logger.info(`✅ Found file in cache: ${cachedPath}`);
+                return { path: cachedPath, source: "cache" };
             } else {
                 // Remove invalid cache entry
                 this.fileCache.delete(filename);
@@ -168,7 +166,7 @@ export class SolutionManager {
                 if (fs.existsSync(fullPath)) {
                     logger.info(`✅ Found file in project source files: ${fullPath}`);
                     this.fileCache.set(filename, fullPath);
-                    return fullPath;
+                    return { path: fullPath, source: "project" };
                 }
             }
         }
@@ -176,6 +174,17 @@ export class SolutionManager {
         // Then try project search paths from redirection entries
         for (const project of this.solution.projects) {
             logger.info(`🔍 Searching in project: ${project.name}`);
+            
+            // Try using the redirection parser directly
+            const redParser = project.getRedirectionParser();
+            const redResult = redParser.findFile(filename);
+            if (redResult && redResult.path) {
+                logger.info(`✅ Found file through redirection: ${redResult.path}`);
+                this.fileCache.set(filename, redResult.path);
+                return { path: redResult.path, source: "redirected" };
+            }
+            
+            // Fallback to search paths
             const searchPaths = project.getSearchPaths(ext);
             
             for (const searchPath of searchPaths) {
@@ -183,32 +192,13 @@ export class SolutionManager {
                 if (fs.existsSync(fullPath)) {
                     logger.info(`✅ Found file in search path: ${fullPath}`);
                     this.fileCache.set(filename, fullPath);
-                    return fullPath;
+                    return { path: fullPath, source: "project-search-path" };
                 }
             }
         }
         
-        // Try standard Clarion include directories
-        const solutionDir = path.dirname(this.solutionFilePath);
-        const standardPaths = [
-            solutionDir,
-            path.join(solutionDir, 'include'),
-            path.join(solutionDir, 'libsrc'),
-            path.join(solutionDir, '..', 'include'),
-            path.join(solutionDir, '..', 'libsrc')
-        ];
-        
-        for (const standardPath of standardPaths) {
-            const fullPath = path.join(standardPath, filename);
-            if (fs.existsSync(fullPath)) {
-                logger.info(`✅ Found file in standard path: ${fullPath}`);
-                this.fileCache.set(filename, fullPath);
-                return fullPath;
-            }
-        }
-        
         logger.warn(`❌ File '${filename}' not found in any project paths.`);
-        return '';
+        return { path: '', source: "" };
     }
 
     public registerHandlers(connection: Connection): void {
@@ -221,15 +211,41 @@ export class SolutionManager {
             return tree;
         });
         
-        connection.onRequest('clarion/findFile', (params: { filename: string }): string => {
-            logger.info(`🔍 Received request to find file: ${params.filename}`);
-            const filePath = this.findFileWithExtension(params.filename);
-            if (filePath) {
-                logger.info(`✅ Found file: ${filePath}`);
-            } else {
-                logger.info(`⚠️ File not found: ${params.filename}`);
+        connection.onRequest('clarion/findFile', (params: { filename: string }): { path: string, source: string } => {
+            logger.setLevel("info"); // Temporarily increase log level
+            logger.info(`🔍 [DEBUG] Received request to find file: ${params.filename}`);
+            
+            try {
+                // Log solution state
+                logger.info(`🔍 [DEBUG] Solution state: ${this.solution ? 'exists' : 'null'}`);
+                logger.info(`🔍 [DEBUG] Solution projects: ${this.solution?.projects?.length || 0}`);
+                logger.info(`🔍 [DEBUG] Solution file path: ${this.solutionFilePath}`);
+                
+                const result = this.findFileWithExtension(params.filename);
+                
+                if (result.path) {
+                    logger.info(`✅ [DEBUG] Found file: ${result.path} (source: ${result.source})`);
+                    logger.info(`✅ [DEBUG] File exists check: ${fs.existsSync(result.path)}`);
+                } else {
+                    logger.info(`⚠️ [DEBUG] File not found: ${params.filename}`);
+                    
+                    // Try a direct path as last resort
+                    const solutionDir = path.dirname(this.solutionFilePath);
+                    const directPath = path.join(solutionDir, params.filename);
+                    if (fs.existsSync(directPath)) {
+                        logger.info(`✅ [DEBUG] Found file using direct path: ${directPath}`);
+                        return { path: directPath, source: "direct" };
+                    }
+                }
+                
+                return result;
+            } catch (error) {
+                logger.error(`❌ [DEBUG] Error in findFile request: ${error instanceof Error ? error.message : String(error)}`);
+                logger.error(`❌ [DEBUG] Stack: ${error instanceof Error && error.stack ? error.stack : 'No stack'}`);
+                return { path: '', source: "error" };
+            } finally {
+                logger.setLevel("error"); // Reset log level
             }
-            return filePath;
         });
     }
 

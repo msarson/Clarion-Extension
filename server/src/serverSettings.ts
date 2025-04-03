@@ -8,6 +8,7 @@ export const serverSettings = {
     macros: {} as Record<string, string>,
     libsrcPaths: [] as string[],
     redirectionFile: "",
+    defaultLookupExtensions: [".clw", ".inc", ".equ", ".eq", ".int"] as string[],
 
     get primaryRedirectionPath(): string {
         return this.redirectionPaths[0] ?? "";

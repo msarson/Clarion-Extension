@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import { LanguageClient } from 'vscode-languageclient/node';
 import { ClarionSolutionTreeNode, ClarionSolutionInfo, ClarionProjectInfo, ClarionSourcerFileInfo } from '../../common/types';
 import LoggerManager from './logger';
+import { globalSettings } from './globals';
 
 const logger = LoggerManager.getLogger("SolutionCache");
 logger.setLevel("error");
@@ -13,6 +14,16 @@ logger.setLevel("error");
  * It communicates with the server-side solution management to get solution information.
  */
 export class SolutionCache {
+    /**
+     * Clears the solution cache state
+     * This should be called when a solution is closed
+     */
+    public clear(): void {
+        this.solutionInfo = null;
+        this.solutionFilePath = '';
+        logger.info("✅ Solution cache cleared");
+    }
+    
     private static instance: SolutionCache | null = null;
     private client: LanguageClient | null = null;
     private solutionInfo: ClarionSolutionInfo | null = null;
@@ -185,8 +196,30 @@ export class SolutionCache {
             const timeoutPromise = new Promise<string[]>((resolve) => {
                 setTimeout(() => {
                     logger.warn(`⚠️ Server request timed out for search paths: ${projectName}, ${extension}`);
+                    
+                    // Try to find project and provide basic search paths as fallback
+                    try {
+                        if (this.solutionInfo) {
+                            const project = this.solutionInfo.projects.find(p => p.name === projectName);
+                            if (project) {
+                                logger.info(`✅ Found project for fallback search paths: ${projectName}`);
+                                // Provide basic search paths
+                                const fallbackPaths = [
+                                    project.path,
+                                    path.dirname(this.solutionFilePath),
+                                    path.join(path.dirname(this.solutionFilePath), 'include'),
+                                    path.join(path.dirname(this.solutionFilePath), 'libsrc')
+                                ];
+                                resolve(fallbackPaths);
+                                return;
+                            }
+                        }
+                    } catch (fallbackError) {
+                        logger.error(`❌ Error in fallback for search paths: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
+                    }
+                    
                     resolve([]);
-                }, 15000); // 15 second timeout
+                }, 30000); // Increased to 30 second timeout
             });
 
             // Race between the actual request and the timeout
@@ -227,8 +260,23 @@ export class SolutionCache {
             const timeoutPromise = new Promise<string[]>((resolve) => {
                 setTimeout(() => {
                     logger.warn(`⚠️ Server request timed out for included redirection files: ${projectPath}`);
+                    
+                    // Try to find redirection files directly as a fallback
+                    try {
+                        const redFileName = globalSettings.redirectionFile;
+                        const redFilePath = path.join(projectPath, redFileName);
+                        
+                        if (fs.existsSync(redFilePath)) {
+                            logger.info(`✅ Found redirection file using fallback direct path: ${redFilePath}`);
+                            resolve([redFilePath]);
+                            return;
+                        }
+                    } catch (fallbackError) {
+                        logger.error(`❌ Error in fallback for redirection files: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
+                    }
+                    
                     resolve([]);
-                }, 15000); // 15 second timeout
+                }, 30000); // Increased to 30 second timeout
             });
 
             // Race between the actual request and the timeout
@@ -316,6 +364,7 @@ export class SolutionCache {
 
     /**
      * Finds a file with the specified extension in any project's search paths
+     * @returns The file path if found, or an empty string if not found
      */
     public async findFileWithExtension(filename: string): Promise<string> {
         if (!this.solutionInfo) {
@@ -329,145 +378,71 @@ export class SolutionCache {
         }
 
         logger.info(`🔍 Searching for file: ${filename}`);
-        const extension = path.extname(filename).toLowerCase();
-        const solutionFolder = path.dirname(this.solutionFilePath);
 
-        // First check if the file exists in any project's source files
-        for (const project of this.solutionInfo.projects) {
-            const sourceFile = project.sourceFiles.find(sf =>
-                sf.name.toLowerCase() === path.basename(filename).toLowerCase()
-            );
-
-            if (sourceFile && sourceFile.relativePath) {
-                // Try multiple approaches to find the file
-                
-                // 1. Try the full path relative to the solution folder
-                const fullPathFromSolution = path.join(solutionFolder, sourceFile.relativePath);
-                if (fs.existsSync(fullPathFromSolution)) {
-                    logger.info(`✅ File found in project source files (solution relative): ${fullPathFromSolution}`);
-                    return fullPathFromSolution;
-                }
-                
-                // 2. Try the path relative to the project folder
-                const fullPathFromProject = path.join(project.path, sourceFile.relativePath);
-                if (fs.existsSync(fullPathFromProject)) {
-                    logger.info(`✅ File found in project source files (project relative): ${fullPathFromProject}`);
-                    return fullPathFromProject;
-                }
-                
-                // 3. Try just the filename in the project folder
-                const fileInProjectFolder = path.join(project.path, path.basename(sourceFile.relativePath));
-                if (fs.existsSync(fileInProjectFolder)) {
-                    logger.info(`✅ File found in project folder: ${fileInProjectFolder}`);
-                    return fileInProjectFolder;
-                }
-            }
-        }
-
-        // Try to get the file path from the server using the language client
+        // Delegate all file resolution to the language server
         if (this.client && !this.client.needsStart()) {
             try {
                 logger.info(`🔄 Requesting file path from server for: ${filename}`);
 
                 // Use a promise with timeout to prevent hanging
-                const timeoutPromise = new Promise<string>((resolve) => {
+                const timeoutPromise = new Promise<{path: string, source: string}>((resolve) => {
                     setTimeout(() => {
                         logger.warn(`⚠️ Server request timed out for file: ${filename}`);
-                        resolve("");
-                    }, 15000); // 15 second timeout
+                        
+                        // Try to resolve the file directly as a fallback
+                        const solutionDir = path.dirname(this.solutionFilePath);
+                        const possiblePaths = [
+                            path.join(solutionDir, filename),
+                            // Try with project paths if we have projects
+                            ...(this.solutionInfo?.projects || []).map(p => path.join(p.path, filename))
+                        ];
+                        
+                        for (const possiblePath of possiblePaths) {
+                            if (fs.existsSync(possiblePath)) {
+                                logger.info(`✅ Found file using fallback direct path: ${possiblePath}`);
+                                resolve({path: possiblePath, source: "fallback"});
+                                return;
+                            }
+                        }
+                        
+                        resolve({path: "", source: ""});
+                    }, 30000); // Increased to 30 second timeout
                 });
 
                 // Race between the actual request and the timeout
-                const serverPath = await Promise.race([
-                    this.client.sendRequest<string>('clarion/findFile', { filename }),
+                const result = await Promise.race([
+                    this.client.sendRequest<{path: string, source: string}>('clarion/findFile', { filename }),
                     timeoutPromise
                 ]);
 
-                if (serverPath && fs.existsSync(serverPath)) {
-                    logger.info(`✅ File found by server: ${serverPath}`);
-                    return serverPath;
-                } else if (serverPath) {
+                if (result.path && fs.existsSync(result.path)) {
+                    logger.info(`✅ File found by server: ${result.path} (source: ${result.source})`);
+                    return result.path;
+                } else if (result.path) {
                     // If the server returned a path but it doesn't exist, try to fix it
                     // This can happen if the server is using different path separators or has a different base path
                     
                     // Try to normalize the path
-                    const normalizedPath = path.normalize(serverPath);
+                    const normalizedPath = path.normalize(result.path);
                     if (fs.existsSync(normalizedPath)) {
                         logger.info(`✅ File found after normalizing server path: ${normalizedPath}`);
                         return normalizedPath;
                     }
                     
-                    // Try to extract just the filename and search in project folders
-                    const serverFileName = path.basename(serverPath);
-                    for (const project of this.solutionInfo.projects) {
-                        const projectFilePath = path.join(project.path, serverFileName);
-                        if (fs.existsSync(projectFilePath)) {
-                            logger.info(`✅ File found in project folder using server filename: ${projectFilePath}`);
-                            return projectFilePath;
-                        }
-                    }
-                    
-                    logger.warn(`⚠️ Server returned path but file doesn't exist: ${serverPath}`);
+                    logger.warn(`⚠️ Server returned path but file doesn't exist: ${result.path}`);
                 }
             } catch (error) {
                 logger.error(`❌ Error requesting file from server: ${error instanceof Error ? error.message : String(error)}`);
             }
+        } else {
+            logger.warn(`⚠️ Language client not available or not ready. Cannot request file from server.`);
         }
 
-        // Then check in project search paths
-        for (const project of this.solutionInfo.projects) {
-            logger.info(`🔍 Searching for '${filename}' in project: ${project.name}`);
-
-            // Get search paths for this extension
-            const searchPaths = this.getProjectSearchPaths(project, extension);
-
-            for (const searchPath of searchPaths) {
-                let resolvedPath = searchPath === '.' ? solutionFolder : searchPath;
-                const fullPath = path.join(resolvedPath, filename);
-
-                if (fs.existsSync(fullPath)) {
-                    logger.info(`✅ File found in search path: ${fullPath}`);
-                    return fullPath;
-                }
-            }
-            // Try directly in the project folder
-            // This is especially important for .clw files in project subdirectories
-            const projectFolder = project.path;
-            const projectFilePath = path.join(projectFolder, filename);
-            if (fs.existsSync(projectFilePath)) {
-                logger.info(`✅ File found directly in project folder: ${projectFilePath}`);
-                return projectFilePath;
-            }
-        }
-
-        // Only check the solution folder as a last resort
-        // All other paths should come from redirection
-        const standardPaths = [
-            solutionFolder
-        ];
-
-        for (const standardPath of standardPaths) {
-            const fullPath = path.join(standardPath, filename);
-            if (fs.existsSync(fullPath)) {
-                logger.info(`✅ File found in standard path: ${fullPath}`);
-                return fullPath;
-            }
-        }
-
-        logger.info(`❌ File '${filename}' not found in any project paths.`);
+        logger.info(`❌ File '${filename}' not found.`);
         return "";
     }
 
-    /**
-     * Gets the search paths for a project and extension
-     */
-    private getProjectSearchPaths(project: ClarionProjectInfo, extension: string): string[] {
-        // Minimal set of paths - let the server handle most path resolution through redirection
-        return [
-            '.',
-            project.path
-        ];
-    }
+    // Removed getProjectSearchPaths method as all path resolution is now handled by the server
 
     /**
      * Gets the available build configurations from the solution

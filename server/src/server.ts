@@ -559,6 +559,7 @@ connection.onNotification('clarion/updatePaths', async (params: {
     macros: Record<string, string>;
     libsrcPaths: string[];
     solutionFilePath?: string; // Add optional solution file path
+    defaultLookupExtensions?: string[]; // Add default lookup extensions
 }) => {
     try {
         // Update server settings
@@ -570,6 +571,12 @@ connection.onNotification('clarion/updatePaths', async (params: {
         serverSettings.libsrcPaths = params.libsrcPaths || [];
         serverSettings.redirectionFile = params.redirectionFile || "";
         serverSettings.solutionFilePath = params.solutionFilePath || ""; // Store solution file path
+        
+        // Update default lookup extensions if provided
+        if (params.defaultLookupExtensions && params.defaultLookupExtensions.length > 0) {
+            serverSettings.defaultLookupExtensions = params.defaultLookupExtensions;
+            logger.info(`✅ Updated default lookup extensions: ${params.defaultLookupExtensions.join(', ')}`);
+        }
 
         // Log the solution file path
         if (params.solutionFilePath) {
@@ -742,17 +749,28 @@ connection.onRequest('clarion/getSolutionTree', async (): Promise<ClarionSolutio
 });
 
 // Add a handler for finding files using the server-side redirection parser
-connection.onRequest('clarion/findFile', (params: { filename: string }): string => {
+connection.onRequest('clarion/findFile', (params: { filename: string }): { path: string, source: string } => {
     logger.info(`🔍 Received request to find file: ${params.filename}`);
     
     try {
         const solutionManager = SolutionManager.getInstance();
         if (solutionManager) {
-            const filePath = solutionManager.findFileWithExtension(params.filename);
-            if (filePath) {
-                logger.info(`✅ Found file: ${filePath}`);
-                return filePath;
+            const result = solutionManager.findFileWithExtension(params.filename);
+            if (result && result.path) {
+                logger.info(`✅ Found file: ${result.path} (source: ${result.source})`);
+                return result;
             } else {
+                // If no extension is provided, try with default lookup extensions
+                if (!path.extname(params.filename)) {
+                    for (const ext of serverSettings.defaultLookupExtensions) {
+                        const filenameWithExt = `${params.filename}${ext}`;
+                        const resultWithExt = solutionManager.findFileWithExtension(filenameWithExt);
+                        if (resultWithExt && resultWithExt.path) {
+                            logger.info(`✅ Found file with added extension: ${resultWithExt.path} (source: ${resultWithExt.source})`);
+                            return resultWithExt;
+                        }
+                    }
+                }
                 logger.warn(`⚠️ File not found: ${params.filename}`);
             }
         } else {
@@ -762,7 +780,7 @@ connection.onRequest('clarion/findFile', (params: { filename: string }): string 
         logger.error(`❌ Error finding file ${params.filename}: ${error instanceof Error ? error.message : String(error)}`);
     }
     
-    return "";
+    return { path: "", source: "" };
 });
 
 // Add a handler for getting search paths for a project and extension
@@ -908,12 +926,12 @@ connection.onRequest('clarion/documentSymbols', async (params: { uri: string }) 
             const solutionManager = SolutionManager.getInstance();
             if (solutionManager) {
                 const fileName = decodeURIComponent(params.uri.split('/').pop() || '');
-                const filePath = solutionManager.findFileWithExtension(fileName);
+                const result = solutionManager.findFileWithExtension(fileName);
 
-                if (filePath && fs.existsSync(filePath)) {
-                    const fileContent = fs.readFileSync(filePath, 'utf8');
+                if (result.path && fs.existsSync(result.path)) {
+                    const fileContent = fs.readFileSync(result.path, 'utf8');
                     document = TextDocument.create(params.uri, 'clarion', 1, fileContent);
-                    logger.info(`✅ Successfully loaded file from disk: ${filePath}`);
+                    logger.info(`✅ Successfully loaded file from disk: ${result.path} (source: ${result.source})`);
                 } else {
                     logger.warn(`⚠️ Could not find file on disk: ${fileName}`);
                     return [];
