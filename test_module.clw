@@ -1,0 +1,9 @@
+PROGRAM
+
+MODULE('DEMO015.CLW')
+  SomeFunction PROCEDURE()
+END
+
+PROCEDURE SomeFunction
+  CODE
+  RETURN

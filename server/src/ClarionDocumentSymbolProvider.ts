@@ -535,7 +535,6 @@ export class ClarionDocumentSymbolProvider {
         const structureKind = clarionStructureKindMap[upperValue] ?? ClarionSymbolKind.TablesGroup;
 
         let displayName: string;
-
         if (upperValue === "JOIN") {
             let joinArgs = "";
             const parenContent: string[] = [];
@@ -553,6 +552,31 @@ export class ClarionDocumentSymbolProvider {
 
             joinArgs = parenContent.join("").trim();
             displayName = `JOIN (${joinArgs})`;
+        } else if (upperValue === "MODULE") {
+            // Extract file path from MODULE('filepath') if present
+            let filePath = "";
+            const nextToken = tokens[index + 1];
+            if (nextToken && nextToken.value === "(") {
+                const parenContent: string[] = [];
+                let j = index + 2;
+                let parenDepth = 1;
+
+                while (j < tokens.length && parenDepth > 0) {
+                    const t = tokens[j];
+                    if (t.value === "(") parenDepth++;
+                    else if (t.value === ")") parenDepth--;
+
+                    if (parenDepth > 0) parenContent.push(t.value);
+                    j++;
+                }
+
+                filePath = parenContent.join("").trim();
+                // Remove quotes if present
+                filePath = this.extractStringContents(filePath);
+                displayName = labelName ? `MODULE('${filePath}') (${labelName})` : `MODULE('${filePath}')`;
+            } else {
+                displayName = labelName ? `${value} (${labelName})` : value;
+            }
         } else {
             displayName = labelName ? `${value} (${labelName})` : value;
         }
@@ -705,33 +729,60 @@ export class ClarionDocumentSymbolProvider {
     // Extract the method name without the class prefix
     const shortName = classMatch ? procedureName.replace(`${classMatch}.`, "") : procedureName;
 
-    // Extract method details for method implementations
-    let methodDetail = "";
-    if (classMatch) {
-        // Look ahead to find PROCEDURE and any parameters/attributes
-        let j = index + 1;
-        let foundProcedure = false;
+    // Extract just the parameters for all procedures (without the PROCEDURE keyword)
+    let parameters = "";
+    // Look ahead to find PROCEDURE and any parameters/attributes
+    let j = index + 1;
+    let foundProcedure = false;
+    let parenDepth = 0;
+    let foundOpenParen = false;
+    let paramsOnly = "";
 
-        while (j < tokens.length && tokens[j].line === line) {
-            const t = tokens[j];
-            if (t.value.toUpperCase() === "PROCEDURE") {
-                foundProcedure = true;
-                methodDetail += t.value;
-            } else if (foundProcedure) {
-                methodDetail += t.value;
-            }
-
-            j++;
+    // First, find the PROCEDURE keyword
+    while (j < tokens.length) {
+        const t = tokens[j];
+        if (t.value.toUpperCase() === "PROCEDURE") {
+            foundProcedure = true;
+            break;
         }
+        j++;
+    }
 
-        // If we didn't find any details, use a default
-        if (!methodDetail) {
-            methodDetail = "PROCEDURE()";
+    // If we found PROCEDURE, continue capturing just the parameters
+    if (foundProcedure) {
+        j++; // Move to the next token after PROCEDURE
+        
+        // Capture everything until we find balanced parentheses
+        while (j < tokens.length) {
+            const t = tokens[j];
+            
+            // Check for parentheses to track depth
+            if (t.value === "(") {
+                parenDepth++;
+                foundOpenParen = true;
+            } else if (t.value === ")") {
+                parenDepth--;
+            }
+            
+            // Add the token to the parameters
+            paramsOnly += t.value;
+            
+            // If we've found balanced parentheses, we can stop
+            if (foundOpenParen && parenDepth === 0 && t.value === ")") {
+                break;
+            }
+            
+            j++;
         }
     }
 
-    // CRITICAL FIX: Include the method definition in the name for method implementations
-    const displayName = classMatch ? `${shortName} ${methodDetail}` : shortName;
+    // If we didn't find any parameters or didn't find balanced parentheses, use a default
+    if (!paramsOnly) {
+        paramsOnly = "()";
+    }
+
+    // Include just the parameters in the name for all procedures
+    const displayName = `${shortName} ${paramsOnly}`;
 
     const procedureSymbol = this.createProcedureSymbol(
         tokens, displayName, classMatch, line, finishesAt ?? line, token.subType || subType
@@ -873,16 +924,11 @@ export class ClarionDocumentSymbolProvider {
         let displayName = name;
         let detail = "";
         
-        // For method implementations, make the name more descriptive
+        // For method implementations, keep the full name including parameters
         if (isClassMethod) {
-            // Extract class and method parts for better breadcrumb display
-            const parts = name.split(' ');
-            const methodName = parts[0];
-            const methodParams = parts.slice(1).join(' ');
-            
-            // Use a cleaner name for the breadcrumb
-            displayName = methodName;
-            detail = methodParams;
+            // Keep the full name with parameters for better visibility
+            displayName = name;
+            detail = "";  // Empty detail since we're including it in the name
         } else {
             // For global procedures, provide context in the detail
             detail = this.describeSubType(subType);
@@ -951,8 +997,8 @@ export class ClarionDocumentSymbolProvider {
         const formattedDetail = detail ? `PROCEDURE${detail}` : "PROCEDURE()";
 
         // Improve breadcrumb navigation by separating name and detail
-        // Use just the procedure name in the breadcrumb, but keep the full detail
-        const displayName = procedureDefName;
+        // Include just the parameters in the display name (without the PROCEDURE keyword)
+        const displayName = `${procedureDefName} ${detail}`;
 
         const procedureDefSymbol = DocumentSymbol.create(
             displayName,

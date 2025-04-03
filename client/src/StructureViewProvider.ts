@@ -16,9 +16,11 @@ import {
 } from 'vscode';
 import { DocumentSymbol, SymbolKind as LSPSymbolKind } from 'vscode-languageserver-types';
 import LoggerManager from './logger';
-
 const logger = LoggerManager.getLogger("StructureViewProvider");
 logger.setLevel("error");
+
+// No thresholds needed - solution view priority is handled on the server side
+
 
 export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     private _onDidChangeTreeData: EventEmitter<DocumentSymbol | undefined | null | void> = new EventEmitter<DocumentSymbol | undefined | null | void>();
@@ -31,9 +33,9 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     private expandAllFlag: boolean = false;
 
     private activeEditor: TextEditor | undefined;
-    public treeView: any;
+    public treeView: TreeView<DocumentSymbol> | undefined;
 
-    constructor(treeView?: any) {
+    constructor(treeView?: TreeView<DocumentSymbol>) {
         this.treeView = treeView;
 
         // Listen for active editor changes
@@ -111,29 +113,31 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
 
     async getChildren(element?: DocumentSymbol): Promise<DocumentSymbol[]> {
         if (!this.activeEditor) return [];
-    
+
         if (element) {
             const key = this.getElementKey(element);
             this.elementMap.set(key, element); // track the real instance
-    
+
             if (element.children) {
                 for (const child of element.children) {
                     const childKey = this.getElementKey(child);
                     this.elementMap.set(childKey, child);
                 }
             }
-    
+
             return element.children ?? [];
         }
-    
+
         try {
+            
+            // For normal-sized documents, proceed with symbol request
             const symbols = await commands.executeCommand<DocumentSymbol[]>(
                 'vscode.executeDocumentSymbolProvider',
                 this.activeEditor.document.uri
             );
             
             this.elementMap.clear();
-    
+
             const trackSymbols = (symbolList: DocumentSymbol[]) => {
                 for (const symbol of symbolList) {
                     const key = this.getElementKey(symbol);
@@ -143,11 +147,11 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                     }
                 }
             };
-    
+
             if (symbols) {
                 trackSymbols(symbols);
             }
-    
+
             return symbols ?? [];
         } catch (error) {
             logger.error(`Error getting document symbols: ${error}`);

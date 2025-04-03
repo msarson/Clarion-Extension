@@ -61,6 +61,12 @@ logger.setLevel("error");
 // Track server initialization state
 export let serverInitialized = false;
 
+// Track if a solution operation is in progress
+export let solutionOperationInProgress = false;
+
+// Make solutionOperationInProgress accessible globally
+(global as any).solutionOperationInProgress = false;
+
 // ✅ Initialize Providers
 
 const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider();
@@ -415,6 +421,12 @@ connection.onDocumentSymbol((params: DocumentSymbolParams) => {
 
         if (!serverInitialized) {
             logger.info(`⚠️ [DEBUG] Server not initialized yet, delaying document symbol request for ${uri}`);
+            return [];
+        }
+
+        // Check if a solution operation is in progress - if so, prioritize solution view
+        if (solutionOperationInProgress || (global as any).solutionOperationInProgress) {
+            logger.info(`⚠️ [DEBUG] Solution operation in progress, deferring document symbol request for: ${uri}`);
             return [];
         }
 

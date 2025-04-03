@@ -6,6 +6,7 @@ import { ClarionProjectServer } from './clarionProjectServer';
 import { Connection } from 'vscode-languageserver';
 import { Token } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
+import { solutionOperationInProgress } from '../server';
 
 const logger = LoggerManager.getLogger("SolutionManager");
 logger.setLevel("error");
@@ -43,21 +44,29 @@ export class SolutionManager {
     
 
     public static async create(filePath: string): Promise<SolutionManager> {
-        const stat = fs.statSync(filePath);
-        if (stat.isDirectory()) {
-            throw new Error(`❌ Expected a file path but received a directory: ${filePath}`);
-        }
+        try {
+            // Set the solution operation flag to true
+            (global as any).solutionOperationInProgress = true;
+            
+            const stat = fs.statSync(filePath);
+            if (stat.isDirectory()) {
+                throw new Error(`❌ Expected a file path but received a directory: ${filePath}`);
+            }
 
-        if (!SolutionManager.instance) {
-            SolutionManager.instance = new SolutionManager(filePath);
-            await SolutionManager.instance.initialize();
-        } else if (SolutionManager.instance.solutionFilePath !== filePath) {
-            // If the solution file has changed, create a new instance
-            SolutionManager.instance = new SolutionManager(filePath);
-            await SolutionManager.instance.initialize();
-        }
+            if (!SolutionManager.instance) {
+                SolutionManager.instance = new SolutionManager(filePath);
+                await SolutionManager.instance.initialize();
+            } else if (SolutionManager.instance.solutionFilePath !== filePath) {
+                // If the solution file has changed, create a new instance
+                SolutionManager.instance = new SolutionManager(filePath);
+                await SolutionManager.instance.initialize();
+            }
 
-        return SolutionManager.instance;
+            return SolutionManager.instance;
+        } finally {
+            // Reset the solution operation flag when done
+            (global as any).solutionOperationInProgress = false;
+        }
     }
 
     public static getInstance(): SolutionManager | null {
@@ -65,9 +74,17 @@ export class SolutionManager {
     }
 
     private async initialize() {
-        logger.info(`🔄 Initializing solution from ${this.solutionFilePath}`);
-        this.solution = await this.parseSolution();
-        logger.info(`✅ Solution initialized with ${this.solution.projects.length} projects`);
+        try {
+            // Set the solution operation flag to true
+            (global as any).solutionOperationInProgress = true;
+            
+            logger.info(`🔄 Initializing solution from ${this.solutionFilePath}`);
+            this.solution = await this.parseSolution();
+            logger.info(`✅ Solution initialized with ${this.solution.projects.length} projects`);
+        } finally {
+            // Reset the solution operation flag when done
+            (global as any).solutionOperationInProgress = false;
+        }
     }
 
     private async parseSolution(): Promise<ClarionSolutionServer> {
@@ -205,46 +222,62 @@ export class SolutionManager {
         logger.info("🔄 Registering solution manager handlers");
         
         connection.onRequest('clarion/getSolutionTree', () => {
-            logger.info("📂 Received request for solution tree");
-            const tree = this.getSolutionTree();
-            logger.info(`📂 Returning solution tree with ${tree.projects.length} projects`);
-            return tree;
+            try {
+                // Set the solution operation flag to true
+                (global as any).solutionOperationInProgress = true;
+                
+                logger.info("📂 Received request for solution tree");
+                const tree = this.getSolutionTree();
+                logger.info(`📂 Returning solution tree with ${tree.projects.length} projects`);
+                return tree;
+            } finally {
+                // Reset the solution operation flag when done
+                (global as any).solutionOperationInProgress = false;
+            }
         });
         
         connection.onRequest('clarion/findFile', (params: { filename: string }): { path: string, source: string } => {
-            logger.setLevel("info"); // Temporarily increase log level
-            logger.info(`🔍 [DEBUG] Received request to find file: ${params.filename}`);
-            
             try {
-                // Log solution state
-                logger.info(`🔍 [DEBUG] Solution state: ${this.solution ? 'exists' : 'null'}`);
-                logger.info(`🔍 [DEBUG] Solution projects: ${this.solution?.projects?.length || 0}`);
-                logger.info(`🔍 [DEBUG] Solution file path: ${this.solutionFilePath}`);
+                // Set the solution operation flag to true
+                (global as any).solutionOperationInProgress = true;
                 
-                const result = this.findFileWithExtension(params.filename);
+                logger.setLevel("info"); // Temporarily increase log level
+                logger.info(`🔍 [DEBUG] Received request to find file: ${params.filename}`);
                 
-                if (result.path) {
-                    logger.info(`✅ [DEBUG] Found file: ${result.path} (source: ${result.source})`);
-                    logger.info(`✅ [DEBUG] File exists check: ${fs.existsSync(result.path)}`);
-                } else {
-                    logger.info(`⚠️ [DEBUG] File not found: ${params.filename}`);
+                try {
+                    // Log solution state
+                    logger.info(`🔍 [DEBUG] Solution state: ${this.solution ? 'exists' : 'null'}`);
+                    logger.info(`🔍 [DEBUG] Solution projects: ${this.solution?.projects?.length || 0}`);
+                    logger.info(`🔍 [DEBUG] Solution file path: ${this.solutionFilePath}`);
                     
-                    // Try a direct path as last resort
-                    const solutionDir = path.dirname(this.solutionFilePath);
-                    const directPath = path.join(solutionDir, params.filename);
-                    if (fs.existsSync(directPath)) {
-                        logger.info(`✅ [DEBUG] Found file using direct path: ${directPath}`);
-                        return { path: directPath, source: "direct" };
+                    const result = this.findFileWithExtension(params.filename);
+                    
+                    if (result.path) {
+                        logger.info(`✅ [DEBUG] Found file: ${result.path} (source: ${result.source})`);
+                        logger.info(`✅ [DEBUG] File exists check: ${fs.existsSync(result.path)}`);
+                    } else {
+                        logger.info(`⚠️ [DEBUG] File not found: ${params.filename}`);
+                        
+                        // Try a direct path as last resort
+                        const solutionDir = path.dirname(this.solutionFilePath);
+                        const directPath = path.join(solutionDir, params.filename);
+                        if (fs.existsSync(directPath)) {
+                            logger.info(`✅ [DEBUG] Found file using direct path: ${directPath}`);
+                            return { path: directPath, source: "direct" };
+                        }
                     }
+                    
+                    return result;
+                } catch (error) {
+                    logger.error(`❌ [DEBUG] Error in findFile request: ${error instanceof Error ? error.message : String(error)}`);
+                    logger.error(`❌ [DEBUG] Stack: ${error instanceof Error && error.stack ? error.stack : 'No stack'}`);
+                    return { path: '', source: "error" };
+                } finally {
+                    logger.setLevel("error"); // Reset log level
                 }
-                
-                return result;
-            } catch (error) {
-                logger.error(`❌ [DEBUG] Error in findFile request: ${error instanceof Error ? error.message : String(error)}`);
-                logger.error(`❌ [DEBUG] Stack: ${error instanceof Error && error.stack ? error.stack : 'No stack'}`);
-                return { path: '', source: "error" };
             } finally {
-                logger.setLevel("error"); // Reset log level
+                // Reset the solution operation flag when done
+                (global as any).solutionOperationInProgress = false;
             }
         });
     }
