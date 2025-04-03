@@ -294,6 +294,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
         
         // Always create the solution tree view, even if no solution is open
         await createSolutionTreeView();
+        
+        // Create the structure view
+        await createStructureView(context);
 
         // Check if we have a solution file loaded from workspace settings
         if (globalSolutionFile) {
@@ -1099,7 +1102,7 @@ async function registerOpenCommand(context: ExtensionContext) {
 
                     const doc = await workspace.openTextDocument(Uri.file(absolutePath));
                     await vscodeWindow.showTextDocument(doc);
-                    vscodeWindow.showInformationMessage(`✅ Opened file: ${absolutePath}`);
+                   // vscodeWindow.showInformationMessage(`✅ Opened file: ${absolutePath}`);
                 } catch (error) {
                     vscodeWindow.showErrorMessage(`❌ Failed to open file: ${filePathStr}`);
                     console.error(`❌ Error opening file: ${filePathStr}`, error);
@@ -1133,12 +1136,9 @@ async function createSolutionTreeView() {
     } catch (error) {
         logger.error("❌ Error registering solution tree view:", error);
     }
-    
-    // Create the structure view if it doesn't exist
-    await createStructureView();
 }
 
-async function createStructureView() {
+async function createStructureView(context: ExtensionContext) {
     // If the structure view already exists, just refresh its data
     if (structureView && structureViewProvider) {
         logger.info("🔄 Refreshing existing structure view...");
@@ -1150,10 +1150,30 @@ async function createStructureView() {
     structureViewProvider = new StructureViewProvider();
 
     try {
-        // Create the tree view only if it doesn't exist
+        // Create the tree view
         structureView = vscodeWindow.createTreeView('clarionStructureView', {
             treeDataProvider: structureViewProvider,
             showCollapseAll: true
+        });
+
+        // 🔥 Inject the TreeView back into the provider!
+        structureViewProvider.setTreeView(structureView);
+
+        // Register the expand all command
+        context.subscriptions.push(
+            commands.registerCommand('clarion.structureView.expandAll', async () => {
+                if (structureViewProvider) {
+                    await structureViewProvider.expandAll();
+                }
+            })
+        );
+
+        structureView.title = "Structure";
+        structureView.message = "Current document structure";
+        structureView.description = "Clarion";
+
+        structureView.onDidChangeVisibility(e => {
+            commands.executeCommand('setContext', 'clarionStructureViewVisible', e.visible);
         });
 
         logger.info("✅ Structure view successfully registered.");

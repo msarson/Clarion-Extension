@@ -3,7 +3,7 @@ import { Token, TokenType } from "./ClarionTokenizer.js";
 import LoggerManager from './logger';
 
 const logger = LoggerManager.getLogger("FoldingProvider");
-logger.setLevel("error");
+logger.setLevel("info");
 class ClarionFoldingProvider {
     private tokens: Token[];
     private foldingRanges: FoldingRange[];
@@ -24,7 +24,9 @@ class ClarionFoldingProvider {
             t.subType === TokenType.Class ||
             t.subType === TokenType.MapProcedure ||         // <-- Add this
             t.subType === TokenType.InterfaceMethod ||      // <-- Optional: INTERFACE methods
-            t.subType === TokenType.MethodDeclaration       // <-- Optional: CLASS methods
+            t.subType === TokenType.MethodDeclaration  ||     // <-- Optional: CLASS methods
+            t.subType === TokenType.MethodImplementation ||  // <-- Optional: CLASS methods
+            t.subType === TokenType.GlobalProcedure        // <-- Optional: GLOBAL PROCEDUREs
         );
         
     

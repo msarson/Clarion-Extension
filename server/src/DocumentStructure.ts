@@ -2,7 +2,7 @@ import { Token, TokenType } from "./ClarionTokenizer";
 import LoggerManager from "./logger";
 
 const logger = LoggerManager.getLogger("DocumentStructure");
-logger.setLevel("error");
+logger.setLevel("info");
 
 export class DocumentStructure {
     private structureStack: Token[] = [];
@@ -266,6 +266,33 @@ export class DocumentStructure {
                 if (prev.value === '(' || prev.type === TokenType.Structure || prev.type === TokenType.Keyword) {
                     break;
                 }
+            }
+        }
+        
+        // 🛑 Special handling: Skip TOOLBAR when it's inside a function call like SELF.AddItem(Toolbar)
+        if (token.value.toUpperCase() === "TOOLBAR") {
+            const sameLine = this.tokens.filter(t => t.line === token.line);
+            const currentIndex = sameLine.findIndex(t => t === token);
+            
+            // Check if TOOLBAR is inside parentheses
+            let insideParentheses = false;
+            let parenDepth = 0;
+            
+            for (let j = 0; j < sameLine.length; j++) {
+                const t = sameLine[j];
+                if (t.value === '(') parenDepth++;
+                if (t.value === ')') parenDepth--;
+                
+                if (j === currentIndex && parenDepth > 0) {
+                    insideParentheses = true;
+                    break;
+                }
+            }
+            
+            if (insideParentheses) {
+                logger.info(`📛 Skipping TOOLBAR at line ${token.line} – inside function call`);
+                token.type = TokenType.Variable; // Change to variable instead
+                return;
             }
         }
 

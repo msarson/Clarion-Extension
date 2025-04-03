@@ -184,6 +184,11 @@
                 "command": "clarion.removeSourceFile",
                 "title": "Remove Source File",
                 "when": "clarion.solutionOpen"
+            },
+            {
+                "command": "clarion.structureView.expandAll",
+                "title": "Expand All",
+                "icon": "$(expand-all)"
             }
         ],
         "menus": {
@@ -261,6 +266,13 @@
                 {
                     "command": "clarion.openSolutionFromList",
                     "when": "view == solutionView",
+                    "group": "navigation@2"
+                },
+                {
+                    "command": "clarion.structureView.expandAll",
+                    "title": "Expand All",
+                    "icon": "$(expand-all)",
+                    "when": "view == clarionStructureView && clarionStructureViewVisible",
                     "group": "navigation@2"
                 }
             ],

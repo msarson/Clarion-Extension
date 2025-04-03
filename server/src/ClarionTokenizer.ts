@@ -143,10 +143,32 @@ export class ClarionTokenizer {
 
                     let match = pattern.exec(substring);
                     if (match && match.index === 0) {
-                      
+                        
+                        // Special handling for Structure tokens to avoid misclassifying variables
+                        let newTokenType = tokenType;
+                        if (tokenType === TokenType.Structure) {
+                            // Check if this is likely a variable reference rather than a structure declaration
+                            const upperValue = match[0].trim().toUpperCase();
+                            
+                            // Check if inside parentheses (function call)
+                            let parenDepth = 0;
+                            for (let i = 0; i < position; i++) {
+                                if (line[i] === '(') parenDepth++;
+                                if (line[i] === ')') parenDepth--;
+                            }
+                            
+                            // If inside parentheses or after a dot (e.g., SELF.AddItem(Toolbar)),
+                            // treat as a variable instead of a structure
+                            if (parenDepth > 0 ||
+                                (position > 0 && line.substring(0, position).includes('.')) ||
+                                (position > 0 && line.substring(0, position).trim().endsWith('='))) {
+                                newTokenType = TokenType.Variable;
+                                logger.info(`🔄 Reclassified '${match[0].trim()}' from Structure to Variable at line ${lineNumber}`);
+                            }
+                        }
                         
                         let newToken: Token = {
-                            type: tokenType,
+                            type: newTokenType,
                             value: match[0].trim(),
                             line: lineNumber,
                             start: column,
@@ -326,7 +348,7 @@ const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     SECTION: /\bSECTION\b/i,
     SHEET: /\bSHEET\b/i,
     TAB: /\bTAB\b/i,
-    TOOLBAR: /\bTOOLBAR\b/i,
+    TOOLBAR: /^[ \t]*TOOLBAR\b(?=\s*(\(|,))/i,  // Only match TOOLBAR at beginning of line followed by ( or ,
     VIEW: /\sVIEW\b/i,
     WINDOW: /\bWINDOW\b(?=\s*(\(|,))/i,
     OPTION: /\bOPTION\b/i,
