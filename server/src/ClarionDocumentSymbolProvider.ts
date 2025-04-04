@@ -71,6 +71,13 @@ export class ClarionDocumentSymbolProvider {
             if (line > lastProcessedLine) {
                 // Check if any structures should be popped based on finishesAt
                 this.checkAndPopCompletedStructures(parentStack, line, symbols, tokens);
+                
+                // CRITICAL FIX: Check if we need to reset lastMethodImplementation
+                // This happens when a new global procedure is encountered
+                if ((token as any)._resetLastMethodImplementation) {
+                    lastMethodImplementation = null;
+                    delete (token as any)._resetLastMethodImplementation;
+                }
 
                 // Update current structure and procedure references
                 currentStructure = parentStack.length > 0 ? parentStack[parentStack.length - 1].symbol : null;
@@ -137,6 +144,11 @@ export class ClarionDocumentSymbolProvider {
                         // For regular procedures, update the current procedure and structure
                         currentProcedure = result.procedureSymbol;
                         currentClassImplementation = result.classImplementation;
+                        
+                        // CRITICAL FIX: Reset lastMethodImplementation when a new global procedure is encountered
+                        if ((result.procedureSymbol as any)._isGlobalProcedure) {
+                            lastMethodImplementation = null;
+                        }
 
                         // Add procedure to parent stack with its finishesAt value if available
                         if ((result.procedureSymbol as any)._finishesAt !== undefined) {
@@ -362,6 +374,9 @@ export class ClarionDocumentSymbolProvider {
         symbols: DocumentSymbol[],
         tokens: Token[]
     ): void {
+        // CRITICAL FIX: Reset lastMethodImplementation when a new global procedure is encountered
+        // This is a reference to the class property that needs to be updated
+        let resetLastMethodImplementation = false;
         // If the stack is empty, nothing to do
         if (parentStack.length === 0) {
             return;
@@ -428,6 +443,9 @@ export class ClarionDocumentSymbolProvider {
         if (isAtNewGlobalProcedure && currentGlobalProcedureIndex !== -1) {
             // Pop the current global procedure and everything after it
             parentStack.splice(currentGlobalProcedureIndex);
+            
+            // CRITICAL FIX: Mark that we need to reset lastMethodImplementation
+            resetLastMethodImplementation = true;
             return;
         }
 
@@ -498,6 +516,19 @@ export class ClarionDocumentSymbolProvider {
                 parentStack.splice(i, 1);
             }
             i--;
+        }
+        
+        // CRITICAL FIX: If we detected a new global procedure, reset lastMethodImplementation
+        if (resetLastMethodImplementation) {
+            // We need to communicate this back to the main method
+            // Since we can't directly modify lastMethodImplementation here (it's in the parent scope)
+            // We'll add a property to the first token in the current line
+            for (const token of tokens) {
+                if (token.line === currentLine) {
+                    (token as any)._resetLastMethodImplementation = true;
+                    break;
+                }
+            }
         }
     }
 
