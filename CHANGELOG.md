@@ -7,6 +7,7 @@ All notable changes to the "clarion-extension" extension will be documented in t
 - **Improved Symbol Provider**: Major updates to the symbol provider for better code navigation and structure representation.
 - **View Filtering**: Added filtering capabilities to Solution View and Structure View for easier navigation in large projects.
 - **File Management**: Added option to add or remove CLW files to/from projects.
+- **Features Documentation**: Added comprehensive [ClarionExtensionFeatures.md](https://github.com/msarson/Clarion-Extension/blob/master/ClarionExtensionFeatures.md) document providing a detailed overview of all extension features and their implementation.
 
 ### Bug Fixes
 - **Symbol Placement**: Fixed issues with symbols not being placed correctly in the document outline.

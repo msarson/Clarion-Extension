@@ -12,6 +12,7 @@
 - [Contributing and Feedback](#contributing-and-feedback)
 - [Acknowledgments](#acknowledgments)
 - [Additional Resources](#additional-resources)
+- [Features Documentation](#features-documentation)
 
 ---
 
@@ -30,6 +31,8 @@ This extension is under **active development** and we need your **help**! Whethe
 ---
 
 ## Features
+
+For a comprehensive list of all features and their locations within the extension architecture, see our [Features Documentation](https://github.com/msarson/Clarion-Extension/blob/master/ClarionExtensionFeatures.md).
 
 - **Solution Explorer View**: Navigate Clarion projects directly inside VS Code.
 - **Automatic Solution Parsing**: Detects all projects and redirection files in your solution.
@@ -203,12 +206,16 @@ This extension builds upon the work of:
 - **Brahn Partridge** (1974–2021) – Early work on textmate language definitions.
 
 ---
-
 ## Additional Resources
 
 📚 **[Getting Started Guide](https://github.com/msarson/Clarion-Extension/blob/master/GettingStarted.md)** – Comprehensive guide to all extension features.
 
 📚 **[Cheat Sheet](https://github.com/msarson/Clarion-Extension/blob/master/docs/CheatSheet.md)** – Quick reference for features and usage.
 
+## Features Documentation
+
+📚 **[Features Documentation](https://github.com/msarson/Clarion-Extension/blob/master/ClarionExtensionFeatures.md)** – Detailed overview of all extension features and their implementation.
+
+Thank you for using **Clarion Extension**! 🎉
 Thank you for using **Clarion Extension**! 🎉
 
