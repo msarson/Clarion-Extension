@@ -380,9 +380,9 @@ export class ClarionDocumentSymbolProvider {
             // Check if this is a global procedure
             const isGlobalProcedure = entry.symbol.kind === SymbolKind.Function &&
                 ((entry.symbol as any)._isGlobalProcedure === true ||
-                (entry.symbol.kind === SymbolKind.Function &&
-                !(entry.symbol as any)._isMethodImplementation &&
-                !entry.symbol.name.includes('.')));
+                    (entry.symbol.kind === SymbolKind.Function &&
+                        !(entry.symbol as any)._isMethodImplementation &&
+                        !entry.symbol.name.includes('.')));
 
             // Check if this is a special routine
             const isSpecialRoutine = entry.symbol.kind === ClarionSymbolKind.Routine &&
@@ -411,12 +411,12 @@ export class ClarionDocumentSymbolProvider {
         // Check if we're at a new global procedure
         let isAtNewGlobalProcedure = false;
         let newGlobalProcedureToken: Token | null = null;
-        
+
         // Look for a global procedure token at the current line
         for (const token of tokens) {
             if (token.line === currentLine &&
                 (token.subType === TokenType.GlobalProcedure ||
-                 (token as any)._isGlobalProcedure === true)) {
+                    (token as any)._isGlobalProcedure === true)) {
                 isAtNewGlobalProcedure = true;
                 newGlobalProcedureToken = token;
                 break;
@@ -713,111 +713,97 @@ export class ClarionDocumentSymbolProvider {
 
             // Mark this as a method implementation
             (token as any)._isMethodImplementation = true;
-    } else {
-        // For regular procedures (not class methods), use the current structure
-        // CRITICAL FIX: Always promote GlobalProcedure to top-level
-        if (token.subType === TokenType.GlobalProcedure || subType === TokenType.GlobalProcedure) {
-            container = null; // <-- promotes it to top-level
-            
-            // Mark this as a global procedure so we can identify it later
-            (token as any)._isGlobalProcedure = true;
         } else {
-            container = currentStructure;
+            // For regular procedures (not class methods), use the current structure
+            // CRITICAL FIX: Always promote GlobalProcedure to top-level
+            if (token.subType === TokenType.GlobalProcedure || subType === TokenType.GlobalProcedure) {
+                container = null; // <-- promotes it to top-level
+
+                // Mark this as a global procedure so we can identify it later
+                (token as any)._isGlobalProcedure = true;
+            } else {
+                container = currentStructure;
+            }
         }
-    }
 
-    // Extract the method name without the class prefix
-    const shortName = classMatch ? procedureName.replace(`${classMatch}.`, "") : procedureName;
+        // Extract the method name without the class prefix
+        const shortName = classMatch ? procedureName.replace(`${classMatch}.`, "") : procedureName;
 
-    // Extract just the parameters for all procedures (without the PROCEDURE keyword)
-    let parameters = "";
-    // Look ahead to find PROCEDURE and any parameters/attributes
-    let j = index + 1;
-    let foundProcedure = false;
-    let parenDepth = 0;
-    let foundOpenParen = false;
-    let paramsOnly = "";
+        // Extract just the parameters for all procedures (without the PROCEDURE keyword)
+        // Extract just the parameters for all procedures (without the PROCEDURE keyword)
+        let paramsOnly = "";
+        let parenDepth = 0;
+        let foundOpen = false;
+        let j = index + 1;
 
-    // First, find the PROCEDURE keyword
-    while (j < tokens.length) {
-        const t = tokens[j];
-        if (t.value.toUpperCase() === "PROCEDURE") {
-            foundProcedure = true;
-            break;
-        }
-        j++;
-    }
-
-    // If we found PROCEDURE, continue capturing just the parameters
-    if (foundProcedure) {
-        j++; // Move to the next token after PROCEDURE
-        
-        // Capture everything until we find balanced parentheses
         while (j < tokens.length) {
             const t = tokens[j];
-            
-            // Check for parentheses to track depth
+
+            // Stop if we're on a new line and haven't opened the parens
+            if (!foundOpen && t.line !== token.line) break;
+
             if (t.value === "(") {
                 parenDepth++;
-                foundOpenParen = true;
+                foundOpen = true;
             } else if (t.value === ")") {
                 parenDepth--;
             }
-            
-            // Add the token to the parameters
-            paramsOnly += t.value;
-            
-            // If we've found balanced parentheses, we can stop
-            if (foundOpenParen && parenDepth === 0 && t.value === ")") {
-                break;
+
+            if (foundOpen) {
+                paramsOnly += t.value + " ";
+
+                if (parenDepth === 0 && t.value === ")") {
+                    break;
+                }
             }
-            
+
             j++;
         }
-    }
 
-    // If we didn't find any parameters or didn't find balanced parentheses, use a default
-    if (!paramsOnly) {
-        paramsOnly = "()";
-    }
+        paramsOnly = paramsOnly.trim();
 
-    // Include just the parameters in the name for all procedures
-    const displayName = `${shortName} ${paramsOnly}`;
+        // Defensive fallback
+        if (!paramsOnly || !paramsOnly.endsWith(")")) {
+            paramsOnly = "()";
+        }
 
-    const procedureSymbol = this.createProcedureSymbol(
-        tokens, displayName, classMatch, line, finishesAt ?? line, token.subType || subType
-    );
+        // Include just the parameters in the name for all procedures
+        const displayName = `${shortName} ${paramsOnly}`;
 
-    // For method implementations, mark the symbol
-    if (classMatch) {
-        (procedureSymbol as any)._isMethodImplementation = true;
+        const procedureSymbol = this.createProcedureSymbol(
+            tokens, displayName, classMatch, line, finishesAt ?? line, token.subType || subType
+        );
 
-        // CRITICAL FIX: Also set the subType to MethodImplementation
-        // This ensures it's properly identified throughout the code
-        procedureSymbol.detail = "";  // Empty detail since we're including it in the name
-    } else if (token.subType === TokenType.GlobalProcedure || subType === TokenType.GlobalProcedure) {
-        // Mark global procedures
-        (procedureSymbol as any)._isGlobalProcedure = true;
-    }
-    
-    // Add the procedure to its container
-    if (classMatch) {
-        // For method implementations, add directly to the container
-        container!.children!.push(procedureSymbol);
-    } else {
-        // For regular procedures, use addSymbolToParent
-        this.addSymbolToParent(procedureSymbol, container, symbols);
-    }
+        // For method implementations, mark the symbol
+        if (classMatch) {
+            (procedureSymbol as any)._isMethodImplementation = true;
 
-    // Add procedure to parent stack with its finishesAt value
-    // This ensures procedures are properly scoped and their children are attached correctly
-    if (finishesAt !== undefined) {
-        // We need to add this to the parentStack in the main method
-        // We'll return it and let the caller add it to the stack
-        (procedureSymbol as any)._finishesAt = finishesAt;
-    }
+            // CRITICAL FIX: Also set the subType to MethodImplementation
+            // This ensures it's properly identified throughout the code
+            procedureSymbol.detail = "";  // Empty detail since we're including it in the name
+        } else if (token.subType === TokenType.GlobalProcedure || subType === TokenType.GlobalProcedure) {
+            // Mark global procedures
+            (procedureSymbol as any)._isGlobalProcedure = true;
+        }
 
-    return { procedureSymbol, classImplementation };
+        // Add the procedure to its container
+        if (classMatch) {
+            // For method implementations, add directly to the container
+            container!.children!.push(procedureSymbol);
+        } else {
+            // For regular procedures, use addSymbolToParent
+            this.addSymbolToParent(procedureSymbol, container, symbols);
+        }
+
+        // Add procedure to parent stack with its finishesAt value
+        // This ensures procedures are properly scoped and their children are attached correctly
+        if (finishesAt !== undefined) {
+            // We need to add this to the parentStack in the main method
+            // We'll return it and let the caller add it to the stack
+            (procedureSymbol as any)._finishesAt = finishesAt;
+        }
+
+        return { procedureSymbol, classImplementation };
     }
 
     private findOrCreateClassImplementation(
@@ -831,14 +817,14 @@ export class ClarionDocumentSymbolProvider {
 
         // First, check if we already have a class implementation container
         let classImplementation: DocumentSymbol | null = null;
-        
+
         // Look for existing class implementation in symbols
         const findClassImplementation = (symbolList: DocumentSymbol[]): DocumentSymbol | null => {
             for (const symbol of symbolList) {
                 if (symbol.name === fullName) {
                     return symbol;
                 }
-                
+
                 // Also check children (for global procedures that might contain class implementations)
                 if (symbol.children && symbol.children.length > 0) {
                     const found = findClassImplementation(symbol.children);
@@ -847,7 +833,7 @@ export class ClarionDocumentSymbolProvider {
             }
             return null;
         };
-        
+
         classImplementation = findClassImplementation(symbols);
 
         if (!classImplementation) {
@@ -878,14 +864,14 @@ export class ClarionDocumentSymbolProvider {
 
             // Find the most recent global procedure to attach this class implementation to
             let mostRecentGlobalProcedure: DocumentSymbol | null = null;
-            
+
             for (const symbol of symbols) {
                 if (symbol.kind === SymbolKind.Function &&
                     (symbol as any)._isGlobalProcedure === true) {
                     mostRecentGlobalProcedure = symbol;
                 }
             }
-            
+
             // If we found a global procedure, add the class implementation as its child
             if (mostRecentGlobalProcedure) {
                 mostRecentGlobalProcedure.children!.push(classImplementation);
@@ -923,7 +909,7 @@ export class ClarionDocumentSymbolProvider {
         // Improve breadcrumb navigation by providing better context
         let displayName = name;
         let detail = "";
-        
+
         // For method implementations, keep the full name including parameters
         if (isClassMethod) {
             // Keep the full name with parameters for better visibility
@@ -932,7 +918,7 @@ export class ClarionDocumentSymbolProvider {
         } else {
             // For global procedures, provide context in the detail
             detail = this.describeSubType(subType);
-            
+
             // If it's a global procedure, add that context to the detail
             if (subType === TokenType.GlobalProcedure) {
                 detail = detail ? `${detail} (Global)` : "Global Procedure";
@@ -1145,7 +1131,7 @@ export class ClarionDocumentSymbolProvider {
                 if (currentStructure.kind === ClarionSymbolKind.Routine &&
                     (currentStructure as any)._isSpecialRoutine) {
                     // Skip special routines and look for a better parent
-                    
+
                     // First, try to find a global procedure in the symbols
                     for (const symbol of symbols) {
                         if (symbol.kind === SymbolKind.Function &&
@@ -1154,7 +1140,7 @@ export class ClarionDocumentSymbolProvider {
                             break;
                         }
                     }
-                    
+
                     // If no global procedure, try any procedure
                     if (!target) {
                         for (const symbol of symbols) {
@@ -1177,7 +1163,7 @@ export class ClarionDocumentSymbolProvider {
             } else {
                 // If no current structure or procedure, look for the most recent global procedure
                 let mostRecentGlobalProcedure: DocumentSymbol | null = null;
-                
+
                 // Find the most recent global procedure by looking at all top-level symbols
                 for (const symbol of symbols) {
                     if (symbol.kind === SymbolKind.Function &&
@@ -1185,7 +1171,7 @@ export class ClarionDocumentSymbolProvider {
                         mostRecentGlobalProcedure = symbol;
                     }
                 }
-                
+
                 if (mostRecentGlobalProcedure) {
                     target = mostRecentGlobalProcedure;
                 }
@@ -1304,7 +1290,7 @@ export class ClarionDocumentSymbolProvider {
         } else {
             // No parent — this becomes a top-level node
             symbols.push(symbol);
-            
+
             // For top-level symbols, ensure they have appropriate detail
             if (!symbol.detail) {
                 if (isMethod || symbol.kind === ClarionSymbolKind.Procedure) {
