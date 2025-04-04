@@ -8,7 +8,7 @@ import { ClarionExtensionCommands } from './ClarionExtensionCommands';
 import { ClarionHoverProvider } from './providers/hoverProvider';
 import { ClarionDocumentLinkProvider } from './providers/documentLinkProvier';
 import { DocumentManager } from './documentManager';
-import { ClarionPrefixDecorator } from './ClarionPrefixDecorator';
+import { ClarionDecorator } from './ClarionDecorator';
 
 import { SolutionTreeDataProvider } from './SolutionTreeDataProvider';
 import { StructureViewProvider } from './StructureViewProvider';
@@ -1050,14 +1050,14 @@ function registerLanguageFeatures(context: ExtensionContext) {
         semanticTokensProviderDisposable.dispose(); // Remove old provider if it exists
     }
     
-    logger.info("🎨 Registering Prefix Decorator for variable highlighting...");
-    const prefixDecorator = new ClarionPrefixDecorator();
+    logger.info("🎨 Registering Clarion Decorator for variable and comment highlighting...");
+    const clarionDecorator = new ClarionDecorator();
     semanticTokensProviderDisposable = {
-        dispose: () => prefixDecorator.dispose()
+        dispose: () => clarionDecorator.dispose()
     };
     context.subscriptions.push(semanticTokensProviderDisposable);
     
-    logger.info(`🎨 Registered Prefix Decorator for variable highlighting`);
+    logger.info(`🎨 Registered Clarion Decorator for variable and comment highlighting`);
 }
 
 async function refreshOpenDocuments() {
