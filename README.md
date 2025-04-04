@@ -85,14 +85,25 @@ For a comprehensive list of all features and their locations within the extensio
 ---
 ## Changelog (What's New in v0.5.6)
 ### Enhancements
-- **Variable Prefix Highlighting**: Added direct color highlighting for variables with user-defined prefixes (e.g., LOCS:, GLOS:) with configurable colors.
+- **Variable Prefix Highlighting**: Added direct highlighting for variables with user-defined prefixes (e.g., LOCS:, GLOS:) with configurable styling options.
   
   To use this feature:
-  1. Define your prefixes and their associated colors in settings:
+  1. Define your prefixes with simple colors or advanced styling options:
      ```json
      "clarion.prefixHighlighting": {
+       // Simple color
        "LOCS": "#ffffcc",
-       "GLOS": "#ccffff"
+       
+       // Advanced styling
+       "GLOS": {
+         "color": "#ccffff",
+         "fontWeight": "bold",
+         "backgroundColor": "#f0f0f0",
+         "before": {
+           "contentText": "→",
+           "color": "#888888"
+         }
+       }
      }
      ```
      
@@ -100,7 +111,7 @@ For a comprehensive list of all features and their locations within the extensio
   
   3. Optionally disable the feature with: `"clarion.prefixHighlighting.enabled": false`
   
-  The extension will automatically apply the selected colors to variables with matching prefixes in your code.
+  The extension will automatically apply the selected styles to variables with matching prefixes in your code.
 
 ## Changelog (What's New in v0.5.5)
 ### Enhancements

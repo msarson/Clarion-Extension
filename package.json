@@ -498,14 +498,77 @@
                 "clarion.prefixHighlighting": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "string",
-                        "format": "color"
+                        "oneOf": [
+                            {
+                                "type": "string",
+                                "format": "color",
+                                "description": "Simple color value"
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "color": {
+                                        "type": "string",
+                                        "format": "color",
+                                        "description": "Text color"
+                                    },
+                                    "backgroundColor": {
+                                        "type": "string",
+                                        "format": "color",
+                                        "description": "Background color"
+                                    },
+                                    "fontWeight": {
+                                        "type": "string",
+                                        "enum": ["normal", "bold"],
+                                        "description": "Font weight (normal or bold)"
+                                    },
+                                    "fontStyle": {
+                                        "type": "string",
+                                        "enum": ["normal", "italic"],
+                                        "description": "Font style (normal or italic)"
+                                    },
+                                    "textDecoration": {
+                                        "type": "string",
+                                        "enum": ["none", "underline", "line-through", "overline"],
+                                        "description": "Text decoration"
+                                    },
+                                    "before": {
+                                        "type": "object",
+                                        "properties": {
+                                            "contentText": {
+                                                "type": "string",
+                                                "description": "Text to insert before the variable"
+                                            },
+                                            "color": {
+                                                "type": "string",
+                                                "format": "color",
+                                                "description": "Color of the before text"
+                                            }
+                                        }
+                                    },
+                                    "after": {
+                                        "type": "object",
+                                        "properties": {
+                                            "contentText": {
+                                                "type": "string",
+                                                "description": "Text to insert after the variable"
+                                            },
+                                            "color": {
+                                                "type": "string",
+                                                "format": "color",
+                                                "description": "Color of the after text"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        ]
                     },
                     "default": {
                         "LOCS": "#ffffcc",
                         "GLOS": "#ccffff"
                     },
-                    "description": "Defines prefix to color mappings for variable highlighting. Each key is a prefix (e.g., 'LOCS', 'GLOS') and each value is a color. Click on the color to use the color picker."
+                    "description": "Defines prefix styling for variable highlighting. Each key is a prefix (e.g., 'LOCS', 'GLOS') and each value can be either a color or an object with detailed styling options."
                 },
                 "clarion.prefixHighlighting.enabled": {
                     "type": "boolean",

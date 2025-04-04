@@ -65,7 +65,7 @@ export class ClarionPrefixDecorator {
         }
         
         // Get the prefix configuration
-        const prefixConfig = vscode.workspace.getConfiguration().get<Record<string, string>>('clarion.prefixHighlighting', {});
+        const prefixConfig = vscode.workspace.getConfiguration().get<Record<string, any>>('clarion.prefixHighlighting', {});
         logger.info('Prefix configuration:', prefixConfig);
         
         // Dispose old decoration types
@@ -79,17 +79,46 @@ export class ClarionPrefixDecorator {
                 logger.info(`Skipping 'enabled' property - it's not a prefix`);
                 return;
             }
+            // Handle both simple color string and complex style object
+            let decorationOptions: vscode.DecorationRenderOptions = {};
             
-            const color = prefixConfig[prefix];
-            logger.info(`Creating decoration type for prefix: ${prefix}, color: ${color}`);
+            if (typeof prefixConfig[prefix] === 'string') {
+                // Simple color string
+                const color = prefixConfig[prefix] as string;
+                logger.info(`Creating decoration type for prefix: ${prefix}, color: ${color}`);
+                decorationOptions.color = color;
+            } else {
+                // Complex style object
+                const style = prefixConfig[prefix] as any;
+                logger.info(`Creating decoration type for prefix: ${prefix}, style:`, style);
+                
+                // Apply basic styling
+                if (style.color) decorationOptions.color = style.color;
+                if (style.backgroundColor) decorationOptions.backgroundColor = style.backgroundColor;
+                if (style.fontWeight) decorationOptions.fontWeight = style.fontWeight;
+                if (style.fontStyle) decorationOptions.fontStyle = style.fontStyle;
+                if (style.textDecoration) decorationOptions.textDecoration = style.textDecoration;
+                
+                // Apply before/after decorations
+                if (style.before && style.before.contentText) {
+                    decorationOptions.before = {
+                        contentText: style.before.contentText,
+                        color: style.before.color
+                    };
+                }
+                
+                if (style.after && style.after.contentText) {
+                    decorationOptions.after = {
+                        contentText: style.after.contentText,
+                        color: style.after.color
+                    };
+                }
+            }
             
-            // Create a decoration type with the specified color
-            const decorationType = vscode.window.createTextEditorDecorationType({
-                color: color
-                // Optional: add other styling as needed
-                // fontWeight: 'bold',
-            });
+            // Create a decoration type with the specified options
+            const decorationType = vscode.window.createTextEditorDecorationType(decorationOptions);
             
+            this.decorationTypes.set(prefix, decorationType);
             this.decorationTypes.set(prefix, decorationType);
         });
         
