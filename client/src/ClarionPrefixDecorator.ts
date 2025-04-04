@@ -1,4 +1,8 @@
 import * as vscode from 'vscode';
+import LoggerManager from './logger';
+const logger = LoggerManager.getLogger("ClarionPrefixDecorator");
+logger.setLevel("error");
+
 
 /**
  * Provides text decorations for Clarion variables with user-defined prefixes.
@@ -55,14 +59,14 @@ export class ClarionPrefixDecorator {
         this.enabled = vscode.workspace.getConfiguration().get<boolean>('clarion.prefixHighlighting.enabled', true);
         
         if (!this.enabled) {
-            console.log('Prefix highlighting is disabled');
+            logger.info('Prefix highlighting is disabled');
             this.clearDecorations();
             return;
         }
         
         // Get the prefix configuration
         const prefixConfig = vscode.workspace.getConfiguration().get<Record<string, string>>('clarion.prefixHighlighting', {});
-        console.log('Prefix configuration:', prefixConfig);
+        logger.info('Prefix configuration:', prefixConfig);
         
         // Dispose old decoration types
         this.decorationTypes.forEach(decorationType => decorationType.dispose());
@@ -72,12 +76,12 @@ export class ClarionPrefixDecorator {
         Object.keys(prefixConfig).forEach(prefix => {
             // Skip the 'enabled' property - it's not a prefix
             if (prefix === 'enabled') {
-                console.log(`Skipping 'enabled' property - it's not a prefix`);
+                logger.info(`Skipping 'enabled' property - it's not a prefix`);
                 return;
             }
             
             const color = prefixConfig[prefix];
-            console.log(`Creating decoration type for prefix: ${prefix}, color: ${color}`);
+            logger.info(`Creating decoration type for prefix: ${prefix}, color: ${color}`);
             
             // Create a decoration type with the specified color
             const decorationType = vscode.window.createTextEditorDecorationType({
@@ -99,10 +103,10 @@ export class ClarionPrefixDecorator {
             
             // Match PREFIX:Identifier pattern
             this.prefixRegexCache = new RegExp(`\\b(${prefixPattern}):(\\w+)\\b`, 'g');
-            console.log(`Created regex pattern: \\b(${prefixPattern}):(\\w+)\\b`);
+            logger.info(`Created regex pattern: \\b(${prefixPattern}):(\\w+)\\b`);
         } else {
             this.prefixRegexCache = null;
-            console.log('No prefixes configured, regex pattern is null');
+            logger.info('No prefixes configured, regex pattern is null');
         }
     }
     
@@ -126,7 +130,7 @@ export class ClarionPrefixDecorator {
             return;
         }
         
-        console.log(`Processing document for decorations: ${document.uri.toString()}`);
+        logger.info(`Processing document for decorations: ${document.uri.toString()}`);
         
         // Create a map to collect ranges for each prefix
         const decorationRanges: Map<string, vscode.Range[]> = new Map();
@@ -153,7 +157,7 @@ export class ClarionPrefixDecorator {
             const ranges = decorationRanges.get(prefix);
             if (ranges) {
                 ranges.push(range);
-                console.log(`Found ${prefix}:${identifier} at ${startPosition.line}:${startPosition.character}`);
+                logger.info(`Found ${prefix}:${identifier} at ${startPosition.line}:${startPosition.character}`);
             }
         }
         
@@ -162,7 +166,7 @@ export class ClarionPrefixDecorator {
             const decorationType = this.decorationTypes.get(prefix);
             if (decorationType) {
                 this.activeEditor!.setDecorations(decorationType, ranges);
-                console.log(`Applied ${ranges.length} decorations for prefix ${prefix}`);
+                logger.info(`Applied ${ranges.length} decorations for prefix ${prefix}`);
             }
         });
     }
