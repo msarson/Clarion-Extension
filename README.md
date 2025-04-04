@@ -6,7 +6,7 @@
 - [Features](#features)
 - [Installation](#installation)
 - [Marketplace](#marketplace-information)
-- [Changelog](#changelog-whats-new-in-v054)
+- [Changelog](#changelog-whats-new-in-v055)
 - [Getting Started](#getting-started)
 - [Troubleshooting](#troubleshooting)
 - [Contributing and Feedback](#contributing-and-feedback)
@@ -46,6 +46,8 @@ This extension is under **active development** and we need your **help**! Whethe
 - **Welcome Screen**: Easily open or reopen Clarion solutions in your workspace.
 - **Multi-Solution Workspace Support**: Open and manage multiple Clarion solutions in the same VS Code workspace.
 - **Clarion Tools Sidebar**: A dedicated view in the activity bar for managing solutions, projects, and files.
+- **View Filtering**: Filter Solution View and Structure View for easier navigation in large projects.
+- **File Management**: Add or remove CLW files to/from projects directly from the Solution View.
 
 ---
 
@@ -70,13 +72,27 @@ This extension is under **active development** and we need your **help**! Whethe
 ## Marketplace Information
 
 - **Identifier**: `msarson.clarion-extensions`
-- **Version**: `0.5.4`
+- **Version**: `0.5.5`
 - **Published**: 2018-08-19
-- **Last Release**: 2025-04-02
+- **Last Release**: 2025-04-04
 
 [View on Marketplace](https://marketplace.visualstudio.com/items?itemName=msarson.clarion-extensions)
 
 ---
+## Changelog (What's New in v0.5.5)
+
+### Enhancements
+- **Improved Symbol Provider**: Major updates to the symbol provider for better code navigation and structure representation.
+- **View Filtering**: Added filtering capabilities to Solution View and Structure View for easier navigation in large projects.
+- **File Management**: Added option to add or remove CLW files to/from projects.
+
+### Bug Fixes
+- **Symbol Placement**: Fixed issues with symbols not being placed correctly in the document outline.
+- **Label Formatting**: Fixed issues with labels not adding spaces between parameters.
+- **Procedure Labels**: Resolved issues with procedure labels in methods.
+- **Import Locations**: Fixed textdocument coming from new import location.
+- **File Redirection**: Refactored file locations to use redirection as the default approach.
+
 ## Changelog (What's New in v0.5.3)
 ### BUG
 - **V0.5.2 was not working when shipped**: Updated .vscodeignore as it was not publishing packages required for extension

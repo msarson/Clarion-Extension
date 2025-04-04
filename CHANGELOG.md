@@ -1,5 +1,46 @@
-# Change Log  
+# Change Log
 All notable changes to the "clarion-extension" extension will be documented in this file.
+
+## [0.5.5] - 2025-04-04
+
+### Enhancements
+- **Improved Symbol Provider**: Major updates to the symbol provider for better code navigation and structure representation.
+- **View Filtering**: Added filtering capabilities to Solution View and Structure View for easier navigation in large projects.
+- **File Management**: Added option to add or remove CLW files to/from projects.
+
+### Bug Fixes
+- **Symbol Placement**: Fixed issues with symbols not being placed correctly in the document outline.
+- **Label Formatting**: Fixed issues with labels not adding spaces between parameters.
+- **Procedure Labels**: Resolved issues with procedure labels in methods.
+- **Import Locations**: Fixed textdocument coming from new import location.
+- **File Redirection**: Refactored file locations to use redirection as the default approach.
+
+## [0.5.4] - 2025-04-02
+
+### Bug Fix
+- **Missing Packaged Files**: Fixed an issue where critical files were excluded due to an incorrect setting in `.vscodeignore`, causing required modules not to be bundled with the extension.
+
+### New
+- **Clarion Tools View**: A new sidebar view titled **Clarion Tools** is now available in the Activity Bar for quick access to solutions and features.
+- **Welcome Screen**: Improved user experience with a welcome screen for opening or reopening Clarion solutions.
+- **Multi-Solution Support**: Workspaces can now contain **multiple Clarion solutions**.
+
+### Fixes
+- **Build Actions**: Fixed issues where **Build Solution** and **Build Project** could fail unexpectedly.
+- **Problem Panel Integration**: Compilation problems are now correctly displayed in the **Problems panel**.
+- **Solution Closing**: You can now close solutions from the Solution View.
+
+## [0.5.3] - 2025-03-29
+
+### BUG
+- **V0.5.2 was not working when shipped**: Updated .vscodeignore as it was not publishing packages required for extension
+
+## [0.5.2] - 2025-03-28
+
+### Added
+- **COLOR Keyword Enhancement**: Added color patch visualization and color picker for COLOR keywords.
+- **Solution Parsing Refactoring**: Moved client-side solution parsing to the language server side for improved performance and reliability.
+- **Quick Open Improvements**: Enhanced Ctrl+P quick open functionality for better file navigation.
 
 ## [0.5.1] - 2025-03-27
 
