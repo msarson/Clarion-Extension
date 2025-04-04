@@ -33,6 +33,7 @@ The extension provides comprehensive solution management capabilities:
 - **Syntax Highlighting**: Clarion-specific syntax highlighting
 - **Code Formatting**: Automatic formatting of Clarion code
 - **Variable Prefix Highlighting**: Direct highlighting for variables with user-defined prefixes (e.g., LOCS:, GLOS:) with configurable styling options including colors, font styles, and decorations
+- **Comment Pattern Highlighting**: Direct highlighting for comment lines with user-defined patterns (e.g., `! TODO`, `! FIXME`) with configurable styling options
 - **Snippets**: Pre-defined code snippets for common Clarion constructs
   - Variables, reference variables
   - Classes and methods
@@ -82,10 +83,15 @@ The extension uses a Language Server Protocol implementation to provide rich lan
 - **Color Provider**: Color highlighting and picker for color values in code
 - **Definition Provider**: Go to definition support
 - **Formatting Provider**: Code formatting according to Clarion conventions
-- **Variable Prefix Decorator**: Highlights variables with user-defined prefixes (e.g., LOCS:, GLOS:). The decorator:
-  - Scans documents for variables with configured prefixes (e.g., LOCS:MyVar, GLOS:CustomerName)
-  - Supports advanced styling options including colors, font styles, backgrounds, and decorations
-  - Applies styles directly from the `clarion.prefixHighlighting` configuration
+- **Clarion Decorator**: Provides highlighting for various Clarion code elements:
+  - **Variable Prefix Highlighting**:
+    - Scans documents for variables with configured prefixes (e.g., LOCS:MyVar, GLOS:CustomerName)
+    - Supports advanced styling options including colors, font styles, backgrounds, and decorations
+    - Applies styles directly from the `clarion.prefixHighlighting` configuration
+  - **Comment Pattern Highlighting**:
+    - Scans documents for comment lines starting with configured patterns (e.g., `! TODO`, `! FIXME`)
+    - Supports the same advanced styling options as variable prefix highlighting
+    - Applies styles directly from the `clarion.commentHighlighting` configuration
   - Updates highlighting in real-time as documents or settings change
 
 ## Configuration Options
@@ -124,6 +130,30 @@ The extension provides several configuration options:
   ```
   Colors can be selected using VS Code's built-in color picker by clicking on the color values in the settings UI. Advanced styling options include font weight, font style, text decoration, background color, and before/after decorations.
 
+- **Comment Highlighting**: Configure styling for comment lines with specific patterns:
+  ```json
+  // Define comment patterns with simple colors or advanced styling
+  "clarion.commentHighlighting": {
+    // Simple color
+    "TODO": "#ff8c00",
+    
+    // Advanced styling
+    "FIXME": {
+      "color": "#ff0000",
+      "fontWeight": "bold",
+      "backgroundColor": "#fff0f0",
+      "before": {
+        "contentText": "⚠️ ",
+        "color": "#ff0000"
+      }
+    }
+  },
+  
+  // Enable/disable the feature
+  "clarion.commentHighlighting.enabled": true
+  ```
+  Any comment line starting with `!` followed by one of your defined patterns (with or without a space) will be highlighted with the specified styling.
+
 ## Integration
 
 - **Redirection Support**: Full support for Clarion's redirection system
@@ -141,7 +171,7 @@ The client-side code handles:
 - File system watchers
 - Solution management
 - Build task integration
-- Variable prefix decorator for highlighting prefixed variables
+- Clarion decorator for highlighting prefixed variables and comment patterns
 
 ### Server-Side (server.ts)
 

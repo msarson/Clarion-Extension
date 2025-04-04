@@ -32,6 +32,28 @@ All notable changes to the "clarion-extension" extension will be documented in t
   
   The extension will automatically apply the selected styles to variables with matching prefixes in your code.
 
+- **Comment Pattern Highlighting**: Added highlighting for comment lines with user-defined patterns (e.g., `! TODO`, `! FIXME`).
+  
+  To use this feature:
+  1. Define your comment patterns with simple colors or advanced styling options:
+     ```json
+     "clarion.commentHighlighting": {
+       // Simple color
+       "TODO": "#ff8c00",
+       
+       // Advanced styling
+       "FIXME": {
+         "color": "#ff0000",
+         "fontWeight": "bold",
+         "backgroundColor": "#fff0f0"
+       }
+     }
+     ```
+     
+  2. Any comment line starting with `!` followed by one of your defined patterns (with or without a space) will be highlighted
+  
+  3. Optionally disable the feature with: `"clarion.commentHighlighting.enabled": false`
+
 ## [0.5.5] - 2025-04-04
 
 ### Enhancements
