@@ -71,7 +71,7 @@ export class ClarionDocumentSymbolProvider {
             if (line > lastProcessedLine) {
                 // Check if any structures should be popped based on finishesAt
                 this.checkAndPopCompletedStructures(parentStack, line, symbols, tokens);
-                
+
                 // CRITICAL FIX: Check if we need to reset lastMethodImplementation
                 // This happens when a new global procedure is encountered
                 if ((token as any)._resetLastMethodImplementation) {
@@ -144,7 +144,7 @@ export class ClarionDocumentSymbolProvider {
                         // For regular procedures, update the current procedure and structure
                         currentProcedure = result.procedureSymbol;
                         currentClassImplementation = result.classImplementation;
-                        
+
                         // CRITICAL FIX: Reset lastMethodImplementation when a new global procedure is encountered
                         if ((result.procedureSymbol as any)._isGlobalProcedure) {
                             lastMethodImplementation = null;
@@ -443,7 +443,7 @@ export class ClarionDocumentSymbolProvider {
         if (isAtNewGlobalProcedure && currentGlobalProcedureIndex !== -1) {
             // Pop the current global procedure and everything after it
             parentStack.splice(currentGlobalProcedureIndex);
-            
+
             // CRITICAL FIX: Mark that we need to reset lastMethodImplementation
             resetLastMethodImplementation = true;
             return;
@@ -517,7 +517,7 @@ export class ClarionDocumentSymbolProvider {
             }
             i--;
         }
-        
+
         // CRITICAL FIX: If we detected a new global procedure, reset lastMethodImplementation
         if (resetLastMethodImplementation) {
             // We need to communicate this back to the main method
@@ -988,7 +988,12 @@ export class ClarionDocumentSymbolProvider {
             const t = tokens[j];
             if (t.line !== line) break;
             if (t.type === TokenType.EndStatement || t.type === TokenType.Structure) break;
-            detail += t.value;
+            if (t.value === "(" || t.value === ")") {
+                detail += t.value;
+            }
+            else {
+                detail += t.value + " ";
+            }
             j++;
         }
 
@@ -1120,7 +1125,7 @@ export class ClarionDocumentSymbolProvider {
                 }
 
                 // Add the token value to the type
-                fullType += t.value + " ";
+                fullType += t.value;// + " ";
                 j++;
             }
 
@@ -1132,10 +1137,10 @@ export class ClarionDocumentSymbolProvider {
             if (commentIndex !== -1) {
                 fullType = fullType.substring(0, commentIndex).trim();
             }
-
+            fullType = fullType.trim();
             // CRITICAL FIX: Include the variable type in the name
             // This ensures it's displayed in the outline view
-            const displayName = `${prevToken.value}  ${fullType}`;
+            const displayName = `${prevToken.value} ${fullType}`;
 
             const variableSymbol = DocumentSymbol.create(
                 displayName,  // Include the variable type in the name
