@@ -47,6 +47,14 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         // Listen for active editor changes
         window.onDidChangeActiveTextEditor(editor => {
             this.activeEditor = editor;
+            
+            // Clear any active filter when changing documents
+            if (this._filterText !== '') {
+                logger.info(`🔄 Clearing filter when changing document`);
+                this._filterText = '';
+                this._filteredNodesCache.clear();
+            }
+            
             this._onDidChangeTreeData.fire();
         });
 
@@ -66,6 +74,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         this.expandAllFlag = false;
         // Clear the filter cache when refreshing
         this._filteredNodesCache.clear();
+        // Clear the visibility map
+        this.visibilityMap.clear();
         this._onDidChangeTreeData.fire();
     }
     
@@ -96,6 +106,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         if (this._filterText !== '') {
             this._filterText = '';
             this._filteredNodesCache.clear();
+            this.visibilityMap.clear();
             this._onDidChangeTreeData.fire();
         }
     }
@@ -154,6 +165,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         return treeItem;
     }
     private elementMap = new Map<string, DocumentSymbol>();
+    private visibilityMap = new Map<string, boolean>();
 
     async getChildren(element?: DocumentSymbol): Promise<DocumentSymbol[]> {
         if (!this.activeEditor) return [];
@@ -181,14 +193,17 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                     return cachedNodes || [];
                 }
                 
-                // Filter the children
-                const filteredChildren = this.filterNodes(element.children ?? [], this._filterText);
+                // When a filter is active, only return visible children
+                const visibleChildren = (element.children ?? []).filter(child => {
+                    const childKey = this.getElementKey(child);
+                    return this.visibilityMap.get(childKey) === true;
+                });
                 
                 // Cache the results
-                this._filteredNodesCache.set(cacheKey, filteredChildren);
+                this._filteredNodesCache.set(cacheKey, visibleChildren);
                 
-                logger.info(`  - Returning ${filteredChildren.length} filtered children`);
-                return filteredChildren;
+                logger.info(`  - Returning ${visibleChildren.length} visible children`);
+                return visibleChildren;
             }
 
             return element.children ?? [];
@@ -229,14 +244,20 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                         return cachedRootNodes || [];
                     }
                     
-                    // Filter the symbols
-                    const filteredSymbols = this.filterSymbols(symbols, this._filterText);
+                    // Apply filtering to mark symbols as visible or hidden
+                    this.filterSymbols(symbols, this._filterText);
+                    
+                    // Get only the visible symbols
+                    const visibleSymbols = symbols.filter(symbol => {
+                        const symbolKey = this.getElementKey(symbol);
+                        return this.visibilityMap.get(symbolKey) === true;
+                    });
                     
                     // Cache the results
-                    this._filteredNodesCache.set(rootCacheKey, filteredSymbols);
+                    this._filteredNodesCache.set(rootCacheKey, visibleSymbols);
                     
-                    logger.info(`  - Returning ${filteredSymbols.length} filtered root nodes`);
-                    return filteredSymbols;
+                    logger.info(`  - Returning ${visibleSymbols.length} visible root symbols`);
+                    return visibleSymbols;
                 }
             }
 
@@ -431,32 +452,72 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         }
         
         const normalizedFilter = filterText.toLowerCase();
-        const result: DocumentSymbol[] = [];
         
-        // Find nodes that match at any level
-        for (const node of nodes) {
-            // Check if this node or any of its descendants match
-            if (this.symbolOrDescendantsMatch(node, normalizedFilter)) {
-                // Create a copy of the node
-                const filteredNode = { ...node };
+        // Mark all nodes as visible or hidden based on the filter
+        const markVisibility = (nodeList: DocumentSymbol[]) => {
+            // First, mark all nodes as not visible
+            for (const node of nodeList) {
+                const key = this.getElementKey(node);
+                this.visibilityMap.set(key, false);
                 
-                // Filter its children if it has any
                 if (node.children && node.children.length > 0) {
-                    filteredNode.children = this.filterNodes(node.children, filterText);
+                    markVisibility(node.children);
                 }
-                
-                result.push(filteredNode);
             }
+        };
+        
+        // Mark nodes that match the filter or have matching descendants as visible
+        const markMatchingVisible = (node: DocumentSymbol): boolean => {
+            const key = this.getElementKey(node);
+            
+            // Check if this node matches
+            const nodeMatches = this.symbolOrDescendantsMatch(node, normalizedFilter);
+            
+            // Check if any children match
+            let hasMatchingChildren = false;
+            if (node.children && node.children.length > 0) {
+                for (const child of node.children) {
+                    if (markMatchingVisible(child)) {
+                        hasMatchingChildren = true;
+                    }
+                }
+            }
+            
+            // Mark this node as visible if it matches or has matching children
+            const isVisible = nodeMatches || hasMatchingChildren;
+            this.visibilityMap.set(key, isVisible);
+            
+            return isVisible;
+        };
+        
+        // Apply visibility marking
+        markVisibility(nodes);
+        for (const node of nodes) {
+            markMatchingVisible(node);
         }
         
-        return result;
+        // Return only the visible nodes
+        return nodes.filter(node => {
+            const key = this.getElementKey(node);
+            return this.visibilityMap.get(key) === true;
+        });
     }
 
+    // Helper method for substring matching
+    private substringMatch(text: string, filter: string): boolean {
+        // Convert both strings to lowercase for case-insensitive matching
+        const textLower = text.toLowerCase();
+        const filterLower = filter.toLowerCase();
+        
+        // Check if filter is a substring of text
+        return textLower.indexOf(filterLower) !== -1;
+    }
+    
     // Helper method to check if a symbol or any of its descendants match the filter
     private symbolOrDescendantsMatch(symbol: DocumentSymbol, normalizedFilter: string): boolean {
         // Check if this symbol matches
-        if (symbol.name.toLowerCase().includes(normalizedFilter) ||
-            (symbol.detail && symbol.detail.toLowerCase().includes(normalizedFilter))) {
+        if (this.substringMatch(symbol.name, normalizedFilter) ||
+            (symbol.detail && this.substringMatch(symbol.detail, normalizedFilter))) {
             return true;
         }
         
@@ -479,52 +540,57 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         }
         
         const normalizedFilter = filterText.toLowerCase();
-        const result: DocumentSymbol[] = [];
         
-        // First, find all symbols that match at any level (including deep children)
-        const matchingSymbols = new Set<string>();
+        // Clear the visibility map when starting a new filter operation
+        this.visibilityMap.clear();
         
-        // Helper function to collect all matching symbols and their ancestors
-        const collectMatchingSymbols = (symbol: DocumentSymbol, path: string[] = []): void => {
-            const currentPath = [...path, this.getElementKey(symbol)];
-            
-            // Check if this symbol or any of its descendants match
-            if (this.symbolOrDescendantsMatch(symbol, normalizedFilter)) {
-                // Add this symbol and all its ancestors to the matching set
-                currentPath.forEach(key => matchingSymbols.add(key));
-            }
-            
-            // Process children
-            if (symbol.children && symbol.children.length > 0) {
-                for (const child of symbol.children) {
-                    collectMatchingSymbols(child, currentPath);
+        // Mark all symbols as visible or hidden based on the filter
+        const markVisibility = (symbolList: DocumentSymbol[]) => {
+            // First, mark all symbols as not visible
+            for (const symbol of symbolList) {
+                const key = this.getElementKey(symbol);
+                this.visibilityMap.set(key, false);
+                
+                if (symbol.children && symbol.children.length > 0) {
+                    markVisibility(symbol.children);
                 }
             }
         };
         
-        // Collect all matching symbols
-        for (const symbol of symbols) {
-            collectMatchingSymbols(symbol);
-        }
-        
-        // Now build the filtered tree
-        for (const symbol of symbols) {
+        // Mark symbols that match the filter or have matching descendants as visible
+        const markMatchingVisible = (symbol: DocumentSymbol): boolean => {
             const key = this.getElementKey(symbol);
             
-            // If this symbol or any of its descendants match, include it
-            if (matchingSymbols.has(key)) {
-                // Create a copy of the symbol
-                const filteredSymbol = { ...symbol };
-                
-                // Filter its children
-                if (symbol.children && symbol.children.length > 0) {
-                    filteredSymbol.children = this.filterSymbols(symbol.children, filterText);
+            // Check if this symbol matches
+            const symbolMatches = this.symbolOrDescendantsMatch(symbol, normalizedFilter);
+            
+            // Check if any children match
+            let hasMatchingChildren = false;
+            if (symbol.children && symbol.children.length > 0) {
+                for (const child of symbol.children) {
+                    if (markMatchingVisible(child)) {
+                        hasMatchingChildren = true;
+                    }
                 }
-                
-                result.push(filteredSymbol);
             }
+            
+            // Mark this symbol as visible if it matches or has matching children
+            const isVisible = symbolMatches || hasMatchingChildren;
+            this.visibilityMap.set(key, isVisible);
+            
+            return isVisible;
+        };
+        
+        // Apply visibility marking
+        markVisibility(symbols);
+        for (const symbol of symbols) {
+            markMatchingVisible(symbol);
         }
         
-        return result;
+        // Return only the visible symbols
+        return symbols.filter(symbol => {
+            const key = this.getElementKey(symbol);
+            return this.visibilityMap.get(key) === true;
+        });
     }
 }

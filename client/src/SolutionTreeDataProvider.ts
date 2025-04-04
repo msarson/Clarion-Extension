@@ -124,14 +124,14 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                     return cachedNodes || [];
                 }
                 
-                // Filter the children
-                const filteredChildren = this.filterNodes(element.children, this._filterText);
+                // When a filter is active, only return visible children
+                const visibleChildren = element.children.filter(child => child.visible);
                 
                 // Cache the results
-                this._filteredNodesCache.set(cacheKey, filteredChildren);
+                this._filteredNodesCache.set(cacheKey, visibleChildren);
                 
-                logger.info(`  - Returning ${filteredChildren.length} filtered children`);
-                return filteredChildren;
+                logger.info(`  - Returning ${visibleChildren.length} visible children`);
+                return visibleChildren;
             }
             
             // No filter active, return all children
@@ -165,17 +165,17 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 return cachedRootNodes || [];
             }
             
-            // We need to create a deep copy of the root to avoid modifying the original
-            const rootCopy = this.cloneRootForFiltering();
+            // Apply filtering to mark nodes as visible or hidden
+            this.applyFilterToTree(this._root, this._filterText);
             
-            // Apply filtering to the copy
-            const filteredRoot = this.applyFilterToTree(rootCopy, this._filterText);
+            // Get only the visible root nodes
+            const visibleRootNodes = this._root.filter(node => node.visible);
             
             // Cache the results
-            this._filteredNodesCache.set(rootCacheKey, filteredRoot);
+            this._filteredNodesCache.set(rootCacheKey, visibleRootNodes);
             
-            logger.info(`  - Returning ${filteredRoot.length} filtered root nodes`);
-            return filteredRoot;
+            logger.info(`  - Returning ${visibleRootNodes.length} visible root nodes`);
+            return visibleRootNodes;
         }
         
         // No filter active, return all root nodes
@@ -673,13 +673,90 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     }
     
     // Helper method to filter nodes based on text
+    // Helper method for substring matching
+    private substringMatch(text: string, filter: string): boolean {
+        // Convert both strings to lowercase for case-insensitive matching
+        const textLower = text.toLowerCase();
+        const filterLower = filter.toLowerCase();
+        
+        // Check if filter is a substring of text
+        return textLower.indexOf(filterLower) !== -1;
+    }
+    
+    // Helper method to check if a node matches the filter directly
+    private nodeMatches(node: TreeNode, normalizedFilter: string): boolean {
+        return this.substringMatch(node.label, normalizedFilter);
+    }
+    
+    // Helper method to find all nodes that match the filter (including descendants)
+    private findAllMatchingNodes(nodes: TreeNode[], normalizedFilter: string): TreeNode[] {
+        const result: TreeNode[] = [];
+        
+        const searchNodes = (nodeList: TreeNode[]) => {
+            for (const node of nodeList) {
+                // Check if this node matches
+                if (this.nodeMatches(node, normalizedFilter)) {
+                    result.push(node);
+                }
+                
+                // Search children
+                if (node.children && node.children.length > 0) {
+                    searchNodes(node.children);
+                }
+            }
+        };
+        
+        searchNodes(nodes);
+        return result;
+    }
+    
     private filterNodes(nodes: TreeNode[], filterText: string): TreeNode[] {
         if (!nodes || nodes.length === 0) {
             return [];
         }
         
         const normalizedFilter = filterText.toLowerCase();
-        return nodes.filter(node => node.label.toLowerCase().includes(normalizedFilter));
+        const visibleNodes: TreeNode[] = [];
+        
+        // First, mark all nodes as not visible
+        const markAllNodesInvisible = (nodeList: TreeNode[]) => {
+            for (const node of nodeList) {
+                node.visible = false;
+                if (node.children && node.children.length > 0) {
+                    markAllNodesInvisible(node.children);
+                }
+            }
+        };
+        
+        // Mark nodes that match the filter as visible
+        const markMatchingNodesVisible = (nodeList: TreeNode[]) => {
+            for (const node of nodeList) {
+                // Check if this node matches
+                const nodeMatches = this.nodeMatches(node, normalizedFilter);
+                
+                // Check if any children match
+                let hasVisibleChildren = false;
+                if (node.children && node.children.length > 0) {
+                    markMatchingNodesVisible(node.children);
+                    hasVisibleChildren = node.children.some(child => child.visible);
+                }
+                
+                // Mark this node as visible if it matches or has visible children
+                node.visible = nodeMatches || hasVisibleChildren;
+                
+                // If this node is visible, add it to the result
+                if (node.visible) {
+                    visibleNodes.push(node);
+                }
+            }
+        };
+        
+        // Apply the visibility marking
+        markAllNodesInvisible(nodes);
+        markMatchingNodesVisible(nodes);
+        
+        // Return only the visible nodes at this level
+        return nodes.filter(node => node.visible);
     }
     
     // Helper method to clone the root for filtering
@@ -715,73 +792,52 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         }
         
         const normalizedFilter = filterText.toLowerCase();
-        const result: TreeNode[] = [];
         
-        for (const rootNode of rootNodes) {
-            // Create a copy of the root node for our filtered tree
-            const filteredRoot = this.cloneNodeForFiltering(rootNode);
+        // Mark all nodes as visible or hidden based on the filter
+        const markVisibility = (nodes: TreeNode[]) => {
+            // First, mark all nodes as not visible
+            const markAllInvisible = (nodeList: TreeNode[]) => {
+                for (const node of nodeList) {
+                    node.visible = false;
+                    if (node.children && node.children.length > 0) {
+                        markAllInvisible(node.children);
+                    }
+                }
+            };
             
-            // Clear children as we'll only add matching ones
-            filteredRoot.children = [];
-            
-            // Process all projects under the solution
-            for (const projectNode of rootNode.children) {
-                // Check if project name matches
-                const projectMatches = projectNode.label.toLowerCase().includes(normalizedFilter);
+            // Then, mark nodes that match the filter or have matching descendants as visible
+            const markMatchingVisible = (node: TreeNode): boolean => {
+                // Check if this node matches
+                const nodeMatches = this.nodeMatches(node, normalizedFilter);
                 
-                // Create a filtered project node
-                const filteredProject = this.cloneNodeForFiltering(projectNode, filteredRoot);
-                filteredProject.children = [];
-                
+                // Check if any children match
                 let hasMatchingChildren = false;
-                
-                // Process all children of the project
-                for (const childNode of projectNode.children) {
-                    // Check if this is a section node
-                    if ((childNode.data as any)?.type === 'section') {
-                        const sectionMatches = childNode.label.toLowerCase().includes(normalizedFilter);
-                        
-                        // Create a filtered section node
-                        const filteredSection = this.cloneNodeForFiltering(childNode, filteredProject);
-                        filteredSection.children = [];
-                        
-                        let hasSectionMatchingChildren = false;
-                        
-                        // Process all children of the section
-                        for (const sectionChild of childNode.children) {
-                            if (sectionChild.label.toLowerCase().includes(normalizedFilter)) {
-                                // Add matching section child
-                                filteredSection.children.push(this.cloneNodeForFiltering(sectionChild, filteredSection));
-                                hasSectionMatchingChildren = true;
-                            }
-                        }
-                        
-                        // Add section if it matches or has matching children
-                        if (sectionMatches || hasSectionMatchingChildren) {
-                            filteredProject.children.push(filteredSection);
-                            hasMatchingChildren = true;
-                        }
-                    } else {
-                        // This is a direct child of the project (like a source file)
-                        if (childNode.label.toLowerCase().includes(normalizedFilter)) {
-                            // Add matching child
-                            filteredProject.children.push(this.cloneNodeForFiltering(childNode, filteredProject));
+                if (node.children && node.children.length > 0) {
+                    for (const child of node.children) {
+                        if (markMatchingVisible(child)) {
                             hasMatchingChildren = true;
                         }
                     }
                 }
                 
-                // Add project if it matches or has matching children
-                if (projectMatches || hasMatchingChildren) {
-                    filteredRoot.children.push(filteredProject);
-                }
-            }
+                // Mark this node as visible if it matches or has matching children
+                node.visible = nodeMatches || hasMatchingChildren;
+                
+                return node.visible;
+            };
             
-            // Add the filtered root to results if it has any children
-            if (filteredRoot.children.length > 0 || rootNode.label.toLowerCase().includes(normalizedFilter)) {
-                result.push(filteredRoot);
+            // Apply the visibility marking
+            markAllInvisible(nodes);
+            for (const node of nodes) {
+                markMatchingVisible(node);
             }
-        }
+        };
+        
+        // Apply visibility marking to the root nodes
+        markVisibility(rootNodes);
+        
+        // Return only the visible root nodes
+        const result = rootNodes.filter(node => node.visible);
         
         return result;
     }
