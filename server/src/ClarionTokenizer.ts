@@ -1,4 +1,3 @@
-import { start } from 'repl';
 import { DocumentStructure } from './DocumentStructure';
 import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("Tokenizer");
