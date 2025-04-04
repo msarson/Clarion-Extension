@@ -104,7 +104,6 @@ The extension provides several configuration options:
 - **Formatting Options**: Configure spacing for class and method names in snippets
 - **Highlighting**: Configure styling for various Clarion code elements:
   ```json
-  // Main highlighting settings
   "clarion.highlighting": {
     // Enable/disable all highlighting features
     "enabled": true,
@@ -132,33 +131,30 @@ The extension provides several configuration options:
           }
         }
       }
-    }
-  }
-  ```
-  Colors can be selected using VS Code's built-in color picker by clicking on the color values in the settings UI. Advanced styling options include font weight, font style, text decoration, background color, and before/after decorations.
-
-- **Comment Highlighting**: Configure styling for comment lines with specific patterns:
-  ```json
-  // Comment highlighting settings (part of clarion.highlighting)
-  "clarion.highlighting.comment": {
-    // Define comment patterns with simple colors or advanced styling
-    "patterns": {
-      // Simple color
-      "TODO": "#ff8c00",
+    },
+    "comment": {
       
-      // Advanced styling
-      "FIXME": {
-        "color": "#ff0000",
-        "fontWeight": "bold",
-        "backgroundColor": "#fff0f0",
-        "before": {
-          "contentText": "⚠️ ",
-          "color": "#ff0000"
+      // Define comment patterns with simple colors or advanced styling
+      "patterns": {
+        // Simple color
+        "TODO": "#ff8c00",
+        
+        // Advanced styling
+        "FIXME": {
+          "color": "#ff0000",
+          "fontWeight": "bold",
+          "backgroundColor": "#fff0f0",
+          "before": {
+            "contentText": "⚠️ ",
+            "color": "#ff0000"
+          }
         }
       }
     }
   }
   ```
+  Colors can be selected using VS Code's built-in color picker by clicking on the color values in the settings UI. Advanced styling options include font weight, font style, text decoration, background color, and before/after decorations.
+  
   Any comment line starting with `!` followed by one of your defined patterns (with or without a space) will be highlighted with the specified styling.
 
 ## Integration
