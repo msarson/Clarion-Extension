@@ -1,6 +1,26 @@
 # Change Log
 All notable changes to the "clarion-extension" extension will be documented in this file.
 
+## [0.5.6] - 2025-04-04
+
+### Enhancements
+- **Variable Prefix Highlighting**: Added direct color highlighting for variables with user-defined prefixes (e.g., LOCS:, GLOS:) with configurable colors.
+  
+  To use this feature:
+  1. Define your prefixes and their associated colors in settings:
+     ```json
+     "clarion.prefixHighlighting": {
+       "LOCS": "#ffffcc",
+       "GLOS": "#ccffff"
+     }
+     ```
+     
+  2. Use VS Code's built-in color picker by clicking on the color values in the settings UI
+  
+  3. Optionally disable the feature with: `"clarion.prefixHighlighting.enabled": false`
+  
+  The extension will automatically apply the selected colors to variables with matching prefixes in your code.
+
 ## [0.5.5] - 2025-04-04
 
 ### Enhancements

@@ -6,7 +6,7 @@
 - [Features](#features)
 - [Installation](#installation)
 - [Marketplace](#marketplace-information)
-- [Changelog](#changelog-whats-new-in-v055)
+- [Changelog](#changelog-whats-new-in-v056)
 - [Getting Started](#getting-started)
 - [Troubleshooting](#troubleshooting)
 - [Contributing and Feedback](#contributing-and-feedback)
@@ -51,6 +51,7 @@ For a comprehensive list of all features and their locations within the extensio
 - **Clarion Tools Sidebar**: A dedicated view in the activity bar for managing solutions, projects, and files.
 - **View Filtering**: Filter Solution View and Structure View for easier navigation in large projects.
 - **File Management**: Add or remove CLW files to/from projects directly from the Solution View.
+- **Variable Prefix Highlighting**: Automatically highlights variables with user-defined prefixes (e.g., LOCS:, GLOS:) with configurable colors. Requires additional color customization settings.
 
 ---
 
@@ -75,15 +76,33 @@ For a comprehensive list of all features and their locations within the extensio
 ## Marketplace Information
 
 - **Identifier**: `msarson.clarion-extensions`
-- **Version**: `0.5.5`
+- **Version**: `0.5.6`
 - **Published**: 2018-08-19
 - **Last Release**: 2025-04-04
 
 [View on Marketplace](https://marketplace.visualstudio.com/items?itemName=msarson.clarion-extensions)
 
 ---
-## Changelog (What's New in v0.5.5)
+## Changelog (What's New in v0.5.6)
+### Enhancements
+- **Variable Prefix Highlighting**: Added direct color highlighting for variables with user-defined prefixes (e.g., LOCS:, GLOS:) with configurable colors.
+  
+  To use this feature:
+  1. Define your prefixes and their associated colors in settings:
+     ```json
+     "clarion.prefixHighlighting": {
+       "LOCS": "#ffffcc",
+       "GLOS": "#ccffff"
+     }
+     ```
+     
+  2. Use VS Code's built-in color picker by clicking on the color values in the settings UI
+  
+  3. Optionally disable the feature with: `"clarion.prefixHighlighting.enabled": false`
+  
+  The extension will automatically apply the selected colors to variables with matching prefixes in your code.
 
+## Changelog (What's New in v0.5.5)
 ### Enhancements
 - **Improved Symbol Provider**: Major updates to the symbol provider for better code navigation and structure representation.
 - **View Filtering**: Added filtering capabilities to Solution View and Structure View for easier navigation in large projects.

@@ -8,6 +8,7 @@ import { ClarionExtensionCommands } from './ClarionExtensionCommands';
 import { ClarionHoverProvider } from './providers/hoverProvider';
 import { ClarionDocumentLinkProvider } from './providers/documentLinkProvier';
 import { DocumentManager } from './documentManager';
+import { ClarionPrefixDecorator } from './ClarionPrefixDecorator';
 
 import { SolutionTreeDataProvider } from './SolutionTreeDataProvider';
 import { StructureViewProvider } from './StructureViewProvider';
@@ -997,6 +998,7 @@ async function handleSettingsChange(context: ExtensionContext) {
 
 let hoverProviderDisposable: Disposable | null = null;
 let documentLinkProviderDisposable: Disposable | null = null;
+let semanticTokensProviderDisposable: Disposable | null = null;
 
 function registerLanguageFeatures(context: ExtensionContext) {
     if (!documentManager) {
@@ -1042,6 +1044,20 @@ function registerLanguageFeatures(context: ExtensionContext) {
     context.subscriptions.push(hoverProviderDisposable);
 
     logger.info(`📄 Registered Hover Provider for extensions: ${lookupExtensions.join(', ')}`);
+    
+    // ✅ Register Prefix Decorator for variable highlighting
+    if (semanticTokensProviderDisposable) {
+        semanticTokensProviderDisposable.dispose(); // Remove old provider if it exists
+    }
+    
+    logger.info("🎨 Registering Prefix Decorator for variable highlighting...");
+    const prefixDecorator = new ClarionPrefixDecorator();
+    semanticTokensProviderDisposable = {
+        dispose: () => prefixDecorator.dispose()
+    };
+    context.subscriptions.push(semanticTokensProviderDisposable);
+    
+    logger.info(`🎨 Registered Prefix Decorator for variable highlighting`);
 }
 
 async function refreshOpenDocuments() {
@@ -1275,6 +1291,13 @@ export async function closeClarionSolution(context: ExtensionContext) {
             hoverProviderDisposable.dispose();
             hoverProviderDisposable = null;
             logger.info("✅ Cleared hover provider");
+        }
+        
+        // Clear semantic token provider
+        if (semanticTokensProviderDisposable) {
+            semanticTokensProviderDisposable.dispose();
+            semanticTokensProviderDisposable = null;
+            logger.info("✅ Cleared semantic token provider");
         }
         
         // Refresh the solution tree view to show the "Open Solution" button

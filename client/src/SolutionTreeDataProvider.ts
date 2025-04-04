@@ -316,7 +316,7 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             treeItem.contextValue = 'clarionFile';
 
             const solutionCache = SolutionCache.getInstance();
-            logger.setLevel("info"); // Temporarily increase log level for debugging
+            logger.setLevel("error"); // Temporarily increase log level for debugging
             logger.info(`🔍 Looking for file: ${file.relativePath}`);
             
             // Get the parent project node to help with debugging

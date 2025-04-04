@@ -241,7 +241,7 @@ export class SolutionManager {
                 // Set the solution operation flag to true
                 (global as any).solutionOperationInProgress = true;
                 
-                logger.setLevel("info"); // Temporarily increase log level
+                logger.setLevel("error"); // Temporarily increase log level
                 logger.info(`🔍 [DEBUG] Received request to find file: ${params.filename}`);
                 
                 try {

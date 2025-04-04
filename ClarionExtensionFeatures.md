@@ -6,7 +6,7 @@ This document provides an overview of the features available in the Clarion Exte
 
 - **Name**: Clarion Extensions
 - **Description**: Extension for Clarion Language
-- **Version**: 0.5.5
+- **Version**: 0.5.6
 - **Publisher**: msarson
 - **Repository**: [GitHub](https://github.com/msarson/Clarion-Extension)
 
@@ -32,6 +32,7 @@ The extension provides comprehensive solution management capabilities:
 
 - **Syntax Highlighting**: Clarion-specific syntax highlighting
 - **Code Formatting**: Automatic formatting of Clarion code
+- **Variable Prefix Highlighting**: Direct color highlighting for variables with user-defined prefixes (e.g., LOCS:, GLOS:) with configurable colors using VS Code's built-in color picker
 - **Snippets**: Pre-defined code snippets for common Clarion constructs
   - Variables, reference variables
   - Classes and methods
@@ -81,6 +82,10 @@ The extension uses a Language Server Protocol implementation to provide rich lan
 - **Color Provider**: Color highlighting and picker for color values in code
 - **Definition Provider**: Go to definition support
 - **Formatting Provider**: Code formatting according to Clarion conventions
+- **Variable Prefix Decorator**: Highlights variables with user-defined prefixes (e.g., LOCS:, GLOS:). The decorator:
+  - Scans documents for variables with configured prefixes (e.g., LOCS:MyVar, GLOS:CustomerName)
+  - Directly applies colors from the `clarion.prefixHighlighting` configuration
+  - Updates highlighting in real-time as documents or settings change
 
 ## Configuration Options
 
@@ -90,6 +95,19 @@ The extension provides several configuration options:
 - **Default Lookup Extensions**: File extensions used for document linking and hover previews
 - **Solution Settings**: Path to solution file, properties file, and selected configuration
 - **Formatting Options**: Configure spacing for class and method names in snippets
+- **Prefix Highlighting**: Configure prefix-to-color mappings for variable highlighting and enable/disable the feature:
+  ```json
+  // Define prefixes and their associated colors
+  "clarion.prefixHighlighting": {
+    "LOCS": "#ffffcc",
+    "GLOS": "#ccffff"
+  },
+  
+  // Enable/disable the feature
+  "clarion.prefixHighlighting.enabled": true
+  ```
+  Colors can be selected using VS Code's built-in color picker by clicking on the color values in the settings UI.
+  The extension automatically applies these colors to the corresponding variables by updating the `editor.semanticTokenColorCustomizations` setting based on your prefix configuration.
 
 ## Integration
 
@@ -108,6 +126,7 @@ The client-side code handles:
 - File system watchers
 - Solution management
 - Build task integration
+- Variable prefix decorator for highlighting prefixed variables
 
 ### Server-Side (server.ts)
 

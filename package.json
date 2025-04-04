@@ -2,7 +2,7 @@
     "name": "clarion-extensions",
     "displayName": "Clarion Extensions",
     "description": "Extension for Clarion Language",
-    "version": "0.5.5",
+    "version": "0.5.6",
     "publisher": "msarson",
     "repository": {
         "type": "git",
@@ -494,6 +494,23 @@
                     "type": "number",
                     "default": 2,
                     "description": "Spacing between MethodName and PROCEDURE in snippets."
+                },
+                "clarion.prefixHighlighting": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string",
+                        "format": "color"
+                    },
+                    "default": {
+                        "LOCS": "#ffffcc",
+                        "GLOS": "#ccffff"
+                    },
+                    "description": "Defines prefix to color mappings for variable highlighting. Each key is a prefix (e.g., 'LOCS', 'GLOS') and each value is a color. Click on the color to use the color picker."
+                },
+                "clarion.prefixHighlighting.enabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable or disable prefix highlighting for Clarion variables."
                 }
             }
         }
