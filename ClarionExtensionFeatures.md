@@ -111,8 +111,6 @@ The extension provides several configuration options:
     
     // Variable prefix highlighting settings
     "prefix": {
-      // Enable/disable prefix highlighting
-      "enabled": true,
       
       // Define prefixes with simple colors or advanced styling
       "patterns": {
@@ -143,9 +141,6 @@ The extension provides several configuration options:
   ```json
   // Comment highlighting settings (part of clarion.highlighting)
   "clarion.highlighting.comment": {
-    // Enable/disable comment highlighting
-    "enabled": true,
-    
     // Define comment patterns with simple colors or advanced styling
     "patterns": {
       // Simple color

@@ -507,11 +507,6 @@
                         "prefix": {
                             "type": "object",
                             "properties": {
-                                "enabled": {
-                                    "type": "boolean",
-                                    "default": true,
-                                    "description": "Enable or disable prefix highlighting"
-                                },
                                 "patterns": {
                                     "type": "object",
                                     "additionalProperties": {
@@ -593,11 +588,6 @@
                         "comment": {
                             "type": "object",
                             "properties": {
-                                "enabled": {
-                                    "type": "boolean",
-                                    "default": true,
-                                    "description": "Enable or disable comment highlighting"
-                                },
                                 "patterns": {
                                     "type": "object",
                                     "additionalProperties": {

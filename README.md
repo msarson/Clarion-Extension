@@ -109,7 +109,7 @@ For a comprehensive list of all features and their locations within the extensio
      
   2. Use VS Code's built-in color picker by clicking on the color values in the settings UI
   
-  3. Optionally disable the feature with: `"clarion.highlighting.prefix.enabled": false`
+  3. Optionally disable all highlighting with: `"clarion.highlighting.enabled": false`
   
   The extension will automatically apply the selected styles to variables with matching prefixes in your code.
 
@@ -133,7 +133,7 @@ For a comprehensive list of all features and their locations within the extensio
      
   2. Any comment line starting with `!` followed by one of your defined patterns (with or without a space) will be highlighted
   
-  3. Optionally disable the feature with: `"clarion.highlighting.comment.enabled": false`
+  3. All highlighting can be disabled with: `"clarion.highlighting.enabled": false`
 
 ## Changelog (What's New in v0.5.5)
 ### Enhancements
