@@ -34,6 +34,12 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
 
     private activeEditor: TextEditor | undefined;
     public treeView: TreeView<DocumentSymbol> | undefined;
+    
+    // Filter-related properties
+    private _filterText: string = '';
+    private _filterDebounceTimeout: NodeJS.Timeout | null = null;
+    private _filteredNodesCache: Map<string, DocumentSymbol[]> = new Map();
+    private _debounceDelay: number = 300; // 300ms debounce delay
 
     constructor(treeView?: TreeView<DocumentSymbol>) {
         this.treeView = treeView;
@@ -58,7 +64,45 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     refresh(): void {
         // Reset the expandAllFlag when refreshing
         this.expandAllFlag = false;
+        // Clear the filter cache when refreshing
+        this._filteredNodesCache.clear();
         this._onDidChangeTreeData.fire();
+    }
+    
+    // Method to set filter text with debouncing
+    setFilterText(text: string): void {
+        // Clear any existing timeout
+        if (this._filterDebounceTimeout) {
+            clearTimeout(this._filterDebounceTimeout);
+        }
+
+        // Set a new timeout for debouncing
+        this._filterDebounceTimeout = setTimeout(() => {
+            logger.info(`🔍 Setting filter text: "${text}"`);
+            this._filterText = text;
+            
+            // Clear the cache when filter changes
+            this._filteredNodesCache.clear();
+            
+            // Notify tree view to refresh
+            this._onDidChangeTreeData.fire();
+            
+            this._filterDebounceTimeout = null;
+        }, this._debounceDelay);
+    }
+
+    // Method to clear the filter
+    clearFilter(): void {
+        if (this._filterText !== '') {
+            this._filterText = '';
+            this._filteredNodesCache.clear();
+            this._onDidChangeTreeData.fire();
+        }
+    }
+
+    // Get the current filter text
+    getFilterText(): string {
+        return this._filterText;
     }
 
     getTreeItem(element: DocumentSymbol): TreeItem {
@@ -124,6 +168,28 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                     this.elementMap.set(childKey, child);
                 }
             }
+            
+            // Check if we have a filter active
+            if (this._filterText && this._filterText.trim() !== '') {
+                // Create a cache key based on the element's key
+                const cacheKey = `${key}_${this._filterText}`;
+                
+                // Check if we have cached results for this element
+                if (this._filteredNodesCache.has(cacheKey)) {
+                    const cachedNodes = this._filteredNodesCache.get(cacheKey);
+                    logger.info(`  - Returning ${cachedNodes?.length || 0} cached filtered children`);
+                    return cachedNodes || [];
+                }
+                
+                // Filter the children
+                const filteredChildren = this.filterNodes(element.children ?? [], this._filterText);
+                
+                // Cache the results
+                this._filteredNodesCache.set(cacheKey, filteredChildren);
+                
+                logger.info(`  - Returning ${filteredChildren.length} filtered children`);
+                return filteredChildren;
+            }
 
             return element.children ?? [];
         }
@@ -150,6 +216,28 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
 
             if (symbols) {
                 trackSymbols(symbols);
+                
+                // If we have a filter active
+                if (this._filterText && this._filterText.trim() !== '') {
+                    // Create a cache key for root level
+                    const rootCacheKey = 'root_' + this._filterText;
+                    
+                    // Check if we have cached results for root level
+                    if (this._filteredNodesCache.has(rootCacheKey)) {
+                        const cachedRootNodes = this._filteredNodesCache.get(rootCacheKey);
+                        logger.info(`  - Returning ${cachedRootNodes?.length || 0} cached filtered root nodes`);
+                        return cachedRootNodes || [];
+                    }
+                    
+                    // Filter the symbols
+                    const filteredSymbols = this.filterSymbols(symbols, this._filterText);
+                    
+                    // Cache the results
+                    this._filteredNodesCache.set(rootCacheKey, filteredSymbols);
+                    
+                    logger.info(`  - Returning ${filteredSymbols.length} filtered root nodes`);
+                    return filteredSymbols;
+                }
             }
 
             return symbols ?? [];
@@ -335,5 +423,108 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
      */
     getParent(element: DocumentSymbol): Promise<DocumentSymbol | null> {
         return Promise.resolve(null); // Root elements have no parent
+    }
+    // Helper method to filter nodes based on text
+    private filterNodes(nodes: DocumentSymbol[], filterText: string): DocumentSymbol[] {
+        if (!nodes || nodes.length === 0) {
+            return [];
+        }
+        
+        const normalizedFilter = filterText.toLowerCase();
+        const result: DocumentSymbol[] = [];
+        
+        // Find nodes that match at any level
+        for (const node of nodes) {
+            // Check if this node or any of its descendants match
+            if (this.symbolOrDescendantsMatch(node, normalizedFilter)) {
+                // Create a copy of the node
+                const filteredNode = { ...node };
+                
+                // Filter its children if it has any
+                if (node.children && node.children.length > 0) {
+                    filteredNode.children = this.filterNodes(node.children, filterText);
+                }
+                
+                result.push(filteredNode);
+            }
+        }
+        
+        return result;
+    }
+
+    // Helper method to check if a symbol or any of its descendants match the filter
+    private symbolOrDescendantsMatch(symbol: DocumentSymbol, normalizedFilter: string): boolean {
+        // Check if this symbol matches
+        if (symbol.name.toLowerCase().includes(normalizedFilter) ||
+            (symbol.detail && symbol.detail.toLowerCase().includes(normalizedFilter))) {
+            return true;
+        }
+        
+        // Check if any children match
+        if (symbol.children && symbol.children.length > 0) {
+            for (const child of symbol.children) {
+                if (this.symbolOrDescendantsMatch(child, normalizedFilter)) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+    
+    // Helper method to filter symbols recursively
+    private filterSymbols(symbols: DocumentSymbol[], filterText: string): DocumentSymbol[] {
+        if (!symbols || symbols.length === 0) {
+            return [];
+        }
+        
+        const normalizedFilter = filterText.toLowerCase();
+        const result: DocumentSymbol[] = [];
+        
+        // First, find all symbols that match at any level (including deep children)
+        const matchingSymbols = new Set<string>();
+        
+        // Helper function to collect all matching symbols and their ancestors
+        const collectMatchingSymbols = (symbol: DocumentSymbol, path: string[] = []): void => {
+            const currentPath = [...path, this.getElementKey(symbol)];
+            
+            // Check if this symbol or any of its descendants match
+            if (this.symbolOrDescendantsMatch(symbol, normalizedFilter)) {
+                // Add this symbol and all its ancestors to the matching set
+                currentPath.forEach(key => matchingSymbols.add(key));
+            }
+            
+            // Process children
+            if (symbol.children && symbol.children.length > 0) {
+                for (const child of symbol.children) {
+                    collectMatchingSymbols(child, currentPath);
+                }
+            }
+        };
+        
+        // Collect all matching symbols
+        for (const symbol of symbols) {
+            collectMatchingSymbols(symbol);
+        }
+        
+        // Now build the filtered tree
+        for (const symbol of symbols) {
+            const key = this.getElementKey(symbol);
+            
+            // If this symbol or any of its descendants match, include it
+            if (matchingSymbols.has(key)) {
+                // Create a copy of the symbol
+                const filteredSymbol = { ...symbol };
+                
+                // Filter its children
+                if (symbol.children && symbol.children.length > 0) {
+                    filteredSymbol.children = this.filterSymbols(symbol.children, filterText);
+                }
+                
+                result.push(filteredSymbol);
+            }
+        }
+        
+        return result;
     }
 }

@@ -189,6 +189,28 @@
                 "command": "clarion.structureView.expandAll",
                 "title": "Expand All",
                 "icon": "$(expand-all)"
+            },
+            {
+                "command": "clarion.structureView.filter",
+                "title": "Filter Structure View",
+                "icon": "$(filter)"
+            },
+            {
+                "command": "clarion.structureView.clearFilter",
+                "title": "Clear Structure Filter",
+                "icon": "$(clear-all)"
+            },
+            {
+                "command": "clarion.solutionView.filter",
+                "title": "Filter Solution Tree",
+                "icon": "$(filter)",
+                "when": "clarion.solutionOpen"
+            },
+            {
+                "command": "clarion.solutionView.clearFilter",
+                "title": "Clear Filter",
+                "icon": "$(clear-all)",
+                "when": "clarion.solutionOpen"
             }
         ],
         "menus": {
@@ -269,11 +291,35 @@
                     "group": "navigation@2"
                 },
                 {
+                    "command": "clarion.solutionView.filter",
+                    "when": "view == solutionView && clarion.solutionOpen",
+                    "group": "navigation@3"
+                },
+                {
+                    "command": "clarion.solutionView.clearFilter",
+                    "when": "view == solutionView && clarion.solutionOpen",
+                    "group": "navigation@4"
+                },
+                {
                     "command": "clarion.structureView.expandAll",
                     "title": "Expand All",
                     "icon": "$(expand-all)",
                     "when": "view == clarionStructureView && clarionStructureViewVisible",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "clarion.structureView.filter",
+                    "title": "Filter Structure View",
+                    "icon": "$(filter)",
+                    "when": "view == clarionStructureView && clarionStructureViewVisible",
                     "group": "navigation@2"
+                },
+                {
+                    "command": "clarion.structureView.clearFilter",
+                    "title": "Clear Filter",
+                    "icon": "$(clear-all)",
+                    "when": "view == clarionStructureView && clarionStructureViewVisible",
+                    "group": "navigation@3"
                 }
             ],
             "viewContainer/context": [

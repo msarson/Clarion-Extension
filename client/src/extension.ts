@@ -293,7 +293,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
         await commands.executeCommand("setContext", "clarion.solutionOpen", !!globalSolutionFile);
         
         // Always create the solution tree view, even if no solution is open
-        await createSolutionTreeView();
+        await createSolutionTreeView(context);
         
         // Create the structure view
         await createStructureView(context);
@@ -639,7 +639,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
                 }
             } else {
                 // Refresh the solution tree view to show the "Open Solution" button
-                await createSolutionTreeView();
+                await createSolutionTreeView(context);
                 vscodeWindow.showInformationMessage("No solution is currently open. Use the 'Open Solution' button in the Solution View.");
             }
         }),
@@ -813,7 +813,7 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
     // ✅ Continue initializing the solution cache and document manager
     documentManager = await reinitializeEnvironment(refreshDocs);
     logger.info("🔄 before createSolutionTreeView");
-    await createSolutionTreeView();
+    await createSolutionTreeView(context);
     logger.info("🔄 before registerLanguageFeatures")   ;
     registerLanguageFeatures(context);
     logger.info("🔄 before setContext");
@@ -928,7 +928,7 @@ async function handleRedirectionFileChange(context: ExtensionContext) {
     await reinitializeEnvironment(true);
 
     // Refresh the solution tree view
-    await createSolutionTreeView();
+    await createSolutionTreeView(context);
 
     // Re-register language features
     registerLanguageFeatures(context);
@@ -949,7 +949,7 @@ async function handleSolutionFileChange(context: ExtensionContext) {
         await reinitializeEnvironment(true);
 
         // Refresh the solution tree view
-        await createSolutionTreeView();
+        await createSolutionTreeView(context);
 
         // Re-register language features
         registerLanguageFeatures(context);
@@ -969,7 +969,7 @@ async function handleProjectFileChange(context: ExtensionContext, uri: Uri) {
     await reinitializeEnvironment(true);
 
     // Refresh the solution tree view
-    await createSolutionTreeView();
+    await createSolutionTreeView(context);
 
     // Re-register language features
     registerLanguageFeatures(context);
@@ -987,7 +987,7 @@ async function handleSettingsChange(context: ExtensionContext) {
     await reinitializeEnvironment(true);
 
     // Refresh the solution tree view
-    await createSolutionTreeView();
+    await createSolutionTreeView(context);
 
     // Re-register language features (ensuring links update properly)
     registerLanguageFeatures(context);
@@ -1111,7 +1111,7 @@ async function registerOpenCommand(context: ExtensionContext) {
         );
     }
 }
-async function createSolutionTreeView() {
+async function createSolutionTreeView(context?: ExtensionContext) {
     // ✅ If the tree view already exists, just refresh its data
     if (treeView && solutionTreeDataProvider) {
         logger.info("🔄 Refreshing existing solution tree...");
@@ -1128,6 +1128,33 @@ async function createSolutionTreeView() {
             treeDataProvider: solutionTreeDataProvider,
             showCollapseAll: true
         });
+
+        // Register filter commands
+        const filterCommand = commands.registerCommand('clarion.solutionView.filter', async () => {
+            const filterText = await vscodeWindow.showInputBox({
+                placeHolder: 'Filter solution tree...',
+                prompt: 'Enter text to filter the solution tree',
+                value: solutionTreeDataProvider?.getFilterText() || ''
+            });
+            
+            if (filterText !== undefined) { // User didn't cancel
+                if (solutionTreeDataProvider) {
+                    solutionTreeDataProvider.setFilterText(filterText);
+                }
+            }
+        });
+        if (context) {
+            context.subscriptions.push(filterCommand);
+        }
+
+        const clearFilterCommand = commands.registerCommand('clarion.solutionView.clearFilter', () => {
+            if (solutionTreeDataProvider) {
+                solutionTreeDataProvider.clearFilter();
+            }
+        });
+        if (context) {
+            context.subscriptions.push(clearFilterCommand);
+        }
 
         // Initial refresh to load data
         await solutionTreeDataProvider.refresh();
@@ -1167,6 +1194,29 @@ async function createStructureView(context: ExtensionContext) {
                 }
             })
         );
+
+        // Register filter commands
+        const filterCommand = commands.registerCommand('clarion.structureView.filter', async () => {
+            const filterText = await vscodeWindow.showInputBox({
+                placeHolder: 'Filter structure view...',
+                prompt: 'Enter text to filter the structure view',
+                value: structureViewProvider?.getFilterText() || ''
+            });
+            
+            if (filterText !== undefined) { // User didn't cancel
+                if (structureViewProvider) {
+                    structureViewProvider.setFilterText(filterText);
+                }
+            }
+        });
+        context.subscriptions.push(filterCommand);
+
+        const clearFilterCommand = commands.registerCommand('clarion.structureView.clearFilter', () => {
+            if (structureViewProvider) {
+                structureViewProvider.clearFilter();
+            }
+        });
+        context.subscriptions.push(clearFilterCommand);
 
         structureView.title = "Structure";
         structureView.message = "Current document structure";
@@ -1228,7 +1278,7 @@ export async function closeClarionSolution(context: ExtensionContext) {
         }
         
         // Refresh the solution tree view to show the "Open Solution" button
-        await createSolutionTreeView();
+        await createSolutionTreeView(context);
         
         // Dispose of any file watchers
         await createSolutionFileWatchers(context);

@@ -25,9 +25,51 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
 
     private _root: TreeNode[] | null = null;
     private solutionCache: SolutionCache;
+    
+    // Filter-related properties
+    private _filterText: string = '';
+    private _filterDebounceTimeout: NodeJS.Timeout | null = null;
+    private _filteredNodesCache: Map<string, TreeNode[]> = new Map();
+    private _debounceDelay: number = 300; // 300ms debounce delay
 
     constructor() {
         this.solutionCache = SolutionCache.getInstance();
+    }
+
+    // Method to set filter text with debouncing
+    setFilterText(text: string): void {
+        // Clear any existing timeout
+        if (this._filterDebounceTimeout) {
+            clearTimeout(this._filterDebounceTimeout);
+        }
+
+        // Set a new timeout for debouncing
+        this._filterDebounceTimeout = setTimeout(() => {
+            logger.info(`🔍 Setting filter text: "${text}"`);
+            this._filterText = text;
+            
+            // Clear the cache when filter changes
+            this._filteredNodesCache.clear();
+            
+            // Notify tree view to refresh
+            this._onDidChangeTreeData.fire();
+            
+            this._filterDebounceTimeout = null;
+        }, this._debounceDelay);
+    }
+
+    // Method to clear the filter
+    clearFilter(): void {
+        if (this._filterText !== '') {
+            this._filterText = '';
+            this._filteredNodesCache.clear();
+            this._onDidChangeTreeData.fire();
+        }
+    }
+
+    // Get the current filter text
+    getFilterText(): string {
+        return this._filterText;
     }
     private refreshInProgress = false;
     async refresh(): Promise<void> {
@@ -35,6 +77,8 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         logger.info("🔄 Refreshing solution tree...");
     
         try {
+            // Clear the filter cache when refreshing
+            this.refreshFilterCache();
             if (!globalSolutionFile) {
                 logger.info("ℹ️ No solution file set. Clearing tree.");
                 this._root = []; // This will trigger the welcome screen if `clarion.solutionOpen` is false
@@ -64,8 +108,33 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         }
     }
     async getChildren(element?: TreeNode): Promise<TreeNode[]> {
+        // If we have a filter and this is a request for children of a specific element
         if (element) {
             logger.info(`🔍 Getting children for element: ${element.label}`);
+            
+            // Check if we have a filter active
+            if (this._filterText && this._filterText.trim() !== '') {
+                // Create a cache key based on the element's path
+                const cacheKey = this.getCacheKeyForNode(element);
+                
+                // Check if we have cached results for this element
+                if (this._filteredNodesCache.has(cacheKey)) {
+                    const cachedNodes = this._filteredNodesCache.get(cacheKey);
+                    logger.info(`  - Returning ${cachedNodes?.length || 0} cached filtered children`);
+                    return cachedNodes || [];
+                }
+                
+                // Filter the children
+                const filteredChildren = this.filterNodes(element.children, this._filterText);
+                
+                // Cache the results
+                this._filteredNodesCache.set(cacheKey, filteredChildren);
+                
+                logger.info(`  - Returning ${filteredChildren.length} filtered children`);
+                return filteredChildren;
+            }
+            
+            // No filter active, return all children
             logger.info(`  - Children count: ${element.children?.length || 0}`);
             
             if (element.children && element.children.length > 0) {
@@ -83,6 +152,33 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     
         // ✅ Otherwise load your normal root tree (project/solution items)
         logger.info(`🔍 Returning root nodes: ${this._root?.length || 0} items`);
+        
+        // If we have a filter and this is a request for root nodes
+        if (this._filterText && this._filterText.trim() !== '' && this._root) {
+            // Create a cache key for root level
+            const rootCacheKey = 'root_' + this._filterText;
+            
+            // Check if we have cached results for root level
+            if (this._filteredNodesCache.has(rootCacheKey)) {
+                const cachedRootNodes = this._filteredNodesCache.get(rootCacheKey);
+                logger.info(`  - Returning ${cachedRootNodes?.length || 0} cached filtered root nodes`);
+                return cachedRootNodes || [];
+            }
+            
+            // We need to create a deep copy of the root to avoid modifying the original
+            const rootCopy = this.cloneRootForFiltering();
+            
+            // Apply filtering to the copy
+            const filteredRoot = this.applyFilterToTree(rootCopy, this._filterText);
+            
+            // Cache the results
+            this._filteredNodesCache.set(rootCacheKey, filteredRoot);
+            
+            logger.info(`  - Returning ${filteredRoot.length} filtered root nodes`);
+            return filteredRoot;
+        }
+        
+        // No filter active, return all root nodes
         if (this._root && this._root.length > 0) {
             logger.info(`  - Root node: ${this._root[0].label}`);
             logger.info(`  - Root children count: ${this._root[0].children?.length || 0}`);
@@ -560,5 +656,138 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             logger.error(`❌ Error building solution tree: ${error instanceof Error ? error.message : String(error)}`);
             return this._root || [];
         }
+    }
+    
+    // Helper method to create a cache key for a node
+    private getCacheKeyForNode(node: TreeNode): string {
+        // Create a unique key based on the node's path in the tree
+        let key = node.label;
+        let parent = node.parent;
+        
+        while (parent) {
+            key = parent.label + '/' + key;
+            parent = parent.parent;
+        }
+        
+        return key + '_' + this._filterText;
+    }
+    
+    // Helper method to filter nodes based on text
+    private filterNodes(nodes: TreeNode[], filterText: string): TreeNode[] {
+        if (!nodes || nodes.length === 0) {
+            return [];
+        }
+        
+        const normalizedFilter = filterText.toLowerCase();
+        return nodes.filter(node => node.label.toLowerCase().includes(normalizedFilter));
+    }
+    
+    // Helper method to clone the root for filtering
+    private cloneRootForFiltering(): TreeNode[] {
+        if (!this._root) {
+            return [];
+        }
+        
+        // Create a deep copy of the root nodes
+        return this._root.map(rootNode => this.cloneNodeForFiltering(rootNode));
+    }
+    
+    // Helper method to clone a node for filtering
+    private cloneNodeForFiltering(node: TreeNode, parent?: TreeNode): TreeNode {
+        // Create a new node with the same properties
+        const clonedNode = new TreeNode(
+            node.label,
+            node.collapsibleState,
+            node.data,
+            parent
+        );
+        
+        // Clone all children
+        clonedNode.children = node.children.map(child => this.cloneNodeForFiltering(child, clonedNode));
+        
+        return clonedNode;
+    }
+    
+    // Helper method to apply filter to the entire tree
+    private applyFilterToTree(rootNodes: TreeNode[], filterText: string): TreeNode[] {
+        if (!rootNodes || rootNodes.length === 0) {
+            return [];
+        }
+        
+        const normalizedFilter = filterText.toLowerCase();
+        const result: TreeNode[] = [];
+        
+        for (const rootNode of rootNodes) {
+            // Create a copy of the root node for our filtered tree
+            const filteredRoot = this.cloneNodeForFiltering(rootNode);
+            
+            // Clear children as we'll only add matching ones
+            filteredRoot.children = [];
+            
+            // Process all projects under the solution
+            for (const projectNode of rootNode.children) {
+                // Check if project name matches
+                const projectMatches = projectNode.label.toLowerCase().includes(normalizedFilter);
+                
+                // Create a filtered project node
+                const filteredProject = this.cloneNodeForFiltering(projectNode, filteredRoot);
+                filteredProject.children = [];
+                
+                let hasMatchingChildren = false;
+                
+                // Process all children of the project
+                for (const childNode of projectNode.children) {
+                    // Check if this is a section node
+                    if ((childNode.data as any)?.type === 'section') {
+                        const sectionMatches = childNode.label.toLowerCase().includes(normalizedFilter);
+                        
+                        // Create a filtered section node
+                        const filteredSection = this.cloneNodeForFiltering(childNode, filteredProject);
+                        filteredSection.children = [];
+                        
+                        let hasSectionMatchingChildren = false;
+                        
+                        // Process all children of the section
+                        for (const sectionChild of childNode.children) {
+                            if (sectionChild.label.toLowerCase().includes(normalizedFilter)) {
+                                // Add matching section child
+                                filteredSection.children.push(this.cloneNodeForFiltering(sectionChild, filteredSection));
+                                hasSectionMatchingChildren = true;
+                            }
+                        }
+                        
+                        // Add section if it matches or has matching children
+                        if (sectionMatches || hasSectionMatchingChildren) {
+                            filteredProject.children.push(filteredSection);
+                            hasMatchingChildren = true;
+                        }
+                    } else {
+                        // This is a direct child of the project (like a source file)
+                        if (childNode.label.toLowerCase().includes(normalizedFilter)) {
+                            // Add matching child
+                            filteredProject.children.push(this.cloneNodeForFiltering(childNode, filteredProject));
+                            hasMatchingChildren = true;
+                        }
+                    }
+                }
+                
+                // Add project if it matches or has matching children
+                if (projectMatches || hasMatchingChildren) {
+                    filteredRoot.children.push(filteredProject);
+                }
+            }
+            
+            // Add the filtered root to results if it has any children
+            if (filteredRoot.children.length > 0 || rootNode.label.toLowerCase().includes(normalizedFilter)) {
+                result.push(filteredRoot);
+            }
+        }
+        
+        return result;
+    }
+    
+    // Method to refresh the cache when data changes
+    refreshFilterCache(): void {
+        this._filteredNodesCache.clear();
     }
 }
