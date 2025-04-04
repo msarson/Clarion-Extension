@@ -6,7 +6,7 @@ import { ClarionProjectServer } from './clarionProjectServer';
 import { Connection } from 'vscode-languageserver';
 import { Token } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
-import { solutionOperationInProgress } from '../server';
+import { getRequestHandler } from '../managers/RequestHandler';
 
 const logger = LoggerManager.getLogger("SolutionManager");
 logger.setLevel("error");
@@ -46,7 +46,7 @@ export class SolutionManager {
     public static async create(filePath: string): Promise<SolutionManager> {
         try {
             // Set the solution operation flag to true
-            (global as any).solutionOperationInProgress = true;
+            getRequestHandler().setSolutionOperationInProgress(true);
             
             const stat = fs.statSync(filePath);
             if (stat.isDirectory()) {
@@ -65,7 +65,7 @@ export class SolutionManager {
             return SolutionManager.instance;
         } finally {
             // Reset the solution operation flag when done
-            (global as any).solutionOperationInProgress = false;
+            getRequestHandler().setSolutionOperationInProgress(false);
         }
     }
 
@@ -76,14 +76,14 @@ export class SolutionManager {
     private async initialize() {
         try {
             // Set the solution operation flag to true
-            (global as any).solutionOperationInProgress = true;
+            getRequestHandler().setSolutionOperationInProgress(true);
             
             logger.info(`🔄 Initializing solution from ${this.solutionFilePath}`);
             this.solution = await this.parseSolution();
             logger.info(`✅ Solution initialized with ${this.solution.projects.length} projects`);
         } finally {
             // Reset the solution operation flag when done
-            (global as any).solutionOperationInProgress = false;
+            getRequestHandler().setSolutionOperationInProgress(false);
         }
     }
 
@@ -224,7 +224,7 @@ export class SolutionManager {
         connection.onRequest('clarion/getSolutionTree', () => {
             try {
                 // Set the solution operation flag to true
-                (global as any).solutionOperationInProgress = true;
+                getRequestHandler().setSolutionOperationInProgress(true);
                 
                 logger.info("📂 Received request for solution tree");
                 const tree = this.getSolutionTree();
@@ -232,14 +232,14 @@ export class SolutionManager {
                 return tree;
             } finally {
                 // Reset the solution operation flag when done
-                (global as any).solutionOperationInProgress = false;
+                getRequestHandler().setSolutionOperationInProgress(false);
             }
         });
         
         connection.onRequest('clarion/findFile', (params: { filename: string }): { path: string, source: string } => {
             try {
                 // Set the solution operation flag to true
-                (global as any).solutionOperationInProgress = true;
+                getRequestHandler().setSolutionOperationInProgress(true);
                 
                 logger.setLevel("error"); // Temporarily increase log level
                 logger.info(`🔍 [DEBUG] Received request to find file: ${params.filename}`);
@@ -277,7 +277,7 @@ export class SolutionManager {
                 }
             } finally {
                 // Reset the solution operation flag when done
-                (global as any).solutionOperationInProgress = false;
+                getRequestHandler().setSolutionOperationInProgress(false);
             }
         });
     }

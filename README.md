@@ -85,6 +85,7 @@ For a comprehensive list of all features and their locations within the extensio
 ---
 ## Changelog (What's New in v0.5.6)
 ### Enhancements
+- **Code Refactoring**: Refactored extension.ts and server.ts into modular manager classes to improve maintainability and organization.
 - **Unified Highlighting System**: Added a comprehensive highlighting system for Clarion code elements with a unified configuration structure.
   
   To use this feature:

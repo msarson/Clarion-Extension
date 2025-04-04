@@ -42,7 +42,7 @@ export class ClarionDocumentSymbolProvider {
     }
 
     public provideDocumentSymbols(tokens: Token[], documentUri: string): DocumentSymbol[] {
-        if (!serverInitialized) {
+        if (!serverInitialized()) {
             logger.warn(`⚠️ Server not initialized, skipping document symbols for: ${documentUri}`);
             return [];
         }

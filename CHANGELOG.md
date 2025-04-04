@@ -4,6 +4,7 @@ All notable changes to the "clarion-extension" extension will be documented in t
 ## [0.5.6] - 2025-04-04
 
 ### Enhancements
+- **Code Refactoring**: Refactored extension.ts and server.ts into modular manager classes to improve maintainability and organization.
 - **Unified Highlighting System**: Added a comprehensive highlighting system for Clarion code elements with a unified configuration structure.
   
   To use this feature:
