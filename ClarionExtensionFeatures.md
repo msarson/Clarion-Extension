@@ -147,6 +147,10 @@ The extension provides several configuration options:
           "before": {
             "contentText": "⚠️ ",
             "color": "#ff0000"
+          },
+          "after": {
+            "contentText": " ⚠️",
+            "color": "#ff0000"
           }
         }
       }

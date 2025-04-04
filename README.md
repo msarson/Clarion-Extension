@@ -129,6 +129,10 @@ For a comprehensive list of all features and their locations within the extensio
              "before": {
                "contentText": "⚠️ ",
                "color": "#ff0000"
+             },
+             "after": {
+               "contentText": " ⚠️",
+               "color": "#ff0000"
              }
            }
          }

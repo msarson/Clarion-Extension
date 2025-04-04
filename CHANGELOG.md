@@ -48,6 +48,10 @@ All notable changes to the "clarion-extension" extension will be documented in t
              "before": {
                "contentText": "⚠️ ",
                "color": "#ff0000"
+             },
+             "after": {
+               "contentText": " ⚠️",
+               "color": "#ff0000"
              }
            }
          }

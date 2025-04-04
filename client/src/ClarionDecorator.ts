@@ -236,8 +236,9 @@ export class ClarionDecorator {
             
             // Create a regex for this pattern
             // Match comment lines that start with ! followed by the pattern (with or without space)
+            // Use a capturing group to identify just the pattern part
             const escapedPattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const regex = new RegExp(`^\\s*!\\s*${escapedPattern}.*$`, 'gm');
+            const regex = new RegExp(`^(\\s*!\\s*)(${escapedPattern})(.*)$`, 'gm');
             this.commentRegexCache.set(pattern, regex);
             
             logger.info(`Created comment regex pattern for '${pattern}': ${regex}`);
@@ -334,8 +335,19 @@ export class ClarionDecorator {
             
             let match: RegExpExecArray | null;
             while ((match = regex.exec(text)) !== null) {
-                const startPos = match.index;
-                const endPos = startPos + match[0].length;
+                // The regex has 3 capturing groups:
+                // 1. The prefix (whitespace + ! + whitespace)
+                // 2. The pattern itself
+                // 3. The rest of the line
+                
+                // We want to decorate from the pattern to the end of the line
+                const prefixPart = match[1];
+                const patternPart = match[2];
+                const restOfLine = match[3];
+                
+                // Calculate positions from the pattern to the end of the line
+                const startPos = match.index + prefixPart.length;
+                const endPos = startPos + patternPart.length + restOfLine.length;
                 
                 // Convert position to VS Code Range
                 const startPosition = document.positionAt(startPos);
