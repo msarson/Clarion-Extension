@@ -85,7 +85,7 @@ export class ClarionPrefixDecorator {
             
             // Create a decoration type with the specified color
             const decorationType = vscode.window.createTextEditorDecorationType({
-                color: color,
+                color: color
                 // Optional: add other styling as needed
                 // fontWeight: 'bold',
             });
