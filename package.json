@@ -495,171 +495,194 @@
                     "default": 2,
                     "description": "Spacing between MethodName and PROCEDURE in snippets."
                 },
-                "clarion.prefixHighlighting": {
+                "clarion.highlighting": {
                     "type": "object",
-                    "additionalProperties": {
-                        "oneOf": [
-                            {
-                                "type": "string",
-                                "format": "color",
-                                "description": "Simple color value"
-                            },
-                            {
-                                "type": "object",
-                                "properties": {
-                                    "color": {
-                                        "type": "string",
-                                        "format": "color",
-                                        "description": "Text color"
-                                    },
-                                    "backgroundColor": {
-                                        "type": "string",
-                                        "format": "color",
-                                        "description": "Background color"
-                                    },
-                                    "fontWeight": {
-                                        "type": "string",
-                                        "enum": ["normal", "bold"],
-                                        "description": "Font weight (normal or bold)"
-                                    },
-                                    "fontStyle": {
-                                        "type": "string",
-                                        "enum": ["normal", "italic"],
-                                        "description": "Font style (normal or italic)"
-                                    },
-                                    "textDecoration": {
-                                        "type": "string",
-                                        "enum": ["none", "underline", "line-through", "overline"],
-                                        "description": "Text decoration"
-                                    },
-                                    "before": {
-                                        "type": "object",
-                                        "properties": {
-                                            "contentText": {
-                                                "type": "string",
-                                                "description": "Text to insert before the variable"
-                                            },
-                                            "color": {
-                                                "type": "string",
-                                                "format": "color",
-                                                "description": "Color of the before text"
-                                            }
-                                        }
-                                    },
-                                    "after": {
-                                        "type": "object",
-                                        "properties": {
-                                            "contentText": {
-                                                "type": "string",
-                                                "description": "Text to insert after the variable"
-                                            },
-                                            "color": {
-                                                "type": "string",
-                                                "format": "color",
-                                                "description": "Color of the after text"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        ]
-                    },
-                    "default": {
-                        "LOCS": "#ffffcc",
-                        "GLOS": "#ccffff"
-                    },
-                    "description": "Defines prefix styling for variable highlighting. Each key is a prefix (e.g., 'LOCS', 'GLOS') and each value can be either a color or an object with detailed styling options."
-                },
-                "clarion.prefixHighlighting.enabled": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable or disable prefix highlighting"
-                },
-                "clarion.commentHighlighting": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "oneOf": [
-                            {
-                                "type": "string",
-                                "format": "color",
-                                "description": "Simple color value"
-                            },
-                            {
-                                "type": "object",
-                                "properties": {
-                                    "color": {
-                                        "type": "string",
-                                        "format": "color",
-                                        "description": "Text color"
-                                    },
-                                    "backgroundColor": {
-                                        "type": "string",
-                                        "format": "color",
-                                        "description": "Background color"
-                                    },
-                                    "fontWeight": {
-                                        "type": "string",
-                                        "enum": ["normal", "bold"],
-                                        "description": "Font weight (normal or bold)"
-                                    },
-                                    "fontStyle": {
-                                        "type": "string",
-                                        "enum": ["normal", "italic"],
-                                        "description": "Font style (normal or italic)"
-                                    },
-                                    "textDecoration": {
-                                        "type": "string",
-                                        "enum": ["none", "underline", "line-through", "overline"],
-                                        "description": "Text decoration"
-                                    },
-                                    "before": {
-                                        "type": "object",
-                                        "properties": {
-                                            "contentText": {
-                                                "type": "string",
-                                                "description": "Text to insert before the comment"
-                                            },
-                                            "color": {
-                                                "type": "string",
-                                                "format": "color",
-                                                "description": "Color of the before text"
-                                            }
-                                        }
-                                    },
-                                    "after": {
-                                        "type": "object",
-                                        "properties": {
-                                            "contentText": {
-                                                "type": "string",
-                                                "description": "Text to insert after the comment"
-                                            },
-                                            "color": {
-                                                "type": "string",
-                                                "format": "color",
-                                                "description": "Color of the after text"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        ]
-                    },
-                    "default": {
-                        "TODO": {
-                            "color": "#ff8c00",
-                            "fontWeight": "bold"
+                    "description": "Highlighting settings for Clarion code elements",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": "Enable or disable all highlighting features"
                         },
-                        "FIXME": {
-                            "color": "#ff0000",
-                            "fontWeight": "bold"
+                        "prefix": {
+                            "type": "object",
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean",
+                                    "default": true,
+                                    "description": "Enable or disable prefix highlighting"
+                                },
+                                "patterns": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                        "oneOf": [
+                                            {
+                                                "type": "string",
+                                                "format": "color",
+                                                "description": "Simple color value"
+                                            },
+                                            {
+                                                "type": "object",
+                                                "properties": {
+                                                    "color": {
+                                                        "type": "string",
+                                                        "format": "color",
+                                                        "description": "Text color"
+                                                    },
+                                                    "backgroundColor": {
+                                                        "type": "string",
+                                                        "format": "color",
+                                                        "description": "Background color"
+                                                    },
+                                                    "fontWeight": {
+                                                        "type": "string",
+                                                        "enum": ["normal", "bold"],
+                                                        "description": "Font weight (normal or bold)"
+                                                    },
+                                                    "fontStyle": {
+                                                        "type": "string",
+                                                        "enum": ["normal", "italic"],
+                                                        "description": "Font style (normal or italic)"
+                                                    },
+                                                    "textDecoration": {
+                                                        "type": "string",
+                                                        "enum": ["none", "underline", "line-through", "overline"],
+                                                        "description": "Text decoration"
+                                                    },
+                                                    "before": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "contentText": {
+                                                                "type": "string",
+                                                                "description": "Text to insert before the variable"
+                                                            },
+                                                            "color": {
+                                                                "type": "string",
+                                                                "format": "color",
+                                                                "description": "Color of the before text"
+                                                            }
+                                                        }
+                                                    },
+                                                    "after": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "contentText": {
+                                                                "type": "string",
+                                                                "description": "Text to insert after the variable"
+                                                            },
+                                                            "color": {
+                                                                "type": "string",
+                                                                "format": "color",
+                                                                "description": "Color of the after text"
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    "default": {
+                                        "LOCS": "#ffffcc",
+                                        "GLOS": "#ccffff"
+                                    },
+                                    "description": "Defines prefix styling for variable highlighting. Each key is a prefix (e.g., 'LOCS', 'GLOS') and each value can be either a color or an object with detailed styling options."
+                                }
+                            },
+                            "description": "Settings for variable prefix highlighting"
+                        },
+                        "comment": {
+                            "type": "object",
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean",
+                                    "default": true,
+                                    "description": "Enable or disable comment highlighting"
+                                },
+                                "patterns": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                        "oneOf": [
+                                            {
+                                                "type": "string",
+                                                "format": "color",
+                                                "description": "Simple color value"
+                                            },
+                                            {
+                                                "type": "object",
+                                                "properties": {
+                                                    "color": {
+                                                        "type": "string",
+                                                        "format": "color",
+                                                        "description": "Text color"
+                                                    },
+                                                    "backgroundColor": {
+                                                        "type": "string",
+                                                        "format": "color",
+                                                        "description": "Background color"
+                                                    },
+                                                    "fontWeight": {
+                                                        "type": "string",
+                                                        "enum": ["normal", "bold"],
+                                                        "description": "Font weight (normal or bold)"
+                                                    },
+                                                    "fontStyle": {
+                                                        "type": "string",
+                                                        "enum": ["normal", "italic"],
+                                                        "description": "Font style (normal or italic)"
+                                                    },
+                                                    "textDecoration": {
+                                                        "type": "string",
+                                                        "enum": ["none", "underline", "line-through", "overline"],
+                                                        "description": "Text decoration"
+                                                    },
+                                                    "before": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "contentText": {
+                                                                "type": "string",
+                                                                "description": "Text to insert before the comment"
+                                                            },
+                                                            "color": {
+                                                                "type": "string",
+                                                                "format": "color",
+                                                                "description": "Color of the before text"
+                                                            }
+                                                        }
+                                                    },
+                                                    "after": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "contentText": {
+                                                                "type": "string",
+                                                                "description": "Text to insert after the comment"
+                                                            },
+                                                            "color": {
+                                                                "type": "string",
+                                                                "format": "color",
+                                                                "description": "Color of the after text"
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    "default": {
+                                        "TODO": {
+                                            "color": "#ff8c00",
+                                            "fontWeight": "bold"
+                                        },
+                                        "FIXME": {
+                                            "color": "#ff0000",
+                                            "fontWeight": "bold"
+                                        }
+                                    },
+                                    "description": "Defines styling for comment lines that start with specific patterns (e.g., '! TODO', '! FIXME'). Each key is a pattern and each value can be either a color or an object with detailed styling options."
+                                }
+                            },
+                            "description": "Settings for comment pattern highlighting"
                         }
-                    },
-                    "description": "Defines styling for comment lines that start with specific patterns (e.g., '! TODO', '! FIXME'). Each key is a pattern and each value can be either a color or an object with detailed styling options."
-                },
-                "clarion.commentHighlighting.enabled": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable or disable comment highlighting"
+                    }
                 },
                 "clarion.prefixHighlighting.enabled": {
                     "type": "boolean",

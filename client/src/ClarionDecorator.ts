@@ -31,8 +31,7 @@ export class ClarionDecorator {
         // Watch for settings changes
         this.disposables.push(
             vscode.workspace.onDidChangeConfiguration(e => {
-                if (e.affectsConfiguration('clarion.prefixHighlighting') || 
-                    e.affectsConfiguration('clarion.commentHighlighting')) {
+                if (e.affectsConfiguration('clarion.highlighting')) {
                     this.updateFromSettings();
                     this.updateDecorations();
                 }
@@ -65,6 +64,16 @@ export class ClarionDecorator {
      * Updates the decorator's state based on current user settings
      */
     private updateFromSettings(): void {
+        // Check if the global highlighting feature is enabled
+        const highlightingEnabled = vscode.workspace.getConfiguration().get<boolean>('clarion.highlighting.enabled', true);
+        
+        if (!highlightingEnabled) {
+            logger.info('All highlighting is disabled');
+            this.clearPrefixDecorations();
+            this.clearCommentDecorations();
+            return;
+        }
+        
         // Update prefix highlighting settings
         this.updatePrefixSettings();
         
@@ -77,7 +86,7 @@ export class ClarionDecorator {
      */
     private updatePrefixSettings(): void {
         // Check if the feature is enabled
-        this.prefixEnabled = vscode.workspace.getConfiguration().get<boolean>('clarion.prefixHighlighting.enabled', true);
+        this.prefixEnabled = vscode.workspace.getConfiguration().get<boolean>('clarion.highlighting.prefix.enabled', true);
         
         if (!this.prefixEnabled) {
             logger.info('Prefix highlighting is disabled');
@@ -86,7 +95,7 @@ export class ClarionDecorator {
         }
         
         // Get the prefix configuration
-        const prefixConfig = vscode.workspace.getConfiguration().get<Record<string, any>>('clarion.prefixHighlighting', {});
+        const prefixConfig = vscode.workspace.getConfiguration().get<Record<string, any>>('clarion.highlighting.prefix.patterns', {});
         logger.info('Prefix configuration:', prefixConfig);
         
         // Dispose old decoration types
@@ -168,7 +177,7 @@ export class ClarionDecorator {
      */
     private updateCommentSettings(): void {
         // Check if the feature is enabled
-        this.commentEnabled = vscode.workspace.getConfiguration().get<boolean>('clarion.commentHighlighting.enabled', true);
+        this.commentEnabled = vscode.workspace.getConfiguration().get<boolean>('clarion.highlighting.comment.enabled', true);
         
         if (!this.commentEnabled) {
             logger.info('Comment highlighting is disabled');
@@ -177,7 +186,7 @@ export class ClarionDecorator {
         }
         
         // Get the comment configuration
-        const commentConfig = vscode.workspace.getConfiguration().get<Record<string, any>>('clarion.commentHighlighting', {});
+        const commentConfig = vscode.workspace.getConfiguration().get<Record<string, any>>('clarion.highlighting.comment.patterns', {});
         logger.info('Comment configuration:', commentConfig);
         
         // Dispose old decoration types

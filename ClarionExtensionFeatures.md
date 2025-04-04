@@ -102,55 +102,67 @@ The extension provides several configuration options:
 - **Default Lookup Extensions**: File extensions used for document linking and hover previews
 - **Solution Settings**: Path to solution file, properties file, and selected configuration
 - **Formatting Options**: Configure spacing for class and method names in snippets
-- **Prefix Highlighting**: Configure prefix styling for variable highlighting and enable/disable the feature:
+- **Highlighting**: Configure styling for various Clarion code elements:
   ```json
-  // Define prefixes with simple colors or advanced styling
-  "clarion.prefixHighlighting": {
-    // Simple color
-    "LOCS": "#ffffcc",
+  // Main highlighting settings
+  "clarion.highlighting": {
+    // Enable/disable all highlighting features
+    "enabled": true,
     
-    // Advanced styling
-    "GLOS": {
-      "color": "#ccffff",
-      "fontWeight": "bold",
-      "backgroundColor": "#f0f0f0",
-      "before": {
-        "contentText": "→",
-        "color": "#888888"
-      },
-      "after": {
-        "contentText": "←",
-        "color": "#888888"
+    // Variable prefix highlighting settings
+    "prefix": {
+      // Enable/disable prefix highlighting
+      "enabled": true,
+      
+      // Define prefixes with simple colors or advanced styling
+      "patterns": {
+        // Simple color
+        "LOCS": "#ffffcc",
+        
+        // Advanced styling
+        "GLOS": {
+          "color": "#ccffff",
+          "fontWeight": "bold",
+          "backgroundColor": "#f0f0f0",
+          "before": {
+            "contentText": "→",
+            "color": "#888888"
+          },
+          "after": {
+            "contentText": "←",
+            "color": "#888888"
+          }
+        }
       }
     }
-  },
-  
-  // Enable/disable the feature
-  "clarion.prefixHighlighting.enabled": true
+  }
   ```
   Colors can be selected using VS Code's built-in color picker by clicking on the color values in the settings UI. Advanced styling options include font weight, font style, text decoration, background color, and before/after decorations.
 
 - **Comment Highlighting**: Configure styling for comment lines with specific patterns:
   ```json
-  // Define comment patterns with simple colors or advanced styling
-  "clarion.commentHighlighting": {
-    // Simple color
-    "TODO": "#ff8c00",
+  // Comment highlighting settings (part of clarion.highlighting)
+  "clarion.highlighting.comment": {
+    // Enable/disable comment highlighting
+    "enabled": true,
     
-    // Advanced styling
-    "FIXME": {
-      "color": "#ff0000",
-      "fontWeight": "bold",
-      "backgroundColor": "#fff0f0",
-      "before": {
-        "contentText": "⚠️ ",
-        "color": "#ff0000"
+    // Define comment patterns with simple colors or advanced styling
+    "patterns": {
+      // Simple color
+      "TODO": "#ff8c00",
+      
+      // Advanced styling
+      "FIXME": {
+        "color": "#ff0000",
+        "fontWeight": "bold",
+        "backgroundColor": "#fff0f0",
+        "before": {
+          "contentText": "⚠️ ",
+          "color": "#ff0000"
+        }
       }
     }
-  },
-  
-  // Enable/disable the feature
-  "clarion.commentHighlighting.enabled": true
+  }
   ```
   Any comment line starting with `!` followed by one of your defined patterns (with or without a space) will be highlighted with the specified styling.
 

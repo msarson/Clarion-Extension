@@ -90,7 +90,7 @@ For a comprehensive list of all features and their locations within the extensio
   To use this feature:
   1. Define your prefixes with simple colors or advanced styling options:
      ```json
-     "clarion.prefixHighlighting": {
+     "clarion.highlighting.prefix.patterns": {
        // Simple color
        "LOCS": "#ffffcc",
        
@@ -109,7 +109,7 @@ For a comprehensive list of all features and their locations within the extensio
      
   2. Use VS Code's built-in color picker by clicking on the color values in the settings UI
   
-  3. Optionally disable the feature with: `"clarion.prefixHighlighting.enabled": false`
+  3. Optionally disable the feature with: `"clarion.highlighting.prefix.enabled": false`
   
   The extension will automatically apply the selected styles to variables with matching prefixes in your code.
 
@@ -118,7 +118,7 @@ For a comprehensive list of all features and their locations within the extensio
   To use this feature:
   1. Define your comment patterns with simple colors or advanced styling options:
      ```json
-     "clarion.commentHighlighting": {
+     "clarion.highlighting.comment.patterns": {
        // Simple color
        "TODO": "#ff8c00",
        
@@ -133,7 +133,7 @@ For a comprehensive list of all features and their locations within the extensio
      
   2. Any comment line starting with `!` followed by one of your defined patterns (with or without a space) will be highlighted
   
-  3. Optionally disable the feature with: `"clarion.commentHighlighting.enabled": false`
+  3. Optionally disable the feature with: `"clarion.highlighting.comment.enabled": false`
 
 ## Changelog (What's New in v0.5.5)
 ### Enhancements
