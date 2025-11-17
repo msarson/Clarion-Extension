@@ -42,6 +42,9 @@ const clarionStructureKindMap: Record<string, SymbolKind> = {
 };
 export class ClarionDocumentSymbolProvider {
     classSymbolMap: Map<string, DocumentSymbol> = new Map();
+    // 🚀 PERFORMANCE: Store tokensByLine as instance variable to avoid passing it everywhere
+    private tokensByLine: Map<number, Token[]> = new Map();
+    
     public extractStringContents(rawString: string): string {
         const match = rawString.match(/'([^']+)'/);
         return match ? match[1] : rawString;
@@ -55,15 +58,15 @@ export class ClarionDocumentSymbolProvider {
         
         // 🚀 PERFORMANCE: Build token index by line to avoid O(n²) lookups
         const perfIndexStart = performance.now();
-        const tokensByLine = new Map<number, Token[]>();
+        this.tokensByLine.clear();
         for (const token of tokens) {
-            if (!tokensByLine.has(token.line)) {
-                tokensByLine.set(token.line, []);
+            if (!this.tokensByLine.has(token.line)) {
+                this.tokensByLine.set(token.line, []);
             }
-            tokensByLine.get(token.line)!.push(token);
+            this.tokensByLine.get(token.line)!.push(token);
         }
         const perfIndexTime = performance.now() - perfIndexStart;
-        logger.perf('Symbol: build index', { time_ms: perfIndexTime.toFixed(2), lines: tokensByLine.size });
+        logger.perf('Symbol: build index', { time_ms: perfIndexTime.toFixed(2), lines: this.tokensByLine.size });
         
         this.classSymbolMap.clear();
         const symbols: DocumentSymbol[] = [];
@@ -89,7 +92,7 @@ export class ClarionDocumentSymbolProvider {
             // Check if we've moved to a new line
             if (line > lastProcessedLine) {
                 // Check if any structures should be popped based on finishesAt
-                this.checkAndPopCompletedStructures(parentStack, line, symbols, tokens, tokensByLine);
+                this.checkAndPopCompletedStructures(parentStack, line, symbols, tokens, this.tokensByLine);
 
                 // CRITICAL FIX: Check if we need to reset lastMethodImplementation
                 // This happens when a new global procedure is encountered
@@ -118,7 +121,7 @@ export class ClarionDocumentSymbolProvider {
             }
 
             if (type === TokenType.Structure) {
-                this.handleStructureToken(tokens, i, symbols, parentStack, currentStructure);
+                this.handleStructureToken(tokens, i, symbols, parentStack, currentStructure, this.tokensByLine);
                 currentStructure = parentStack.length > 0 ? parentStack[parentStack.length - 1].symbol : null;
                 
                 // Special handling for MAP and MODULE structures
@@ -608,7 +611,8 @@ export class ClarionDocumentSymbolProvider {
         index: number,
         symbols: DocumentSymbol[],
         parentStack: Array<{ symbol: DocumentSymbol, finishesAt: number | undefined }>,
-        currentStructure: DocumentSymbol | null
+        currentStructure: DocumentSymbol | null,
+        tokensByLine: Map<number, Token[]>
     ): void {
         const token = tokens[index];
         const { value, line, finishesAt } = token;
@@ -622,7 +626,8 @@ export class ClarionDocumentSymbolProvider {
 
 
         if (value.toUpperCase() === "MODULE") {
-            const sameLineTokens = tokens.filter(t => t.line === token.line);
+            // 🚀 PERFORMANCE: Use indexed lookup instead of filter
+            const sameLineTokens = tokensByLine.get(token.line) || [];
             const currentIndex = sameLineTokens.findIndex(t => t === token);
 
             // Look backwards on the same line for a comma (i.e., inside `CLASS(...)`)
@@ -2176,8 +2181,12 @@ export class ClarionDocumentSymbolProvider {
 
 
     private getTokenRange(tokens: Token[], startLine: number, endLine: number): Range {
-        const startToken = tokens.find((t: Token) => t.line === startLine);
-        const endToken = [...tokens].reverse().find((t: Token) => t.line === endLine);
+        // 🚀 PERFORMANCE: Use indexed lookup instead of find/reverse
+        const startLineTokens = this.tokensByLine.get(startLine) || [];
+        const endLineTokens = this.tokensByLine.get(endLine) || [];
+        
+        const startToken = startLineTokens[0]; // First token on line
+        const endToken = endLineTokens[endLineTokens.length - 1]; // Last token on line
 
         // If either token is missing, fallback to line-wide range
         if (!startToken || !endToken) {
