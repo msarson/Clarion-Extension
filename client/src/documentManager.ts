@@ -21,7 +21,7 @@ import { globalSettings } from './globals';
 import LoggerManager from './logger';
 import { SolutionCache } from './SolutionCache';
 const logger = LoggerManager.getLogger("DocumentManager");
-logger.setLevel("info");
+logger.setLevel("error");
 
 /**
  * Interface representing document information including statement locations

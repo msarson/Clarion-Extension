@@ -5,7 +5,7 @@ import { SolutionCache } from '../SolutionCache';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("LocationProvider");
-logger.setLevel("info");
+logger.setLevel("error");
 
 /**
  * Represents a location in Clarion code, with support for lazy method implementation resolution.

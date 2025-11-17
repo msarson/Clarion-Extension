@@ -5,7 +5,7 @@ import LoggerManager from '../logger';
 import { globalSettings } from '../globals';
 
 const logger = LoggerManager.getLogger("DocumentLinkProvider");
-logger.setLevel("info");
+logger.setLevel("error");
 
 export class ClarionDocumentLinkProvider implements DocumentLinkProvider {
     private documentManager: DocumentManager;

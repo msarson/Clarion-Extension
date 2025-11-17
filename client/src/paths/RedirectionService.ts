@@ -5,7 +5,7 @@ import { globalSettings } from '../globals';
 import { getLanguageClient, isClientReady } from '../LanguageClientManager';
 
 const logger = LoggerManager.getLogger("RedirectionService");
-logger.setLevel("info");
+logger.setLevel("error");
 
 /**
  * Represents a resolved redirection entry

@@ -25,7 +25,7 @@ import { redirectionService } from './paths/RedirectionService';
 import { ClarionProjectInfo } from 'common/types';
 
 const logger = LoggerManager.getLogger("Extension");
-logger.setLevel("info");
+logger.setLevel("error");
 let client: LanguageClient | undefined;
 // clientReady is now managed by LanguageClientManager
 let treeView: TreeView<TreeNode> | undefined;

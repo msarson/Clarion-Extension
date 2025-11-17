@@ -17,7 +17,7 @@ import {
 import { DocumentSymbol, SymbolKind as LSPSymbolKind } from 'vscode-languageserver-types';
 import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("StructureViewProvider");
-logger.setLevel("info");
+logger.setLevel("error");
 
 // No thresholds needed - solution view priority is handled on the server side
 

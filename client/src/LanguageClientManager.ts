@@ -2,7 +2,7 @@ import { LanguageClient } from 'vscode-languageclient/node';
 import LoggerManager from './logger';
 
 const logger = LoggerManager.getLogger("LanguageClientManager");
-logger.setLevel("info");
+logger.setLevel("error");
 
 /**
  * LanguageClientManager is a singleton class that manages the language client's ready state

@@ -11,7 +11,7 @@ import { redirectionService } from './paths/RedirectionService';
 import { ProjectIndex } from './ProjectIndex';
 
 const logger = LoggerManager.getLogger("SolutionCache");
-logger.setLevel("info");
+logger.setLevel("error");
 
 // Cache schema version - increment when changing the structure
 const CACHE_SCHEMA_VERSION = 2;

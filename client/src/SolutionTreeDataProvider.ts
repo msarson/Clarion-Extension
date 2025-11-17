@@ -11,11 +11,11 @@ import { PathUtils } from './PathUtils';
 import { getLanguageClient } from './LanguageClientManager';
 
 const logger = LoggerManager.getLogger("SolutionTreeDataProvider");
-logger.setLevel("info");
+logger.setLevel("error");
 
 // Create a specialized debug logger for file resolution issues
 const fileResolutionLogger = LoggerManager.getLogger("FileResolution");
-fileResolutionLogger.setLevel("debug");
+fileResolutionLogger.setLevel("error");
 
 // Special node type for when no solution is open
 interface NoSolutionNodeData {
@@ -575,7 +575,6 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             treeItem.contextValue = 'clarionFile';
 
             const solutionCache = SolutionCache.getInstance();
-            logger.setLevel("info"); // Temporarily increase log level for debugging
             // Log more details about the file for debugging
             logger.info(`🔍 Looking for file: ${file.name || 'undefined'}, relativePath: ${file.relativePath || 'undefined'}`);
             
@@ -607,7 +606,6 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                         arguments: [directPath]
                     };
                     treeItem.tooltip = `File: ${file.name || path.basename(fileRelativePath)}\nPath: ${directPath} (direct)`;
-                    logger.setLevel("info"); // Reset log level
                     return treeItem;
                 }
             }
@@ -656,7 +654,6 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             }).catch(err => {
                 logger.error(`❌ getTreeItem(): Error finding file for ${file.relativePath}: ${err}`);
             });
-            logger.setLevel("info"); // Reset log level
             return treeItem;
         }
 
