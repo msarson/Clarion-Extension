@@ -172,6 +172,10 @@ export class ClarionTokenizer {
 
     /** ✅ Public method to tokenize text */
     public tokenize(): Token[] {
+        // 📊 METRICS: Start performance measurement
+        const perfStart = performance.now();
+        const charCount = this.text.length;
+        
         try {
             logger.info("🔍 [DEBUG] Starting tokenization...");
             
@@ -181,27 +185,43 @@ export class ClarionTokenizer {
                 return [];
             }
             
-            logger.info(`🔍 [DEBUG] Splitting text into lines (length: ${this.text.length})`);
+            const splitStart = performance.now();
             this.lines = this.text.split(/\r?\n/);
-            logger.info(`🔍 [DEBUG] Split into ${this.lines.length} lines`);
+            const splitTime = performance.now() - splitStart;
+            logger.info(`🔍 [DEBUG] Split into ${this.lines.length} lines (${splitTime.toFixed(2)}ms)`);
 
-            logger.info("🔍 [DEBUG] Tokenizing lines...");
+            const tokenizeStart = performance.now();
             this.tokenizeLines(this.lines); // ✅ Step 1: Tokenize all lines
-            logger.info(`🔍 [DEBUG] Tokenized ${this.tokens.length} tokens`);
+            const tokenizeTime = performance.now() - tokenizeStart;
+            logger.info(`🔍 [DEBUG] Tokenized ${this.tokens.length} tokens (${tokenizeTime.toFixed(2)}ms)`);
             
-            logger.info("🔍 [DEBUG] Processing document structure...");
+            const structureStart = performance.now();
             this.processDocumentStructure(); // ✅ Step 2: Process relationships
+            const structureTime = performance.now() - structureStart;
             logger.info("🔍 [DEBUG] Document structure processed");
             
-            logger.info(`🔍 [DEBUG] Returning ${this.tokens.length} tokens`);
+            // 📊 METRICS: Calculate and log performance stats
+            const totalTime = performance.now() - perfStart;
+            const tokensPerMs = this.tokens.length / totalTime;
+            const charsPerMs = charCount / totalTime;
+            const linesPerMs = this.lines.length / totalTime;
+            
+            logger.info(`📊 [PERFORMANCE] Tokenization complete:
+  Total time: ${totalTime.toFixed(2)}ms
+  Lines: ${this.lines.length} (${linesPerMs.toFixed(1)} lines/ms)
+  Characters: ${charCount} (${charsPerMs.toFixed(0)} chars/ms)
+  Tokens: ${this.tokens.length} (${tokensPerMs.toFixed(1)} tokens/ms)
+  Breakdown:
+    - Splitting: ${splitTime.toFixed(2)}ms (${((splitTime/totalTime)*100).toFixed(1)}%)
+    - Tokenizing: ${tokenizeTime.toFixed(2)}ms (${((tokenizeTime/totalTime)*100).toFixed(1)}%)
+    - Structure: ${structureTime.toFixed(2)}ms (${((structureTime/totalTime)*100).toFixed(1)}%)`);
+            
             return this.tokens;
         } catch (error) {
-            logger.error(`❌ [DEBUG] Error in tokenize: ${error instanceof Error ? error.message : String(error)}`);
+            const totalTime = performance.now() - perfStart;
+            logger.error(`❌ [DEBUG] Error in tokenize after ${totalTime.toFixed(2)}ms: ${error instanceof Error ? error.message : String(error)}`);
             return [];
         }
-
-        logger.info("🔍 Tokenization complete.");
-        return this.tokens;
     }
 
     /** ✅ Step 1: Tokenize all lines */

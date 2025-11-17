@@ -53,6 +53,8 @@ export class TokenCache {
      * @returns Array of tokens
      */
     public getTokens(document: TextDocument): Token[] {
+        const perfStart = performance.now();
+        
         try {
             logger.info(`🔍 [DEBUG] TokenCache.getTokens called for: ${document.uri}`);
             logger.info(`🔍 [DEBUG] Document language ID: ${document.languageId}`);
@@ -69,17 +71,21 @@ export class TokenCache {
             
             // 🚀 PERFORMANCE: Check if we can use incremental update
             if (cached && cached.version === document.version) {
-                logger.info(`🟢 Using cached tokens for ${document.uri} (version ${document.version})`);
+                const cacheTime = performance.now() - perfStart;
+                logger.info(`🟢 Using cached tokens for ${document.uri} (version ${document.version}) - ${cacheTime.toFixed(2)}ms`);
                 return cached.tokens;
             }
             
             // 🚀 PERFORMANCE: Try incremental update if we have cached data
             if (cached && cached.documentText && this.canUseIncrementalUpdate(currentText, cached.documentText)) {
                 logger.info(`🚀 Attempting incremental tokenization for ${document.uri}`);
+                const incStart = performance.now();
                 try {
                     const tokens = this.incrementalTokenize(document, cached, currentText);
                     if (tokens) {
-                        logger.info(`✅ Incremental tokenization successful, got ${tokens.length} tokens`);
+                        const incTime = performance.now() - incStart;
+                        const totalTime = performance.now() - perfStart;
+                        logger.info(`✅ Incremental tokenization successful, got ${tokens.length} tokens (${incTime.toFixed(2)}ms tokenize, ${totalTime.toFixed(2)}ms total)`);
                         return tokens;
                     }
                 } catch (incError) {
@@ -89,13 +95,16 @@ export class TokenCache {
 
             // Full tokenization
             logger.info(`🟢 Running full tokenizer for ${document.uri} (version ${document.version})`);
+            const fullStart = performance.now();
             
             try {
                 const tokenizer = new ClarionTokenizer(document.getText());
                 const tokens = tokenizer.tokenize();
                 
                 // 🚀 PERFORMANCE: Build line-based cache
+                const cacheStart = performance.now();
                 const lineTokens = this.buildLineTokenMap(document, tokens);
+                const cacheTime = performance.now() - cacheStart;
                 
                 this.cache.set(document.uri, { 
                     version: document.version, 
@@ -104,14 +113,22 @@ export class TokenCache {
                     documentText: currentText
                 });
                 
-                logger.info(`✅ [DEBUG] Successfully tokenized ${document.uri}, got ${tokens.length} tokens`);
+                const fullTime = performance.now() - fullStart;
+                const totalTime = performance.now() - perfStart;
+                
+                logger.info(`📊 [PERFORMANCE] Full tokenization: ${tokens.length} tokens
+  Tokenize: ${fullTime.toFixed(2)}ms
+  Build cache: ${cacheTime.toFixed(2)}ms
+  Total: ${totalTime.toFixed(2)}ms`);
+                
                 return tokens;
             } catch (tokenizeError) {
                 logger.error(`❌ [DEBUG] Error tokenizing document: ${tokenizeError instanceof Error ? tokenizeError.message : String(tokenizeError)}`);
                 return [];
             }
         } catch (error) {
-            logger.error(`❌ [DEBUG] Unexpected error in TokenCache.getTokens: ${error instanceof Error ? error.message : String(error)}`);
+            const totalTime = performance.now() - perfStart;
+            logger.error(`❌ [DEBUG] Unexpected error in TokenCache.getTokens after ${totalTime.toFixed(2)}ms: ${error instanceof Error ? error.message : String(error)}`);
             return [];
         }
     }
@@ -255,27 +272,34 @@ export class TokenCache {
      * 🚀 PERFORMANCE: Incrementally re-tokenize only changed lines
      */
     private incrementalTokenize(document: TextDocument, cached: CachedTokenData, newText: string): Token[] | null {
+        const perfStart = performance.now();
+        
+        const detectStart = performance.now();
         const changedLines = this.detectChangedLines(newText, cached.documentText);
+        const detectTime = performance.now() - detectStart;
         
         if (changedLines.size === 0) {
-            logger.info(`🚀 No lines changed, using cached tokens`);
+            logger.info(`🚀 No lines changed, using cached tokens (${detectTime.toFixed(2)}ms detection)`);
             return cached.tokens;
         }
         
-        logger.info(`🚀 Detected ${changedLines.size} changed lines: ${Array.from(changedLines).join(', ')}`);
+        logger.info(`🚀 Detected ${changedLines.size} changed lines in ${detectTime.toFixed(2)}ms: ${Array.from(changedLines).slice(0, 10).join(', ')}${changedLines.size > 10 ? '...' : ''}`);
         
         // Expand to include dependencies
+        const expandStart = performance.now();
         const linesToRetokenize = this.expandToDependencies(changedLines, cached, document.lineCount);
+        const expandTime = performance.now() - expandStart;
         
-        logger.info(`🚀 Re-tokenizing ${linesToRetokenize.size} lines (including dependencies)`);
+        logger.info(`🚀 Re-tokenizing ${linesToRetokenize.size} lines (including dependencies) - expansion took ${expandTime.toFixed(2)}ms`);
         
         // If we need to re-tokenize more than 30% of the document, just do full tokenization
         if (linesToRetokenize.size / document.lineCount > 0.3) {
-            logger.info(`🚀 Too many lines changed (${linesToRetokenize.size}/${document.lineCount}), doing full tokenization`);
+            logger.info(`🚀 Too many lines changed (${linesToRetokenize.size}/${document.lineCount} = ${((linesToRetokenize.size/document.lineCount)*100).toFixed(1)}%), doing full tokenization`);
             return null;
         }
         
         // Build text with only the lines we need to re-tokenize
+        const buildStart = performance.now();
         const linesToTokenize: string[] = [];
         const lineMapping: number[] = []; // Maps tokenized line index to document line number
         
@@ -287,12 +311,16 @@ export class TokenCache {
             linesToTokenize.push(lineText);
             lineMapping.push(lineNum);
         }
+        const buildTime = performance.now() - buildStart;
         
         // Tokenize the subset
+        const tokenizeStart = performance.now();
         const tokenizer = new ClarionTokenizer(linesToTokenize.join('\n'));
         const newTokens = tokenizer.tokenize();
+        const tokenizeTime = performance.now() - tokenizeStart;
         
         // Adjust line numbers in new tokens
+        const adjustStart = performance.now();
         for (const token of newTokens) {
             token.line = lineMapping[token.line];
             if (token.finishesAt !== undefined) {
@@ -303,8 +331,10 @@ export class TokenCache {
                 }
             }
         }
+        const adjustTime = performance.now() - adjustStart;
         
         // Merge with cached tokens
+        const mergeStart = performance.now();
         const mergedTokens: Token[] = [];
         
         // Remove old tokens from changed lines
@@ -322,8 +352,10 @@ export class TokenCache {
             if (a.line !== b.line) return a.line - b.line;
             return a.start - b.start;
         });
+        const mergeTime = performance.now() - mergeStart;
         
         // Update cache
+        const cacheStart = performance.now();
         const lineTokens = this.buildLineTokenMap(document, mergedTokens);
         this.cache.set(document.uri, {
             version: document.version,
@@ -331,6 +363,24 @@ export class TokenCache {
             lineTokens,
             documentText: newText
         });
+        const cacheTime = performance.now() - cacheStart;
+        
+        const totalTime = performance.now() - perfStart;
+        const reusedTokens = cached.tokens.length - (cached.tokens.length - mergedTokens.length + newTokens.length);
+        const reusedPercent = (reusedTokens / cached.tokens.length) * 100;
+        
+        logger.info(`📊 [PERFORMANCE] Incremental tokenization complete:
+  Total time: ${totalTime.toFixed(2)}ms
+  Changed lines: ${changedLines.size} → ${linesToRetokenize.size} (with dependencies)
+  Tokens: ${mergedTokens.length} (${reusedPercent.toFixed(1)}% reused from cache)
+  Breakdown:
+    - Detect: ${detectTime.toFixed(2)}ms (${((detectTime/totalTime)*100).toFixed(1)}%)
+    - Expand: ${expandTime.toFixed(2)}ms (${((expandTime/totalTime)*100).toFixed(1)}%)
+    - Build: ${buildTime.toFixed(2)}ms (${((buildTime/totalTime)*100).toFixed(1)}%)
+    - Tokenize: ${tokenizeTime.toFixed(2)}ms (${((tokenizeTime/totalTime)*100).toFixed(1)}%)
+    - Adjust: ${adjustTime.toFixed(2)}ms (${((adjustTime/totalTime)*100).toFixed(1)}%)
+    - Merge: ${mergeTime.toFixed(2)}ms (${((mergeTime/totalTime)*100).toFixed(1)}%)
+    - Cache: ${cacheTime.toFixed(2)}ms (${((cacheTime/totalTime)*100).toFixed(1)}%)`);
         
         return mergedTokens;
     }
