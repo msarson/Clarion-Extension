@@ -116,10 +116,12 @@ export class TokenCache {
                 const fullTime = performance.now() - fullStart;
                 const totalTime = performance.now() - perfStart;
                 
-                logger.info(`📊 [PERFORMANCE] Full tokenization: ${tokens.length} tokens
-  Tokenize: ${fullTime.toFixed(2)}ms
-  Build cache: ${cacheTime.toFixed(2)}ms
-  Total: ${totalTime.toFixed(2)}ms`);
+                logger.perf('Full tokenization', {
+                    'total_ms': totalTime.toFixed(2),
+                    'tokenize_ms': fullTime.toFixed(2),
+                    'cache_build_ms': cacheTime.toFixed(2),
+                    'tokens': tokens.length
+                });
                 
                 return tokens;
             } catch (tokenizeError) {
@@ -369,18 +371,20 @@ export class TokenCache {
         const reusedTokens = cached.tokens.length - (cached.tokens.length - mergedTokens.length + newTokens.length);
         const reusedPercent = (reusedTokens / cached.tokens.length) * 100;
         
-        logger.info(`📊 [PERFORMANCE] Incremental tokenization complete:
-  Total time: ${totalTime.toFixed(2)}ms
-  Changed lines: ${changedLines.size} → ${linesToRetokenize.size} (with dependencies)
-  Tokens: ${mergedTokens.length} (${reusedPercent.toFixed(1)}% reused from cache)
-  Breakdown:
-    - Detect: ${detectTime.toFixed(2)}ms (${((detectTime/totalTime)*100).toFixed(1)}%)
-    - Expand: ${expandTime.toFixed(2)}ms (${((expandTime/totalTime)*100).toFixed(1)}%)
-    - Build: ${buildTime.toFixed(2)}ms (${((buildTime/totalTime)*100).toFixed(1)}%)
-    - Tokenize: ${tokenizeTime.toFixed(2)}ms (${((tokenizeTime/totalTime)*100).toFixed(1)}%)
-    - Adjust: ${adjustTime.toFixed(2)}ms (${((adjustTime/totalTime)*100).toFixed(1)}%)
-    - Merge: ${mergeTime.toFixed(2)}ms (${((mergeTime/totalTime)*100).toFixed(1)}%)
-    - Cache: ${cacheTime.toFixed(2)}ms (${((cacheTime/totalTime)*100).toFixed(1)}%)`);
+        logger.perf('Incremental tokenization', {
+            'total_ms': totalTime.toFixed(2),
+            'changed_lines': changedLines.size,
+            'retokenized_lines': linesToRetokenize.size,
+            'tokens': mergedTokens.length,
+            'reused_pct': reusedPercent.toFixed(1) + '%',
+            'detect_ms': detectTime.toFixed(2),
+            'expand_ms': expandTime.toFixed(2),
+            'build_ms': buildTime.toFixed(2),
+            'tokenize_ms': tokenizeTime.toFixed(2),
+            'adjust_ms': adjustTime.toFixed(2),
+            'merge_ms': mergeTime.toFixed(2),
+            'cache_ms': cacheTime.toFixed(2)
+        });
         
         return mergedTokens;
     }

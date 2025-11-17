@@ -44,6 +44,24 @@ class Logger {
         }
     }
 
+    /**
+     * 📊 Log performance metrics - always uses INFO level with special PERF tag for easy filtering
+     * Search for "PERF:" in debug console to see all performance metrics
+     */
+    perf(message: string, metrics?: Record<string, number | string>) {
+        if (this.shouldLog("info")) {
+            const timestamp = this.getTimestamp();
+            if (metrics) {
+                const metricsStr = Object.entries(metrics)
+                    .map(([key, value]) => `${key}=${value}`)
+                    .join(', ');
+                console.log(`[${timestamp}] [${this.name}] 📊 PERF: ${message} | ${metricsStr}`);
+            } else {
+                console.log(`[${timestamp}] [${this.name}] 📊 PERF: ${message}`);
+            }
+        }
+    }
+
     setLevel(newLevel: "debug" | "info" | "warn" | "error") {
         this.level = newLevel;
     }

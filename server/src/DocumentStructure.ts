@@ -54,7 +54,13 @@ export class DocumentStructure {
         }
         
         const indexTime = performance.now() - perfStart;
-        logger.info(`📊 [PERFORMANCE] Built indexes in ${indexTime.toFixed(2)}ms (${this.tokens.length} tokens)`);
+        logger.perf('Built indexes', {
+            'time_ms': indexTime.toFixed(2),
+            'tokens': this.tokens.length,
+            'labels': this.labelIndex.size,
+            'lines': this.tokensByLine.size,
+            'struct_types': this.structuresByType.size
+        });
     }
 
     public process(): void {

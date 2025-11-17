@@ -206,15 +206,21 @@ export class ClarionTokenizer {
             const charsPerMs = charCount / totalTime;
             const linesPerMs = this.lines.length / totalTime;
             
-            logger.info(`📊 [PERFORMANCE] Tokenization complete:
-  Total time: ${totalTime.toFixed(2)}ms
-  Lines: ${this.lines.length} (${linesPerMs.toFixed(1)} lines/ms)
-  Characters: ${charCount} (${charsPerMs.toFixed(0)} chars/ms)
-  Tokens: ${this.tokens.length} (${tokensPerMs.toFixed(1)} tokens/ms)
-  Breakdown:
-    - Splitting: ${splitTime.toFixed(2)}ms (${((splitTime/totalTime)*100).toFixed(1)}%)
-    - Tokenizing: ${tokenizeTime.toFixed(2)}ms (${((tokenizeTime/totalTime)*100).toFixed(1)}%)
-    - Structure: ${structureTime.toFixed(2)}ms (${((structureTime/totalTime)*100).toFixed(1)}%)`);
+            logger.perf('Tokenization complete', {
+                'total_ms': totalTime.toFixed(2),
+                'lines': this.lines.length,
+                'lines_per_ms': linesPerMs.toFixed(1),
+                'chars': charCount,
+                'chars_per_ms': charsPerMs.toFixed(0),
+                'tokens': this.tokens.length,
+                'tokens_per_ms': tokensPerMs.toFixed(1),
+                'split_ms': splitTime.toFixed(2),
+                'split_pct': ((splitTime/totalTime)*100).toFixed(1) + '%',
+                'tokenize_ms': tokenizeTime.toFixed(2),
+                'tokenize_pct': ((tokenizeTime/totalTime)*100).toFixed(1) + '%',
+                'structure_ms': structureTime.toFixed(2),
+                'structure_pct': ((structureTime/totalTime)*100).toFixed(1) + '%'
+            });
             
             return this.tokens;
         } catch (error) {
