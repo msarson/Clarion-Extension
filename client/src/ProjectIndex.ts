@@ -17,6 +17,9 @@ export class ProjectIndex {
     
     // Map of project IDs to absolute paths (lowercase)
     private byProject: Map<string, Set<string>> = new Map();
+    
+    // 🔧 FIX: Track warned paths to prevent duplicate warnings
+    private warnedPaths: Set<string> = new Set();
 
     /**
      * Adds a file to the index for a specific project
@@ -35,7 +38,7 @@ export class ProjectIndex {
             // Normalize the file path to an absolute path
             const absPath = this.normalizeToAbsolutePath(filePath, projectPath);
             if (!absPath) {
-                fileResolutionLogger.debug(`[FILE_RESOLUTION] Failed to normalize path: ${filePath} (project path: ${projectPath})`);
+                fileResolutionLogger.debug(`[FILE_RESOLUTION] Failed to normalize path: ${filePath} (project path: ${projectPath || 'MISSING'})`);
                 return;
             }
 
@@ -346,7 +349,12 @@ export class ProjectIndex {
             }
 
             // If we don't have a base path, we can't resolve a relative path
-            logger.warn(`[INDEX] Cannot resolve relative path without base path: ${filePath}`);
+            // 🔧 FIX: Only warn once per file to prevent log spam
+            const warnKey = `${filePath}`;
+            if (!this.warnedPaths.has(warnKey)) {
+                logger.warn(`[INDEX] Cannot resolve relative path without base path: ${filePath}`);
+                this.warnedPaths.add(warnKey);
+            }
             fileResolutionLogger.debug(`[FILE_RESOLUTION] Failed to resolve relative path without base path: ${filePath}`);
             return '';
         } catch (error) {

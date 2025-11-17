@@ -442,7 +442,12 @@ export class SolutionCache {
                         resolve(null);
                     }
                 } catch (error) {
-                    logger.error(`❌ Error fetching solution tree: ${error instanceof Error ? error.message : String(error)}`);
+                    // 🔧 FIX: Provide better error context
+                    if (error instanceof Error && error.message.includes("reading 'sendRequest'")) {
+                        logger.error(`❌ Error fetching solution tree: Language client not initialized yet. This is normal during startup.`);
+                    } else {
+                        logger.error(`❌ Error fetching solution tree: ${error instanceof Error ? error.message : String(error)}`);
+                    }
                     resolve(null);
                 } finally {
                     // Clear the in-progress promise after a short delay to prevent immediate re-requests
