@@ -82,6 +82,8 @@ export class ClarionTokenizer {
     // 🚀 PERFORMANCE: Pre-compiled regex patterns cache
     private static compiledPatterns: Map<TokenType, RegExp> | null = null;
     private static orderedTypes: TokenType[] | null = null;
+    // 🚀 PERFORMANCE: Pattern groups by character class for fast filtering
+    private static patternsByCharClass: Map<string, TokenType[]> | null = null;
 
     constructor(text: string, tabSize: number = 2) {  // ✅ Default to 2 if not provided
         this.text = text;
@@ -95,9 +97,29 @@ export class ClarionTokenizer {
         }
     }
 
+    // 🚀 PERFORMANCE: Classify character for fast pattern filtering
+    private getCharClass(char: string): string {
+        if (char >= 'A' && char <= 'Z') return 'upper';
+        if (char >= 'a' && char <= 'z') return 'lower';
+        if (char === '_') return 'underscore';
+        if (char >= '0' && char <= '9') return 'digit';
+        if (char === '!') return 'comment';
+        if (char === "'") return 'string';
+        if (char === '&') return 'ampersand';
+        if (char === '@') return 'at';
+        if (char === '?') return 'question';
+        if (char === '|') return 'pipe';
+        if (char === '*') return 'star';
+        if ('+-*/=<>'.indexOf(char) >= 0) return 'operator';
+        if ('(),:.'.indexOf(char) >= 0) return 'delimiter';
+        if (char === ' ' || char === '\t') return 'whitespace';
+        return 'other';
+    }
+
     // 🚀 PERFORMANCE: Pre-compile all regex patterns once
     private static initializePatterns(): void {
         ClarionTokenizer.compiledPatterns = new Map();
+        ClarionTokenizer.patternsByCharClass = new Map();
         
         // 🚀 PERFORMANCE: Optimized order balancing specificity and frequency
         // Critical: More specific patterns MUST come before more general ones
@@ -166,6 +188,49 @@ export class ClarionTokenizer {
             if (pattern) {
                 ClarionTokenizer.compiledPatterns.set(type, pattern);
             }
+        }
+        
+        // 🚀 PERFORMANCE: Build pattern groups by character class
+        // This allows us to skip entire groups of patterns based on first character
+        const charClassGroups: Record<string, TokenType[]> = {
+            'comment': [TokenType.Comment],
+            'string': [TokenType.String],
+            'question': [TokenType.FieldEquateLabel],
+            'at': [TokenType.PictureFormat],
+            'pipe': [TokenType.LineContinuation],
+            'ampersand': [TokenType.ReferenceVariable, TokenType.LineContinuation],
+            'star': [TokenType.PointerParameter],
+            'digit': [TokenType.Number],
+            'operator': [TokenType.Operator],
+            'delimiter': [TokenType.Delimiter],
+            'upper': [ // Uppercase letter - identifiers, keywords, structures
+                TokenType.Label, TokenType.Keyword, TokenType.Directive,
+                TokenType.ClarionDocument, TokenType.ExecutionMarker, TokenType.EndStatement,
+                TokenType.ConditionalContinuation, TokenType.Structure, TokenType.WindowElement,
+                TokenType.Function, TokenType.FunctionArgumentParameter, TokenType.PropertyFunction,
+                TokenType.Property, TokenType.StructurePrefix, TokenType.StructureField, TokenType.Class,
+                TokenType.Type, TokenType.TypeAnnotation, TokenType.Attribute, TokenType.Constant,
+                TokenType.ImplicitVariable, TokenType.Variable, TokenType.Unknown
+            ],
+            'lower': [ // Lowercase letter - identifiers, keywords (case-insensitive)
+                TokenType.Keyword, TokenType.Directive, TokenType.ClarionDocument,
+                TokenType.ExecutionMarker, TokenType.ConditionalContinuation, TokenType.Structure,
+                TokenType.Function, TokenType.FunctionArgumentParameter, TokenType.PropertyFunction,
+                TokenType.Property, TokenType.StructurePrefix, TokenType.StructureField, TokenType.Class,
+                TokenType.Type, TokenType.TypeAnnotation, TokenType.Attribute, TokenType.Constant,
+                TokenType.ImplicitVariable, TokenType.Variable, TokenType.Unknown
+            ],
+            'underscore': [ // Underscore - identifiers only
+                TokenType.Label, TokenType.ReferenceVariable, TokenType.Variable, 
+                TokenType.StructurePrefix, TokenType.StructureField, TokenType.Unknown
+            ],
+            'other': [ // Fallback - test all patterns
+                ...ClarionTokenizer.orderedTypes
+            ]
+        };
+        
+        for (const [charClass, types] of Object.entries(charClassGroups)) {
+            ClarionTokenizer.patternsByCharClass.set(charClass, types);
         }
     }
 
@@ -264,68 +329,17 @@ export class ClarionTokenizer {
                 const substring = line.slice(position);
                 let matched = false;
 
-                // 🚀 PERFORMANCE: Use pre-compiled patterns in optimized order
-                for (const tokenType of types) {
+                // 🚀 PERFORMANCE: Character-class filtering - classify once, test only relevant patterns
+                const firstChar = substring[0];
+                const charClass = this.getCharClass(firstChar);
+                const relevantTypes = ClarionTokenizer.patternsByCharClass!.get(charClass) || types;
+
+                // Test only patterns relevant to this character class
+                for (const tokenType of relevantTypes) {
                     const pattern = patterns.get(tokenType);
                     if (!pattern) continue;
 
                     if (tokenType === TokenType.Label && column !== 0) continue; // ✅ Labels must be in column 0
-
-                    // 🚀 PERFORMANCE: Fast-path character checks to skip impossible patterns
-                    const firstChar = substring[0];
-                    const secondChar = substring.length > 1 ? substring[1] : '';
-                    
-                    // Skip patterns based on first character - eliminates 40%+ of regex tests
-                    switch (tokenType) {
-                        case TokenType.Comment:
-                            if (firstChar !== '!') continue;
-                            break;
-                        case TokenType.String:
-                            if (firstChar !== "'") continue;
-                            break;
-                        case TokenType.LineContinuation:
-                            if (firstChar !== '&' && firstChar !== '|') continue;
-                            break;
-                        case TokenType.Number:
-                            if (!/[\d+\-]/.test(firstChar)) continue;
-                            break;
-                        case TokenType.Operator:
-                            if (!/[+\-*/=<>!&]/.test(firstChar)) continue;
-                            break;
-                        case TokenType.Delimiter:
-                            if (!/[,():.]/.test(firstChar)) continue;
-                            break;
-                        case TokenType.FieldEquateLabel:
-                            if (firstChar !== '?') continue;
-                            break;
-                        case TokenType.ReferenceVariable:
-                        case TokenType.PointerParameter:
-                            if (firstChar !== '&' && firstChar !== '*') continue;
-                            break;
-                        case TokenType.PictureFormat:
-                            if (firstChar !== '@') continue;
-                            break;
-                        case TokenType.StructurePrefix:
-                            // PREFIX:Field - must have letter followed eventually by colon
-                            if (!/[A-Za-z_]/.test(firstChar)) continue;
-                            if (!substring.includes(':')) continue;
-                            break;
-                        case TokenType.StructureField:
-                            // Structure.Field - must have letter followed eventually by dot
-                            if (!/[A-Za-z_]/.test(firstChar)) continue;
-                            if (!substring.includes('.')) continue;
-                            break;
-                        case TokenType.WindowElement:
-                            // Must start with space/tab (not column 0) and then letter
-                            if (column === 0) continue;
-                            if (!/[A-Z]/.test(firstChar)) continue;
-                            break;
-                        case TokenType.ImplicitVariable:
-                            // Variable with suffix like VAR$ or VAR# or VAR"
-                            if (!/[A-Za-z]/.test(firstChar)) continue;
-                            if (!substring.match(/[\$#"]/)) continue;
-                            break;
-                    }
 
                     // 🔬 PROFILING: Time each pattern test
                     const testStart = performance.now();
