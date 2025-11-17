@@ -14,20 +14,38 @@ class ClarionFoldingProvider {
     }
 
     public computeFoldingRanges(): FoldingRange[] {
+        const perfStart = performance.now();
         this.foldingRanges = [];
     
-        // ✅ Include all PROCEDUREs, STRUCTUREs, and ROUTINEs (not just top-level)
-        const foldableTokens = this.tokens.filter(t =>
-            t.subType === TokenType.Procedure ||
-            t.subType === TokenType.Structure ||
-            t.subType === TokenType.Routine ||
-            t.subType === TokenType.Class ||
-            t.subType === TokenType.MapProcedure ||         // <-- Add this
-            t.subType === TokenType.InterfaceMethod ||      // <-- Optional: INTERFACE methods
-            t.subType === TokenType.MethodDeclaration  ||     // <-- Optional: CLASS methods
-            t.subType === TokenType.MethodImplementation ||  // <-- Optional: CLASS methods
-            t.subType === TokenType.GlobalProcedure        // <-- Optional: GLOBAL PROCEDUREs
-        );
+        // 🚀 PERFORMANCE: Filter once and collect regions in same pass
+        const foldableTokens: Token[] = [];
+        const regionComments: Token[] = [];
+        
+        for (const t of this.tokens) {
+            // Collect foldable tokens
+            if (t.subType === TokenType.Procedure ||
+                t.subType === TokenType.Structure ||
+                t.subType === TokenType.Routine ||
+                t.subType === TokenType.Class ||
+                t.subType === TokenType.MapProcedure ||
+                t.subType === TokenType.InterfaceMethod ||
+                t.subType === TokenType.MethodDeclaration ||
+                t.subType === TokenType.MethodImplementation ||
+                t.subType === TokenType.GlobalProcedure) {
+                foldableTokens.push(t);
+            }
+            
+            // Collect region comments
+            if (t.type === TokenType.Comment) {
+                const upperValue = t.value.toUpperCase().trim();
+                if (upperValue.startsWith("!REGION") || upperValue.startsWith("!ENDREGION")) {
+                    regionComments.push(t);
+                }
+            }
+        }
+        
+        const filterTime = performance.now() - perfStart;
+        logger.perf('Folding: filter', { time_ms: filterTime.toFixed(2), foldable: foldableTokens.length, regions: regionComments.length });
         
     
         // 🔍 Infer missing finishesAt for PROCEDUREs
@@ -51,8 +69,8 @@ class ClarionFoldingProvider {
             this.processFolding(token);
         }
     
-        // ✅ Process REGIONS separately
-        this.foldRegions();
+        // ✅ Process REGIONS using pre-filtered comments
+        this.foldRegionsOptimized(regionComments);
     
         logger.info(`📏 [FOLDING] Returning ${this.foldingRanges.length} ranges`);
         return this.foldingRanges;
@@ -200,6 +218,50 @@ class ClarionFoldingProvider {
             });
 
             logger.warn(`⚠️ [FoldingProvider] Region END (at EOF) from Line ${lastRegion?.startLine ?? 0} to EOF`);
+        }
+    }
+    
+    /** 🔹 Process REGIONS using pre-filtered comment tokens (optimized) */
+    private foldRegionsOptimized(regionComments: Token[]): void {
+        let regionStack: { startLine: number; label?: string }[] = [];
+
+        for (const token of regionComments) {
+            const upperValue = token.value.toUpperCase().trim();
+
+            // ✅ Detect `!REGION` start
+            if (upperValue.startsWith("!REGION")) {
+                const labelMatch = token.value.match(/!REGION\s+"?(.*?)"?$/i);
+                const label = labelMatch ? labelMatch[1] : undefined;
+                regionStack.push({ startLine: token.line, label });
+
+                logger.info(`🔹 [FoldingProvider] Region START detected at Line ${token.line} (${label ?? "No Label"})`);
+            }
+
+            // ✅ Detect `!ENDREGION` and close last opened REGION
+            if (upperValue.startsWith("!ENDREGION")) {
+                const lastRegion = regionStack.pop();
+                if (lastRegion) {
+                    this.foldingRanges.push({
+                        startLine: lastRegion.startLine,
+                        endLine: token.line,
+                        kind: FoldingRangeKind.Region
+                    });
+
+                    logger.info(`🔹 [FoldingProvider] Region END detected from Line ${lastRegion.startLine} to ${token.line}`);
+                }
+            }
+        }
+
+        // ✅ Close any remaining open REGIONS at EOF
+        while (regionStack.length > 0) {
+            const lastRegion = regionStack.pop();
+            this.foldingRanges.push({
+                startLine: lastRegion?.startLine ?? 0,
+                endLine: this.tokens[this.tokens.length - 1]?.line ?? 0,
+                kind: FoldingRangeKind.Region
+            });
+
+            logger.warn(`⚠️ [FoldingProvider] Auto-closed Region at EOF from Line ${lastRegion?.startLine}`);
         }
     }
 }
