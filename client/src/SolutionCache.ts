@@ -415,11 +415,12 @@ export class SolutionCache {
                     logger.info("🔄 Fetching solution tree from server...");
                     
                     // Set a timeout to prevent hanging if the server doesn't respond
+                    // 🚀 PERFORMANCE: Reduced from 8 seconds to 5 seconds
                     const timeoutPromise = new Promise<null>((timeoutResolve) => {
                         setTimeout(() => {
-                            logger.warn("[SolutionCache] ⚠️ Server request timed out after 8 seconds");
+                            logger.warn("[SolutionCache] ⚠️ Server request timed out after 5 seconds");
                             timeoutResolve(null);
-                        }, 8000); // Increased to 8 seconds but still short enough to avoid UI freezes
+                        }, 5000);
                     });
                     
                     // Race between the actual request and the timeout
