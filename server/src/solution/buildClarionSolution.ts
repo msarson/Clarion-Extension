@@ -7,7 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("BuildClarionSolution");
-logger.setLevel("error");
+logger.setLevel("info");
 
 export async function buildClarionSolution(): Promise<ClarionSolutionInfo> {
     const solutionManagerInstance = SolutionManager.getInstance();

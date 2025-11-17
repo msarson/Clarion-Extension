@@ -2,7 +2,7 @@ import { Token, TokenType } from "./ClarionTokenizer";
 import LoggerManager from "./logger";
 
 const logger = LoggerManager.getLogger("DocumentStructure");
-logger.setLevel("error");
+logger.setLevel("info");
 
 export class DocumentStructure {
     private structureStack: Token[] = [];
@@ -16,63 +16,6 @@ export class DocumentStructure {
     constructor(private tokens: Token[]) {
         this.maxLabelWidth = this.processLabels();
     }
-
-    /** 🚀 Process token relationships and update tokens */
-    // public process(): void {
-    //     for (let i = 0; i < this.tokens.length; i++) {
-    //         const token = this.tokens[i];
-
-    //         if (token.type === TokenType.Keyword || token.type === TokenType.ExecutionMarker) {
-    //             switch (token.value.toUpperCase()) {
-    //                 case "PROCEDURE":
-    //                     this.handleProcedureToken(token, i);
-    //                     break;
-    //                 case "ROUTINE":
-    //                     this.handleRoutineToken(token, i);
-    //                     break;
-    //                 case "CODE":
-    //                 case "DATA":
-    //                     this.handleExecutionMarker(token);
-    //                     break;
-    //             }
-    //         } else if (token.type === TokenType.Structure) {
-    //             this.handleStructureToken(token);
-    //         } else if (token.type === TokenType.EndStatement) {
-    //             this.handleEndStatementForStructure(token);
-    //         }
-    //     }
-
-    //     this.closeRemainingProcedures();
-    //     this.assignMaxLabelLengths();
-
-    //     // ✅ Step: Re-parent class method implementations
-    //     for (const token of this.tokens) {
-    //         if (token.subType === TokenType.Class) {
-    //             const classNameMatch = token.value.match(/^(\w+)\.(\w+)$/);
-    //             if (classNameMatch) {
-    //                 const [_, classLabel, _methodName] = classNameMatch;
-
-    //                 // 🔍 Find the CLASS structure with that label
-    //                 const classDef = this.tokens.find(t =>
-    //                     t.type === TokenType.Structure &&
-    //                     t.value.toUpperCase() === "CLASS" &&
-    //                     t.parent?.value === classLabel
-    //                 );
-
-    //                 // ✅ Reassign method’s parent to the owning PROCEDURE
-    //                 if (classDef && classDef.parent?.subType === TokenType.Procedure) {
-    //                     const owningProc = classDef.parent;
-
-    //                     token.parent = owningProc;
-    //                     owningProc.children = owningProc.children || [];
-    //                     owningProc.children.push(token);
-
-    //                     logger.info(`🔁 Bound class method '${token.value}' to owning procedure '${owningProc.value}'`);
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
 
     public process(): void {
         for (let i = 0; i < this.tokens.length; i++) {
@@ -99,6 +42,10 @@ export class DocumentStructure {
             }
             
         }
+        
+        // Close any procedures that are still open at the end of the file
+        this.closeRemainingProcedures();
+        this.assignMaxLabelLengths();
     }
     
     private handleExecutionMarker(token: Token): void {
@@ -134,7 +81,7 @@ export class DocumentStructure {
         for (const token of this.tokens) {
             const insideExecutionCode = this.procedureStack.length > 0;
 
-            if (!insideExecutionCode && token.start === 0 && token.type !== TokenType.Comment) {
+            if (!insideExecutionCode && token.start === 0 && token.type !== TokenType.Comment && token.value !== '?') {
                 token.type = TokenType.Label;
                 token.label = token.value;
                 maxLabelWidth = Math.max(maxLabelWidth, token.value.length);
@@ -362,8 +309,8 @@ export class DocumentStructure {
             }
         }
 
-        if (["CLASS", "MAP", "INTERFACE"].includes(token.value.toUpperCase())) {
-            logger.info(`Checking if CLASS is inline`);
+        if (["CLASS", "MAP", "INTERFACE", "MODULE"].includes(token.value.toUpperCase())) {
+            logger.info(`Checking if ${token.value.toUpperCase()} is inline`);
             const sameLine = this.tokens.filter(t => t.line === token.line);
             logger.info(`Same line tokens: ${sameLine.map(t => t.value).join(", ")}`);
             const currentIndex = sameLine.findIndex(t => t === token);
@@ -384,8 +331,16 @@ export class DocumentStructure {
 
             if (!isInlineAttribute) {
                 this.insideClassOrInterfaceOrMapDepth++;
+                // Store the structure type in the token's value
+                // We'll use this later to identify the type of structure
+                logger.info(`Inside ${token.value.toUpperCase()} structure, depth: ${this.insideClassOrInterfaceOrMapDepth}`);
+                
+                // Special handling for MAP structure: look for shorthand procedure declarations
+                if (token.value.toUpperCase() === "MAP") {
+                    this.processShorthandProcedures(token);
+                }
             } else {
-                logger.info('Skipping module line');
+                logger.info('Skipping inline attribute');
                 return;
             }
         }
@@ -394,6 +349,55 @@ export class DocumentStructure {
         this.structureIndentMap.set(token, indentLevel);
     }
 
+    /**
+     * Process shorthand procedure declarations in MAP structures
+     * In MAP structures, procedures can be declared without the PROCEDURE keyword
+     * Format: ProcedureName(parameters),returnType
+     *
+     * In shorthand syntax, the entire declaration is in a single token:
+     * e.g., "Dos2DriverPipe(Long pOpCode, long pClaFCB, long pVarList),long,name(LongName)"
+     */
+    private processShorthandProcedures(mapToken: Token): void {
+        const mapIndex = this.tokens.indexOf(mapToken);
+        if (mapIndex === -1) return;
+        
+        // Find the END statement for this MAP
+        let endIndex = -1;
+        let depth = 1;
+        
+        for (let i = mapIndex + 1; i < this.tokens.length; i++) {
+            const token = this.tokens[i];
+            
+            if (token.type === TokenType.Structure) {
+                depth++;
+            } else if (token.type === TokenType.EndStatement) {
+                depth--;
+                if (depth === 0) {
+                    endIndex = i;
+                    break;
+                }
+            }
+            
+            // Look for tokens that contain an opening parenthesis
+            // In shorthand syntax, the procedure name and opening parenthesis are in the same token
+            if (token.value.includes("(") && token.value !== "(" && !token.value.toLowerCase().startsWith("module") && ! token.value.startsWith("!")) {
+                // This looks like a shorthand procedure declaration
+                token.subType = TokenType.MapProcedure;
+                token.parent = mapToken;
+                mapToken.children = mapToken.children || [];
+                mapToken.children.push(token);
+                
+                // Extract the procedure name (everything before the opening parenthesis)
+                const procName = token.value.split("(")[0];
+                
+                // CRITICAL FIX: Set the token's label to the procedure name
+                // This ensures it will be displayed correctly in the outline view
+                token.label = procName;
+                
+                logger.info(`📌 Found MAP shorthand procedure: ${procName} at line ${token.line}`);
+            }
+        }
+    }
 
     private handleEndStatementForStructure(token: Token): void {
         const lastStructure = this.structureStack.pop();
@@ -401,8 +405,9 @@ export class DocumentStructure {
             lastStructure.finishesAt = token.line;
             token.start = this.structureIndentMap.get(lastStructure) || 0;
             logger.info(`🔚 Closed ${lastStructure.value} at Line ${token.line}`);
-            if (["CLASS", "MAP", "INTERFACE"].includes(lastStructure.value.toUpperCase())) {
+            if (["CLASS", "MAP", "INTERFACE", "MODULE"].includes(lastStructure.value.toUpperCase())) {
                 this.insideClassOrInterfaceOrMapDepth = Math.max(0, this.insideClassOrInterfaceOrMapDepth - 1);
+                logger.info(`Exiting ${lastStructure.value.toUpperCase()} structure, depth: ${this.insideClassOrInterfaceOrMapDepth}`);
             }
         }
     }
@@ -419,15 +424,9 @@ export class DocumentStructure {
     private handleProcedureToken(token: Token, index: number): void {
         const prevToken = this.tokens[index - 1];
     
-        // 🧠 Always close the previous procedure first
-        const lastProc = this.procedureStack[this.procedureStack.length - 1];
-        if (lastProc) {
-            this.handleProcedureClosure(token.line - 1);
-        }
-    
         // 🧠 Determine token type based on context
         if (this.insideClassOrInterfaceOrMapDepth > 0) {
-            // It's a declaration inside CLASS, MAP, or INTERFACE
+            // It's a declaration inside CLASS, MAP, INTERFACE, or MODULE
             const parent = this.structureStack[this.structureStack.length - 1];
             const parentType = parent?.value.toUpperCase();
             token.label = prevToken?.value ?? "AnonymousMethod";
@@ -437,6 +436,10 @@ export class DocumentStructure {
                 token.subType = TokenType.MethodDeclaration;
             } else if (parentType === "MAP") {
                 token.subType = TokenType.MapProcedure;
+                logger.info(`📌 Found MAP procedure: ${token.label}`);
+            } else if (parentType === "MODULE") {
+                token.subType = TokenType.MapProcedure; // Use same type for MODULE procedures
+                logger.info(`📌 Found MODULE procedure: ${token.label}`);
             } else if (parentType === "INTERFACE") {
                 token.subType = TokenType.InterfaceMethod;
             } else {
@@ -449,6 +452,12 @@ export class DocumentStructure {
         
             logger.info(`📌 Declared ${TokenType[token.subType]} '${token.label}' inside ${parentType} at line ${token.line}`);
             return;
+        }
+        
+        // Only close the previous procedure if we're not inside a CLASS/MAP/INTERFACE
+        const lastProc = this.procedureStack[this.procedureStack.length - 1];
+        if (lastProc) {
+            this.handleProcedureClosure(token.line - 1);
         }
         
         const isMethodImpl = prevToken?.type === TokenType.Label && prevToken.value.includes(".");
@@ -468,47 +477,7 @@ export class DocumentStructure {
         this.procedureStack.push(token);
         
         logger.info(`📌 Registered ${TokenType[token.subType]} '${token.label}' at line ${token.line}`);
-        
     }
-    
-    
-    // private handleProcedureToken(token: Token, index: number): void {
-    //     if (this.insideClassOrInterfaceOrMapDepth > 0 ) {
-            
-    //         this.handleProcedureInsideDefinition(token, index);
-    //         return;
-    //     }
-
-
-    //     const prevToken = this.tokens[index - 1];
-    //     const isMethodImplementation = prevToken && prevToken.type === TokenType.Label && prevToken.value.includes(".");
-
-    //     // 🧠 Always close the previous procedure/method before starting a new one
-    //     const lastProc = this.procedureStack[this.procedureStack.length - 1];
-    //     if (lastProc && lastProc.subType === (isMethodImplementation ? TokenType.Class : TokenType.Procedure)) {
-    //         this.handleProcedureClosure(token.line - 1);
-    //     }
-
-
-    //     token.subType = isMethodImplementation ? TokenType.Class : TokenType.Procedure;
-    //     token.label = prevToken?.value ?? "AnonymousProcedure";
-    //     // token.value = prevToken?.value ?? "AnonymousProcedure";
-
-    //     if (isMethodImplementation) {
-    //         // ⛳ Skip assigning parent — we fix that in post-processing
-    //     } else if (this.structureStack.length > 0) {
-    //         const parent = this.structureStack[this.structureStack.length - 1];
-    //         token.parent = parent;
-    //         parent.children = parent.children || [];
-    //         parent.children.push(token);
-    //     }
-
-    //     this.procedureStack.push(token);
-    // }
-
-
-
-
 
     private handleRoutineToken(token: Token, index: number): void {
         if (this.procedureStack.length === 0) return;
@@ -539,8 +508,6 @@ export class DocumentStructure {
             this.handleRoutineClosure(endLine);
         }
     }
-
-
 
     private handleRoutineClosure(endLine: number): void {
         if (this.routineStack.length > 0) {

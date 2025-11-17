@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("ClarionPrefixDecorator");
-logger.setLevel("error");
+logger.setLevel("info");
 
 
 /**

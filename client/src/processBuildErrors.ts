@@ -5,82 +5,130 @@ const logger = LoggerManager.getLogger("ProcessBuildErrors");
 
 const diagnosticCollection: DiagnosticCollection = languages.createDiagnosticCollection("clarion");
 
-function processBuildErrors(buildOutput: string): { errorCount: number, warningCount: number } {
+function processBuildErrors(
+    buildOutput: string
+): { errorCount: number; warningCount: number; diagnostics: Map<string, Diagnostic[]> } {
     logger.info("🔍 Processing build output for errors and warnings...");
-    logger.info("📝 Raw Build Output:\n", buildOutput);
+    logger.info("📝 Raw Build Output:\n" + buildOutput);
 
-    // ✅ Updated regex to capture both errors and warnings without breaking existing matches
-    const errorPattern = /^.*?>([A-Za-z]:\\.*?\.clw)\((\d+),(\d+)\):\s+(error|warning)\s*:?\s*(.*?)(?:\s+\[.*\])?$/gm;
+    // Single-line: 3> C:\...\Foo.Clw(123,4): error : Message [C:\...\Bar.cwproj]
+    const errorPattern =
+        /^.*?>\s*([A-Za-z]:\\.*?\.(?:[cC][lL][wW]|[iI][nN][cC]|[eE][qQ][uU]|[iI][nN][tT]))\((\d+),(\d+)\):\s+(error|warning)\s*:?\s*(.*?)(?:\s+\[([^\]]+)\])?$/gm;
+
+    // Wrapped: 3> C:\...\Foo.Clw(123,\n    4): error : Message [C:\...\Bar.cwproj]
+    const wrappedErrorPattern =
+        /^.*?>\s*([A-Za-z]:\\.*?\.(?:[cC][lL][wW]|[iI][nN][cC]|[eE][qQ][uU]|[iI][nN][tT]))\((\d+),\s*$\r?\n^\s*(\d+)\):\s+(error|warning)\s*:?\s*(.*?)(?:\s+\[([^\]]+)\])?/gm;
+
+    // Generic MSBuild lines without a file:  MSBUILD : error MSB1009: ...
+    const fallbackPattern =
+        /^\s*(?:MSBUILD|.+?)\s*:\s+(error|warning)\s+([A-Z0-9]+)?:?\s*(.+)$/gm;
 
     const diagnostics: Map<string, Diagnostic[]> = new Map();
-    const seenMessages = new Set<string>(); // ✅ Prevent duplicates
+    const seenDiagnostics = new Set<string>();        // dedupe actual diagnostics
+    const coveredFallbackMsgs = new Set<string>();    // messages covered by file-based matches
     let errorCount = 0;
     let warningCount = 0;
 
-    let match;
-    while ((match = errorPattern.exec(buildOutput)) !== null) {
-        logger.info("✅ Match Found:", match); // 🔍 Log each match
-
-        const [, filePath, line, column, type, message] = match;
+    const processFileBased = (
+        filePath: string,
+        line: string,
+        column: string,
+        type: string,
+        message: string,
+        projTail?: string
+    ) => {
         const absFilePath = path.resolve(filePath);
-        const fileUri = Uri.file(absFilePath);
-
-        // ✅ Deduplicate messages using file, line, column, and message content
-        const uniqueKey = `${absFilePath}:${line}:${column}:${type}:${message}`;
-        if (seenMessages.has(uniqueKey)) {
-            logger.warn(`⚠️ Skipping duplicate message: ${uniqueKey}`);
-            continue;
-        }
-        seenMessages.add(uniqueKey);
-        // Convert line and column to zero-based indices for VS Code
         const lineNum = parseInt(line, 10) - 1;
         const colNum = parseInt(column, 10) - 1;
 
-        // Create a range that covers the entire line for better visibility
-        const startPosition = new Position(lineNum, colNum);
-        const endPosition = new Position(lineNum, colNum + 50); // Extend range to make error more visible
+        const diagKey = `${absFilePath}:${lineNum}:${colNum}:${type}:${message}`;
+        if (seenDiagnostics.has(diagKey)) return;
+        seenDiagnostics.add(diagKey);
 
-        // ✅ Determine severity (Error or Warning)
-        const severity = type === "error" ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning;
+        // Mark fallback coverage
+        coveredFallbackMsgs.add(`${type}:${message}`);
+        if (projTail) coveredFallbackMsgs.add(`${type}:${message} [${projTail}]`);
 
-        // Create a more descriptive message that includes the error type
-        const formattedMessage = `Clarion ${type}: ${message}`;
-        const diagnostic = new Diagnostic(new Range(startPosition, endPosition), formattedMessage, severity);
-
-        // Set the source to "Clarion" for better identification in the Problems panel
+        const severity =
+            type.toLowerCase() === "error"
+                ? DiagnosticSeverity.Error
+                : DiagnosticSeverity.Warning;
+        const diagnostic = new Diagnostic(
+            new Range(
+                new Position(lineNum, Math.max(colNum, 0)),
+                new Position(lineNum, Math.max(colNum, 0) + 50)
+            ),
+            `Clarion ${type}: ${message}`,
+            severity
+        );
         diagnostic.source = "Clarion";
 
-        // Increment the appropriate counter
-        if (type === "error") {
-            errorCount++;
-        } else {
-            warningCount++;
+        if (!diagnostics.has(absFilePath)) diagnostics.set(absFilePath, []);
+        diagnostics.get(absFilePath)!.push(diagnostic);
+
+        if (severity === DiagnosticSeverity.Error) errorCount++;
+        else warningCount++;
+    };
+
+    const processFallback = (type: string, msg: string) => {
+        const baseMsg = msg.replace(/\s+\[[^\]]+\]\s*$/, "");
+        if (
+            coveredFallbackMsgs.has(`${type}:${msg}`) ||
+            coveredFallbackMsgs.has(`${type}:${baseMsg}`)
+        ) {
+            return;
         }
 
-        logger.info(`📌 Creating ${type.toUpperCase()} diagnostic for file: ${filePath}`);
-        logger.info(`🔹 Line: ${line}, Column: ${column}`);
-        logger.info(`💬 Message: ${message}`);
-        logger.info(`🗂 Absolute File Path: ${absFilePath}`);
+        const absFilePath = path.resolve("BuildOutput.log");
+        const lineNum = 0,
+            colNum = 0;
+        const diagKey = `${absFilePath}:${lineNum}:${colNum}:${type}:${msg}`;
+        if (seenDiagnostics.has(diagKey)) return;
+        seenDiagnostics.add(diagKey);
 
-        if (!diagnostics.has(absFilePath)) {
-            diagnostics.set(absFilePath, []);
-        }
-        diagnostics.get(absFilePath)?.push(diagnostic);
+        const severity =
+            type.toLowerCase() === "error"
+                ? DiagnosticSeverity.Error
+                : DiagnosticSeverity.Warning;
+        const diagnostic = new Diagnostic(
+            new Range(new Position(lineNum, colNum), new Position(lineNum, colNum + 50)),
+            `Clarion ${type}: ${msg}`,
+            severity
+        );
+        diagnostic.source = "Clarion";
+
+        if (!diagnostics.has(absFilePath)) diagnostics.set(absFilePath, []);
+        diagnostics.get(absFilePath)!.push(diagnostic);
+
+        if (severity === DiagnosticSeverity.Error) errorCount++;
+        else warningCount++;
+    };
+
+    // Apply regex passes
+    for (let m; (m = errorPattern.exec(buildOutput)) !== null;) {
+        const [, filePath, line, column, type, message, projTail] = m;
+        processFileBased(filePath, line, column, type, message, projTail);
     }
 
-    logger.info("🧹 Resetting diagnostics...");
-    // ✅ Clear and reset diagnostics with a delay to ensure VS Code updates properly
-    setTimeout(() => {
-        diagnosticCollection.clear();
-        logger.info("📌 Adding new diagnostics...");
-        diagnostics.forEach((diagArray, file) => {
-            logger.info(`📌 Adding ${diagArray.length} diagnostics for ${file}`);
-            diagnosticCollection.set(Uri.file(file), diagArray);
-        });
-        logger.info(`✅ Processed ${errorCount} errors and ${warningCount} warnings and added to Problems panel.`);
-    }, 100);
-    
-    return { errorCount, warningCount };
+    for (let m; (m = wrappedErrorPattern.exec(buildOutput)) !== null;) {
+        const [, filePath, line1, col, type, message, projTail] = m;
+        processFileBased(filePath, line1, col, type, message, projTail);
+    }
+
+    for (let m; (m = fallbackPattern.exec(buildOutput)) !== null;) {
+        const [, type, code, message] = m;
+        const msg = code ? `${code}: ${message}` : message;
+        processFallback(type, msg);
+    }
+
+    logger.info(`✅ Processed ${errorCount} errors and ${warningCount} warnings.`);
+
+    return { errorCount, warningCount, diagnostics };
 }
+
+
+
+
+
 
 export default processBuildErrors;

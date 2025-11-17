@@ -7,7 +7,7 @@ type StructureToken = Token & {
 };
 
 const logger = LoggerManager.getLogger("Formatter");
-logger.setLevel("error");
+logger.setLevel("info");
 
 class ClarionFormatter {
     private tokens: Token[];
@@ -32,10 +32,25 @@ class ClarionFormatter {
             logger.info(`Using editor tab size: ${this.indentSize}`);
         }
 
+        // Check if input text contains tabs
+        if (text.includes('\t')) {
+            logger.warn('⚠️ Input text contains tabs. This may cause alignment issues if token.start values are tab-aware.');
+        }
+
         this.identifyExecutionRanges();
         this.identifyLabelLines();
         this.detectMisplacedLabels(); // 🚀 NEW FUNCTION HERE
         // this.calculateIndentation();
+    }
+
+    /**
+     * Expands tabs to spaces in a string
+     * @param text The text to expand tabs in
+     * @param tabSize The size of a tab in spaces
+     * @returns The text with tabs expanded to spaces
+     */
+    private expandTabs(text: string, tabSize: number = this.indentSize): string {
+        return text.replace(/\t/g, ' '.repeat(tabSize));
     }
 
     private identifyExecutionRanges(): void {
@@ -183,158 +198,183 @@ class ClarionFormatter {
     private isStructure(token: Token): token is StructureToken {
         return token.type === TokenType.Structure;
     }
-    
 
-   public format(): string {
-    logger.info("📐 Starting inline structure-based formatting...");
 
-    let indentStack: { startColumn: number; indentLevel: number }[] = [];
-    let finalIndent = this.indentSize; // 🔹 Minimum indent size
+    public format(): string {
+        logger.info("📐 Starting inline structure-based formatting...");
 
-    const formattedLines: string[] = [];
+        // 0-based snap to VS Code tab grid (0,4,8,... for indentSize=4)
+        const snap0 = (col0: number) =>
+          col0 + ((this.indentSize - (col0 % this.indentSize)) % this.indentSize);
 
-    for (let index = 0; index < this.lines.length; index++) {
-        const originalLine = this.lines[index];
-        const trimmedLine = originalLine.trimLeft();
-        if (trimmedLine.length === 0) {
-            formattedLines.push("");
-            continue;
-        }
+        // Render helper: produce spaces so the next char is at 0-based column col0
+        const padToCol0 = (col0: number) => " ".repeat(Math.max(0, col0));
 
-        // ✅ Get tokens for this line
-        const tokensOnLine = this.tokens.filter(t => t.line === index);
-        if (tokensOnLine.length === 0) {
-            formattedLines.push(" ".repeat(finalIndent) + trimmedLine);
-            continue;
-        }
+        let indentStack: { startColumn: number; indentLevel: number }[] = [];
+        let finalIndent = this.indentSize; // 🔹 Minimum indent size
 
-        // ✅ Identify first and second tokens
-        const firstToken = tokensOnLine[0];
-        const secondToken = tokensOnLine.length > 1 ? tokensOnLine[1] : null;
+        const formattedLines: string[] = [];
 
-        let lineIndent = finalIndent;
-
-        // ✅ Labels always stay at column 0
-        if (firstToken.type === TokenType.Label) {
-            logger.info(`📌 Keeping label '${firstToken.value}' at column 0 on Line ${index}`);
-
-            let labelEndColumn = firstToken.start + firstToken.value.length;
-
-            // ✅ If followed by a structure, indent it correctly
-            if (secondToken?.type === TokenType.Structure) {
-                let parentIndent = indentStack.length > 0 ? indentStack[indentStack.length - 1].indentLevel : this.indentSize;
-                let structureIndent = Math.max(labelEndColumn + this.indentSize, secondToken.maxLabelLength + this.indentSize, parentIndent);
-
-                logger.info(`📏 Formatting STRUCTURE '${secondToken.value}' at Line ${index}, indent = ${structureIndent}`);
-
-                // ✅ Store indentation for nested structures
-                indentStack.push({ startColumn: structureIndent, indentLevel: structureIndent + this.indentSize });
-
-                formattedLines.push(
-                    firstToken.value + " ".repeat(Math.max(0, structureIndent - labelEndColumn)) + trimmedLine.substring(secondToken.start)
-                );
+        for (let index = 0; index < this.lines.length; index++) {
+            const originalLine = this.lines[index];
+            
+            // Check if line contains tabs and log a warning
+            if (originalLine.includes('\t')) {
+                logger.warn(`⚠️ Line ${index} contains tabs. This may cause alignment issues.`);
+                logger.info(`Original line with tabs: "${originalLine.replace(/\t/g, '\\t')}"`);
+            }
+            
+            // Trim both leading and trailing spaces to avoid preserving trailing spaces
+            const trimmedLine = originalLine.trim();
+            if (trimmedLine.length === 0) {
+                formattedLines.push("");
                 continue;
             }
+            
+            // For logging purposes, also track the left-trimmed version to maintain token positions
+            const leftTrimmedLine = originalLine.trimLeft();
 
-            // ✅ If label is followed by a non-structure statement, indent it based on parent
-            if (secondToken && !this.isStructure(secondToken)) {
-                let parentIndent = indentStack.length > 0 ? indentStack[indentStack.length - 1].indentLevel : this.indentSize;
-                let statementIndent = Math.max(labelEndColumn + this.indentSize, parentIndent);
-
-                logger.info(`🔹 Formatting non-structure statement '${secondToken.value}' at Line ${index}, indent = ${statementIndent}`);
-
-                formattedLines.push(
-                    firstToken.value + " ".repeat(Math.max(0, statementIndent - labelEndColumn)) + trimmedLine.substring(secondToken.start)
-                );
-                continue;
-            }
-
-            formattedLines.push(trimmedLine);
-            continue;
-        }
-
-        // ✅ Handle Conditional Continuation (ELSE, ELSIF, OF)
-        if (firstToken.type === TokenType.ConditionalContinuation) {
-            logger.info(`↩️ Reducing indent for '${firstToken.value}' at Line ${index}`);
-
-            if (indentStack.length > 0) {
-                let lastIndent = indentStack.pop();
-                if (lastIndent) {
-                    lineIndent = Math.max(lastIndent.startColumn, this.indentSize);
-                }
-            }
-
-            // ✅ Restore the indentation for following lines
-            indentStack.push({ startColumn: lineIndent, indentLevel: lineIndent + this.indentSize });
-        }
-
-        // ✅ Structures without a label before them
-        else if (firstToken.type === TokenType.Structure) {
-            // ✅ Ignore structures that start and finish on the same line
-            if (firstToken.finishesAt !== undefined && firstToken.finishesAt === index) {
-                logger.info(`⏩ Skipping inline structure '${firstToken.value}' on Line ${index}`);
+            // ✅ Get tokens for this line
+            const tokensOnLine = this.tokens.filter(t => t.line === index);
+            if (tokensOnLine.length === 0) {
                 formattedLines.push(" ".repeat(finalIndent) + trimmedLine);
                 continue;
             }
 
-            // ✅ Ensure structure indentation respects parent structures
-            let parentIndent = indentStack.length > 0 ? indentStack[indentStack.length - 1].indentLevel : this.indentSize;
-            let structureIndent = Math.max(parentIndent, firstToken.maxLabelLength + this.indentSize);
+            // ✅ Identify first and second tokens
+            const firstToken = tokensOnLine[0];
+            const secondToken = tokensOnLine.length > 1 ? tokensOnLine[1] : null;
 
-            logger.info(`📏 Formatting STRUCTURE '${firstToken.value}' at Line ${index}, indent = ${structureIndent}`);
+            let lineIndent = finalIndent;
 
-            // ✅ Store indentation for child elements
-            indentStack.push({ startColumn: structureIndent, indentLevel: structureIndent + this.indentSize });
+            if (firstToken.type === TokenType.Label) {
+              logger.info(`📌 Keeping label '${firstToken.value}' at column 0 on Line ${index}`);
 
-            lineIndent = structureIndent;
-        }
+              // 0-based label positions
+              const labelStart0 = firstToken.start;                              // 0-based
+              const labelEnd0   = labelStart0 + firstToken.value.length;         // 0-based
 
-        // ✅ Handle END statement (aligns with its structure)
-        else if (firstToken.type === TokenType.EndStatement) {
-            let lastStructure = indentStack.pop();
-            if (lastStructure) {
-                lineIndent = lastStructure.startColumn;
-                logger.info(`✅ END at Line ${index} aligns with its structure at Column ${lineIndent}`);
+              const parentCol0  = indentStack.length
+                ? indentStack[indentStack.length - 1].indentLevel                // 0-based
+                : this.indentSize;                                               // minimum 0-based indent
+
+              if (secondToken?.type === TokenType.Structure) {
+                // Require a full indent gap after label, then snap to grid
+                const minAfterLabel0   = labelEnd0 + this.indentSize;            // e.g., 24 + 4 = 28
+                const nextGridAfterLbl = snap0(minAfterLabel0);                  // e.g., -> 28
+
+                // If maxLabelLength policy is present, snap that too (+indentSize if desired)
+                const maxLabelTarget0 = (secondToken as any).maxLabelLength
+                  ? snap0((secondToken as any).maxLabelLength + this.indentSize)
+                  : nextGridAfterLbl;
+
+                const structureCol0 = Math.max(nextGridAfterLbl, maxLabelTarget0, parentCol0); // 0-based
+
+                // Push EXACT opener column (0-based); children will use +indentSize, END will pop to this
+                indentStack.push({ startColumn: structureCol0, indentLevel: structureCol0 + this.indentSize });
+                logger.info(`labelEnd0 = ${labelEnd0} - structureCol0 = ${structureCol0}`);
+                const spacesToAdd = Math.max(0, structureCol0 - labelEnd0);      // 0-based delta from label end
+                logger.info(`➡️ Aligning structure '${secondToken.value}' after label '${firstToken.value}' at Column ${structureCol0} on Line ${index}`);
+                const formattedLine =
+                  firstToken.value +
+                  " ".repeat(spacesToAdd) +
+                  originalLine.substring(secondToken.start); // token.start is 0-based index into original
+                logger.info(`Formatted Line ${index}: "${formattedLine}"`);
+                formattedLines.push(formattedLine);
+                continue;
+              }
+
+              if (secondToken && !this.isStructure(secondToken)) {
+                // Non-structure after label: align to the same grid column policy
+                const stmtCol0    = Math.max(snap0(labelEnd0 + this.indentSize), parentCol0);
+                const spacesToAdd = Math.max(0, stmtCol0 - labelEnd0);
+                logger.info(`➡️ Aligning statement '${secondToken.value}' after label '${firstToken.value}' at Column ${stmtCol0} on Line ${index}`);
+                const formattedLine =
+                  firstToken.value +
+                  " ".repeat(spacesToAdd) +
+                  originalLine.substring(secondToken.start);
+
+                formattedLines.push(formattedLine);
+                continue;
+              }
+
+              // Label-only line: keep as trimmed (no trailing spaces)
+              formattedLines.push(originalLine.trim());
+              continue;
             }
-        }
 
-        // ✅ Non-structure tokens inside a Structure (e.g., `KEY`, `FIELD`, etc.)
-        else {
-            if (indentStack.length > 0) {
-                // ✅ Indent non-structure elements one level deeper than their parent structure
-                let parentIndent = indentStack[indentStack.length - 1].startColumn;
-                lineIndent = parentIndent + this.indentSize;
-            } else {
-                lineIndent = finalIndent;
+
+            // ✅ Handle Conditional Continuation (ELSE, ELSIF, OF)
+            if (firstToken.type === TokenType.ConditionalContinuation) {
+                logger.info(`↩️ Reducing indent for '${firstToken.value}' at Line ${index}`);
+
+                if (indentStack.length > 0) {
+                    let lastIndent = indentStack.pop();
+                    if (lastIndent) {
+                        lineIndent = Math.max(lastIndent.startColumn, this.indentSize);
+                    }
+                }
+
+                // ✅ Restore the indentation for following lines
+                indentStack.push({ startColumn: lineIndent, indentLevel: lineIndent + this.indentSize });
             }
 
-            logger.info(`🔹 Token '${firstToken.value}' at Line ${index} indented at Column ${lineIndent}`);
+            else if (firstToken.type === TokenType.Structure) {
+              if (firstToken.finishesAt !== undefined && firstToken.finishesAt === index) {
+                logger.info(`⏩ Skipping inline structure '${firstToken.value}' on Line ${index}`);
+                formattedLines.push(padToCol0(this.indentSize) + originalLine.trim()); // minimal indent
+                continue;
+              }
+
+              const parentCol0 = indentStack.length
+                ? indentStack[indentStack.length - 1].indentLevel
+                : this.indentSize;
+
+              // Align unlabeled structure to a grid target (e.g. after global longest label, if provided)
+              const targetCol0 = firstToken.maxLabelLength
+                ? snap0(firstToken.maxLabelLength + this.indentSize)
+                : parentCol0;
+
+              const structureCol0 = Math.max(parentCol0, targetCol0);
+
+              indentStack.push({ startColumn: structureCol0, indentLevel: structureCol0 + this.indentSize });
+              lineIndent = structureCol0; // 0-based
+            }
+
+            else if (firstToken.type === TokenType.EndStatement) {
+              const last = indentStack.pop();
+              if (last) {
+                lineIndent = last.startColumn; // 0-based; END aligns with opener
+                logger.info(`✅ END at Line ${index} aligns with opener at column ${lineIndent}`);
+              }
+            }
+
+            else {
+              if (indentStack.length > 0) {
+                const parentCol0 = indentStack[indentStack.length - 1].startColumn; // 0-based
+                lineIndent = parentCol0 + this.indentSize;                          // 0-based child column
+                logger.info(`🔍 Child '${firstToken.value}' at column ${lineIndent} (parent ${parentCol0} + ${this.indentSize})`);
+              } else {
+                lineIndent = this.indentSize; // minimal 0-based indent
+              }
+            }
+
+            lineIndent = Math.max(lineIndent, this.indentSize); // still 0-based
+            const formattedLine = padToCol0(lineIndent) + originalLine.trim();
+            formattedLines.push(formattedLine);
         }
 
-        // ✅ Ensure minimum indentation for all non-labels
-        lineIndent = Math.max(lineIndent, this.indentSize);
-
-        // ✅ Format the line using the calculated indentation
-        let formattedLine = " ".repeat(lineIndent) + trimmedLine;
-
-        if (formattedLine !== originalLine) {
-            logger.info(`✅ Formatting changed for Line ${index}: '${originalLine}' → '${formattedLine}'`);
-        }
-
-        formattedLines.push(formattedLine);
+        logger.info("📐 Structure-based formatting complete.");
+        return formattedLines.join("\r\n");
     }
 
-    logger.info("📐 Structure-based formatting complete.");
-    return formattedLines.join("\r\n");
-}
 
-    
-    
-    
-    
-  
-    
-    
+
+
+
+
+
+
     /** ✅ Gets the root structure that a given token belongs to */
     private getRootStructure(token: Token): Token | null {
         let current = token;
@@ -343,14 +383,14 @@ class ClarionFormatter {
         }
         return current;
     }
-    
-    
 
 
 
-   
-    
-    
+
+
+
+
+
 
 
 

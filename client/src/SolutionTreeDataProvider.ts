@@ -6,13 +6,25 @@ import * as path from 'path';
 import { SolutionCache } from './SolutionCache';
 import { globalSolutionFile } from './globals';
 import * as fs from 'fs';
+import { ProjectIndex } from './ProjectIndex';
+import { PathUtils } from './PathUtils';
+import { getLanguageClient } from './LanguageClientManager';
 
 const logger = LoggerManager.getLogger("SolutionTreeDataProvider");
-logger.setLevel("error");
+logger.setLevel("info");
+
+// Create a specialized debug logger for file resolution issues
+const fileResolutionLogger = LoggerManager.getLogger("FileResolution");
+fileResolutionLogger.setLevel("debug");
 
 // Special node type for when no solution is open
 interface NoSolutionNodeData {
     type: 'noSolution';
+}
+
+// Add description property to TreeNode
+interface TreeNodeWithDescription extends TreeNode {
+    description?: string;
 }
 
 export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
@@ -25,6 +37,7 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
 
     private _root: TreeNode[] | null = null;
     private solutionCache: SolutionCache;
+    private projectIndex: ProjectIndex;
     
     // Filter-related properties
     private _filterText: string = '';
@@ -34,6 +47,7 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
 
     constructor() {
         this.solutionCache = SolutionCache.getInstance();
+        this.projectIndex = ProjectIndex.getInstance();
     }
 
     // Method to set filter text with debouncing
@@ -74,6 +88,8 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     private refreshInProgress = false;
     async refresh(): Promise<void> {
         if (this.refreshInProgress) return;
+        this.refreshInProgress = true;
+        const startTime = performance.now();
         logger.info("🔄 Refreshing solution tree...");
     
         try {
@@ -83,23 +99,60 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 logger.info("ℹ️ No solution file set. Clearing tree.");
                 this._root = []; // This will trigger the welcome screen if `clarion.solutionOpen` is false
                 this._onDidChangeTreeData.fire();
+                const endTime = performance.now();
+                logger.info(`✅ Tree cleared in ${(endTime - startTime).toFixed(2)}ms`);
                 return;
             }
     
-            const currentSolutionPath = this.solutionCache.getSolutionFilePath();
-            if (currentSolutionPath) {
-                await this.solutionCache.refresh();
-            } else {
-                await this.solutionCache.initialize(globalSolutionFile);
+            // Store the current tree state before refreshing
+            const existingTree = this._root ? [...this._root] : [];
+            const hasExistingProjects = existingTree.length > 0 &&
+                existingTree[0].children && existingTree[0].children.length > 0;
+            
+            if (hasExistingProjects) {
+                logger.info(`ℹ️ Existing tree has ${existingTree[0].children.length} projects before refresh`);
             }
     
+            const currentSolutionPath = this.solutionCache.getSolutionFilePath();
+            const cacheStartTime = performance.now();
+            if (currentSolutionPath) {
+                // Use non-forced refresh to preserve cache on empty server results
+                await this.solutionCache.refresh(false);
+            } else {
+                await this.solutionCache.initialize(globalSolutionFile);
+                
+                // If the solution info is empty after initialization, try a refresh but don't force it
+                const solution = this.solutionCache.getSolutionInfo();
+                if (!solution || !solution.projects || solution.projects.length === 0) {
+                    logger.warn("⚠️ Solution cache is empty after initialization. Refreshing from server...");
+                    await this.solutionCache.refresh(false);
+                }
+            }
+            const cacheEndTime = performance.now();
+            logger.info(`✅ Solution cache refreshed in ${(cacheEndTime - cacheStartTime).toFixed(2)}ms`);
+    
+            const treeStartTime = performance.now();
             await this.getTreeItems(); // Load the new tree
+            const treeEndTime = performance.now();
+            logger.info(`✅ Tree items loaded in ${(treeEndTime - treeStartTime).toFixed(2)}ms`);
+            
+            // Check if we got an empty tree but had projects before
+            if ((!this._root || this._root.length === 0 ||
+                (this._root[0].children && this._root[0].children.length === 0)) &&
+                hasExistingProjects) {
+                
+                logger.warn("⚠️ Tree is empty after refresh but had projects before. Restoring previous tree.");
+                this._root = existingTree;
+                logger.info(`✅ Restored previous tree with ${existingTree[0].children.length} projects`);
+            }
+            
             this._onDidChangeTreeData.fire();
     
             if (!this._root || this._root.length === 0) {
                 logger.warn("⚠️ Tree root is empty after refresh.");
             } else {
-                logger.info(`✅ Tree refreshed successfully with ${this._root.length} root item(s).`);
+                const endTime = performance.now();
+                logger.info(`✅ Tree refreshed successfully with ${this._root.length} root item(s) in ${(endTime - startTime).toFixed(2)}ms`);
             }
         } catch (error) {
             logger.error(`❌ Error refreshing solution tree: ${error instanceof Error ? error.message : String(error)}`);
@@ -111,6 +164,203 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         // If we have a filter and this is a request for children of a specific element
         if (element) {
             logger.info(`🔍 Getting children for element: ${element.label}`);
+            
+            // Check if this is a project node that needs to load its details
+            if (element.data && (element.data as any).kind === 'project') {
+                // This is a project node that needs to load its details from the server
+                const projectData = element.data as any;
+                
+                // Show loading indicator
+                const loadingNode = new TreeNode(
+                    "Loading...",
+                    TreeItemCollapsibleState.None,
+                    { type: 'loading' }
+                );
+                
+                // Return the loading node while we fetch the details
+                const loadingResult = [loadingNode];
+                
+                // Get project information from the data payload
+                const { projectId } = projectData;
+                
+                // Get the language client
+                const client = getLanguageClient();
+                if (!client) {
+                    logger.error("❌ Language client not available");
+                    return loadingResult;
+                }
+                
+                try {
+                    logger.info(`🔄 Requesting children for ${element.label} from server with GUID: ${projectId}`);
+                    
+                    // Request project files from the server
+                    const response = await client.sendRequest<{ files: any[] }>('clarion/getProjectFiles', {
+                        projectGuid: projectId
+                    });
+                    
+                    if (response && response.files) {
+                        logger.info(`✅ Received ${response.files.length} files from server for project ${element.label}`);
+                        
+                        // Update the project node description to show the correct file count
+                        const projectNodeWithDesc = element as TreeNodeWithDescription;
+                        projectNodeWithDesc.description = `${response.files.length} ${response.files.length === 1 ? 'file' : 'files'}`;
+                        
+                        // Clear existing children
+                        element.children = [];
+                        
+                        // Create a set to track files already added to this project
+                        const addedFiles = new Set<string>();
+                        
+                        // Add the files to the project node
+                        for (const sourceFile of response.files) {
+                            // Skip files that have already been added to this project
+                            if (addedFiles.has(sourceFile.name)) {
+                                logger.info(`[TREE] Skipping duplicate file: ${sourceFile.name} in project ${element.label}`);
+                                continue;
+                            }
+                            
+                            const uniqueId = `${projectId}_${sourceFile.name}`;
+                            // Log more details about the source file for debugging
+                            logger.info(`[TREE] Creating node for file: ${sourceFile.name} with uniqueId: ${uniqueId}`);
+                            logger.info(`[TREE] Source file details: name=${sourceFile.name}, relativePath=${sourceFile.relativePath}`);
+                            
+                            // Make sure we never use undefined as a label
+                            const displayName = sourceFile.name || path.basename(sourceFile.relativePath || "unknown-file");
+                            
+                            const sourceFileNode = new TreeNode(
+                                displayName,
+                                TreeItemCollapsibleState.None,
+                                {
+                                    ...sourceFile,
+                                    // Ensure each file has a unique identifier to prevent duplication
+                                    uniqueId: uniqueId
+                                },
+                                element
+                            );
+                            element.children.push(sourceFileNode);
+                            
+                            // Mark this file as added to prevent duplicates
+                            addedFiles.add(sourceFile.name);
+                        }
+                        
+                        logger.info(`[TREE] Added ${element.children.length} source files to project node`);
+                        
+                        // Return the source files
+                        return element.children;
+                    } else {
+                        logger.warn(`⚠️ Server returned no files for project ${element.label}`);
+                        
+                        // Clear existing children and update description
+                        element.children = [];
+                        const projectNodeWithDesc = element as TreeNodeWithDescription;
+                        projectNodeWithDesc.description = "0 files";
+                        
+                        return [];
+                    }
+                } catch (error) {
+                    logger.error(`❌ Error getting project files from server: ${error instanceof Error ? error.message : String(error)}`);
+                    
+                    // Return the loading node to indicate an error
+                    return loadingResult;
+                }
+            }
+            
+            // Check if this is a project node with the old format (for backward compatibility)
+            else if (element.data && (element.data as any).guid) {
+                // This is a project node that needs to load its details from the server
+                const projectData = element.data as any;
+                
+                // Show loading indicator
+                const loadingNode = new TreeNode(
+                    "Loading...",
+                    TreeItemCollapsibleState.None,
+                    { type: 'loading' }
+                );
+                
+                // Return the loading node while we fetch the details
+                const loadingResult = [loadingNode];
+                
+                // Get the language client
+                const client = getLanguageClient();
+                if (!client) {
+                    logger.error("❌ Language client not available");
+                    return loadingResult;
+                }
+                
+                try {
+                    logger.info(`🔄 Requesting children for ${element.label} from server with GUID: ${projectData.guid}`);
+                    
+                    // Request project files from the server
+                    const response = await client.sendRequest<{ files: any[] }>('clarion/getProjectFiles', {
+                        projectGuid: projectData.guid
+                    });
+                    
+                    if (response && response.files) {
+                        logger.info(`✅ Received ${response.files.length} files from server for project ${element.label}`);
+                        
+                        // Update the project node description to show the correct file count
+                        const projectNodeWithDesc = element as TreeNodeWithDescription;
+                        projectNodeWithDesc.description = `${response.files.length} ${response.files.length === 1 ? 'file' : 'files'}`;
+                        
+                        // Clear existing children
+                        element.children = [];
+                        
+                        // Create a set to track files already added to this project
+                        const addedFiles = new Set<string>();
+                        
+                        // Add the files to the project node
+                        for (const sourceFile of response.files) {
+                            // Skip files that have already been added to this project
+                            if (addedFiles.has(sourceFile.name)) {
+                                logger.info(`[TREE] Skipping duplicate file: ${sourceFile.name} in project ${element.label}`);
+                                continue;
+                            }
+                            
+                            const uniqueId = `${projectData.guid}_${sourceFile.name}`;
+                            // Log more details about the source file for debugging
+                            logger.info(`[TREE] Creating node for file: ${sourceFile.name} with uniqueId: ${uniqueId}`);
+                            logger.info(`[TREE] Source file details: name=${sourceFile.name}, relativePath=${sourceFile.relativePath}`);
+                            
+                            // Make sure we never use undefined as a label
+                            const displayName = sourceFile.name || path.basename(sourceFile.relativePath || "unknown-file");
+                            
+                            const sourceFileNode = new TreeNode(
+                                displayName,
+                                TreeItemCollapsibleState.None,
+                                {
+                                    ...sourceFile,
+                                    // Ensure each file has a unique identifier to prevent duplication
+                                    uniqueId: uniqueId
+                                },
+                                element
+                            );
+                            element.children.push(sourceFileNode);
+                            
+                            // Mark this file as added to prevent duplicates
+                            addedFiles.add(sourceFile.name);
+                        }
+                        
+                        logger.info(`[TREE] Added ${element.children.length} source files to project node`);
+                        
+                        // Return the source files
+                        return element.children;
+                    } else {
+                        logger.warn(`⚠️ Server returned no files for project ${element.label}`);
+                        
+                        // Clear existing children and update description
+                        element.children = [];
+                        const projectNodeWithDesc = element as TreeNodeWithDescription;
+                        projectNodeWithDesc.description = "0 files";
+                        
+                        return [];
+                    }
+                } catch (error) {
+                    logger.error(`❌ Error getting project files from server: ${error instanceof Error ? error.message : String(error)}`);
+                    
+                    // Return the loading node to indicate an error
+                    return loadingResult;
+                }
+            }
             
             // Check if we have a filter active
             if (this._filterText && this._filterText.trim() !== '') {
@@ -191,12 +441,21 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         return this._root || [];
     }
     
+    // The loadProjectDetails method has been removed as we now always request data from the server
+    
     getTreeItem(element: TreeNode): TreeItem {
         const label = element.label || "Unnamed Item";
         const treeItem = new TreeItem(label, element.collapsibleState);
+        
+        // Set description if available
+        if (element.description) {
+            treeItem.description = element.description;
+        }
+        
         const data = element.data;
         logger.info(`🏗 Processing item with label: ${label}`);
-        logger.info(JSON.stringify(data, null, 2));
+        // Reduce logging to improve performance
+        logger.info(`🏗 Item data type: ${data?.type || (data?.guid ? 'project' : (data?.relativePath ? 'file' : 'other'))}`);
 
         if ((data as any)?.type === 'noSolution') {
             treeItem.iconPath = new ThemeIcon('folder-opened');
@@ -316,8 +575,9 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             treeItem.contextValue = 'clarionFile';
 
             const solutionCache = SolutionCache.getInstance();
-            logger.setLevel("error"); // Temporarily increase log level for debugging
-            logger.info(`🔍 Looking for file: ${file.relativePath}`);
+            logger.setLevel("info"); // Temporarily increase log level for debugging
+            // Log more details about the file for debugging
+            logger.info(`🔍 Looking for file: ${file.name || 'undefined'}, relativePath: ${file.relativePath || 'undefined'}`);
             
             // Get the parent project node to help with debugging
             let projectNode = element.parent;
@@ -329,10 +589,16 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 projectName = projectData.name || "unnamed";
                 projectPath = projectData.path || "unknown";
                 logger.info(`🔍 File belongs to project: ${projectName}, path: ${projectPath}`);
-                logger.info(`🔍 Full relative path: ${path.join(projectPath, file.relativePath)}`);
+                
+                // Make sure we have a valid relative path
+                const relativePath = file.relativePath || file.name || "unknown-file";
+                logger.info(`🔍 Full relative path: ${path.join(projectPath, relativePath)}`);
                 
                 // Try direct path first as a quick check
-                const directPath = path.join(projectPath, file.relativePath);
+                // Make sure we have a valid relative path
+                const fileRelativePath = file.relativePath || file.name || "unknown-file";
+                const directPath = path.join(projectPath, fileRelativePath);
+                
                 if (fs.existsSync(directPath)) {
                     logger.info(`✅ File found immediately using direct path: ${directPath}`);
                     treeItem.command = {
@@ -340,14 +606,16 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                         command: 'clarion.openFile',
                         arguments: [directPath]
                     };
-                    treeItem.tooltip = `File: ${file.name}\nPath: ${directPath} (direct)`;
-                    logger.setLevel("error"); // Reset log level
+                    treeItem.tooltip = `File: ${file.name || path.basename(fileRelativePath)}\nPath: ${directPath} (direct)`;
+                    logger.setLevel("info"); // Reset log level
                     return treeItem;
                 }
             }
             
             // If direct path didn't work, try server resolution
-            solutionCache.findFileWithExtension(file.relativePath).then(fullPath => {
+            // Make sure we have a valid path to search for
+            const searchPath = file.relativePath || file.name || "unknown-file";
+            solutionCache.findFileWithExtension(searchPath).then(fullPath => {
                 logger.info(`🔍 Result from findFileWithExtension: ${fullPath}`);
                 
                 if (fullPath && fullPath !== "") {
@@ -356,15 +624,17 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                         command: 'clarion.openFile',
                         arguments: [fullPath]
                     };
-                    logger.info(`📄 getTreeItem(): File – ${file.name} (${fullPath})`);
+                    logger.info(`📄 getTreeItem(): File – ${file.name || path.basename(searchPath)} (${fullPath})`);
                     
                     // Add tooltip with file path for debugging
-                    treeItem.tooltip = `File: ${file.name}\nPath: ${fullPath}`;
+                    treeItem.tooltip = `File: ${file.name || path.basename(searchPath)}\nPath: ${fullPath}`;
                 } else {
                     // Try with full path as fallback
                     if (projectNode && projectNode.data && (projectNode.data as any).guid) {
                         const projectData = projectNode.data as ClarionProjectInfo;
-                        const fullFilePath = path.join(projectData.path, file.relativePath);
+                        // Make sure we have a valid relative path
+                        const fallbackPath = file.relativePath || file.name || "unknown-file";
+                        const fullFilePath = path.join(projectData.path, fallbackPath);
                         
                         if (fs.existsSync(fullFilePath)) {
                             logger.info(`✅ File found using direct path: ${fullFilePath}`);
@@ -373,20 +643,20 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                                 command: 'clarion.openFile',
                                 arguments: [fullFilePath]
                             };
-                            treeItem.tooltip = `File: ${file.name}\nPath: ${fullFilePath} (direct)`;
+                            treeItem.tooltip = `File: ${file.name || path.basename(fallbackPath)}\nPath: ${fullFilePath} (direct)`;
                         } else {
-                            treeItem.tooltip = `⚠️ File not found: ${file.relativePath}`;
-                            logger.warn(`⚠️ getTreeItem(): File not found for ${file.relativePath}`);
+                            treeItem.tooltip = `⚠️ File not found: ${file.name || fallbackPath}`;
+                            logger.warn(`⚠️ getTreeItem(): File not found for ${file.name || fallbackPath}`);
                         }
                     } else {
-                        treeItem.tooltip = `⚠️ File not found: ${file.relativePath}`;
-                        logger.warn(`⚠️ getTreeItem(): File not found for ${file.relativePath}`);
+                        treeItem.tooltip = `⚠️ File not found: ${file.name || file.relativePath || "unknown-file"}`;
+                        logger.warn(`⚠️ getTreeItem(): File not found for ${file.name || file.relativePath || "unknown-file"}`);
                     }
                 }
             }).catch(err => {
                 logger.error(`❌ getTreeItem(): Error finding file for ${file.relativePath}: ${err}`);
             });
-            logger.setLevel("error"); // Reset log level
+            logger.setLevel("info"); // Reset log level
             return treeItem;
         }
 
@@ -457,6 +727,7 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     }
 
     async getTreeItems(): Promise<TreeNode[]> {
+        const startTime = performance.now();
         try {
             logger.info("🔄 Getting solution tree from cache...");
 
@@ -469,187 +740,105 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 );
                 this._root = [noSolutionNode];
                 this._onDidChangeTreeData.fire();
+                const endTime = performance.now();
+                logger.info(`✅ Created 'Open Solution' node in ${(endTime - startTime).toFixed(2)}ms`);
                 return this._root;
             }
-
-            try {
-                await this.solutionCache.refresh();
-                logger.info("✅ Solution cache refreshed successfully");
-            } catch (refreshError) {
-                logger.error(`❌ Error refreshing solution cache: ${refreshError instanceof Error ? refreshError.message : String(refreshError)}`);
-            }
-
-            const solution = this.solutionCache.getSolutionInfo();
+    
+            // Use the solution info directly without refreshing again
+            // This avoids duplicate refreshes since the refresh() method already refreshes the cache
+            let solution = this.solutionCache.getSolutionInfo();
 
             if (!solution) {
                 logger.warn("⚠️ No solution available in cache.");
                 return this._root || [];
             }
 
+            // Check if we already have a valid tree with projects
+            if (this._root && this._root.length > 0 && this._root[0].children && this._root[0].children.length > 0) {
+                // We have an existing tree with projects
+                if (!solution.projects || !Array.isArray(solution.projects) || solution.projects.length === 0) {
+                    logger.warn("⚠️ Server returned empty projects array. Preserving existing tree.");
+                    logger.info(`✅ Preserved existing tree with ${this._root[0].children.length} projects`);
+                    return this._root;
+                }
+            }
+
+            // If we don't have an existing tree or the solution has projects, proceed normally
             if (!solution.projects || !Array.isArray(solution.projects) || solution.projects.length === 0) {
-                logger.warn("⚠️ Invalid or empty projects array in solution");
-                return this._root || [];
+                logger.warn("⚠️ Invalid or empty projects array in solution. Forcing refresh from server...");
+                
+                // Try one more time with force refresh
+                await this.solutionCache.refresh(true);
+                const refreshedSolution = this.solutionCache.getSolutionInfo();
+                
+                if (!refreshedSolution || !refreshedSolution.projects || refreshedSolution.projects.length === 0) {
+                    logger.error("❌ Still unable to get valid solution data after force refresh");
+                    
+                    // If we have an existing tree, preserve it
+                    if (this._root && this._root.length > 0) {
+                        logger.info("✅ Preserving existing tree after failed refresh");
+                        return this._root;
+                    }
+                    
+                    return this._root || [];
+                }
+                
+                // Use the refreshed solution
+                solution = refreshedSolution;
             }
 
             logger.info(`🌲 Building tree for solution: ${solution.name}`);
             logger.info(`📁 Projects in solution: ${solution.projects.length}`);
             
-            // Log detailed project information
-            logger.info(`📊 Solution tree details in getTreeItems:`);
-            for (let i = 0; i < solution.projects.length; i++) {
-                const project = solution.projects[i];
-                logger.info(`📂 Project ${i+1}/${solution.projects.length}: ${project.name}`);
-                logger.info(`  - Path: ${project.path}`);
-                logger.info(`  - GUID: ${project.guid}`);
-                logger.info(`  - Source Files: ${project.sourceFiles?.length || 0}`);
-                logger.info(`  - File Drivers: ${project.fileDrivers?.length || 0}`);
-                logger.info(`  - Libraries: ${project.libraries?.length || 0}`);
-                logger.info(`  - Project References: ${project.projectReferences?.length || 0}`);
-                logger.info(`  - None Files: ${project.noneFiles?.length || 0}`);
-            }
-
+            // Create the solution node
             const solutionNode = new TreeNode(
                 solution.name || "Solution",
                 TreeItemCollapsibleState.Expanded,
                 solution
             );
 
+
+            // Add project nodes with minimal information - details will be loaded on demand
             for (const project of solution.projects.filter(Boolean)) {
-                // Log project details to help diagnose issues
-                logger.info(`Processing project: ${project.name}`);
-                logger.info(`  Source Files: ${project.sourceFiles?.length || 0}`);
-                logger.info(`  File Drivers: ${project.fileDrivers?.length || 0} - ${project.fileDrivers?.join(', ') || 'none'}`);
-                logger.info(`  Libraries: ${project.libraries?.length || 0} - ${project.libraries?.join(', ') || 'none'}`);
-                logger.info(`  Project References: ${project.projectReferences?.length || 0} - ${project.projectReferences?.map(r => r.name).join(', ') || 'none'}`);
-                logger.info(`  None Files: ${project.noneFiles?.length || 0} - ${project.noneFiles?.join(', ') || 'none'}`);
-                
+                // Create a project node with no children initially
+                // Add project identity data to allow lazy loading on expand
                 const projectNode = new TreeNode(
                     project.name || "Unnamed Project",
                     TreeItemCollapsibleState.Collapsed,
-                    project,
+                    {
+                        ...project,
+                        kind: 'project',
+                        projectId: project.guid,
+                        projectPath: project.path,
+                        projectName: project.name
+                    },
                     solutionNode
                 );
-
-                // Add File Drivers section if available
-                if (project.fileDrivers && project.fileDrivers.length > 0) {
-                    const fileDriversNode = new TreeNode(
-                        "File Drivers",
-                        TreeItemCollapsibleState.Collapsed,
-                        { type: 'section', sectionType: 'fileDrivers' },
-                        projectNode
-                    );
-
-                    for (const driver of project.fileDrivers) {
-                        const driverNode = new TreeNode(
-                            driver,
-                            TreeItemCollapsibleState.None,
-                            { type: 'fileDriver', name: driver },
-                            fileDriversNode
-                        );
-                        fileDriversNode.children.push(driverNode);
-                    }
-
-                    projectNode.children.push(fileDriversNode);
-                    logger.info(`     ✅ Added ${project.fileDrivers.length} file drivers to project ${project.name || 'unnamed'}`);
-                }
-
-                // Add Libraries, Objects and Resource Files section if available
-                if (project.libraries && project.libraries.length > 0) {
-                    const librariesNode = new TreeNode(
-                        "Libraries, Objects and Resource Files",
-                        TreeItemCollapsibleState.Collapsed,
-                        { type: 'section', sectionType: 'libraries' },
-                        projectNode
-                    );
-
-                    for (const lib of project.libraries) {
-                        const libNode = new TreeNode(
-                            lib,
-                            TreeItemCollapsibleState.None,
-                            { type: 'library', name: lib },
-                            librariesNode
-                        );
-                        librariesNode.children.push(libNode);
-                    }
-
-                    projectNode.children.push(librariesNode);
-                    logger.info(`     ✅ Added ${project.libraries.length} libraries to project ${project.name || 'unnamed'}`);
-                }
-
-                // Add Referenced Projects section if available
-                if (project.projectReferences && project.projectReferences.length > 0) {
-                    const referencesNode = new TreeNode(
-                        "Referenced Projects",
-                        TreeItemCollapsibleState.Collapsed,
-                        { type: 'section', sectionType: 'projectReferences' },
-                        projectNode
-                    );
-
-                    for (const ref of project.projectReferences) {
-                        const refNode = new TreeNode(
-                            ref.name,
-                            TreeItemCollapsibleState.None,
-                            { type: 'projectReference', name: ref.name, project: ref.project },
-                            referencesNode
-                        );
-                        referencesNode.children.push(refNode);
-                    }
-
-                    projectNode.children.push(referencesNode);
-                    logger.info(`     ✅ Added ${project.projectReferences.length} project references to project ${project.name || 'unnamed'}`);
-                }
-
-                // Add Other Files section if available
-                if (project.noneFiles && project.noneFiles.length > 0) {
-                    const noneFilesNode = new TreeNode(
-                        "Other Files",
-                        TreeItemCollapsibleState.Collapsed,
-                        { type: 'section', sectionType: 'noneFiles' },
-                        projectNode
-                    );
-
-                    for (const file of project.noneFiles) {
-                        const fileNode = new TreeNode(
-                            file,
-                            TreeItemCollapsibleState.None,
-                            { type: 'noneFile', name: file },
-                            noneFilesNode
-                        );
-                        noneFilesNode.children.push(fileNode);
-                    }
-
-                    projectNode.children.push(noneFilesNode);
-                    logger.info(`     ✅ Added ${project.noneFiles.length} other files to project ${project.name || 'unnamed'}`);
-                }
-
-                // Add source files directly under the project node (as they were originally)
-                // Now added at the end so they appear after the section nodes
-                if (project.sourceFiles && Array.isArray(project.sourceFiles) && project.sourceFiles.length > 0) {
-                    for (const sourceFile of project.sourceFiles.filter(Boolean)) {
-                        const sourceFileNode = new TreeNode(
-                            sourceFile.name || "Unnamed File",
-                            TreeItemCollapsibleState.None,
-                            sourceFile,
-                            projectNode
-                        );
-
-                        logger.info(`     📄 ${sourceFile.name || 'unnamed'} — ${sourceFile.relativePath || 'no path'}`);
-                        projectNode.children.push(sourceFileNode);
-                    }
-
-                    logger.info(`     ✅ Added ${project.sourceFiles.length} source files to project ${project.name || 'unnamed'}`);
+                
+                // Add counts to the project node label if available
+                const projectWithCounts = project as any;
+                const projectNodeWithDesc = projectNode as TreeNodeWithDescription;
+                
+                if (projectWithCounts.sourceFilesCount !== undefined) {
+                    projectNodeWithDesc.description = `${projectWithCounts.sourceFilesCount} ${projectWithCounts.sourceFilesCount === 1 ? 'file' : 'files'}`;
+                } else if (project.sourceFiles) {
+                    projectNodeWithDesc.description = `${project.sourceFiles.length} ${project.sourceFiles.length === 1 ? 'file' : 'files'}`;
                 } else {
-                    logger.warn(`⚠️ Project ${project.name || 'unnamed'} has no valid sourceFiles array`);
+                    // Default to 0 files if no count is available
+                    projectNodeWithDesc.description = "0 files";
                 }
 
+                // Add the project node to the solution
                 solutionNode.children.push(projectNode);
-                logger.info(`✅ Added project ${project.name} to solution tree with ${projectNode.children.length} child nodes`);
+                logger.info(`✅ Added project ${project.name} to solution tree (details will be loaded on demand)`);
             }
 
             logger.info(`✅ Added ${solutionNode.children.length} projects to solution tree`);
             this._root = [solutionNode];
             this._onDidChangeTreeData.fire();
-            logger.info("✅ Solution tree updated successfully");
+            const endTime = performance.now();
+            logger.info(`✅ Solution tree updated successfully in ${(endTime - startTime).toFixed(2)}ms`);
 
             return this._root;
         } catch (error) {
@@ -846,4 +1035,7 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     refreshFilterCache(): void {
         this._filteredNodesCache.clear();
     }
+    
+    // The updateReverseIndex method has been removed as part of the client-side caching removal
+    // Project files are now always requested from the server when needed
 }

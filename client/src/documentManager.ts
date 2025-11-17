@@ -21,9 +21,25 @@ import { globalSettings } from './globals';
 import LoggerManager from './logger';
 import { SolutionCache } from './SolutionCache';
 const logger = LoggerManager.getLogger("DocumentManager");
-logger.setLevel("error");
+logger.setLevel("info");
+
+/**
+ * Interface representing document information including statement locations
+ */
 interface DocumentInfo {
     statementLocations: ClarionLocation[];
+}
+
+/**
+ * Interface representing cached document links with metadata
+ */
+interface CachedDocumentLinks {
+    /** The cached document links */
+    links: DocumentLink[];
+    /** Timestamp when the links were generated */
+    timestamp: number;
+    /** Document version number when the links were generated */
+    version: number;
 }
 
 /**
@@ -40,6 +56,47 @@ interface DocumentInfo {
  * in documents for each recognized statement, enabling features like document link generation and
  * navigation to specific document locations (including sections).
  *
+ * LAZY LOADING IMPLEMENTATION:
+ * ----------------------------
+ * The DocumentManager implements a lazy loading approach for method implementations to improve performance
+ * with large files. Instead of eagerly resolving all method implementations during document parsing:
+ *
+ * 1. During document parsing, only method metadata is stored (class name, method name, module file)
+ *    without searching for the actual implementation location.
+ *
+ * 2. When a user hovers over a method declaration, the implementation is resolved on-demand by:
+ *    - Looking up the stored metadata
+ *    - Searching for the implementation in the module file
+ *    - Caching the result to avoid repeated lookups
+ *
+ * This approach significantly reduces the initial parsing time for large files with many method
+ * declarations, as the expensive file I/O and regex searches are deferred until actually needed.
+ *
+ * OVERLOADED METHOD MATCHING:
+ * ---------------------------
+ * The DocumentManager now supports matching overloaded methods based on parameter signatures:
+ *
+ * 1. Parameter Signature Parsing:
+ *    - For method declarations: During document parsing, parameter signatures are extracted and stored
+ *      in the ClarionLocation object as an array of parameter types.
+ *    - For method implementations: When resolving implementations, parameter signatures are extracted
+ *      from potential matches in the module file.
+ *
+ * 2. Matching Algorithm:
+ *    - When resolving a method implementation, all potential implementations with the same class and
+ *      method name are found in the module file.
+ *    - Each implementation's parameter signature is compared with the declaration's parameter signature.
+ *    - The implementation with the matching parameter signature is returned.
+ *    - If no exact match is found, the first implementation is returned as a fallback.
+ *
+ * 3. Parameter Comparison:
+ *    - Parameters are compared based on their types (ignoring parameter names).
+ *    - The number of parameters must match.
+ *    - Parameter types are normalized to lowercase for case-insensitive comparison.
+ *
+ * This approach ensures that "Go to Definition" and "Go to Implementation" navigate to the correct
+ * overloaded method implementation based on the parameter signature.
+ *
  * @remarks
  * - The class registers event listeners upon instantiation to keep the openDocuments map in sync with
  *   the state of the workspace.
@@ -51,7 +108,7 @@ interface DocumentInfo {
  * const solutionCache: SolutionCache = SolutionCache.getInstance();
  * const documentManager = new DocumentManager();
  * await documentManager.initialize();
- * 
+ *
  * // Retrieve a document's links
  * const documentLinks = documentManager.generateDocumentLinks(documentUri);
  * ```
@@ -66,9 +123,17 @@ export class DocumentManager implements Disposable {
     private readonly includePattern = /INCLUDE\s*\(\s*'([^']+\.[a-zA-Z0-9]+)'\s*(?:,\s*'([^']+\.[a-zA-Z0-9]+)'\s*)?(?:,\s*ONCE)?\)/ig;
     private readonly memberPattern = /\bMEMBER\s*\(\s*'([^']+\.[a-zA-Z0-9]+)'\s*\).*?/ig;
     private readonly linkPattern = /LINK\s*\(\s*'([^']+\.[a-zA-Z0-9]+)'\s*\)/ig;
+    // Pattern to detect class method declarations
+    private readonly methodPattern = /\b([A-Za-z0-9_]+)\s+PROCEDURE\s*\([^)]*\)/ig;
 
 
-    private openDocuments: Map<string, DocumentInfo> = new Map(); // Store document info by URI
+    /** Cache expiration time in milliseconds (5 minutes) */
+    private static readonly CACHE_EXPIRATION_MS: number = 5 * 60 * 1000;
+    
+    /** Map to store document info by URI */
+    private openDocuments: Map<string, DocumentInfo> = new Map();
+    /** Map to store cached document links by URI */
+    private documentLinksCache: Map<string, CachedDocumentLinks> = new Map();
     private locationProvider!: LocationProvider;
     private disposables: Disposable[] = [];
     private solutionCache: SolutionCache;
@@ -76,18 +141,18 @@ export class DocumentManager implements Disposable {
     private constructor() {
         this.solutionCache = SolutionCache.getInstance();
     }
-    
+
     // ✅ Static factory method to ensure proper async initialization
     public static async create(): Promise<DocumentManager> {
         const manager = new DocumentManager();
         await manager.initialize();
         return manager;
     }
-    
+
     private async initialize() {
         logger.info("✅ DocumentManager.initialize() called");
         this.locationProvider = new LocationProvider();
-    
+
         this.disposables.push(
             workspace.onDidOpenTextDocument(this.onDidOpenTextDocument, this),
             workspace.onDidChangeTextDocument(this.onDidChangeTextDocument, this),
@@ -96,18 +161,51 @@ export class DocumentManager implements Disposable {
             workspace.onDidDeleteFiles(this.onDidDeleteFiles, this)
         );
 
-        // ✅ Manually process currently open documents
+        logger.info("✅ DocumentManager event listeners registered.");
+        
+        // Defer INCLUDE/MODULE scanning to avoid blocking activation
+        setTimeout(() => {
+            this.processOpenDocumentsInBackground();
+        }, 0);
+    }
+    
+    /**
+     * Process open documents in the background without blocking activation
+     */
+    private async processOpenDocumentsInBackground() {
+        logger.info("🔄 Starting background processing of open documents");
+        const startTime = performance.now();
+        
+        // Create a counter to track progress
+        let processedCount = 0;
+        const totalDocuments = workspace.textDocuments.length;
+        
+        // Process documents in batches to avoid UI freezing
         for (const document of workspace.textDocuments) {
             const ext = path.extname(document.uri.fsPath).toLowerCase();
             if (ext === '.xml' || ext === '.cwproj') {
                 logger.info(`⚠ Skipping open XML-like file during startup: ${document.uri.fsPath}`);
                 continue;
             }
-        
-            await this.updateDocumentInfo(document);
+
+            try {
+                await this.updateDocumentInfo(document);
+                processedCount++;
+                
+                // Log progress every 5 documents
+                if (processedCount % 5 === 0 || processedCount === totalDocuments) {
+                    logger.info(`📊 Processed ${processedCount}/${totalDocuments} documents in background`);
+                }
+            } catch (error) {
+                logger.error(`❌ Error processing document in background: ${error instanceof Error ? error.message : String(error)}`);
+            }
         }
         
-        logger.info("✅ DocumentManager event listeners registered.");
+        const endTime = performance.now();
+        const duration = (endTime - startTime).toFixed(2);
+        
+        // Log completion instead of showing a notification to avoid import issues
+        logger.info(`✅ Background document processing completed: ${processedCount} files in ${duration}ms`);
     }
 
     private async onDidSaveTextDocument(document: TextDocument) {
@@ -115,29 +213,109 @@ export class DocumentManager implements Disposable {
         await this.updateDocumentInfo(document);
     }
 
+    /**
+     * Handles file deletion events
+     *
+     * This method is called when files are deleted. It invalidates the cache entries
+     * for the deleted files and removes them from the openDocuments map.
+     *
+     * @param event - The file delete event
+     */
     private async onDidDeleteFiles(event: FileDeleteEvent) {
         for (const fileDelete of event.files) {
             const deletedUri = fileDelete;
-            // Handle deletion by removing entries from openDocuments map
+            const normalizedUri = deletedUri.toString().toLowerCase();
+            
+            // Remove from openDocuments map
+            if (this.openDocuments.has(normalizedUri)) {
+                logger.info(`🗑️ Removing document info for deleted file: ${deletedUri.fsPath}`);
+                this.openDocuments.delete(normalizedUri);
+            }
+            
+            // Invalidate cache for the deleted file
+            if (this.documentLinksCache.has(normalizedUri)) {
+                logger.info(`🗑️ Invalidating cache for deleted file: ${deletedUri.fsPath}`);
+                this.documentLinksCache.delete(normalizedUri);
+            }
+            
+            // Also invalidate cache for any documents that might reference this file
+            // This is a more aggressive approach to ensure consistency
+            this.invalidateAllCacheEntries();
         }
     }
-    
+
+    /**
+     * Handles file rename events
+     *
+     * This method is called when files are renamed. It invalidates the cache entries
+     * for the renamed files and updates the openDocuments map.
+     *
+     * @param event - The file rename event
+     */
     private async onDidRenameFiles(event: FileRenameEvent) {
         for (const fileRename of event.files) {
             const oldUri = fileRename.oldUri;
             const newUri = fileRename.newUri;
-            // Handle renaming by updating the entries in openDocuments map
-            // You might need to adjust the keys in the map accordingly
+            const normalizedOldUri = oldUri.toString().toLowerCase();
+            const normalizedNewUri = newUri.toString().toLowerCase();
+            
+            // Update openDocuments map
+            const documentInfo = this.openDocuments.get(normalizedOldUri);
+            if (documentInfo) {
+                logger.info(`📝 Updating document info for renamed file: ${oldUri.fsPath} -> ${newUri.fsPath}`);
+                this.openDocuments.delete(normalizedOldUri);
+                this.openDocuments.set(normalizedNewUri, documentInfo);
+            }
+            
+            // Invalidate cache for the renamed file
+            if (this.documentLinksCache.has(normalizedOldUri)) {
+                logger.info(`🗑️ Invalidating cache for renamed file: ${oldUri.fsPath}`);
+                this.documentLinksCache.delete(normalizedOldUri);
+            }
+            
+            // Also invalidate cache for any documents that might reference this file
+            // This is a more aggressive approach to ensure consistency
+            this.invalidateAllCacheEntries();
         }
     }
     
+    /**
+     * Invalidates all cache entries
+     *
+     * This method is called when a file is renamed or deleted, as these operations
+     * might affect multiple documents that reference the renamed or deleted file.
+     */
+    private invalidateAllCacheEntries() {
+        const cacheSize = this.documentLinksCache.size;
+        if (cacheSize > 0) {
+            logger.info(`🗑️ Invalidating all ${cacheSize} cache entries due to file system changes`);
+            this.documentLinksCache.clear();
+        }
+    }
+
     private async onDidOpenTextDocument(document: TextDocument) {
         logger.info(`📄 [EVENT] Document opened: ${document.uri.fsPath}`);
         await this.updateDocumentInfo(document);
     }
 
+    /**
+     * Handles document change events
+     *
+     * This method is called when a document is changed. It invalidates the cache entry
+     * for the changed document and updates the document info.
+     *
+     * @param event - The document change event
+     */
     private async onDidChangeTextDocument(event: TextDocumentChangeEvent) {
         const doc = event.document;
+        const normalizedUri = doc.uri.toString().toLowerCase();
+        
+        // Invalidate cache for the changed document
+        if (this.documentLinksCache.has(normalizedUri)) {
+            logger.info(`🗑️ Invalidating cache for changed document: ${doc.uri.fsPath}`);
+            this.documentLinksCache.delete(normalizedUri);
+        }
+        
         logger.info(`Document changed: ${doc.uri.fsPath}`);
         await this.updateDocumentInfo(event.document);
     }
@@ -159,9 +337,13 @@ export class DocumentManager implements Disposable {
         if (location) {
             let targetUri = Uri.file(location.fullFileName);
 
-            if (location.statementType === "SECTION" && location.sectionLineLocation) {
+            if ((location.statementType?.toUpperCase() === "SECTION" || location.statementType?.toUpperCase() === "METHOD") &&
+                location.sectionLineLocation) {
                 const lineQueryParam = `${location.sectionLineLocation.line + 1}:1`;
                 targetUri = targetUri.with({ fragment: lineQueryParam });
+                logger.info(`Created link to ${location.fullFileName}#${lineQueryParam} for ${location.statementType}`);
+            } else {
+                logger.info(`Created link to ${location.fullFileName} for ${location.statementType}`);
             }
             return targetUri;
         }
@@ -185,7 +367,52 @@ export class DocumentManager implements Disposable {
      * @returns An array of DocumentLink objects representing the navigable code links within the document.
      */
 
+    /**
+     * Gets the current version of a document
+     *
+     * @param uri - The URI of the document
+     * @returns The document version or undefined if the document is not found
+     */
+    private getDocumentVersion(uri: Uri): number | undefined {
+        const document = workspace.textDocuments.find(doc => doc.uri.toString() === uri.toString());
+        return document?.version;
+    }
+
+    /**
+     * Generates document links for a provided URI based on the locations
+     * and types of statements found in the document.
+     *
+     * This method first checks if there's a valid cache entry for the document.
+     * If there is and the document version hasn't changed, it returns the cached links.
+     * Otherwise, it generates new links and caches them.
+     *
+     * @param uri - The URI of the document to generate links for.
+     * @returns An array of DocumentLink objects representing the navigable code links within the document.
+     */
     generateDocumentLinks(uri: Uri): DocumentLink[] {
+        const normalizedUri = uri.toString().toLowerCase();
+        const currentVersion = this.getDocumentVersion(uri);
+        
+        // Check if we have a valid cache entry
+        const cachedEntry = this.documentLinksCache.get(normalizedUri);
+        
+        if (cachedEntry && currentVersion !== undefined) {
+            const isVersionMatch = cachedEntry.version === currentVersion;
+            const isNotExpired = (Date.now() - cachedEntry.timestamp) < DocumentManager.CACHE_EXPIRATION_MS;
+            
+            if (isVersionMatch && isNotExpired) {
+                logger.info(`🔍 Cache HIT for ${uri.fsPath} (version: ${currentVersion})`);
+                return cachedEntry.links;
+            } else if (!isVersionMatch) {
+                logger.info(`🔄 Cache MISS for ${uri.fsPath} - version changed (cached: ${cachedEntry.version}, current: ${currentVersion})`);
+            } else {
+                logger.info(`⏰ Cache MISS for ${uri.fsPath} - cache expired (age: ${(Date.now() - cachedEntry.timestamp) / 1000}s)`);
+            }
+        } else {
+            logger.info(`🔄 Cache MISS for ${uri.fsPath} - no cache entry`);
+        }
+        
+        // Generate links if no valid cache entry
         const documentInfo = this.getDocumentInfo(uri);
 
         if (!documentInfo) {
@@ -194,19 +421,38 @@ export class DocumentManager implements Disposable {
         }
 
         const links: DocumentLink[] = [];
-        const supportedTypes = ["INCLUDE", "MODULE", "MEMBER", "SECTION", "LINK"];
+        const supportedTypes = ["INCLUDE", "MODULE", "MEMBER", "SECTION", "LINK", "METHOD"];
+        
+        logger.info(`Generating links for ${uri.fsPath} with ${documentInfo.statementLocations.length} locations`);
+        
         // 🔹 Process existing document statements from `documentInfo`
         for (const location of documentInfo.statementLocations) {
+            logger.info(`Processing location: type=${location.statementType}, file=${location.fullFileName}, pos=${location.linePosition?.line}:${location.linePosition?.character}`);
 
-            if (!supportedTypes.includes(location.statementType ?? "") || !location.fullFileName || !location.linePosition || !location.linePositionEnd) {
-                continue; // Skip invalid or unsupported entries
+            // Case-insensitive check for statement type
+            if (!supportedTypes.some(type => type.toUpperCase() === (location.statementType ?? "").toUpperCase())) {
+                logger.info(`Skipping unsupported type: ${location.statementType}`);
+                continue;
+            }
+            
+            if (!location.fullFileName) {
+                logger.info(`Skipping location with no file name`);
+                continue;
+            }
+            
+            if (!location.linePosition || !location.linePositionEnd) {
+                logger.info(`Skipping location with invalid position`);
+                continue;
             }
 
             let targetUri = Uri.file(location.fullFileName);
 
-            if (location.statementType === "SECTION" && location.sectionLineLocation) {
+            // Case-insensitive check for section type
+            if ((location.statementType?.toUpperCase() === "SECTION" || location.statementType?.toUpperCase() === "METHOD") &&
+                location.sectionLineLocation) {
                 const lineQueryParam = `${location.sectionLineLocation.line + 1}:1`;
                 targetUri = targetUri.with({ fragment: lineQueryParam });
+                logger.info(`Created link with fragment: ${targetUri.toString()}`);
             }
 
             const link = new DocumentLink(
@@ -214,8 +460,21 @@ export class DocumentManager implements Disposable {
                 targetUri
             );
             links.push(link);
+            logger.info(`Added link for ${location.statementType} at line ${location.linePosition.line} to ${targetUri.toString()}`);
         }
 
+        logger.info(`Generated ${links.length} links for ${uri.fsPath}`);
+        
+        // Cache the generated links if we have a document version
+        if (currentVersion !== undefined) {
+            this.documentLinksCache.set(normalizedUri, {
+                links,
+                timestamp: Date.now(),
+                version: currentVersion
+            });
+            logger.info(`💾 Cached ${links.length} links for ${uri.fsPath} (version: ${currentVersion})`);
+        }
+        
         return links;
     }
 
@@ -227,22 +486,283 @@ export class DocumentManager implements Disposable {
      *
      * @returns The location of the link if the given position falls within any known link range, otherwise undefined.
      */
+    /**
+     * Resolves a method implementation lazily when needed.
+     *
+     * This function is called when a user hovers over a method declaration.
+     * It searches for the implementation in the module file and updates the location
+     * with the implementation details.
+     *
+     * Enhanced to match overloaded methods based on parameter signatures.
+     *
+     * @param location - The method location with metadata
+     * @returns The updated location with implementation details, or the original location if implementation not found
+     */
+    async resolveMethodImplementation(location: ClarionLocation): Promise<ClarionLocation> {
+        // If implementation is already resolved or this is not a method, return as is
+        if (location.implementationResolved || location.statementType !== "METHOD") {
+            return location;
+        }
+
+        logger.info(`Lazily resolving implementation for ${location.className}.${location.methodName}`);
+        
+        if (location.parameterSignature) {
+            logger.info(`Method has parameter signature: [${location.parameterSignature.join(', ')}]`);
+        } else {
+            logger.info(`Method has no parameter signature`);
+        }
+
+        // Ensure we have the necessary metadata
+        if (!location.className || !location.methodName || !location.moduleFile) {
+            logger.error(`Missing metadata for method implementation resolution: class=${location.className}, method=${location.methodName}, module=${location.moduleFile}`);
+            location.implementationResolved = true; // Mark as resolved to avoid repeated attempts
+            return location;
+        }
+
+        try {
+            // Cache for file path resolution
+            const filePathCache: Map<string, string | null> = new Map();
+            
+            // Resolve the module file path
+            const moduleFilePath = await this.locationProvider.getFullPath(location.moduleFile, location.fullFileName, filePathCache);
+            
+            if (!moduleFilePath || !fs.existsSync(moduleFilePath)) {
+                logger.info(`❌ Could not resolve MODULE path: ${location.moduleFile} for class ${location.className}`);
+                location.implementationResolved = true; // Mark as resolved to avoid repeated attempts
+                return location;
+            }
+
+            // Read the module file content
+            const moduleContent = fs.readFileSync(moduleFilePath, 'utf8');
+            
+            // Search for the implementation with parameter matching
+            const implLineNumber = this.findMethodImplementationLine(
+                moduleContent,
+                location.className,
+                location.methodName,
+                location.parameterSignature
+            );
+            
+            if (implLineNumber !== null) {
+                logger.info(`✅ Found method implementation for ${location.className}.${location.methodName} at line ${implLineNumber} in ${moduleFilePath}`);
+                
+                // Update the location with implementation details
+                location.fullFileName = moduleFilePath;
+                location.sectionLineLocation = new Position(implLineNumber, 0);
+            } else {
+                // Try to find implementation in the current document (fallback)
+                const currentDocument = workspace.textDocuments.find(doc =>
+                    doc.uri.toString() === Uri.file(location.fullFileName).toString()
+                );
+                
+                if (currentDocument) {
+                    const currentContent = currentDocument.getText();
+                    const currentImplLine = this.findMethodImplementationLine(
+                        currentContent,
+                        location.className,
+                        location.methodName,
+                        location.parameterSignature
+                    );
+                    
+                    if (currentImplLine !== null) {
+                        logger.info(`✅ Found method implementation for ${location.className}.${location.methodName} in current document at line ${currentImplLine}`);
+                        location.sectionLineLocation = new Position(currentImplLine, 0);
+                    } else {
+                        logger.info(`❌ Could not find implementation for ${location.className}.${location.methodName} in MODULE ${location.moduleFile} or current document`);
+                    }
+                }
+            }
+            
+            // Mark as resolved regardless of whether we found the implementation
+            location.implementationResolved = true;
+            
+        } catch (error) {
+            logger.error(`Error resolving method implementation: ${error instanceof Error ? error.message : String(error)}`);
+            location.implementationResolved = true; // Mark as resolved to avoid repeated attempts
+        }
+        
+        return location;
+    }
+    
+    /**
+     * Helper function to parse parameter signatures from Clarion method implementations
+     *
+     * @param paramString - The parameter string from a method implementation
+     * @returns An array of parameter types (normalized for comparison)
+     */
+    private parseImplementationParameters(paramString?: string): string[] {
+        if (!paramString || paramString.trim() === '') {
+            return [];
+        }
+        
+        // Split by commas, trim each parameter, and extract type information
+        return paramString.split(',')
+            .map(param => {
+                // Extract parameter type (ignore parameter name and attributes)
+                const paramParts = param.trim().split(/\s+/);
+                // Return just the type in lowercase for comparison
+                return paramParts[0].toLowerCase();
+            });
+    }
+
+    /**
+     * Helper function to compare two parameter signatures
+     *
+     * @param declaredParams - Parameter signature from method declaration
+     * @param implParams - Parameter signature from method implementation
+     * @returns True if the signatures match, false otherwise
+     */
+    private parametersMatch(declaredParams: string[] | undefined, implParams: string[]): boolean {
+        // If declaration has no parameters defined, treat as empty array
+        const declParams = declaredParams || [];
+        
+        // If parameter counts don't match, they can't be the same method
+        if (declParams.length !== implParams.length) {
+            return false;
+        }
+        
+        // Special case: both empty parameter lists
+        if (declParams.length === 0 && implParams.length === 0) {
+            return true;
+        }
+        
+        // Compare each parameter type
+        for (let i = 0; i < declParams.length; i++) {
+            // Simple string comparison of normalized parameter types
+            if (declParams[i] !== implParams[i]) {
+                return false;
+            }
+        }
+        
+        return true;
+    }
+
+    /**
+     * Helper function to find a method implementation line in a file content.
+     * Enhanced to match overloaded methods based on parameter signatures.
+     *
+     * @param content - The file content to search in
+     * @param className - The class name
+     * @param methodName - The method name
+     * @param parameterSignature - The parameter signature to match (optional)
+     * @returns The line number of the implementation or null if not found
+     */
+    private findMethodImplementationLine(
+        content: string,
+        className: string,
+        methodName: string,
+        parameterSignature?: string[]
+    ): number | null {
+        const lowerContent = content.toLowerCase();
+        const cls = className.toLowerCase();
+        const mth = methodName.toLowerCase();
+        
+        // Find all potential implementations of this method
+        const implementations: Array<{line: number, params: string[]}> = [];
+        
+        // Regex to find all implementations of this method with parameter capture
+        const implRegex = new RegExp(
+            String.raw`(^|\r?\n)[ \t]*` + cls + String.raw`(?:\.|::)` + mth +
+            String.raw`\s+(?:procedure|function)\s*\(([^)]*)\)`,
+            'gi'
+        );
+        
+        logger.info(`Searching for implementation of ${cls}.${mth} as PROCEDURE or FUNCTION with parameter matching`);
+        
+        let match;
+        while ((match = implRegex.exec(lowerContent)) !== null) {
+            const implPos = match.index + (match[1] ? match[1].length : 0);
+            const lineNumber = content.substring(0, implPos).split('\n').length - 1;
+            const paramString = match[2];
+            const params = this.parseImplementationParameters(paramString);
+            
+            logger.info(`Found potential implementation at line ${lineNumber} with parameters: [${params.join(', ')}]`);
+            
+            implementations.push({
+                line: lineNumber,
+                params: params
+            });
+        }
+        
+        // If no implementations found, try the old regex without parameter capture as fallback
+        if (implementations.length === 0) {
+            logger.info(`No implementations found with parameter capture, trying fallback regex`);
+            
+            const fallbackRegex = new RegExp(
+                String.raw`(^|\r?\n)[ \t]*` + cls + String.raw`(?:\.|::)` + mth +
+                String.raw`\s+(?:procedure|function)\s*(?:\([^)]*\))?`,
+                'i'
+            );
+            
+            const m = fallbackRegex.exec(lowerContent);
+            if (m) {
+                const implPos = m.index + (m[1] ? m[1].length : 0);
+                const implLineNumber = content.substring(0, implPos).split('\n').length - 1;
+                logger.info(`Found implementation using fallback regex at line ${implLineNumber}`);
+                return implLineNumber;
+            }
+            
+            return null;
+        }
+        
+        // If we have parameter signature, try to find an exact match
+        if (parameterSignature && parameterSignature.length > 0) {
+            logger.info(`Looking for implementation matching parameter signature: [${parameterSignature.join(', ')}]`);
+            
+            for (const impl of implementations) {
+                if (this.parametersMatch(parameterSignature, impl.params)) {
+                    logger.info(`Found exact parameter match at line ${impl.line}`);
+                    return impl.line;
+                }
+            }
+            
+            logger.info(`No exact parameter match found, falling back to first implementation`);
+        }
+        
+        // If no exact match or no parameter signature provided, return the first implementation
+        logger.info(`Returning first implementation at line ${implementations[0].line}`);
+        return implementations[0].line;
+    }
+
+    /**
+     * Finds a link at the specified position in the document.
+     * For method declarations, it lazily resolves the implementation when needed.
+     *
+     * @param documentUri - The URI of the document to search
+     * @param position - The position within the document
+     * @returns The location of the link if found, otherwise undefined
+     */
     findLinkAtPosition(documentUri: Uri, position: Position): ClarionLocation | undefined {
         const documentInfo = this.getDocumentInfo(documentUri);
+        logger.info(`Finding link at position ${position.line}:${position.character} in ${documentUri.fsPath}`);
 
+        if (!documentInfo) {
+            logger.info(`No document info available for ${documentUri.fsPath}`);
+            return undefined;
+        }
+        
         if (documentInfo) {
             for (const location of documentInfo.statementLocations) {
+                if (!location.linePosition || !location.linePositionEnd) {
+                    continue;
+                }
+                
                 const linkRange = new Range(
-                    location.linePosition || new Position(0, 0),
-                    location.linePositionEnd || new Position(0, 0)
+                    location.linePosition,
+                    location.linePositionEnd
                 );
 
                 if (linkRange.contains(position)) {
+                    logger.info(`Found link at position: ${location.statementType} to ${location.fullFileName}`);
+                    
+                    // For method declarations, we don't need to resolve the implementation here
+                    // The hover provider will call resolveMethodImplementation when needed
                     return location;
                 }
             }
         }
 
+        logger.info(`No link found at position ${position.line}:${position.character}`);
         return undefined;
     }
 
@@ -267,18 +787,18 @@ export class DocumentManager implements Disposable {
         }
 
         // Early exit for XML-related files to avoid triggering Red Hat XML extension
-    const ext = path.extname(document.uri.fsPath).toLowerCase();
-    if (ext === '.xml' || ext === '.cwproj') {
-        logger.info(`⚠ Skipping XML-related file to avoid extension conflict: ${document.uri.fsPath}`);
-        return;
-    }
+        const ext = path.extname(document.uri.fsPath).toLowerCase();
+        if (ext === '.xml' || ext === '.cwproj') {
+            logger.info(`⚠ Skipping XML-related file to avoid extension conflict: ${document.uri.fsPath}`);
+            return;
+        }
 
         // Check if this is a Clarion file based on the extension
         const fileExt = path.extname(document.uri.fsPath).toLowerCase();
-        
+
         // Only process files with extensions in the lookupExtensions array from workspace settings
         const isClarionFile = lookupExtensions.some(ext => ext.toLowerCase() === fileExt);
-        
+
         if (!isClarionFile) {
             logger.info(`⚠ Skipping non-Clarion file: ${document.uri.fsPath} (extension not in lookupExtensions)`);
             return;
@@ -289,7 +809,7 @@ export class DocumentManager implements Disposable {
         // Try to find a corresponding source file for this document
         const documentPath = document.uri.fsPath;
         const fileName = path.basename(documentPath);
-        
+
         // Find which project this file belongs to using SolutionCache
         const sourceFile = this.solutionCache.findSourceInProject(fileName);
         const project = this.solutionCache.findProjectForFile(fileName);
@@ -305,15 +825,26 @@ export class DocumentManager implements Disposable {
             const moduleLocations = await this.processPattern(document, this.modulePattern, "MODULE");
             const memberLocations = await this.processPattern(document, this.memberPattern, "MEMBER");
             const linkLocations = await this.processPattern(document, this.linkPattern, "LINK");
+
+            // Process method declarations in class files
+            const methodLocations = await this.processMethodDeclarations(document);
+            
+            logger.info(`Found ${methodLocations.length} method locations for ${document.uri.fsPath}`);
+            if (methodLocations.length > 0) {
+                for (const loc of methodLocations) {
+                    logger.info(`Method location: ${loc.statementType} at line ${loc.linePosition?.line} to ${loc.fullFileName}`);
+                }
+            }
             
             const statementLocations: ClarionLocation[] = [
                 ...includeLocations,
                 ...moduleLocations,
                 ...memberLocations,
-                ...linkLocations
+                ...linkLocations,
+                ...methodLocations
             ];
 
-            logger.info(`📊 Found ${includeLocations.length} INCLUDE, ${moduleLocations.length} MODULE, ${memberLocations.length} MEMBER, and ${linkLocations.length} LINK statements`);
+            logger.info(`📊 Found ${includeLocations.length} INCLUDE, ${moduleLocations.length} MODULE, ${memberLocations.length} MEMBER, ${linkLocations.length} LINK, and ${methodLocations.length} METHOD statements`);
 
             // Always store document info even if there are no statement locations
             // This prevents repeated processing of the same document
@@ -321,7 +852,7 @@ export class DocumentManager implements Disposable {
 
             if (statementLocations.length > 0) {
                 logger.info(`✅ Stored document info for ${document.uri.fsPath} with ${statementLocations.length} statement locations`);
-                
+
                 // Log a sample of the statement locations for debugging
                 if (statementLocations.length > 0) {
                     const sample = statementLocations[0];
@@ -336,7 +867,7 @@ export class DocumentManager implements Disposable {
             this.openDocuments.set(document.uri.toString().toLowerCase(), { statementLocations: [] });
         }
     }
-    
+
     /**
      * Processes a document to extract and map locations that match the provided regular expression pattern.
      *
@@ -354,13 +885,13 @@ export class DocumentManager implements Disposable {
             logger.error(`❌ Error: locationProvider is not initialized when processing ${statementType}.`);
             return [];
         }
-        
+
         // Reset the pattern's lastIndex to ensure we start from the beginning
         pattern.lastIndex = 0;
-        
+
         const statementLocations: ClarionLocation[] = [];
         logger.info(`Processing ${statementType} pattern in: ${document.uri.fsPath}`);
-        
+
         try {
             // Get locations from the pattern
             const clarionLocation = await this.locationProvider.getLocationFromPattern(document, pattern);
@@ -413,7 +944,161 @@ export class DocumentManager implements Disposable {
         return statementLocations;
     }
 
-    getDocumentInfo(uri: Uri): DocumentInfo | undefined {
+    /**
+     * Processes a document to find class method declarations and their implementations in module files.
+     *
+     * This method scans the document for class declarations with Module links, extracts method declarations,
+     * and attempts to find their implementations in the linked module files.
+     *
+     * @param document - The text document to be analyzed.
+     * @returns An array of ClarionLocation objects representing the method declarations and their implementations.
+     */
+    /**
+     * Processes a document to find class method declarations and stores their metadata.
+     *
+     * This method scans the document for class declarations with Module links and extracts method declarations,
+     * but DOES NOT search for implementations. Instead, it stores metadata that will be used later
+     * for lazy resolution when the user hovers over a method.
+     *
+     * @param document - The text document to be analyzed.
+     * @returns An array of ClarionLocation objects representing the method declarations with metadata.
+     */
+    /**
+     * Helper function to parse parameter signatures from Clarion method declarations
+     *
+     * @param paramString - The parameter string from a method declaration
+     * @returns An array of parameter types (normalized for comparison)
+     */
+    private parseDeclarationParameters(paramString?: string): string[] {
+        if (!paramString || paramString.trim() === '') {
+            return [];
+        }
+        
+        // Split by commas, trim each parameter, and extract type information
+        return paramString.split(',')
+            .map(param => {
+                // Extract parameter type (ignore parameter name and attributes)
+                const paramParts = param.trim().split(/\s+/);
+                // Return just the type in lowercase for comparison
+                return paramParts[0].toLowerCase();
+            });
+    }
+
+    private async processMethodDeclarations(document: TextDocument): Promise<ClarionLocation[]> {
+        if (!this.locationProvider) {
+            logger.error(`❌ Error: locationProvider is not initialized when processing method declarations.`);
+            return [];
+        }
+
+        const methodLocations: ClarionLocation[] = [];
+        logger.info(`Processing method declarations in: ${document.uri.fsPath}`);
+        logger.info(`File extension: ${path.extname(document.uri.fsPath).toLowerCase()}`);
+
+        // Cache for file path resolution only (we don't read module files at this stage)
+        const filePathCache: Map<string, string | null> = new Map();
+
+        try {
+            const originalText = document.getText();
+            const lowerText = originalText.toLowerCase();
+
+            const classRegex = /([a-z0-9_]+)\s+class\s*(?:\([^)]*\))?\s*(?:,|$)/gis;
+            const moduleRegex = /module\s*\(\s*'([^']+)'\s*(?:[^)]*)\)/gis;
+            const linkRegex = /link\s*\(\s*'([^']+)'(?:[^)]*)*\)/gis;
+            logger.info(`Searching for class definitions with improved regex pattern`);
+
+            let classMatch: RegExpExecArray | null;
+            while ((classMatch = classRegex.exec(lowerText)) !== null) {
+                const classStartPos = classMatch.index;
+                const classNameEndPos = classStartPos + classMatch[1].length;
+                const originalClassName = originalText.substring(classStartPos, classNameEndPos);
+                const classTail = lowerText.slice(classMatch.index);
+                const endInTail = /^\s*end\b/mi.exec(classTail);
+                if (!endInTail) {
+                    logger.info(`No END found for class ${originalClassName} starting at ${classMatch.index}, skipping.`);
+                    continue;
+                }
+                const classEndPos = classMatch.index + endInTail.index;
+                logger.info(`Class ${originalClassName} ends at position ${classEndPos}`);
+                const fullClassText = lowerText.substring(classMatch.index, classEndPos);
+                if (!fullClassText.includes('module')) {
+                    logger.info(`No MODULE keyword found for class ${originalClassName}, skipping.`);
+                    continue;
+                }
+                moduleRegex.lastIndex = 0;
+                const moduleMatch = moduleRegex.exec(fullClassText);
+                if (!moduleMatch) {
+                    logger.info(`No MODULE pattern matched for class ${originalClassName}, skipping.`);
+                    continue;
+                }
+                const moduleFile = moduleMatch[1];
+                linkRegex.lastIndex = 0;
+                const linkMatch = linkRegex.exec(fullClassText);
+                const linkFile = linkMatch ? linkMatch[1] : null;
+                logger.info(`Found class ${originalClassName} with MODULE ${moduleFile}${linkFile ? ` and LINK ${linkFile}` : ''}`);
+                
+                // Resolve the module file path (but don't read its content yet)
+                const moduleFilePath = await this.locationProvider.getFullPath(moduleFile, document.uri.fsPath, filePathCache);
+                if (!moduleFilePath) {
+                    logger.info(`❌ Could not resolve MODULE path: ${moduleFile} for class ${originalClassName}`);
+                    // Continue anyway to record the method declarations
+                }
+                
+                const lowerClassContent = fullClassText;
+                const originalClassContent = originalText.substring(classMatch.index, classEndPos);
+                const methodDeclRegex = /([a-z0-9_:]+(?:\.[a-z0-9_:]+)*)\s+(?:procedure|function)\s*(?:\(([^)]*)\))?/gi;
+                logger.info(`Searching for method declarations (PROCEDURE or FUNCTION) in class ${originalClassName}`);
+                
+                let methodMatch: RegExpExecArray | null;
+                while ((methodMatch = methodDeclRegex.exec(lowerClassContent)) !== null) {
+                    const methodStartPos = methodMatch.index;
+                    const methodNameEndPos = methodStartPos + methodMatch[1].length;
+                    const originalMethodName = originalClassContent.substring(methodStartPos, methodNameEndPos);
+                    const methodParams = methodMatch[2];
+                    const documentMethodPos = classMatch.index + methodMatch.index;
+                    const methodLine = document.positionAt(documentMethodPos).line;
+                    const methodChar = document.positionAt(documentMethodPos).character;
+                    const methodEndChar = methodChar + originalMethodName.length;
+                    
+                    // Parse parameter signature for method matching
+                    const parameterSignature = this.parseDeclarationParameters(methodParams);
+                    
+                    logger.info(`Found method declaration: ${originalClassName}.${originalMethodName}(${methodParams}) at line ${methodLine}`);
+                    logger.info(`Parsed parameter signature: [${parameterSignature.join(', ')}]`);
+                    
+                    // Store method metadata without resolving implementation
+                    methodLocations.push({
+                        fullFileName: moduleFilePath || "", // Use empty string if module path couldn't be resolved
+                        linePosition: new Position(methodLine, methodChar),
+                        linePositionEnd: new Position(methodLine, methodEndChar),
+                        statementType: "METHOD",
+                        // Store metadata for lazy implementation resolution
+                        className: originalClassName,
+                        methodName: originalMethodName,
+                        moduleFile: moduleFile,
+                        implementationResolved: false,
+                        // Store parameter signature for matching overloaded methods
+                        parameterSignature: parameterSignature
+                    });
+                    
+                    logger.info(`Stored metadata for method ${originalClassName}.${originalMethodName} (implementation will be resolved on demand)`);
+                }
+            }
+            
+            logger.info(`Found ${methodLocations.length} method declarations (implementations will be resolved on demand)`);
+        } catch (error) {
+            logger.error(`Error processing method declarations: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        return methodLocations;
+    }
+
+
+    /**
+     * Gets document information for a URI
+     *
+     * @param uri - The URI of the document
+     * @returns The document information or undefined if not found
+     */
+    public getDocumentInfo(uri: Uri): DocumentInfo | undefined {
         try {
             // Normalize the URI for consistency in lookups
             const normalizedUri = uri.toString().toLowerCase();
@@ -440,6 +1125,12 @@ export class DocumentManager implements Disposable {
         }
     }
 
+    /**
+     * Gets the document content
+     *
+     * @param uri - The URI of the document
+     * @returns The document content or undefined if the document is not found
+     */
     getDocumentContent(uri: Uri): string | undefined {
         const document = workspace.textDocuments.find(doc => doc.uri.toString() === uri.toString());
         if (document) {
@@ -447,7 +1138,30 @@ export class DocumentManager implements Disposable {
         }
         return undefined;
     }
-    
+
+    /**
+     * Gets cache statistics for debugging and testing
+     *
+     * @returns An object with cache statistics
+     */
+    getCacheStats() {
+        return {
+            cacheSize: this.documentLinksCache.size,
+            openDocumentsSize: this.openDocuments.size
+        };
+    }
+
+    /**
+     * Clears the document links cache
+     *
+     * This method is useful for testing and debugging.
+     */
+    clearCache() {
+        const cacheSize = this.documentLinksCache.size;
+        logger.info(`🗑️ Manually clearing cache with ${cacheSize} entries`);
+        this.documentLinksCache.clear();
+    }
+
     dispose() {
         this.disposables.forEach(disposable => disposable.dispose());
     }

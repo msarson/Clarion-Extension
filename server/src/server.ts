@@ -56,7 +56,7 @@ import { ClarionSolutionInfo } from 'common/types';
 import * as fs from 'fs';
 import { URI } from 'vscode-languageserver';
 const logger = LoggerManager.getLogger("Server");
-logger.setLevel("error");
+logger.setLevel("info");
 
 // Track server initialization state
 export let serverInitialized = false;
@@ -573,6 +573,9 @@ connection.onNotification('clarion/updatePaths', async (params: {
     solutionFilePath?: string; // Add optional solution file path
     defaultLookupExtensions?: string[]; // Add default lookup extensions
 }) => {
+    const startTime = performance.now();
+    logger.info(`🕒 Starting solution initialization`);
+    
     try {
         // Update server settings
         serverSettings.redirectionPaths = params.redirectionPaths || [];
@@ -597,6 +600,14 @@ connection.onNotification('clarion/updatePaths', async (params: {
             logger.warn("⚠️ No solution file path provided in updatePaths notification");
         }
 
+        // Log memory usage before initialization
+        const memoryBefore = process.memoryUsage();
+        logger.info(`📊 Memory usage before solution initialization:
+            - RSS: ${Math.round(memoryBefore.rss / 1024 / 1024)} MB
+            - Heap total: ${Math.round(memoryBefore.heapTotal / 1024 / 1024)} MB
+            - Heap used: ${Math.round(memoryBefore.heapUsed / 1024 / 1024)} MB
+        `);
+
         // ✅ Initialize the solution manager before building the solution
         const solutionPath = params.projectPaths?.[0];
         if (!solutionPath) {
@@ -612,10 +623,12 @@ connection.onNotification('clarion/updatePaths', async (params: {
         }
 
         // Initialize the solution manager
+        const initStartTime = performance.now();
         logger.info(`🔄 Initializing solution manager with path: ${solutionPath}`);
         try {
             await initializeSolutionManager(solutionPath);
-            logger.info(`✅ Solution manager initialized successfully`);
+            const initEndTime = performance.now();
+            logger.info(`✅ Solution manager initialized successfully in ${(initEndTime - initStartTime).toFixed(2)}ms`);
             
             // Log the solution manager state
             const solutionManager = SolutionManager.getInstance();
@@ -652,10 +665,12 @@ connection.onNotification('clarion/updatePaths', async (params: {
         }
         
         // Build the solution after registering handlers
+        const buildStartTime = performance.now();
         try {
             logger.info(`🔄 Building solution...`);
             globalSolution = await buildClarionSolution();
-            logger.info(`✅ Solution built successfully with ${globalSolution.projects.length} projects`);
+            const buildEndTime = performance.now();
+            logger.info(`✅ Solution built successfully with ${globalSolution.projects.length} projects in ${(buildEndTime - buildStartTime).toFixed(2)}ms`);
             
             // Log each project in the global solution
             for (let i = 0; i < globalSolution.projects.length; i++) {
@@ -679,6 +694,15 @@ connection.onNotification('clarion/updatePaths', async (params: {
             };
         }
 
+        // Log memory usage after initialization
+        const memoryAfter = process.memoryUsage();
+        logger.info(`📊 Memory usage after solution initialization:
+            - RSS: ${Math.round(memoryAfter.rss / 1024 / 1024)} MB
+            - Heap total: ${Math.round(memoryAfter.heapTotal / 1024 / 1024)} MB
+            - Heap used: ${Math.round(memoryAfter.heapUsed / 1024 / 1024)} MB
+            - Difference: ${Math.round((memoryAfter.heapUsed - memoryBefore.heapUsed) / 1024 / 1024)} MB
+        `);
+
         logger.info("🔁 Clarion paths updated:");
         logger.info("🔹 Project Paths:", serverSettings.projectPaths);
         logger.info("🔹 Redirection Paths:", serverSettings.redirectionPaths);
@@ -686,6 +710,9 @@ connection.onNotification('clarion/updatePaths', async (params: {
         logger.info("🔹 Macros:", Object.keys(serverSettings.macros).length);
         logger.info("🔹 Clarion Version:", serverSettings.clarionVersion);
         logger.info("🔹 Configuration:", serverSettings.configuration);
+
+        const endTime = performance.now();
+        logger.info(`🕒 Total solution initialization time: ${(endTime - startTime).toFixed(2)}ms`);
 
     } catch (error: any) {
         logger.error(`❌ Failed to initialize and build solution: ${error.message || error}`);
@@ -702,6 +729,7 @@ connection.onNotification('clarion/updatePaths', async (params: {
 
 
 connection.onRequest('clarion/getSolutionTree', async (): Promise<ClarionSolutionInfo> => {
+    const startTime = performance.now();
     logger.info("📂 Received request for solution tree");
     
     try {
@@ -713,12 +741,10 @@ connection.onRequest('clarion/getSolutionTree', async (): Promise<ClarionSolutio
                 const solutionTree = solutionManager.getSolutionTree();
                 
                 if (solutionTree && solutionTree.projects && solutionTree.projects.length > 0) {
-                    logger.info(`✅ Returning solution tree from SolutionManager with ${solutionTree.projects.length} projects`);
+                    const endTime = performance.now();
+                    logger.info(`✅ Returning solution tree from SolutionManager with ${solutionTree.projects.length} projects in ${(endTime - startTime).toFixed(2)}ms`);
                     logger.info(`🔹 Solution name: ${solutionTree.name}`);
                     logger.info(`🔹 Solution path: ${solutionTree.path}`);
-                    solutionTree.projects.forEach(project => {
-                        logger.info(`🔹 Project: ${project.name} with ${project.sourceFiles?.length || 0} source files`);
-                    });
                     return solutionTree;
                 } else {
                     logger.warn(`⚠️ SolutionManager returned empty or invalid solution tree`);
@@ -733,7 +759,8 @@ connection.onRequest('clarion/getSolutionTree', async (): Promise<ClarionSolutio
         
         // Fall back to the cached globalSolution
         if (globalSolution && globalSolution.projects && globalSolution.projects.length > 0) {
-            logger.info(`✅ Returning cached solution with ${globalSolution.projects.length} projects`);
+            const endTime = performance.now();
+            logger.info(`✅ Returning cached solution with ${globalSolution.projects.length} projects in ${(endTime - startTime).toFixed(2)}ms`);
             logger.info(`🔹 Solution name: ${globalSolution.name}`);
             logger.info(`🔹 Solution path: ${globalSolution.path}`);
             return globalSolution;
@@ -744,14 +771,16 @@ connection.onRequest('clarion/getSolutionTree', async (): Promise<ClarionSolutio
         }
         
         // If all else fails, return an empty solution
-        logger.warn("⚠️ No solution available to return, creating empty solution");
+        const endTime = performance.now();
+        logger.warn(`⚠️ No solution available to return, creating empty solution in ${(endTime - startTime).toFixed(2)}ms`);
         return {
             name: "No Solution",
             path: "",
             projects: []
         };
     } catch (error) {
-        logger.error(`❌ Unexpected error in getSolutionTree: ${error instanceof Error ? error.message : String(error)}`);
+        const endTime = performance.now();
+        logger.error(`❌ Unexpected error in getSolutionTree: ${error instanceof Error ? error.message : String(error)} (${(endTime - startTime).toFixed(2)}ms)`);
         return {
             name: "Error",
             path: "",
@@ -761,13 +790,13 @@ connection.onRequest('clarion/getSolutionTree', async (): Promise<ClarionSolutio
 });
 
 // Add a handler for finding files using the server-side redirection parser
-connection.onRequest('clarion/findFile', (params: { filename: string }): { path: string, source: string } => {
+connection.onRequest('clarion/findFile', async (params: { filename: string }): Promise<{ path: string, source: string }> => {
     logger.info(`🔍 Received request to find file: ${params.filename}`);
     
     try {
         const solutionManager = SolutionManager.getInstance();
         if (solutionManager) {
-            const result = solutionManager.findFileWithExtension(params.filename);
+            const result = await solutionManager.findFileWithExtension(params.filename);
             if (result && result.path) {
                 logger.info(`✅ Found file: ${result.path} (source: ${result.source})`);
                 return result;
@@ -776,7 +805,7 @@ connection.onRequest('clarion/findFile', (params: { filename: string }): { path:
                 if (!path.extname(params.filename)) {
                     for (const ext of serverSettings.defaultLookupExtensions) {
                         const filenameWithExt = `${params.filename}${ext}`;
-                        const resultWithExt = solutionManager.findFileWithExtension(filenameWithExt);
+                        const resultWithExt = await solutionManager.findFileWithExtension(filenameWithExt);
                         if (resultWithExt && resultWithExt.path) {
                             logger.info(`✅ Found file with added extension: ${resultWithExt.path} (source: ${resultWithExt.source})`);
                             return resultWithExt;
@@ -791,7 +820,7 @@ connection.onRequest('clarion/findFile', (params: { filename: string }): { path:
     } catch (error) {
         logger.error(`❌ Error finding file ${params.filename}: ${error instanceof Error ? error.message : String(error)}`);
     }
-    
+
     return { path: "", source: "" };
 });
 
@@ -938,7 +967,7 @@ connection.onRequest('clarion/documentSymbols', async (params: { uri: string }) 
             const solutionManager = SolutionManager.getInstance();
             if (solutionManager) {
                 const fileName = decodeURIComponent(params.uri.split('/').pop() || '');
-                const result = solutionManager.findFileWithExtension(fileName);
+                const result = await solutionManager.findFileWithExtension(fileName);
 
                 if (result.path && fs.existsSync(result.path)) {
                     const fileContent = fs.readFileSync(result.path, 'utf8');
@@ -1030,5 +1059,14 @@ connection.onInitialized(() => {
 // ✅ Start Listening
 documents.listen(connection);
 connection.listen();
+
+// Add a handler for getting performance metrics
+connection.onRequest('clarion/getPerformanceMetrics', () => {
+    return {
+        memoryUsage: process.memoryUsage().heapUsed,
+        cpuUsage: process.cpuUsage(),
+        uptime: process.uptime()
+    };
+});
 
 logger.info("🟢  Clarion Language Server is now listening for requests.");

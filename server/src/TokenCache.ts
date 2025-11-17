@@ -3,7 +3,7 @@ import { ClarionTokenizer, Token } from './ClarionTokenizer';
 import LoggerManager from './logger';
 
 const logger = LoggerManager.getLogger("TokenCache");
-logger.setLevel("error");
+logger.setLevel("info");
 
 /**
  * Cached token data structure

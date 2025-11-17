@@ -1,4 +1,4 @@
-﻿﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, TextEditor, window as vscodeWindow, Diagnostic, DiagnosticSeverity, Range, StatusBarItem, StatusBarAlignment, extensions } from 'vscode';
+﻿﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, TextEditor, window as vscodeWindow, Diagnostic, DiagnosticSeverity, Range, StatusBarItem, StatusBarAlignment, extensions, DiagnosticCollection } from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, ErrorAction, CloseAction } from 'vscode-languageclient/node';
 
 import * as path from 'path';
@@ -7,6 +7,8 @@ import * as fs from 'fs';
 import { ClarionExtensionCommands } from './ClarionExtensionCommands';
 import { ClarionHoverProvider } from './providers/hoverProvider';
 import { ClarionDocumentLinkProvider } from './providers/documentLinkProvier';
+import { ClarionImplementationProvider } from './providers/implementationProvider';
+import { ClarionDefinitionProvider } from './providers/definitionProvider';
 import { DocumentManager } from './documentManager';
 import { ClarionDecorator } from './ClarionDecorator';
 
@@ -17,13 +19,15 @@ import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, glob
 import * as buildTasks from './buildTasks';
 import LoggerManager from './logger';
 import { SolutionCache } from './SolutionCache';
+import { LanguageClientManager, isClientReady, getClientReadyPromise, setLanguageClient } from './LanguageClientManager';
+import { redirectionService } from './paths/RedirectionService';
 
 import { ClarionProjectInfo } from 'common/types';
 
 const logger = LoggerManager.getLogger("Extension");
-logger.setLevel("error");
+logger.setLevel("info");
 let client: LanguageClient | undefined;
-let clientReady: boolean = false;
+// clientReady is now managed by LanguageClientManager
 let treeView: TreeView<TreeNode> | undefined;
 let solutionTreeDataProvider: SolutionTreeDataProvider | undefined;
 let structureViewProvider: StructureViewProvider | undefined;
@@ -31,6 +35,7 @@ let structureView: TreeView<any> | undefined;
 let documentManager: DocumentManager | undefined;
 
 let configStatusBarItem: StatusBarItem;
+let buildProjectStatusBarItem: StatusBarItem;
 
 export async function updateConfigurationStatusBar(configuration: string) {
     if (!configStatusBarItem) {
@@ -48,6 +53,57 @@ export async function updateConfigurationStatusBar(configuration: string) {
     if (currentConfig !== configuration) {
         logger.info(`🔄 Updating workspace configuration: clarion.configuration = ${configuration}`);
         await workspace.getConfiguration().update("clarion.configuration", configuration, ConfigurationTarget.Workspace);
+    }
+}
+
+export async function updateBuildProjectStatusBar() {
+    // Only proceed if we have a solution open
+    if (!globalSolutionFile) {
+        if (buildProjectStatusBarItem) {
+            buildProjectStatusBarItem.hide();
+        }
+        return;
+    }
+
+    // Check if there's an active editor
+    const activeEditor = window.activeTextEditor;
+    if (!activeEditor) {
+        if (buildProjectStatusBarItem) {
+            buildProjectStatusBarItem.hide();
+        }
+        return;
+    }
+
+    // Get the file path of the active editor
+    const filePath = activeEditor.document.uri.fsPath;
+    
+    // Get the SolutionCache instance
+    const solutionCache = SolutionCache.getInstance();
+    
+    // Find all projects the file belongs to
+    const projects = solutionCache.findProjectsForFile(filePath);
+    
+    // Create the status bar item if it doesn't exist
+    if (!buildProjectStatusBarItem) {
+        buildProjectStatusBarItem = window.createStatusBarItem(StatusBarAlignment.Left, 99); // Position it to the right of the configuration status bar
+        buildProjectStatusBarItem.command = 'clarion.buildCurrentProject';
+    }
+    
+    if (projects.length === 1) {
+        // If we found exactly one project, show "Build [project name]"
+        buildProjectStatusBarItem.text = `$(play) Build ${projects[0].name}`;
+        buildProjectStatusBarItem.tooltip = `Build project ${projects[0].name}`;
+        buildProjectStatusBarItem.show();
+    } else if (projects.length > 1) {
+        // If the file is in multiple projects, show "Build (Multiple Projects...)"
+        buildProjectStatusBarItem.text = `$(play) Build (Multiple Projects...)`;
+        buildProjectStatusBarItem.tooltip = `File is in multiple projects. Click to select which to build.`;
+        buildProjectStatusBarItem.show();
+    } else {
+        // If no project was found, show "Build Solution" instead
+        buildProjectStatusBarItem.text = `$(play) Build Solution`;
+        buildProjectStatusBarItem.tooltip = `Build the entire solution`;
+        buildProjectStatusBarItem.show();
     }
 }
 
@@ -181,8 +237,16 @@ async function createSolutionFileWatchers(context: ExtensionContext) {
 export async function activate(context: ExtensionContext): Promise<void> {
     const disposables: Disposable[] = [];
     const isRefreshingRef = { value: false };
-
+    const diagnosticCollection = languages.createDiagnosticCollection("clarion");
+    context.subscriptions.push(diagnosticCollection);
     logger.info("🔄 Activating Clarion extension...");
+    
+    // Add event listener for active editor changes to update the build status bar
+    context.subscriptions.push(
+        window.onDidChangeActiveTextEditor(() => {
+            updateBuildProjectStatusBar();
+        })
+    );
 
     // Check for open XML files to avoid conflicts with redhat.vscode-xml extension
     const openXmlFiles = workspace.textDocuments.filter(doc =>
@@ -307,12 +371,12 @@ export async function activate(context: ExtensionContext): Promise<void> {
             if (client) {
                 logger.info("⏳ Waiting for language client to be ready before initializing solution...");
                 
-                if (clientReady) {
+                if (isClientReady()) {
                     logger.info("✅ Language client is already ready. Proceeding with solution initialization...");
                     await workspaceHasBeenTrusted(context, disposables);
                 } else {
-                    // Set up a listener for when the client is ready
-                    client.onReady().then(async () => {
+                    // Use the LanguageClientManager's readyPromise
+                    getClientReadyPromise().then(async () => {
                         logger.info("✅ Language client is ready. Proceeding with solution initialization...");
                         // ✅ **Re-added workspaceHasBeenTrusted!**
                         await workspaceHasBeenTrusted(context, disposables);
@@ -526,6 +590,8 @@ export async function activate(context: ExtensionContext): Promise<void> {
         })
     );
 
+
+
     context.subscriptions.push(
         // Register the goToSymbol command
         commands.registerCommand('clarion.goToSymbol', (uri: Uri, range: Range) => {
@@ -590,11 +656,13 @@ export async function activate(context: ExtensionContext): Promise<void> {
         }),
         
         // Add solution build command
-        commands.registerCommand('clarion.buildSolution', async () => {
-            // Call the existing build function with solution as target
-            await buildSolutionOrProject("Solution");
+        // commands.registerCommand('clarion.buildSolution', async () => {
+        //     // Call the existing build function with solution as target
+        //     await buildSolutionOrProject("Solution", undefined, diagnosticCollection);
+        // }),
+        commands.registerCommand("clarion.buildSolution", async () => {
+            await buildTasks.runClarionBuild();//"Solution", diagnosticCollection);
         }),
-
         // Add project build command
         commands.registerCommand('clarion.buildProject', async (node) => {
             // The node parameter is passed automatically from the treeview
@@ -602,10 +670,10 @@ export async function activate(context: ExtensionContext): Promise<void> {
                 // If this is a file node, get the parent project node
                 if (node.data.relativePath && node.parent && node.parent.data && node.parent.data.path) {
                     // This is a file node, use its parent project
-                    await buildSolutionOrProject("Project", node.parent.data);
+                    await buildSolutionOrProject("Project", node.parent.data, diagnosticCollection);
                 } else if (node.data.path) {
                     // This is a project node
-                    await buildSolutionOrProject("Project", node.data);
+                    await buildSolutionOrProject("Project", node.data, diagnosticCollection);
                 } else {
                     window.showErrorMessage("Cannot determine which project to build.");
                 }
@@ -623,8 +691,8 @@ export async function activate(context: ExtensionContext): Promise<void> {
                     logger.info("⏳ Waiting for language client to be ready before reinitializing solution...");
                     
                     try {
-                        if (!clientReady) {
-                            await client.onReady();
+                        if (!isClientReady()) {
+                            await getClientReadyPromise();
                             logger.info("✅ Language client is now ready for reinitialization.");
                         }
                         
@@ -642,6 +710,101 @@ export async function activate(context: ExtensionContext): Promise<void> {
                 // Refresh the solution tree view to show the "Open Solution" button
                 await createSolutionTreeView(context);
                 vscodeWindow.showInformationMessage("No solution is currently open. Use the 'Open Solution' button in the Solution View.");
+            }
+        }),
+        
+        // Add force refresh solution cache command
+        commands.registerCommand('clarion.forceRefreshSolutionCache', async () => {
+            logger.info("🔄 Manually force refreshing solution cache...");
+            if (globalSolutionFile) {
+                try {
+                    vscodeWindow.showInformationMessage("Force refreshing solution cache...");
+                    
+                    // Get the SolutionCache singleton
+                    const solutionCache = SolutionCache.getInstance();
+                    
+                    // Force refresh the solution cache
+                    const startTime = performance.now();
+                    const result = await solutionCache.refresh(true);
+                    const endTime = performance.now();
+                    
+                    if (result) {
+                        logger.info(`✅ Solution cache force refreshed successfully in ${(endTime - startTime).toFixed(2)}ms`);
+                        
+                        // Refresh the solution tree view
+                        if (solutionTreeDataProvider) {
+                            await solutionTreeDataProvider.refresh();
+                        }
+                        
+                        vscodeWindow.showInformationMessage("Solution cache force refreshed successfully.");
+                    } else {
+                        logger.error("❌ Failed to force refresh solution cache.");
+                        vscodeWindow.showErrorMessage("Failed to force refresh solution cache. Check the logs for details.");
+                    }
+                } catch (error) {
+                    logger.error(`❌ Error force refreshing solution cache: ${error instanceof Error ? error.message : String(error)}`);
+                    vscodeWindow.showErrorMessage(`Error force refreshing solution cache: ${error instanceof Error ? error.message : String(error)}`);
+                }
+            } else {
+                vscodeWindow.showInformationMessage("No solution is currently open. Use the 'Open Solution' button in the Solution View.");
+            }
+        }),
+
+        // Add build current project command
+        commands.registerCommand('clarion.buildCurrentProject', async () => {
+            logger.info("🔄 Building current project or solution...");
+            
+            // Get the active editor
+            const activeEditor = window.activeTextEditor;
+            if (!activeEditor) {
+                vscodeWindow.showWarningMessage("No active file. Please open a file to build its project.");
+                return;
+            }
+            
+            // Get the file path of the active editor
+            const filePath = activeEditor.document.uri.fsPath;
+            
+            // Get the SolutionCache instance
+            const solutionCache = SolutionCache.getInstance();
+            
+            // Find all projects the file belongs to
+            const projects = solutionCache.findProjectsForFile(filePath);
+            
+            if (projects.length === 1) {
+                // If exactly one project contains the file, build that project
+                await buildSolutionOrProject("Project", projects[0], diagnosticCollection);
+            } else if (projects.length > 1) {
+                // If multiple projects contain the file, show a quick pick to select which one to build
+                const buildOptions = [
+                    "Build Full Solution",
+                    ...projects.map(p => `Build Project: ${p.name}`),
+                    "Cancel"
+                ];
+                
+                const selectedOption = await vscodeWindow.showQuickPick(buildOptions, {
+                    placeHolder: "Select a build target",
+                });
+                
+                if (!selectedOption || selectedOption === "Cancel") {
+                    return;
+                }
+                
+                if (selectedOption === "Build Full Solution") {
+                    await buildSolutionOrProject("Solution", undefined, diagnosticCollection);
+                } else {
+                    // Extract project name from the selected option
+                    const projectName = selectedOption.replace("Build Project: ", "");
+                    const selectedProject = projects.find(p => p.name === projectName);
+                    
+                    if (selectedProject) {
+                        await buildSolutionOrProject("Project", selectedProject, diagnosticCollection);
+                    } else {
+                        vscodeWindow.showErrorMessage(`Project ${projectName} not found.`);
+                    }
+                }
+            } else {
+                // Build the entire solution if no project is found
+                await buildSolutionOrProject("Solution", undefined, diagnosticCollection);
             }
         }),
 
@@ -774,10 +937,10 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
     }
     // ✅ Wait for the language client to be ready before proceeding
     if (client) {
-        if (!clientReady) {
+        if (!isClientReady()) {
             logger.info("⏳ Waiting for language client to be ready...");
             try {
-                await client.onReady();
+                await getClientReadyPromise();
                 logger.info("✅ Language client is now ready.");
             } catch (error) {
                 logger.error(`❌ Error waiting for language client: ${error instanceof Error ? error.message : String(error)}`);
@@ -785,6 +948,7 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
                 return;
             }
         }
+    updateBuildProjectStatusBar(); // Update the build project status bar
 
         // Get the solution directory
         const solutionDir = path.dirname(globalSolutionFile);
@@ -807,31 +971,39 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
         vscodeWindow.showErrorMessage("Error initializing Clarion solution: Language client is not available.");
         return;
     }
-    logger.info("🔄 before timeout");
-    // Wait a moment for the server to process the notification
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    logger.info("🔄 before reinitalizeEnvironment");
+    const startTime = performance.now();
+    logger.info("🔄 Initializing solution environment...");
+    
     // ✅ Continue initializing the solution cache and document manager
     documentManager = await reinitializeEnvironment(refreshDocs);
-    logger.info("🔄 before createSolutionTreeView");
+    logger.info("✅ Environment initialized");
+    
     await createSolutionTreeView(context);
-    logger.info("🔄 before registerLanguageFeatures")   ;
+    logger.info("✅ Solution tree view created");
+    
     registerLanguageFeatures(context);
-    logger.info("🔄 before setContext");
+    logger.info("✅ Language features registered");
+    
     await commands.executeCommand("setContext", "clarion.solutionOpen", true);
-    logger.info("🔄 before updateConfigurationStatusBar");
     updateConfigurationStatusBar(globalSettings.configuration);
-    logger.info("🔄 before createSolutionFileWatchers");
+    updateBuildProjectStatusBar(); // Update the build project status bar
+    
     // Create file watchers for the solution, project, and redirection files
     await createSolutionFileWatchers(context);
-    logger.info("🔄 before refreshOpenDocuments");
+    logger.info("✅ File watchers created");
+    
     // Force refresh all open documents to ensure links are generated
     await refreshOpenDocuments();
-    logger.info("🔄 before showInformationMessage");
+    logger.info("✅ Open documents refreshed");
+    
+    const endTime = performance.now();
+    logger.info(`✅ Solution initialization completed in ${(endTime - startTime).toFixed(2)}ms`);
+    
     vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(globalSolutionFile)}`);
 }
 
 async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<DocumentManager> {
+    const startTime = performance.now();
     logger.info("🔄 Initializing SolutionCache and DocumentManager...");
 
     // Get the SolutionCache singleton
@@ -846,10 +1018,30 @@ async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<Do
 
     // Initialize the solution cache with the solution file path
     if (globalSolutionFile) {
-        await solutionCache.initialize(globalSolutionFile);
+        const cacheStartTime = performance.now();
+        const result = await solutionCache.initialize(globalSolutionFile);
+        const cacheEndTime = performance.now();
+        logger.info(`✅ SolutionCache initialized in ${(cacheEndTime - cacheStartTime).toFixed(2)}ms (${result ? 'success' : 'failed'})`);
+        
+        // If initialization failed or returned empty solution, force a refresh from server
+        if (!result) {
+            logger.warn("⚠️ Solution cache initialization failed. Forcing refresh from server...");
+            const refreshStartTime = performance.now();
+            const refreshResult = await solutionCache.refresh(true);
+            const refreshEndTime = performance.now();
+            logger.info(`✅ SolutionCache force refreshed in ${(refreshEndTime - refreshStartTime).toFixed(2)}ms (${refreshResult ? 'success' : 'failed'})`);
+            
+            if (!refreshResult) {
+                logger.error("❌ Failed to refresh solution cache from server. Solution features may not work correctly.");
+            }
+        }
     } else {
         logger.warn("⚠️ No solution file path available. SolutionCache will not be initialized.");
     }
+    
+    // Mark activation as complete in SolutionCache
+    solutionCache.markActivationComplete();
+    logger.info("✅ Marked activation as complete in SolutionCache");
 
     if (documentManager) {
         logger.info("🔄 Disposing of existing DocumentManager instance...");
@@ -858,13 +1050,18 @@ async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<Do
     }
 
     // Create a new DocumentManager (no longer needs SolutionParser)
+    const dmStartTime = performance.now();
     documentManager = await DocumentManager.create();
+    const dmEndTime = performance.now();
+    logger.info(`✅ DocumentManager created in ${(dmEndTime - dmStartTime).toFixed(2)}ms`);
 
     if (refreshDocs) {
         logger.info("🔄 Refreshing open documents...");
         await refreshOpenDocuments();
     }
 
+    const endTime = performance.now();
+    logger.info(`✅ Environment reinitialized in ${(endTime - startTime).toFixed(2)}ms`);
     return documentManager;
 }
 
@@ -924,6 +1121,10 @@ export async function getAllOpenDocuments(): Promise<TextDocument[]> {
  */
 async function handleRedirectionFileChange(context: ExtensionContext) {
     logger.info("🔄 Redirection file changed. Refreshing environment...");
+
+    // Clear the redirection service cache
+    redirectionService.clearCache();
+    logger.info("✅ Redirection service cache cleared");
 
     // Reinitialize the Solution Cache and Document Manager
     await reinitializeEnvironment(true);
@@ -998,6 +1199,8 @@ async function handleSettingsChange(context: ExtensionContext) {
 
 let hoverProviderDisposable: Disposable | null = null;
 let documentLinkProviderDisposable: Disposable | null = null;
+let implementationProviderDisposable: Disposable | null = null;
+let definitionProviderDisposable: Disposable | null = null;
 let semanticTokensProviderDisposable: Disposable | null = null;
 
 function registerLanguageFeatures(context: ExtensionContext) {
@@ -1045,6 +1248,34 @@ function registerLanguageFeatures(context: ExtensionContext) {
 
     logger.info(`📄 Registered Hover Provider for extensions: ${lookupExtensions.join(', ')}`);
     
+    // ✅ Register Implementation Provider for "Go to Implementation" functionality
+    if (implementationProviderDisposable) {
+        implementationProviderDisposable.dispose(); // Remove old provider if it exists
+    }
+    
+    logger.info("🔍 Registering Implementation Provider...");
+    implementationProviderDisposable = languages.registerImplementationProvider(
+        documentSelectors,
+        new ClarionImplementationProvider(documentManager)
+    );
+    context.subscriptions.push(implementationProviderDisposable);
+    
+    logger.info(`📄 Registered Implementation Provider for extensions: ${lookupExtensions.join(', ')}`);
+    
+    // ✅ Register Definition Provider for "Go to Definition" functionality for class methods
+    if (definitionProviderDisposable) {
+        definitionProviderDisposable.dispose(); // Remove old provider if it exists
+    }
+    
+    logger.info("🔍 Registering Definition Provider for class methods...");
+    definitionProviderDisposable = languages.registerDefinitionProvider(
+        documentSelectors,
+        new ClarionDefinitionProvider(documentManager)
+    );
+    context.subscriptions.push(definitionProviderDisposable);
+    
+    logger.info(`📄 Registered Definition Provider for extensions: ${lookupExtensions.join(', ')}`);
+    
     // ✅ Register Prefix Decorator for variable highlighting
     if (semanticTokensProviderDisposable) {
         semanticTokensProviderDisposable.dispose(); // Remove old provider if it exists
@@ -1061,29 +1292,47 @@ function registerLanguageFeatures(context: ExtensionContext) {
 }
 
 async function refreshOpenDocuments() {
+    const startTime = performance.now();
     logger.info("🔄 Refreshing all open documents...");
 
-    const defaultLookupExtensions = globalSettings.defaultLookupExtensions;
-    logger.info(`🔍 Loaded defaultLookupExtensions: ${JSON.stringify(defaultLookupExtensions)}`);
+    try {
+        const defaultLookupExtensions = globalSettings.defaultLookupExtensions;
+        logger.info(`🔍 Loaded defaultLookupExtensions: ${JSON.stringify(defaultLookupExtensions)}`);
 
-    // ✅ Fetch ALL open documents using the updated method
-    const openDocuments = await getAllOpenDocuments(); // <-- Await the function here
+        // ✅ Fetch ALL open documents using the updated method
+        const docsStartTime = performance.now();
+        const openDocuments = await getAllOpenDocuments(); // <-- Await the function here
+        const docsEndTime = performance.now();
+        logger.info(`✅ Retrieved ${openDocuments.length} open documents in ${(docsEndTime - docsStartTime).toFixed(2)}ms`);
 
-    if (openDocuments.length === 0) {
-        logger.warn("⚠️ No open documents found.");
-        return;
-    }
-
-    for (const document of openDocuments) {
-        const documentUri = document.uri;
-
-        // ✅ Ensure the document manager updates the links
-        if (documentManager) {
-            await documentManager.updateDocumentInfo(document);
+        if (openDocuments.length === 0) {
+            logger.warn("⚠️ No open documents found.");
+            return;
         }
-    }
 
-    logger.info(`✅ Successfully refreshed ${openDocuments.length} open documents.`);
+        // Process documents in parallel for better performance
+        const updatePromises = openDocuments.map(async (document) => {
+            try {
+                const docStartTime = performance.now();
+                // ✅ Ensure the document manager updates the links
+                if (documentManager) {
+                    await documentManager.updateDocumentInfo(document);
+                }
+                const docEndTime = performance.now();
+                logger.debug(`✅ Updated document ${document.uri.fsPath} in ${(docEndTime - docStartTime).toFixed(2)}ms`);
+            } catch (docError) {
+                logger.error(`❌ Error updating document ${document.uri.fsPath}: ${docError instanceof Error ? docError.message : String(docError)}`);
+            }
+        });
+
+        // Wait for all document updates to complete
+        await Promise.all(updatePromises);
+
+        const endTime = performance.now();
+        logger.info(`✅ Successfully refreshed ${openDocuments.length} open documents in ${(endTime - startTime).toFixed(2)}ms`);
+    } catch (error) {
+        logger.error(`❌ Error in refreshOpenDocuments: ${error instanceof Error ? error.message : String(error)}`);
+    }
 }
 
 async function registerOpenCommand(context: ExtensionContext) {
@@ -1233,14 +1482,47 @@ async function createStructureView(context: ExtensionContext) {
             }
         });
         context.subscriptions.push(clearFilterCommand);
+        // Register the toggle follow cursor command
+        const toggleFollowCursorCommand = commands.registerCommand('clarion.structureView.toggleFollowCursor', async () => {
+            if (structureViewProvider) {
+                const isEnabled = structureViewProvider.toggleFollowCursor();
+                // Set context variable for the menu checkmark
+                await commands.executeCommand('setContext', 'clarion.followCursorEnabled', isEnabled);
+                logger.info(`Set clarion.followCursorEnabled context to ${isEnabled}`);
+                
+                // Force refresh the menu by triggering a context change
+                await commands.executeCommand('setContext', 'clarionStructureViewVisible', false);
+                await commands.executeCommand('setContext', 'clarionStructureViewVisible', true);
+            }
+        });
+        context.subscriptions.push(toggleFollowCursorCommand);
+        
+        // Register the structure view menu command (empty handler for the submenu)
+        const structureViewMenuCommand = commands.registerCommand('clarion.structureView.menu', () => {
+            // This is just a placeholder for the submenu
+            logger.info('Structure view menu clicked');
+        });
+        context.subscriptions.push(structureViewMenuCommand);
+        
+        
 
         structureView.title = "Structure";
         structureView.message = "Current document structure";
         structureView.description = "Clarion";
 
-        structureView.onDidChangeVisibility(e => {
-            commands.executeCommand('setContext', 'clarionStructureViewVisible', e.visible);
+        structureView.onDidChangeVisibility(async e => {
+            await commands.executeCommand('setContext', 'clarionStructureViewVisible', e.visible);
+            
+            // If the view becomes visible, ensure the follow cursor context is set correctly
+            if (e.visible && structureViewProvider) {
+                const isEnabled = structureViewProvider.isFollowCursorEnabled();
+                await commands.executeCommand('setContext', 'clarion.followCursorEnabled', isEnabled);
+                logger.info(`Refreshed clarion.followCursorEnabled context to ${isEnabled}`);
+            }
         });
+        
+        // Set the initial visibility context
+        await commands.executeCommand('setContext', 'clarionStructureViewVisible', true);
 
         logger.info("✅ Structure view successfully registered.");
     } catch (error) {
@@ -1271,7 +1553,11 @@ export async function closeClarionSolution(context: ExtensionContext) {
         solutionCache.clear();
         logger.info("✅ Cleared solution cache");
         
-        // Hide the configuration status bar if it exists
+        // Hide the status bar items
+        if (buildProjectStatusBarItem) {
+            buildProjectStatusBarItem.hide();
+        }
+        
         if (configStatusBarItem) {
             configStatusBarItem.hide();
         }
@@ -1293,6 +1579,20 @@ export async function closeClarionSolution(context: ExtensionContext) {
             logger.info("✅ Cleared hover provider");
         }
         
+        // Clear implementation provider
+        if (implementationProviderDisposable) {
+            implementationProviderDisposable.dispose();
+            implementationProviderDisposable = null;
+            logger.info("✅ Cleared implementation provider");
+        }
+        
+        // Clear definition provider
+        if (definitionProviderDisposable) {
+            definitionProviderDisposable.dispose();
+            definitionProviderDisposable = null;
+            logger.info("✅ Cleared definition provider");
+        }
+        
         // Clear semantic token provider
         if (semanticTokensProviderDisposable) {
             semanticTokensProviderDisposable.dispose();
@@ -1302,6 +1602,11 @@ export async function closeClarionSolution(context: ExtensionContext) {
         
         // Refresh the solution tree view to show the "Open Solution" button
         await createSolutionTreeView(context);
+        // Hide the build project status bar if it exists
+        if (buildProjectStatusBarItem) {
+            buildProjectStatusBarItem.hide();
+        }
+        
         
         // Dispose of any file watchers
         await createSolutionFileWatchers(context);
@@ -1540,20 +1845,22 @@ export async function openClarionSolution(context: ExtensionContext) {
 }
 
 function extractConfigurationsFromSolution(solutionContent: string): string[] {
-    const configPattern = /GlobalSection\(SolutionConfigurationPlatforms\) = preSolution([\s\S]*?)EndGlobalSection/g;
-    const match = configPattern.exec(solutionContent);
+    // Extract the SolutionConfigurationPlatforms section
+    const sectionPattern = /GlobalSection\(SolutionConfigurationPlatforms\)\s*=\s*preSolution([\s\S]*?)EndGlobalSection/;
+    const match = sectionPattern.exec(solutionContent);
 
     if (!match) {
         logger.warn("⚠️ No configurations found in solution file. Defaulting to Debug/Release.");
         return ["Debug", "Release"];
     }
 
-    const configurations = match[1]
+    const sectionContent = match[1];
+    const configurations = sectionContent
         .split('\n')
         .map(line => line.trim())
         .filter(line => line && !line.startsWith("GlobalSection")) // ✅ Remove section header
         .map(line => line.split('=')[0].trim()) // ✅ Extract left-hand side (config name)
-        .map(config => config.replace("|Win32", "").trim()) // ✅ Remove "|Win32"
+        .map(config => config.split('|')[0].trim()) // ✅ Extract everything before the pipe
         .filter(config => config.length > 0); // ✅ Ensure only valid names remain
 
     logger.info(`📂 Extracted configurations from solution: ${JSON.stringify(configurations)}`);
@@ -1887,24 +2194,12 @@ async function startClientServer(context: ExtensionContext, hasOpenXmlFiles: boo
         if (hasOpenXmlFiles) {
             logger.info(`🔍 [DEBUG] XML files are open, skipping delay and proceeding with initialization...`);
         } else {
-            // Add a shorter delay to allow other extensions to initialize first
-            const delayTime = 1000; // Use a shorter delay
-            logger.info(`🔍 [DEBUG] Waiting for other extensions to initialize (${delayTime}ms delay)...`);
+            // Minimal delay to allow other extensions to initialize first
+            const delayTime = 100; // Reduced to minimal delay
+            logger.info(`🔍 [DEBUG] Minimal wait for other extensions (${delayTime}ms delay)...`);
             
-            // Use a different approach for the delay
-            const startTime = Date.now();
-            let elapsedTime = 0;
-            
-            while (elapsedTime < delayTime) {
-                // Check every 100ms
-                await new Promise(resolve => setTimeout(resolve, 100));
-                elapsedTime = Date.now() - startTime;
-                
-                // Log progress every 500ms
-                if (elapsedTime % 500 < 100) {
-                    logger.info(`🔍 [DEBUG] Delay progress: ${elapsedTime}ms / ${delayTime}ms`);
-                }
-            }
+            // Simple timeout instead of polling
+            await new Promise(resolve => setTimeout(resolve, delayTime));
             
             logger.info("🔍 [DEBUG] Delay completed. Continuing with Clarion Language Server initialization...");
         }
@@ -1968,14 +2263,13 @@ async function startClientServer(context: ExtensionContext, hasOpenXmlFiles: boo
     const disposable = client.start();
     context.subscriptions.push(disposable);
 
-    // Reset client ready state
-    clientReady = false;
+    // Set the client in the LanguageClientManager
+    setLanguageClient(client);
 
     try {
         // Wait for the language client to become ready
-        await client.onReady();
+        await getClientReadyPromise();
         logger.info("✅ Language client started and is ready");
-        clientReady = true;
     } catch (err) {
         logger.error("❌ Language client failed to start properly", err);
         vscodeWindow.showWarningMessage("Clarion Language Server had issues during startup. Some features may not work correctly.");
@@ -1983,7 +2277,11 @@ async function startClientServer(context: ExtensionContext, hasOpenXmlFiles: boo
     }
 
 }
-async function buildSolutionOrProject(buildTarget: "Solution" | "Project", project?: ClarionProjectInfo) {
+async function buildSolutionOrProject(
+    buildTarget: "Solution" | "Project",
+    project: ClarionProjectInfo | undefined,
+    diagnosticCollection: DiagnosticCollection   // 🔹 required
+) {
     const buildConfig = {
         buildTarget,
         selectedProjectPath: project?.path ?? "",
@@ -1994,18 +2292,25 @@ async function buildSolutionOrProject(buildTarget: "Solution" | "Project", proje
         return;
     }
 
-    // Get solution info from the SolutionCache instead of loading a SolutionParser
     const solutionCache = SolutionCache.getInstance();
     const solutionInfo = solutionCache.getSolutionInfo();
 
     if (!solutionInfo) {
-        // Refresh the solution tree view to show the "Open Solution" button
         await createSolutionTreeView();
-        vscodeWindow.showInformationMessage("No solution is currently open. Use the 'Open Solution' button in the Solution View.");
+        vscodeWindow.showInformationMessage(
+            "No solution is currently open. Use the 'Open Solution' button in the Solution View."
+        );
         return;
     }
 
-    const buildParams = buildTasks.prepareBuildParameters(buildConfig);
+    const buildParams = {
+        ...buildTasks.prepareBuildParameters(buildConfig),
+        diagnosticCollection
+    };
+
     await buildTasks.executeBuildTask(buildParams);
 }
+
+
+
 

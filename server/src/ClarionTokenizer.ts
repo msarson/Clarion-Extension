@@ -1,7 +1,7 @@
 import { DocumentStructure } from './DocumentStructure';
 import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("Tokenizer");
-logger.setLevel("error");
+logger.setLevel("info");
 export enum TokenType {
     Comment,
     String,
@@ -43,7 +43,10 @@ export enum TokenType {
     MethodDeclaration,         // PROCEDURE inside a CLASS/MAP/INTERFACE (definition only, no CODE)
     MethodImplementation,      // e.g., ThisWindow.Init PROCEDURE (with CODE)
     MapProcedure,              // Optional: inside MAP structure
-    InterfaceMethod           // Optional: inside INTERFACE structure
+    InterfaceMethod,           // Optional: inside INTERFACE structure
+    // ✅ Window structure elements
+    WindowElement,             // Elements that appear in window structures (BUTTON, LIST, ITEM)
+    PictureFormat              // Picture format specifiers (e.g., @N10.2)
 }
 
 export interface Token {
@@ -318,8 +321,10 @@ const orderedTokenTypes: TokenType[] = [
     TokenType.PropertyFunction, TokenType.EndStatement, TokenType.Keyword, TokenType.Structure,
     // ✅ Add StructurePrefix and StructureField before other variable types
     TokenType.StructurePrefix, TokenType.StructureField,
+    // ✅ Add WindowElement after Structure elements but before other types
+    TokenType.WindowElement,
     TokenType.ConditionalContinuation, TokenType.Function,  // ✅ Placed after Structure, before FunctionArgumentParameter
-    TokenType.FunctionArgumentParameter, TokenType.TypeAnnotation, TokenType.Number,
+    TokenType.FunctionArgumentParameter, TokenType.TypeAnnotation, TokenType.PictureFormat, TokenType.Number,
     TokenType.Operator, TokenType.Class, TokenType.Attribute, TokenType.Constant, TokenType.Variable,
     TokenType.ImplicitVariable, TokenType.Delimiter, TokenType.Unknown
 ];
@@ -374,6 +379,7 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.ClarionDocument]: /\b(?:PROGRAM|MEMBER)\b/i,
     [TokenType.ConditionalContinuation]: /\b(?:ELSE|ELSIF|OF)\b/i,  // ✅ New type for ELSE and ELSIF
     [TokenType.Keyword]: /\b(?:RETURN|THEN|UNTIL|EXIT|NEW|PROCEDURE|ROUTINE|PROC|BREAK|KEY)\b/i, // Added KEY to keywords
+    [TokenType.PictureFormat]: /(@N[^\s,]*|@[Ee][^\s,]*|@S\d+|@D\d{1,2}[.\-_'`<>]?\d{0,2}B?|@T\d{1,2}[.\-_'`]?[B]?|@[Pp][^Pp\n]+[Pp]B?|@[Kk][^Kk\n]+[Kk]B?)/i,
 
     [TokenType.Structure]: new RegExp(
         Object.values(STRUCTURE_PATTERNS).map(r => r.source).join("|"), "i"
@@ -382,7 +388,7 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
 
     [TokenType.Function]: /\b(?:COLOR|LINK|DLL)\b(?=\s*\()/i,
     [TokenType.Directive]: /\b(?:ASSERT|BEGIN|COMPILE|INCLUDE|ITEMIZE|OMIT|ONCE|SECTION|SIZE)\b(?=\s*(\(|,))/i,
-    [TokenType.Property]: /\b(?:HVSCROLL|SEPARATOR|LIST|RESIZE|DEFAULT|CENTER|MAX|SYSTEM|IMM|DRIVER|PROP|PROPLIST|EVENT|CREATE|BRUSH|LEVEL|STD|CURSOR|BEEP|REJECT|CHARSET|PEN|LISTZONE|BUTTON|MSGMODE|TEXT|FREEZE|DDE|FF_|OCX|DOCK|MATCH|PAPER|DRIVEROP|DATATYPE|GradientTypes|STD|ITEM|MDI|GRAY|HLP)\b/i,
+    [TokenType.Property]: /\b(?:HVSCROLL|SEPARATOR|RESIZE|DEFAULT|CENTER|MAX|SYSTEM|IMM|DRIVER|PROP|PROPLIST|EVENT|CREATE|BRUSH|LEVEL|STD|CURSOR|BEEP|REJECT|CHARSET|PEN|LISTZONE|MSGMODE|TEXT|FREEZE|DDE|FF_|OCX|DOCK|MATCH|PAPER|DRIVEROP|DATATYPE|GradientTypes|STD|MDI|GRAY|HLP)\b/i,
     [TokenType.PropertyFunction]: /\b(?:FORMAT|FONT|USE|ICON|STATUS|MSG|TIP|AT|PROJECT|PRE|FROM|NAME|DLL)\b(?=\s*\()/i,
     //[TokenType.Label]: /^\s*([A-Za-z_][A-Za-z0-9_:]*)\b/i,
     [TokenType.Label]: /^\s*([A-Za-z_][A-Za-z0-9_:.]*)\b/i,
@@ -408,5 +414,12 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.ImplicitVariable]: /\b[A-Za-z][A-Za-z0-9_]+(?:\$|#|")\b/i,
     [TokenType.Delimiter]: /[,():]/i,  // ❌ Remove "." from here
     [TokenType.ReferenceVariable]: /&[A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*(?::\d+)?)?/i,
-    [TokenType.Unknown]: /\S+/i
+    [TokenType.Unknown]: /\S+/i,
+    
+    // ✅ Add pattern for window structure elements (BUTTON, LIST, ITEM)
+    // These elements appear as the first word on a line but not in column one (requiring at least one space beforehand)
+    // Window elements pattern - for STRING, only match when it's followed by a picture format (@...)
+    [TokenType.WindowElement]: /^[ \t]+(BUTTON|LIST|ITEM|PROMPT|ENTRY|RADIO|CHECK|SLIDER|BOX|IMAGE|PROGRESS|REGION|SPIN|LINE)\b(?!\s*:)|^[ \t]+STRING\s*\(@[^)]*\)/i
+    
+
 };

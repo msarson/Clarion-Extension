@@ -1,6 +1,12 @@
 # Change Log
 All notable changes to the "clarion-extension" extension will be documented in this file.
 
+## [0.5.7] - 2025-08-29
+
+### Enhancements
+- **Keyboard Shortcut for Go to Implementation**: Added Ctrl+F12 shortcut for "Go to Implementation" command, matching Visual Studio/VS Code defaults.
+- **Simplified Navigation**: Removed redundant Ctrl+F12 shortcut for "Follow Link" as this functionality is already available via Ctrl+click.
+
 ## [0.5.6] - 2025-04-04
 
 ### Enhancements

@@ -8,7 +8,7 @@ import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
-logger.setLevel("error");
+logger.setLevel("info");
 
 /**
  * Provides goto definition functionality for Clarion files
@@ -916,18 +916,18 @@ export class DefinitionProvider {
     
         // 🔁 Step 2: Fallback — search all redirection paths
         logger.info(`↪️ Fallback: searching via redirection for ${word}`);
-        const resolvedCandidate = solutionManager.findFileWithExtension(`${word}.CLW`);
+        const resolvedCandidate = await solutionManager.findFileWithExtension(`${word}.CLW`);
         if (resolvedCandidate && resolvedCandidate.path && fs.existsSync(resolvedCandidate.path) && !visited.has(resolvedCandidate.path)) {
             const contents = await fs.promises.readFile(resolvedCandidate.path, "utf-8");
             const doc = TextDocument.create(`file:///${resolvedCandidate.path.replace(/\\/g, "/")}`, "clarion", 1, contents);
             const tokens = this.tokenCache.getTokens(doc);
-    
+
             const label = tokens.find(t =>
                 t.start === 0 &&
                 t.type === TokenType.Label &&
                 t.value.toLowerCase() === word.toLowerCase()
             );
-    
+
             if (label) {
                 logger.info(`✅ Found global label via redirection: ${label.value} at line ${label.line} in ${resolvedCandidate.path} (source: ${resolvedCandidate.source})`);
                 return Location.create(doc.uri, {
@@ -962,9 +962,9 @@ export class DefinitionProvider {
         logger.info(`Document path: ${documentPath}`);
 
         // Use the SolutionManager's findFileWithExtension method which now returns path and source
-        const result = solutionManager.findFileWithExtension(fileName);
+        const result = await solutionManager.findFileWithExtension(fileName);
         let filePath = '';
-        
+
         if (result && result.path) {
             filePath = result.path;
             logger.info(`Found file: ${filePath} (source: ${result.source})`);

@@ -17,7 +17,7 @@ import {
 import { DocumentSymbol, SymbolKind as LSPSymbolKind } from 'vscode-languageserver-types';
 import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("StructureViewProvider");
-logger.setLevel("error");
+logger.setLevel("info");
 
 // No thresholds needed - solution view priority is handled on the server side
 
@@ -35,6 +35,11 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     private activeEditor: TextEditor | undefined;
     public treeView: TreeView<DocumentSymbol> | undefined;
     
+    // Follow cursor functionality
+    private followCursor: boolean = true;
+    private selectionChangeDebounceTimeout: NodeJS.Timeout | null = null;
+    private currentHighlightedSymbol: DocumentSymbol | undefined;
+    
     // Filter-related properties
     private _filterText: string = '';
     private _filterDebounceTimeout: NodeJS.Timeout | null = null;
@@ -43,6 +48,16 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
 
     constructor(treeView?: TreeView<DocumentSymbol>) {
         this.treeView = treeView;
+        
+        // Initialize the follow cursor context - make sure to use await in an async IIFE
+        (async () => {
+            try {
+                await commands.executeCommand('setContext', 'clarion.followCursorEnabled', this.followCursor);
+                logger.info(`Initialized clarion.followCursorEnabled context to ${this.followCursor}`);
+            } catch (error) {
+                logger.error(`Failed to set context: ${error}`);
+            }
+        })();
 
         // Listen for active editor changes
         window.onDidChangeActiveTextEditor(editor => {
@@ -64,6 +79,21 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 this._onDidChangeTreeData.fire();
             }
         });
+        
+        // Listen for selection changes to implement "Follow Cursor" functionality
+        window.onDidChangeTextEditorSelection(event => {
+            if (this.followCursor && this.activeEditor && event.textEditor === this.activeEditor) {
+                // Debounce the selection change to avoid excessive updates
+                if (this.selectionChangeDebounceTimeout) {
+                    clearTimeout(this.selectionChangeDebounceTimeout);
+                }
+                
+                this.selectionChangeDebounceTimeout = setTimeout(() => {
+                    this.revealActiveSelection();
+                    this.selectionChangeDebounceTimeout = null;
+                }, 100); // 100ms debounce delay for cursor movements
+            }
+        });
 
         // Initialize with the current active editor
         this.activeEditor = window.activeTextEditor;
@@ -77,6 +107,109 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         // Clear the visibility map
         this.visibilityMap.clear();
         this._onDidChangeTreeData.fire();
+    }
+    
+    /**
+     * Toggles the "Follow Cursor" functionality
+     * @returns The new state of the follow cursor setting
+     */
+    toggleFollowCursor(): boolean {
+        this.followCursor = !this.followCursor;
+        logger.info(`🔄 Follow cursor ${this.followCursor ? 'enabled' : 'disabled'}`);
+        
+        // If we just enabled follow cursor, immediately reveal the current selection
+        if (this.followCursor) {
+            this.revealActiveSelection();
+        } else {
+            // Clear the current highlighted symbol when disabling
+            this.currentHighlightedSymbol = undefined;
+            this._onDidChangeTreeData.fire();
+        }
+        
+        return this.followCursor;
+    }
+    
+    /**
+     * Gets the current state of the follow cursor setting
+     */
+    isFollowCursorEnabled(): boolean {
+        return this.followCursor;
+    }
+    
+    /**
+     * Finds and reveals the symbol at the current cursor position
+     */
+    private async revealActiveSelection(): Promise<void> {
+        if (!this.activeEditor || !this.treeView) {
+            return;
+        }
+        
+        try {
+            // Get the current cursor position
+            const position = this.activeEditor.selection.active;
+            
+            // Get all symbols for the current document
+            const symbols = await this.getChildren();
+            if (!symbols || symbols.length === 0) {
+                return;
+            }
+            
+            // Find the symbol that contains the cursor position
+            const symbol = this.findSymbolAtPosition(symbols, position.line);
+            if (symbol) {
+                // Store the currently highlighted symbol
+                this.currentHighlightedSymbol = symbol;
+                
+                // Reveal the symbol in the tree view
+                await this.treeView.reveal(symbol, { select: true, focus: false });
+                
+                // Force refresh to apply highlighting
+                this._onDidChangeTreeData.fire(symbol);
+            }
+        } catch (error) {
+            logger.error(`Failed to reveal active selection: ${error}`);
+        }
+    }
+    
+    /**
+     * Recursively finds the most specific symbol that contains the given line
+     * @param symbols The symbols to search through
+     * @param line The line number to find
+     * @returns The most specific symbol containing the line, or undefined if none found
+     */
+    private findSymbolAtPosition(symbols: DocumentSymbol[], line: number): DocumentSymbol | undefined {
+        if (!symbols || symbols.length === 0) {
+            return undefined;
+        }
+        
+        // Find all symbols that contain the line
+        const containingSymbols = symbols.filter(symbol =>
+            line >= symbol.range.start.line && line <= symbol.range.end.line
+        );
+        
+        if (containingSymbols.length === 0) {
+            return undefined;
+        }
+        
+        // Sort by specificity (smaller range is more specific)
+        containingSymbols.sort((a, b) => {
+            const aRange = a.range.end.line - a.range.start.line;
+            const bRange = b.range.end.line - b.range.start.line;
+            return aRange - bRange;
+        });
+        
+        // Get the most specific symbol
+        const mostSpecificSymbol = containingSymbols[0];
+        
+        // Check if there's an even more specific symbol in the children
+        if (mostSpecificSymbol.children && mostSpecificSymbol.children.length > 0) {
+            const childSymbol = this.findSymbolAtPosition(mostSpecificSymbol.children, line);
+            if (childSymbol) {
+                return childSymbol;
+            }
+        }
+        
+        return mostSpecificSymbol;
     }
     
     // Method to set filter text with debouncing
@@ -117,6 +250,9 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     }
 
     getTreeItem(element: DocumentSymbol): TreeItem {
+        // Store the current element being processed
+        this.currentElement = element;
+        
         // Generate a unique key for this element
         const elementKey = this.getElementKey(element);
 
@@ -135,13 +271,52 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             }
         }
 
+        // Create tree item with name only (not detail)
         const treeItem = new TreeItem(element.name, collapsibleState);
 
+        // Set icon based on symbol kind and detail
         // Set icon based on symbol kind
         treeItem.iconPath = this.getIconForSymbolKind(element.kind);
+        
+        // Add detail as description if available (shows to the right of the name)
+        if (element.detail) {
+            // Special handling for method declarations and implementations
+            if (element.detail === "Declaration") {
+                // Check if this method has an implementation
+                const hasImplementation = element.children?.some(child =>
+                    child.detail === "Implementation");
+                
+                if (hasImplementation) {
+                    treeItem.description = "Declaration @L" + (element.range.start.line + 1);
+                } else {
+                    treeItem.description = "Declaration";
+                }
+            } else if (element.detail === "Implementation") {
+                treeItem.description = "Implementation @L" + (element.range.start.line + 1);
+            } else {
+                treeItem.description = element.detail;
+            }
+        } else if (element.name === "Functions" && element.kind === 10) { // SymbolKind.Function
+            // Special handling for Functions container in MAP and MODULE
+            treeItem.description = "MAP/MODULE Functions";
+        }
 
         // Set tooltip to include detail if available
         treeItem.tooltip = element.detail ? `${element.name} (${element.detail})` : element.name;
+        
+        // Apply highlighting if this is the currently highlighted symbol
+        if (this.currentHighlightedSymbol && this.getElementKey(element) === this.getElementKey(this.currentHighlightedSymbol)) {
+            // Make the item stand out more with a description
+            // If we already have a detail description, append the current position marker
+            if (element.detail) {
+                treeItem.description = `${element.detail} ← current position`;
+            } else {
+                treeItem.description = "← current position";
+            }
+            
+            // Use a different icon to make it more visible
+            treeItem.iconPath = new ThemeIcon('location');
+        }
 
         // Set command to navigate to symbol when clicked
         if (this.activeEditor) {
@@ -304,6 +479,10 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             case LSPSymbolKind.Interface:
                 return new ThemeIcon('symbol-interface');
             case LSPSymbolKind.Function:
+                // Special handling for Functions container in MAP and MODULE
+                if (this.isMapModuleFunctionsContainer) {
+                    return new ThemeIcon('list-tree');
+                }
                 return new ThemeIcon('symbol-function');
             case LSPSymbolKind.Variable:
                 return new ThemeIcon('symbol-variable');
@@ -337,6 +516,15 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 return new ThemeIcon('symbol-misc');
         }
     }
+    
+    // Helper to check if this is a Functions container for MAP or MODULE
+    private get isMapModuleFunctionsContainer(): boolean {
+        const element = this.currentElement;
+        return element?.name === "Functions" && element?.kind === 10; // SymbolKind.Function
+    }
+    
+    // Track the current element being processed
+    private currentElement: DocumentSymbol | undefined;
 
     /**
      * Collapses all nodes in the tree view
