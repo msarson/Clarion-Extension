@@ -235,6 +235,17 @@ export class ClarionTokenizer {
         const patterns = ClarionTokenizer.compiledPatterns!;
         const types = ClarionTokenizer.orderedTypes!;
         
+        // 🔬 PROFILING: Track time spent per pattern type
+        const patternTiming = new Map<TokenType, number>();
+        const patternMatches = new Map<TokenType, number>();
+        const patternTests = new Map<TokenType, number>();
+        
+        for (const type of types) {
+            patternTiming.set(type, 0);
+            patternMatches.set(type, 0);
+            patternTests.set(type, 0);
+        }
+        
         for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
             const line = lines[lineNumber];
             if (line.trim() === "") continue; // ✅ Skip blank lines
@@ -260,8 +271,16 @@ export class ClarionTokenizer {
 
                     if (tokenType === TokenType.Label && column !== 0) continue; // ✅ Labels must be in column 0
 
+                    // 🔬 PROFILING: Time each pattern test
+                    const testStart = performance.now();
                     let match = pattern.exec(substring);
+                    const testTime = performance.now() - testStart;
+                    
+                    patternTiming.set(tokenType, patternTiming.get(tokenType)! + testTime);
+                    patternTests.set(tokenType, patternTests.get(tokenType)! + 1);
+                    
                     if (match && match.index === 0) {
+                        patternMatches.set(tokenType, patternMatches.get(tokenType)! + 1);
                         
                         // Special handling for Structure tokens to avoid misclassifying variables
                         let newTokenType = tokenType;
@@ -388,8 +407,38 @@ export class ClarionTokenizer {
             }
         }
 
-
-
+        // 🔬 PROFILING: Report pattern timing statistics
+        logger.info('🔬 [PROFILING] Pattern performance analysis:');
+        
+        // Sort by time spent (descending)
+        const sortedByTime = Array.from(patternTiming.entries())
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 10); // Top 10 slowest
+        
+        const totalPatternTime = Array.from(patternTiming.values()).reduce((sum, time) => sum + time, 0);
+        
+        for (const [type, time] of sortedByTime) {
+            const tests = patternTests.get(type) || 0;
+            const matches = patternMatches.get(type) || 0;
+            const avgTime = tests > 0 ? time / tests : 0;
+            const hitRate = tests > 0 ? (matches / tests) * 100 : 0;
+            const pct = totalPatternTime > 0 ? (time / totalPatternTime) * 100 : 0;
+            
+            logger.perf(`Pattern: ${TokenType[type]}`, {
+                'total_ms': time.toFixed(2),
+                'pct': pct.toFixed(1) + '%',
+                'tests': tests,
+                'matches': matches,
+                'hit_rate': hitRate.toFixed(1) + '%',
+                'avg_us': (avgTime * 1000).toFixed(2)
+            });
+        }
+        
+        logger.perf('Pattern summary', {
+            'total_pattern_ms': totalPatternTime.toFixed(2),
+            'total_tests': Array.from(patternTests.values()).reduce((sum, n) => sum + n, 0),
+            'total_matches': Array.from(patternMatches.values()).reduce((sum, n) => sum + n, 0)
+        });
     }
 
 
