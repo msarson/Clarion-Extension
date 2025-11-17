@@ -13,8 +13,48 @@ export class DocumentStructure {
     private structureIndentMap: Map<Token, number> = new Map();
     private maxLabelWidth: number = 0;
 
+    // 🚀 PERFORMANCE: Index structures for O(1) lookups
+    private labelIndex: Map<string, Token> = new Map();
+    private procedureIndex: Map<string, Token> = new Map();
+    private tokensByLine: Map<number, Token[]> = new Map();
+    private structuresByType: Map<string, Token[]> = new Map();
+
     constructor(private tokens: Token[]) {
+        // 🚀 PERFORMANCE: Build indexes first for fast lookups
+        this.buildIndexes();
         this.maxLabelWidth = this.processLabels();
+    }
+
+    /**
+     * 🚀 PERFORMANCE: Build index structures for fast lookups
+     */
+    private buildIndexes(): void {
+        const perfStart = performance.now();
+        
+        // Index tokens by line for fast line-based lookups
+        for (const token of this.tokens) {
+            if (!this.tokensByLine.has(token.line)) {
+                this.tokensByLine.set(token.line, []);
+            }
+            this.tokensByLine.get(token.line)!.push(token);
+            
+            // Index labels
+            if (token.type === TokenType.Label && token.label) {
+                this.labelIndex.set(token.label.toUpperCase(), token);
+            }
+            
+            // Index structures by type
+            if (token.type === TokenType.Structure) {
+                const structType = token.value.toUpperCase();
+                if (!this.structuresByType.has(structType)) {
+                    this.structuresByType.set(structType, []);
+                }
+                this.structuresByType.get(structType)!.push(token);
+            }
+        }
+        
+        const indexTime = performance.now() - perfStart;
+        logger.info(`📊 [PERFORMANCE] Built indexes in ${indexTime.toFixed(2)}ms (${this.tokens.length} tokens)`);
     }
 
     public process(): void {
@@ -99,14 +139,18 @@ export class DocumentStructure {
                         token.structureParent = parentStructure;
 
                         // Find the label of the parent structure (if any)
-                        const tokenIndex = this.tokens.indexOf(parentStructure);
-                        if (tokenIndex > 0) {
-                            // Check if the token before the structure is a label
-                            const prevToken = this.tokens[tokenIndex - 1];
-                            if (prevToken && prevToken.type === TokenType.Label) {
-                                // Set the nestedLabel property to the parent structure's label
-                                token.nestedLabel = prevToken.value;
-                                logger.info(`📌 Field '${token.value}' has nested label '${prevToken.value}'`);
+                        // 🚀 PERFORMANCE: Use tokensByLine index instead of indexOf
+                        const lineTokens = this.tokensByLine.get(parentStructure.line);
+                        if (lineTokens) {
+                            const structIndex = lineTokens.indexOf(parentStructure);
+                            if (structIndex > 0) {
+                                // Check if the token before the structure is a label
+                                const prevToken = lineTokens[structIndex - 1];
+                                if (prevToken && prevToken.type === TokenType.Label) {
+                                    // Set the nestedLabel property to the parent structure's label
+                                    token.nestedLabel = prevToken.value;
+                                    logger.info(`📌 Field '${token.value}' has nested label '${prevToken.value}'`);
+                                }
                             }
                         }
 
@@ -201,7 +245,8 @@ export class DocumentStructure {
 
         // 🛑 Special handling: Skip MODULE structures that are part of CLASS attribute list
         if (token.value.toUpperCase() === "MODULE") {
-            const sameLine = this.tokens.filter(t => t.line === token.line);
+            // 🚀 PERFORMANCE: Use tokensByLine index
+            const sameLine = this.tokensByLine.get(token.line) || [];
             const currentIndex = sameLine.findIndex(t => t === token);
 
             for (let j = currentIndex - 1; j >= 0; j--) {
@@ -218,7 +263,8 @@ export class DocumentStructure {
         
         // 🛑 Special handling: Skip TOOLBAR when it's inside a function call like SELF.AddItem(Toolbar)
         if (token.value.toUpperCase() === "TOOLBAR") {
-            const sameLine = this.tokens.filter(t => t.line === token.line);
+            // 🚀 PERFORMANCE: Use tokensByLine index
+            const sameLine = this.tokensByLine.get(token.line) || [];
             const currentIndex = sameLine.findIndex(t => t === token);
             
             // Check if TOOLBAR is inside parentheses
@@ -263,9 +309,11 @@ export class DocumentStructure {
             logger.info(`🔗 Structure ${token.value} at Line ${token.line} parented to structure ${parentStructure.value}`);
         }
 
-        const tokenIndex = this.tokens.indexOf(token);
+        // 🚀 PERFORMANCE: Use tokensByLine to find previous token
+        const lineTokens = this.tokensByLine.get(token.line) || [];
+        const tokenIndex = lineTokens.indexOf(token);
         if (tokenIndex > 0) {
-            const prevToken = this.tokens[tokenIndex - 1];
+            const prevToken = lineTokens[tokenIndex - 1];
             if (prevToken.type === TokenType.Label) {
                 token.label = prevToken.value;
             }
@@ -275,43 +323,48 @@ export class DocumentStructure {
         // ✅ Extract structure prefix if present (PRE)
         // Look for PRE attribute in the same line or next few lines
         // This works for all structure types (FILE, QUEUE, GROUP, RECORD, etc.)
-        const startSearchIndex = tokenIndex;
-        const endSearchIndex = Math.min(startSearchIndex + 20, this.tokens.length); // Look ahead a reasonable amount
+        // 🚀 PERFORMANCE: Search only in relevant lines
+        const searchEndLine = Math.min(token.line + 20, this.tokens[this.tokens.length - 1]?.line || token.line);
+        
+        prefixSearch: for (let line = token.line; line <= searchEndLine; line++) {
+            const tokensInLine = this.tokensByLine.get(line) || [];
+            
+            for (let idx = 0; idx < tokensInLine.length; idx++) {
+                const t = tokensInLine[idx];
 
-        for (let i = startSearchIndex; i < endSearchIndex; i++) {
-            const t = this.tokens[i];
-
-            // If we hit an END statement or another structure, stop searching
-            if (t.type === TokenType.EndStatement ||
-                (t.type === TokenType.Structure && t !== token)) {
-                break;
-            }
-
-            // Look for PRE attribute
-            if (t.value.toUpperCase() === "PRE") {
-                // Check if PRE is followed by parentheses with a prefix
-                if (i + 1 < this.tokens.length && this.tokens[i + 1].value === "(") {
-                    let prefixValue = "";
-                    let j = i + 2;
-
-                    // Extract the prefix value inside the parentheses
-                    while (j < this.tokens.length && this.tokens[j].value !== ")") {
-                        prefixValue += this.tokens[j].value;
-                        j++;
-                    }
-
-                    if (prefixValue) {
-                        token.structurePrefix = prefixValue;
-                        logger.info(`📌 Found structure prefix: ${prefixValue} for ${token.value} at Line ${token.line}`);
-                    }
+                // If we hit an END statement or another structure, stop searching
+                if (t.type === TokenType.EndStatement ||
+                    (t.type === TokenType.Structure && t !== token)) {
+                    break prefixSearch;
                 }
-                break;
+
+                // Look for PRE attribute
+                if (t.value.toUpperCase() === "PRE") {
+                    // Check if PRE is followed by parentheses with a prefix
+                    if (idx + 1 < tokensInLine.length && tokensInLine[idx + 1].value === "(") {
+                        let prefixValue = "";
+                        let j = idx + 2;
+
+                        // Extract the prefix value inside the parentheses
+                        while (j < tokensInLine.length && tokensInLine[j].value !== ")") {
+                            prefixValue += tokensInLine[j].value;
+                            j++;
+                        }
+
+                        if (prefixValue) {
+                            token.structurePrefix = prefixValue;
+                            logger.info(`📌 Found structure prefix: ${prefixValue} for ${token.value} at Line ${token.line}`);
+                        }
+                    }
+                    break prefixSearch;
+                }
             }
         }
 
         if (["CLASS", "MAP", "INTERFACE", "MODULE"].includes(token.value.toUpperCase())) {
             logger.info(`Checking if ${token.value.toUpperCase()} is inline`);
-            const sameLine = this.tokens.filter(t => t.line === token.line);
+            // 🚀 PERFORMANCE: Use tokensByLine index
+            const sameLine = this.tokensByLine.get(token.line) || [];
             logger.info(`Same line tokens: ${sameLine.map(t => t.value).join(", ")}`);
             const currentIndex = sameLine.findIndex(t => t === token);
             let isInlineAttribute = false;
