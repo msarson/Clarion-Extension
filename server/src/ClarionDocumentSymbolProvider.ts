@@ -52,6 +52,19 @@ export class ClarionDocumentSymbolProvider {
             logger.warn(`⚠️ Server not initialized, skipping document symbols for: ${documentUri}`);
             return [];
         }
+        
+        // 🚀 PERFORMANCE: Build token index by line to avoid O(n²) lookups
+        const perfIndexStart = performance.now();
+        const tokensByLine = new Map<number, Token[]>();
+        for (const token of tokens) {
+            if (!tokensByLine.has(token.line)) {
+                tokensByLine.set(token.line, []);
+            }
+            tokensByLine.get(token.line)!.push(token);
+        }
+        const perfIndexTime = performance.now() - perfIndexStart;
+        logger.perf('Symbol: build index', { time_ms: perfIndexTime.toFixed(2), lines: tokensByLine.size });
+        
         this.classSymbolMap.clear();
         const symbols: DocumentSymbol[] = [];
 
@@ -76,7 +89,7 @@ export class ClarionDocumentSymbolProvider {
             // Check if we've moved to a new line
             if (line > lastProcessedLine) {
                 // Check if any structures should be popped based on finishesAt
-                this.checkAndPopCompletedStructures(parentStack, line, symbols, tokens);
+                this.checkAndPopCompletedStructures(parentStack, line, symbols, tokens, tokensByLine);
 
                 // CRITICAL FIX: Check if we need to reset lastMethodImplementation
                 // This happens when a new global procedure is encountered
@@ -429,7 +442,8 @@ export class ClarionDocumentSymbolProvider {
         parentStack: Array<{ symbol: DocumentSymbol, finishesAt: number | undefined }>,
         currentLine: number,
         symbols: DocumentSymbol[],
-        tokens: Token[]
+        tokens: Token[],
+        tokensByLine: Map<number, Token[]>
     ): void {
         // CRITICAL FIX: Reset lastMethodImplementation when a new global procedure is encountered
         // This is a reference to the class property that needs to be updated
@@ -484,11 +498,11 @@ export class ClarionDocumentSymbolProvider {
         let isAtNewGlobalProcedure = false;
         let newGlobalProcedureToken: Token | null = null;
 
-        // Look for a global procedure token at the current line
-        for (const token of tokens) {
-            if (token.line === currentLine &&
-                (token.subType === TokenType.GlobalProcedure ||
-                    (token as any)._isGlobalProcedure === true)) {
+        // 🚀 PERFORMANCE: Use indexed lookup instead of looping through all tokens
+        const lineTokens = tokensByLine.get(currentLine) || [];
+        for (const token of lineTokens) {
+            if (token.subType === TokenType.GlobalProcedure ||
+                (token as any)._isGlobalProcedure === true) {
                 isAtNewGlobalProcedure = true;
                 newGlobalProcedureToken = token;
                 break;
