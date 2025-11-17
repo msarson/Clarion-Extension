@@ -79,13 +79,69 @@ export class ClarionTokenizer {
     private tabSize: number;  // ✅ Store tabSize
     maxLabelWidth: number = 0;
 
-
+    // 🚀 PERFORMANCE: Pre-compiled regex patterns cache
+    private static compiledPatterns: Map<TokenType, RegExp> | null = null;
+    private static orderedTypes: TokenType[] | null = null;
 
     constructor(text: string, tabSize: number = 2) {  // ✅ Default to 2 if not provided
         this.text = text;
         this.tokens = [];
         this.lines = [];
         this.tabSize = tabSize;  // ✅ Store the provided or default value
+        
+        // 🚀 PERFORMANCE: Initialize compiled patterns once
+        if (!ClarionTokenizer.compiledPatterns) {
+            ClarionTokenizer.initializePatterns();
+        }
+    }
+
+    // 🚀 PERFORMANCE: Pre-compile all regex patterns once
+    private static initializePatterns(): void {
+        ClarionTokenizer.compiledPatterns = new Map();
+        
+        // Optimized order: most common tokens first for faster matching
+        ClarionTokenizer.orderedTypes = [
+            TokenType.Comment,           // Very common
+            TokenType.String,            // Common
+            TokenType.Variable,          // Very common
+            TokenType.Number,            // Common
+            TokenType.Operator,          // Very common
+            TokenType.Delimiter,         // Very common
+            TokenType.LineContinuation,  // Common in multi-line code
+            TokenType.Keyword,           // Common
+            TokenType.Type,              // Common
+            TokenType.Label,             // Fairly common
+            TokenType.ReferenceVariable, // Less common but check before Variable
+            TokenType.EndStatement,      // Less common
+            TokenType.ExecutionMarker,   // Less common
+            TokenType.Directive,         // Less common
+            TokenType.ClarionDocument,   // Rare
+            TokenType.Structure,         // Less common but important
+            TokenType.StructurePrefix,   // Less common
+            TokenType.StructureField,    // Less common
+            TokenType.WindowElement,     // Less common
+            TokenType.ConditionalContinuation, // Less common
+            TokenType.Function,          // Less common
+            TokenType.FunctionArgumentParameter, // Less common
+            TokenType.TypeAnnotation,    // Less common
+            TokenType.PictureFormat,     // Less common
+            TokenType.PointerParameter,  // Rare
+            TokenType.FieldEquateLabel,  // Rare
+            TokenType.Property,          // Less common
+            TokenType.PropertyFunction,  // Less common
+            TokenType.Class,             // Rare
+            TokenType.Attribute,         // Less common
+            TokenType.Constant,          // Less common
+            TokenType.ImplicitVariable,  // Rare
+            TokenType.Unknown            // Last resort
+        ];
+        
+        for (const type of ClarionTokenizer.orderedTypes) {
+            const pattern = tokenPatterns[type];
+            if (pattern) {
+                ClarionTokenizer.compiledPatterns.set(type, pattern);
+            }
+        }
     }
 
 
@@ -125,20 +181,30 @@ export class ClarionTokenizer {
 
     /** ✅ Step 1: Tokenize all lines */
     private tokenizeLines(lines: string[]): void {
+        const patterns = ClarionTokenizer.compiledPatterns!;
+        const types = ClarionTokenizer.orderedTypes!;
+        
         for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
             const line = lines[lineNumber];
             if (line.trim() === "") continue; // ✅ Skip blank lines
 
             let position = 0;
-            let expandedLine = this.expandTabs(line);
-            let column = expandedLine.match(/^(\s*)/)?.[0].length || 0;
+            // 🚀 PERFORMANCE: Only expand tabs if line contains tabs
+            let column = 0;
+            if (line.includes('\t')) {
+                const expandedLine = this.expandTabs(line);
+                column = expandedLine.match(/^(\s*)/)?.[0].length || 0;
+            } else {
+                column = line.match(/^(\s*)/)?.[0].length || 0;
+            }
 
             while (position < line.length) {
                 const substring = line.slice(position);
                 let matched = false;
 
-                for (const tokenType of orderedTokenTypes) {
-                    const pattern = tokenPatterns[tokenType];
+                // 🚀 PERFORMANCE: Use pre-compiled patterns in optimized order
+                for (const tokenType of types) {
+                    const pattern = patterns.get(tokenType);
                     if (!pattern) continue;
 
                     if (tokenType === TokenType.Label && column !== 0) continue; // ✅ Labels must be in column 0
