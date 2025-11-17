@@ -260,6 +260,7 @@ function getTokens(document: TextDocument): Token[] {
 
 // ✅ Handle Folding Ranges (Uses Cached Tokens & Caches Results)
 connection.onFoldingRanges((params: FoldingRangeParams) => {
+    const perfStart = performance.now();
     try {
         logger.info(`📂 [DEBUG] Received onFoldingRanges request for: ${params.textDocument.uri}`);
         const document = documents.get(params.textDocument.uri);
@@ -283,12 +284,25 @@ connection.onFoldingRanges((params: FoldingRangeParams) => {
 
         logger.info(`📂 [DEBUG] Computing folding ranges for: ${uri}, language: ${document.languageId}`);
         
+        const tokenStart = performance.now();
         const tokens = getTokens(document);
+        const tokenTime = performance.now() - tokenStart;
         logger.info(`🔍 [DEBUG] Got ${tokens.length} tokens for folding ranges`);
+        logger.perf('Folding: getTokens', { time_ms: tokenTime.toFixed(2), tokens: tokens.length });
         
+        const foldStart = performance.now();
         const foldingProvider = new ClarionFoldingProvider(tokens);
         const ranges = foldingProvider.computeFoldingRanges();
+        const foldTime = performance.now() - foldStart;
         logger.info(`📂 [DEBUG] Computed ${ranges.length} folding ranges for: ${uri}`);
+        
+        const totalTime = performance.now() - perfStart;
+        logger.perf('Folding: complete', { 
+            total_ms: totalTime.toFixed(2),
+            token_ms: tokenTime.toFixed(2),
+            fold_ms: foldTime.toFixed(2),
+            ranges: ranges.length
+        });
         
         return ranges;
     } catch (error) {
@@ -403,6 +417,7 @@ connection.onDocumentFormatting((params: DocumentFormattingParams): TextEdit[] =
 
 
 connection.onDocumentSymbol((params: DocumentSymbolParams) => {
+    const perfStart = performance.now();
     try {
         logger.info(`📂 [DEBUG] Received onDocumentSymbol request for: ${params.textDocument.uri}`);
         const document = documents.get(params.textDocument.uri);
@@ -431,11 +446,25 @@ connection.onDocumentSymbol((params: DocumentSymbolParams) => {
         }
 
         logger.info(`📂 [DEBUG] Computing document symbols for: ${uri}, language: ${document.languageId}`);
-        const tokens = getTokens(document);  // ✅ No need for async
-        logger.info(`🔍 [DEBUG] Got ${tokens.length} tokens for document symbols`);
         
+        const tokenStart = performance.now();
+        const tokens = getTokens(document);  // ✅ No need for async
+        const tokenTime = performance.now() - tokenStart;
+        logger.info(`🔍 [DEBUG] Got ${tokens.length} tokens for document symbols`);
+        logger.perf('Symbols: getTokens', { time_ms: tokenTime.toFixed(2), tokens: tokens.length });
+        
+        const symbolStart = performance.now();
         const symbols = clarionDocumentSymbolProvider.provideDocumentSymbols(tokens, uri);
+        const symbolTime = performance.now() - symbolStart;
         logger.info(`🧩 [DEBUG] Returned ${symbols.length} document symbols for ${uri}`);
+
+        const totalTime = performance.now() - perfStart;
+        logger.perf('Symbols: complete', { 
+            total_ms: totalTime.toFixed(2),
+            token_ms: tokenTime.toFixed(2),
+            symbol_ms: symbolTime.toFixed(2),
+            symbols: symbols.length
+        });
 
         return symbols;
     } catch (error) {

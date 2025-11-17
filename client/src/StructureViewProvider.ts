@@ -19,6 +19,10 @@ import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("StructureViewProvider");
 logger.setLevel("error");
 
+// 📊 PERFORMANCE: Create perf logger that always logs
+const perfLogger = LoggerManager.getLogger("StructureViewPerf");
+perfLogger.setLevel("info"); // Keep perf logs visible
+
 // No thresholds needed - solution view priority is handled on the server side
 
 
@@ -61,6 +65,9 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
 
         // Listen for active editor changes
         window.onDidChangeActiveTextEditor(editor => {
+            perfLogger.info(`📊 PERF: Active editor changed to: ${editor?.document.fileName || 'none'}`);
+            const perfStart = performance.now();
+            
             this.activeEditor = editor;
             
             // Clear any active filter when changing documents
@@ -71,6 +78,9 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             }
             
             this._onDidChangeTreeData.fire();
+            
+            const perfTime = performance.now() - perfStart;
+            perfLogger.info(`📊 PERF: Structure view updated for editor change: ${perfTime.toFixed(2)}ms`);
         });
 
         // Listen for document changes
@@ -100,6 +110,9 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     }
 
     refresh(): void {
+        perfLogger.info(`📊 PERF: Structure view refresh triggered`);
+        const perfStart = performance.now();
+        
         // Reset the expandAllFlag when refreshing
         this.expandAllFlag = false;
         // Clear the filter cache when refreshing
@@ -107,6 +120,9 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         // Clear the visibility map
         this.visibilityMap.clear();
         this._onDidChangeTreeData.fire();
+        
+        const perfTime = performance.now() - perfStart;
+        perfLogger.info(`📊 PERF: Structure view refresh completed: ${perfTime.toFixed(2)}ms`);
     }
     
     /**
@@ -343,6 +359,10 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     private visibilityMap = new Map<string, boolean>();
 
     async getChildren(element?: DocumentSymbol): Promise<DocumentSymbol[]> {
+        // 📊 PERFORMANCE: Track getChildren timing
+        const perfStart = performance.now();
+        const context = element ? `child of ${element.name}` : 'root';
+        
         if (!this.activeEditor) return [];
 
         if (element) {
@@ -365,6 +385,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 if (this._filteredNodesCache.has(cacheKey)) {
                     const cachedNodes = this._filteredNodesCache.get(cacheKey);
                     logger.info(`  - Returning ${cachedNodes?.length || 0} cached filtered children`);
+                    const perfTime = performance.now() - perfStart;
+                    if (perfTime > 10) perfLogger.info(`📊 PERF: getChildren(${context}) cached: ${perfTime.toFixed(2)}ms`);
                     return cachedNodes || [];
                 }
                 
@@ -378,19 +400,27 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 this._filteredNodesCache.set(cacheKey, visibleChildren);
                 
                 logger.info(`  - Returning ${visibleChildren.length} visible children`);
+                const perfTime = performance.now() - perfStart;
+                if (perfTime > 10) perfLogger.info(`📊 PERF: getChildren(${context}) filtered: ${perfTime.toFixed(2)}ms`);
                 return visibleChildren;
             }
 
+            const perfTime = performance.now() - perfStart;
+            if (perfTime > 10) perfLogger.info(`📊 PERF: getChildren(${context}) direct: ${perfTime.toFixed(2)}ms`);
             return element.children ?? [];
         }
 
         try {
+            const symbolsStart = performance.now();
             
             // For normal-sized documents, proceed with symbol request
             const symbols = await commands.executeCommand<DocumentSymbol[]>(
                 'vscode.executeDocumentSymbolProvider',
                 this.activeEditor.document.uri
             );
+            
+            const symbolsTime = performance.now() - symbolsStart;
+            perfLogger.info(`📊 PERF: executeDocumentSymbolProvider: ${symbolsTime.toFixed(2)}ms, returned ${symbols?.length || 0} symbols`);
             
             this.elementMap.clear();
 
