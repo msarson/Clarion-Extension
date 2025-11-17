@@ -6,7 +6,7 @@
  * to get project information and build the solution or individual projects.
  */
 
-import { workspace, window, tasks, Task, ShellExecution, TaskScope, TaskProcessEndEvent, TaskRevealKind, TaskPanelKind, TextEditor, Diagnostic, DiagnosticSeverity, Range, languages, Uri } from "vscode";
+import { workspace, window, tasks, Task, ShellExecution, TaskScope, TaskProcessEndEvent, TaskRevealKind, TaskPanelKind, TextEditor, Diagnostic, DiagnosticSeverity, Range, languages, Uri, DiagnosticCollection } from "vscode";
 import { globalSolutionFile, globalSettings } from "./globals";
 import * as path from "path";
 import * as fs from "fs";
@@ -16,7 +16,7 @@ import { PlatformUtils } from "./platformUtils";
 import { SolutionCache } from "./SolutionCache";
 import { ClarionProjectInfo } from "../../common/types";
 const logger = LoggerManager.getLogger("BuildTasks");
-logger.setLevel("error"); // Changed from "error" to "info" to see more detailed logs
+logger.setLevel("error");
 /**
  * Main entry point for the Clarion build process
  */
@@ -41,9 +41,16 @@ export async function runClarionBuild() {
     // Prepare build task parameters
     const buildParams = prepareBuildParameters(buildConfig);
 
-    // Execute the build task
-    await executeBuildTask(buildParams);
+    // ✅ Ensure we have a diagnostic collection for this extension
+    const diagnosticCollection = languages.createDiagnosticCollection("clarion");
+
+    // Execute the build task with diagnostics
+    await executeBuildTask({
+        ...buildParams,
+        diagnosticCollection,   // ✅ pass through
+    });
 }
+
 
 /**
  * Validates the build environment
@@ -74,10 +81,10 @@ export function validateBuildEnvironment(): boolean {
 export async function loadSolutionInfo(): Promise<{ solutionInfo: any } | null> {
     try {
         const solutionCache = SolutionCache.getInstance();
-        
+
         // Ensure we have the latest solution information from the server
         await solutionCache.refresh();
-        
+
         const solutionInfo = solutionCache.getSolutionInfo();
 
         if (!solutionInfo) {
@@ -118,17 +125,22 @@ async function determineBuildTarget(solutionInfo: any): Promise<{
         // We don't return here, allowing the user to choose between solution and project build
     }
 
-    // Try to find the project for the active file
-    const currentProject = findCurrentProject(solutionInfo);
-    if (currentProject) {
-        selectedProjectPath = currentProject.path;
-        projectObject = currentProject as ClarionProjectInfo;
-    }
-
+    // Try to find projects for the active file
+    const currentProjects = findCurrentProjects(solutionInfo);
+    
     const buildOptions = ["Build Full Solution"];
 
-    if (currentProject) {
+    if (currentProjects.length === 1) {
+        // If there's exactly one project for the current file
+        const currentProject = currentProjects[0];
+        selectedProjectPath = currentProject.path;
+        projectObject = currentProject as ClarionProjectInfo;
         buildOptions.push(`Build Current Project: ${currentProject.name}`);
+    } else if (currentProjects.length > 1) {
+        // If the file is in multiple projects, add an option for each
+        currentProjects.forEach(project => {
+            buildOptions.push(`Build Project: ${project.name}`);
+        });
     }
 
     buildOptions.push("Cancel");
@@ -144,6 +156,16 @@ async function determineBuildTarget(solutionInfo: any): Promise<{
 
     if (selectedOption.startsWith("Build Current Project")) {
         buildTarget = "Project";
+    } else if (selectedOption.startsWith("Build Project:")) {
+        buildTarget = "Project";
+        // Extract project name from the selected option
+        const projectName = selectedOption.replace("Build Project: ", "");
+        const selectedProject = currentProjects.find(p => p.name === projectName);
+        
+        if (selectedProject) {
+            selectedProjectPath = selectedProject.path;
+            projectObject = selectedProject;
+        }
     }
 
     return { buildTarget, selectedProjectPath, projectObject };
@@ -152,28 +174,40 @@ async function determineBuildTarget(solutionInfo: any): Promise<{
 /**
  * Finds the project that contains the file in the active editor
  * This now uses the SolutionCache's findProjectForFile method
+ * @deprecated Use findCurrentProjects instead to handle files in multiple projects
  */
 function findCurrentProject(solutionInfo: any) {
+    const projects = findCurrentProjects(solutionInfo);
+    return projects.length > 0 ? projects[0] : undefined;
+}
+
+/**
+ * Finds all projects that contain the file in the active editor
+ * This uses the SolutionCache's findProjectsForFile method
+ * @returns Array of projects containing the file (empty if none found)
+ */
+function findCurrentProjects(solutionInfo: any): ClarionProjectInfo[] {
     const activeEditor: TextEditor | undefined = window.activeTextEditor;
 
     if (!activeEditor) {
-        return undefined;
+        return [];
     }
 
     const activeFilePath = activeEditor.document.uri.fsPath;
     const activeFileName = path.basename(activeFilePath);
 
-    // Use SolutionCache to find the project for the active file
+    // Use SolutionCache to find all projects for the active file
     const solutionCache = SolutionCache.getInstance();
-    const project = solutionCache.findProjectForFile(activeFileName);
-    
-    if (project) {
-        logger.info(`✅ Found project ${project.name} for file ${activeFileName} using server-side solution cache`);
-        return project;
+    // Use the full file path instead of just the basename
+    const projects = solutionCache.findProjectsForFile(activeFilePath);
+
+    if (projects.length > 0) {
+        logger.info(`✅ Found ${projects.length} projects for file ${activeFileName} using server-side solution cache`);
+        return projects;
     }
 
-    logger.info(`❌ No project found for file ${activeFileName}`);
-    return undefined;
+    logger.info(`❌ No projects found for file ${activeFileName}`);
+    return [];
 }
 
 /**
@@ -213,7 +247,6 @@ export function prepareBuildParameters(buildConfig: {
     const buildArgs = [
         "/property:GenerateFullPaths=true",
         "/t:build",
-        "/m",
         "/consoleloggerparameters:ErrorsOnly",
         `/property:Configuration=${selectedConfig}`,
         `/property:clarion_Sections=${selectedConfig}`,
@@ -231,7 +264,7 @@ export function prepareBuildParameters(buildConfig: {
     if (buildConfig.buildTarget === "Solution") {
         buildArgs.push(`/property:SolutionDir="${path.dirname(globalSolutionFile)}"`);
         logger.info(`🔹 Solution directory: ${path.dirname(globalSolutionFile)}`);
-        
+
         // Explicitly specify the solution file to build
         buildArgs.push(`"${globalSolutionFile}"`);
         logger.info(`🔹 Solution file: ${path.basename(globalSolutionFile)}`);
@@ -239,7 +272,7 @@ export function prepareBuildParameters(buildConfig: {
         const projectDir = path.dirname(buildConfig.selectedProjectPath);
         buildArgs.push(`/property:ProjectPath="${projectDir}"`);
         logger.info(`🔹 Project directory: ${projectDir}`);
-        
+
         // Explicitly specify the project file to build
         const projectFile = buildConfig.projectObject?.filename || path.basename(buildConfig.selectedProjectPath);
         const projectFilePath = path.join(buildConfig.selectedProjectPath, projectFile);
@@ -268,8 +301,9 @@ export async function executeBuildTask(params: {
     buildLogPath: string;
     buildTarget: "Solution" | "Project";
     targetName: string;
+    diagnosticCollection: DiagnosticCollection;   // ✅ add
 }): Promise<void> {
-    const { solutionDir, msBuildPath, buildArgs, buildLogPath, buildTarget, targetName } = params;
+    const { solutionDir, msBuildPath, buildArgs, buildLogPath, buildTarget, targetName, diagnosticCollection } = params;
 
     logger.info(`🔄 Executing build task for ${buildTarget === "Solution" ? "solution" : "project"}: ${targetName}`);
     logger.info(`🔹 Working directory: ${solutionDir}`);
@@ -290,11 +324,16 @@ export async function executeBuildTask(params: {
         const buildTypeMessage = buildTarget === "Solution"
             ? `🔄 Building Clarion Solution: ${targetName}`
             : `🔄 Building Clarion Project: ${targetName}`;
-        
+
         window.showInformationMessage(buildTypeMessage);
 
-        // Pass the target info to the completion handler
-        const disposable = setupBuildCompletionHandler(buildLogPath, buildTarget, targetName);
+        // Pass the target info (and diagnostics) to the completion handler
+        const disposable = setupBuildCompletionHandler(
+            buildLogPath,
+            buildTarget,
+            targetName,
+            diagnosticCollection   // ✅ pass through
+        );
 
         logger.info(`✅ Executing build task: ${execution.commandLine}`);
         await tasks.executeTask(task);
@@ -303,6 +342,7 @@ export async function executeBuildTask(params: {
         logger.error("❌ Clarion Build Task Error:", error);
     }
 }
+
 
 /**
  * Creates the build task
@@ -337,64 +377,87 @@ function createBuildTask(execution: ShellExecution): Task {
 /**
  * Sets up the handler for build completion
  */
-function setupBuildCompletionHandler(buildLogPath: string, buildTarget: "Solution" | "Project", targetName: string) {
+function setupBuildCompletionHandler(
+    buildLogPath: string,
+    buildTarget: "Solution" | "Project",
+    targetName: string,
+    diagnosticCollection: DiagnosticCollection   // ✅ add
+) {
     return tasks.onDidEndTaskProcess((event: TaskProcessEndEvent) => {
         if (event.execution.task.name === "Clarion Build") {
-            processTaskCompletion(event, buildLogPath, buildTarget, targetName);
+            processTaskCompletion(
+                event,
+                buildLogPath,
+                buildTarget,
+                targetName,
+                diagnosticCollection   // ✅ pass through
+            );
         }
     });
 }
 
+
 /**
  * Processes the task completion, reads log file, and shows results
  */
-function processTaskCompletion(event: TaskProcessEndEvent, buildLogPath: string, buildTarget: "Solution" | "Project", targetName: string) {
+function processTaskCompletion(
+    event: TaskProcessEndEvent,
+    buildLogPath: string,
+    buildTarget: "Solution" | "Project",
+    targetName: string,
+    diagnosticCollection: DiagnosticCollection   // ✅ add this
+) {
     fs.readFile(buildLogPath, "utf8", (err, data) => {
         if (err) {
             logger.info("Error reading build log:", err);
         } else {
             logger.info("Captured Build Output");
             logger.info(data);
-            
-            // Process the build errors and get counts
-            const { errorCount, warningCount } = processBuildErrors(data);
-            
-            // If build failed, also check for MSBuild errors
+
             if (event.exitCode !== 0) {
+                // ❌ Failed build: parse diagnostics
+                const { errorCount, warningCount, diagnostics } = processBuildErrors(data);
                 const msbuildErrors = processGeneralMSBuildErrors(data);
-                
-                // Show toast with error and warning counts
-                const totalErrors = errorCount + (msbuildErrors ? 1 : 0); // Add 1 if there are MSBuild errors
-                
-                // Format the build target name for the message
-                const targetInfo = buildTarget === "Solution"
-                    ? `Solution: ${targetName}`
-                    : `Project: ${targetName}`;
-                
-                // Create a detailed message with both errors and warnings
+
+                // ✅ clear + set diagnostics here
+                diagnosticCollection.clear();
+                diagnostics.forEach((arr, file) =>
+                    diagnosticCollection.set(Uri.file(file), arr)
+                );
+
+                const totalErrors = errorCount; // + (msbuildErrors ? 1 : 0);
+                const targetInfo =
+                    buildTarget === "Solution"
+                        ? `Solution: ${targetName}`
+                        : `Project: ${targetName}`;
+
                 let message = `❌ Build Failed (${targetInfo}): `;
-                
+
                 if (totalErrors > 0) {
-                    message += `${totalErrors} error${totalErrors !== 1 ? 's' : ''}`;
+                    message += `${totalErrors} error${totalErrors !== 1 ? "s" : ""}`;
                     if (warningCount > 0) {
-                        message += ` and ${warningCount} warning${warningCount !== 1 ? 's' : ''}`;
+                        message += ` and ${warningCount} warning${warningCount !== 1 ? "s" : ""}`;
                     }
                     message += ` found. Check the Problems Panel!`;
+                } else if (warningCount > 0) {
+                    message += `${warningCount} warning${warningCount !== 1 ? "s" : ""} found. Check the Problems Panel!`;
                 } else {
-                    // If we have warnings but no errors (unusual for a failed build)
-                    if (warningCount > 0) {
-                        message += `${warningCount} warning${warningCount !== 1 ? 's' : ''} found. Check the Problems Panel!`;
-                    } else {
-                        // Generic error message if no specific errors or warnings were detected
-                        message += `Check the Problems Panel for details.`;
-                    }
+                    message += `Check the Problems Panel for details.`;
                 }
-                
+
                 window.showErrorMessage(message);
+            } else {
+                // ✅ Success: clear old diagnostics
+                diagnosticCollection.clear();
+
+                const successMessage =
+                    buildTarget === "Solution"
+                        ? `✅ Building Clarion Solution Complete: ${targetName}`
+                        : `✅ Building Clarion Project Complete: ${targetName}`;
+                window.showInformationMessage(successMessage);
             }
         }
 
-        // Delete the temporary log file after processing
         fs.unlink(buildLogPath, (unlinkErr) => {
             if (unlinkErr) {
                 logger.info("Failed to delete build log:", unlinkErr);
@@ -403,18 +466,8 @@ function processTaskCompletion(event: TaskProcessEndEvent, buildLogPath: string,
             }
         });
     });
-
-    if (event.exitCode === 0) {
-        // Show success message with target details
-        const successMessage = buildTarget === "Solution"
-            ? `✅ Building Clarion Solution Complete: ${targetName}`
-            : `✅ Building Clarion Project Complete: ${targetName}`;
-            
-        window.showInformationMessage(successMessage);
-    }
-    // Note: We don't show a generic error message here anymore
-    // The error message with error count is now shown in the file processing section above
 }
+
 
 /**
  * Process general MSBuild errors that don't match the standard Clarion error format
@@ -424,32 +477,32 @@ function processTaskCompletion(event: TaskProcessEndEvent, buildLogPath: string,
 function processGeneralMSBuildErrors(output: string): boolean {
     const diagnostics: { [key: string]: Diagnostic[] } = {};
     const diagnosticCollection = languages.createDiagnosticCollection("msbuild-errors");
-    
+
     // Clear previous diagnostics
     diagnosticCollection.clear();
-    
+
     // Improved solution file error pattern with more specific matching
     // Look for lines that start with a number (like 0>) followed by a path and error
     const solutionErrorRegex = /\s*(\d+)>([^(]+?\.(sln|cwproj))\((\d+)\):\s+(?:Solution|Project) file error\s+([A-Z0-9]+):\s+(.+)$/gm;
-    
+
     // Match MSBuild errors like: "MSBUILD : error MSB1009: Project file does not exist."
     const msbuildErrorRegex = /^(?:MSBUILD|.+):\s*(error|warning)\s+([A-Z0-9]+):\s+(.+)$/gm;
-    
+
     let match;
     let hasErrors = false;
-    
+
     // First, check for solution file errors
     while ((match = solutionErrorRegex.exec(output)) !== null) {
         hasErrors = true;
         const [_, linePrefix, filePath, fileExt, line, code, message] = match;
-        
+
         // Validate the file path to make sure it's a real path
         if (!filePath || !fs.existsSync(filePath)) {
             logger.warn(`⚠️ Invalid file path detected in error message: ${filePath}`);
             window.showErrorMessage(`${code}: ${message} (in solution file)`);
             continue;
         }
-        
+
         // Create a diagnostic for the solution file error
         const lineNum = parseInt(line) - 1;
         const diagnostic = new Diagnostic(
@@ -457,37 +510,37 @@ function processGeneralMSBuildErrors(output: string): boolean {
             `${fileExt === 'sln' ? 'Solution' : 'Project'} file error ${code}: ${message}`,
             DiagnosticSeverity.Error
         );
-        
+
         if (!diagnostics[filePath]) {
             diagnostics[filePath] = [];
         }
         diagnostics[filePath].push(diagnostic);
-        
+
         logger.info(`📌 File error detected: ${filePath}(${line}): ${code}: ${message}`);
     }
-    
+
     // Then check for general MSBuild errors
     while ((match = msbuildErrorRegex.exec(output)) !== null) {
         hasErrors = true;
         const [_, severity, code, message] = match;
-        
+
         // Since we don't have file/line info, we'll show it as a general error
         window.showErrorMessage(`MSBuild ${severity} ${code}: ${message}`);
-        
+
         // We'll also add to the diagnostics collection with a generic file
         const diagnostic = new Diagnostic(
             new Range(0, 0, 0, 0),
             `MSBuild ${severity} ${code}: ${message}`,
             severity === 'error' ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning
         );
-        
+
         const errorFile = globalSolutionFile; // Use the solution file for general MSBuild errors
         if (!diagnostics[errorFile]) {
             diagnostics[errorFile] = [];
         }
         diagnostics[errorFile].push(diagnostic);
     }
-    
+
     // Apply diagnostics to the problems panel
     Object.keys(diagnostics).forEach(file => {
         // Double check that the file exists before setting diagnostics
@@ -501,6 +554,6 @@ function processGeneralMSBuildErrors(output: string): boolean {
             });
         }
     });
-    
+
     return hasErrors;
 }

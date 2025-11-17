@@ -2,6 +2,7 @@ class Logger {
     private level: "debug" | "info" | "warn" | "error";
     private name: string;
     public fullDebugging: boolean = false; // default is false, toggle externally if needed
+    public static enabled: boolean = true; 
 
     constructor(name: string, level: "debug" | "info" | "warn" | "error" = "error") {
         this.name = name;
@@ -13,6 +14,7 @@ class Logger {
     }
 
     private shouldLog(level: "debug" | "info" | "warn" | "error"): boolean {
+        if (!Logger.enabled) return false;
         if (this.fullDebugging) return true;
         const levels = ["debug", "info", "warn", "error"];
         return levels.indexOf(level) >= levels.indexOf(this.level);

@@ -13,66 +13,55 @@ export class DocumentStructure {
     private structureIndentMap: Map<Token, number> = new Map();
     private maxLabelWidth: number = 0;
 
+    // 🚀 PERFORMANCE: Index structures for O(1) lookups
+    private labelIndex: Map<string, Token> = new Map();
+    private procedureIndex: Map<string, Token> = new Map();
+    private tokensByLine: Map<number, Token[]> = new Map();
+    private structuresByType: Map<string, Token[]> = new Map();
+
     constructor(private tokens: Token[]) {
+        // 🚀 PERFORMANCE: Build indexes first for fast lookups
+        this.buildIndexes();
         this.maxLabelWidth = this.processLabels();
     }
 
-    /** 🚀 Process token relationships and update tokens */
-    // public process(): void {
-    //     for (let i = 0; i < this.tokens.length; i++) {
-    //         const token = this.tokens[i];
-
-    //         if (token.type === TokenType.Keyword || token.type === TokenType.ExecutionMarker) {
-    //             switch (token.value.toUpperCase()) {
-    //                 case "PROCEDURE":
-    //                     this.handleProcedureToken(token, i);
-    //                     break;
-    //                 case "ROUTINE":
-    //                     this.handleRoutineToken(token, i);
-    //                     break;
-    //                 case "CODE":
-    //                 case "DATA":
-    //                     this.handleExecutionMarker(token);
-    //                     break;
-    //             }
-    //         } else if (token.type === TokenType.Structure) {
-    //             this.handleStructureToken(token);
-    //         } else if (token.type === TokenType.EndStatement) {
-    //             this.handleEndStatementForStructure(token);
-    //         }
-    //     }
-
-    //     this.closeRemainingProcedures();
-    //     this.assignMaxLabelLengths();
-
-    //     // ✅ Step: Re-parent class method implementations
-    //     for (const token of this.tokens) {
-    //         if (token.subType === TokenType.Class) {
-    //             const classNameMatch = token.value.match(/^(\w+)\.(\w+)$/);
-    //             if (classNameMatch) {
-    //                 const [_, classLabel, _methodName] = classNameMatch;
-
-    //                 // 🔍 Find the CLASS structure with that label
-    //                 const classDef = this.tokens.find(t =>
-    //                     t.type === TokenType.Structure &&
-    //                     t.value.toUpperCase() === "CLASS" &&
-    //                     t.parent?.value === classLabel
-    //                 );
-
-    //                 // ✅ Reassign method’s parent to the owning PROCEDURE
-    //                 if (classDef && classDef.parent?.subType === TokenType.Procedure) {
-    //                     const owningProc = classDef.parent;
-
-    //                     token.parent = owningProc;
-    //                     owningProc.children = owningProc.children || [];
-    //                     owningProc.children.push(token);
-
-    //                     logger.info(`🔁 Bound class method '${token.value}' to owning procedure '${owningProc.value}'`);
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
+    /**
+     * 🚀 PERFORMANCE: Build index structures for fast lookups
+     */
+    private buildIndexes(): void {
+        const perfStart = performance.now();
+        
+        // Index tokens by line for fast line-based lookups
+        for (const token of this.tokens) {
+            if (!this.tokensByLine.has(token.line)) {
+                this.tokensByLine.set(token.line, []);
+            }
+            this.tokensByLine.get(token.line)!.push(token);
+            
+            // Index labels
+            if (token.type === TokenType.Label && token.label) {
+                this.labelIndex.set(token.label.toUpperCase(), token);
+            }
+            
+            // Index structures by type
+            if (token.type === TokenType.Structure) {
+                const structType = token.value.toUpperCase();
+                if (!this.structuresByType.has(structType)) {
+                    this.structuresByType.set(structType, []);
+                }
+                this.structuresByType.get(structType)!.push(token);
+            }
+        }
+        
+        const indexTime = performance.now() - perfStart;
+        logger.perf('Built indexes', {
+            'time_ms': indexTime.toFixed(2),
+            'tokens': this.tokens.length,
+            'labels': this.labelIndex.size,
+            'lines': this.tokensByLine.size,
+            'struct_types': this.structuresByType.size
+        });
+    }
 
     public process(): void {
         for (let i = 0; i < this.tokens.length; i++) {
@@ -99,6 +88,10 @@ export class DocumentStructure {
             }
             
         }
+        
+        // Close any procedures that are still open at the end of the file
+        this.closeRemainingProcedures();
+        this.assignMaxLabelLengths();
     }
     
     private handleExecutionMarker(token: Token): void {
@@ -134,7 +127,7 @@ export class DocumentStructure {
         for (const token of this.tokens) {
             const insideExecutionCode = this.procedureStack.length > 0;
 
-            if (!insideExecutionCode && token.start === 0 && token.type !== TokenType.Comment) {
+            if (!insideExecutionCode && token.start === 0 && token.type !== TokenType.Comment && token.value !== '?') {
                 token.type = TokenType.Label;
                 token.label = token.value;
                 maxLabelWidth = Math.max(maxLabelWidth, token.value.length);
@@ -152,14 +145,18 @@ export class DocumentStructure {
                         token.structureParent = parentStructure;
 
                         // Find the label of the parent structure (if any)
-                        const tokenIndex = this.tokens.indexOf(parentStructure);
-                        if (tokenIndex > 0) {
-                            // Check if the token before the structure is a label
-                            const prevToken = this.tokens[tokenIndex - 1];
-                            if (prevToken && prevToken.type === TokenType.Label) {
-                                // Set the nestedLabel property to the parent structure's label
-                                token.nestedLabel = prevToken.value;
-                                logger.info(`📌 Field '${token.value}' has nested label '${prevToken.value}'`);
+                        // 🚀 PERFORMANCE: Use tokensByLine index instead of indexOf
+                        const lineTokens = this.tokensByLine.get(parentStructure.line);
+                        if (lineTokens) {
+                            const structIndex = lineTokens.indexOf(parentStructure);
+                            if (structIndex > 0) {
+                                // Check if the token before the structure is a label
+                                const prevToken = lineTokens[structIndex - 1];
+                                if (prevToken && prevToken.type === TokenType.Label) {
+                                    // Set the nestedLabel property to the parent structure's label
+                                    token.nestedLabel = prevToken.value;
+                                    logger.info(`📌 Field '${token.value}' has nested label '${prevToken.value}'`);
+                                }
                             }
                         }
 
@@ -254,7 +251,8 @@ export class DocumentStructure {
 
         // 🛑 Special handling: Skip MODULE structures that are part of CLASS attribute list
         if (token.value.toUpperCase() === "MODULE") {
-            const sameLine = this.tokens.filter(t => t.line === token.line);
+            // 🚀 PERFORMANCE: Use tokensByLine index
+            const sameLine = this.tokensByLine.get(token.line) || [];
             const currentIndex = sameLine.findIndex(t => t === token);
 
             for (let j = currentIndex - 1; j >= 0; j--) {
@@ -271,7 +269,8 @@ export class DocumentStructure {
         
         // 🛑 Special handling: Skip TOOLBAR when it's inside a function call like SELF.AddItem(Toolbar)
         if (token.value.toUpperCase() === "TOOLBAR") {
-            const sameLine = this.tokens.filter(t => t.line === token.line);
+            // 🚀 PERFORMANCE: Use tokensByLine index
+            const sameLine = this.tokensByLine.get(token.line) || [];
             const currentIndex = sameLine.findIndex(t => t === token);
             
             // Check if TOOLBAR is inside parentheses
@@ -316,9 +315,11 @@ export class DocumentStructure {
             logger.info(`🔗 Structure ${token.value} at Line ${token.line} parented to structure ${parentStructure.value}`);
         }
 
-        const tokenIndex = this.tokens.indexOf(token);
+        // 🚀 PERFORMANCE: Use tokensByLine to find previous token
+        const lineTokens = this.tokensByLine.get(token.line) || [];
+        const tokenIndex = lineTokens.indexOf(token);
         if (tokenIndex > 0) {
-            const prevToken = this.tokens[tokenIndex - 1];
+            const prevToken = lineTokens[tokenIndex - 1];
             if (prevToken.type === TokenType.Label) {
                 token.label = prevToken.value;
             }
@@ -328,43 +329,48 @@ export class DocumentStructure {
         // ✅ Extract structure prefix if present (PRE)
         // Look for PRE attribute in the same line or next few lines
         // This works for all structure types (FILE, QUEUE, GROUP, RECORD, etc.)
-        const startSearchIndex = tokenIndex;
-        const endSearchIndex = Math.min(startSearchIndex + 20, this.tokens.length); // Look ahead a reasonable amount
+        // 🚀 PERFORMANCE: Search only in relevant lines
+        const searchEndLine = Math.min(token.line + 20, this.tokens[this.tokens.length - 1]?.line || token.line);
+        
+        prefixSearch: for (let line = token.line; line <= searchEndLine; line++) {
+            const tokensInLine = this.tokensByLine.get(line) || [];
+            
+            for (let idx = 0; idx < tokensInLine.length; idx++) {
+                const t = tokensInLine[idx];
 
-        for (let i = startSearchIndex; i < endSearchIndex; i++) {
-            const t = this.tokens[i];
-
-            // If we hit an END statement or another structure, stop searching
-            if (t.type === TokenType.EndStatement ||
-                (t.type === TokenType.Structure && t !== token)) {
-                break;
-            }
-
-            // Look for PRE attribute
-            if (t.value.toUpperCase() === "PRE") {
-                // Check if PRE is followed by parentheses with a prefix
-                if (i + 1 < this.tokens.length && this.tokens[i + 1].value === "(") {
-                    let prefixValue = "";
-                    let j = i + 2;
-
-                    // Extract the prefix value inside the parentheses
-                    while (j < this.tokens.length && this.tokens[j].value !== ")") {
-                        prefixValue += this.tokens[j].value;
-                        j++;
-                    }
-
-                    if (prefixValue) {
-                        token.structurePrefix = prefixValue;
-                        logger.info(`📌 Found structure prefix: ${prefixValue} for ${token.value} at Line ${token.line}`);
-                    }
+                // If we hit an END statement or another structure, stop searching
+                if (t.type === TokenType.EndStatement ||
+                    (t.type === TokenType.Structure && t !== token)) {
+                    break prefixSearch;
                 }
-                break;
+
+                // Look for PRE attribute
+                if (t.value.toUpperCase() === "PRE") {
+                    // Check if PRE is followed by parentheses with a prefix
+                    if (idx + 1 < tokensInLine.length && tokensInLine[idx + 1].value === "(") {
+                        let prefixValue = "";
+                        let j = idx + 2;
+
+                        // Extract the prefix value inside the parentheses
+                        while (j < tokensInLine.length && tokensInLine[j].value !== ")") {
+                            prefixValue += tokensInLine[j].value;
+                            j++;
+                        }
+
+                        if (prefixValue) {
+                            token.structurePrefix = prefixValue;
+                            logger.info(`📌 Found structure prefix: ${prefixValue} for ${token.value} at Line ${token.line}`);
+                        }
+                    }
+                    break prefixSearch;
+                }
             }
         }
 
-        if (["CLASS", "MAP", "INTERFACE"].includes(token.value.toUpperCase())) {
-            logger.info(`Checking if CLASS is inline`);
-            const sameLine = this.tokens.filter(t => t.line === token.line);
+        if (["CLASS", "MAP", "INTERFACE", "MODULE"].includes(token.value.toUpperCase())) {
+            logger.info(`Checking if ${token.value.toUpperCase()} is inline`);
+            // 🚀 PERFORMANCE: Use tokensByLine index
+            const sameLine = this.tokensByLine.get(token.line) || [];
             logger.info(`Same line tokens: ${sameLine.map(t => t.value).join(", ")}`);
             const currentIndex = sameLine.findIndex(t => t === token);
             let isInlineAttribute = false;
@@ -384,8 +390,16 @@ export class DocumentStructure {
 
             if (!isInlineAttribute) {
                 this.insideClassOrInterfaceOrMapDepth++;
+                // Store the structure type in the token's value
+                // We'll use this later to identify the type of structure
+                logger.info(`Inside ${token.value.toUpperCase()} structure, depth: ${this.insideClassOrInterfaceOrMapDepth}`);
+                
+                // Special handling for MAP structure: look for shorthand procedure declarations
+                if (token.value.toUpperCase() === "MAP") {
+                    this.processShorthandProcedures(token);
+                }
             } else {
-                logger.info('Skipping module line');
+                logger.info('Skipping inline attribute');
                 return;
             }
         }
@@ -394,6 +408,55 @@ export class DocumentStructure {
         this.structureIndentMap.set(token, indentLevel);
     }
 
+    /**
+     * Process shorthand procedure declarations in MAP structures
+     * In MAP structures, procedures can be declared without the PROCEDURE keyword
+     * Format: ProcedureName(parameters),returnType
+     *
+     * In shorthand syntax, the entire declaration is in a single token:
+     * e.g., "Dos2DriverPipe(Long pOpCode, long pClaFCB, long pVarList),long,name(LongName)"
+     */
+    private processShorthandProcedures(mapToken: Token): void {
+        const mapIndex = this.tokens.indexOf(mapToken);
+        if (mapIndex === -1) return;
+        
+        // Find the END statement for this MAP
+        let endIndex = -1;
+        let depth = 1;
+        
+        for (let i = mapIndex + 1; i < this.tokens.length; i++) {
+            const token = this.tokens[i];
+            
+            if (token.type === TokenType.Structure) {
+                depth++;
+            } else if (token.type === TokenType.EndStatement) {
+                depth--;
+                if (depth === 0) {
+                    endIndex = i;
+                    break;
+                }
+            }
+            
+            // Look for tokens that contain an opening parenthesis
+            // In shorthand syntax, the procedure name and opening parenthesis are in the same token
+            if (token.value.includes("(") && token.value !== "(" && !token.value.toLowerCase().startsWith("module") && ! token.value.startsWith("!")) {
+                // This looks like a shorthand procedure declaration
+                token.subType = TokenType.MapProcedure;
+                token.parent = mapToken;
+                mapToken.children = mapToken.children || [];
+                mapToken.children.push(token);
+                
+                // Extract the procedure name (everything before the opening parenthesis)
+                const procName = token.value.split("(")[0];
+                
+                // CRITICAL FIX: Set the token's label to the procedure name
+                // This ensures it will be displayed correctly in the outline view
+                token.label = procName;
+                
+                logger.info(`📌 Found MAP shorthand procedure: ${procName} at line ${token.line}`);
+            }
+        }
+    }
 
     private handleEndStatementForStructure(token: Token): void {
         const lastStructure = this.structureStack.pop();
@@ -401,8 +464,9 @@ export class DocumentStructure {
             lastStructure.finishesAt = token.line;
             token.start = this.structureIndentMap.get(lastStructure) || 0;
             logger.info(`🔚 Closed ${lastStructure.value} at Line ${token.line}`);
-            if (["CLASS", "MAP", "INTERFACE"].includes(lastStructure.value.toUpperCase())) {
+            if (["CLASS", "MAP", "INTERFACE", "MODULE"].includes(lastStructure.value.toUpperCase())) {
                 this.insideClassOrInterfaceOrMapDepth = Math.max(0, this.insideClassOrInterfaceOrMapDepth - 1);
+                logger.info(`Exiting ${lastStructure.value.toUpperCase()} structure, depth: ${this.insideClassOrInterfaceOrMapDepth}`);
             }
         }
     }
@@ -419,15 +483,9 @@ export class DocumentStructure {
     private handleProcedureToken(token: Token, index: number): void {
         const prevToken = this.tokens[index - 1];
     
-        // 🧠 Always close the previous procedure first
-        const lastProc = this.procedureStack[this.procedureStack.length - 1];
-        if (lastProc) {
-            this.handleProcedureClosure(token.line - 1);
-        }
-    
         // 🧠 Determine token type based on context
         if (this.insideClassOrInterfaceOrMapDepth > 0) {
-            // It's a declaration inside CLASS, MAP, or INTERFACE
+            // It's a declaration inside CLASS, MAP, INTERFACE, or MODULE
             const parent = this.structureStack[this.structureStack.length - 1];
             const parentType = parent?.value.toUpperCase();
             token.label = prevToken?.value ?? "AnonymousMethod";
@@ -437,6 +495,10 @@ export class DocumentStructure {
                 token.subType = TokenType.MethodDeclaration;
             } else if (parentType === "MAP") {
                 token.subType = TokenType.MapProcedure;
+                logger.info(`📌 Found MAP procedure: ${token.label}`);
+            } else if (parentType === "MODULE") {
+                token.subType = TokenType.MapProcedure; // Use same type for MODULE procedures
+                logger.info(`📌 Found MODULE procedure: ${token.label}`);
             } else if (parentType === "INTERFACE") {
                 token.subType = TokenType.InterfaceMethod;
             } else {
@@ -449,6 +511,12 @@ export class DocumentStructure {
         
             logger.info(`📌 Declared ${TokenType[token.subType]} '${token.label}' inside ${parentType} at line ${token.line}`);
             return;
+        }
+        
+        // Only close the previous procedure if we're not inside a CLASS/MAP/INTERFACE
+        const lastProc = this.procedureStack[this.procedureStack.length - 1];
+        if (lastProc) {
+            this.handleProcedureClosure(token.line - 1);
         }
         
         const isMethodImpl = prevToken?.type === TokenType.Label && prevToken.value.includes(".");
@@ -468,47 +536,7 @@ export class DocumentStructure {
         this.procedureStack.push(token);
         
         logger.info(`📌 Registered ${TokenType[token.subType]} '${token.label}' at line ${token.line}`);
-        
     }
-    
-    
-    // private handleProcedureToken(token: Token, index: number): void {
-    //     if (this.insideClassOrInterfaceOrMapDepth > 0 ) {
-            
-    //         this.handleProcedureInsideDefinition(token, index);
-    //         return;
-    //     }
-
-
-    //     const prevToken = this.tokens[index - 1];
-    //     const isMethodImplementation = prevToken && prevToken.type === TokenType.Label && prevToken.value.includes(".");
-
-    //     // 🧠 Always close the previous procedure/method before starting a new one
-    //     const lastProc = this.procedureStack[this.procedureStack.length - 1];
-    //     if (lastProc && lastProc.subType === (isMethodImplementation ? TokenType.Class : TokenType.Procedure)) {
-    //         this.handleProcedureClosure(token.line - 1);
-    //     }
-
-
-    //     token.subType = isMethodImplementation ? TokenType.Class : TokenType.Procedure;
-    //     token.label = prevToken?.value ?? "AnonymousProcedure";
-    //     // token.value = prevToken?.value ?? "AnonymousProcedure";
-
-    //     if (isMethodImplementation) {
-    //         // ⛳ Skip assigning parent — we fix that in post-processing
-    //     } else if (this.structureStack.length > 0) {
-    //         const parent = this.structureStack[this.structureStack.length - 1];
-    //         token.parent = parent;
-    //         parent.children = parent.children || [];
-    //         parent.children.push(token);
-    //     }
-
-    //     this.procedureStack.push(token);
-    // }
-
-
-
-
 
     private handleRoutineToken(token: Token, index: number): void {
         if (this.procedureStack.length === 0) return;
@@ -539,8 +567,6 @@ export class DocumentStructure {
             this.handleRoutineClosure(endLine);
         }
     }
-
-
 
     private handleRoutineClosure(endLine: number): void {
         if (this.routineStack.length > 0) {

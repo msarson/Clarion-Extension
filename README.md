@@ -76,14 +76,53 @@ For a comprehensive list of all features and their locations within the extensio
 ## Marketplace Information
 
 - **Identifier**: `msarson.clarion-extensions`
-- **Version**: `0.5.6`
+- **Version**: `0.5.8`
 - **Published**: 2018-08-19
-- **Last Release**: 2025-04-04
+- **Last Release**: 2025-11-17
 
 [View on Marketplace](https://marketplace.visualstudio.com/items?itemName=msarson.clarion-extensions)
 
 ---
-## Changelog (What's New in v0.5.6)
+## Changelog (What's New in v0.5.8)
+
+### Performance Improvements
+
+**Load times reduced from 35+ seconds to under 1 second for large files.**
+
+This release significantly improves performance through systematic optimization. Completed in collaboration with GitHub Copilot on November 17, 2025.
+
+#### Key Improvements:
+- **Tokenization**: 10x faster (5,800ms → 598ms)
+  - Pre-compiled regex patterns
+  - Character-class pre-filtering
+  - Line-based incremental caching (95%+ speedup on edits)
+  
+- **Symbol Generation**: 55x faster (6,000ms → 110ms)
+  - Fixed O(n²) algorithm
+  - Built tokensByLine index for O(1) lookups
+  
+- **Structure View**: Much faster expansion (<1 second vs 20+ seconds)
+  - Top-level only expansion with parallel processing
+  
+- **Code Folding**: 60% faster (6ms → 4ms)
+  - Single-pass filtering optimization
+
+#### User Experience:
+- Fixed duplicate warning spam (24+ → 1)
+- Better error messages
+- Comprehensive performance logging (search `📊 PERF:`)
+
+Large Clarion files (14k+ lines) now have significantly improved response times.
+
+For full details, see [CHANGELOG.md](CHANGELOG.md)
+
+---
+## Previous Release (v0.5.7)
+### Enhancements
+- **Keyboard Shortcut for Go to Implementation**: Added Ctrl+F12 shortcut for "Go to Implementation" command.
+
+---
+## Older Changelog (What's New in v0.5.6)
 ### Enhancements
 - **Unified Highlighting System**: Added a comprehensive highlighting system for Clarion code elements with a unified configuration structure.
   

@@ -140,7 +140,7 @@ export class ClarionExtensionCommands {
     const xmlContent = fs.readFileSync(filePath, 'utf-8');
     let versions: ClarionVersionProperties[] = [];
 
-    parseString(xmlContent, (err, result) => {
+    parseString(xmlContent, (err: Error | null, result: any) => {
       if (!err && result?.ClarionProperties?.Properties) {
         const propertiesArray = result.ClarionProperties.Properties;
 

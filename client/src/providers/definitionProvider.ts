@@ -1,42 +1,83 @@
-// import * as vscode from 'vscode';
+import { DefinitionProvider, TextDocument, Position, CancellationToken, ProviderResult, Location, Uri, Definition, LocationLink } from 'vscode';
+import { DocumentManager } from '../documentManager';
+import LoggerManager from '../logger';
 
-// import { ClarionDependencyAnalyzer } from '../ClarionDependencyAnalyzer';
-// import  LocationProvider   from '../UtilityClasses/LocationProvider';
+const logger = LoggerManager.getLogger("DefinitionProvider");
+logger.setLevel("error");
 
-// const xml2js = require('xml2js');
-// export class ClarionDefinitionProvider implements vscode.DefinitionProvider {
-    
-    
-    
-//     private locationProvider: LocationProvider;
+/**
+ * Provides "Go to Definition" functionality for Clarion class methods.
+ * 
+ * This provider leverages the same lazy loading approach as the ImplementationProvider:
+ * - When a user triggers "Go to Definition" on a method declaration, it gets the location from DocumentManager
+ * - If the location is a method, it calls resolveMethodImplementation to find the actual implementation on-demand
+ * - This defers the expensive implementation lookup until it's actually needed
+ * - Once resolved, the implementation details are cached to avoid repeated lookups
+ * 
+ * Note: This provider only handles class methods, not other Clarion symbols.
+ * Other symbol types are handled by the server-side DefinitionProvider.
+ */
+export class ClarionDefinitionProvider implements DefinitionProvider {
+    private documentManager: DocumentManager;
 
-//     constructor() {
-//         this.locationProvider = new LocationProvider();
-//     }
+    constructor(documentManager: DocumentManager) {
+        this.documentManager = documentManager;
+    }
 
-//     public provideDefinition(document: vscode.TextDocument, position: vscode.Position, _token: vscode.CancellationToken): vscode.ProviderResult<vscode.Definition> {
+    provideDefinition(
+        document: TextDocument,
+        position: Position,
+        token: CancellationToken
+    ): ProviderResult<Definition | LocationLink[]> {
+        return this._provideDefinition(document, position, token);
+    }
 
-//         if (_token.isCancellationRequested) {
-//             // The user canceled the operation
-//             return Promise.resolve(null);
-//         }
-//         const includePattern = /INCLUDE\s*\('([^']+)'\s*(?:,\s*'([^']+)'\s*)?(?:,\s*ONCE)?\)/i;
+    private async _provideDefinition(
+        document: TextDocument,
+        position: Position,
+        token: CancellationToken
+    ): Promise<Definition | null> {
+        if (token.isCancellationRequested) {
+            return null;
+        }
+
+        logger.info(`Definition requested at position ${position.line}:${position.character} in ${document.uri.fsPath}`);
         
-//         const locationFromInclude = this.locationProvider.getLocationFromPattern(document, position.line, includePattern);
-//         if (locationFromInclude) {
-//             return locationFromInclude;;
-//         }
+        // Find the link at the current position
+        const location = this.documentManager.findLinkAtPosition(document.uri, position);
+        if (!location) {
+            logger.info(`No location found at position ${position.line}:${position.character}`);
+            return null;
+        }
 
-//         const modulePattern = /MODULE\s*\('([^']+)'\s*(?:,\s*'([^']+)'\s*)?\)/i;
-//         const locationFromModule = this.locationProvider.getLocationFromPattern(document, position.line, modulePattern);
-//         if (locationFromModule) {
-//             return locationFromModule;
-//         }
-
-//         return null; // No definition found
-
-//     }
-    
-// }
-
-
+        logger.info(`Found location at position: ${location.statementType} to ${location.fullFileName}`);
+        
+        // Only handle METHOD type locations
+        if (location.statementType !== "METHOD") {
+            logger.info(`Location is not a method declaration (type: ${location.statementType})`);
+            return null;
+        }
+        
+        try {
+            // Resolve the method implementation using the same logic as ImplementationProvider
+            const resolvedLocation = await this.documentManager.resolveMethodImplementation(location);
+            
+            // Check if we successfully resolved the implementation
+            if (!resolvedLocation.sectionLineLocation) {
+                logger.info(`Could not resolve implementation for ${resolvedLocation.className}.${resolvedLocation.methodName}`);
+                return null;
+            }
+            
+            logger.info(`Resolved implementation for ${resolvedLocation.className}.${resolvedLocation.methodName} at ${resolvedLocation.fullFileName}:${resolvedLocation.sectionLineLocation.line}`);
+            
+            // Create a Location object for the implementation
+            return new Location(
+                Uri.file(resolvedLocation.fullFileName),
+                resolvedLocation.sectionLineLocation
+            );
+        } catch (error) {
+            logger.error(`Error resolving definition: ${error instanceof Error ? error.message : String(error)}`);
+            return null;
+        }
+    }
+}

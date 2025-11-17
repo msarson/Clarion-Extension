@@ -16,12 +16,26 @@ export class ClarionSourcerFileServer {
         public name: string,
         public relativePath: string,
         public project?: ClarionProjectServer
-    ) {}
+    ) {
+        // Ensure name is never undefined
+        if (!this.name) {
+            this.name = path.basename(this.relativePath || "unknown-file");
+        }
+        
+        // Ensure relativePath is never undefined
+        if (!this.relativePath) {
+            this.relativePath = this.name;
+        }
+    }
 
     toInfo(): ClarionSourcerFileInfo {
+        // Ensure name and relativePath are never undefined
+        const name = this.name || path.basename(this.relativePath || "unknown-file");
+        const relativePath = this.relativePath || name;
+        
         return {
-            name: this.name,
-            relativePath: this.relativePath,
+            name: name,
+            relativePath: relativePath,
             project: this.project ? {
                 name: this.project.name,
                 type: this.project.type,

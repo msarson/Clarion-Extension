@@ -32,10 +32,19 @@ const clarionStructureKindMap: Record<string, SymbolKind> = {
     MENUBAR: SymbolKind.Object,         // 🧱
     MENU: SymbolKind.Enum,              // 📜
     OPTION: SymbolKind.Constant,         // 🔘
-    ROUTINE: SymbolKind.Method
+    ROUTINE: SymbolKind.Method,
+    VIEW: SymbolKind.Array,             // 📋
+    FILE: SymbolKind.File,              // 📁
+    BUTTON: SymbolKind.Boolean,         // 🔘
+    LIST: SymbolKind.Array,             // 📋
+    ITEM: SymbolKind.EnumMember,        // #
+    STRING: SymbolKind.String           // 📝
 };
 export class ClarionDocumentSymbolProvider {
     classSymbolMap: Map<string, DocumentSymbol> = new Map();
+    // 🚀 PERFORMANCE: Store tokensByLine as instance variable to avoid passing it everywhere
+    private tokensByLine: Map<number, Token[]> = new Map();
+    
     public extractStringContents(rawString: string): string {
         const match = rawString.match(/'([^']+)'/);
         return match ? match[1] : rawString;
@@ -46,6 +55,19 @@ export class ClarionDocumentSymbolProvider {
             logger.warn(`⚠️ Server not initialized, skipping document symbols for: ${documentUri}`);
             return [];
         }
+        
+        // 🚀 PERFORMANCE: Build token index by line to avoid O(n²) lookups
+        const perfIndexStart = performance.now();
+        this.tokensByLine.clear();
+        for (const token of tokens) {
+            if (!this.tokensByLine.has(token.line)) {
+                this.tokensByLine.set(token.line, []);
+            }
+            this.tokensByLine.get(token.line)!.push(token);
+        }
+        const perfIndexTime = performance.now() - perfIndexStart;
+        logger.perf('Symbol: build index', { time_ms: perfIndexTime.toFixed(2), lines: this.tokensByLine.size });
+        
         this.classSymbolMap.clear();
         const symbols: DocumentSymbol[] = [];
 
@@ -70,7 +92,7 @@ export class ClarionDocumentSymbolProvider {
             // Check if we've moved to a new line
             if (line > lastProcessedLine) {
                 // Check if any structures should be popped based on finishesAt
-                this.checkAndPopCompletedStructures(parentStack, line, symbols, tokens);
+                this.checkAndPopCompletedStructures(parentStack, line, symbols, tokens, this.tokensByLine);
 
                 // CRITICAL FIX: Check if we need to reset lastMethodImplementation
                 // This happens when a new global procedure is encountered
@@ -99,13 +121,60 @@ export class ClarionDocumentSymbolProvider {
             }
 
             if (type === TokenType.Structure) {
-                this.handleStructureToken(tokens, i, symbols, parentStack, currentStructure);
+                this.handleStructureToken(tokens, i, symbols, parentStack, currentStructure, this.tokensByLine);
                 currentStructure = parentStack.length > 0 ? parentStack[parentStack.length - 1].symbol : null;
+                
+                // Special handling for MAP and MODULE structures
+                if (value.toUpperCase() === "MAP" || value.toUpperCase() === "MODULE") {
+                    // Look ahead for procedure declarations inside this structure
+                    let j = i + 1;
+                    let endFound = false;
+                    
+                    while (j < tokens.length && !endFound) {
+                        const nextToken = tokens[j];
+                        
+                        // Stop if we hit an END statement for this structure
+                        if (nextToken.type === TokenType.EndStatement &&
+                            nextToken.line > line &&
+                            !tokens.slice(i+1, j).some(t => t.type === TokenType.Structure)) {
+                            endFound = true;
+                            break;
+                        }
+                        
+                        // If we find a procedure declaration with PROCEDURE keyword, mark it
+                        if (nextToken.type === TokenType.Keyword &&
+                            nextToken.value.toUpperCase() === "PROCEDURE") {
+                            // Mark this as a MAP/MODULE procedure
+                            nextToken.subType = TokenType.MapProcedure;
+                            logger.info(`Marked procedure at line ${nextToken.line} as MAP/MODULE procedure`);
+                        }
+                        // Special case for MAP: Look for procedure declarations without PROCEDURE keyword
+                        // Format: ProcedureName(parameters),returnType
+                        else if (nextToken.type === TokenType.Label &&
+                                j + 1 < tokens.length &&
+                                tokens[j + 1].value === "(") {
+                            // This looks like a procedure declaration in shorthand MAP syntax
+                            nextToken.subType = TokenType.MapProcedure;
+                            logger.info(`Marked shorthand procedure ${nextToken.value} at line ${nextToken.line} as MAP/MODULE procedure`);
+                        }
+                        
+                        j++;
+                    }
+                }
+                
+                continue;
+            }
+
+            if (type === TokenType.WindowElement) {
+                this.handleWindowElementToken(tokens, i, symbols, currentProcedure, currentStructure);
                 continue;
             }
             if (type === TokenType.PropertyFunction && value.toUpperCase() === "PROJECT") {
                 this.handleProjectToken(tokens, i, symbols, currentProcedure, currentStructure);
-
+                continue;
+            }
+            if (type === TokenType.Keyword && value.toUpperCase() === "KEY") {
+                this.handleKeyToken(tokens, i, symbols, currentProcedure, currentStructure);
                 continue;
             }
 
@@ -182,7 +251,8 @@ export class ClarionDocumentSymbolProvider {
 
             const insideClassOrModule =
                 currentStructure?.kind === SymbolKind.Class ||
-                currentStructure?.name?.startsWith("MODULE");
+                currentStructure?.name?.startsWith("MODULE") ||
+                currentStructure?.name?.startsWith("MAP");
             const sub = token.subType as TokenType;
             // CRITICAL FIX: Also check for method declarations
             if ((insideDefinitionBlock || insideClassOrModule) &&
@@ -344,9 +414,12 @@ export class ClarionDocumentSymbolProvider {
             projectValue = parenContent.join("").trim();
         }
 
+        // Create a more descriptive display name that shows the field being projected
+        const displayName = `PROJECT(${projectValue})`;
+
         const projectSymbol = DocumentSymbol.create(
-            "PROJECT",
-            "(" + projectValue + ")",
+            displayName,
+            "", // Empty detail since we're including it in the name
             SymbolKind.Property,
             this.getTokenRange(tokens, line, line),
             this.getTokenRange(tokens, line, line),
@@ -372,7 +445,8 @@ export class ClarionDocumentSymbolProvider {
         parentStack: Array<{ symbol: DocumentSymbol, finishesAt: number | undefined }>,
         currentLine: number,
         symbols: DocumentSymbol[],
-        tokens: Token[]
+        tokens: Token[],
+        tokensByLine: Map<number, Token[]>
     ): void {
         // CRITICAL FIX: Reset lastMethodImplementation when a new global procedure is encountered
         // This is a reference to the class property that needs to be updated
@@ -427,11 +501,11 @@ export class ClarionDocumentSymbolProvider {
         let isAtNewGlobalProcedure = false;
         let newGlobalProcedureToken: Token | null = null;
 
-        // Look for a global procedure token at the current line
-        for (const token of tokens) {
-            if (token.line === currentLine &&
-                (token.subType === TokenType.GlobalProcedure ||
-                    (token as any)._isGlobalProcedure === true)) {
+        // 🚀 PERFORMANCE: Use indexed lookup instead of looping through all tokens
+        const lineTokens = tokensByLine.get(currentLine) || [];
+        for (const token of lineTokens) {
+            if (token.subType === TokenType.GlobalProcedure ||
+                (token as any)._isGlobalProcedure === true) {
                 isAtNewGlobalProcedure = true;
                 newGlobalProcedureToken = token;
                 break;
@@ -537,16 +611,23 @@ export class ClarionDocumentSymbolProvider {
         index: number,
         symbols: DocumentSymbol[],
         parentStack: Array<{ symbol: DocumentSymbol, finishesAt: number | undefined }>,
-        currentStructure: DocumentSymbol | null
+        currentStructure: DocumentSymbol | null,
+        tokensByLine: Map<number, Token[]>
     ): void {
         const token = tokens[index];
         const { value, line, finishesAt } = token;
 
         const foldingOnly = ["IF", "LOOP", "CASE", "BEGIN", "EXECUTE", "ITEMIZE", "BREAK", "ACCEPT"];
         if (foldingOnly.includes(value.toUpperCase())) return;
+        // Handle UI controls that are one-liners (no END statement)
+        // BUTTON is now handled by WindowElement token type
+        const oneLineControls: string[] = [];
+        const isOneLineControl = oneLineControls.includes(value.toUpperCase());
+
 
         if (value.toUpperCase() === "MODULE") {
-            const sameLineTokens = tokens.filter(t => t.line === token.line);
+            // 🚀 PERFORMANCE: Use indexed lookup instead of filter
+            const sameLineTokens = tokensByLine.get(token.line) || [];
             const currentIndex = sameLineTokens.findIndex(t => t === token);
 
             // Look backwards on the same line for a comma (i.e., inside `CLASS(...)`)
@@ -608,6 +689,420 @@ export class ClarionDocumentSymbolProvider {
             } else {
                 displayName = labelName ? `${value} (${labelName})` : value;
             }
+        } else if (upperValue === "TAB") {
+            // Extract tab name from TAB('Tracking') syntax
+            let tabName = "";
+            let useParam = "";
+
+            // First, look for the tab name in parentheses
+            const nextToken = tokens[index + 1];
+            if (nextToken && nextToken.value === "(") {
+                const parenContent: string[] = [];
+                let j = index + 2;
+                let parenDepth = 1;
+
+                while (j < tokens.length && parenDepth > 0) {
+                    const t = tokens[j];
+                    if (t.value === "(") parenDepth++;
+                    else if (t.value === ")") parenDepth--;
+
+                    if (parenDepth > 0) parenContent.push(t.value);
+                    j++;
+                }
+
+                tabName = parenContent.join("").trim();
+                // Remove quotes if present
+                tabName = this.extractStringContents(tabName);
+
+                // Now look for USE parameter after the tab name
+                // Search for USE token after the TAB declaration
+                while (j < tokens.length) {
+                    const t = tokens[j];
+
+                    // Stop if we hit a new line or another structure
+                    if (t.line !== line && t.line !== line + 1) break;
+                    if (t.type === TokenType.Structure && t !== token) break;
+
+                    // Look for USE token
+                    if (t.value.toUpperCase() === "USE" && j + 1 < tokens.length && tokens[j + 1].value === "(") {
+                        // Extract the USE parameter
+                        const useContent: string[] = [];
+                        let k = j + 2;
+                        let useParenDepth = 1;
+
+                        while (k < tokens.length && useParenDepth > 0) {
+                            const useToken = tokens[k];
+                            if (useToken.value === "(") useParenDepth++;
+                            else if (useToken.value === ")") useParenDepth--;
+
+                            if (useParenDepth > 0) useContent.push(useToken.value);
+                            k++;
+                        }
+
+                        useParam = useContent.join("").trim();
+                        break;
+                    }
+
+                    j++;
+                }
+
+                // Create a display name with the tab name and USE parameter
+                if (tabName && useParam) {
+                    displayName = `TAB('${tabName}') USE(${useParam})`;
+                } else if (tabName) {
+                    displayName = `TAB('${tabName}')`;
+                } else {
+                    displayName = labelName ? `${value} (${labelName})` : value;
+                }
+            } else {
+                displayName = labelName ? `${value} (${labelName})` : value;
+            }
+        } else if (upperValue === "MENU") {
+            // For MENU elements like: MENU('&File'),USE(?FileMenu)
+            let menuText = "";
+            let useParam = "";
+
+            // First, look for the menu text in parentheses
+            const nextToken = tokens[index + 1];
+            if (nextToken && nextToken.value === "(") {
+                const parenContent: string[] = [];
+                let j = index + 2;
+                let parenDepth = 1;
+
+                while (j < tokens.length && parenDepth > 0) {
+                    const t = tokens[j];
+                    if (t.value === "(") parenDepth++;
+                    else if (t.value === ")") parenDepth--;
+
+                    if (parenDepth > 0) parenContent.push(t.value);
+                    j++;
+                }
+
+                menuText = parenContent.join("").trim();
+                // Remove quotes if present
+                menuText = this.extractStringContents(menuText);
+
+                // Now look for USE parameter after the menu text
+                // Search for USE token after the MENU declaration
+                while (j < tokens.length) {
+                    const t = tokens[j];
+
+                    // Stop if we hit a new line or another structure
+                    if (t.line !== line && t.line !== line + 1) break;
+                    if (t.type === TokenType.Structure && t !== token) break;
+
+                    // Look for USE token
+                    if (t.value.toUpperCase() === "USE" && j + 1 < tokens.length && tokens[j + 1].value === "(") {
+                        // Extract the USE parameter
+                        const useContent: string[] = [];
+                        let k = j + 2;
+                        let useParenDepth = 1;
+
+                        while (k < tokens.length && useParenDepth > 0) {
+                            const useToken = tokens[k];
+                            if (useToken.value === "(") useParenDepth++;
+                            else if (useToken.value === ")") useParenDepth--;
+
+                            if (useParenDepth > 0) useContent.push(useToken.value);
+                            k++;
+                        }
+
+                        useParam = useContent.join("").trim();
+                        break;
+                    }
+
+                    j++;
+                }
+
+                // Create a display name with the menu text and USE parameter
+                if (menuText && useParam) {
+                    displayName = `MENU('${menuText}') USE(${useParam})`;
+                } else if (menuText) {
+                    displayName = `MENU('${menuText}')`;
+                } else {
+                    displayName = labelName ? `${value} (${labelName})` : value;
+                }
+            } else {
+                displayName = labelName ? `${value} (${labelName})` : value;
+            }
+        } else if (upperValue === "SHEET") {
+            // For SHEET elements like: SHEET,AT(0,0,758,387),USE(?WindowSheet),NOSHEET,WIZARD
+            let useParam = "";
+
+            // Look for the USE attribute in the tokens following the SHEET token
+            let j = index + 1;
+
+            // Continue until we hit a new line or another structure
+            while (j < tokens.length) {
+                const t = tokens[j];
+
+                // Stop if we hit a new line or another structure
+                if (t.line !== line && t.line !== line + 1) break;
+                if (t.type === TokenType.Structure && t !== token) break;
+
+                // Look for USE token
+                if (t.value.toUpperCase() === "USE" && j + 1 < tokens.length && tokens[j + 1].value === "(") {
+                    // Extract the USE parameter
+                    const useContent: string[] = [];
+                    let k = j + 2;
+                    let useParenDepth = 1;
+
+                    while (k < tokens.length && useParenDepth > 0) {
+                        const useToken = tokens[k];
+                        if (useToken.value === "(") useParenDepth++;
+                        else if (useToken.value === ")") useParenDepth--;
+
+                        if (useParenDepth > 0) useContent.push(useToken.value);
+                        k++;
+                    }
+
+                    useParam = useContent.join("").trim();
+                    break;
+                }
+
+                j++;
+            }
+
+            // Create a display name with the USE parameter
+            if (useParam) {
+                displayName = `SHEET USE(${useParam})`;
+            } else {
+                displayName = labelName ? `${value} (${labelName})` : value;
+            }
+        } else if (upperValue === "OLE") {
+            // For OLE elements like: OLE,AT(3,2,753,229),USE(?SchedulerControl),COMPATIBILITY(021H)
+            let useParam = "";
+
+            // Look for the USE attribute in the tokens following the OLE token
+            let j = index + 1;
+
+            // Continue until we hit a new line or another structure
+            while (j < tokens.length) {
+                const t = tokens[j];
+
+                // Stop if we hit a new line or another structure
+                if (t.line !== line && t.line !== line + 1) break;
+                if (t.type === TokenType.Structure && t !== token) break;
+
+                // Look for USE token
+                if (t.value.toUpperCase() === "USE" && j + 1 < tokens.length && tokens[j + 1].value === "(") {
+                    // Extract the USE parameter
+                    const useContent: string[] = [];
+                    let k = j + 2;
+                    let useParenDepth = 1;
+
+                    while (k < tokens.length && useParenDepth > 0) {
+                        const useToken = tokens[k];
+                        if (useToken.value === "(") useParenDepth++;
+                        else if (useToken.value === ")") useParenDepth--;
+
+                        if (useParenDepth > 0) useContent.push(useToken.value);
+                        k++;
+                    }
+
+                    useParam = useContent.join("").trim();
+                    break;
+                }
+
+                j++;
+            }
+
+            // Create a display name with the USE parameter
+            if (useParam) {
+                displayName = `OLE USE(${useParam})`;
+            } else {
+                displayName = labelName ? `${value} (${labelName})` : value;
+            }
+        } else if (upperValue === "MENUBAR") {
+            // For MENUBAR elements like: MENUBAR,USE(?Menubar)
+            let useParam = "";
+
+            // Look for the USE attribute in the tokens following the MENUBAR token
+            let j = index + 1;
+
+            // Continue until we hit a new line or another structure
+            while (j < tokens.length) {
+                const t = tokens[j];
+
+                // Stop if we hit a new line or another structure
+                if (t.line !== line && t.line !== line + 1) break;
+                if (t.type === TokenType.Structure && t !== token) break;
+
+                // Look for USE token
+                if (t.value.toUpperCase() === "USE" && j + 1 < tokens.length && tokens[j + 1].value === "(") {
+                    // Extract the USE parameter
+                    const useContent: string[] = [];
+                    let k = j + 2;
+                    let useParenDepth = 1;
+
+                    while (k < tokens.length && useParenDepth > 0) {
+                        const useToken = tokens[k];
+                        if (useToken.value === "(") useParenDepth++;
+                        else if (useToken.value === ")") useParenDepth--;
+
+                        if (useParenDepth > 0) useContent.push(useToken.value);
+                        k++;
+                    }
+
+                    useParam = useContent.join("").trim();
+                    break;
+                }
+
+                j++;
+            }
+
+            // Create a display name with the USE parameter
+            if (useParam) {
+                displayName = `MENUBAR USE(${useParam})`;
+            } else {
+                displayName = labelName ? `${value} (${labelName})` : value;
+            }
+        } else if (upperValue === "WINDOW" || upperValue === "APPLICATION") {
+            // For WINDOW elements like: WINDOW('Accura scheduling'),AT(,,759,389),FONT('Segoe UI',8,,FONT:regular),RESIZE,ALRT(CtrlZ)
+            // or APPLICATION elements which are similar
+            let title = "";
+
+            // Look for the title in parentheses
+            const nextToken = tokens[index + 1];
+            if (nextToken && nextToken.value === "(") {
+                const parenContent: string[] = [];
+                let j = index + 2;
+                let parenDepth = 1;
+
+                while (j < tokens.length && parenDepth > 0) {
+                    const t = tokens[j];
+                    if (t.value === "(") parenDepth++;
+                    else if (t.value === ")") parenDepth--;
+
+                    if (parenDepth > 0) parenContent.push(t.value);
+                    j++;
+                }
+
+                title = parenContent.join("").trim();
+                // Remove quotes if present
+                title = this.extractStringContents(title);
+
+                // Create a display name with the title and label
+                if (title) {
+                    displayName = labelName ?
+                        `${value}('${title}') (${labelName})` :
+                        `${value}('${title}')`;
+                } else {
+                    displayName = labelName ? `${value} (${labelName})` : value;
+                }
+            } else {
+                displayName = labelName ? `${value} (${labelName})` : value;
+            }
+        } else if (upperValue === "VIEW") {
+            // For VIEW elements like: VIEW(Entries)
+            let viewFile = "";
+
+            // Look for the file name in parentheses
+            const nextToken = tokens[index + 1];
+            if (nextToken && nextToken.value === "(") {
+                const parenContent: string[] = [];
+                let j = index + 2;
+                let parenDepth = 1;
+
+                while (j < tokens.length && parenDepth > 0) {
+                    const t = tokens[j];
+                    if (t.value === "(") parenDepth++;
+                    else if (t.value === ")") parenDepth--;
+
+                    if (parenDepth > 0) parenContent.push(t.value);
+                    j++;
+                }
+
+                viewFile = parenContent.join("").trim();
+
+                // Create a display name with the view file
+                if (viewFile) {
+                    displayName = labelName ?
+                        `${value}(${viewFile}) (${labelName})` :
+                        `${value}(${viewFile})`;
+                } else {
+                    displayName = labelName ? `${value} (${labelName})` : value;
+                }
+            } else {
+                displayName = labelName ? `${value} (${labelName})` : value;
+            }
+        } else if (upperValue === "FILE") {
+            // For FILE elements like: FILE,DRIVER('TOPSPEED'),PRE(SHI),CREATE,BINDABLE,THREAD
+            let driverValue = "";
+            let preValue = "";
+
+            // Look for DRIVER and PRE attributes in the tokens following the FILE token
+            let j = index + 1;
+
+            // Continue until we hit a new line or another structure
+            while (j < tokens.length) {
+                const t = tokens[j];
+
+                // Stop if we hit a new line or another structure
+                if (t.line !== line && t.line !== line + 1) break;
+                if (t.type === TokenType.Structure && t !== token) break;
+
+                // Look for DRIVER token
+                if (t.value.toUpperCase() === "DRIVER" && j + 1 < tokens.length && tokens[j + 1].value === "(") {
+                    // Extract the DRIVER parameter
+                    const driverContent: string[] = [];
+                    let k = j + 2;
+                    let driverParenDepth = 1;
+
+                    while (k < tokens.length && driverParenDepth > 0) {
+                        const driverToken = tokens[k];
+                        if (driverToken.value === "(") driverParenDepth++;
+                        else if (driverToken.value === ")") driverParenDepth--;
+
+                        if (driverParenDepth > 0) driverContent.push(driverToken.value);
+                        k++;
+                    }
+
+                    driverValue = driverContent.join("").trim();
+                    // Remove quotes if present
+                    driverValue = this.extractStringContents(driverValue);
+                }
+
+                // Look for PRE token
+                if (t.value.toUpperCase() === "PRE" && j + 1 < tokens.length && tokens[j + 1].value === "(") {
+                    // Extract the PRE parameter
+                    const preContent: string[] = [];
+                    let k = j + 2;
+                    let preParenDepth = 1;
+
+                    while (k < tokens.length && preParenDepth > 0) {
+                        const preToken = tokens[k];
+                        if (preToken.value === "(") preParenDepth++;
+                        else if (preToken.value === ")") preParenDepth--;
+
+                        if (preParenDepth > 0) preContent.push(preToken.value);
+                        k++;
+                    }
+
+                    preValue = preContent.join("").trim();
+                }
+
+                j++;
+            }
+
+            // Create a display name with the DRIVER and PRE values
+            let displayParts = [];
+
+            if (labelName) {
+                displayParts.push(`FILE (${labelName})`);
+            } else {
+                displayParts.push("FILE");
+            }
+
+            if (driverValue) {
+                displayParts.push(driverValue);
+            }
+
+            if (preValue) {
+                displayParts.push(`PRE(${preValue})`);
+            }
+
+            displayName = displayParts.join(",");
         } else {
             displayName = labelName ? `${value} (${labelName})` : value;
         }
@@ -660,9 +1155,38 @@ export class ClarionDocumentSymbolProvider {
             // Just mark it as an interface for reference
             (structureSymbol as any)._isInterface = true;
         }
+        // MAP support: add Functions container to organize MAP procedures
+        else if (upperValue === "MAP") {
+            const functionsContainer = DocumentSymbol.create(
+                "Functions",
+                "",
+                SymbolKind.Function,
+                structureSymbol.range,
+                structureSymbol.range,
+                []
+            );
+            (functionsContainer as any).sortText = "0001";
 
+            // Store the functions container for easy access
+            (structureSymbol as any).$clarionFunctions = functionsContainer;
+            structureSymbol.children!.push(functionsContainer);
+        }
+        // MODULE support: add Functions container to organize MODULE procedures
+        else if (upperValue === "MODULE") {
+            const functionsContainer = DocumentSymbol.create(
+                "Functions",
+                "",
+                SymbolKind.Function,
+                structureSymbol.range,
+                structureSymbol.range,
+                []
+            );
+            (functionsContainer as any).sortText = "0001";
 
-
+            // Store the functions container for easy access
+            (structureSymbol as any).$clarionFunctions = functionsContainer;
+            structureSymbol.children!.push(functionsContainer);
+        }
 
         this.addSymbolToParent(structureSymbol, currentStructure, symbols);
         // Push to the parent stack with finishesAt information
@@ -725,25 +1249,77 @@ export class ClarionDocumentSymbolProvider {
         const prevToken = tokens[index - 1];
         const procedureName = prevToken?.type === TokenType.Label ? prevToken.value : "UnnamedProcedure";
         const classMatch = procedureName.includes('.') ? procedureName.split('.')[0] : null;
+        const methodName = classMatch ? procedureName.replace(`${classMatch}.`, "") : procedureName;
 
         let container: DocumentSymbol | null = null;
         let classImplementation: DocumentSymbol | null = null;
 
         // IMPORTANT: For method implementations, we need to handle them differently
-        // to ensure they don't break procedure scope and improve breadcrumb navigation
         if (classMatch) {
             // This is a method implementation (e.g., ThisWindow.Init)
-            // Find or create a class implementation container
-            classImplementation = this.findOrCreateClassImplementation(
-                symbols, classMatch, tokens, line, finishesAt ?? line
-            );
-
-            // Use the methods container as the parent
-            const methodsContainer = (classImplementation as any).$clarionMethods || classImplementation;
-            container = methodsContainer;
-
-            // Mark this as a method implementation
-            (token as any)._isMethodImplementation = true;
+            // First, try to find the class definition in the symbols
+            const classDefinition = this.findClassDefinition(symbols, classMatch);
+            
+            if (classDefinition) {
+                // If we found the class definition, look for the method declaration
+                const methodsContainer = classDefinition.children?.find(c => c.name === "Methods");
+                
+                if (methodsContainer) {
+                    // Look for the method declaration by name (without parameters)
+                    const methodDeclaration = methodsContainer.children?.find(m => {
+                        // Extract just the method name without parameters
+                        const mName = m.name.split(' ')[0];
+                        return mName === methodName;
+                    });
+                    
+                    if (methodDeclaration) {
+                        // We found the method declaration, use it as the container
+                        container = methodDeclaration;
+                        
+                        // Mark this as a method implementation
+                        (token as any)._isMethodImplementation = true;
+                        
+                        // We don't need to create a class implementation container
+                        classImplementation = null;
+                    } else {
+                        // Method declaration not found, fall back to the old behavior
+                        classImplementation = this.findOrCreateClassImplementation(
+                            symbols, classMatch, tokens, line, finishesAt ?? line
+                        );
+                        
+                        // Use the methods container as the parent
+                        const implMethodsContainer = (classImplementation as any).$clarionMethods || classImplementation;
+                        container = implMethodsContainer;
+                        
+                        // Mark this as a method implementation
+                        (token as any)._isMethodImplementation = true;
+                    }
+                } else {
+                    // Methods container not found, fall back to the old behavior
+                    classImplementation = this.findOrCreateClassImplementation(
+                        symbols, classMatch, tokens, line, finishesAt ?? line
+                    );
+                    
+                    // Use the methods container as the parent
+                    const implMethodsContainer = (classImplementation as any).$clarionMethods || classImplementation;
+                    container = implMethodsContainer;
+                    
+                    // Mark this as a method implementation
+                    (token as any)._isMethodImplementation = true;
+                }
+            } else {
+                // Class definition not found, fall back to the old behavior
+                classImplementation = this.findOrCreateClassImplementation(
+                    symbols, classMatch, tokens, line, finishesAt ?? line
+                );
+                
+                // Use the methods container as the parent
+                const implMethodsContainer = (classImplementation as any).$clarionMethods || classImplementation;
+                container = implMethodsContainer;
+                
+                // Mark this as a method implementation
+                (token as any)._isMethodImplementation = true;
+            }
         } else {
             // For regular procedures (not class methods), use the current structure
             // CRITICAL FIX: Always promote GlobalProcedure to top-level
@@ -757,10 +1333,6 @@ export class ClarionDocumentSymbolProvider {
             }
         }
 
-        // Extract the method name without the class prefix
-        const shortName = classMatch ? procedureName.replace(`${classMatch}.`, "") : procedureName;
-
-        // Extract just the parameters for all procedures (without the PROCEDURE keyword)
         // Extract just the parameters for all procedures (without the PROCEDURE keyword)
         let paramsOnly = "";
         let parenDepth = 0;
@@ -799,7 +1371,7 @@ export class ClarionDocumentSymbolProvider {
         }
 
         // Include just the parameters in the name for all procedures
-        const displayName = `${shortName} ${paramsOnly}`;
+        const displayName = `${methodName} ${paramsOnly}`;
 
         const procedureSymbol = this.createProcedureSymbol(
             tokens, displayName, classMatch, line, finishesAt ?? line, token.subType || subType
@@ -808,10 +1380,14 @@ export class ClarionDocumentSymbolProvider {
         // For method implementations, mark the symbol
         if (classMatch) {
             (procedureSymbol as any)._isMethodImplementation = true;
-
-            // CRITICAL FIX: Also set the subType to MethodImplementation
-            // This ensures it's properly identified throughout the code
-            procedureSymbol.detail = "";  // Empty detail since we're including it in the name
+            
+            // If this is a method implementation and we found the declaration,
+            // set the detail to "Implementation" to distinguish it
+            if (container && container !== (classImplementation as any)?.$clarionMethods) {
+                procedureSymbol.detail = "Implementation";
+            } else {
+                procedureSymbol.detail = "";  // Empty detail since we're including it in the name
+            }
         } else if (token.subType === TokenType.GlobalProcedure || subType === TokenType.GlobalProcedure) {
             // Mark global procedures
             (procedureSymbol as any)._isGlobalProcedure = true;
@@ -836,6 +1412,39 @@ export class ClarionDocumentSymbolProvider {
 
         return { procedureSymbol, classImplementation };
     }
+    
+    /**
+     * Find a class definition symbol by name
+     */
+    private findClassDefinition(symbols: DocumentSymbol[], className: string): DocumentSymbol | null {
+        // First check the class symbol map
+        const classSymbol = this.classSymbolMap.get(className.toUpperCase());
+        if (classSymbol) {
+            return classSymbol;
+        }
+        
+        // If not found in the map, search through all symbols recursively
+        const findInSymbols = (symbolList: DocumentSymbol[]): DocumentSymbol | null => {
+            for (const symbol of symbolList) {
+                // Check if this is a class with the matching name
+                if (symbol.kind === SymbolKind.Class) {
+                    const symbolName = symbol.name.split(' ')[0]; // Get name without any suffix
+                    if (symbolName.toUpperCase() === className.toUpperCase()) {
+                        return symbol;
+                    }
+                }
+                
+                // Check children recursively
+                if (symbol.children && symbol.children.length > 0) {
+                    const found = findInSymbols(symbol.children);
+                    if (found) return found;
+                }
+            }
+            return null;
+        };
+        
+        return findInSymbols(symbols);
+    }
 
     private findOrCreateClassImplementation(
         symbols: DocumentSymbol[],
@@ -844,6 +1453,43 @@ export class ClarionDocumentSymbolProvider {
         startLine: number,
         endLine: number
     ): DocumentSymbol {
+        // First, try to find the class definition
+        const classDefinition = this.findClassDefinition(symbols, className);
+        
+        // If we found the class definition, use it instead of creating a separate implementation container
+        if (classDefinition) {
+            // Make sure the class has a Methods container
+            let methodsContainer = classDefinition.children?.find(c => c.name === "Methods");
+            
+            if (!methodsContainer) {
+                // Create a Methods container if it doesn't exist
+                methodsContainer = DocumentSymbol.create(
+                    "Methods",
+                    "",
+                    SymbolKind.Method,
+                    classDefinition.range,
+                    classDefinition.range,
+                    []
+                );
+                (methodsContainer as any).sortText = "0002";
+                classDefinition.children!.push(methodsContainer);
+                (classDefinition as any).$clarionMethods = methodsContainer;
+            }
+            
+            // Update the range to encompass the implementation
+            if (startLine < classDefinition.range.start.line) {
+                classDefinition.range.start.line = startLine;
+                classDefinition.selectionRange.start.line = startLine;
+            }
+            if (endLine > classDefinition.range.end.line) {
+                classDefinition.range.end.line = endLine;
+                classDefinition.selectionRange.end.line = endLine;
+            }
+            
+            return classDefinition;
+        }
+        
+        // If no class definition was found, fall back to the original implementation
         const fullName = `${className} (Implementation)`;
 
         // First, check if we already have a class implementation container
@@ -973,13 +1619,30 @@ export class ClarionDocumentSymbolProvider {
         symbols: DocumentSymbol[],
         currentStructure: DocumentSymbol | null
     ): DocumentSymbol {
+        // Mark MAP procedures for special handling
+        const isMapProcedure = currentStructure?.name?.startsWith("MAP") ||
+                               currentStructure?.name === "Functions";
+                                
+        // Mark MODULE procedures for special handling
+        const isModuleProcedure = currentStructure?.name?.startsWith("MODULE") ||
+                                  currentStructure?.name === "Functions";
 
         const token = tokens[index];
         const { line, finishesAt, parent } = token;
         const prevToken = tokens[index - 1];
-        const procedureDefName = token.label ? token.label : "UnnamedDefinition";// prevToken?.type === TokenType.Label ? prevToken.value : "UnnamedDefinition";
+        
+        // Handle both standard procedure declarations and MAP shorthand syntax
+        let procedureDefName;
+        
+        if (token.subType === TokenType.MapProcedure) {
+            // This is a MAP shorthand procedure declaration (without PROCEDURE keyword)
+            // Use token.label which was set in DocumentStructure.processShorthandProcedures
+            procedureDefName = token.label || token.value;
+        } else {
+            // Standard procedure declaration with PROCEDURE keyword
+            procedureDefName = token.label ? token.label : "UnnamedDefinition";
+        }
 
-        // 🔍 Extract the definition detail — e.g. "(string newValue), virtual"
         // 🔍 Extract the definition detail — e.g. "(string newValue), virtual"
         let detail = "";
         let j = index + 1;
@@ -1015,16 +1678,32 @@ export class ClarionDocumentSymbolProvider {
             symbolKind = ClarionSymbolKind.Method;
         }
 
-        // Format the detail to show the full procedure declaration
-        const formattedDetail = detail ? `PROCEDURE${detail}` : "PROCEDURE()";
+        // For MAP shorthand syntax, we need to extract the full definition from the token value
+        let fullDefinition = "";
+        
+        if (token.subType === TokenType.MapProcedure) {
+            // For MAP shorthand syntax, extract everything after the procedure name
+            // This includes parameters, return type, and any other attributes
+            if (token.value && token.value.includes("(")) {
+                // Extract everything from the opening parenthesis onwards
+                const startIndex = token.value.indexOf("(");
+                fullDefinition = token.value.substring(startIndex);
+            } else {
+                // Fallback to the detail if we can't extract from token.value
+                fullDefinition = detail ? detail : "()";
+            }
+        } else {
+            // For standard syntax, use the detail
+            fullDefinition = detail ? detail : "()";
+        }
 
         // Improve breadcrumb navigation by separating name and detail
-        // Include just the parameters in the display name (without the PROCEDURE keyword)
-        const displayName = `${procedureDefName} ${detail}`;
+        // Include the full definition in the display name
+        const displayName = `${procedureDefName} ${fullDefinition}`;
 
         const procedureDefSymbol = DocumentSymbol.create(
             displayName,
-            formattedDetail,  // Move the procedure details to the detail field for better breadcrumb
+            "Declaration",  // Mark as Declaration to distinguish from Implementation
             symbolKind,
             this.getTokenRange(tokens, line, finishesAt ?? line),
             // Use a more precise selection range for better navigation
@@ -1036,15 +1715,45 @@ export class ClarionDocumentSymbolProvider {
         if (token.subType === TokenType.MethodDeclaration) {
             (procedureDefSymbol as any)._isMethodDeclaration = true;
         }
+        
+        // Mark MAP procedures
+        if (isMapProcedure || token.subType === TokenType.MapProcedure) {
+            (procedureDefSymbol as any)._isMapProcedure = true;
+        }
 
         // Store finishesAt value for procedure definitions if available
         if (finishesAt !== undefined) {
             (procedureDefSymbol as any)._finishesAt = finishesAt;
         }
 
-        // ✅ Prefer attaching to MODULE if that's the current structure
-        if (currentStructure?.name?.startsWith("MODULE")) {
-            currentStructure.children!.push(procedureDefSymbol);
+        // ✅ Prefer attaching to MODULE or MAP if that's the current structure
+        if (currentStructure?.name?.startsWith("MODULE") ||
+            currentStructure?.name === "Functions") {
+            
+            // If we're already in the Functions container, add directly to it
+            if (currentStructure?.name === "Functions") {
+                currentStructure.children!.push(procedureDefSymbol);
+            }
+            // Otherwise, use the Functions container if available
+            else if ((currentStructure as any).$clarionFunctions) {
+                (currentStructure as any).$clarionFunctions.children!.push(procedureDefSymbol);
+            } else {
+                currentStructure.children!.push(procedureDefSymbol);
+            }
+            return procedureDefSymbol;
+        } else if (currentStructure?.name?.startsWith("MAP") ||
+                  currentStructure?.name === "Functions") {
+            
+            // If we're already in the Functions container, add directly to it
+            if (currentStructure?.name === "Functions") {
+                currentStructure.children!.push(procedureDefSymbol);
+            }
+            // Otherwise, use the Functions container if available
+            else if ((currentStructure as any).$clarionFunctions) {
+                (currentStructure as any).$clarionFunctions.children!.push(procedureDefSymbol);
+            } else {
+                currentStructure.children!.push(procedureDefSymbol);
+            }
             return procedureDefSymbol;
         }
 
@@ -1234,6 +1943,92 @@ export class ClarionDocumentSymbolProvider {
         }
     }
 
+    /**
+     * Handle KEY tokens to extract key field and options
+     */
+    private handleKeyToken(
+        tokens: Token[],
+        index: number,
+        symbols: DocumentSymbol[],
+        currentProcedure: DocumentSymbol | null,
+        currentStructure: DocumentSymbol | null
+    ): void {
+        const token = tokens[index];
+        const { line } = token;
+        const prevToken = tokens[index - 1];
+        const labelName = prevToken?.type === TokenType.Label ? prevToken.value : null;
+
+        // Extract what's inside the parentheses: KEY(SHI:ShipperCode)
+        let keyField = "";
+        const keyOptions: string[] = [];
+
+        // Look for the key field in parentheses
+        const nextToken = tokens[index + 1];
+        if (nextToken && nextToken.value === "(") {
+            const parenContent: string[] = [];
+            let j = index + 2;
+            let parenDepth = 1;
+
+            while (j < tokens.length && parenDepth > 0) {
+                const t = tokens[j];
+                if (t.value === "(") parenDepth++;
+                else if (t.value === ")") parenDepth--;
+
+                if (parenDepth > 0) parenContent.push(t.value);
+                j++;
+            }
+
+            keyField = parenContent.join("").trim();
+
+            // Now collect all options after the key field until end of line or another structure
+            while (j < tokens.length) {
+                const t = tokens[j];
+
+                // Stop if we hit a new line or another structure
+                if (t.line !== line) break;
+                if (t.type === TokenType.Structure) break;
+
+                // Skip commas
+                if (t.value !== ",") {
+                    keyOptions.push(t.value);
+                }
+
+                j++;
+            }
+        }
+
+        // Create a display name with the key field and options
+        let displayParts = [];
+
+        if (labelName) {
+            displayParts.push(`KEY(${labelName})`);
+        } else {
+            displayParts.push("KEY");
+        }
+
+        if (keyField) {
+            displayParts.push(`(${keyField})`);
+        }
+
+        if (keyOptions.length > 0) {
+            displayParts.push(keyOptions.join(","));
+        }
+
+        const displayName = displayParts.join(",");
+
+        const keySymbol = DocumentSymbol.create(
+            displayName,
+            "",  // Empty detail since we're including it in the name
+            SymbolKind.Key,
+            this.getTokenRange(tokens, line, line),
+            this.getTokenRange(tokens, line, line),
+            []
+        );
+
+        const target = currentStructure || currentProcedure;
+        this.addSymbolToParent(keySymbol, target, symbols);
+    }
+
 
     private addSymbolToParent(
         symbol: DocumentSymbol,
@@ -1250,6 +2045,10 @@ export class ClarionDocumentSymbolProvider {
         // CRITICAL FIX: Also check if this is a method declaration
         const isMethodDeclaration = symbol.kind === ClarionSymbolKind.Method ||
             (symbol as any)._isMethodDeclaration === true;
+
+        // Check if this is a MAP procedure
+        const isMapProcedure = symbol.kind === SymbolKind.Function &&
+            (symbol as any)._isMapProcedure === true;
 
         const isClassImplementation = parent?.name.includes(" (Implementation)");
         const isMethodImplementation = (parent as any)?._isMethodImplementation === true;
@@ -1318,7 +2117,18 @@ export class ClarionDocumentSymbolProvider {
                 parent.children!.push(symbol);
                 this.sortContainerChildren(parent);
             }
-
+            // Handle MAP and MODULE procedures
+            else if (isMapProcedure ||
+                    (symbol.kind === SymbolKind.Function &&
+                     (parent?.name?.startsWith("MAP") || parent?.name?.startsWith("MODULE")))) {
+                // For MAP and MODULE, use the Functions container if available
+                if ((parent as any).$clarionFunctions) {
+                    (parent as any).$clarionFunctions.children!.push(symbol);
+                    this.sortContainerChildren((parent as any).$clarionFunctions);
+                } else {
+                    parent.children!.push(symbol);
+                }
+            }
             // Regular symbols go straight into parent
             else {
                 parent.children!.push(symbol);
@@ -1371,8 +2181,12 @@ export class ClarionDocumentSymbolProvider {
 
 
     private getTokenRange(tokens: Token[], startLine: number, endLine: number): Range {
-        const startToken = tokens.find((t: Token) => t.line === startLine);
-        const endToken = [...tokens].reverse().find((t: Token) => t.line === endLine);
+        // 🚀 PERFORMANCE: Use indexed lookup instead of find/reverse
+        const startLineTokens = this.tokensByLine.get(startLine) || [];
+        const endLineTokens = this.tokensByLine.get(endLine) || [];
+        
+        const startToken = startLineTokens[0]; // First token on line
+        const endToken = endLineTokens[endLineTokens.length - 1]; // Last token on line
 
         // If either token is missing, fallback to line-wide range
         if (!startToken || !endToken) {
@@ -1415,4 +2229,242 @@ export class ClarionDocumentSymbolProvider {
         }
     }
 
+    /**
+     * Handle window element tokens (BUTTON, LIST, ITEM)
+     */
+    private handleWindowElementToken(
+        tokens: Token[],
+        index: number,
+        symbols: DocumentSymbol[],
+        currentProcedure: DocumentSymbol | null,
+        currentStructure: DocumentSymbol | null
+    ): void {
+        logger.debug(`Processing window element at line ${tokens[index].line}: ${tokens[index].value}`);
+        const token = tokens[index];
+        const { value, line } = token;
+        const upperValue = value.toUpperCase();
+
+        // --- helpers ---------------------------------------------------------------
+        const lastNonWhitespaceTokenOnLine = (ln: number): Token | undefined => {
+            for (let i = tokens.length - 1; i >= 0; i--) {
+                const t = tokens[i];
+                if (t.line < ln) break;                // gone past the line
+                if (t.line === ln && t.value.trim() !== "") return t;
+            }
+            return undefined;
+        };
+
+        const lineContinues = (ln: number): boolean => {
+            const last = lastNonWhitespaceTokenOnLine(ln);
+            return !!last && last.value === "|";
+        };
+
+        // Allow inner scanners to move to the next line only if the *previous* line continued.
+        const advanceOrBreakAtEOL = (currentLineRef: { value: number }, nextToken: Token): boolean => {
+            if (nextToken.line === currentLineRef.value) return true; // same line, ok
+            if (lineContinues(currentLineRef.value)) {
+                currentLineRef.value = nextToken.line; // allowed to cross due to '|'
+                return true;
+            }
+            return false; // not allowed to cross line
+        };
+
+        // ---------------------------------------------------------------------------
+
+        // Determine the appropriate symbol kind based on the element type
+        let symbolKind: SymbolKind;
+        switch (upperValue) {
+            case "BUTTON": symbolKind = SymbolKind.Boolean; break;
+            case "LIST": symbolKind = SymbolKind.Array; break;
+            case "ITEM": symbolKind = SymbolKind.EnumMember; break;
+            case "STRING": symbolKind = SymbolKind.String; break;
+            case "ENTRY": symbolKind = SymbolKind.Variable; break;
+            case "PROMPT": symbolKind = SymbolKind.String; break;
+            case "RADIO": symbolKind = SymbolKind.Boolean; break;
+            case "CHECK": symbolKind = SymbolKind.Boolean; break;
+            case "SLIDER": symbolKind = SymbolKind.Number; break;
+            case "SPIN": symbolKind = SymbolKind.Number; break;
+            default: symbolKind = SymbolKind.Object;
+        }
+
+        // Extract element text from parentheses if present
+        let elementText = "";
+        let useParam = "";
+
+        // Check if there's a parenthesis after the element (BUTTON will have one, LIST might not)
+        let j = index + 1;
+
+        // Skip any whitespace (same line only)
+        while (j < tokens.length && tokens[j].line === line && tokens[j].value.trim() === "") {
+            j++;
+        }
+
+        // If we find an opening parenthesis, extract the content
+        if (j < tokens.length && tokens[j].line === line && tokens[j].value === "(") {
+            const parenContent: string[] = [];
+            let k = j + 1;
+            let parenDepth = 1;
+            const curLine = { value: line };
+
+            // Extract only the content inside the first set of parentheses
+            while (k < tokens.length && parenDepth > 0) {
+                const parenToken = tokens[k];
+
+                // Respect EOL unless the previous line ends with '|'
+                if (!advanceOrBreakAtEOL(curLine, parenToken)) break;
+
+                // Track parenthesis depth
+                if (parenToken.value === "(") parenDepth++;
+                else if (parenToken.value === ")") parenDepth--;
+
+                // Only add tokens while we're inside the parentheses
+                if (parenDepth > 0) {
+                    // Stop at a comma - this is usually a separator between parameters
+                    if (parenToken.value === ",") break;
+                    parenContent.push(parenToken.value);
+                } else {
+                    // ✅ we just closed the first paren pair
+                    break;
+                }
+
+
+                k++;
+            }
+
+            elementText = parenContent.join("").trim();
+            logger.debug(`  - Extracted element text: "${elementText}"`);
+
+            // Update j to continue after the closing parenthesis (or what we managed to parse)
+            j = k;
+        }
+
+        // Now look for USE and AT parameters
+        let atParam = "";
+
+        while (j < tokens.length) {
+            const t = tokens[j];
+
+            // Stop if we hit a new line (outer sweep respects continuations only inside specific scanners)
+            if (t.line !== line) break;
+
+            // Stop if we hit an END token or another structure token
+            if (t.value.toUpperCase() === "END" ||
+                (t.type === TokenType.Structure && t !== token)) {
+                break;
+            }
+
+            // Look for USE token
+            // Look for USE token
+            if (t.value.toUpperCase() === "USE" && j + 1 < tokens.length && tokens[j + 1].value === "(") {
+                const useContent: string[] = [];
+                let k = j + 2;
+                let useParenDepth = 1;
+                const curLine = { value: line };
+
+                while (k < tokens.length && useParenDepth > 0) {
+                    const useToken = tokens[k];
+
+                    // Respect EOL unless the previous line ended with '|'
+                    if (!advanceOrBreakAtEOL(curLine, useToken)) break;
+
+                    // Track parenthesis depth
+                    if (useToken.value === "(") useParenDepth++;
+                    else if (useToken.value === ")") useParenDepth--;
+
+                    // Only add tokens while we're inside the parentheses
+                    if (useParenDepth > 0) {
+                        useContent.push(useToken.value);
+                    }
+                    k++;
+                }
+
+                useParam = useContent.join("").trim();
+                logger.debug(`  - Extracted USE parameter: "${useParam}"`);
+                j = k;
+                continue;
+            }
+
+
+            // Look for AT token
+            if (t.value.toUpperCase() === "AT" && j + 1 < tokens.length && tokens[j + 1].value === "(") {
+                const atContent: string[] = [];
+                let k = j + 2;
+                let atParenDepth = 1;
+                const curLine = { value: line };
+
+                while (k < tokens.length && atParenDepth > 0) {
+                    const atToken = tokens[k];
+
+                    // Respect EOL unless previous line continues with '|'
+                    if (!advanceOrBreakAtEOL(curLine, atToken)) break;
+
+                    if (atToken.value === "(") atParenDepth++;
+                    else if (atToken.value === ")") atParenDepth--;
+
+                    if (atParenDepth > 0) atContent.push(atToken.value);
+                    k++;
+                }
+
+                atParam = atContent.join("").trim();
+                logger.debug(`  - Extracted AT parameter: "${atParam}"`);
+                j = k;
+                continue;
+            }
+
+            // Stop if we hit a comma followed by another window element
+            if (t.value === "," && j + 1 < tokens.length &&
+                tokens[j + 1].type === TokenType.WindowElement) {
+                break;
+            }
+
+            j++;
+        }
+
+        // Create a display name and detail for the element
+        let displayName: string;
+        let detail: string = "";
+
+        // For ENTRY and GROUP elements, simplify the display
+        // if (upperValue === "ENTRY" || upperValue === "GROUP") {
+        //     displayName = `${upperValue}`;
+
+        //     // Only include element text and USE parameter in the detail
+        //     if (elementText && useParam) {
+        //         detail = `(${elementText}) USE(${useParam})`;
+        //     } else if (elementText) {
+        //         detail = `(${elementText})`;
+        //     } else if (useParam) {
+        //         detail = `USE(${useParam})`;
+        //     }
+        // } else {
+        // For other elements, use the standard approach
+        if (elementText) {
+            displayName = `${upperValue}(${elementText})`;
+        } else {
+            displayName = upperValue;
+        }
+
+        if (useParam) {
+            detail = `USE(${useParam})`;
+        }
+        // }
+
+        logger.debug(`  - Final display name: "${displayName}"`);
+        logger.debug(`  - Final detail: "${detail}"`);
+
+        const elementSymbol = DocumentSymbol.create(
+            displayName,
+            detail,  // detail field
+            symbolKind,
+            this.getTokenRange(tokens, line, line),
+            this.getTokenRange(tokens, line, line),
+            []
+        );
+
+        const target = currentStructure || currentProcedure;
+        this.addSymbolToParent(elementSymbol, target, symbols);
+    }
+
+
 }
+

@@ -2,6 +2,7 @@ class Logger {
     private level: "debug" | "info" | "warn" | "error";
     private name: string;
     public fullDebugging: boolean = false; // default is false, toggle externally if needed
+    public static enabled: boolean = true;
 
     constructor(name: string, level: "debug" | "info" | "warn" | "error" = "error") {
         this.name = name;
@@ -13,6 +14,7 @@ class Logger {
     }
 
     private shouldLog(level: "debug" | "info" | "warn" | "error"): boolean {
+        if (!Logger.enabled) return false;
         if (this.fullDebugging) return true;
         const levels = ["debug", "info", "warn", "error"];
         return levels.indexOf(level) >= levels.indexOf(this.level);
@@ -39,6 +41,24 @@ class Logger {
     error(message: string, ...args: any[]) {
         if (this.shouldLog("error")) {
             console.log(`[${this.getTimestamp()}] [${this.name}] ❌ ERROR:`, message, ...args);
+        }
+    }
+
+    /**
+     * 📊 Log performance metrics - ALWAYS logs regardless of level setting
+     * Search for "PERF:" in debug console to see all performance metrics
+     */
+    perf(message: string, metrics?: Record<string, number | string>) {
+        if (!Logger.enabled) return;
+        
+        const timestamp = this.getTimestamp();
+        if (metrics) {
+            const metricsStr = Object.entries(metrics)
+                .map(([key, value]) => `${key}=${value}`)
+                .join(', ');
+            console.log(`[${timestamp}] [${this.name}] 📊 PERF: ${message} | ${metricsStr}`);
+        } else {
+            console.log(`[${timestamp}] [${this.name}] 📊 PERF: ${message}`);
         }
     }
 

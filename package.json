@@ -2,7 +2,7 @@
     "name": "clarion-extensions",
     "displayName": "Clarion Extensions",
     "description": "Extension for Clarion Language",
-    "version": "0.5.6",
+    "version": "0.5.8",
     "publisher": "msarson",
     "repository": {
         "type": "git",
@@ -41,6 +41,11 @@
             {
                 "id": "clarion.solutionMenu",
                 "label": "Solution"
+            },
+            {
+                "id": "clarion.structureView.menu",
+                "label": "Structure View Options",
+                "icon": "$(ellipsis)"
             }
         ],
         "problemMatchers": [
@@ -52,7 +57,7 @@
                 ],
                 "pattern": [
                     {
-                        "regexp": "^\\s*\\d*>?\\s*(.+\\.clw)\\((\\d+),(\\d+)\\):\\s+(error|warning)\\s*:\\s*(.*)\\s+\\[.*\\]$",
+                        "regexp": "^\\s*\\d*>?\\s*(.+\\.(?i:clw))\\((\\d+),(\\d+)\\):\\s+(error|warning)\\s*:\\s*(.*)\\s+\\[.*\\]$",
                         "file": 1,
                         "line": 2,
                         "column": 3,
@@ -79,7 +84,7 @@
         ],
         "keybindings": [
             {
-                "command": "clarion.followLink",
+                "command": "editor.action.goToImplementation",
                 "key": "ctrl+f12",
                 "when": "editorTextFocus"
             },
@@ -118,12 +123,22 @@
             ]
         },
         "commands": [
-            
+            {
+                "command": "clarion.buildCurrentProject",
+                "title": "Build Current Project",
+                "when": "clarion.solutionOpen"
+            },
             {
                 "command": "clarion.buildSolution",
                 "title": "Build Clarion Solution",
                 "key": "ctrl+shift+b",
                 "when": "clarion.solutionOpen"
+            },
+            {
+                "command": "clarion.forceRefreshSolutionCache",
+                "title": "Refresh Solution",
+                "when": "clarion.solutionOpen",
+                "icon": "$(sync)"
             },
             {
                 "command": "clarion.followLink",
@@ -199,6 +214,11 @@
                 "command": "clarion.structureView.clearFilter",
                 "title": "Clear Structure Filter",
                 "icon": "$(clear-all)"
+            },
+            {
+                "command": "clarion.structureView.toggleFollowCursor",
+                "title": "Follow Cursor",
+                "checked": "clarion.followCursorEnabled"
             },
             {
                 "command": "clarion.solutionView.filter",
@@ -291,14 +311,19 @@
                     "group": "navigation@2"
                 },
                 {
-                    "command": "clarion.solutionView.filter",
+                    "command": "clarion.forceRefreshSolutionCache",
                     "when": "view == solutionView && clarion.solutionOpen",
                     "group": "navigation@3"
                 },
                 {
-                    "command": "clarion.solutionView.clearFilter",
+                    "command": "clarion.solutionView.filter",
                     "when": "view == solutionView && clarion.solutionOpen",
                     "group": "navigation@4"
+                },
+                {
+                    "command": "clarion.solutionView.clearFilter",
+                    "when": "view == solutionView && clarion.solutionOpen",
+                    "group": "navigation@5"
                 },
                 {
                     "command": "clarion.structureView.expandAll",
@@ -320,6 +345,12 @@
                     "icon": "$(clear-all)",
                     "when": "view == clarionStructureView && clarionStructureViewVisible",
                     "group": "navigation@3"
+                },
+                {
+                    "submenu": "clarion.structureView.menu",
+                    "icon": "$(ellipsis)",
+                    "when": "view == clarionStructureView && clarionStructureViewVisible",
+                    "group": "navigation@4"
                 }
             ],
             "viewContainer/context": [
@@ -337,6 +368,24 @@
                 {
                     "command": "clarion.openSolutionFromList",
                     "group": "navigation@2"
+                },
+                {
+                    "command": "clarion.closeSolution",
+                    "when": "clarion.solutionOpen",
+                    "group": "navigation@3"
+                },
+                {
+                    "command": "clarion.forceRefreshSolutionCache",
+                    "when": "clarion.solutionOpen",
+                    "group": "navigation@4"
+                }
+            ],
+            "view/title/context": [],
+            "clarion.structureView.menu": [
+                {
+                    "command": "clarion.structureView.toggleFollowCursor",
+                    "group": "navigation@1",
+                    "checked": "clarion.followCursorEnabled"
                 }
             ]
         },
@@ -531,17 +580,28 @@
                                                     },
                                                     "fontWeight": {
                                                         "type": "string",
-                                                        "enum": ["normal", "bold"],
+                                                        "enum": [
+                                                            "normal",
+                                                            "bold"
+                                                        ],
                                                         "description": "Font weight (normal or bold)"
                                                     },
                                                     "fontStyle": {
                                                         "type": "string",
-                                                        "enum": ["normal", "italic"],
+                                                        "enum": [
+                                                            "normal",
+                                                            "italic"
+                                                        ],
                                                         "description": "Font style (normal or italic)"
                                                     },
                                                     "textDecoration": {
                                                         "type": "string",
-                                                        "enum": ["none", "underline", "line-through", "overline"],
+                                                        "enum": [
+                                                            "none",
+                                                            "underline",
+                                                            "line-through",
+                                                            "overline"
+                                                        ],
                                                         "description": "Text decoration"
                                                     },
                                                     "before": {
@@ -612,17 +672,28 @@
                                                     },
                                                     "fontWeight": {
                                                         "type": "string",
-                                                        "enum": ["normal", "bold"],
+                                                        "enum": [
+                                                            "normal",
+                                                            "bold"
+                                                        ],
                                                         "description": "Font weight (normal or bold)"
                                                     },
                                                     "fontStyle": {
                                                         "type": "string",
-                                                        "enum": ["normal", "italic"],
+                                                        "enum": [
+                                                            "normal",
+                                                            "italic"
+                                                        ],
                                                         "description": "Font style (normal or italic)"
                                                     },
                                                     "textDecoration": {
                                                         "type": "string",
-                                                        "enum": ["none", "underline", "line-through", "overline"],
+                                                        "enum": [
+                                                            "none",
+                                                            "underline",
+                                                            "line-through",
+                                                            "overline"
+                                                        ],
                                                         "description": "Text decoration"
                                                     },
                                                     "before": {
@@ -678,6 +749,16 @@
                     "type": "boolean",
                     "default": true,
                     "description": "Enable or disable prefix highlighting for Clarion variables."
+                },
+                "clarion.firstFetchTimeoutMs": {
+                    "type": "number",
+                    "default": 2500,
+                    "description": "Timeout in milliseconds for the first solution fetch attempt after activation. Lower values improve startup time when the language server is not ready."
+                },
+                "clarion.enableLocalSlnFallback": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "When enabled, uses a local .sln file parser as a fast fallback when the language server is not ready or times out."
                 }
             }
         }
@@ -691,10 +772,11 @@
         "@types/mocha": "^8.2.2",
         "@types/node": "^22.13.5",
         "@types/vscode": "^1.97.0",
+        "@types/xml2js": "^0.4.14",
         "@typescript-eslint/parser": "^8.25.0",
         "@vscode/test-electron": "^2.4.1",
         "eslint": "^9.21.0",
-        "glob": "^11.0.1",
+        "glob": "^11.0.3",
         "mocha": "^11.1.0",
         "rimraf": "^6.0.1",
         "typescript": "^4.2.4"

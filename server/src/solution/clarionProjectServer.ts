@@ -18,6 +18,7 @@ export class ClarionProjectServer {
     noneFiles: string[] = [];
     redirectionEntries: RedirectionEntry[] = [];
     private searchPathsCache: Map<string, string[]> = new Map();
+    private redirectionParser: RedirectionFileParserServer | null = null;
 
     constructor(
         public name: string,
@@ -43,82 +44,280 @@ export class ClarionProjectServer {
             const projectFile = path.join(this.path, `${this.name}.cwproj`);
             logger.info(`📂 Project file path: ${projectFile}`);
 
-            if (!fs.existsSync(projectFile)) {
+            // Use async file existence check
+            try {
+                await fs.promises.access(projectFile, fs.constants.F_OK);
+            } catch {
                 logger.warn(`⚠️ Project file not found: ${projectFile}`);
                 return;
             }
 
             try {
-                const xmlContent = fs.readFileSync(projectFile, 'utf-8');
-                const parsed = await xml2js.parseStringPromise(xmlContent);
+                // Use async file reading
+                const xmlContent = await fs.promises.readFile(projectFile, 'utf-8');
+                
+                // Use a more efficient XML parsing approach
+                const parser = new xml2js.Parser({
+                    explicitArray: false, // Don't create arrays for single elements
+                    mergeAttrs: true,     // Merge attributes into the object
+                    normalizeTags: true,  // Normalize tag names to lowercase
+                    trim: true            // Trim whitespace
+                });
+                
+                const parsed = await parser.parseStringPromise(xmlContent);
                 
                 // Process all ItemGroups
-                if (parsed?.Project?.ItemGroup) {
-                    // Reset collections
-                    this.sourceFiles = [];
-                    this.fileDrivers = [];
-                    this.libraries = [];
-                    this.projectReferences = [];
-                    this.noneFiles = [];
+                if (parsed?.project?.itemgroup) {
+                    // Convert to array if it's not already (happens when there's only one itemgroup)
+                    const itemGroups = Array.isArray(parsed.project.itemgroup)
+                        ? parsed.project.itemgroup
+                        : [parsed.project.itemgroup];
+                    
+                    // Create arrays to collect items from all groups
+                    const compileItems = [];
+                    const fileDriverItems = [];
+                    const libraryItems = [];
+                    const projectReferenceItems = [];
+                    const noneItems = [];
                     
                     // Process each ItemGroup
-                    for (const group of parsed.Project.ItemGroup) {
+                    for (const group of itemGroups) {
                         // Process Compile items (source files)
-                        if (group.Compile) {
-                            for (const file of group.Compile) {
-                                try {
-                                    const fileName = file.$.Include;
-                                    const resolvedPath = this.findFileInProjectPaths(fileName);
-                                    if (resolvedPath) {
-                                        const relativePath = path.relative(this.path, resolvedPath);
-                                        this.sourceFiles.push(new ClarionSourcerFileServer(fileName, relativePath, this));
-                                        logger.info(`✅ Added source file: ${fileName} (${relativePath})`);
-                                    } else {
-                                        logger.warn(`❌ Could not resolve file: ${fileName}`);
-                                    }
-                                } catch (fileError) {
-                                    logger.error(`❌ Error processing file: ${fileError instanceof Error ? fileError.message : String(fileError)}`);
-                                }
-                            }
+                        if (group.compile) {
+                            const compiles = Array.isArray(group.compile) ? group.compile : [group.compile];
+                            compileItems.push(...compiles);
                         }
                         
                         // Process FileDriver items
-                        if (group.FileDriver) {
-                            for (const driver of group.FileDriver) {
-                                this.fileDrivers.push(driver.$.Include);
-                            }
-                            logger.info(`📂 Found ${this.fileDrivers.length} file drivers in project ${this.name}: ${this.fileDrivers.join(', ')}`);
+                        if (group.filedriver) {
+                            const drivers = Array.isArray(group.filedriver) ? group.filedriver : [group.filedriver];
+                            fileDriverItems.push(...drivers);
                         }
                         
                         // Process Library items
-                        if (group.Library) {
-                            for (const lib of group.Library) {
-                                this.libraries.push(lib.$.Include);
-                            }
-                            logger.info(`📂 Found ${this.libraries.length} libraries in project ${this.name}: ${this.libraries.join(', ')}`);
+                        if (group.library) {
+                            const libs = Array.isArray(group.library) ? group.library : [group.library];
+                            libraryItems.push(...libs);
                         }
                         
                         // Process ProjectReference items
-                        if (group.ProjectReference) {
-                            for (const ref of group.ProjectReference) {
-                                const projectGuid = ref.$.Project;
-                                const projectName = ref.$.Name || path.basename(ref.$.Include, '.cwproj');
-                                this.projectReferences.push({
-                                    name: projectName,
-                                    project: projectGuid
-                                });
-                            }
-                            logger.info(`📂 Found ${this.projectReferences.length} project references in project ${this.name}: ${this.projectReferences.map(r => r.name).join(', ')}`);
+                        if (group.projectreference) {
+                            const refs = Array.isArray(group.projectreference) ? group.projectreference : [group.projectreference];
+                            projectReferenceItems.push(...refs);
                         }
                         
                         // Process None items (other files)
-                        if (group.None) {
-                            for (const none of group.None) {
-                                this.noneFiles.push(none.$.Include);
-                            }
-                            logger.info(`📂 Found ${this.noneFiles.length} other files in project ${this.name}: ${this.noneFiles.join(', ')}`);
+                        if (group.none) {
+                            const nones = Array.isArray(group.none) ? group.none : [group.none];
+                            noneItems.push(...nones);
                         }
                     }
+                    
+                    // Process file drivers (faster to process these simpler items first)
+                    for (const driver of fileDriverItems) {
+                        // Handle different possible formats
+                        let driverPath = null;
+                        if (typeof driver === 'string') {
+                            driverPath = driver;
+                        } else if (driver && typeof driver === 'object' && driver.include) {
+                            driverPath = driver.include;
+                        }
+                        
+                        if (driverPath) {
+                            this.fileDrivers.push(driverPath);
+                        }
+                    }
+                    logger.info(`📂 Found ${this.fileDrivers.length} file drivers in project ${this.name}`);
+                    
+                    // Process libraries
+                    for (const lib of libraryItems) {
+                        // Handle different possible formats
+                        let libPath = null;
+                        if (typeof lib === 'string') {
+                            libPath = lib;
+                        } else if (lib && typeof lib === 'object' && lib.include) {
+                            libPath = lib.include;
+                        }
+                        
+                        if (libPath) {
+                            this.libraries.push(libPath);
+                        }
+                    }
+                    logger.info(`📂 Found ${this.libraries.length} libraries in project ${this.name}`);
+                    
+                    // Process project references
+                    for (const ref of projectReferenceItems) {
+                        let projectGuid = null;
+                        let projectName = null;
+                        let includePath = null;
+                        
+                        if (typeof ref === 'object') {
+                            projectGuid = ref.project;
+                            projectName = ref.name;
+                            includePath = ref.include;
+                        }
+                        
+                        if (projectGuid && (projectName || includePath)) {
+                            this.projectReferences.push({
+                                name: projectName || (includePath ? path.basename(includePath, '.cwproj') : "Unknown"),
+                                project: projectGuid
+                            });
+                        }
+                    }
+                    logger.info(`📂 Found ${this.projectReferences.length} project references in project ${this.name}`);
+                    
+                    // Process none files
+                    for (const none of noneItems) {
+                        // Handle different possible formats
+                        let nonePath = null;
+                        if (typeof none === 'string') {
+                            nonePath = none;
+                        } else if (none && typeof none === 'object' && none.include) {
+                            nonePath = none.include;
+                        }
+                        
+                        if (nonePath) {
+                            this.noneFiles.push(nonePath);
+                        }
+                    }
+                    logger.info(`📂 Found ${this.noneFiles.length} other files in project ${this.name}`);
+                    
+                    // Log the types of files found in the project
+                    logger.info(`📂 Project ${this.name} contains:
+                        - ${compileItems.length} Compile items (source files)
+                        - ${fileDriverItems.length} FileDriver items
+                        - ${libraryItems.length} Library items
+                        - ${projectReferenceItems.length} ProjectReference items
+                        - ${noneItems.length} None items
+                    `);
+                    
+                    // Process source files (most expensive operation, do it last)
+                    // Create an array of promises for resolving file paths in parallel
+                    // We only process Compile items as source files
+                    const filePromises = compileItems.map(async (file, index) => {
+                        try {
+                            // Log the raw file object to understand its structure
+                            logger.info(`📂 Raw file object: ${JSON.stringify(file)}`);
+                            
+                            // For XML like: <Compile Include="CLASTR.clw" />
+                            // With the current parser options, it should be parsed as:
+                            // { include: "CLASTR.clw" }
+                            
+                            // Start with a null fileName and only use fallback if we can't extract it
+                            let fileName = null;
+                            
+                            if (file) {
+                                if (typeof file === 'string') {
+                                    // If file is directly a string
+                                    fileName = file;
+                                    logger.info(`📄 File name extracted (string): ${fileName}`);
+                                } else if (typeof file === 'object') {
+                                    // Try multiple possible formats based on how xml2js might parse it
+                                    if (file.include) {
+                                        fileName = file.include;
+                                        logger.info(`📄 File name extracted (include): ${fileName}`);
+                                    } else if (file.$ && file.$.include) {
+                                        fileName = file.$.include;
+                                        logger.info(`📄 File name extracted ($.include): ${fileName}`);
+                                    } else if (file.Include) {
+                                        fileName = file.Include;
+                                        logger.info(`📄 File name extracted (Include): ${fileName}`);
+                                    } else {
+                                        // Log all keys to help diagnose the structure
+                                        logger.info(`🔍 Available keys in file object: ${Object.keys(file).join(', ')}`);
+                                        
+                                        // If it's an object but we can't find the include attribute,
+                                        // try to find any property that might contain the file name
+                                        for (const key of Object.keys(file)) {
+                                            if (typeof file[key] === 'string' &&
+                                                (key.toLowerCase().includes('include') ||
+                                                 file[key].toLowerCase().endsWith('.clw') ||
+                                                 file[key].toLowerCase().endsWith('.inc'))) {
+                                                fileName = file[key];
+                                                logger.info(`📄 File name extracted (key: ${key}): ${fileName}`);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Only use fallback if we couldn't extract a file name
+                            if (!fileName) {
+                                fileName = `unknown-file-${index}-${Math.random().toString(36).substring(2, 10)}`;
+                                logger.warn(`⚠️ Using fallback file name: ${fileName}`);
+                            }
+                            
+                            logger.info(`📂 Processing file from project: ${fileName}`);
+                            
+                            // Use the async version of findFileInProjectPaths
+                            const resolvedPath = await this.findFileInProjectPathsAsync(fileName);
+                            if (resolvedPath) {
+                                const relativePath = path.relative(this.path, resolvedPath);
+                                logger.info(`✅ Resolved path for ${fileName}: ${relativePath}`);
+                                return new ClarionSourcerFileServer(fileName, relativePath, this);
+                            } else {
+                                logger.warn(`❌ Could not resolve file: ${fileName}, but will still include it in the project`);
+                                // Still include the file even if we can't resolve its path
+                                // Use the fileName as both the name and relativePath
+                                logger.info(`📂 Including file with original name: ${fileName}`);
+                                return new ClarionSourcerFileServer(fileName, fileName, this);
+                            }
+                        } catch (fileError) {
+                            logger.error(`❌ Error processing file: ${fileError instanceof Error ? fileError.message : String(fileError)}`);
+                            // Still include the file even if there was an error
+                            // Try to extract the file name even in error cases
+                            let fileName = null;
+                            
+                            if (file) {
+                                if (typeof file === 'string') {
+                                    fileName = file;
+                                } else if (typeof file === 'object') {
+                                    // Try multiple possible formats
+                                    if (file.include) {
+                                        fileName = file.include;
+                                    } else if (file.$ && file.$.include) {
+                                        fileName = file.$.include;
+                                    } else if (file.Include) {
+                                        fileName = file.Include;
+                                    }
+                                }
+                            }
+                            
+                            // Use fallback only if we couldn't extract a name
+                            if (!fileName) {
+                                fileName = `unknown-file-error-${Math.random().toString(36).substring(2, 10)}`;
+                                logger.warn(`⚠️ Using error fallback file name: ${fileName}`);
+                            }
+                            
+                            logger.info(`⚠️ Including file ${fileName} despite error`);
+                            return new ClarionSourcerFileServer(fileName, fileName, this);
+                        }
+                    });
+                    
+                    // Wait for all file resolutions to complete
+                    const resolvedFiles = await Promise.all(filePromises);
+                    
+                    // No need to filter out null values since we always return a ClarionSourcerFileServer
+                    this.sourceFiles = resolvedFiles as ClarionSourcerFileServer[];
+                    
+                    // Log the file extensions to help with debugging
+                    const extensions = new Map<string, number>();
+                    for (const file of this.sourceFiles) {
+                        if (file.name) {
+                            const ext = path.extname(file.name).toLowerCase();
+                            extensions.set(ext, (extensions.get(ext) || 0) + 1);
+                        }
+                    }
+                    
+                    // Log the extension counts
+                    let extensionLog = "File extensions in source files:";
+                    extensions.forEach((count, ext) => {
+                        extensionLog += `\n  - ${ext}: ${count} files`;
+                    });
+                    logger.info(extensionLog);
+                    
+                    logger.info(`✅ Resolved ${this.sourceFiles.length} source files for project ${this.name}`);
                 }
                 
                 // Log summary of what was found
@@ -175,12 +374,8 @@ export class ClarionProjectServer {
 
         logger.info(`🔍 Resolving search paths for extension: ${fileExtension}, using configuration: ${serverSettings.configuration}`);
 
-        const redParser = new RedirectionFileParserServer();
-
-        if (!this.redirectionEntries.length) {
-            this.redirectionEntries = redParser.parseRedFile(this.path);
-            logger.info(`📂 Parsed redirection file for project ${this.name}, found ${this.redirectionEntries.length} entries`);
-        }
+        // Use a singleton instance of RedirectionFileParserServer for better performance
+        const redParser = this.getRedirectionParser();
 
         // Include both Common and configuration-specific entries
         const matchingEntries = this.redirectionEntries.filter(entry =>
@@ -190,37 +385,39 @@ export class ClarionProjectServer {
         logger.info(`📂 Found ${matchingEntries.length} matching entries for section Common or ${serverSettings.configuration}`);
 
         // Filter entries by extension and resolve paths
-        const paths = matchingEntries
-            .filter(entry => entry.extension.toLowerCase() === normalizedExt || entry.extension === "*.*")
-            .flatMap(entry => {
-                logger.info(`📂 Processing entry: ${entry.extension} from section ${entry.section}`);
-                return entry.paths.map(p => {
-                    const resolvedPath = path.isAbsolute(p) ? p : path.resolve(this.path, p);
-                    logger.info(`📂 Resolved path: ${p} -> ${resolvedPath}`);
-                    return resolvedPath;
-                });
-            });
-
-        // ✅ Ensure the directory containing the redirection file is included
-        paths.push(path.dirname(this.path));
+        // Use a Set to avoid duplicates from the beginning
+        const pathSet = new Set<string>();
         
-        // ✅ Ensure the project path is included
-        paths.push(this.path);
+        // Add the project path and its parent directory first (they're always included)
+        pathSet.add(this.path);
+        pathSet.add(path.dirname(this.path));
+        
+        // Process matching entries
+        for (const entry of matchingEntries) {
+            if (entry.extension.toLowerCase() === normalizedExt || entry.extension === "*.*") {
+                logger.info(`📂 Processing entry: ${entry.extension} from section ${entry.section}`);
+                
+                for (const p of entry.paths) {
+                    const resolvedPath = path.isAbsolute(p) ? p : path.resolve(this.path, p);
+                    pathSet.add(resolvedPath);
+                }
+            }
+        }
 
-        const uniquePaths = Array.from(new Set(paths));
+        const uniquePaths = Array.from(pathSet);
 
-        logger.info(`✅ Resolved search paths for ${normalizedExt}: (${uniquePaths.length})`);
-        uniquePaths.forEach((p, i) => logger.info(`   ${i + 1}. ${p}`));
+        // Only log detailed path info at debug level to reduce noise
+        logger.info(`✅ Resolved ${uniquePaths.length} search paths for ${normalizedExt}`);
 
         // Cache the result
         this.searchPathsCache.set(cacheKey, uniquePaths);
-        logger.info(`✅ Cached search paths for ${normalizedExt} in project ${this.name}`);
 
         return uniquePaths;
     }
 
 
 
+    // Keep the synchronous version for backward compatibility
     private findFileInProjectPaths(fileName: string): string | null {
         // First try using the redirection parser directly
         const redParser = this.getRedirectionParser();
@@ -266,15 +463,107 @@ export class ClarionProjectServer {
 
         return null;
     }
+    
+    // Add an asynchronous version for better performance
+    private async findFileInProjectPathsAsync(fileName: string): Promise<string | null> {
+        // Helper for async existence check
+        const fileExists = async (filePath: string) => {
+            try {
+                await fs.promises.access(filePath, fs.constants.F_OK);
+                return true;
+            } catch {
+                return false;
+            }
+        };
+        
+        // First try using the redirection parser directly
+        const redParser = this.getRedirectionParser();
+        const redResult = redParser.findFile(fileName);
+        if (redResult && redResult.path) {
+            // Verify the file exists
+            if (await fileExists(redResult.path)) {
+                logger.info(`✅ Found file through redirection: ${redResult.path} (source: ${redResult.source})`);
+                return redResult.path;
+            }
+        }
+        
+        // Fallback to search paths
+        const ext = path.extname(fileName).toLowerCase();
+        const searchPaths = this.getSearchPaths(ext);
+
+        // Create an array of promises to check all paths in parallel
+        const pathPromises = searchPaths.map(async (spath) => {
+            const full = path.normalize(path.join(spath, fileName));
+            if (await fileExists(full)) {
+                return full;
+            }
+            return null;
+        });
+        
+        // Wait for all path checks to complete
+        const results = await Promise.all(pathPromises);
+        const foundPath = results.find(p => p !== null);
+        if (foundPath) {
+            return foundPath;
+        }
+
+        // If no extension is provided, try with default lookup extensions
+        if (!ext) {
+            // Create an array of promises for each extension
+            const extPromises = serverSettings.defaultLookupExtensions.map(async (defaultExt) => {
+                const fileNameWithExt = `${fileName}${defaultExt}`;
+                
+                // Try with redirection parser first
+                const redResultWithExt = redParser.findFile(fileNameWithExt);
+                if (redResultWithExt && redResultWithExt.path) {
+                    if (await fileExists(redResultWithExt.path)) {
+                        logger.info(`✅ Found file with added extension through redirection: ${redResultWithExt.path} (source: ${redResultWithExt.source})`);
+                        return redResultWithExt.path;
+                    }
+                }
+                
+                // Create promises for each search path with this extension
+                const extPathPromises = searchPaths.map(async (spath) => {
+                    const full = path.normalize(path.join(spath, fileNameWithExt));
+                    if (await fileExists(full)) {
+                        logger.info(`✅ Found file with added extension in search path: ${full}`);
+                        return full;
+                    }
+                    return null;
+                });
+                
+                // Wait for all path checks for this extension to complete
+                const extResults = await Promise.all(extPathPromises);
+                return extResults.find(p => p !== null) || null;
+            });
+            
+            // Wait for all extension checks to complete
+            const extResults = await Promise.all(extPromises);
+            const foundExtPath = extResults.find(p => p !== null);
+            if (foundExtPath) {
+                return foundExtPath;
+            }
+        }
+
+        return null;
+    }
 
     /**
      * Gets the redirection parser for this project
-     * @returns A RedirectionFileParserServer instance
+     * @returns A RedirectionFileParserServer instance (singleton per project)
      */
     public getRedirectionParser(): RedirectionFileParserServer {
-        const redParser = new RedirectionFileParserServer();
-        redParser.parseRedFile(this.path);
-        return redParser;
+        // Use the cached instance if available
+        if (this.redirectionParser) {
+            logger.info(`✅ Using cached RedirectionFileParserServer instance for project: ${this.name}`);
+            return this.redirectionParser;
+        }
+
+        // Create a new instance if not available
+        logger.info(`🔄 Creating new RedirectionFileParserServer instance for project: ${this.name}`);
+        this.redirectionParser = new RedirectionFileParserServer();
+        this.redirectionEntries = this.redirectionParser.parseRedFile(this.path);
+        return this.redirectionParser;
     }
 
     /**

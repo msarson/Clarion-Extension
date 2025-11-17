@@ -19,6 +19,10 @@ import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("StructureViewProvider");
 logger.setLevel("error");
 
+// 📊 PERFORMANCE: Create perf logger that always logs
+const perfLogger = LoggerManager.getLogger("StructureViewPerf");
+perfLogger.setLevel("info"); // Keep perf logs visible
+
 // No thresholds needed - solution view priority is handled on the server side
 
 
@@ -35,6 +39,11 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     private activeEditor: TextEditor | undefined;
     public treeView: TreeView<DocumentSymbol> | undefined;
     
+    // Follow cursor functionality
+    private followCursor: boolean = true;
+    private selectionChangeDebounceTimeout: NodeJS.Timeout | null = null;
+    private currentHighlightedSymbol: DocumentSymbol | undefined;
+    
     // Filter-related properties
     private _filterText: string = '';
     private _filterDebounceTimeout: NodeJS.Timeout | null = null;
@@ -43,9 +52,22 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
 
     constructor(treeView?: TreeView<DocumentSymbol>) {
         this.treeView = treeView;
+        
+        // Initialize the follow cursor context - make sure to use await in an async IIFE
+        (async () => {
+            try {
+                await commands.executeCommand('setContext', 'clarion.followCursorEnabled', this.followCursor);
+                logger.info(`Initialized clarion.followCursorEnabled context to ${this.followCursor}`);
+            } catch (error) {
+                logger.error(`Failed to set context: ${error}`);
+            }
+        })();
 
         // Listen for active editor changes
         window.onDidChangeActiveTextEditor(editor => {
+            perfLogger.info(`📊 PERF: Active editor changed to: ${editor?.document.fileName || 'none'}`);
+            const perfStart = performance.now();
+            
             this.activeEditor = editor;
             
             // Clear any active filter when changing documents
@@ -56,6 +78,9 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             }
             
             this._onDidChangeTreeData.fire();
+            
+            const perfTime = performance.now() - perfStart;
+            perfLogger.info(`📊 PERF: Structure view updated for editor change: ${perfTime.toFixed(2)}ms`);
         });
 
         // Listen for document changes
@@ -64,12 +89,30 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 this._onDidChangeTreeData.fire();
             }
         });
+        
+        // Listen for selection changes to implement "Follow Cursor" functionality
+        window.onDidChangeTextEditorSelection(event => {
+            if (this.followCursor && this.activeEditor && event.textEditor === this.activeEditor) {
+                // Debounce the selection change to avoid excessive updates
+                if (this.selectionChangeDebounceTimeout) {
+                    clearTimeout(this.selectionChangeDebounceTimeout);
+                }
+                
+                this.selectionChangeDebounceTimeout = setTimeout(() => {
+                    this.revealActiveSelection();
+                    this.selectionChangeDebounceTimeout = null;
+                }, 100); // 100ms debounce delay for cursor movements
+            }
+        });
 
         // Initialize with the current active editor
         this.activeEditor = window.activeTextEditor;
     }
 
     refresh(): void {
+        perfLogger.info(`📊 PERF: Structure view refresh triggered`);
+        const perfStart = performance.now();
+        
         // Reset the expandAllFlag when refreshing
         this.expandAllFlag = false;
         // Clear the filter cache when refreshing
@@ -77,6 +120,112 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         // Clear the visibility map
         this.visibilityMap.clear();
         this._onDidChangeTreeData.fire();
+        
+        const perfTime = performance.now() - perfStart;
+        perfLogger.info(`📊 PERF: Structure view refresh completed: ${perfTime.toFixed(2)}ms`);
+    }
+    
+    /**
+     * Toggles the "Follow Cursor" functionality
+     * @returns The new state of the follow cursor setting
+     */
+    toggleFollowCursor(): boolean {
+        this.followCursor = !this.followCursor;
+        logger.info(`🔄 Follow cursor ${this.followCursor ? 'enabled' : 'disabled'}`);
+        
+        // If we just enabled follow cursor, immediately reveal the current selection
+        if (this.followCursor) {
+            this.revealActiveSelection();
+        } else {
+            // Clear the current highlighted symbol when disabling
+            this.currentHighlightedSymbol = undefined;
+            this._onDidChangeTreeData.fire();
+        }
+        
+        return this.followCursor;
+    }
+    
+    /**
+     * Gets the current state of the follow cursor setting
+     */
+    isFollowCursorEnabled(): boolean {
+        return this.followCursor;
+    }
+    
+    /**
+     * Finds and reveals the symbol at the current cursor position
+     */
+    private async revealActiveSelection(): Promise<void> {
+        if (!this.activeEditor || !this.treeView) {
+            return;
+        }
+        
+        try {
+            // Get the current cursor position
+            const position = this.activeEditor.selection.active;
+            
+            // Get all symbols for the current document
+            const symbols = await this.getChildren();
+            if (!symbols || symbols.length === 0) {
+                return;
+            }
+            
+            // Find the symbol that contains the cursor position
+            const symbol = this.findSymbolAtPosition(symbols, position.line);
+            if (symbol) {
+                // Store the currently highlighted symbol
+                this.currentHighlightedSymbol = symbol;
+                
+                // Reveal the symbol in the tree view
+                await this.treeView.reveal(symbol, { select: true, focus: false });
+                
+                // Force refresh to apply highlighting
+                this._onDidChangeTreeData.fire(symbol);
+            }
+        } catch (error) {
+            logger.error(`Failed to reveal active selection: ${error}`);
+        }
+    }
+    
+    /**
+     * Recursively finds the most specific symbol that contains the given line
+     * @param symbols The symbols to search through
+     * @param line The line number to find
+     * @returns The most specific symbol containing the line, or undefined if none found
+     */
+    private findSymbolAtPosition(symbols: DocumentSymbol[], line: number): DocumentSymbol | undefined {
+        if (!symbols || symbols.length === 0) {
+            return undefined;
+        }
+        
+        // Find all symbols that contain the line
+        const containingSymbols = symbols.filter(symbol =>
+            line >= symbol.range.start.line && line <= symbol.range.end.line
+        );
+        
+        if (containingSymbols.length === 0) {
+            return undefined;
+        }
+        
+        // Sort by specificity (smaller range is more specific)
+        containingSymbols.sort((a, b) => {
+            const aRange = a.range.end.line - a.range.start.line;
+            const bRange = b.range.end.line - b.range.start.line;
+            return aRange - bRange;
+        });
+        
+        // Get the most specific symbol
+        const mostSpecificSymbol = containingSymbols[0];
+        
+        // Check if there's an even more specific symbol in the children
+        if (mostSpecificSymbol.children && mostSpecificSymbol.children.length > 0) {
+            const childSymbol = this.findSymbolAtPosition(mostSpecificSymbol.children, line);
+            if (childSymbol) {
+                return childSymbol;
+            }
+        }
+        
+        return mostSpecificSymbol;
     }
     
     // Method to set filter text with debouncing
@@ -117,6 +266,9 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     }
 
     getTreeItem(element: DocumentSymbol): TreeItem {
+        // Store the current element being processed
+        this.currentElement = element;
+        
         // Generate a unique key for this element
         const elementKey = this.getElementKey(element);
 
@@ -135,13 +287,52 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             }
         }
 
+        // Create tree item with name only (not detail)
         const treeItem = new TreeItem(element.name, collapsibleState);
 
+        // Set icon based on symbol kind and detail
         // Set icon based on symbol kind
         treeItem.iconPath = this.getIconForSymbolKind(element.kind);
+        
+        // Add detail as description if available (shows to the right of the name)
+        if (element.detail) {
+            // Special handling for method declarations and implementations
+            if (element.detail === "Declaration") {
+                // Check if this method has an implementation
+                const hasImplementation = element.children?.some(child =>
+                    child.detail === "Implementation");
+                
+                if (hasImplementation) {
+                    treeItem.description = "Declaration @L" + (element.range.start.line + 1);
+                } else {
+                    treeItem.description = "Declaration";
+                }
+            } else if (element.detail === "Implementation") {
+                treeItem.description = "Implementation @L" + (element.range.start.line + 1);
+            } else {
+                treeItem.description = element.detail;
+            }
+        } else if (element.name === "Functions" && element.kind === 10) { // SymbolKind.Function
+            // Special handling for Functions container in MAP and MODULE
+            treeItem.description = "MAP/MODULE Functions";
+        }
 
         // Set tooltip to include detail if available
         treeItem.tooltip = element.detail ? `${element.name} (${element.detail})` : element.name;
+        
+        // Apply highlighting if this is the currently highlighted symbol
+        if (this.currentHighlightedSymbol && this.getElementKey(element) === this.getElementKey(this.currentHighlightedSymbol)) {
+            // Make the item stand out more with a description
+            // If we already have a detail description, append the current position marker
+            if (element.detail) {
+                treeItem.description = `${element.detail} ← current position`;
+            } else {
+                treeItem.description = "← current position";
+            }
+            
+            // Use a different icon to make it more visible
+            treeItem.iconPath = new ThemeIcon('location');
+        }
 
         // Set command to navigate to symbol when clicked
         if (this.activeEditor) {
@@ -168,6 +359,10 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     private visibilityMap = new Map<string, boolean>();
 
     async getChildren(element?: DocumentSymbol): Promise<DocumentSymbol[]> {
+        // 📊 PERFORMANCE: Track getChildren timing
+        const perfStart = performance.now();
+        const context = element ? `child of ${element.name}` : 'root';
+        
         if (!this.activeEditor) return [];
 
         if (element) {
@@ -190,6 +385,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 if (this._filteredNodesCache.has(cacheKey)) {
                     const cachedNodes = this._filteredNodesCache.get(cacheKey);
                     logger.info(`  - Returning ${cachedNodes?.length || 0} cached filtered children`);
+                    const perfTime = performance.now() - perfStart;
+                    if (perfTime > 10) perfLogger.info(`📊 PERF: getChildren(${context}) cached: ${perfTime.toFixed(2)}ms`);
                     return cachedNodes || [];
                 }
                 
@@ -203,19 +400,27 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 this._filteredNodesCache.set(cacheKey, visibleChildren);
                 
                 logger.info(`  - Returning ${visibleChildren.length} visible children`);
+                const perfTime = performance.now() - perfStart;
+                if (perfTime > 10) perfLogger.info(`📊 PERF: getChildren(${context}) filtered: ${perfTime.toFixed(2)}ms`);
                 return visibleChildren;
             }
 
+            const perfTime = performance.now() - perfStart;
+            if (perfTime > 10) perfLogger.info(`📊 PERF: getChildren(${context}) direct: ${perfTime.toFixed(2)}ms`);
             return element.children ?? [];
         }
 
         try {
+            const symbolsStart = performance.now();
             
             // For normal-sized documents, proceed with symbol request
             const symbols = await commands.executeCommand<DocumentSymbol[]>(
                 'vscode.executeDocumentSymbolProvider',
                 this.activeEditor.document.uri
             );
+            
+            const symbolsTime = performance.now() - symbolsStart;
+            perfLogger.info(`📊 PERF: executeDocumentSymbolProvider: ${symbolsTime.toFixed(2)}ms, returned ${symbols?.length || 0} symbols`);
             
             this.elementMap.clear();
 
@@ -304,6 +509,10 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             case LSPSymbolKind.Interface:
                 return new ThemeIcon('symbol-interface');
             case LSPSymbolKind.Function:
+                // Special handling for Functions container in MAP and MODULE
+                if (this.isMapModuleFunctionsContainer) {
+                    return new ThemeIcon('list-tree');
+                }
                 return new ThemeIcon('symbol-function');
             case LSPSymbolKind.Variable:
                 return new ThemeIcon('symbol-variable');
@@ -337,6 +546,15 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 return new ThemeIcon('symbol-misc');
         }
     }
+    
+    // Helper to check if this is a Functions container for MAP or MODULE
+    private get isMapModuleFunctionsContainer(): boolean {
+        const element = this.currentElement;
+        return element?.name === "Functions" && element?.kind === 10; // SymbolKind.Function
+    }
+    
+    // Track the current element being processed
+    private currentElement: DocumentSymbol | undefined;
 
     /**
      * Collapses all nodes in the tree view
@@ -375,25 +593,49 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
 
     /**
      * Expands all nodes in the tree view
+     * ⚠️ Performance: For large files with 100+ symbols, this can take several seconds
      */
     async expandAll(): Promise<void> {
         this.expandAllFlag = true;
     
         this._onDidChangeTreeData.fire(); // First refresh to force getChildren()
     
-        // Give the tree some time to populate
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // 🚀 PERFORMANCE: Reduced delay from 100ms to 10ms
+        await new Promise(resolve => setTimeout(resolve, 10));
     
         const symbols = await this.getChildren(); // Now fetch the fresh, tracked instances
     
         if (this.treeView && symbols) {
-            for (const symbol of symbols) {
-                await this.expandSymbolRecursively(symbol); // Uses elementMap
-            }
+            // 🚀 PERFORMANCE: Only expand top-level symbols to avoid 20+ second delay
+            // User can manually expand children as needed
+            const expandPromises = symbols.map(symbol => this.expandTopLevelOnly(symbol));
+            await Promise.all(expandPromises); // Parallel expansion for speed
         }
     }
     
+    /**
+     * 🚀 PERFORMANCE: Expand only the top level, not all children recursively
+     * This prevents 20+ second delays on large files
+     */
+    private async expandTopLevelOnly(symbol: DocumentSymbol): Promise<void> {
+        try {
+            const key = this.getElementKey(symbol);
+            const tracked = this.elementMap.get(key);
+            if (!tracked) {
+                logger.error(`❌ Missing elementMap entry for key: ${key} (${symbol.name})`);
+                return;
+            }
+            
+            await this.treeView?.reveal(tracked, { expand: true });
+        } catch (error) {
+            logger.error(`Failed to expand symbol: ${symbol.name}`, error);
+        }
+    }
 
+    /**
+     * Legacy recursive expansion - kept for potential future use
+     * ⚠️ WARNING: This is SLOW on large files (20+ seconds for 500+ symbols)
+     */
     private async expandSymbolRecursively(symbol: DocumentSymbol): Promise<void> {
         try {
             const key = this.getElementKey(symbol);
@@ -403,16 +645,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 logger.debug('Current keys:', Array.from(this.elementMap.keys()));
                 return;
             }
-            
-            
-            // if (tracked !== symbol) {
-            //     logger.warn(`⚠️ Symbol instance mismatch for ${symbol.name}. Reveal will likely fail.`);
-            // }
-            
     
             await this.treeView?.reveal(tracked, { expand: true });
-    
-         //   await new Promise(resolve => setTimeout(resolve, 50));
     
             for (const child of tracked.children ?? []) {
                 await this.expandSymbolRecursively(child);
