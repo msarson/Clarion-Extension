@@ -99,41 +99,66 @@ export class ClarionTokenizer {
     private static initializePatterns(): void {
         ClarionTokenizer.compiledPatterns = new Map();
         
-        // Optimized order: most common tokens first for faster matching
+        // 🚀 PERFORMANCE: Optimized order balancing specificity and frequency
+        // Critical: More specific patterns MUST come before more general ones
+        // Also ordered by frequency within specificity groups
         ClarionTokenizer.orderedTypes = [
-            TokenType.Comment,           // Very common
-            TokenType.String,            // Common
-            TokenType.Variable,          // Very common
-            TokenType.Number,            // Common
-            TokenType.Operator,          // Very common
-            TokenType.Delimiter,         // Very common
-            TokenType.LineContinuation,  // Common in multi-line code
-            TokenType.Keyword,           // Common
-            TokenType.Type,              // Common
-            TokenType.Label,             // Fairly common
-            TokenType.ReferenceVariable, // Less common but check before Variable
-            TokenType.EndStatement,      // Less common
-            TokenType.ExecutionMarker,   // Less common
-            TokenType.Directive,         // Less common
-            TokenType.ClarionDocument,   // Rare
-            TokenType.Structure,         // Less common but important
-            TokenType.StructurePrefix,   // Less common
-            TokenType.StructureField,    // Less common
-            TokenType.WindowElement,     // Less common
-            TokenType.ConditionalContinuation, // Less common
-            TokenType.Function,          // Less common
-            TokenType.FunctionArgumentParameter, // Less common
-            TokenType.TypeAnnotation,    // Less common
-            TokenType.PictureFormat,     // Less common
-            TokenType.PointerParameter,  // Rare
-            TokenType.FieldEquateLabel,  // Rare
-            TokenType.Property,          // Less common
-            TokenType.PropertyFunction,  // Less common
-            TokenType.Class,             // Rare
-            TokenType.Attribute,         // Less common
-            TokenType.Constant,          // Less common
-            TokenType.ImplicitVariable,  // Rare
-            TokenType.Unknown            // Last resort
+            // HIGH PRIORITY: Must match first due to specificity
+            TokenType.Comment,              // Very common, must be early to skip comment content
+            TokenType.LineContinuation,     // Must be early (can contain other tokens)
+            TokenType.String,               // Must be before Variable (strings can contain variable-like text)
+            
+            // LABELS & SPECIAL: Must be before general identifiers
+            TokenType.Label,                // Must be before Variable (labels are identifiers at column 0)
+            TokenType.FieldEquateLabel,     // Must be before Variable (?FieldName)
+            TokenType.ReferenceVariable,    // Must be before Variable (&Variable)
+            
+            // SPECIFIC IDENTIFIERS: Before general Variable
+            TokenType.ClarionDocument,      // Rare but specific (PROGRAM/MEMBER)
+            TokenType.ExecutionMarker,      // Specific (CODE/DATA)
+            TokenType.EndStatement,         // Specific (END/.)
+            TokenType.ConditionalContinuation, // Specific (ELSE/ELSIF/OF)
+            TokenType.Keyword,              // Common, more specific than Variable
+            TokenType.Directive,            // Specific keywords with special syntax
+            
+            // STRUCTURES: Before Variable but after keywords
+            TokenType.Structure,            // Must be before Variable
+            TokenType.WindowElement,        // Specific window controls
+            
+            // FUNCTIONS & PROPERTIES: Specific patterns
+            TokenType.Function,             // Must be before FunctionArgumentParameter
+            TokenType.FunctionArgumentParameter, // Must be before Variable
+            TokenType.PropertyFunction,     // Specific properties with parentheses
+            TokenType.Property,             // Specific property names
+            
+            // FIELD REFERENCES: Before Variable
+            TokenType.StructurePrefix,      // Must be before Variable (PREFIX:Field)
+            TokenType.StructureField,       // Must be before Variable (Structure.Field)
+            TokenType.Class,                // Must be before Variable (Class.Method)
+            
+            // TYPES: Before Variable
+            TokenType.Type,                 // Common, specific type keywords
+            TokenType.TypeAnnotation,       // Specific type annotations
+            
+            // COMPLEX PATTERNS: Before simple ones
+            TokenType.PointerParameter,     // *Variable before Variable
+            TokenType.PictureFormat,        // @... formats
+            
+            // SIMPLE TOKENS: Common, can be checked relatively early
+            TokenType.Number,               // Very common
+            TokenType.Operator,             // Very common
+            TokenType.Delimiter,            // Very common
+            
+            // ATTRIBUTES & CONSTANTS: After types
+            TokenType.Attribute,            // Specific attribute keywords
+            TokenType.Constant,             // Specific constants (TRUE/FALSE/NULL)
+            
+            // GENERAL: Last specific check before catchall
+            TokenType.ImplicitVariable,     // Variable with suffix ($/#/")
+            TokenType.Variable,             // General identifier - must be late
+            
+            // CATCHALL: Absolute last resort
+            TokenType.Unknown
         ];
         
         for (const type of ClarionTokenizer.orderedTypes) {
