@@ -56,7 +56,7 @@ import { ClarionSolutionInfo } from 'common/types';
 import * as fs from 'fs';
 import { URI } from 'vscode-languageserver';
 const logger = LoggerManager.getLogger("Server");
-logger.setLevel("info");
+logger.setLevel("error");
 
 // Track server initialization state
 export let serverInitialized = false;

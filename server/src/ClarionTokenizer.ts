@@ -1,7 +1,7 @@
 import { DocumentStructure } from './DocumentStructure';
 import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("Tokenizer");
-logger.setLevel("info");
+logger.setLevel("error"); // Only show errors and PERF (PERF logs directly to console)
 export enum TokenType {
     Comment,
     String,

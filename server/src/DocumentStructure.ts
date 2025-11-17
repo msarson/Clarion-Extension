@@ -2,7 +2,7 @@ import { Token, TokenType } from "./ClarionTokenizer";
 import LoggerManager from "./logger";
 
 const logger = LoggerManager.getLogger("DocumentStructure");
-logger.setLevel("info");
+logger.setLevel("error");
 
 export class DocumentStructure {
     private structureStack: Token[] = [];
