@@ -3,13 +3,13 @@ All notable changes to the "clarion-extension" extension will be documented in t
 
 ## [0.5.8] - 2025-11-17
 
-### 🚀 Major Performance Improvements
+### Performance Improvements
 
-**BREAKING THROUGH THE PERFORMANCE BARRIER** - This release delivers a **97% performance improvement** for large Clarion files, reducing load times from 35+ seconds to under 1 second! 
+This release significantly improves performance for large Clarion files through systematic optimization.
 
-Special thanks to GitHub Copilot for an epic vibe coding session where we systematically hunted down and eliminated every performance bottleneck. 🎯
+Special thanks to GitHub Copilot for the collaborative coding session that identified and resolved the performance bottlenecks.
 
-#### Tokenization Performance (90% faster - 10x improvement)
+#### Tokenization Performance (10x faster)
 - **Before**: 5,800ms for large files (14k lines, 532k chars)
 - **After**: 598ms
 - **Improvements**:
@@ -19,10 +19,10 @@ Special thanks to GitHub Copilot for an epic vibe coding session where we system
   - Reduced logging overhead (errors only, performance metrics always visible)
   - Line-based incremental caching (95%+ speedup on edits - only re-tokenize changed lines)
 
-#### Symbol Generation Performance (98% faster - 55x improvement)
+#### Symbol Generation Performance (55x faster)
 - **Before**: 6,000ms per call (×5 calls = 30 seconds total)
 - **After**: 110ms per call (×4 calls = 440ms total)
-- **Root Cause**: O(n²) algorithm - was checking 814 MILLION token combinations!
+- **Root Cause**: O(n²) algorithm checking excessive token combinations
 - **Solution**: Built tokensByLine index for O(1) lookups
 - **Fixed**:
   - `checkAndPopCompletedStructures()` - eliminated full token array scan on every line change
@@ -58,7 +58,7 @@ Performance bottlenecks identified and resolved:
 5. **Folding dual-pass** → Single-pass filtering
 
 #### Credits
-This massive performance overhaul was achieved through systematic profiling and optimization during an epic coding session with GitHub Copilot on November 17, 2025. Every millisecond counted, and we found them all! 🚀
+This performance work was completed in collaboration with GitHub Copilot on November 17, 2025.
 
 ### Results Summary
 | Component | Before | After | Improvement |
@@ -69,7 +69,7 @@ This massive performance overhaul was achieved through systematic profiling and 
 | Structure View Expansion | 20+ sec | <1 sec | 95%+ faster |
 | **Total Startup Time** | **35+ sec** | **<1 sec** | **97% faster (35x)** |
 
-Large Clarion files (14k+ lines) are now production-ready with instant response times! 🎉
+Large Clarion files (14k+ lines) now have significantly improved response times.
 
 ## [0.5.7] - 2025-08-29
 

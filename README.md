@@ -85,11 +85,11 @@ For a comprehensive list of all features and their locations within the extensio
 ---
 ## Changelog (What's New in v0.5.8)
 
-### 🚀 Major Performance Breakthrough - 97% Faster! 
+### Performance Improvements
 
-**Load times reduced from 35+ seconds to under 1 second for large files!**
+**Load times reduced from 35+ seconds to under 1 second for large files.**
 
-This release represents a complete performance overhaul achieved through systematic profiling and optimization. Special thanks to GitHub Copilot for an epic vibe coding session on November 17, 2025! 🎯
+This release significantly improves performance through systematic optimization. Completed in collaboration with GitHub Copilot on November 17, 2025.
 
 #### Key Improvements:
 - **Tokenization**: 10x faster (5,800ms → 598ms)
@@ -98,10 +98,10 @@ This release represents a complete performance overhaul achieved through systema
   - Line-based incremental caching (95%+ speedup on edits)
   
 - **Symbol Generation**: 55x faster (6,000ms → 110ms)
-  - Fixed O(n²) algorithm (was checking 814 MILLION combinations!)
+  - Fixed O(n²) algorithm
   - Built tokensByLine index for O(1) lookups
   
-- **Structure View**: Instant expansion (<1 second vs 20+ seconds)
+- **Structure View**: Much faster expansion (<1 second vs 20+ seconds)
   - Top-level only expansion with parallel processing
   
 - **Code Folding**: 60% faster (6ms → 4ms)
@@ -112,7 +112,7 @@ This release represents a complete performance overhaul achieved through systema
 - Better error messages
 - Comprehensive performance logging (search `📊 PERF:`)
 
-**Large Clarion files (14k+ lines) are now production-ready!** 🎉
+Large Clarion files (14k+ lines) now have significantly improved response times.
 
 For full details, see [CHANGELOG.md](CHANGELOG.md)
 

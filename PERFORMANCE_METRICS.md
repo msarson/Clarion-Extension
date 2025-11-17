@@ -24,7 +24,7 @@ The extension now includes comprehensive performance instrumentation to track to
 - Line-based incremental caching (95%+ speedup on edits)
 
 **Symbol Generation (55x faster):**
-- Fixed O(n²) algorithm that was checking 814 MILLION token combinations
+- Fixed O(n²) algorithm
 - Built tokensByLine index for O(1) lookups
 - Eliminated repeated token array scans
 
@@ -38,7 +38,7 @@ The extension now includes comprehensive performance instrumentation to track to
 - Pre-filtered region processing
 
 **Credits:**
-Achieved through an epic vibe coding session with GitHub Copilot on November 17, 2025. Every millisecond was hunted down and eliminated! 🎯
+Completed in collaboration with GitHub Copilot on November 17, 2025.
 
 ---
 
