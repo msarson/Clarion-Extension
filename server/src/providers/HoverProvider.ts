@@ -402,10 +402,11 @@ export class HoverProvider {
                             const memberMatch = memberLine.match(new RegExp(`^\\s*(${memberName})\\s+`, 'i'));
                             if (memberMatch) {
                                 logger.info(`Found member ${memberName} at line ${k}: ${memberLine}`);
-                                // Extract type - first word after member name
+                                // Extract type - everything after member name until comment or end of line
                                 const afterMember = memberLine.substring(memberMatch[0].length).trim();
-                                const typeMatch = afterMember.match(/^(\S+)/);
-                                const type = typeMatch ? typeMatch[1] : 'Unknown';
+                                // Remove trailing comments (! or //)
+                                const typeWithoutComment = afterMember.split(/\s*[!\/\/]/).shift() || afterMember;
+                                const type = typeWithoutComment.trim() || 'Unknown';
                                 logger.info(`Extracted type: ${type}`);
                                 return { type, className, line: k, file: resolvedPath };
                             }
