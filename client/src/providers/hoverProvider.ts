@@ -51,6 +51,7 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
     private async constructHoverMessage(location: ClarionLocation): Promise<vscode.MarkdownString> {
         const linesToShow = 10;
         const hoverMessage = new vscode.MarkdownString();
+        hoverMessage.isTrusted = true; // Enable command links in hover
 
         logger.info(`Constructing hover message for ${location.statementType} at ${location.fullFileName}`);
 
