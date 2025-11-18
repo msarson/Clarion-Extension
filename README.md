@@ -122,6 +122,7 @@ For full details, see [CHANGELOG.md](CHANGELOG.md)
 - **Improved Method Hover Display**: Method hovers now show up to 15 lines of actual implementation code after the CODE statement
 - **Interactive Navigation in Hover**: Click the line number link in hovers to jump directly to method implementation
 - **Keyboard Shortcut Hint**: Hover displays "Click or press Ctrl+F12 to navigate" to guide users
+- **Method Call Hover Support**: Hovers now work for method calls within implementations (e.g., `self.SetLength(...)`)
 
 ---
 ## Previous Release (v0.5.7)

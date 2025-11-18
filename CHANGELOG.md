@@ -11,6 +11,10 @@ All notable changes to the "clarion-extension" extension will be documented in t
 - **Interactive navigation**: Added clickable line number link in hover to jump directly to method implementation
 - **Keyboard shortcut hint**: Hover displays "Click or press Ctrl+F12 to navigate" to guide users
 - **Better developer experience**: Aligns hover behavior with standard IDE practices (VS Code, Visual Studio, IntelliJ) by showing actual implementation preview
+- **Method call hover support**: Hovers now work for method calls within implementations (e.g., hovering over `self.SetLength(...)` shows the SetLength implementation)
+  - Intelligently matches methods by parameter count
+  - Works seamlessly with Ctrl+F12 navigation
+  - Provides context without being intrusive
 
 This enhancement provides developers with meaningful context at a glance, showing what a method actually does rather than just its signature.
 

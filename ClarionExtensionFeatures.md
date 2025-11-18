@@ -56,6 +56,13 @@ The extension provides comprehensive solution management capabilities:
 - **Structure View**: Hierarchical view of the code structure (procedures, classes, methods)
 - **Go to Definition**: Navigate to symbol definitions (Ctrl+F12)
 - **Document Symbols**: Outline view of the current document's structure
+- **Enhanced Hover Information**: Intelligent hover displays for method implementations
+  - Shows up to 15 lines of actual implementation code after the CODE statement
+  - Works for both method declarations and method calls (e.g., `self.SetLength(...)`)
+  - Includes clickable line number link to navigate directly to implementation
+  - Displays keyboard shortcut hint (Ctrl+F12) for quick navigation
+  - Smart boundary detection stops before nested methods/routines
+  - Parameter-aware matching for method calls
 
 ### Code Editing and Formatting
 
