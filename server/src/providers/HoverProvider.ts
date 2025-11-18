@@ -428,17 +428,30 @@ export class HoverProvider {
         
         const markdown = [
             `**Class ${memberType}:** \`${name}\``,
-            ``,
-            `**Type:** \`${info.type}\``,
-            ``,
-            `**Class:** ${info.className}`
+            ``
         ];
+        
+        // Format type - if it's long, put it on its own line with code block for wrapping
+        if (info.type.length > 50) {
+            markdown.push(`**Type:**`);
+            markdown.push('```clarion');
+            markdown.push(info.type);
+            markdown.push('```');
+        } else {
+            markdown.push(`**Type:** \`${info.type}\``);
+        }
+        
+        markdown.push(``);
+        markdown.push(`**Class:** ${info.className}`);
         
         if (info.line >= 0) {
             // Extract just the filename from the path
             const fileName = info.file.split(/[\/\\]/).pop() || info.file;
+            const fileUri = `file:///${info.file.replace(/\\/g, '/')}`;
+            // Use the same command format as client-side hover provider
+            const commandUri = `command:clarion.goToSymbol?${encodeURIComponent(JSON.stringify([info.file, info.line, 0]))}`;
             markdown.push(``);
-            markdown.push(`**Declared in:** ${fileName} ([line ${info.line + 1}](command:clarion.goToSymbol?${encodeURIComponent(JSON.stringify({ uri: `file:///${info.file.replace(/\\/g, '/')}`, line: info.line, character: 0 }))}))`);
+            markdown.push(`**Declared in:** ${fileName} - [line ${info.line + 1}](${commandUri} "Click to go to definition")`);
         } else {
             markdown.push(``);
             markdown.push(`**Declared in:** ${info.file}`);
