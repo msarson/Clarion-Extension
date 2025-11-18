@@ -94,9 +94,9 @@ export class HoverProvider {
             }
 
             // Check if this is a local variable
-            const variableInfo = this.findLocalVariableInfo(word, tokens, currentScope);
+            const variableInfo = this.findLocalVariableInfo(word, tokens, currentScope, document);
             if (variableInfo) {
-                return this.constructVariableHover(word, variableInfo);
+                return this.constructVariableHover(word, variableInfo, currentScope);
             }
 
             return null;
@@ -212,7 +212,7 @@ export class HoverProvider {
     /**
      * Finds local variable information
      */
-    private findLocalVariableInfo(word: string, tokens: Token[], currentScope: Token): { type: string; line: number } | null {
+    private findLocalVariableInfo(word: string, tokens: Token[], currentScope: Token, document: TextDocument): { type: string; line: number } | null {
         // Find variable tokens at column 0 within the current scope
         const variableTokens = tokens.filter(token =>
             (token.type === TokenType.Variable ||
@@ -232,25 +232,30 @@ export class HoverProvider {
 
         const varToken = variableTokens[0];
         
-        // Try to find the type declaration on the same line
+        // Get the source line to extract type information
+        const content = document.getText();
+        const lines = content.split('\n');
+        const sourceLine = lines[varToken.line];
+        
+        // Parse the variable declaration: varName   &type  or  varName   type
+        const typeMatch = sourceLine.match(/^[A-Za-z_][A-Za-z0-9_]*\s+(&?[A-Za-z_][A-Za-z0-9_]*)/i);
+        if (typeMatch) {
+            return { type: typeMatch[1], line: varToken.line };
+        }
+        
+        // Fallback: Try to find the type declaration on the same line using tokens
         const lineTokens = tokens.filter(t => t.line === varToken.line);
         const typeTokens = lineTokens.filter(t => 
             t.type === TokenType.Type || 
             t.type === TokenType.Structure ||
+            t.type === TokenType.ReferenceVariable ||
             t.value.toUpperCase() === 'LONG' ||
             t.value.toUpperCase() === 'STRING' ||
             t.value.toUpperCase() === 'SHORT' ||
             t.value.toUpperCase() === 'BYTE'
         );
 
-        // Check if it's a reference variable (&)
-        const isReference = varToken.subType === TokenType.ReferenceVariable;
-        let type = typeTokens.length > 0 ? typeTokens[0].value : 'Unknown';
-        
-        // Add & prefix for reference variables
-        if (isReference && !type.startsWith('&')) {
-            type = '&' + type;
-        }
+        const type = typeTokens.length > 0 ? typeTokens[0].value : 'Unknown';
 
         return { type, line: varToken.line };
     }
@@ -280,9 +285,12 @@ export class HoverProvider {
     /**
      * Constructs hover for a local variable
      */
-    private constructVariableHover(name: string, info: { type: string; line: number }): Hover {
+    private constructVariableHover(name: string, info: { type: string; line: number }, scope: Token): Hover {
+        const isRoutine = scope.subType === TokenType.Routine;
+        const variableType = isRoutine ? 'Routine Variable' : 'Local Variable';
+        
         const markdown = [
-            `**Local Variable:** \`${name}\``,
+            `**${variableType}:** \`${name}\``,
             ``,
             `**Type:** \`${info.type}\``,
             ``,
