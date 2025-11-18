@@ -30,12 +30,33 @@ export class HoverProvider {
             const word = document.getText(wordRange);
             logger.info(`Found word: "${word}" at position`);
 
-            // Check if this is a class member access (self.member or variable.member)
+            // Check if this is a method implementation line and show declaration hover
             const line = document.getText({
                 start: { line: position.line, character: 0 },
                 end: { line: position.line, character: Number.MAX_VALUE }
             });
             
+            const methodImplMatch = line.match(/^(\w+)\.(\w+)\s+PROCEDURE/i);
+            if (methodImplMatch) {
+                const className = methodImplMatch[1];
+                const methodName = methodImplMatch[2];
+                
+                // Check if cursor is on the class or method name
+                const classStart = line.indexOf(className);
+                const classEnd = classStart + className.length;
+                const methodStart = line.indexOf(methodName, classEnd);
+                const methodEnd = methodStart + methodName.length;
+                
+                if ((position.character >= classStart && position.character <= classEnd) ||
+                    (position.character >= methodStart && position.character <= methodEnd)) {
+                    const declInfo = this.findMethodDeclarationInfo(className, methodName, document);
+                    if (declInfo) {
+                        return this.constructMethodImplementationHover(methodName, className, declInfo);
+                    }
+                }
+            }
+
+            // Check if this is a class member access (self.member or variable.member)
             const dotIndex = line.lastIndexOf('.', position.character - 1);
             if (dotIndex > 0) {
                 const beforeDot = line.substring(0, dotIndex).trim();
@@ -459,6 +480,151 @@ export class HoverProvider {
             markdown.push(`*Press F12 to go to definition*`);
         }
         
+        return {
+            contents: {
+                kind: 'markdown',
+                value: markdown.join('\n')
+            }
+        };
+    }
+
+    /**
+     * Finds method declaration info from CLASS (for hover on implementation)
+     */
+    private findMethodDeclarationInfo(className: string, methodName: string, document: TextDocument): { signature: string; file: string; line: number } | null {
+        // Search in current file first
+        const tokens = this.tokenCache.getTokens(document);
+        const classTokens = tokens.filter(token =>
+            token.type === TokenType.Structure &&
+            token.value.toUpperCase() === 'CLASS' &&
+            token.line > 0
+        );
+        
+        for (const classToken of classTokens) {
+            const labelToken = tokens.find(t =>
+                t.type === TokenType.Label &&
+                t.line === classToken.line &&
+                t.value.toLowerCase() === className.toLowerCase()
+            );
+            
+            if (labelToken) {
+                // Search for method in class
+                for (let i = labelToken.line + 1; i < tokens.length; i++) {
+                    const lineTokens = tokens.filter(t => t.line === i);
+                    const endToken = lineTokens.find(t => t.value.toUpperCase() === 'END' && t.start === 0);
+                    if (endToken) break;
+                    
+                    const methodToken = lineTokens.find(t =>
+                        t.value.toLowerCase() === methodName.toLowerCase() &&
+                        t.start === 0
+                    );
+                    
+                    if (methodToken) {
+                        // Get the full line as signature
+                        const content = document.getText();
+                        const lines = content.split('\n');
+                        const signature = lines[i].trim();
+                        return { signature, file: document.uri, line: i };
+                    }
+                }
+            }
+        }
+        
+        // Search in INCLUDE files
+        return this.findMethodDeclarationInIncludes(className, methodName, document);
+    }
+
+    /**
+     * Searches INCLUDE files for method declaration
+     */
+    private findMethodDeclarationInIncludes(className: string, methodName: string, document: TextDocument): { signature: string; file: string; line: number } | null {
+        const filePath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
+        const content = document.getText();
+        const lines = content.split('\n');
+        
+        // Find INCLUDE statements
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const includeMatch = line.match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
+            if (!includeMatch) continue;
+            
+            const includeFileName = includeMatch[1];
+            let resolvedPath: string | null = null;
+            
+            // Try solution-wide redirection
+            const SolutionManager = require('../solution/solutionManager').SolutionManager;
+            const solutionManager = SolutionManager.getInstance();
+            if (solutionManager && solutionManager.solution) {
+                for (const project of solutionManager.solution.projects) {
+                    const redirectionParser = project.getRedirectionParser();
+                    const resolved = redirectionParser.findFile(includeFileName);
+                    if (resolved && resolved.path && require('fs').existsSync(resolved.path)) {
+                        resolvedPath = resolved.path;
+                        break;
+                    }
+                }
+            }
+            
+            // Fallback to relative path
+            if (!resolvedPath) {
+                const path = require('path');
+                const currentDir = path.dirname(filePath);
+                const relativePath = path.join(currentDir, includeFileName);
+                if (require('fs').existsSync(relativePath)) {
+                    resolvedPath = relativePath;
+                }
+            }
+            
+            if (resolvedPath) {
+                const fs = require('fs');
+                const includeContent = fs.readFileSync(resolvedPath, 'utf8');
+                const includeLines = includeContent.split('\n');
+                
+                // Find the class
+                for (let j = 0; j < includeLines.length; j++) {
+                    const includeLine = includeLines[j];
+                    const classMatch = includeLine.match(new RegExp(`^${className}\\s+CLASS`, 'i'));
+                    if (classMatch) {
+                        // Find the method
+                        for (let k = j + 1; k < includeLines.length; k++) {
+                            const methodLine = includeLines[k];
+                            if (methodLine.match(/^\s*END\s*$/i) || methodLine.match(/^END\s*$/i)) {
+                                break;
+                            }
+                            
+                            const methodMatch = methodLine.match(new RegExp(`^\\s*(${methodName})\\s+PROCEDURE`, 'i'));
+                            if (methodMatch) {
+                                const signature = methodLine.trim();
+                                return { signature, file: resolvedPath, line: k };
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        return null;
+    }
+
+    /**
+     * Constructs hover for method implementation showing declaration
+     */
+    private constructMethodImplementationHover(methodName: string, className: string, declInfo: { signature: string; file: string; line: number }): Hover {
+        const fileName = declInfo.file.split(/[\/\\]/).pop() || declInfo.file;
+        
+        const markdown = [
+            `**Method Implementation:** \`${className}.${methodName}\``,
+            ``,
+            `**Declaration:**`,
+            '```clarion',
+            declInfo.signature,
+            '```',
+            ``,
+            `**Declared in:** \`${fileName}\` at line **${declInfo.line + 1}**`,
+            ``,
+            `*(Press F12 to go to declaration)*`
+        ];
+
         return {
             contents: {
                 kind: 'markdown',
