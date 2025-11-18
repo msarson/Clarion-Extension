@@ -54,15 +54,26 @@ The extension provides comprehensive solution management capabilities:
 
 - **Quick Open**: Navigate to files within the solution, including those in redirection paths (Ctrl+P)
 - **Structure View**: Hierarchical view of the code structure (procedures, classes, methods)
-- **Go to Definition**: Navigate to symbol definitions (Ctrl+F12)
+- **Go to Definition (F12)**: Navigate to symbol definitions
+  - Local variables: Jump from usage to declaration in DATA section
+  - Parameters: Jump to parameter definition in procedure/method signature
+  - Supports parameters with default values
+  - Scope-aware within current procedure/method
+- **Go to Implementation (Ctrl+F12)**: Navigate to implementations
+  - Methods: Jump to method implementation
+  - Routines: Jump to routine implementation from DO statements
 - **Document Symbols**: Outline view of the current document's structure
-- **Enhanced Hover Information**: Intelligent hover displays for method implementations
-  - Shows up to 15 lines of actual implementation code after the CODE statement
-  - Works for both method declarations and method calls (e.g., `self.SetLength(...)`)
-  - Includes clickable line number link to navigate directly to implementation
-  - Displays keyboard shortcut hint (Ctrl+F12) for quick navigation
-  - Smart boundary detection stops before nested methods/routines
-  - Parameter-aware matching for method calls
+- **Enhanced Hover Information**: Intelligent hover displays with rich context
+  - **Method implementations**: Shows up to 15 lines of actual implementation code after the CODE statement
+    - Works for both method declarations and method calls (e.g., `self.SetLength(...)`)
+    - Includes clickable line number link to navigate directly to implementation
+    - Displays keyboard shortcut hint (Ctrl+F12) for quick navigation
+    - Smart boundary detection stops before nested methods/routines
+    - Parameter-aware matching for method calls
+    - Only triggers on method name, not on parameters inside parentheses
+  - **Local variables**: Shows type, declaration location, and navigation hint
+  - **Parameters**: Shows type, parameter name, and declaring procedure
+  - **Routines**: Preview of routine code with navigation link
 - **Routine Navigation**: Complete navigation support for routines in DO statements
   - Hover over routine names in DO statements to see code preview
   - Ctrl+F12 or click hover link to navigate to routine implementation

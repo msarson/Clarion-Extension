@@ -15,6 +15,7 @@ All notable changes to the "clarion-extension" extension will be documented in t
   - Intelligently matches methods by parameter count
   - Works seamlessly with Ctrl+F12 navigation
   - Provides context without being intrusive
+  - **Improved precision**: Method hover only triggers when cursor is on the method name itself, not on parameters
 
 #### Routine Navigation (DO Statements)
 - **Navigate to Routine**: Complete navigation support for routines referenced in DO statements
@@ -24,7 +25,26 @@ All notable changes to the "clarion-extension" extension will be documented in t
   - **Scope-aware**: Prioritizes routines within the current procedure scope
   - Shows up to 10 lines of code preview starting from the routine
 
-This enhancement provides developers with meaningful context at a glance, showing what a method actually does rather than just its signature.
+#### Local Variable and Parameter Navigation
+- **Go to Definition (F12)**: Navigate from variable/parameter usage to declaration
+  - Works for local variables declared in DATA sections
+  - Works for procedure and method parameters
+  - Supports parameters with default values (e.g., `pForce=false`)
+  - Scope-aware: finds variables within current procedure/method
+- **Hover Information**: Rich hover tooltips for variables and parameters
+  - Shows variable/parameter name and type
+  - Displays declaration location (procedure name and line number)
+  - Includes "Press F12 to go to declaration" hint
+  - Works for parameters: Shows type and declaring procedure
+  - Works for local variables: Shows type and declaration line
+  
+### Technical Improvements
+- **Server-side definition provider**: Enabled language server definition provider capability
+- **Server-side hover provider**: Added server-side hover provider for variables and parameters
+- **Client-side provider coordination**: Client-side providers properly defer to server for symbols they don't handle
+- **Enhanced scope detection**: Improved scope detection to recognize all procedure types (GlobalProcedure, MethodImplementation, MethodDeclaration)
+
+This enhancement provides developers with meaningful context at a glance and enables quick navigation through code.
 
 ## [0.5.8] - 2025-11-17
 
