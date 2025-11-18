@@ -175,6 +175,7 @@ export class DefinitionProvider {
      * Also handles class member access (self.Member or variable.Member)
      */
     private async findStructureFieldDefinition(word: string, document: TextDocument, position: Position): Promise<Definition | null> {
+        console.error(`🔥🔥🔥 findStructureFieldDefinition called for word: ${word}`);
         logger.info(`Looking for structure field definition: ${word}`);
 
         // Get tokens from cache
