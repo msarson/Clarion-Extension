@@ -30,10 +30,10 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
 
         logger.info(`Hover requested at position ${position.line}:${position.character} in ${document.uri.fsPath}`);
         
-        // First, check if this is a label/routine reference (like in GOTO or DO statements)
+        // First, check if this is a routine reference (in DO or CYCLE statements)
         const labelInfo = this.detectLabelOrRoutineReference(document, position);
         if (labelInfo) {
-            logger.info(`Detected label/routine reference: ${labelInfo.name}`);
+            logger.info(`Detected routine reference: ${labelInfo.name}`);
             const labelLocation = await this.findLabelOrRoutine(document, labelInfo.name, position.line);
             if (labelLocation) {
                 const hoverMessage = await this.constructLabelHoverMessage(document, labelLocation, labelInfo.name);
@@ -159,7 +159,7 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
     }
 
     /**
-     * Detects if the cursor is on a label or routine reference (e.g., in GOTO, DO, CYCLE statements)
+     * Detects if the cursor is on a routine reference (in DO or CYCLE statements)
      */
     private detectLabelOrRoutineReference(document: vscode.TextDocument, position: vscode.Position): { name: string } | null {
         const lineText = document.lineAt(position.line).text;
@@ -171,8 +171,8 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
         const word = document.getText(wordRange);
         const beforeWord = lineText.substring(0, wordRange.start.character).trim().toUpperCase();
         
-        // Check if this is after GOTO, DO, or CYCLE keywords
-        if (beforeWord.endsWith('GOTO') || beforeWord.endsWith('DO') || beforeWord.endsWith('CYCLE')) {
+        // Check if this is after DO or CYCLE keywords (NOT GOTO)
+        if (beforeWord.endsWith('DO') || beforeWord.endsWith('CYCLE')) {
             return { name: word };
         }
         
@@ -180,7 +180,7 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
     }
 
     /**
-     * Finds a label or routine definition in the document
+     * Finds a routine definition in the document (labels at column 0)
      */
     private async findLabelOrRoutine(document: vscode.TextDocument, name: string, currentLine: number): Promise<vscode.Location | null> {
         const content = document.getText();
@@ -207,7 +207,7 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
     }
 
     /**
-     * Constructs a hover message for a label or routine
+     * Constructs a hover message for a routine
      */
     private async constructLabelHoverMessage(document: vscode.TextDocument, location: vscode.Location, labelName: string): Promise<vscode.MarkdownString> {
         const hoverMessage = new vscode.MarkdownString();
@@ -221,8 +221,8 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
             'goto'
         ]))}`);
         
-        hoverMessage.appendMarkdown(`**Label/Routine: ${labelName}**\n\n`);
-        hoverMessage.appendMarkdown(` - Line: [${lineNumber}](${commandUri} "Go to Label (F12)") *(Click or press F12 to navigate)*\n\n`);
+        hoverMessage.appendMarkdown(`**Routine: ${labelName}**\n\n`);
+        hoverMessage.appendMarkdown(` - Line: [${lineNumber}](${commandUri} "Go to Routine (F12)") *(Click or press F12 to navigate)*\n\n`);
         
         try {
             const content = document.getText();

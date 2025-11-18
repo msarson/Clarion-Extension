@@ -123,7 +123,7 @@ For full details, see [CHANGELOG.md](CHANGELOG.md)
 - **Interactive Navigation in Hover**: Click the line number link in hovers to jump directly to method implementation
 - **Keyboard Shortcut Hint**: Hover displays "Click or press Ctrl+F12 to navigate" to guide users
 - **Method Call Hover Support**: Hovers now work for method calls within implementations (e.g., `self.SetLength(...)`)
-- **Label and Routine Navigation**: Complete navigation support for GOTO/DO/CYCLE statements with hover preview and F12 navigation
+- **Routine Navigation**: Complete navigation support for DO/CYCLE statements with hover preview and F12 navigation
 
 ---
 ## Previous Release (v0.5.7)
