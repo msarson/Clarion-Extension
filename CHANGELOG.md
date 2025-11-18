@@ -27,16 +27,17 @@ All notable changes to the "clarion-extension" extension will be documented in t
 
 #### Local Variable and Parameter Navigation
 - **Go to Definition (F12)**: Navigate from variable/parameter usage to declaration
-  - Works for local variables declared in DATA sections
+  - Works for procedure/method local variables (declared between PROCEDURE and CODE)
+  - Works for routine local variables (declared in ROUTINE DATA sections)
   - Works for procedure and method parameters
   - Supports parameters with default values (e.g., `pForce=false`)
-  - Scope-aware: finds variables within current procedure/method
+  - Supports reference variables (e.g., `&string`)
+  - Scope-aware: finds variables within current procedure/method/routine
 - **Hover Information**: Rich hover tooltips for variables and parameters
   - Shows variable/parameter name and type
-  - Displays declaration location (procedure name and line number)
+  - Displays declaration location (procedure/routine name and line number)
+  - Distinguishes between "Parameter", "Local Variable", and "Local Routine Variable"
   - Includes "Press F12 to go to declaration" hint
-  - Works for parameters: Shows type and declaring procedure
-  - Works for local variables: Shows type and declaration line
 
 #### Class Member Navigation
 - **Go to Definition (F12)**: Navigate from class member access to definition
