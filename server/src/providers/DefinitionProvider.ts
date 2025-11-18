@@ -143,6 +143,9 @@ export class DefinitionProvider {
         logger.info(`🔍 Looking for scope at line ${line}`);
         const scopes = tokens.filter(token =>
             (token.subType === TokenType.Procedure ||
+                token.subType === TokenType.GlobalProcedure ||
+                token.subType === TokenType.MethodImplementation ||
+                token.subType === TokenType.MethodDeclaration ||
                 token.subType === TokenType.Routine ||
                 token.subType === TokenType.Class) &&
             token.line <= line &&
@@ -151,7 +154,7 @@ export class DefinitionProvider {
         
         logger.info(`🔍 Found ${scopes.length} potential scopes`);
         if (scopes.length > 0) {
-            scopes.forEach(s => logger.info(`  - ${s.value} at line ${s.line}, finishesAt: ${s.finishesAt}`));
+            scopes.forEach(s => logger.info(`  - ${s.value} at line ${s.line}, finishesAt: ${s.finishesAt}, subType: ${s.subType}`));
         }
 
         // Return the innermost (last matching) scope
