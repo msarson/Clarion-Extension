@@ -598,6 +598,13 @@ export async function activate(context: ExtensionContext): Promise<void> {
             vscodeWindow.showTextDocument(uri, { selection: range });
         }),
 
+        // Add command to navigate to method implementation
+        commands.registerCommand('clarion.goToMethodImplementation', (filePath: string, line: number, character: number = 0) => {
+            const uri = Uri.file(filePath);
+            const position = new Range(line, character, line, character);
+            vscodeWindow.showTextDocument(uri, { selection: position });
+        }),
+
         // Add command to navigate to a project in the solution tree
         commands.registerCommand('clarion.navigateToProject', async (projectGuid: string) => {
             if (!projectGuid) {

@@ -78,8 +78,7 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
                 const statementType = (location.statementType || "").toUpperCase();
                 if (statementType === "METHOD") {
                     const lineNumber = location.sectionLineLocation.line + 1;
-                    const uri = vscode.Uri.file(location.fullFileName);
-                    const commandUri = vscode.Uri.parse(`command:editor.action.goToImplementation`);
+                    const commandUri = vscode.Uri.parse(`command:clarion.goToMethodImplementation?${encodeURIComponent(JSON.stringify([location.fullFileName, location.sectionLineLocation.line, 0]))}`);
                     hoverMessage.appendMarkdown(` - Implementation Line: [${lineNumber}](${commandUri} "Go to Implementation (Ctrl+F12)") *(Click or press Ctrl+F12 to navigate)*\n\n`);
                 } else if (statementType === "SECTION") {
                     hoverMessage.appendMarkdown(` - Section Line: ${location.sectionLineLocation.line + 1}\n\n`);
