@@ -30,6 +30,27 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
 
         logger.info(`Hover requested at position ${position.line}:${position.character} in ${document.uri.fsPath}`);
         
+        // First, check if this is a method call (like self.SetLength(...))
+        const methodCallInfo = this.detectMethodCall(document, position);
+        if (methodCallInfo) {
+            logger.info(`Detected method call to ${methodCallInfo.methodName} with ${methodCallInfo.paramCount} parameters`);
+            const implementationLocation = await this.findMethodImplementationForCall(document, methodCallInfo.methodName, methodCallInfo.paramCount);
+            if (implementationLocation) {
+                // Create a ClarionLocation-like object for the method implementation
+                const clarionLocation: ClarionLocation = {
+                    fullFileName: implementationLocation.uri.fsPath,
+                    statementType: "METHOD",
+                    sectionLineLocation: implementationLocation.range.start,
+                    linePosition: implementationLocation.range.start,
+                    methodName: methodCallInfo.methodName,
+                    implementationResolved: true
+                };
+                const hoverMessage = await this.constructHoverMessage(clarionLocation);
+                return new vscode.Hover(hoverMessage);
+            }
+        }
+        
+        // If not a method call, proceed with existing logic for declarations
         let location = this.documentManager.findLinkAtPosition(document.uri, position);
         if (!location) {
             logger.info(`No location found at position ${position.line}:${position.character}`);
@@ -46,6 +67,84 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
         
         const hoverMessage = await this.constructHoverMessage(location);
         return new vscode.Hover(hoverMessage);
+    }
+
+    /**
+     * Detects if the cursor is on a method call
+     */
+    private detectMethodCall(document: vscode.TextDocument, position: vscode.Position): { methodName: string, paramCount: number } | null {
+        const lineText = document.lineAt(position.line).text;
+        const methodCallRegex = /(\w+)\.(\w+)\s*\((.*?)\)/gi;
+        
+        methodCallRegex.lastIndex = 0;
+        let match: RegExpExecArray | null;
+        while ((match = methodCallRegex.exec(lineText)) !== null) {
+            const callStart = match.index;
+            const callEnd = match.index + match[0].length;
+            
+            if (position.character >= callStart && position.character <= callEnd) {
+                const methodName = match[2];
+                const paramList = match[3].trim();
+                const paramCount = paramList === "" ? 0 : paramList.split(',').length;
+                return { methodName, paramCount };
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Finds the implementation of a method call in the current file
+     */
+    private async findMethodImplementationForCall(
+        document: vscode.TextDocument,
+        methodName: string,
+        paramCount: number
+    ): Promise<vscode.Location | null> {
+        logger.info(`Finding implementation for method call ${methodName} with ${paramCount} parameters`);
+        
+        try {
+            const content = document.getText();
+            const implementationRegex = new RegExp(
+                `(\\w+)\\.${methodName}\\s+(?:procedure|function)\\s*\\(([^)]*)\\)`,
+                'gi'
+            );
+            
+            let bestMatch: { line: number, distance: number } | null = null;
+            let match: RegExpExecArray | null;
+            
+            while ((match = implementationRegex.exec(content)) !== null) {
+                const params = match[2];
+                const implementationParamCount = params.trim() === "" ? 0 : params.split(',').length;
+                const matchPos = match.index;
+                const lineNumber = content.substring(0, matchPos).split('\n').length - 1;
+                const paramDistance = Math.abs(implementationParamCount - paramCount);
+                
+                if (paramDistance === 0) {
+                    logger.info(`Found exact parameter count match at line ${lineNumber}`);
+                    return new vscode.Location(
+                        document.uri,
+                        new vscode.Position(lineNumber, 0)
+                    );
+                }
+                
+                if (bestMatch === null || paramDistance < bestMatch.distance) {
+                    bestMatch = { line: lineNumber, distance: paramDistance };
+                }
+            }
+            
+            if (bestMatch !== null) {
+                logger.info(`Using closest parameter count match at line ${bestMatch.line}`);
+                return new vscode.Location(
+                    document.uri,
+                    new vscode.Position(bestMatch.line, 0)
+                );
+            }
+            
+            return null;
+        } catch (error) {
+            logger.error(`Error finding method implementation: ${error instanceof Error ? error.message : String(error)}`);
+            return null;
+        }
     }
 
     private async constructHoverMessage(location: ClarionLocation): Promise<vscode.MarkdownString> {
