@@ -34,6 +34,14 @@ export class DefinitionProvider {
 
             const word = document.getText(wordRange);
             logger.info(`Found word: "${word}" at position`);
+            
+            // Get the line to check context
+            const line = document.getText({
+                start: { line: position.line, character: 0 },
+                end: { line: position.line, character: Number.MAX_VALUE }
+            });
+            logger.info(`Full line text: "${line}"`);
+            logger.info(`Position character: ${position.character}`);
 
             // Check if this is a structure field reference (either dot notation or prefix notation)
             const structureFieldDefinition = await this.findStructureFieldDefinition(word, document, position);
