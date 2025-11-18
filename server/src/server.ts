@@ -126,7 +126,8 @@ connection.onInitialize((params) => {
                 documentSymbolProvider: true,
                 foldingRangeProvider: true,
                 colorProvider: true,
-                definitionProvider: true
+                definitionProvider: true,
+                hoverProvider: true
             }
         };
     } catch (error) {
