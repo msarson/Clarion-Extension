@@ -2,7 +2,7 @@
     "name": "clarion-extensions",
     "displayName": "Clarion Extensions",
     "description": "Extension for Clarion Language",
-    "version": "0.5.9",
+    "version": "0.5.9.1",
     "publisher": "msarson",
     "repository": {
         "type": "git",
