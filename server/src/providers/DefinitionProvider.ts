@@ -1120,6 +1120,19 @@ export class DefinitionProvider {
         if (currentScope.value.includes('.')) {
             className = currentScope.value.split('.')[0];
             logger.info(`Extracted class name from method: ${className}`);
+        } else {
+            // Scope value doesn't have class name, try to parse from the actual line
+            const content = document.getText();
+            const lines = content.split('\n');
+            const scopeLine = lines[currentScope.line];
+            logger.info(`Scope line text: "${scopeLine}"`);
+            
+            // Match ClassName.MethodName PROCEDURE pattern
+            const classMethodMatch = scopeLine.match(/^(\w+)\.(\w+)\s+PROCEDURE/i);
+            if (classMethodMatch) {
+                className = classMethodMatch[1];
+                logger.info(`Extracted class name from line: ${className}`);
+            }
         }
 
         if (!className) {
