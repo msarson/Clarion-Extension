@@ -456,6 +456,7 @@ export class DefinitionProvider {
     
         const tokens = this.tokenCache.getTokens(document);
         const currentLine = position.line;
+        logger.info(`🔍 Current line: ${currentLine}, total tokens: ${tokens.length}`);
         const currentScope = this.getInnermostScopeAtLine(tokens, currentLine);
     
         if (currentScope) {
@@ -467,6 +468,8 @@ export class DefinitionProvider {
                 logger.info(`Found parameter definition for ${word} in procedure ${currentScope.value}`);
                 return parameterDefinition;
             }
+        } else {
+            logger.info(`❌ NO SCOPE FOUND at line ${currentLine} - cannot check for parameters`);
         }
     
         const variableTokens = tokens.filter(token =>
