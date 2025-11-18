@@ -1035,8 +1035,8 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
             foldingRangeProvider: true,
             documentSymbolProvider: true,
             documentFormattingProvider: true,
-            colorProvider: true
-            //definitionProvider: true
+            colorProvider: true,
+            definitionProvider: true
         }
     };
 });
