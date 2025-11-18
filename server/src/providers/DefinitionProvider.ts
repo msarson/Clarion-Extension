@@ -1232,71 +1232,91 @@ export class DefinitionProvider {
     private findClassMemberInIncludes(className: string, memberName: string, documentUri: string): Location | null {
         logger.info(`Searching for ${className}.${memberName} in INCLUDE files`);
 
-        // Get the project and redirection parser
-        const solutionManager = SolutionManager.getInstance();
-        if (!solutionManager) {
-            logger.info('No solution manager available');
-            return null;
-        }
-
-        const filePath = documentUri.replace('file:///', '').replace(/\//g, '\\');
-        const project = solutionManager.findProjectForFile(filePath);
-        if (!project) {
-            logger.info(`No project found for file: ${filePath}`);
-            return null;
-        }
-
         // Get tokens from current document to find INCLUDE statements
         const tokens = this.tokenCache.getTokens({ uri: documentUri } as TextDocument);
-        const includeTokens = tokens.filter(token =>
-            token.type === TokenType.Keyword &&
-            token.value.toUpperCase().includes('INCLUDE')
-        );
-
-        // Search each include file
-        for (const includeToken of includeTokens) {
-            const match = includeToken.value.match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
-            if (!match || !match[1]) continue;
-
-            const includeFileName = match[1];
-            const redirectionParser = project.getRedirectionParser();
-            const resolvedPath = redirectionParser.findFile(includeFileName);
-
-            if (resolvedPath && resolvedPath.path && fs.existsSync(resolvedPath.path)) {
-                logger.info(`Searching in include file: ${resolvedPath.path}`);
+        const content = fs.readFileSync(documentUri.replace('file:///', '').replace(/\//g, '\\'), 'utf8');
+        const lines = content.split('\n');
+        
+        // Find INCLUDE statements by searching the text
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const includeMatch = line.match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
+            if (!includeMatch) continue;
+            
+            const includeFileName = includeMatch[1];
+            logger.info(`Found INCLUDE statement: ${includeFileName}`);
+            
+            // Try to resolve the include file
+            let resolvedPath: string | null = null;
+            
+            // Try with project redirection parser if available
+            const solutionManager = SolutionManager.getInstance();
+            const filePath = documentUri.replace('file:///', '').replace(/\//g, '\\');
+            const project = solutionManager?.findProjectForFile(filePath);
+            
+            if (project) {
+                const redirectionParser = project.getRedirectionParser();
+                const resolved = redirectionParser.findFile(includeFileName);
+                if (resolved && resolved.path) {
+                    resolvedPath = resolved.path;
+                    logger.info(`Resolved via project redirection: ${resolvedPath}`);
+                }
+            }
+            
+            // Fallback: try relative to current file
+            if (!resolvedPath) {
+                const currentDir = path.dirname(filePath);
+                const relativePath = path.join(currentDir, includeFileName);
+                if (fs.existsSync(relativePath)) {
+                    resolvedPath = relativePath;
+                    logger.info(`Resolved via relative path: ${resolvedPath}`);
+                }
+            }
+            
+            // If we found the file, search it for the class
+            if (resolvedPath && fs.existsSync(resolvedPath)) {
+                logger.info(`Searching in include file: ${resolvedPath}`);
                 
-                const includeContent = fs.readFileSync(resolvedPath.path, 'utf8');
-                const lines = includeContent.split('\n');
+                const includeContent = fs.readFileSync(resolvedPath, 'utf8');
+                const includeLines = includeContent.split('\n');
 
                 // Search for the class definition
-                for (let i = 0; i < lines.length; i++) {
-                    const line = lines[i];
-                    const classMatch = line.match(new RegExp(`^${className}\\s+CLASS`, 'i'));
+                for (let j = 0; j < includeLines.length; j++) {
+                    const includeLine = includeLines[j];
+                    const classMatch = includeLine.match(new RegExp(`^${className}\\s+CLASS`, 'i'));
                     if (classMatch) {
-                        logger.info(`Found class ${className} at line ${i} in ${resolvedPath.path}`);
+                        logger.info(`Found class ${className} at line ${j} in ${resolvedPath}`);
                         
                         // Search for the member within the class
-                        for (let j = i + 1; j < lines.length; j++) {
-                            const memberLine = lines[j];
+                        for (let k = j + 1; k < includeLines.length; k++) {
+                            const memberLine = includeLines[k];
                             
                             // Check for END (end of class)
-                            if (memberLine.match(/^\s*END\s*$/i)) {
+                            if (memberLine.match(/^\s*END\s*$/i) || memberLine.match(/^END\s*$/i)) {
+                                logger.info('Reached END of class');
                                 break;
                             }
                             
-                            // Check for member definition
+                            // Check for member definition (member name at start of line or after whitespace)
                             const memberMatch = memberLine.match(new RegExp(`^\\s*${memberName}\\s+`, 'i'));
                             if (memberMatch) {
-                                logger.info(`Found member ${memberName} at line ${j}`);
-                                const fileUri = `file:///${resolvedPath.path.replace(/\\/g, '/')}`;
+                                logger.info(`Found member ${memberName} at line ${k}`);
+                                const fileUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+                                const memberIndex = memberLine.indexOf(memberName);
                                 return Location.create(fileUri, {
-                                    start: { line: j, character: memberLine.indexOf(memberMatch[0]) },
-                                    end: { line: j, character: memberLine.indexOf(memberMatch[0]) + memberName.length }
+                                    start: { line: k, character: memberIndex },
+                                    end: { line: k, character: memberIndex + memberName.length }
                                 });
                             }
                         }
+                        
+                        // Class found but member not found
+                        logger.info(`Class ${className} found but member ${memberName} not found`);
+                        break;
                     }
                 }
+            } else {
+                logger.warn(`Could not resolve INCLUDE file: ${includeFileName}`);
             }
         }
 
