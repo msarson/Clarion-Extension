@@ -1269,10 +1269,12 @@ function registerLanguageFeatures(context: ExtensionContext) {
     
     logger.info(`📄 Registered Implementation Provider for extensions: ${lookupExtensions.join(', ')}`);
     
-    // ✅ Register Definition Provider for "Go to Definition" functionality for class methods
-    // Note: This only handles METHOD types, all other symbols fall through to the server
+    // ✅ DISABLED: Client-side Definition Provider blocks server-side providers
+    // All definition requests now handled by server-side DefinitionProvider
+    // This includes: variables, parameters, methods, structures, etc.
+    /*
     if (definitionProviderDisposable) {
-        definitionProviderDisposable.dispose(); // Remove old provider if it exists
+        definitionProviderDisposable.dispose();
     }
     
     logger.info("🔍 Registering Definition Provider for class methods...");
@@ -1283,7 +1285,7 @@ function registerLanguageFeatures(context: ExtensionContext) {
     context.subscriptions.push(definitionProviderDisposable);
     
     logger.info(`📄 Registered Definition Provider for extensions: ${lookupExtensions.join(', ')}`);
-    
+    */
     // ✅ Register Prefix Decorator for variable highlighting
     if (semanticTokensProviderDisposable) {
         semanticTokensProviderDisposable.dispose(); // Remove old provider if it exists
