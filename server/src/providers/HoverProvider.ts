@@ -5,7 +5,7 @@ import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 
 const logger = LoggerManager.getLogger("HoverProvider");
-logger.setLevel("error");
+logger.setLevel("info");
 
 /**
  * Provides hover information for local variables and parameters
@@ -88,16 +88,22 @@ export class HoverProvider {
             logger.info(`Current scope: ${currentScope.value}`);
 
             // Check if this is a parameter
+            logger.info(`Checking if ${word} is a parameter...`);
             const parameterInfo = this.findParameterInfo(word, document, currentScope);
             if (parameterInfo) {
+                logger.info(`Found parameter info for ${word}`);
                 return this.constructParameterHover(word, parameterInfo, currentScope);
             }
+            logger.info(`${word} is not a parameter`);
 
             // Check if this is a local variable
+            logger.info(`Checking if ${word} is a local variable...`);
             const variableInfo = this.findLocalVariableInfo(word, tokens, currentScope, document);
             if (variableInfo) {
+                logger.info(`Found variable info for ${word}: type=${variableInfo.type}, line=${variableInfo.line}`);
                 return this.constructVariableHover(word, variableInfo, currentScope);
             }
+            logger.info(`${word} is not a local variable`);
 
             return null;
         } catch (error) {
@@ -213,6 +219,8 @@ export class HoverProvider {
      * Finds local variable information
      */
     private findLocalVariableInfo(word: string, tokens: Token[], currentScope: Token, document: TextDocument): { type: string; line: number } | null {
+        logger.info(`findLocalVariableInfo called for word: ${word}, scope: ${currentScope.value}`);
+        
         // Find variable tokens at column 0 within the current scope
         const variableTokens = tokens.filter(token =>
             (token.type === TokenType.Variable ||
@@ -226,7 +234,15 @@ export class HoverProvider {
             (currentScope.finishesAt === undefined || token.line <= currentScope.finishesAt)
         );
 
+        logger.info(`Found ${variableTokens.length} variable tokens for ${word}`);
+        
         if (variableTokens.length === 0) {
+            // Debug: Check what tokens exist for this word
+            const allMatchingTokens = tokens.filter(t => t.value.toLowerCase() === word.toLowerCase());
+            logger.info(`Debug: Found ${allMatchingTokens.length} total tokens matching "${word}"`);
+            allMatchingTokens.forEach(t => {
+                logger.info(`  -> Line ${t.line}, Type: ${t.type}, SubType: ${t.subType}, Start: ${t.start}, Value: "${t.value}"`);
+            });
             return null;
         }
 

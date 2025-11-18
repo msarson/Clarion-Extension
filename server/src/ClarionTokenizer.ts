@@ -270,6 +270,11 @@ export class ClarionTokenizer {
             const routineVarsTime = performance.now() - routineVarsStart;
             logger.info(`🔍 [DEBUG] Routine variables tokenized (${routineVarsTime.toFixed(2)}ms)`);
             
+            const procedureVarsStart = performance.now();
+            this.tokenizeProcedureLocalVariables(); // ✅ Step 4: Tokenize procedure local variables
+            const procedureVarsTime = performance.now() - procedureVarsStart;
+            logger.info(`🔍 [DEBUG] Procedure local variables tokenized (${procedureVarsTime.toFixed(2)}ms)`);
+            
             // 📊 METRICS: Calculate and log performance stats
             const totalTime = performance.now() - perfStart;
             const tokensPerMs = this.tokens.length / totalTime;
@@ -588,6 +593,58 @@ export class ClarionTokenizer {
                         
                         this.tokens.splice(insertIndex, 0, varToken);
                     }
+                }
+            }
+        }
+    }
+
+    /** ✅ Tokenize local variables in procedures/methods/functions */
+    private tokenizeProcedureLocalVariables(): void {
+        // Find all procedures/methods/functions
+        const procedures = this.tokens.filter(t => 
+            t.subType === TokenType.Procedure || 
+            t.subType === TokenType.MethodImplementation || 
+            t.subType === TokenType.Function
+        );
+
+        for (const proc of procedures) {
+            const procEnd = proc.finishesAt || this.lines.length - 1;
+            
+            // Search from procedure declaration to CODE statement
+            for (let lineNum = proc.line + 1; lineNum <= procEnd; lineNum++) {
+                const line = this.lines[lineNum];
+                if (!line) continue;
+                
+                // Stop at CODE keyword
+                if (line.match(/^\s*code\s*$/i)) {
+                    break;
+                }
+                
+                // Match variable declarations at column 0: varName   type
+                const varMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+(&?[A-Za-z_][A-Za-z0-9_]*)/i);
+                if (varMatch) {
+                    const varName = varMatch[1];
+                    const isReference = varMatch[2].startsWith('&');
+                    
+                    logger.info(`Found procedure local variable: ${varName} (reference: ${isReference}) at line ${lineNum}`);
+                    
+                    // Create a Variable or ReferenceVariable token
+                    const varToken: Token = {
+                        type: TokenType.Label,
+                        subType: isReference ? TokenType.ReferenceVariable : TokenType.Variable,
+                        value: varName,
+                        line: lineNum,
+                        start: 0,
+                        maxLabelLength: 0
+                    };
+                    
+                    // Insert the token in the correct position
+                    let insertIndex = this.tokens.findIndex(t => t.line > lineNum);
+                    if (insertIndex === -1) {
+                        insertIndex = this.tokens.length;
+                    }
+                    
+                    this.tokens.splice(insertIndex, 0, varToken);
                 }
             }
         }
