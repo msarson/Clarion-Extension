@@ -303,13 +303,12 @@ export class HoverProvider {
                     );
                     
                     if (memberToken) {
-                        const typeTokens = lineTokens.filter(t => t.start > memberToken.start);
-                        // Get the type - should be a Type token after the member name
-                        const typeToken = typeTokens.find(t => 
-                            t.type === TokenType.Type || 
-                            t.value.startsWith('&')  // Reference types like &STRING
-                        );
-                        const type = typeToken ? typeToken.value : (typeTokens.length > 0 ? typeTokens[0].value : 'Unknown');
+                        // Get the first token after the member name - this is the type
+                        // It could be a simple type (LONG, BYTE), reference type (&STRING), 
+                        // or complex type (class name like StringTheory)
+                        const memberEnd = memberToken.start + memberToken.value.length;
+                        const typeTokens = lineTokens.filter(t => t.start > memberEnd);
+                        const type = typeTokens.length > 0 ? typeTokens[0].value : 'Unknown';
                         return { type, className, line: i, file: document.uri };
                     }
                 }
