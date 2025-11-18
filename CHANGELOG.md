@@ -16,6 +16,14 @@ All notable changes to the "clarion-extension" extension will be documented in t
   - Works seamlessly with Ctrl+F12 navigation
   - Provides context without being intrusive
 
+#### Label and Routine Navigation
+- **Navigate to Label/Routine**: Complete navigation support for labels and routines
+  - **Hover preview**: Hover over label references in GOTO, DO, or CYCLE statements to see code preview
+  - **Go to Definition**: F12 or Ctrl+Click on label references to jump to label definition
+  - **Clickable navigation**: Hover includes clickable link to navigate directly to label
+  - **Scope-aware**: Prioritizes labels within the current procedure/routine scope
+  - Shows up to 10 lines of code preview starting from the label
+
 This enhancement provides developers with meaningful context at a glance, showing what a method actually does rather than just its signature.
 
 ## [0.5.8] - 2025-11-17
