@@ -330,9 +330,91 @@ export class HoverProvider {
             }
         }
         
-        // If not found in current file, it's probably in an INCLUDE
-        // For now, just return basic info
-        logger.info(`⚠️ Class ${className} not found in current file - returning fallback`);
+        // If not found in current file, search INCLUDE files
+        logger.info(`⚠️ Class ${className} not found in current file - searching INCLUDE files`);
+        return this.findClassMemberInIncludes(className, memberName, document);
+    }
+
+    /**
+     * Searches for class member info in INCLUDE files
+     */
+    private findClassMemberInIncludes(className: string, memberName: string, document: TextDocument): { type: string; className: string; line: number; file: string } | null {
+        const content = document.getText();
+        const lines = content.split('\n');
+        
+        // Find INCLUDE statements
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const includeMatch = line.match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
+            if (!includeMatch) continue;
+            
+            const includeFileName = includeMatch[1];
+            logger.info(`Found INCLUDE: ${includeFileName}`);
+            
+            // Try to resolve the file (same logic as DefinitionProvider)
+            const filePath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
+            let resolvedPath: string | null = null;
+            
+            // Try solution-wide redirection
+            const SolutionManager = require('../solution/solutionManager').SolutionManager;
+            const solutionManager = SolutionManager.getInstance();
+            if (solutionManager && solutionManager.solution) {
+                for (const project of solutionManager.solution.projects) {
+                    const redirectionParser = project.getRedirectionParser();
+                    const resolved = redirectionParser.findFile(includeFileName);
+                    if (resolved && resolved.path && require('fs').existsSync(resolved.path)) {
+                        resolvedPath = resolved.path;
+                        break;
+                    }
+                }
+            }
+            
+            // Fallback to relative path
+            if (!resolvedPath) {
+                const path = require('path');
+                const currentDir = path.dirname(filePath);
+                const relativePath = path.join(currentDir, includeFileName);
+                if (require('fs').existsSync(relativePath)) {
+                    resolvedPath = relativePath;
+                }
+            }
+            
+            if (resolvedPath) {
+                logger.info(`Resolved to: ${resolvedPath}`);
+                const fs = require('fs');
+                const includeContent = fs.readFileSync(resolvedPath, 'utf8');
+                const includeLines = includeContent.split('\n');
+                
+                // Find the class
+                for (let j = 0; j < includeLines.length; j++) {
+                    const includeLine = includeLines[j];
+                    const classMatch = includeLine.match(new RegExp(`^${className}\\s+CLASS`, 'i'));
+                    if (classMatch) {
+                        logger.info(`Found class ${className} in INCLUDE at line ${j}`);
+                        
+                        // Find the member
+                        for (let k = j + 1; k < includeLines.length; k++) {
+                            const memberLine = includeLines[k];
+                            if (memberLine.match(/^\s*END\s*$/i) || memberLine.match(/^END\s*$/i)) {
+                                break;
+                            }
+                            
+                            const memberMatch = memberLine.match(new RegExp(`^\\s*(${memberName})\\s+`, 'i'));
+                            if (memberMatch) {
+                                logger.info(`Found member ${memberName} at line ${k}: ${memberLine}`);
+                                // Extract type - first word after member name
+                                const afterMember = memberLine.substring(memberMatch[0].length).trim();
+                                const typeMatch = afterMember.match(/^(\S+)/);
+                                const type = typeMatch ? typeMatch[1] : 'Unknown';
+                                logger.info(`Extracted type: ${type}`);
+                                return { type, className, line: k, file: resolvedPath };
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
         return { type: 'Property', className, line: -1, file: 'INCLUDE file' };
     }
 
