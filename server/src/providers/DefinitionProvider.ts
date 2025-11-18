@@ -1232,8 +1232,6 @@ export class DefinitionProvider {
     private findClassMemberInIncludes(className: string, memberName: string, documentUri: string): Location | null {
         logger.info(`Searching for ${className}.${memberName} in INCLUDE files`);
 
-        // Get tokens from current document to find INCLUDE statements
-        const tokens = this.tokenCache.getTokens({ uri: documentUri } as TextDocument);
         const content = fs.readFileSync(documentUri.replace('file:///', '').replace(/\//g, '\\'), 'utf8');
         const lines = content.split('\n');
         
@@ -1246,30 +1244,31 @@ export class DefinitionProvider {
             const includeFileName = includeMatch[1];
             logger.info(`Found INCLUDE statement: ${includeFileName}`);
             
-            // Try to resolve the include file
+            // Try to resolve the include file using solution-wide redirection
             let resolvedPath: string | null = null;
             
-            // Try with project redirection parser if available
             const solutionManager = SolutionManager.getInstance();
-            const filePath = documentUri.replace('file:///', '').replace(/\//g, '\\');
-            const project = solutionManager?.findProjectForFile(filePath);
-            
-            if (project) {
-                const redirectionParser = project.getRedirectionParser();
-                const resolved = redirectionParser.findFile(includeFileName);
-                if (resolved && resolved.path) {
-                    resolvedPath = resolved.path;
-                    logger.info(`Resolved via project redirection: ${resolvedPath}`);
+            if (solutionManager && solutionManager.solution) {
+                // Try each project's redirection parser
+                for (const project of solutionManager.solution.projects) {
+                    const redirectionParser = project.getRedirectionParser();
+                    const resolved = redirectionParser.findFile(includeFileName);
+                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
+                        resolvedPath = resolved.path;
+                        logger.info(`Resolved via project ${project.name} redirection: ${resolvedPath}`);
+                        break;
+                    }
                 }
             }
             
-            // Fallback: try relative to current file
+            // Fallback: try relative to current file if no solution/project available
             if (!resolvedPath) {
+                const filePath = documentUri.replace('file:///', '').replace(/\//g, '\\');
                 const currentDir = path.dirname(filePath);
                 const relativePath = path.join(currentDir, includeFileName);
                 if (fs.existsSync(relativePath)) {
                     resolvedPath = relativePath;
-                    logger.info(`Resolved via relative path: ${resolvedPath}`);
+                    logger.info(`Resolved via relative path (no solution): ${resolvedPath}`);
                 }
             }
             
