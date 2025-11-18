@@ -63,6 +63,11 @@ The extension provides comprehensive solution management capabilities:
   - Displays keyboard shortcut hint (Ctrl+F12) for quick navigation
   - Smart boundary detection stops before nested methods/routines
   - Parameter-aware matching for method calls
+- **Routine Navigation**: Complete navigation support for routines in DO statements
+  - Hover over routine names in DO statements to see code preview
+  - Ctrl+F12 or click hover link to navigate to routine implementation
+  - Shows up to 10 lines of code preview starting from the routine
+  - Scope-aware navigation prioritizes routines within current procedure
 
 ### Code Editing and Formatting
 
