@@ -57,7 +57,7 @@ import { ClarionSolutionInfo } from 'common/types';
 import * as fs from 'fs';
 import { URI } from 'vscode-languageserver';
 const logger = LoggerManager.getLogger("Server");
-logger.setLevel("info");
+logger.setLevel("error");
 
 // Track server initialization state
 export let serverInitialized = false;
@@ -1047,7 +1047,6 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
 
 // Handle definition requests
 connection.onDefinition(async (params) => {
-    console.error(`🔥🔥🔥 DEFINITION REQUEST RECEIVED!!! 🔥🔥🔥`);
     logger.info(`📂 Received definition request for: ${params.textDocument.uri} at position ${params.position.line}:${params.position.character}`);
     
     if (!serverInitialized) {
@@ -1077,7 +1076,6 @@ connection.onDefinition(async (params) => {
 
 // Handle hover requests
 connection.onHover(async (params) => {
-    console.error(`🔥 HOVER REQUEST RECEIVED!!!`);
     logger.info(`📂 Received hover request for: ${params.textDocument.uri} at position ${params.position.line}:${params.position.character}`);
     
     if (!serverInitialized) {

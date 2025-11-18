@@ -5,7 +5,7 @@ import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 
 const logger = LoggerManager.getLogger("HoverProvider");
-logger.setLevel("info");
+logger.setLevel("error");
 
 /**
  * Provides hover information for local variables and parameters

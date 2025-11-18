@@ -8,7 +8,7 @@ import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
-logger.setLevel("info");
+logger.setLevel("error");
 
 /**
  * Provides goto definition functionality for Clarion files
@@ -1013,8 +1013,6 @@ export class DefinitionProvider {
      * Handles formats like: ProcName PROCEDURE(LONG pLen, STRING pName=default)
      */
     private findParameterDefinition(word: string, document: TextDocument, currentScope: Token): Location | null {
-        // TEMP: Force an error to test if this is being called
-        console.error(`🔍 PARAMETER SEARCH: Looking for parameter "${word}" in procedure "${currentScope.value}"`);
         logger.info(`Looking for parameter ${word} in procedure ${currentScope.value}`);
         
         const content = document.getText();
