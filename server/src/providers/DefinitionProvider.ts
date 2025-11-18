@@ -193,6 +193,33 @@ export class DefinitionProvider {
     }
 
     /**
+     * Finds the parent scope (procedure/method) containing a routine
+     */
+    private getParentScopeOfRoutine(tokens: Token[], routineScope: Token): Token | undefined {
+        logger.info(`🔍 Looking for parent scope of routine ${routineScope.value}`);
+        
+        // Find all procedure/method scopes that contain this routine
+        const parentScopes = tokens.filter(token =>
+            (token.subType === TokenType.Procedure ||
+                token.subType === TokenType.GlobalProcedure ||
+                token.subType === TokenType.MethodImplementation ||
+                token.subType === TokenType.MethodDeclaration) &&
+            token.line < routineScope.line &&
+            (token.finishesAt === undefined || token.finishesAt >= routineScope.line)
+        );
+
+        if (parentScopes.length === 0) {
+            logger.info('No parent scope found');
+            return undefined;
+        }
+
+        // Return the closest parent (highest line number)
+        const parent = parentScopes.reduce((a, b) => a.line > b.line ? a : b);
+        logger.info(`Found parent scope: ${parent.value} at line ${parent.line}`);
+        return parent;
+    }
+
+    /**
      * Finds the definition of a structure field reference
      * Handles both dot notation (Structure.Field) and prefix notation (PREFIX:Field)
      * Also handles class member access (self.Member or variable.Member)
@@ -1132,10 +1159,23 @@ export class DefinitionProvider {
         logger.info(`Looking for class member ${memberName} in current context`);
 
         // Find the current class or method context
-        const currentScope = this.getInnermostScopeAtLine(tokens, currentLine);
+        let currentScope = this.getInnermostScopeAtLine(tokens, currentLine);
         if (!currentScope) {
             logger.info('No scope found - cannot determine class context');
             return null;
+        }
+
+        // If we're in a routine, we need the parent scope (the method/procedure) to get the class name
+        if (currentScope.subType === TokenType.Routine) {
+            logger.info(`Current scope is a routine (${currentScope.value}), looking for parent scope`);
+            const parentScope = this.getParentScopeOfRoutine(tokens, currentScope);
+            if (parentScope) {
+                currentScope = parentScope;
+                logger.info(`Using parent scope: ${currentScope.value}`);
+            } else {
+                logger.info('No parent scope found for routine');
+                return null;
+            }
         }
 
         // For method implementations, extract the class name (e.g., "StringTheory._Malloc" -> "StringTheory")

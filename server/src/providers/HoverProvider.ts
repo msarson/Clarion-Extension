@@ -151,6 +151,28 @@ export class HoverProvider {
     }
 
     /**
+     * Finds the parent scope (procedure/method) containing a routine
+     */
+    private getParentScopeOfRoutine(tokens: Token[], routineScope: Token): Token | undefined {
+        // Find all procedure/method scopes that contain this routine
+        const parentScopes = tokens.filter(token =>
+            (token.subType === TokenType.Procedure ||
+                token.subType === TokenType.GlobalProcedure ||
+                token.subType === TokenType.MethodImplementation ||
+                token.subType === TokenType.MethodDeclaration) &&
+            token.line < routineScope.line &&
+            (token.finishesAt === undefined || token.finishesAt >= routineScope.line)
+        );
+
+        if (parentScopes.length === 0) {
+            return undefined;
+        }
+
+        // Return the closest parent (highest line number)
+        return parentScopes.reduce((a, b) => a.line > b.line ? a : b);
+    }
+
+    /**
      * Finds parameter information
      */
     private findParameterInfo(word: string, document: TextDocument, currentScope: Token): { type: string; line: number } | null {
@@ -274,13 +296,26 @@ export class HoverProvider {
     private findClassMemberInfo(memberName: string, document: TextDocument, currentLine: number, tokens: Token[]): { type: string; className: string; line: number; file: string } | null {
         logger.info(`🔍 findClassMemberInfo called for member: ${memberName}`);
         // Find the current scope to get the class name
-        const currentScope = this.getInnermostScopeAtLine(tokens, currentLine);
+        let currentScope = this.getInnermostScopeAtLine(tokens, currentLine);
         if (!currentScope) {
             logger.info('❌ No scope found');
             return null;
         }
         
         logger.info(`Scope: ${currentScope.value}`);
+
+        // If we're in a routine, we need the parent scope (the method/procedure) to get the class name
+        if (currentScope.subType === TokenType.Routine) {
+            logger.info(`Current scope is a routine (${currentScope.value}), looking for parent scope`);
+            const parentScope = this.getParentScopeOfRoutine(tokens, currentScope);
+            if (parentScope) {
+                currentScope = parentScope;
+                logger.info(`Using parent scope: ${currentScope.value}`);
+            } else {
+                logger.info('No parent scope found for routine');
+                return null;
+            }
+        }
         
         // Extract class name from method
         let className: string | null = null;
