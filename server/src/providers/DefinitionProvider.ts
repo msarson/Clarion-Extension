@@ -460,6 +460,13 @@ export class DefinitionProvider {
     
         if (currentScope) {
             logger.info(`Current scope: ${currentScope.value} (${currentScope.line}-${currentScope.finishesAt})`);
+            
+            // Check if this is a parameter in the current procedure
+            const parameterDefinition = this.findParameterDefinition(word, document, currentScope);
+            if (parameterDefinition) {
+                logger.info(`Found parameter definition for ${word} in procedure ${currentScope.value}`);
+                return parameterDefinition;
+            }
         }
     
         const variableTokens = tokens.filter(token =>
@@ -987,5 +994,62 @@ export class DefinitionProvider {
             start: { line: 0, character: 0 },
             end: { line: 0, character: 0 }
         });
+    }
+
+    /**
+     * Finds parameter definition in a procedure/method signature
+     * Handles formats like: ProcName PROCEDURE(LONG pLen, STRING pName)
+     */
+    private findParameterDefinition(word: string, document: TextDocument, currentScope: Token): Location | null {
+        logger.info(`Looking for parameter ${word} in procedure ${currentScope.value}`);
+        
+        const content = document.getText();
+        const lines = content.split('\n');
+        
+        // Get the procedure line
+        const procedureLine = lines[currentScope.line];
+        if (!procedureLine) {
+            return null;
+        }
+        
+        // Match PROCEDURE(...) pattern to extract parameters
+        const match = procedureLine.match(/PROCEDURE\s*\((.*?)\)/i);
+        if (!match || !match[1]) {
+            logger.info(`No parameters found in procedure signature`);
+            return null;
+        }
+        
+        const paramString = match[1];
+        const paramStartColumn = procedureLine.indexOf('(') + 1;
+        
+        // Split parameters by comma (simple split, doesn't handle nested parentheses yet)
+        const params = paramString.split(',');
+        let currentColumn = paramStartColumn;
+        
+        for (const param of params) {
+            const trimmedParam = param.trim();
+            // Extract parameter name (last word in the parameter declaration)
+            // Format: TYPE paramName or *TYPE paramName or &TYPE paramName
+            const paramMatch = trimmedParam.match(/[*&]?\s*\w+\s+([A-Za-z_][A-Za-z0-9_]*)\s*$/i);
+            if (paramMatch) {
+                const paramName = paramMatch[1];
+                if (paramName.toLowerCase() === word.toLowerCase()) {
+                    // Find the position of this parameter name in the original line
+                    const paramNameIndex = procedureLine.indexOf(paramName, currentColumn);
+                    if (paramNameIndex >= 0) {
+                        logger.info(`Found parameter ${paramName} at column ${paramNameIndex}`);
+                        return Location.create(document.uri, {
+                            start: { line: currentScope.line, character: paramNameIndex },
+                            end: { line: currentScope.line, character: paramNameIndex + paramName.length }
+                        });
+                    }
+                }
+            }
+            // Move past this parameter for next iteration
+            currentColumn += param.length + 1; // +1 for comma
+        }
+        
+        logger.info(`Parameter ${word} not found in procedure signature`);
+        return null;
     }
 }
