@@ -23,7 +23,7 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
         this.documentManager = documentManager;
     }
 
-    async provideHover(document: vscode.TextDocument, position: vscode.Position, _token: vscode.CancellationToken): Promise<vscode.Hover | null> {
+    async provideHover(document: vscode.TextDocument, position: vscode.Position, _token: vscode.CancellationToken): Promise<vscode.Hover | null | undefined> {
         if (_token.isCancellationRequested) {
             return null;
         }
@@ -64,8 +64,8 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
         // If not a method call, proceed with existing logic for declarations
         let location = this.documentManager.findLinkAtPosition(document.uri, position);
         if (!location) {
-            logger.info(`No location found at position ${position.line}:${position.character}`);
-            return null;
+            logger.info(`No location found at position ${position.line}:${position.character} - deferring to server`);
+            return undefined; // Let server handle variable/parameter hovers
         }
 
         logger.info(`Found location at position: ${location.statementType} to ${location.fullFileName}`);

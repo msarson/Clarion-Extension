@@ -50,6 +50,7 @@ import { buildClarionSolution, initializeSolutionManager } from './solution/buil
 import { SolutionManager } from './solution/solutionManager';
 import { RedirectionFileParserServer } from './solution/redirectionFileParserServer';
 import { DefinitionProvider } from './providers/DefinitionProvider';
+import { HoverProvider } from './providers/HoverProvider';
 import path = require('path');
 import { ClarionSolutionInfo } from 'common/types';
 
@@ -71,6 +72,7 @@ export let solutionOperationInProgress = false;
 
 const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider();
 const definitionProvider = new DefinitionProvider();
+const hoverProvider = new HoverProvider();
 
 // ✅ Create Connection and Documents Manager
 const connection = createConnection(ProposedFeatures.all);
@@ -1036,7 +1038,8 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
             documentSymbolProvider: true,
             documentFormattingProvider: true,
             colorProvider: true,
-            definitionProvider: true
+            definitionProvider: true,
+            hoverProvider: true
         }
     };
 });
@@ -1067,6 +1070,36 @@ connection.onDefinition(async (params) => {
         return definition;
     } catch (error) {
         logger.error(`❌ Error providing definition: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+    }
+});
+
+// Handle hover requests
+connection.onHover(async (params) => {
+    console.error(`🔥 HOVER REQUEST RECEIVED!!!`);
+    logger.info(`📂 Received hover request for: ${params.textDocument.uri} at position ${params.position.line}:${params.position.character}`);
+    
+    if (!serverInitialized) {
+        logger.info(`⚠️ [DELAY] Server not initialized yet, delaying hover request`);
+        return null;
+    }
+    
+    const document = documents.get(params.textDocument.uri);
+    if (!document) {
+        logger.info(`⚠️ Document not found: ${params.textDocument.uri}`);
+        return null;
+    }
+    
+    try {
+        const hover = await hoverProvider.provideHover(document, params.position);
+        if (hover) {
+            logger.info(`✅ Found hover info for ${params.textDocument.uri}`);
+        } else {
+            logger.info(`⚠️ No hover info found for ${params.textDocument.uri}`);
+        }
+        return hover;
+    } catch (error) {
+        logger.error(`❌ Error providing hover: ${error instanceof Error ? error.message : String(error)}`);
         return null;
     }
 });
