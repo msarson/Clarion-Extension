@@ -1232,7 +1232,11 @@ export class DefinitionProvider {
     private findClassMemberInIncludes(className: string, memberName: string, documentUri: string): Location | null {
         logger.info(`Searching for ${className}.${memberName} in INCLUDE files`);
 
-        const content = fs.readFileSync(documentUri.replace('file:///', '').replace(/\//g, '\\'), 'utf8');
+        // Decode the URI properly
+        const filePath = decodeURIComponent(documentUri.replace('file:///', '')).replace(/\//g, '\\');
+        logger.info(`Reading file: ${filePath}`);
+        
+        const content = fs.readFileSync(filePath, 'utf8');
         const lines = content.split('\n');
         
         // Find INCLUDE statements by searching the text
@@ -1263,7 +1267,6 @@ export class DefinitionProvider {
             
             // Fallback: try relative to current file if no solution/project available
             if (!resolvedPath) {
-                const filePath = documentUri.replace('file:///', '').replace(/\//g, '\\');
                 const currentDir = path.dirname(filePath);
                 const relativePath = path.join(currentDir, includeFileName);
                 if (fs.existsSync(relativePath)) {
