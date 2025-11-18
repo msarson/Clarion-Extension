@@ -1,6 +1,71 @@
 # Change Log
 All notable changes to the "clarion-extension" extension will be documented in this file.
 
+## [0.5.9] - 2025-11-18
+
+### Enhancements
+
+#### Improved Method Hover Display
+- **Enhanced hover content**: Method implementation hovers now show up to 15 lines of actual implementation code after the CODE statement (previously stopped at CODE)
+- **Smart boundary detection**: Automatically stops before nested method/routine implementations within the 15-line preview
+- **Interactive navigation**: Added clickable line number link in hover to jump directly to method implementation
+- **Keyboard shortcut hint**: Hover displays "Click or press Ctrl+F12 to navigate" to guide users
+- **Better developer experience**: Aligns hover behavior with standard IDE practices (VS Code, Visual Studio, IntelliJ) by showing actual implementation preview
+- **Method call hover support**: Hovers now work for method calls within implementations (e.g., hovering over `self.SetLength(...)` shows the SetLength implementation)
+  - Intelligently matches methods by parameter count
+  - Works seamlessly with Ctrl+F12 navigation
+  - Provides context without being intrusive
+  - **Improved precision**: Method hover only triggers when cursor is on the method name itself, not on parameters
+
+#### Routine Navigation (DO Statements)
+- **Navigate to Routine**: Complete navigation support for routines referenced in DO statements
+  - **Hover preview**: Hover over routine references in DO statements to see code preview
+  - **Go to Implementation**: Ctrl+F12 or click hover link to jump to routine implementation
+  - **Clickable navigation**: Hover includes clickable link to navigate directly to routine
+  - **Scope-aware**: Prioritizes routines within the current procedure scope
+  - Shows up to 10 lines of code preview starting from the routine
+
+#### Local Variable and Parameter Navigation
+- **Go to Definition (F12)**: Navigate from variable/parameter usage to declaration
+  - Works for procedure/method local variables (declared between PROCEDURE and CODE)
+  - Works for routine local variables (declared in ROUTINE DATA sections)
+  - Works for procedure and method parameters
+  - Supports parameters with default values (e.g., `pForce=false`)
+  - Supports reference variables (e.g., `&string`)
+  - Scope-aware: finds variables within current procedure/method/routine
+- **Hover Information**: Rich hover tooltips for variables and parameters
+  - Shows variable/parameter name and type
+  - Displays declaration location (procedure/routine name and line number)
+  - Distinguishes between "Parameter", "Local Variable", and "Local Routine Variable"
+  - Includes "Press F12 to go to declaration" hint
+
+#### Class Member Navigation
+- **Go to Definition (F12)**: Navigate from class member access to definition
+  - Works for `self.property` and `self.method` references in class implementations
+  - Works for typed variables (e.g., `otherValue.value` where `otherValue` is `StringTheory`)
+  - **Navigate from implementation to declaration**: F12 on method implementation line (e.g., `StringTheory.Construct PROCEDURE()`) jumps to CLASS declaration
+  - Automatically searches INCLUDE files for class definitions
+  - Uses solution-wide redirection system to resolve INCLUDE files
+  - Handles both properties and methods
+- **Hover Information**: Rich hover tooltips for class members
+  - Shows whether it's a Property or Method
+  - Displays full type declaration including attributes (PRIVATE, name(), etc.)
+  - Shows class name
+  - Displays declaring file name and line number
+  - Long type declarations shown in code block for better readability
+  - **Method implementation hover**: Hovering on method implementation line shows the declaration signature with return type
+  - F12 navigation hint included
+  
+### Technical Improvements
+- **Server-side definition provider**: Enabled language server definition provider capability
+- **Server-side hover provider**: Added server-side hover provider for variables, parameters, and class members
+- **Client-side provider coordination**: Client-side providers properly defer to server for symbols they don't handle
+- **Enhanced scope detection**: Improved scope detection to recognize all procedure types (GlobalProcedure, MethodImplementation, MethodDeclaration)
+- **INCLUDE file resolution**: Enhanced to work without requiring files to be in project, uses solution-wide redirection
+- **URI decoding**: Proper handling of URL-encoded file paths
+
+This enhancement provides developers with meaningful context at a glance and enables quick navigation through code.
+
 ## [0.5.8] - 2025-11-17
 
 ### Performance Improvements

@@ -598,6 +598,13 @@ export async function activate(context: ExtensionContext): Promise<void> {
             vscodeWindow.showTextDocument(uri, { selection: range });
         }),
 
+        // Add command to navigate to method implementation
+        commands.registerCommand('clarion.goToMethodImplementation', (filePath: string, line: number, character: number = 0) => {
+            const uri = Uri.file(filePath);
+            const position = new Range(line, character, line, character);
+            vscodeWindow.showTextDocument(uri, { selection: position });
+        }),
+
         // Add command to navigate to a project in the solution tree
         commands.registerCommand('clarion.navigateToProject', async (projectGuid: string) => {
             if (!projectGuid) {
@@ -1262,9 +1269,12 @@ function registerLanguageFeatures(context: ExtensionContext) {
     
     logger.info(`📄 Registered Implementation Provider for extensions: ${lookupExtensions.join(', ')}`);
     
-    // ✅ Register Definition Provider for "Go to Definition" functionality for class methods
+    // ✅ DISABLED: Client-side Definition Provider blocks server-side providers
+    // All definition requests now handled by server-side DefinitionProvider
+    // This includes: variables, parameters, methods, structures, etc.
+    /*
     if (definitionProviderDisposable) {
-        definitionProviderDisposable.dispose(); // Remove old provider if it exists
+        definitionProviderDisposable.dispose();
     }
     
     logger.info("🔍 Registering Definition Provider for class methods...");
@@ -1275,7 +1285,7 @@ function registerLanguageFeatures(context: ExtensionContext) {
     context.subscriptions.push(definitionProviderDisposable);
     
     logger.info(`📄 Registered Definition Provider for extensions: ${lookupExtensions.join(', ')}`);
-    
+    */
     // ✅ Register Prefix Decorator for variable highlighting
     if (semanticTokensProviderDisposable) {
         semanticTokensProviderDisposable.dispose(); // Remove old provider if it exists
@@ -2241,6 +2251,12 @@ async function startClientServer(context: ExtensionContext, hasOpenXmlFiles: boo
                 workspace.createFileSystemWatcher(projectFileWatcherPattern)
             ],
         },
+        middleware: {
+            provideDefinition: (document, position, token, next) => {
+                logger.info(`🔥 CLIENT MIDDLEWARE: Definition request for ${document.uri.toString()} at ${position.line}:${position.character}`);
+                return next(document, position, token);
+            }
+        },
         // Add error handling options
         errorHandler: {
             error: (error, message, count) => {
@@ -2270,6 +2286,17 @@ async function startClientServer(context: ExtensionContext, hasOpenXmlFiles: boo
         // Wait for the language client to become ready
         await getClientReadyPromise();
         logger.info("✅ Language client started and is ready");
+        
+        // Log server capabilities
+        const capabilities = client.initializeResult?.capabilities;
+        logger.info(`📋 Server capabilities: ${JSON.stringify(capabilities, null, 2)}`);
+        logger.info(`📋 Full initializeResult: ${JSON.stringify(client.initializeResult, null, 2)}`);
+        if (capabilities?.definitionProvider) {
+            logger.info("✅ Server reports definitionProvider capability is enabled");
+        } else {
+            logger.error("❌ Server does NOT report definitionProvider capability!");
+            logger.error(`❌ Capabilities object: ${JSON.stringify(capabilities)}`);
+        }
     } catch (err) {
         logger.error("❌ Language client failed to start properly", err);
         vscodeWindow.showWarningMessage("Clarion Language Server had issues during startup. Some features may not work correctly.");

@@ -36,9 +36,9 @@ export class ClarionDefinitionProvider implements DefinitionProvider {
         document: TextDocument,
         position: Position,
         token: CancellationToken
-    ): Promise<Definition | null> {
+    ): Promise<Definition | null | undefined> {
         if (token.isCancellationRequested) {
-            return null;
+            return undefined;
         }
 
         logger.info(`Definition requested at position ${position.line}:${position.character} in ${document.uri.fsPath}`);
@@ -46,16 +46,16 @@ export class ClarionDefinitionProvider implements DefinitionProvider {
         // Find the link at the current position
         const location = this.documentManager.findLinkAtPosition(document.uri, position);
         if (!location) {
-            logger.info(`No location found at position ${position.line}:${position.character}`);
-            return null;
+            logger.info(`No location found at position ${position.line}:${position.character} - deferring to server`);
+            return undefined; // Return undefined to let server-side provider handle it
         }
 
         logger.info(`Found location at position: ${location.statementType} to ${location.fullFileName}`);
         
         // Only handle METHOD type locations
         if (location.statementType !== "METHOD") {
-            logger.info(`Location is not a method declaration (type: ${location.statementType})`);
-            return null;
+            logger.info(`Location is not a method declaration (type: ${location.statementType}) - deferring to server`);
+            return undefined; // Return undefined to let server-side provider handle it
         }
         
         try {

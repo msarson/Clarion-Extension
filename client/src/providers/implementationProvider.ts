@@ -157,7 +157,14 @@ export class ClarionImplementationProvider implements ImplementationProvider {
 
         logger.info(`Implementation requested at position ${position.line}:${position.character} in ${document.uri.fsPath}`);
         
-        // First, check if this is a method call
+        // First, check if this is a routine reference (in DO statements)
+        const routineInfo = this.detectRoutineReference(document, position);
+        if (routineInfo) {
+            logger.info(`Detected routine reference to ${routineInfo.name}`);
+            return this.findRoutineImplementation(document, routineInfo.name);
+        }
+        
+        // Check if this is a method call
         const methodCall = this.countMethodCallParameters(document, position);
         if (methodCall) {
             logger.info(`Detected method call to ${methodCall.methodName} with ${methodCall.paramCount} parameters`);
@@ -202,5 +209,53 @@ export class ClarionImplementationProvider implements ImplementationProvider {
             logger.error(`Error resolving implementation: ${error instanceof Error ? error.message : String(error)}`);
             return null;
         }
+    }
+
+    /**
+     * Detects if the cursor is on a routine reference (in DO statements)
+     */
+    private detectRoutineReference(document: TextDocument, position: Position): { name: string } | null {
+        const lineText = document.lineAt(position.line).text;
+        const wordRange = document.getWordRangeAtPosition(position);
+        if (!wordRange) {
+            return null;
+        }
+        
+        const word = document.getText(wordRange);
+        const beforeWord = lineText.substring(0, wordRange.start.character).trim().toUpperCase();
+        
+        // Check if this is after DO keyword
+        if (beforeWord.endsWith('DO')) {
+            return { name: word };
+        }
+        
+        return null;
+    }
+
+    /**
+     * Finds a routine implementation in the document (labels at column 0 followed by ROUTINE)
+     */
+    private findRoutineImplementation(document: TextDocument, name: string): Location | null {
+        const content = document.getText();
+        const lines = content.split('\n');
+        
+        // Search for routine at column 0
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            
+            // Check if line starts at column 0 (no leading whitespace)
+            if (line.length > 0 && line[0] !== ' ' && line[0] !== '\t') {
+                // Extract the label name (everything before space or end of line)
+                const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+ROUTINE/i);
+                if (match && match[1].toUpperCase() === name.toUpperCase()) {
+                    return new Location(
+                        document.uri,
+                        new Position(i, 0)
+                    );
+                }
+            }
+        }
+        
+        return null;
     }
 }
