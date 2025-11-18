@@ -637,13 +637,16 @@ export class DefinitionProvider {
     /**
      * Gets the word range at the given position
      */
+    /**
+     * Gets the word range at a position (without including dots for variable lookup)
+     */
     private getWordRangeAtPosition(document: TextDocument, position: Position): Range | null {
         const line = document.getText({
             start: { line: position.line, character: 0 },
             end: { line: position.line, character: Number.MAX_VALUE }
         });
 
-        // Find the start and end of the word
+        // Find the start and end of the word (stopping at dots)
         let start = position.character;
         while (start > 0 && this.isWordCharacter(line.charAt(start - 1))) {
             start--;
@@ -665,10 +668,10 @@ export class DefinitionProvider {
     }
 
     /**
-     * Checks if a character is part of a word
+     * Checks if a character is part of a word (excluding dots for variable detection)
      */
     private isWordCharacter(char: string): boolean {
-        return /[a-zA-Z0-9_\.]/.test(char);
+        return /[a-zA-Z0-9_]/.test(char);
     }
 
     /**
