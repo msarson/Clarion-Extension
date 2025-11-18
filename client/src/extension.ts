@@ -2286,6 +2286,15 @@ async function startClientServer(context: ExtensionContext, hasOpenXmlFiles: boo
         // Wait for the language client to become ready
         await getClientReadyPromise();
         logger.info("✅ Language client started and is ready");
+        
+        // Log server capabilities
+        const capabilities = client.initializeResult?.capabilities;
+        logger.info(`📋 Server capabilities: ${JSON.stringify(capabilities)}`);
+        if (capabilities?.definitionProvider) {
+            logger.info("✅ Server reports definitionProvider capability is enabled");
+        } else {
+            logger.error("❌ Server does NOT report definitionProvider capability!");
+        }
     } catch (err) {
         logger.error("❌ Language client failed to start properly", err);
         vscodeWindow.showWarningMessage("Clarion Language Server had issues during startup. Some features may not work correctly.");
