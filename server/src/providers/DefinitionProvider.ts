@@ -8,7 +8,7 @@ import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
-logger.setLevel("error");
+logger.setLevel("info");
 
 /**
  * Provides goto definition functionality for Clarion files
@@ -565,7 +565,6 @@ export class DefinitionProvider {
              token.type === TokenType.ReferenceVariable ||
              token.type === TokenType.ImplicitVariable) &&
             token.value.toLowerCase() === word.toLowerCase() &&
-            token.start === 0 &&
             !(token.line === position.line &&
               position.character >= token.start &&
               position.character <= token.start + token.value.length)
@@ -605,13 +604,6 @@ export class DefinitionProvider {
         // 🎯 Try FILE structure fallback
         logger.info(`🧐 Still no match; checking for FILE label fallback`);
 
-        tokens
-            .filter(t => t.start === 0)
-            .forEach(t => {
-                logger.info(`   [${t.line}] ${t.type}${t.subType ? ` (${t.subType})` : ''} -> "${t.value}"`);
-            });
-        
-
         const labelToken = tokens.find(t =>
             t.type === TokenType.Label &&
             t.value.toLowerCase() === word.toLowerCase() &&
@@ -619,9 +611,9 @@ export class DefinitionProvider {
         );
     
         if (labelToken) {
+            logger.info(`Found label token for ${word} at line ${labelToken.line}`);
             const labelIndex = tokens.indexOf(labelToken);
             for (let i = labelIndex + 1; i < tokens.length; i++) {
-                logger.info(`Checking token ${i}: ${tokens[i].value} (${tokens[i].type})`);
                 const t = tokens[i];
                 if (t.type === TokenType.Structure && t.value.toUpperCase() === "FILE") {
                     logger.info(`📄 Resolved ${word} as FILE label definition`);

@@ -213,13 +213,12 @@ export class HoverProvider {
      * Finds local variable information
      */
     private findLocalVariableInfo(word: string, tokens: Token[], currentScope: Token): { type: string; line: number } | null {
-        // Find variable tokens at column 0 within the current scope
+        // Find variable tokens within the current scope
         const variableTokens = tokens.filter(token =>
             (token.type === TokenType.Variable ||
                 token.type === TokenType.ReferenceVariable ||
                 token.type === TokenType.ImplicitVariable) &&
             token.value.toLowerCase() === word.toLowerCase() &&
-            token.start === 0 &&
             token.line >= currentScope.line &&
             (currentScope.finishesAt === undefined || token.line <= currentScope.finishesAt)
         );
@@ -228,7 +227,9 @@ export class HoverProvider {
             return null;
         }
 
-        const varToken = variableTokens[0];
+        // Prefer variables at column 0 (procedure/method locals), but allow indented ones (routine locals)
+        const declTokens = variableTokens.filter(t => t.start === 0);
+        const varToken = declTokens.length > 0 ? declTokens[0] : variableTokens[0];
         
         // Try to find the type declaration on the same line
         const lineTokens = tokens.filter(t => t.line === varToken.line);
