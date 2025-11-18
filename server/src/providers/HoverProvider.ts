@@ -30,6 +30,31 @@ export class HoverProvider {
             const word = document.getText(wordRange);
             logger.info(`Found word: "${word}" at position`);
 
+            // Check if this is a class member access (self.member or variable.member)
+            const line = document.getText({
+                start: { line: position.line, character: 0 },
+                end: { line: position.line, character: Number.MAX_VALUE }
+            });
+            
+            const dotIndex = line.lastIndexOf('.', position.character - 1);
+            if (dotIndex > 0) {
+                const beforeDot = line.substring(0, dotIndex).trim();
+                const afterDot = line.substring(dotIndex + 1).trim();
+                const fieldMatch = afterDot.match(/^(\w+)/);
+                
+                if (fieldMatch && fieldMatch[1].toLowerCase() === word.toLowerCase()) {
+                    // This is a member access
+                    if (beforeDot.toLowerCase() === 'self' || beforeDot.endsWith('self')) {
+                        // self.member - class member
+                        const tokens = this.tokenCache.getTokens(document);
+                        const memberInfo = this.findClassMemberInfo(word, document, position.line, tokens);
+                        if (memberInfo) {
+                            return this.constructClassMemberHover(word, memberInfo);
+                        }
+                    }
+                }
+            }
+
             // Get tokens and find current scope
             const tokens = this.tokenCache.getTokens(document);
             const currentScope = this.getInnermostScopeAtLine(tokens, position.line);
@@ -212,6 +237,99 @@ export class HoverProvider {
             `**Declared at:** line ${info.line + 1}`,
             ``,
             `*Press F12 to go to declaration*`
+        ].join('\n');
+
+        return {
+            contents: {
+                kind: 'markdown',
+                value: markdown
+            }
+        };
+    }
+
+    /**
+     * Finds class member information for hover
+     */
+    private findClassMemberInfo(memberName: string, document: TextDocument, currentLine: number, tokens: Token[]): { type: string; className: string; line: number; file: string } | null {
+        // Find the current scope to get the class name
+        const currentScope = this.getInnermostScopeAtLine(tokens, currentLine);
+        if (!currentScope) {
+            return null;
+        }
+        
+        // Extract class name from method
+        let className: string | null = null;
+        if (currentScope.value.includes('.')) {
+            className = currentScope.value.split('.')[0];
+        } else {
+            // Parse from the line
+            const content = document.getText();
+            const lines = content.split('\n');
+            const scopeLine = lines[currentScope.line];
+            const classMethodMatch = scopeLine.match(/^(\w+)\.(\w+)\s+PROCEDURE/i);
+            if (classMethodMatch) {
+                className = classMethodMatch[1];
+            }
+        }
+        
+        if (!className) {
+            return null;
+        }
+        
+        // Search in current file first
+        const classTokens = tokens.filter(token =>
+            token.type === TokenType.Structure &&
+            token.value.toUpperCase() === 'CLASS' &&
+            token.line > 0
+        );
+        
+        for (const classToken of classTokens) {
+            const labelToken = tokens.find(t =>
+                t.type === TokenType.Label &&
+                t.line === classToken.line &&
+                t.value.toLowerCase() === className!.toLowerCase()
+            );
+            
+            if (labelToken) {
+                // Search for member in this class
+                for (let i = labelToken.line + 1; i < tokens.length; i++) {
+                    const lineTokens = tokens.filter(t => t.line === i);
+                    const endToken = lineTokens.find(t => t.value.toUpperCase() === 'END' && t.start === 0);
+                    if (endToken) break;
+                    
+                    const memberToken = lineTokens.find(t => 
+                        t.value.toLowerCase() === memberName.toLowerCase() && 
+                        t.start === 0
+                    );
+                    
+                    if (memberToken) {
+                        const typeTokens = lineTokens.filter(t => t.start > memberToken.start);
+                        const type = typeTokens.length > 0 ? typeTokens[0].value : 'Unknown';
+                        return { type, className, line: i, file: document.uri };
+                    }
+                }
+            }
+        }
+        
+        // If not found in current file, it's probably in an INCLUDE
+        // For now, just return basic info
+        return { type: 'Property', className, line: -1, file: 'INCLUDE file' };
+    }
+
+    /**
+     * Constructs hover for a class member
+     */
+    private constructClassMemberHover(name: string, info: { type: string; className: string; line: number; file: string }): Hover {
+        const markdown = [
+            `**Class Member:** \`${name}\``,
+            ``,
+            `**Type:** \`${info.type}\``,
+            ``,
+            `**Class:** ${info.className}`,
+            ``,
+            info.line >= 0 ? `**Declared at:** line ${info.line + 1}` : `**Declared in:** ${info.file}`,
+            ``,
+            `*Press F12 to go to definition*`
         ].join('\n');
 
         return {
