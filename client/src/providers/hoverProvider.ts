@@ -81,7 +81,7 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
     }
 
     /**
-     * Detects if the cursor is on a method call
+     * Detects if the cursor is on a method call (specifically on the method name, not parameters)
      */
     private detectMethodCall(document: vscode.TextDocument, position: vscode.Position): { methodName: string, paramCount: number } | null {
         const lineText = document.lineAt(position.line).text;
@@ -90,11 +90,12 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
         methodCallRegex.lastIndex = 0;
         let match: RegExpExecArray | null;
         while ((match = methodCallRegex.exec(lineText)) !== null) {
-            const callStart = match.index;
-            const callEnd = match.index + match[0].length;
+            const methodName = match[2];
+            const methodNameStart = match.index + match[1].length + 1; // +1 for the dot
+            const methodNameEnd = methodNameStart + methodName.length;
             
-            if (position.character >= callStart && position.character <= callEnd) {
-                const methodName = match[2];
+            // Only trigger if cursor is specifically on the method name
+            if (position.character >= methodNameStart && position.character <= methodNameEnd) {
                 const paramList = match[3].trim();
                 const paramCount = paramList === "" ? 0 : paramList.split(',').length;
                 return { methodName, paramCount };
