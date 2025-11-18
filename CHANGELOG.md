@@ -37,12 +37,29 @@ All notable changes to the "clarion-extension" extension will be documented in t
   - Includes "Press F12 to go to declaration" hint
   - Works for parameters: Shows type and declaring procedure
   - Works for local variables: Shows type and declaration line
+
+#### Class Member Navigation
+- **Go to Definition (F12)**: Navigate from class member access to definition
+  - Works for `self.property` and `self.method` references in class implementations
+  - Works for typed variables (e.g., `otherValue.value` where `otherValue` is `StringTheory`)
+  - Automatically searches INCLUDE files for class definitions
+  - Uses solution-wide redirection system to resolve INCLUDE files
+  - Handles both properties and methods
+- **Hover Information**: Rich hover tooltips for class members
+  - Shows whether it's a Property or Method
+  - Displays full type declaration including attributes (PRIVATE, name(), etc.)
+  - Shows class name
+  - Displays declaring file name and line number
+  - Long type declarations shown in code block for better readability
+  - F12 navigation hint included
   
 ### Technical Improvements
 - **Server-side definition provider**: Enabled language server definition provider capability
-- **Server-side hover provider**: Added server-side hover provider for variables and parameters
+- **Server-side hover provider**: Added server-side hover provider for variables, parameters, and class members
 - **Client-side provider coordination**: Client-side providers properly defer to server for symbols they don't handle
 - **Enhanced scope detection**: Improved scope detection to recognize all procedure types (GlobalProcedure, MethodImplementation, MethodDeclaration)
+- **INCLUDE file resolution**: Enhanced to work without requiring files to be in project, uses solution-wide redirection
+- **URI decoding**: Proper handling of URL-encoded file paths
 
 This enhancement provides developers with meaningful context at a glance and enables quick navigation through code.
 
