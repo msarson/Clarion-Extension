@@ -251,11 +251,15 @@ export class HoverProvider {
      * Finds class member information for hover
      */
     private findClassMemberInfo(memberName: string, document: TextDocument, currentLine: number, tokens: Token[]): { type: string; className: string; line: number; file: string } | null {
+        logger.info(`🔍 findClassMemberInfo called for member: ${memberName}`);
         // Find the current scope to get the class name
         const currentScope = this.getInnermostScopeAtLine(tokens, currentLine);
         if (!currentScope) {
+            logger.info('❌ No scope found');
             return null;
         }
+        
+        logger.info(`Scope: ${currentScope.value}`);
         
         // Extract class name from method
         let className: string | null = null;
@@ -273,8 +277,11 @@ export class HoverProvider {
         }
         
         if (!className) {
+            logger.info('❌ Could not determine className');
             return null;
         }
+        
+        logger.info(`Looking for member ${memberName} in class ${className}`);
         
         // Search in current file first
         const classTokens = tokens.filter(token =>
@@ -282,6 +289,8 @@ export class HoverProvider {
             token.value.toUpperCase() === 'CLASS' &&
             token.line > 0
         );
+        
+        logger.info(`Found ${classTokens.length} CLASS tokens in file`);
         
         for (const classToken of classTokens) {
             const labelToken = tokens.find(t =>
@@ -291,6 +300,7 @@ export class HoverProvider {
             );
             
             if (labelToken) {
+                logger.info(`✅ Found class ${className} at line ${labelToken.line}`);
                 // Search for member in this class
                 for (let i = labelToken.line + 1; i < tokens.length; i++) {
                     const lineTokens = tokens.filter(t => t.line === i);
@@ -322,6 +332,7 @@ export class HoverProvider {
         
         // If not found in current file, it's probably in an INCLUDE
         // For now, just return basic info
+        logger.info(`⚠️ Class ${className} not found in current file - returning fallback`);
         return { type: 'Property', className, line: -1, file: 'INCLUDE file' };
     }
 
