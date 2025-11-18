@@ -2289,11 +2289,13 @@ async function startClientServer(context: ExtensionContext, hasOpenXmlFiles: boo
         
         // Log server capabilities
         const capabilities = client.initializeResult?.capabilities;
-        logger.info(`📋 Server capabilities: ${JSON.stringify(capabilities)}`);
+        logger.info(`📋 Server capabilities: ${JSON.stringify(capabilities, null, 2)}`);
+        logger.info(`📋 Full initializeResult: ${JSON.stringify(client.initializeResult, null, 2)}`);
         if (capabilities?.definitionProvider) {
             logger.info("✅ Server reports definitionProvider capability is enabled");
         } else {
             logger.error("❌ Server does NOT report definitionProvider capability!");
+            logger.error(`❌ Capabilities object: ${JSON.stringify(capabilities)}`);
         }
     } catch (err) {
         logger.error("❌ Language client failed to start properly", err);
