@@ -422,22 +422,35 @@ export class HoverProvider {
      * Constructs hover for a class member
      */
     private constructClassMemberHover(name: string, info: { type: string; className: string; line: number; file: string }): Hover {
+        // Determine if it's a property or method based on type
+        const isMethod = info.type.toUpperCase().includes('PROCEDURE') || info.type.toUpperCase().includes('FUNCTION');
+        const memberType = isMethod ? 'Method' : 'Property';
+        
         const markdown = [
-            `**Class Member:** \`${name}\``,
+            `**Class ${memberType}:** \`${name}\``,
             ``,
             `**Type:** \`${info.type}\``,
             ``,
-            `**Class:** ${info.className}`,
-            ``,
-            info.line >= 0 ? `**Declared at:** line ${info.line + 1}` : `**Declared in:** ${info.file}`,
-            ``,
-            `*Press F12 to go to definition*`
-        ].join('\n');
+            `**Class:** ${info.className}`
+        ];
+        
+        if (info.line >= 0) {
+            // Extract just the filename from the path
+            const fileName = info.file.split(/[\/\\]/).pop() || info.file;
+            markdown.push(``);
+            markdown.push(`**Declared in:** ${fileName} ([line ${info.line + 1}](command:clarion.goToSymbol?${encodeURIComponent(JSON.stringify({ uri: `file:///${info.file.replace(/\\/g, '/')}`, line: info.line, character: 0 }))}))`);
+        } else {
+            markdown.push(``);
+            markdown.push(`**Declared in:** ${info.file}`);
+        }
+        
+        markdown.push(``);
+        markdown.push(`*Press F12 to go to definition*`);
 
         return {
             contents: {
                 kind: 'markdown',
-                value: markdown
+                value: markdown.join('\n')
             }
         };
     }
