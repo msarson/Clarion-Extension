@@ -304,11 +304,9 @@ export class HoverProvider {
                     
                     if (memberToken) {
                         const typeTokens = lineTokens.filter(t => t.start > memberToken.start);
-                        // Get the type - should be the first token after the member name
-                        // Skip structure markers and get actual type
+                        // Get the type - should be a Type token after the member name
                         const typeToken = typeTokens.find(t => 
-                            t.type === TokenType.Type ||
-                            ['LONG', 'STRING', 'BYTE', 'SHORT', 'REAL', 'DECIMAL', 'SREAL', 'CSTRING', 'PSTRING'].includes(t.value.toUpperCase()) ||
+                            t.type === TokenType.Type || 
                             t.value.startsWith('&')  // Reference types like &STRING
                         );
                         const type = typeToken ? typeToken.value : (typeTokens.length > 0 ? typeTokens[0].value : 'Unknown');
