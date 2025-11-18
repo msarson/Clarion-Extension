@@ -1043,6 +1043,7 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
 
 // Handle definition requests
 connection.onDefinition(async (params) => {
+    console.error(`🔥🔥🔥 DEFINITION REQUEST RECEIVED!!! 🔥🔥🔥`);
     logger.info(`📂 Received definition request for: ${params.textDocument.uri} at position ${params.position.line}:${params.position.character}`);
     
     if (!serverInitialized) {
