@@ -448,19 +448,17 @@ export class HoverProvider {
         if (info.line >= 0) {
             // Extract just the filename from the path
             const fileName = info.file.split(/[\/\\]/).pop() || info.file;
-            const fileUri = `file:///${info.file.replace(/\\/g, '/')}`;
-            // Use the same command format as client-side hover provider
-            const commandUri = `command:clarion.goToSymbol?${encodeURIComponent(JSON.stringify([info.file, info.line, 0]))}`;
             markdown.push(``);
-            markdown.push(`**Declared in:** ${fileName} - [line ${info.line + 1}](${commandUri} "Click to go to definition")`);
+            markdown.push(`**Declared in:** \`${fileName}\` at line **${info.line + 1}**`);
+            markdown.push(``);
+            markdown.push(`*(F12 will navigate to the definition)*`);
         } else {
             markdown.push(``);
             markdown.push(`**Declared in:** ${info.file}`);
+            markdown.push(``);
+            markdown.push(`*Press F12 to go to definition*`);
         }
         
-        markdown.push(``);
-        markdown.push(`*Press F12 to go to definition*`);
-
         return {
             contents: {
                 kind: 'markdown',
