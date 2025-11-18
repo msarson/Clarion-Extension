@@ -5,7 +5,7 @@ import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 
 const logger = LoggerManager.getLogger("HoverProvider");
-logger.setLevel("error");
+logger.setLevel("info");
 
 /**
  * Provides hover information for local variables and parameters
@@ -303,12 +303,17 @@ export class HoverProvider {
                     );
                     
                     if (memberToken) {
+                        logger.info(`Found member token: ${memberToken.value} at start ${memberToken.start}`);
+                        logger.info(`All tokens on line ${i}: ${lineTokens.map(t => `[${t.value}:${t.start}:${t.type}]`).join(' ')}`);
+                        
                         // Get the first token after the member name - this is the type
                         // It could be a simple type (LONG, BYTE), reference type (&STRING), 
                         // or complex type (class name like StringTheory)
                         const memberEnd = memberToken.start + memberToken.value.length;
                         const typeTokens = lineTokens.filter(t => t.start > memberEnd);
+                        logger.info(`Type tokens after member: ${typeTokens.map(t => `[${t.value}:${t.start}:${t.type}]`).join(' ')}`);
                         const type = typeTokens.length > 0 ? typeTokens[0].value : 'Unknown';
+                        logger.info(`Selected type: ${type}`);
                         return { type, className, line: i, file: document.uri };
                     }
                 }
