@@ -2251,6 +2251,12 @@ async function startClientServer(context: ExtensionContext, hasOpenXmlFiles: boo
                 workspace.createFileSystemWatcher(projectFileWatcherPattern)
             ],
         },
+        middleware: {
+            provideDefinition: (document, position, token, next) => {
+                logger.info(`🔥 CLIENT MIDDLEWARE: Definition request for ${document.uri.toString()} at ${position.line}:${position.character}`);
+                return next(document, position, token);
+            }
+        },
         // Add error handling options
         errorHandler: {
             error: (error, message, count) => {
