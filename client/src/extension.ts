@@ -1270,18 +1270,20 @@ function registerLanguageFeatures(context: ExtensionContext) {
     logger.info(`📄 Registered Implementation Provider for extensions: ${lookupExtensions.join(', ')}`);
     
     // ✅ Register Definition Provider for "Go to Definition" functionality for class methods
-    if (definitionProviderDisposable) {
-        definitionProviderDisposable.dispose(); // Remove old provider if it exists
-    }
+    // TEMPORARILY DISABLED: Client-side definition provider blocks server-side variable navigation
+    // The server-side DefinitionProvider handles all symbol types including variables and parameters
+    // if (definitionProviderDisposable) {
+    //     definitionProviderDisposable.dispose(); // Remove old provider if it exists
+    // }
     
-    logger.info("🔍 Registering Definition Provider for class methods...");
-    definitionProviderDisposable = languages.registerDefinitionProvider(
-        documentSelectors,
-        new ClarionDefinitionProvider(documentManager)
-    );
-    context.subscriptions.push(definitionProviderDisposable);
+    // logger.info("🔍 Registering Definition Provider for class methods...");
+    // definitionProviderDisposable = languages.registerDefinitionProvider(
+    //     documentSelectors,
+    //     new ClarionDefinitionProvider(documentManager)
+    // );
+    // context.subscriptions.push(definitionProviderDisposable);
     
-    logger.info(`📄 Registered Definition Provider for extensions: ${lookupExtensions.join(', ')}`);
+    // logger.info(`📄 Registered Definition Provider for extensions: ${lookupExtensions.join(', ')}`);
     
     // ✅ Register Prefix Decorator for variable highlighting
     if (semanticTokensProviderDisposable) {
