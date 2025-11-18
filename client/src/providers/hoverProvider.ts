@@ -214,11 +214,11 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
         hoverMessage.isTrusted = true;
         
         const lineNumber = location.range.start.line + 1;
-        // Use the existing clarion.goToSymbol command
-        const range = new vscode.Range(location.range.start, location.range.start);
-        const commandUri = vscode.Uri.parse(`command:clarion.goToSymbol?${encodeURIComponent(JSON.stringify([
-            document.uri.toString(),
-            { start: { line: location.range.start.line, character: 0 }, end: { line: location.range.start.line, character: labelName.length } }
+        // Use the clarion.goToMethodImplementation command which takes filePath and line number
+        const commandUri = vscode.Uri.parse(`command:clarion.goToMethodImplementation?${encodeURIComponent(JSON.stringify([
+            document.uri.fsPath,
+            location.range.start.line,
+            0
         ]))}`);
         
         hoverMessage.appendMarkdown(`**Routine: ${labelName}**\n\n`);
