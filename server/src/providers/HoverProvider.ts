@@ -237,8 +237,9 @@ export class HoverProvider {
         const lines = content.split('\n');
         const sourceLine = lines[varToken.line];
         
-        // Parse the variable declaration: varName   &type  or  varName   type
-        const typeMatch = sourceLine.match(/^[A-Za-z_][A-Za-z0-9_]*\s+(&?[A-Za-z_][A-Za-z0-9_]*)/i);
+        // Parse the variable declaration: varName   type[,attributes]
+        // Examples: "AllocLen  long,auto" or "oldString   &string"
+        const typeMatch = sourceLine.match(/^[A-Za-z_][A-Za-z0-9_]*\s+(&?[A-Za-z_][A-Za-z0-9_]*(?:,[A-Za-z_][A-Za-z0-9_]*)*)/i);
         if (typeMatch) {
             return { type: typeMatch[1], line: varToken.line };
         }
