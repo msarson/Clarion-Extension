@@ -83,23 +83,42 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
                 startLine = location.sectionLineLocation.line;
             }
 
-            // For method implementations, try to extract just the method signature and body
+            // For method implementations, show signature and first 15 lines of implementation
             // Case-insensitive comparison
             if ((location.statementType || "").toUpperCase() === "METHOD") {
-                // Find the method signature and body
-                let endLine = startLine + linesToShow;
+                const maxLinesToShow = 15;
+                let codeLineIndex = -1;
+                let endLine = startLine + maxLinesToShow;
                 
                 logger.info(`Looking for method implementation starting at line ${startLine}`);
                 
-                // Look for the end of the method (CODE or END marker)
+                // First, find the CODE statement
                 for (let i = startLine; i < Math.min(fileLines.length, startLine + 30); i++) {
                     const trimmedLine = fileLines[i].trim().toUpperCase();
-                    if (trimmedLine === 'CODE' || trimmedLine === 'END') {
-                        // Found the CODE or END marker, include it
-                        endLine = i + 1;
-                        logger.info(`Found ${trimmedLine} marker at line ${i}`);
+                    if (trimmedLine === 'CODE') {
+                        codeLineIndex = i;
+                        logger.info(`Found CODE statement at line ${i}`);
                         break;
                     }
+                }
+                
+                // If we found CODE, show up to 15 lines after it
+                if (codeLineIndex >= 0) {
+                    endLine = Math.min(fileLines.length, codeLineIndex + 1 + maxLinesToShow);
+                    
+                    // Check for nested method/routine implementations and stop before them
+                    for (let i = codeLineIndex + 1; i < endLine; i++) {
+                        const trimmedLine = fileLines[i].trim().toUpperCase();
+                        // Stop if we encounter another METHOD, ROUTINE, or PROCEDURE definition
+                        if (trimmedLine.match(/^[A-Z_][A-Z0-9_]*\s+(PROCEDURE|ROUTINE|METHOD)/)) {
+                            endLine = i;
+                            logger.info(`Found nested method/routine at line ${i}, stopping before it`);
+                            break;
+                        }
+                    }
+                } else {
+                    // If no CODE found, just show from start (fallback behavior)
+                    endLine = Math.min(fileLines.length, startLine + maxLinesToShow);
                 }
                 
                 const methodContent = fileLines.slice(startLine, endLine).join('\n');
