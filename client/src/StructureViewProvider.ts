@@ -183,7 +183,12 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 this._onDidChangeTreeData.fire(symbol);
             }
         } catch (error) {
-            logger.error(`Failed to reveal active selection: ${error}`);
+            // This can happen if VS Code hasn't finished building the tree yet or if the symbol structure changed
+            // It's usually harmless - the tree will sync on next cursor move
+            logger.debug(`Could not reveal symbol in tree view (this is usually harmless): ${error instanceof Error ? error.message : String(error)}`);
+            if (error instanceof Error && error.stack) {
+                logger.debug(`Stack: ${error.stack}`);
+            }
         }
     }
     
