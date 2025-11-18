@@ -11,3 +11,29 @@ node_modules/**/docs/**
 node_modules/**/*.md
 node_modules/**/*.ts
 node_modules/**/*.map
+
+# Exclude source files - only ship compiled JS
+client/src/**
+server/src/**
+
+# Exclude test files
+test_*.clw
+*.log
+
+# Exclude documentation that's not needed in the extension
+CHANGELOG-old.md
+README-old.md
+RELEASE_NOTES_*.md
+RELEASE_SUMMARY.md
+PERFORMANCE_METRICS.md
+PUBLISHING_GUIDE.md
+WelcomePanel.png
+vsc-extension-quickstart.md
+Clarion-Extension.code-workspace
+
+# Exclude GitHub files
+.github/**
+
+# Exclude dev dependencies
+tsconfig*.json
+.vscode/**
