@@ -1,6 +1,19 @@
 # Change Log
 All notable changes to the "clarion-extension" extension will be documented in this file.
 
+## [0.5.9] - 2025-11-18
+
+### Enhancements
+
+#### Improved Method Hover Display
+- **Enhanced hover content**: Method implementation hovers now show up to 15 lines of actual implementation code after the CODE statement (previously stopped at CODE)
+- **Smart boundary detection**: Automatically stops before nested method/routine implementations within the 15-line preview
+- **Interactive navigation**: Added clickable line number link in hover to jump directly to method implementation
+- **Keyboard shortcut hint**: Hover displays "Click or press Ctrl+F12 to navigate" to guide users
+- **Better developer experience**: Aligns hover behavior with standard IDE practices (VS Code, Visual Studio, IntelliJ) by showing actual implementation preview
+
+This enhancement provides developers with meaningful context at a glance, showing what a method actually does rather than just its signature.
+
 ## [0.5.8] - 2025-11-17
 
 ### Performance Improvements
