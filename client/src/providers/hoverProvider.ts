@@ -30,7 +30,18 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
 
         logger.info(`Hover requested at position ${position.line}:${position.character} in ${document.uri.fsPath}`);
         
-        // First, check if this is a method call (like self.SetLength(...))
+        // First, check if this is a label/routine reference (like in GOTO or DO statements)
+        const labelInfo = this.detectLabelOrRoutineReference(document, position);
+        if (labelInfo) {
+            logger.info(`Detected label/routine reference: ${labelInfo.name}`);
+            const labelLocation = await this.findLabelOrRoutine(document, labelInfo.name, position.line);
+            if (labelLocation) {
+                const hoverMessage = await this.constructLabelHoverMessage(document, labelLocation, labelInfo.name);
+                return new vscode.Hover(hoverMessage);
+            }
+        }
+        
+        // Check if this is a method call (like self.SetLength(...))
         const methodCallInfo = this.detectMethodCall(document, position);
         if (methodCallInfo) {
             logger.info(`Detected method call to ${methodCallInfo.methodName} with ${methodCallInfo.paramCount} parameters`);
@@ -145,6 +156,89 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
             logger.error(`Error finding method implementation: ${error instanceof Error ? error.message : String(error)}`);
             return null;
         }
+    }
+
+    /**
+     * Detects if the cursor is on a label or routine reference (e.g., in GOTO, DO, CYCLE statements)
+     */
+    private detectLabelOrRoutineReference(document: vscode.TextDocument, position: vscode.Position): { name: string } | null {
+        const lineText = document.lineAt(position.line).text;
+        const wordRange = document.getWordRangeAtPosition(position);
+        if (!wordRange) {
+            return null;
+        }
+        
+        const word = document.getText(wordRange);
+        const beforeWord = lineText.substring(0, wordRange.start.character).trim().toUpperCase();
+        
+        // Check if this is after GOTO, DO, or CYCLE keywords
+        if (beforeWord.endsWith('GOTO') || beforeWord.endsWith('DO') || beforeWord.endsWith('CYCLE')) {
+            return { name: word };
+        }
+        
+        return null;
+    }
+
+    /**
+     * Finds a label or routine definition in the document
+     */
+    private async findLabelOrRoutine(document: vscode.TextDocument, name: string, currentLine: number): Promise<vscode.Location | null> {
+        const content = document.getText();
+        const lines = content.split('\n');
+        
+        // Search for labels at column 0
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            
+            // Check if line starts at column 0 (no leading whitespace)
+            if (line.length > 0 && line[0] !== ' ' && line[0] !== '\t') {
+                // Extract the label name (everything before space or end of line)
+                const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)/);
+                if (match && match[1].toUpperCase() === name.toUpperCase()) {
+                    return new vscode.Location(
+                        document.uri,
+                        new vscode.Position(i, 0)
+                    );
+                }
+            }
+        }
+        
+        return null;
+    }
+
+    /**
+     * Constructs a hover message for a label or routine
+     */
+    private async constructLabelHoverMessage(document: vscode.TextDocument, location: vscode.Location, labelName: string): Promise<vscode.MarkdownString> {
+        const hoverMessage = new vscode.MarkdownString();
+        hoverMessage.isTrusted = true;
+        
+        const lineNumber = location.range.start.line + 1;
+        const commandUri = vscode.Uri.parse(`command:editor.action.goToLocations?${encodeURIComponent(JSON.stringify([
+            document.uri.toString(),
+            location.range.start,
+            [],
+            'goto'
+        ]))}`);
+        
+        hoverMessage.appendMarkdown(`**Label/Routine: ${labelName}**\n\n`);
+        hoverMessage.appendMarkdown(` - Line: [${lineNumber}](${commandUri} "Go to Label (F12)") *(Click or press F12 to navigate)*\n\n`);
+        
+        try {
+            const content = document.getText();
+            const lines = content.split('\n');
+            const startLine = location.range.start.line;
+            
+            // Show up to 10 lines starting from the label
+            const endLine = Math.min(lines.length, startLine + 10);
+            const previewLines = lines.slice(startLine, endLine);
+            
+            hoverMessage.appendCodeblock(previewLines.join('\n'), 'clarion');
+        } catch (error) {
+            logger.error(`Error constructing label hover: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        
+        return hoverMessage;
     }
 
     private async constructHoverMessage(location: ClarionLocation): Promise<vscode.MarkdownString> {
