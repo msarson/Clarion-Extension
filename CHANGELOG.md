@@ -16,10 +16,10 @@ All notable changes to the "clarion-extension" extension will be documented in t
   - Works seamlessly with Ctrl+F12 navigation
   - Provides context without being intrusive
 
-#### Routine Navigation (DO/CYCLE Statements)
-- **Navigate to Routine**: Complete navigation support for routines referenced in DO and CYCLE statements
-  - **Hover preview**: Hover over routine references in DO or CYCLE statements to see code preview
-  - **Go to Definition**: F12 or Ctrl+Click on routine references to jump to routine definition
+#### Routine Navigation (DO Statements)
+- **Navigate to Routine**: Complete navigation support for routines referenced in DO statements
+  - **Hover preview**: Hover over routine references in DO statements to see code preview
+  - **Go to Implementation**: Ctrl+F12 or click hover link to jump to routine implementation
   - **Clickable navigation**: Hover includes clickable link to navigate directly to routine
   - **Scope-aware**: Prioritizes routines within the current procedure scope
   - Shows up to 10 lines of code preview starting from the routine

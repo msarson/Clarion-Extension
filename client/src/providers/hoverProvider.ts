@@ -30,7 +30,7 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
 
         logger.info(`Hover requested at position ${position.line}:${position.character} in ${document.uri.fsPath}`);
         
-        // First, check if this is a routine reference (in DO or CYCLE statements)
+        // First, check if this is a routine reference (in DO statements)
         const labelInfo = this.detectLabelOrRoutineReference(document, position);
         if (labelInfo) {
             logger.info(`Detected routine reference: ${labelInfo.name}`);
@@ -159,7 +159,7 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
     }
 
     /**
-     * Detects if the cursor is on a routine reference (in DO or CYCLE statements)
+     * Detects if the cursor is on a routine reference (in DO statements)
      */
     private detectLabelOrRoutineReference(document: vscode.TextDocument, position: vscode.Position): { name: string } | null {
         const lineText = document.lineAt(position.line).text;
@@ -171,8 +171,8 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
         const word = document.getText(wordRange);
         const beforeWord = lineText.substring(0, wordRange.start.character).trim().toUpperCase();
         
-        // Check if this is after DO or CYCLE keywords (NOT GOTO)
-        if (beforeWord.endsWith('DO') || beforeWord.endsWith('CYCLE')) {
+        // Check if this is after DO keyword
+        if (beforeWord.endsWith('DO')) {
             return { name: word };
         }
         

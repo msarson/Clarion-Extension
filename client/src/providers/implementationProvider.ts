@@ -157,7 +157,7 @@ export class ClarionImplementationProvider implements ImplementationProvider {
 
         logger.info(`Implementation requested at position ${position.line}:${position.character} in ${document.uri.fsPath}`);
         
-        // First, check if this is a routine reference (in DO or CYCLE statements)
+        // First, check if this is a routine reference (in DO statements)
         const routineInfo = this.detectRoutineReference(document, position);
         if (routineInfo) {
             logger.info(`Detected routine reference to ${routineInfo.name}`);
@@ -212,7 +212,7 @@ export class ClarionImplementationProvider implements ImplementationProvider {
     }
 
     /**
-     * Detects if the cursor is on a routine reference (in DO or CYCLE statements)
+     * Detects if the cursor is on a routine reference (in DO statements)
      */
     private detectRoutineReference(document: TextDocument, position: Position): { name: string } | null {
         const lineText = document.lineAt(position.line).text;
@@ -224,8 +224,8 @@ export class ClarionImplementationProvider implements ImplementationProvider {
         const word = document.getText(wordRange);
         const beforeWord = lineText.substring(0, wordRange.start.character).trim().toUpperCase();
         
-        // Check if this is after DO or CYCLE keywords
-        if (beforeWord.endsWith('DO') || beforeWord.endsWith('CYCLE')) {
+        // Check if this is after DO keyword
+        if (beforeWord.endsWith('DO')) {
             return { name: word };
         }
         
