@@ -164,6 +164,7 @@ export class DefinitionProvider {
     /**
      * Finds the definition of a structure field reference
      * Handles both dot notation (Structure.Field) and prefix notation (PREFIX:Field)
+     * Also handles class member access (self.Member or variable.Member)
      */
     private async findStructureFieldDefinition(word: string, document: TextDocument, position: Position): Promise<Definition | null> {
         logger.info(`Looking for structure field definition: ${word}`);
@@ -177,22 +178,41 @@ export class DefinitionProvider {
             end: { line: position.line, character: Number.MAX_VALUE }
         });
 
-        // Check if this is a dot notation reference (Structure.Field or Complex:Structure:1.Field)
-        const dotIndex = line.lastIndexOf('.');
+        // Check if this is a dot notation reference (Structure.Field or Complex:Structure:1.Field or self.Member)
+        const dotIndex = line.lastIndexOf('.', position.character - 1);
         if (dotIndex > 0) {
-            const structurePart = line.substring(0, dotIndex).trim();
-            const fieldPart = line.substring(dotIndex + 1).trim();
+            const beforeDot = line.substring(0, dotIndex).trim();
+            const afterDot = line.substring(dotIndex + 1).trim();
 
             // Extract just the field name without any trailing characters
-            const fieldMatch = fieldPart.match(/^(\w+)/);
+            const fieldMatch = afterDot.match(/^(\w+)/);
             if (fieldMatch && fieldMatch[1].toLowerCase() === word.toLowerCase()) {
                 const fieldName = fieldMatch[1];
-                logger.info(`Detected dot notation: ${structurePart}.${fieldName}`);
+                logger.info(`Detected dot notation: ${beforeDot}.${fieldName}`);
+
+                // Check if this is self.Member - class member access
+                if (beforeDot.toLowerCase() === 'self' || beforeDot.endsWith('self')) {
+                    logger.info(`Detected self.${fieldName} - looking for class member`);
+                    return this.findClassMember(tokens, fieldName, document, position.line);
+                }
+
+                // Try to find as a typed variable (e.g., otherValue.value where otherValue is StringTheory)
+                const variableName = beforeDot.split(/[^a-zA-Z0-9_]/).pop(); // Get last word
+                if (variableName) {
+                    const classType = this.findVariableType(tokens, variableName, position.line);
+                    if (classType) {
+                        logger.info(`Variable ${variableName} is of type ${classType}, looking for member ${fieldName}`);
+                        const result = await this.findClassMemberInType(tokens, classType, fieldName, document);
+                        if (result) {
+                            return result;
+                        }
+                    }
+                }
 
                 // Find the structure definition - handle complex structure names
                 const structureTokens = tokens.filter(token =>
                     token.type === TokenType.Label &&
-                    token.value.toLowerCase() === structurePart.toLowerCase() &&
+                    token.value.toLowerCase() === beforeDot.toLowerCase() &&
                     token.start === 0
                 );
 
@@ -1070,6 +1090,194 @@ export class DefinitionProvider {
         }
         
         logger.info(`Parameter ${word} not found in procedure signature`);
+        return null;
+    }
+
+    /**
+     * Finds a class member definition (property or method) in the current class context
+     */
+    private async findClassMember(tokens: Token[], memberName: string, document: TextDocument, currentLine: number): Promise<Location | null> {
+        logger.info(`Looking for class member ${memberName} in current context`);
+
+        // Find the current class or method context
+        const currentScope = this.getInnermostScopeAtLine(tokens, currentLine);
+        if (!currentScope) {
+            logger.info('No scope found - cannot determine class context');
+            return null;
+        }
+
+        // For method implementations, extract the class name (e.g., "StringTheory._Malloc" -> "StringTheory")
+        let className: string | null = null;
+        if (currentScope.value.includes('.')) {
+            className = currentScope.value.split('.')[0];
+            logger.info(`Extracted class name from method: ${className}`);
+        }
+
+        if (!className) {
+            logger.info('Could not determine class name from context');
+            return null;
+        }
+
+        // Find the class member in this class
+        return this.findClassMemberInType(tokens, className, memberName, document);
+    }
+
+    /**
+     * Finds a class member in a specific class type
+     */
+    private async findClassMemberInType(tokens: Token[], className: string, memberName: string, document: TextDocument): Promise<Location | null> {
+        logger.info(`Looking for member ${memberName} in class ${className}`);
+
+        // Find the CLASS structure definition
+        const classTokens = tokens.filter(token =>
+            token.type === TokenType.Structure &&
+            token.value.toUpperCase() === 'CLASS' &&
+            token.line > 0
+        );
+
+        for (const classToken of classTokens) {
+            // Find the label token just before this CLASS
+            const labelToken = tokens.find(t =>
+                t.type === TokenType.Label &&
+                t.line === classToken.line &&
+                t.value.toLowerCase() === className.toLowerCase()
+            );
+
+            if (labelToken) {
+                logger.info(`Found class definition for ${className} at line ${labelToken.line}`);
+                
+                // Search for the member within the class structure  
+                // findFieldInStructure returns Definition (Location | Location[]), we need Location
+                const result = await this.findFieldInStructure(tokens, labelToken, memberName, document, { line: labelToken.line, character: 0 });
+                if (result) {
+                    // If it's an array, return the first location
+                    return Array.isArray(result) ? result[0] : result;
+                }
+            }
+        }
+
+        // If not found in current file, search in INCLUDE files
+        logger.info(`Class ${className} not found in current file, searching includes`);
+        return this.findClassMemberInIncludes(className, memberName, document.uri);
+    }
+
+    /**
+     * Finds the type of a variable (for typed variable.member lookups)
+     */
+    private findVariableType(tokens: Token[], variableName: string, currentLine: number): string | null {
+        logger.info(`Looking for type of variable ${variableName}`);
+
+        // Find the variable declaration
+        const varTokens = tokens.filter(token =>
+            (token.type === TokenType.Variable ||
+                token.type === TokenType.ReferenceVariable ||
+                token.type === TokenType.ImplicitVariable) &&
+            token.value.toLowerCase() === variableName.toLowerCase() &&
+            token.start === 0
+        );
+
+        if (varTokens.length === 0) {
+            // Check if it's a parameter
+            const currentScope = this.getInnermostScopeAtLine(tokens, currentLine);
+            if (currentScope) {
+                // TODO: Parse parameters to get type - for now return null
+                logger.info('Variable might be a parameter - parameter type detection not yet implemented');
+            }
+            return null;
+        }
+
+        const varToken = varTokens[0];
+        
+        // Find the type token on the same line (should be after the variable name)
+        const lineTokens = tokens.filter(t => t.line === varToken.line && t.start > varToken.start);
+        const typeToken = lineTokens.find(t => 
+            t.type === TokenType.Type || 
+            t.type === TokenType.Label || // Class names appear as labels
+            /^[A-Z][A-Za-z0-9_]*$/.test(t.value) // Capitalized word (likely a class name)
+        );
+
+        if (typeToken) {
+            logger.info(`Found type ${typeToken.value} for variable ${variableName}`);
+            return typeToken.value;
+        }
+
+        return null;
+    }
+
+    /**
+     * Searches for a class member in INCLUDE files
+     */
+    private findClassMemberInIncludes(className: string, memberName: string, documentUri: string): Location | null {
+        logger.info(`Searching for ${className}.${memberName} in INCLUDE files`);
+
+        // Get the project and redirection parser
+        const solutionManager = SolutionManager.getInstance();
+        if (!solutionManager) {
+            logger.info('No solution manager available');
+            return null;
+        }
+
+        const filePath = documentUri.replace('file:///', '').replace(/\//g, '\\');
+        const project = solutionManager.findProjectForFile(filePath);
+        if (!project) {
+            logger.info(`No project found for file: ${filePath}`);
+            return null;
+        }
+
+        // Get tokens from current document to find INCLUDE statements
+        const tokens = this.tokenCache.getTokens({ uri: documentUri } as TextDocument);
+        const includeTokens = tokens.filter(token =>
+            token.type === TokenType.Keyword &&
+            token.value.toUpperCase().includes('INCLUDE')
+        );
+
+        // Search each include file
+        for (const includeToken of includeTokens) {
+            const match = includeToken.value.match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
+            if (!match || !match[1]) continue;
+
+            const includeFileName = match[1];
+            const redirectionParser = project.getRedirectionParser();
+            const resolvedPath = redirectionParser.findFile(includeFileName);
+
+            if (resolvedPath && resolvedPath.path && fs.existsSync(resolvedPath.path)) {
+                logger.info(`Searching in include file: ${resolvedPath.path}`);
+                
+                const includeContent = fs.readFileSync(resolvedPath.path, 'utf8');
+                const lines = includeContent.split('\n');
+
+                // Search for the class definition
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i];
+                    const classMatch = line.match(new RegExp(`^${className}\\s+CLASS`, 'i'));
+                    if (classMatch) {
+                        logger.info(`Found class ${className} at line ${i} in ${resolvedPath.path}`);
+                        
+                        // Search for the member within the class
+                        for (let j = i + 1; j < lines.length; j++) {
+                            const memberLine = lines[j];
+                            
+                            // Check for END (end of class)
+                            if (memberLine.match(/^\s*END\s*$/i)) {
+                                break;
+                            }
+                            
+                            // Check for member definition
+                            const memberMatch = memberLine.match(new RegExp(`^\\s*${memberName}\\s+`, 'i'));
+                            if (memberMatch) {
+                                logger.info(`Found member ${memberName} at line ${j}`);
+                                const fileUri = `file:///${resolvedPath.path.replace(/\\/g, '/')}`;
+                                return Location.create(fileUri, {
+                                    start: { line: j, character: memberLine.indexOf(memberMatch[0]) },
+                                    end: { line: j, character: memberLine.indexOf(memberMatch[0]) + memberName.length }
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         return null;
     }
 }
