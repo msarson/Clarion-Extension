@@ -998,7 +998,7 @@ export class DefinitionProvider {
 
     /**
      * Finds parameter definition in a procedure/method signature
-     * Handles formats like: ProcName PROCEDURE(LONG pLen, STRING pName)
+     * Handles formats like: ProcName PROCEDURE(LONG pLen, STRING pName=default)
      */
     private findParameterDefinition(word: string, document: TextDocument, currentScope: Token): Location | null {
         logger.info(`Looking for parameter ${word} in procedure ${currentScope.value}`);
@@ -1020,6 +1020,7 @@ export class DefinitionProvider {
         }
         
         const paramString = match[1];
+        logger.info(`Parameter string: "${paramString}"`);
         const paramStartColumn = procedureLine.indexOf('(') + 1;
         
         // Split parameters by comma (simple split, doesn't handle nested parentheses yet)
@@ -1028,11 +1029,15 @@ export class DefinitionProvider {
         
         for (const param of params) {
             const trimmedParam = param.trim();
-            // Extract parameter name (last word in the parameter declaration)
-            // Format: TYPE paramName or *TYPE paramName or &TYPE paramName
-            const paramMatch = trimmedParam.match(/[*&]?\s*\w+\s+([A-Za-z_][A-Za-z0-9_]*)\s*$/i);
+            logger.info(`Checking parameter: "${trimmedParam}"`);
+            
+            // Extract parameter name (last word before = or end of parameter)
+            // Format: TYPE paramName or TYPE paramName=default or *TYPE paramName or &TYPE paramName
+            // Match pattern: optional pointer/reference, whitespace, type, whitespace, paramName, optional =default
+            const paramMatch = trimmedParam.match(/[*&]?\s*\w+\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*=.*)?$/i);
             if (paramMatch) {
                 const paramName = paramMatch[1];
+                logger.info(`Extracted parameter name: "${paramName}"`);
                 if (paramName.toLowerCase() === word.toLowerCase()) {
                     // Find the position of this parameter name in the original line
                     const paramNameIndex = procedureLine.indexOf(paramName, currentColumn);
