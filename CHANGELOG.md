@@ -42,6 +42,7 @@ All notable changes to the "clarion-extension" extension will be documented in t
 - **Go to Definition (F12)**: Navigate from class member access to definition
   - Works for `self.property` and `self.method` references in class implementations
   - Works for typed variables (e.g., `otherValue.value` where `otherValue` is `StringTheory`)
+  - **Navigate from implementation to declaration**: F12 on method implementation line (e.g., `StringTheory.Construct PROCEDURE()`) jumps to CLASS declaration
   - Automatically searches INCLUDE files for class definitions
   - Uses solution-wide redirection system to resolve INCLUDE files
   - Handles both properties and methods
@@ -51,6 +52,7 @@ All notable changes to the "clarion-extension" extension will be documented in t
   - Shows class name
   - Displays declaring file name and line number
   - Long type declarations shown in code block for better readability
+  - **Method implementation hover**: Hovering on method implementation line shows the declaration signature with return type
   - F12 navigation hint included
   
 ### Technical Improvements

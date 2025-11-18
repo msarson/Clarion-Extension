@@ -126,6 +126,7 @@ For full details, see [CHANGELOG.md](CHANGELOG.md)
 - **Routine Navigation**: Complete navigation support for DO statements with hover preview and Ctrl+F12 navigation
 - **Local Variable and Parameter Navigation**: F12 navigation and hover tooltips for local variables and procedure/method parameters
 - **Class Member Navigation**: F12 navigation and hover tooltips for class properties and methods (e.g., `self.value`, `otherValue.property`)
+- **Method Implementation to Declaration**: F12 on method implementation line navigates to CLASS declaration, hover shows declaration signature
 
 ---
 ## Previous Release (v0.5.7)

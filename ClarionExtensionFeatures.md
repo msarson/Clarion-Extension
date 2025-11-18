@@ -58,6 +58,7 @@ The extension provides comprehensive solution management capabilities:
   - Local variables: Jump from usage to declaration in DATA section
   - Parameters: Jump to parameter definition in procedure/method signature
   - Class members: Jump from `self.property` or typed variable access to class definition in INCLUDE files
+  - Method implementations: F12 on method implementation line navigates to CLASS declaration
   - Supports parameters with default values
   - Scope-aware within current procedure/method
   - Automatically resolves INCLUDE files using solution-wide redirection
@@ -79,6 +80,10 @@ The extension provides comprehensive solution management capabilities:
     - Displays full type declaration including PRIVATE, name(), etc.
     - Shows declaring file and line number
     - Long types displayed in code block for readability
+  - **Method implementation lines**: Hover on method implementation shows declaration signature with return type
+    - Displays full declaration from CLASS definition
+    - Shows declaring file and line number
+    - F12 navigation hint to jump to declaration
   - **Routines**: Preview of routine code with navigation link
 - **Routine Navigation**: Complete navigation support for routines in DO statements
   - Hover over routine names in DO statements to see code preview
