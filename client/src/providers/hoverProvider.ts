@@ -76,7 +76,10 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
                 // Case-insensitive comparison for statement types
                 const statementType = (location.statementType || "").toUpperCase();
                 if (statementType === "METHOD") {
-                    hoverMessage.appendMarkdown(` - Implementation Line: ${location.sectionLineLocation.line + 1}\n\n`);
+                    const lineNumber = location.sectionLineLocation.line + 1;
+                    const uri = vscode.Uri.file(location.fullFileName);
+                    const commandUri = vscode.Uri.parse(`command:editor.action.goToImplementation`);
+                    hoverMessage.appendMarkdown(` - Implementation Line: [${lineNumber}](${commandUri} "Go to Implementation (Ctrl+F12)") *(Click or press Ctrl+F12 to navigate)*\n\n`);
                 } else if (statementType === "SECTION") {
                     hoverMessage.appendMarkdown(` - Section Line: ${location.sectionLineLocation.line + 1}\n\n`);
                 }
