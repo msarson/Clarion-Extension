@@ -140,6 +140,7 @@ export class DefinitionProvider {
  * Returns the innermost enclosing procedure/routine/class for a given line
  */
     private getInnermostScopeAtLine(tokens: Token[], line: number): Token | undefined {
+        logger.info(`🔍 Looking for scope at line ${line}`);
         const scopes = tokens.filter(token =>
             (token.subType === TokenType.Procedure ||
                 token.subType === TokenType.Routine ||
@@ -147,6 +148,11 @@ export class DefinitionProvider {
             token.line <= line &&
             (token.finishesAt === undefined || token.finishesAt >= line)
         );
+        
+        logger.info(`🔍 Found ${scopes.length} potential scopes`);
+        if (scopes.length > 0) {
+            scopes.forEach(s => logger.info(`  - ${s.value} at line ${s.line}, finishesAt: ${s.finishesAt}`));
+        }
 
         // Return the innermost (last matching) scope
         return scopes.length > 0 ? scopes[scopes.length - 1] : undefined;
