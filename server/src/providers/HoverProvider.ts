@@ -217,7 +217,9 @@ export class HoverProvider {
         const variableTokens = tokens.filter(token =>
             (token.type === TokenType.Variable ||
                 token.type === TokenType.ReferenceVariable ||
-                token.type === TokenType.ImplicitVariable) &&
+                token.type === TokenType.ImplicitVariable ||
+                token.subType === TokenType.Variable ||
+                token.subType === TokenType.ReferenceVariable) &&
             token.value.toLowerCase() === word.toLowerCase() &&
             token.start === 0 &&
             token.line >= currentScope.line &&
@@ -241,7 +243,14 @@ export class HoverProvider {
             t.value.toUpperCase() === 'BYTE'
         );
 
-        const type = typeTokens.length > 0 ? typeTokens[0].value : 'Unknown';
+        // Check if it's a reference variable (&)
+        const isReference = varToken.subType === TokenType.ReferenceVariable;
+        let type = typeTokens.length > 0 ? typeTokens[0].value : 'Unknown';
+        
+        // Add & prefix for reference variables
+        if (isReference && !type.startsWith('&')) {
+            type = '&' + type;
+        }
 
         return { type, line: varToken.line };
     }
