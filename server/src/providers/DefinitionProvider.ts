@@ -560,11 +560,21 @@ export class DefinitionProvider {
             logger.info(`❌ NO SCOPE FOUND at line ${currentLine} - cannot check for parameters`);
         }
     
+        // DEBUG: Log all tokens that match the word to see what we're getting
+        const allMatchingTokens = tokens.filter(token => 
+            token.value.toLowerCase() === word.toLowerCase()
+        );
+        logger.info(`🔍 DEBUG: Found ${allMatchingTokens.length} tokens matching "${word}"`);
+        allMatchingTokens.forEach(t => 
+            logger.info(`  -> Line ${t.line}, Type: ${t.type}, Start: ${t.start}, Value: "${t.value}"`)
+        );
+
         const variableTokens = tokens.filter(token =>
             (token.type === TokenType.Variable ||
              token.type === TokenType.ReferenceVariable ||
              token.type === TokenType.ImplicitVariable) &&
             token.value.toLowerCase() === word.toLowerCase() &&
+            token.start === 0 &&
             !(token.line === position.line &&
               position.character >= token.start &&
               position.character <= token.start + token.value.length)

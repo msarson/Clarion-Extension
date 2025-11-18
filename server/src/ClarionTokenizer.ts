@@ -265,6 +265,11 @@ export class ClarionTokenizer {
             const structureTime = performance.now() - structureStart;
             logger.info("🔍 [DEBUG] Document structure processed");
             
+            const routineVarsStart = performance.now();
+            this.tokenizeRoutineVariables(); // ✅ Step 3: Tokenize routine DATA section variables
+            const routineVarsTime = performance.now() - routineVarsStart;
+            logger.info(`🔍 [DEBUG] Routine variables tokenized (${routineVarsTime.toFixed(2)}ms)`);
+            
             // 📊 METRICS: Calculate and log performance stats
             const totalTime = performance.now() - perfStart;
             const tokensPerMs = this.tokens.length / totalTime;
@@ -523,6 +528,70 @@ export class ClarionTokenizer {
 
     }
 
+    /** ✅ Tokenize variables in routine DATA sections */
+    private tokenizeRoutineVariables(): void {
+        // Find all routines with DATA sections
+        const routines = this.tokens.filter(t => 
+            t.subType === TokenType.Routine && t.hasLocalData
+        );
+
+        for (const routine of routines) {
+            let inDataSection = false;
+            const routineEnd = routine.finishesAt || this.lines.length - 1;
+            
+            // Search from routine start to routine end
+            for (let lineNum = routine.line; lineNum <= routineEnd; lineNum++) {
+                const line = this.lines[lineNum];
+                if (!line) continue;
+                
+                // Check for DATA keyword
+                if (line.match(/^\s*data\s*$/i)) {
+                    inDataSection = true;
+                    logger.info(`Found DATA section in routine ${routine.value} at line ${lineNum}`);
+                    continue;
+                }
+                
+                // Check for CODE keyword (ends DATA section)
+                if (line.match(/^\s*code\s*$/i)) {
+                    inDataSection = false;
+                    logger.info(`DATA section ended at line ${lineNum}`);
+                    break;
+                }
+                
+                // If in DATA section, tokenize variable declarations
+                if (inDataSection) {
+                    // Match variable declarations: varName   type
+                    // Variables in routines start at column 0 (after any leading whitespace is removed)
+                    const varMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+(&?[A-Za-z_][A-Za-z0-9_]*)/i);
+                    if (varMatch) {
+                        const varName = varMatch[1];
+                        const isReference = varMatch[2].startsWith('&');
+                        
+                        logger.info(`Found routine variable: ${varName} (reference: ${isReference}) at line ${lineNum}`);
+                        
+                        // Create a Variable or ReferenceVariable token
+                        const varToken: Token = {
+                            type: TokenType.Label,
+                            subType: isReference ? TokenType.ReferenceVariable : TokenType.Variable,
+                            value: varName,
+                            line: lineNum,
+                            start: 0,
+                            maxLabelLength: 0
+                        };
+                        
+                        // Insert the token in the correct position
+                        // Find insertion point: after the last token on this line or before first token on next line
+                        let insertIndex = this.tokens.findIndex(t => t.line > lineNum);
+                        if (insertIndex === -1) {
+                            insertIndex = this.tokens.length;
+                        }
+                        
+                        this.tokens.splice(insertIndex, 0, varToken);
+                    }
+                }
+            }
+        }
+    }
 
     /** ✅ Expand tabs into spaces for correct alignment */
     private expandTabs(line: string): string {
