@@ -1,9 +1,10 @@
 name: Publish VS Code Extension
 
 on:
-  push:
-    branches:
-      - master
+  # Disabled automatic publishing - use manual workflow_dispatch only
+  # push:
+  #   branches:
+  #     - master
   workflow_dispatch:
     inputs:
       version:
