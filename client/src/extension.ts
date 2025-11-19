@@ -251,13 +251,21 @@ export async function activate(context: ExtensionContext): Promise<void> {
         
         if (!hasShownFushinsoftMessage) {
             const action = await window.showInformationMessage(
-                "The fushnisoft.clarion extension is no longer needed. All syntax highlighting and language features are now included in Clarion Extensions. Please reload VS Code and then uninstall fushnisoft.clarion from the Extensions view.",
-                "Reload VS Code",
+                "The fushnisoft.clarion extension is no longer needed. All syntax highlighting and language features are now included in Clarion Extensions.",
+                "Uninstall & Reload",
                 "Don't Show Again"
             );
             
-            if (action === "Reload VS Code") {
-                await commands.executeCommand('workbench.action.reloadWindow');
+            if (action === "Uninstall & Reload") {
+                try {
+                    await commands.executeCommand('workbench.extensions.uninstallExtension', 'fushnisoft.clarion');
+                    // Immediately reload to apply changes
+                    await commands.executeCommand('workbench.action.reloadWindow');
+                } catch (error) {
+                    // If uninstall fails (due to cached dependency), just reload first
+                    window.showInformationMessage("Please reload VS Code, then uninstall fushnisoft.clarion from the Extensions view.");
+                    await commands.executeCommand('workbench.action.reloadWindow');
+                }
             } else if (action === "Don't Show Again") {
                 await context.globalState.update('clarion.hasShownFushinsoftMessage', true);
             }
