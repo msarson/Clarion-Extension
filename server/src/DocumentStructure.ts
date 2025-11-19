@@ -295,6 +295,39 @@ export class DocumentStructure {
             }
         }
 
+        // ✅ Check if structure ends on the same line (single-line declaration)
+        // Examples: "AnswerDateTime GROUP(DateTimeType)." or "MyGroup GROUP;END"
+        const sameLine = this.tokensByLine.get(token.line) || [];
+        const structureIndex = sameLine.indexOf(token);
+        let endsOnSameLine = false;
+        
+        // Look for terminator (. or END) after this structure token on the same line
+        for (let i = structureIndex + 1; i < sameLine.length; i++) {
+            const t = sameLine[i];
+            
+            // Found period terminator
+            if (t.value === '.') {
+                endsOnSameLine = true;
+                token.finishesAt = token.line;
+                logger.info(`📌 Single-line structure: ${token.value} at Line ${token.line} (ends with period)`);
+                break;
+            }
+            
+            // Found END keyword
+            if (t.type === TokenType.EndStatement || t.value.toUpperCase() === 'END') {
+                endsOnSameLine = true;
+                token.finishesAt = token.line;
+                logger.info(`📌 Single-line structure: ${token.value} at Line ${token.line} (ends with END)`);
+                break;
+            }
+        }
+        
+        // If structure ends on same line, don't push to stack (no folding needed)
+        if (endsOnSameLine) {
+            logger.info(`⏭️ Skipping stack push for single-line structure: ${token.value} at Line ${token.line}`);
+            return;
+        }
+
         token.maxLabelLength = 0;
         this.structureStack.push(token);
 
