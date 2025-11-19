@@ -2,7 +2,7 @@ import { Token, TokenType } from "./ClarionTokenizer";
 import LoggerManager from "./logger";
 
 const logger = LoggerManager.getLogger("DocumentStructure");
-logger.setLevel("error");
+logger.setLevel("error"); // Back to error-only logging
 
 export class DocumentStructure {
     private structureStack: Token[] = [];
@@ -19,7 +19,7 @@ export class DocumentStructure {
     private tokensByLine: Map<number, Token[]> = new Map();
     private structuresByType: Map<string, Token[]> = new Map();
 
-    constructor(private tokens: Token[]) {
+    constructor(private tokens: Token[], private lines?: string[]) {
         // 🚀 PERFORMANCE: Build indexes first for fast lookups
         this.buildIndexes();
         this.maxLabelWidth = this.processLabels();
@@ -301,30 +301,40 @@ export class DocumentStructure {
         const structureIndex = sameLine.indexOf(token);
         let endsOnSameLine = false;
         
-        // Look for terminator (. or END) after this structure token on the same line
-        for (let i = structureIndex + 1; i < sameLine.length; i++) {
-            const t = sameLine[i];
+        // Check source text for period (since periods may not be tokenized)
+        if (this.lines && token.line >= 0 && token.line < this.lines.length) {
+            const lineText = this.lines[token.line];
             
-            // Found period terminator
-            if (t.value === '.') {
+            // Check if line ends with period (after trimming whitespace)
+            if (lineText.trim().endsWith('.')) {
                 endsOnSameLine = true;
                 token.finishesAt = token.line;
-                logger.info(`📌 Single-line structure: ${token.value} at Line ${token.line} (ends with period)`);
-                break;
             }
-            
-            // Found END keyword
-            if (t.type === TokenType.EndStatement || t.value.toUpperCase() === 'END') {
-                endsOnSameLine = true;
-                token.finishesAt = token.line;
-                logger.info(`📌 Single-line structure: ${token.value} at Line ${token.line} (ends with END)`);
-                break;
+        }
+        
+        // Also check tokens for period or END (fallback if source text not available)
+        if (!endsOnSameLine) {
+            for (let i = structureIndex + 1; i < sameLine.length; i++) {
+                const t = sameLine[i];
+                
+                // Found period terminator
+                if (t.value === '.') {
+                    endsOnSameLine = true;
+                    token.finishesAt = token.line;
+                    break;
+                }
+                
+                // Found END keyword
+                if (t.type === TokenType.EndStatement || t.value.toUpperCase() === 'END') {
+                    endsOnSameLine = true;
+                    token.finishesAt = token.line;
+                    break;
+                }
             }
         }
         
         // If structure ends on same line, don't push to stack (no folding needed)
         if (endsOnSameLine) {
-            logger.info(`⏭️ Skipping stack push for single-line structure: ${token.value} at Line ${token.line}`);
             return;
         }
 
