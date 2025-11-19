@@ -1,6 +1,15 @@
 # Change Log
 All notable changes to the "clarion-extension" extension will be documented in this file.
 
+## [0.6.5] - 2025-11-19
+
+**Note:** This release is functionally identical to v0.6.4. Due to a VS Code Marketplace publishing inconsistency where v0.6.4 was accepted but not properly indexed, we republished as v0.6.5 to ensure users receive the update.
+
+### What's in This Release
+All features and fixes from v0.6.4 (see below).
+
+---
+
 ## [0.6.4] - 2025-11-19
 
 ### Enhancements
