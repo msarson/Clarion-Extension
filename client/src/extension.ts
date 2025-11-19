@@ -1595,6 +1595,13 @@ async function createStatusView(context: ExtensionContext) {
     statusView = window.createTreeView('clarionStatusView', {
         treeDataProvider: statusViewProvider
     });
+    
+    // Inject the treeView reference so provider can update title
+    statusViewProvider.setTreeView(statusView);
+    
+    // Set initial title
+    statusViewProvider.refresh();
+    
     context.subscriptions.push(statusView);
     logger.info("✅ Status view created");
     

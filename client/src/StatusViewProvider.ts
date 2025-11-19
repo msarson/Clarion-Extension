@@ -32,11 +32,50 @@ export class StatusItem extends vscode.TreeItem {
 export class StatusViewProvider implements vscode.TreeDataProvider<StatusItem> {
     private _onDidChangeTreeData: vscode.EventEmitter<StatusItem | undefined | null | void> = new vscode.EventEmitter<StatusItem | undefined | null | void>();
     readonly onDidChangeTreeData: vscode.Event<StatusItem | undefined | null | void> = this._onDidChangeTreeData.event;
+    private treeView?: vscode.TreeView<StatusItem>;
 
     constructor() {}
+    
+    setTreeView(treeView: vscode.TreeView<StatusItem>): void {
+        this.treeView = treeView;
+    }
 
     refresh(): void {
         this._onDidChangeTreeData.fire();
+        this.updateTitle();
+    }
+    
+    private updateTitle(): void {
+        if (!this.treeView) return;
+        
+        const { warnings, errors } = this.countIssues();
+        
+        if (errors > 0 || warnings > 0) {
+            this.treeView.title = `Extension Status (${errors} ❌, ${warnings} ⚠️)`;
+        } else {
+            this.treeView.title = "Extension Status ✅";
+        }
+    }
+    
+    private countIssues(): { errors: number; warnings: number } {
+        let errors = 0;
+        let warnings = 0;
+        
+        const hasWorkspace = !!vscode.workspace.workspaceFolders;
+        const isTrusted = vscode.workspace.isTrusted;
+        const hasSolution = !!globalSolutionFile;
+        const serverActive = isClientReady();
+        
+        // Count errors (❌)
+        if (!serverActive) errors++;
+        if (!isTrusted) errors++;
+        if (!hasWorkspace) errors++;
+        
+        // Count warnings (⚠️)
+        if (!hasSolution && hasWorkspace && isTrusted) warnings++;
+        if (!serverActive) warnings += 2; // Document symbols and folding
+        
+        return { errors, warnings };
     }
 
     getTreeItem(element: StatusItem): vscode.TreeItem {
