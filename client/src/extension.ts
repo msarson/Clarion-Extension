@@ -393,15 +393,6 @@ export async function activate(context: ExtensionContext): Promise<void> {
         if (!isRefreshingRef.value) {
             await refreshOpenDocuments();
 
-            // Initialize the solution open context variable
-            await commands.executeCommand("setContext", "clarion.solutionOpen", !!globalSolutionFile);
-            
-            // Always create the solution tree view, even if no solution is open
-            await createSolutionTreeView(context);
-            
-            // Create the structure view
-            await createStructureView(context);
-
             // Check if we have a solution file loaded from workspace settings
             if (globalSolutionFile) {
                 logger.info(`✅ Solution file found in workspace settings: ${globalSolutionFile}`);
@@ -435,6 +426,16 @@ export async function activate(context: ExtensionContext): Promise<void> {
         // No workspace - log that advanced features are disabled
         logger.info("ℹ️ Advanced features disabled: no workspace or workspace not trusted");
     }
+
+    // ✅ ALWAYS create the views (they work without workspace)
+    // Initialize the solution open context variable
+    await commands.executeCommand("setContext", "clarion.solutionOpen", hasWorkspace && !!globalSolutionFile);
+    
+    // Always create the solution tree view (shows "Open Solution" button when no solution)
+    await createSolutionTreeView(context);
+    
+    // Always create the structure view (shows document outline, works without workspace)
+    await createStructureView(context);
 
     context.subscriptions.push(...disposables);
 

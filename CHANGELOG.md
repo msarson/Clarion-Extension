@@ -1,6 +1,20 @@
 # Change Log
 All notable changes to the "clarion-extension" extension will be documented in this file.
 
+## [0.6.2] - 2025-01-19
+
+### Bug Fixes
+
+#### Critical: Fix Sidebar Icon and Views Not Showing Without Workspace
+- **Issue**: Clarion sidebar icon disappeared when no workspace was open
+- **Root cause**: View creation (Solution View and Structure View) was only happening when workspace existed
+- **Resolution**: Views are now always created regardless of workspace status
+- **Impact**: 
+  - Sidebar icon now always visible
+  - Solution View shows "Open Solution" button when no solution is open
+  - Structure View works immediately without workspace (shows document outline)
+  - Better user experience and discoverability of extension features
+
 ## [0.6.1] - 2025-01-19
 
 ### Enhancements
