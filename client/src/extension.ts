@@ -14,6 +14,7 @@ import { ClarionDecorator } from './ClarionDecorator';
 
 import { SolutionTreeDataProvider } from './SolutionTreeDataProvider';
 import { StructureViewProvider } from './StructureViewProvider';
+import { StatusViewProvider } from './StatusViewProvider';
 import { TreeNode } from './TreeNode';
 import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile, setGlobalClarionSelection, ClarionSolutionSettings } from './globals';
 import * as buildTasks from './buildTasks';
@@ -32,6 +33,8 @@ let treeView: TreeView<TreeNode> | undefined;
 let solutionTreeDataProvider: SolutionTreeDataProvider | undefined;
 let structureViewProvider: StructureViewProvider | undefined;
 let structureView: TreeView<any> | undefined;
+let statusViewProvider: StatusViewProvider | undefined;
+let statusView: TreeView<any> | undefined;
 let documentManager: DocumentManager | undefined;
 
 let configStatusBarItem: StatusBarItem;
@@ -436,6 +439,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
     
     // Always create the structure view (shows document outline, works without workspace)
     await createStructureView(context);
+    
+    // Always create the status view (shows extension status and diagnostics)
+    await createStatusView(context);
 
     context.subscriptions.push(...disposables);
 
@@ -1582,6 +1588,30 @@ async function createStructureView(context: ExtensionContext) {
     }
 }
 
+async function createStatusView(context: ExtensionContext) {
+    if (!statusViewProvider) {
+        statusViewProvider = new StatusViewProvider();
+        statusView = window.createTreeView('clarionStatusView', {
+            treeDataProvider: statusViewProvider
+        });
+        context.subscriptions.push(statusView);
+        logger.info("✅ Status view created");
+        
+        // Refresh status view when workspace changes
+        context.subscriptions.push(
+            workspace.onDidChangeWorkspaceFolders(() => {
+                statusViewProvider?.refresh();
+            })
+        );
+        
+        // Export refresh function for use elsewhere
+        (global as any).refreshStatusView = () => {
+            statusViewProvider?.refresh();
+        };
+    }
+}
+
+
 export async function closeClarionSolution(context: ExtensionContext) {
     try {
         logger.info("🔄 Closing Clarion solution...");
@@ -1743,6 +1773,92 @@ export async function openSolutionFromList(context: ExtensionContext) {
 
 export async function openClarionSolution(context: ExtensionContext) {
     try {
+        // ✅ Check if workspace exists - offer to create one if not
+        if (!workspace.workspaceFolders) {
+            const choice = await window.showInformationMessage(
+                "Solutions require a workspace. Would you like to create one?",
+                { modal: true },
+                "Create Workspace & Open Solution",
+                "Cancel"
+            );
+            
+            if (choice !== "Create Workspace & Open Solution") {
+                return;
+            }
+            
+            // Let user pick solution file first
+            const solutionUris = await window.showOpenDialog({
+                canSelectFiles: true,
+                canSelectFolders: false,
+                canSelectMany: false,
+                filters: { 'Clarion Solution': ['sln'] },
+                title: 'Select Clarion Solution'
+            });
+            
+            if (!solutionUris || solutionUris.length === 0) {
+                window.showInformationMessage("Solution selection canceled.");
+                return;
+            }
+            
+            const solutionPath = solutionUris[0].fsPath;
+            const solutionFolder = path.dirname(solutionPath);
+            const solutionName = path.basename(solutionPath, '.sln');
+            const defaultWorkspacePath = path.join(solutionFolder, `${solutionName}.code-workspace`);
+            
+            // Ask where to save workspace
+            const workspaceChoice = await window.showInformationMessage(
+                `Create workspace in solution folder?\n${solutionFolder}`,
+                { modal: true },
+                "Create Here",
+                "Choose Different Location",
+                "Cancel"
+            );
+            
+            if (workspaceChoice === "Cancel" || !workspaceChoice) {
+                window.showInformationMessage("Workspace creation canceled.");
+                return;
+            }
+            
+            let finalWorkspacePath = defaultWorkspacePath;
+            
+            if (workspaceChoice === "Choose Different Location") {
+                const saveUri = await window.showSaveDialog({
+                    defaultUri: Uri.file(defaultWorkspacePath),
+                    filters: { 'Workspace': ['code-workspace'] },
+                    title: 'Save Workspace As'
+                });
+                
+                if (!saveUri) {
+                    window.showInformationMessage("Workspace creation canceled.");
+                    return;
+                }
+                finalWorkspacePath = saveUri.fsPath;
+            }
+            
+            // Create workspace file
+            const workspaceContent = {
+                folders: [{ path: solutionFolder }],
+                settings: {
+                    "clarion.solutionFile": solutionPath
+                }
+            };
+            
+            try {
+                fs.writeFileSync(finalWorkspacePath, JSON.stringify(workspaceContent, null, 2));
+                logger.info(`✅ Created workspace file: ${finalWorkspacePath}`);
+                
+                // Open the workspace (VS Code will reload)
+                window.showInformationMessage(`Workspace created. Opening ${solutionName}...`);
+                await commands.executeCommand('vscode.openFolder', Uri.file(finalWorkspacePath));
+                
+                return;
+            } catch (error) {
+                logger.error(`❌ Error creating workspace: ${error instanceof Error ? error.message : String(error)}`);
+                window.showErrorMessage(`Failed to create workspace: ${error instanceof Error ? error.message : String(error)}`);
+                return;
+            }
+        }
+
         // ✅ Store current values in case user cancels
         const previousSolutionFile = globalSolutionFile;
         const previousPropertiesFile = globalClarionPropertiesFile;

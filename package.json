@@ -119,6 +119,11 @@
                     "id": "clarionStructureView",
                     "name": "Structure",
                     "icon": "symbol-structure"
+                },
+                {
+                    "id": "clarionStatusView",
+                    "name": "Extension Status",
+                    "icon": "info"
                 }
             ]
         },

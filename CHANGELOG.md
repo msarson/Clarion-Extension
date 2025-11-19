@@ -3,6 +3,29 @@ All notable changes to the "clarion-extension" extension will be documented in t
 
 ## [0.6.2] - 2025-01-19
 
+### Enhancements
+
+#### New: Extension Status View
+- **Added diagnostic status view** showing what features are enabled/disabled
+- **Real-time status monitoring**:
+  - Language Server status
+  - Document Symbols availability
+  - Code Folding status
+  - Workspace and trust status
+  - Solution status
+  - Cross-file navigation capabilities
+  - Build tasks availability
+- **Actionable buttons** for common tasks (Save Workspace, Open Solution, Manage Trust)
+- **Helpful tips** to guide users toward full functionality
+- **Solves the "why isn't X working?" problem** - users can now see exactly what's enabled and why
+
+#### Auto-Create Workspace on Solution Open
+- **Smooth onboarding**: Opening a solution without a workspace now offers to create one automatically
+- **Smart defaults**: Workspace file created in solution folder with solution name
+- **User control**: Option to choose different location for workspace file
+- **Pre-configured**: Workspace automatically includes solution file setting
+- **Eliminates confusion**: No more "this feature requires a workspace" dead-ends
+
 ### Bug Fixes
 
 #### Critical: Fix Sidebar Icon and Views Not Showing Without Workspace
