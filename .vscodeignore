@@ -15,6 +15,7 @@ node_modules/**/*.map
 # Exclude source files - only ship compiled JS
 client/src/**
 server/src/**
+common/**
 
 # Exclude test files
 test_*.clw
@@ -27,6 +28,7 @@ RELEASE_NOTES_*.md
 RELEASE_SUMMARY.md
 PERFORMANCE_METRICS.md
 PUBLISHING_GUIDE.md
+HOTFIX_*.md
 WelcomePanel.png
 vsc-extension-quickstart.md
 Clarion-Extension.code-workspace
@@ -34,6 +36,24 @@ Clarion-Extension.code-workspace
 # Exclude GitHub files
 .github/**
 
-# Exclude dev dependencies
+# Exclude dev dependencies and config files
 tsconfig*.json
 .vscode/**
+server/tsconfig.json
+server/package.json
+server/package-lock.json
+client/tsconfig.json
+client/package.json
+client/package-lock.json
+
+# Exclude unnecessary node_modules subdirectories
+server/node_modules/**/*.md
+server/node_modules/**/*.txt
+server/node_modules/**/*.yml
+server/node_modules/**/test/**
+server/node_modules/**/tests/**
+server/node_modules/**/example/**
+server/node_modules/**/examples/**
+server/node_modules/**/docs/**
+server/node_modules/**/*.ts
+server/node_modules/**/*.map
