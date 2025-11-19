@@ -244,6 +244,37 @@ export async function activate(context: ExtensionContext): Promise<void> {
     context.subscriptions.push(diagnosticCollection);
     logger.info("🔄 Activating Clarion extension...");
     
+    // Check if fushnisoft.clarion extension is installed
+    const fushinsoftExtension = extensions.getExtension('fushnisoft.clarion');
+    if (fushinsoftExtension) {
+        const hasShownFushinsoftMessage = context.globalState.get<boolean>('clarion.hasShownFushinsoftMessage', false);
+        
+        if (!hasShownFushinsoftMessage) {
+            const action = await window.showInformationMessage(
+                "The fushnisoft.clarion extension is no longer needed. All syntax highlighting and language features are now included in Clarion Extensions. Would you like to uninstall it?",
+                "Uninstall fushnisoft.clarion",
+                "Keep Both",
+                "Don't Show Again"
+            );
+            
+            if (action === "Uninstall fushnisoft.clarion") {
+                try {
+                    await commands.executeCommand('workbench.extensions.uninstallExtension', 'fushnisoft.clarion');
+                    window.showInformationMessage("fushnisoft.clarion has been uninstalled. Please reload VS Code for changes to take effect.", "Reload Now").then(selection => {
+                        if (selection === "Reload Now") {
+                            commands.executeCommand('workbench.action.reloadWindow');
+                        }
+                    });
+                } catch (error) {
+                    logger.error("Failed to uninstall fushnisoft.clarion", error);
+                    window.showWarningMessage("Could not automatically uninstall fushnisoft.clarion. Please uninstall it manually from the Extensions view.");
+                }
+            }
+            // Mark as shown regardless of action to avoid nagging
+            await context.globalState.update('clarion.hasShownFushinsoftMessage', true);
+        }
+    }
+    
     // Add event listener for active editor changes to update the build status bar
     context.subscriptions.push(
         window.onDidChangeActiveTextEditor(() => {

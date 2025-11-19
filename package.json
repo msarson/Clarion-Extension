@@ -2,7 +2,7 @@
     "name": "clarion-extensions",
     "displayName": "Clarion Extensions",
     "description": "Extension for Clarion Language",
-    "version": "0.6.5",
+    "version": "0.7.0",
     "publisher": "msarson",
     "repository": {
         "type": "git",
@@ -33,10 +33,34 @@
         "clarion",
         "json"
     ],
-    "extensionDependencies": [
-        "fushnisoft.clarion"
-    ],
     "contributes": {
+        "languages": [
+            {
+                "id": "clarion",
+                "aliases": [
+                    "Clarion",
+                    "clarion"
+                ],
+                "extensions": [
+                    ".clw",
+                    ".equ",
+                    ".inc",
+                    ".int",
+                    ".txa",
+                    ".txd",
+                    ".tpl",
+                    ".tpw"
+                ],
+                "configuration": "./syntaxes/clarion.configuration.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "clarion",
+                "scopeName": "source.clarion",
+                "path": "./syntaxes/clarion.tmLanguage.json"
+            }
+        ],
         "submenus": [
             {
                 "id": "clarion.solutionMenu",

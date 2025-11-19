@@ -528,7 +528,7 @@ export class ClarionTokenizer {
 
         // ✅ Second Pass: Process Token Relationships
         // ✅ Create a DocumentStructure instance and process the tokens
-        const documentStructure = new DocumentStructure(this.tokens);
+        const documentStructure = new DocumentStructure(this.tokens, this.lines);
         documentStructure.process();
 
     }

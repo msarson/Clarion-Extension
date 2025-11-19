@@ -3,10 +3,11 @@
 ## Table of Contents
 
 - [Overview](#overview)
+- [Dedication](#dedication---version-070)
 - [Features](#features)
 - [Installation](#installation)
 - [Marketplace](#marketplace-information)
-- [Changelog](#changelog-whats-new-in-v056)
+- [Changelog](#changelog-whats-new-in-v070)
 - [Getting Started](#getting-started)
 - [Troubleshooting](#troubleshooting)
 - [Contributing and Feedback](#contributing-and-feedback)
@@ -18,11 +19,37 @@
 
 ## Overview
 
-Welcome to the **Clarion Extension** for VS Code! This extension enhances the functionality of the [Fushnisoft Clarion Extension](https://marketplace.visualstudio.com/items?itemName=Fushnisoft.Clarion) by providing powerful tools such as **snippets, code folding, solution parsing, and enhanced navigation**.
+Welcome to the **Clarion Extension** for VS Code! This extension provides comprehensive support for the Clarion programming language, including **syntax highlighting, snippets, code folding, solution parsing, and enhanced navigation**.
+
+**New in v0.7.0**: This extension now includes all syntax highlighting and language features previously provided by the Fushnisoft extension. You no longer need to install a separate extension for basic Clarion language support!
 
 For a quick reference, check out the [Cheat Sheet](https://github.com/msarson/Clarion-Extension/blob/master/docs/CheatSheet.md).
 
-A special thanks to [Mark Goldberg](https://github.com/MarkGoldberg) for his contributions to code folding and [Allen Zhu](https://github.com/celeron533) for Document Outline support.
+---
+
+## Dedication - Version 0.7.0
+
+**This release is dedicated to the memory of Brahn Partridge (4th January 1977 – 29th October 2021)**
+
+Brahn, known in the community as **Fushnisoft**, created the original Clarion language support for VS Code through his [fushnisoft.clarion extension](https://marketplace.visualstudio.com/items?itemName=Fushnisoft.Clarion). His work provided the foundation for syntax highlighting and language features that so many Clarion developers relied upon.
+
+Following Brahn's passing in October 2021, his extension could no longer be maintained or updated. The Clarion community has continued to evolve, and developers needed ongoing support for new VS Code features and improvements.
+
+In v0.7.0, we have respectfully integrated Brahn's TextMate grammar and language configuration into Clarion Extensions. This integration:
+
+- **Preserves his legacy**: His excellent work continues to serve the community
+- **Enables future updates**: The language support can now evolve with VS Code and Clarion
+- **Simplifies installation**: Developers need only one extension
+- **Honors his contribution**: Full attribution is maintained in our LICENSE and documentation
+
+Brahn's contributions to the Clarion developer community will not be forgotten. Thank you, Brahn, for your dedication to making Clarion development better for everyone.
+
+*Rest in peace, friend.*
+
+---
+
+**Acknowledgments:**
+
 
 ### This is an active project looking for contributors!
 
@@ -34,6 +61,7 @@ This extension is under **active development** and we need your **help**! Whethe
 
 For a comprehensive list of all features and their locations within the extension architecture, see our [Features Documentation](https://github.com/msarson/Clarion-Extension/blob/master/ClarionExtensionFeatures.md).
 
+- **Complete Language Support**: Syntax highlighting, bracket matching, and auto-closing pairs for all Clarion file types (.clw, .inc, .txa, etc.)
 - **Solution Explorer View**: Navigate Clarion projects directly inside VS Code.
 - **Automatic Solution Parsing**: Detects all projects and redirection files in your solution.
 - **Enhanced "Go To Definition"**: Supports `INCLUDE` and `MODULE` statements, with redirection-aware searches.
@@ -60,16 +88,24 @@ For a comprehensive list of all features and their locations within the extensio
 ### Requirements
 
 - **Visual Studio Code** (latest version recommended)
-- **Fushnisoft Clarion Extension** (as a base language extension)  
-  Install from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=Fushnisoft.Clarion).
 
 ### Installation Steps
 
 1. Open **Visual Studio Code**.
 2. Go to the **Extensions Marketplace** (`Ctrl+Shift+X`).
-3. Search for **Clarion Extension**.
+3. Search for **Clarion Extensions**.
 4. Click **Install**.
 5. Restart VS Code if needed.
+
+### Upgrading from v0.6.x or earlier
+
+**Important**: If you are upgrading from v0.6.x or earlier and have the **fushnisoft.clarion** extension installed:
+
+1. **First**: Uninstall **BOTH** extensions (fushnisoft.clarion AND clarion-extensions)
+2. **Then**: Reinstall **only** clarion-extensions v0.7.0 or later
+3. All syntax highlighting and language features are now included - you no longer need fushnisoft.clarion
+
+This is necessary because older versions had a dependency on fushnisoft.clarion that prevents individual uninstallation.
 
 ---
 
