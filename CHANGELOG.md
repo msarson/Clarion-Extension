@@ -1,6 +1,48 @@
 # Change Log
 All notable changes to the "clarion-extension" extension will be documented in this file.
 
+## [0.6.4] - 2025-11-19
+
+### Enhancements
+
+#### Extension Status View Improvements
+- **Dynamic refresh**: Status view now updates automatically when:
+  - Solution is opened or closed
+  - Workspace folders change
+  - Workspace trust is granted
+- **At-a-glance status**: View title shows issue count (e.g., "Extension Status (1 ❌, 2 ⚠️)")
+- **Contextual tips**: Tips section only shows when there's an issue to address
+  - No workspace? Shows workspace-related tips
+  - Untrusted? Shows trust-related tips
+  - No solution? Shows solution-related tips
+  - Everything working? No tips section shown (clean view)
+- **Default collapsed**: View starts collapsed to reduce clutter
+- **Smart indicators**: Title shows ✅ when all features working
+
+### Bug Fixes
+
+#### Critical: Fixed Extension Activation Failure
+- **Issue**: Extension failed to activate with "Cannot find module 'glob'" error
+- **Root cause**: `glob` was in both devDependencies and dependencies, but vsce excludes devDependencies
+- **Resolution**: Removed glob from devDependencies, kept only in dependencies
+- **Impact**: Extension now activates properly in production environments
+
+#### Fixed Code Folding for Single-Line Structures
+- **Issue**: Single-line structure declarations (e.g., `GROUP(DateTimeType).` or `GROUP;END`) were creating fold ranges, causing subsequent folds to break
+- **Resolution**: Detect when structure terminator (`.` or `END`) is on same line and skip fold creation
+- **Impact**: Code folding now works correctly throughout the file
+
+#### Improved .vscodeignore
+- **Issue**: client/package.json and server/package.json were excluded, potentially causing dependency issues
+- **Resolution**: Include package.json files that define runtime dependencies
+- **Impact**: Extension packaging now includes all necessary dependency metadata
+
+### Security
+
+#### Dependency Updates
+- **Merged Dependabot PR**: Updated brace-expansion from 1.1.11 to 1.1.12
+- **Fix**: Addressed ReDoS (Regular Expression Denial of Service) vulnerability
+
 ## [0.6.2] - 2025-01-19
 
 ### Enhancements
