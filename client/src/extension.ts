@@ -262,55 +262,92 @@ export async function activate(context: ExtensionContext): Promise<void> {
     // Icons are already in the images directory
     logger.info("✅ Using SVG icons from images directory");
 
+    // ✅ Always start the language server for basic features (symbols, folding, formatting)
     if (!client) {
         logger.info("🚀 Starting Clarion Language Server...");
         // Use a longer delay if XML files are open
         await startClientServer(context, openXmlFiles.length > 0);
     }
 
-    // ✅ Step 1: Ensure a workspace is saved
-    if (!workspace.workspaceFolders) {
-        logger.warn("⚠️ No saved workspace detected. Clarion features will be disabled until a workspace is saved.");
-        return; // ⛔ Exit early
+    // ✅ Check workspace and trust status
+    const hasWorkspace = !!workspace.workspaceFolders;
+    const isTrusted = workspace.isTrusted;
+
+    // ✅ Show one-time notification if no workspace (use context.globalState to track)
+    if (!hasWorkspace) {
+        const hasShownNoWorkspaceMessage = context.globalState.get<boolean>('clarion.hasShownNoWorkspaceMessage', false);
+        
+        if (!hasShownNoWorkspaceMessage) {
+            logger.info("ℹ️ No workspace detected. Basic features enabled (symbols, folding, hover). Full features require a saved workspace.");
+            
+            const action = await window.showInformationMessage(
+                "Clarion: Basic features enabled. Save a workspace for solution management and enhanced navigation.",
+                "Save Workspace",
+                "Don't Show Again"
+            );
+            
+            if (action === "Save Workspace") {
+                await commands.executeCommand('workbench.action.files.saveWorkspaceAs');
+            } else if (action === "Don't Show Again") {
+                await context.globalState.update('clarion.hasShownNoWorkspaceMessage', true);
+            }
+        }
+        
+        // Continue with limited activation - don't return here
+        logger.info("📝 Operating in no-workspace mode: basic language features available");
     }
 
-    // ✅ Step 2: Ensure the workspace is trusted
-    if (!workspace.isTrusted) {
+    // ✅ Early exit only if workspace exists but isn't trusted
+    if (hasWorkspace && !isTrusted) {
         logger.warn("⚠️ Workspace is not trusted. Clarion features will remain disabled until trust is granted.");
-        return; // ⛔ Exit early
+        window.showWarningMessage("Clarion extension requires workspace trust to enable features.");
+        return; // ⛔ Exit early only for untrusted workspace
     }
 
-    // ✅ Step 3: Load workspace settings before initialization
-    await globalSettings.initializeFromWorkspace();
-    
-    // Log the current state of global variables after loading workspace settings
-    logger.info(`🔍 Global settings state after loading workspace settings:
-        - globalSolutionFile: ${globalSolutionFile || 'not set'}
-        - globalClarionPropertiesFile: ${globalClarionPropertiesFile || 'not set'}
-        - globalClarionVersion: ${globalClarionVersion || 'not set'}`);
+    // ✅ Load workspace settings if we have a workspace
+    if (hasWorkspace) {
+        await globalSettings.initializeFromWorkspace();
+        
+        // Log the current state of global variables after loading workspace settings
+        logger.info(`🔍 Global settings state after loading workspace settings:
+            - globalSolutionFile: ${globalSolutionFile || 'not set'}
+            - globalClarionPropertiesFile: ${globalClarionPropertiesFile || 'not set'}
+            - globalClarionVersion: ${globalClarionVersion || 'not set'}`);
+    } else {
+        logger.info("ℹ️ Skipping workspace settings - no workspace available");
+    }
 
+    // ✅ Register basic commands that work without workspace
     registerOpenCommand(context);
 
     context.subscriptions.push(commands.registerCommand("clarion.quickOpen", async () => {
-        if (!workspace.isTrusted) {
-            vscodeWindow.showWarningMessage("Clarion features require a trusted workspace.");
+        if (!hasWorkspace) {
+            window.showInformationMessage("This feature requires a saved workspace. Use File → Save Workspace As...");
+            return;
+        }
+        if (!isTrusted) {
+            window.showWarningMessage("Clarion features require a trusted workspace.");
             return;
         }
 
         await showClarionQuickOpen();
     }));
 
-    // Helper function to check workspace trust before executing commands
-    const withTrustedWorkspace = (callback: () => Promise<void>) => async () => {
-        if (!workspace.isTrusted) {
-            vscodeWindow.showWarningMessage("Clarion features require a trusted workspace.");
+    // Helper function to check workspace and trust before executing commands
+    const withWorkspaceAndTrust = (callback: () => Promise<void>) => async () => {
+        if (!hasWorkspace) {
+            window.showInformationMessage("This feature requires a saved workspace. Use File → Save Workspace As...");
+            return;
+        }
+        if (!isTrusted) {
+            window.showWarningMessage("Clarion features require a trusted workspace.");
             return;
         }
         await callback();
     };
 
-    // Register commands with workspace trust check
-    const commandsRequiringTrust = [
+    // Register workspace-dependent commands
+    const commandsRequiringWorkspace = [
         { id: "clarion.openSolution", handler: openClarionSolution.bind(null, context) },
         { id: "clarion.openSolutionFromList", handler: openSolutionFromList.bind(null, context) },
         { id: "clarion.closeSolution", handler: closeClarionSolution.bind(null, context) },
@@ -318,81 +355,85 @@ export async function activate(context: ExtensionContext): Promise<void> {
         { id: "clarion.openSolutionMenu", handler: async () => Promise.resolve() } // Empty handler for the submenu
     ];
 
-    commandsRequiringTrust.forEach(command => {
+    commandsRequiringWorkspace.forEach(command => {
         context.subscriptions.push(
-            commands.registerCommand(command.id, withTrustedWorkspace(command.handler))
+            commands.registerCommand(command.id, withWorkspaceAndTrust(command.handler))
         );
     });
 
-    // ✅ Watch for changes in Clarion configuration settings
-    context.subscriptions.push(
-        workspace.onDidChangeConfiguration(async (event) => {
-            if (event.affectsConfiguration("clarion.defaultLookupExtensions") || event.affectsConfiguration("clarion.configuration")) {
-                logger.info("🔄 Clarion configuration changed. Refreshing the solution cache...");
-                await handleSettingsChange(context);
-            }
-        })
-    );
+    // ✅ Only setup workspace-dependent features if we have a workspace
+    if (hasWorkspace && isTrusted) {
+        // ✅ Watch for changes in Clarion configuration settings
+        context.subscriptions.push(
+            workspace.onDidChangeConfiguration(async (event) => {
+                if (event.affectsConfiguration("clarion.defaultLookupExtensions") || event.affectsConfiguration("clarion.configuration")) {
+                    logger.info("🔄 Clarion configuration changed. Refreshing the solution cache...");
+                    await handleSettingsChange(context);
+                }
+            })
+        );
 
-    // Create the file watchers initially
-    if (globalSolutionFile) {
-        await createSolutionFileWatchers(context);
-    }
-
-    // Re-create file watchers when the solution changes
-    context.subscriptions.push(
-        workspace.onDidChangeConfiguration(async (event) => {
-            if (event.affectsConfiguration("clarion.redirectionFile") ||
-                event.affectsConfiguration("clarion.redirectionPath")) {
-                logger.info("🔄 Redirection settings changed. Recreating file watchers...");
-                await createSolutionFileWatchers(context);
-            }
-        })
-    );
-
-    // ✅ Ensure all restored tabs are properly indexed (if workspace is already trusted)
-    if (workspace.isTrusted && !isRefreshingRef.value) {
-        await refreshOpenDocuments();
-
-        // Initialize the solution open context variable
-        await commands.executeCommand("setContext", "clarion.solutionOpen", !!globalSolutionFile);
-        
-        // Always create the solution tree view, even if no solution is open
-        await createSolutionTreeView(context);
-        
-        // Create the structure view
-        await createStructureView(context);
-
-        // Check if we have a solution file loaded from workspace settings
+        // Create the file watchers initially
         if (globalSolutionFile) {
-            logger.info(`✅ Solution file found in workspace settings: ${globalSolutionFile}`);
+            await createSolutionFileWatchers(context);
+        }
+
+        // Re-create file watchers when the solution changes
+        context.subscriptions.push(
+            workspace.onDidChangeConfiguration(async (event) => {
+                if (event.affectsConfiguration("clarion.redirectionFile") ||
+                    event.affectsConfiguration("clarion.redirectionPath")) {
+                    logger.info("🔄 Redirection settings changed. Recreating file watchers...");
+                    await createSolutionFileWatchers(context);
+                }
+            })
+        );
+
+        // ✅ Ensure all restored tabs are properly indexed (workspace with trust)
+        if (!isRefreshingRef.value) {
+            await refreshOpenDocuments();
+
+            // Initialize the solution open context variable
+            await commands.executeCommand("setContext", "clarion.solutionOpen", !!globalSolutionFile);
             
-            // Wait for the language client to be ready before initializing the solution
-            if (client) {
-                logger.info("⏳ Waiting for language client to be ready before initializing solution...");
+            // Always create the solution tree view, even if no solution is open
+            await createSolutionTreeView(context);
+            
+            // Create the structure view
+            await createStructureView(context);
+
+            // Check if we have a solution file loaded from workspace settings
+            if (globalSolutionFile) {
+                logger.info(`✅ Solution file found in workspace settings: ${globalSolutionFile}`);
                 
-                if (isClientReady()) {
-                    logger.info("✅ Language client is already ready. Proceeding with solution initialization...");
-                    await workspaceHasBeenTrusted(context, disposables);
-                } else {
-                    // Use the LanguageClientManager's readyPromise
-                    getClientReadyPromise().then(async () => {
-                        logger.info("✅ Language client is ready. Proceeding with solution initialization...");
-                        // ✅ **Re-added workspaceHasBeenTrusted!**
+                // Wait for the language client to be ready before initializing the solution
+                if (client) {
+                    logger.info("⏳ Waiting for language client to be ready before initializing solution...");
+                    
+                    if (isClientReady()) {
+                        logger.info("✅ Language client is already ready. Proceeding with solution initialization...");
                         await workspaceHasBeenTrusted(context, disposables);
-                    }).catch(error => {
-                        logger.error(`❌ Error waiting for language client: ${error instanceof Error ? error.message : String(error)}`);
-                        vscodeWindow.showErrorMessage("Error initializing Clarion solution: Language client failed to start.");
-                    });
+                    } else {
+                        // Use the LanguageClientManager's readyPromise
+                        getClientReadyPromise().then(async () => {
+                            logger.info("✅ Language client is ready. Proceeding with solution initialization...");
+                            await workspaceHasBeenTrusted(context, disposables);
+                        }).catch(error => {
+                            logger.error(`❌ Error waiting for language client: ${error instanceof Error ? error.message : String(error)}`);
+                            vscodeWindow.showErrorMessage("Error initializing Clarion solution: Language client failed to start.");
+                        });
+                    }
+                } else {
+                    logger.error("❌ Language client is not available.");
+                    vscodeWindow.showErrorMessage("Error initializing Clarion solution: Language client is not available.");
                 }
             } else {
-                logger.error("❌ Language client is not available.");
-                vscodeWindow.showErrorMessage("Error initializing Clarion solution: Language client is not available.");
+                logger.warn("⚠️ No solution file found in workspace settings.");
             }
-        } else {
-            logger.warn("⚠️ No solution file found in workspace settings.");
-            // Don't show the information message as the solution view will now show an "Open Solution" button
         }
+    } else {
+        // No workspace - log that advanced features are disabled
+        logger.info("ℹ️ Advanced features disabled: no workspace or workspace not trusted");
     }
 
     context.subscriptions.push(...disposables);

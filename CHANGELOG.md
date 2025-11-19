@@ -1,6 +1,26 @@
 # Change Log
 All notable changes to the "clarion-extension" extension will be documented in this file.
 
+## [0.6.1] - 2025-01-19
+
+### Enhancements
+
+#### Enable Basic Features Without Workspace
+- **Major improvement**: Language server and basic features now work without a saved workspace
+- **Features that work without workspace**:
+  - Document symbols (outline view)
+  - Code folding ranges
+  - Syntax highlighting
+  - Hover information (within same file)
+  - Go to definition (within same file and current folder)
+  - Document formatting
+- **Smart notifications**: One-time, non-intrusive message when opening files without workspace
+  - Option to save workspace immediately
+  - "Don't Show Again" option to prevent repeated notifications
+- **Graceful degradation**: Advanced features (solution management, cross-file navigation with redirection) require workspace
+- **Better UX**: Clear messages explaining which features need workspace, with guidance on how to enable them
+- **Rationale**: Developers can now quickly view and edit Clarion files without workspace setup, while full functionality remains available when needed
+
 ## [0.6.0] - 2025-01-19
 
 ### Bug Fixes
