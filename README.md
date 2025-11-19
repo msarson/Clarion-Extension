@@ -3,6 +3,7 @@
 ## Table of Contents
 
 - [Overview](#overview)
+- [Dedication](#dedication---version-070)
 - [Features](#features)
 - [Installation](#installation)
 - [Marketplace](#marketplace-information)
@@ -24,7 +25,31 @@ Welcome to the **Clarion Extension** for VS Code! This extension provides compre
 
 For a quick reference, check out the [Cheat Sheet](https://github.com/msarson/Clarion-Extension/blob/master/docs/CheatSheet.md).
 
-A special thanks to [Fushnisoft](https://github.com/fushnisoft) for the original TextMate grammar and language configuration, [Mark Goldberg](https://github.com/MarkGoldberg) for his contributions to code folding, and [Allen Zhu](https://github.com/celeron533) for Document Outline support.
+---
+
+## Dedication - Version 0.7.0
+
+**This release is dedicated to the memory of Brahn Partridge (4th January 1977 – 29th October 2021)**
+
+Brahn, known in the community as **Fushnisoft**, created the original Clarion language support for VS Code through his [fushnisoft.clarion extension](https://marketplace.visualstudio.com/items?itemName=Fushnisoft.Clarion). His work provided the foundation for syntax highlighting and language features that thousands of Clarion developers relied upon.
+
+Following Brahn's passing in October 2021, his extension could no longer be maintained or updated. The Clarion community has continued to evolve, and developers needed ongoing support for new VS Code features and improvements.
+
+In v0.7.0, we have respectfully integrated Brahn's TextMate grammar and language configuration into Clarion Extensions. This integration:
+
+- **Preserves his legacy**: His excellent work continues to serve the community
+- **Enables future updates**: The language support can now evolve with VS Code and Clarion
+- **Simplifies installation**: Developers need only one extension
+- **Honors his contribution**: Full attribution is maintained in our LICENSE and documentation
+
+Brahn's contributions to the Clarion developer community will not be forgotten. Thank you, Brahn, for your dedication to making Clarion development better for everyone.
+
+*Rest in peace, friend.*
+
+---
+
+**Acknowledgments:**
+
 
 ### This is an active project looking for contributors!
 

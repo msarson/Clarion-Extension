@@ -1,6 +1,49 @@
 # Change Log
 All notable changes to the "clarion-extension" extension will be documented in this file.
 
+---
+
+## [0.7.0] - 2025-11-19
+
+**🕯️ Dedicated to the memory of Brahn Partridge (4th January 1977 – 29th October 2021)**
+
+This release integrates the language features from Brahn's fushnisoft.clarion extension, ensuring his work continues to serve the Clarion community and can be maintained going forward.
+
+### Major Changes
+
+#### Integrated Fushnisoft Language Support
+- **Complete syntax highlighting**: All Clarion file types (.clw, .inc, .equ, .int, .txa, .txd, .tpl, .tpw) now have built-in syntax highlighting
+- **Language configuration**: Bracket matching, auto-closing pairs, and comment support integrated
+- **No external dependencies**: Extension is now fully self-contained
+- **Removed dependency**: No longer requires fushnisoft.clarion extension
+- **Migration assistance**: Automatic detection and optional uninstallation of fushnisoft.clarion
+
+#### Why This Change?
+Following Brahn Partridge's passing in October 2021, the fushnisoft.clarion extension could no longer receive updates. By integrating his excellent work into Clarion Extensions:
+- His legacy continues to serve the community
+- Language support can evolve with VS Code updates
+- Installation is simplified (one extension instead of two)
+- Full attribution is maintained for his contributions
+
+### Technical Details
+- Added `syntaxes/clarion.tmLanguage.json` (TextMate grammar from Fushnisoft)
+- Added `syntaxes/clarion.configuration.json` (language configuration from Fushnisoft)
+- Registered all Clarion file extensions with VS Code
+- Updated LICENSE to include Fushnisoft MIT license attribution
+- Smart migration: detects fushnisoft.clarion and offers automatic uninstallation
+
+### Upgrading
+- **Fresh install**: Just install Clarion Extensions v0.7.0
+- **Existing users with fushnisoft.clarion**: 
+  - Extension will detect and offer to uninstall fushnisoft.clarion
+  - All features continue to work seamlessly
+  - You can keep both if preferred (no conflicts)
+
+### Acknowledgments
+Special thanks to Brahn Partridge (Fushnisoft) for creating the original Clarion language support that has served the community since 2015. Your work lives on. Rest in peace, friend.
+
+---
+
 ## [0.6.5] - 2025-11-19
 
 **Note:** This release is functionally identical to v0.6.4. Due to a VS Code Marketplace publishing inconsistency where v0.6.4 was accepted but not properly indexed, we republished as v0.6.5 to ensure users receive the update.
