@@ -244,6 +244,28 @@ export async function activate(context: ExtensionContext): Promise<void> {
     context.subscriptions.push(diagnosticCollection);
     logger.info("🔄 Activating Clarion extension...");
     
+    // Check if fushnisoft.clarion extension is installed
+    const fushinsoftExtension = extensions.getExtension('fushnisoft.clarion');
+    if (fushinsoftExtension) {
+        const hasShownFushinsoftMessage = context.globalState.get<boolean>('clarion.hasShownFushinsoftMessage', false);
+        
+        if (!hasShownFushinsoftMessage) {
+            const action = await window.showInformationMessage(
+                "The fushnisoft.clarion extension is no longer needed. All syntax highlighting and language features are now included in Clarion Extensions.",
+                "Uninstall fushnisoft.clarion",
+                "Keep Both",
+                "Don't Show Again"
+            );
+            
+            if (action === "Uninstall fushnisoft.clarion") {
+                await commands.executeCommand('workbench.extensions.uninstallExtension', 'fushnisoft.clarion');
+                window.showInformationMessage("fushnisoft.clarion has been uninstalled. Please reload VS Code.");
+            } else if (action === "Don't Show Again") {
+                await context.globalState.update('clarion.hasShownFushinsoftMessage', true);
+            }
+        }
+    }
+    
     // Add event listener for active editor changes to update the build status bar
     context.subscriptions.push(
         window.onDidChangeActiveTextEditor(() => {

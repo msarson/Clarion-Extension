@@ -6,7 +6,7 @@
 - [Features](#features)
 - [Installation](#installation)
 - [Marketplace](#marketplace-information)
-- [Changelog](#changelog-whats-new-in-v056)
+- [Changelog](#changelog-whats-new-in-v070)
 - [Getting Started](#getting-started)
 - [Troubleshooting](#troubleshooting)
 - [Contributing and Feedback](#contributing-and-feedback)
@@ -18,11 +18,13 @@
 
 ## Overview
 
-Welcome to the **Clarion Extension** for VS Code! This extension enhances the functionality of the [Fushnisoft Clarion Extension](https://marketplace.visualstudio.com/items?itemName=Fushnisoft.Clarion) by providing powerful tools such as **snippets, code folding, solution parsing, and enhanced navigation**.
+Welcome to the **Clarion Extension** for VS Code! This extension provides comprehensive support for the Clarion programming language, including **syntax highlighting, snippets, code folding, solution parsing, and enhanced navigation**.
+
+**New in v0.7.0**: This extension now includes all syntax highlighting and language features previously provided by the Fushnisoft extension. You no longer need to install a separate extension for basic Clarion language support!
 
 For a quick reference, check out the [Cheat Sheet](https://github.com/msarson/Clarion-Extension/blob/master/docs/CheatSheet.md).
 
-A special thanks to [Mark Goldberg](https://github.com/MarkGoldberg) for his contributions to code folding and [Allen Zhu](https://github.com/celeron533) for Document Outline support.
+A special thanks to [Fushnisoft](https://github.com/fushnisoft) for the original TextMate grammar and language configuration, [Mark Goldberg](https://github.com/MarkGoldberg) for his contributions to code folding, and [Allen Zhu](https://github.com/celeron533) for Document Outline support.
 
 ### This is an active project looking for contributors!
 
@@ -34,6 +36,7 @@ This extension is under **active development** and we need your **help**! Whethe
 
 For a comprehensive list of all features and their locations within the extension architecture, see our [Features Documentation](https://github.com/msarson/Clarion-Extension/blob/master/ClarionExtensionFeatures.md).
 
+- **Complete Language Support**: Syntax highlighting, bracket matching, and auto-closing pairs for all Clarion file types (.clw, .inc, .txa, etc.)
 - **Solution Explorer View**: Navigate Clarion projects directly inside VS Code.
 - **Automatic Solution Parsing**: Detects all projects and redirection files in your solution.
 - **Enhanced "Go To Definition"**: Supports `INCLUDE` and `MODULE` statements, with redirection-aware searches.
