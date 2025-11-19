@@ -43,8 +43,8 @@ server/tsconfig.json
 server/package.json
 server/package-lock.json
 client/tsconfig.json
-client/package.json
-client/package-lock.json
+# Note: client/package.json and client/package-lock.json are NOT excluded
+# because they contain runtime dependencies needed by the extension
 
 # Exclude unnecessary node_modules subdirectories
 server/node_modules/**/*.md
