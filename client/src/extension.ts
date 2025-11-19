@@ -1589,26 +1589,25 @@ async function createStructureView(context: ExtensionContext) {
 }
 
 async function createStatusView(context: ExtensionContext) {
-    if (!statusViewProvider) {
-        statusViewProvider = new StatusViewProvider();
-        statusView = window.createTreeView('clarionStatusView', {
-            treeDataProvider: statusViewProvider
-        });
-        context.subscriptions.push(statusView);
-        logger.info("✅ Status view created");
-        
-        // Refresh status view when workspace changes
-        context.subscriptions.push(
-            workspace.onDidChangeWorkspaceFolders(() => {
-                statusViewProvider?.refresh();
-            })
-        );
-        
-        // Export refresh function for use elsewhere
-        (global as any).refreshStatusView = () => {
+    // Always create a fresh provider
+    statusViewProvider = new StatusViewProvider();
+    statusView = window.createTreeView('clarionStatusView', {
+        treeDataProvider: statusViewProvider
+    });
+    context.subscriptions.push(statusView);
+    logger.info("✅ Status view created");
+    
+    // Refresh status view when workspace changes
+    context.subscriptions.push(
+        workspace.onDidChangeWorkspaceFolders(() => {
             statusViewProvider?.refresh();
-        };
-    }
+        })
+    );
+    
+    // Export refresh function for use elsewhere
+    (global as any).refreshStatusView = () => {
+        statusViewProvider?.refresh();
+    };
 }
 
 
