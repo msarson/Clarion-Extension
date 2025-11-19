@@ -194,20 +194,41 @@ export class StatusViewProvider implements vscode.TreeDataProvider<StatusItem> {
             ));
         }
 
-        // Add separator
-        items.push(new StatusItem("", "", undefined));
+        // Add separator only if we have tips to show
+        const tips: StatusItem[] = [];
         
-        // Help section
-        items.push(new StatusItem(
-            "💡 Tips",
-            "",
-            undefined,
-            [
-                new StatusItem("    • Open a Clarion file to see symbols", "", undefined),
-                new StatusItem("    • Save workspace for solution features", "", undefined),
-                new StatusItem("    • Trust workspace to enable full features", "", undefined)
-            ]
-        ));
+        // Show contextual tips based on current issues
+        if (!hasWorkspace) {
+            tips.push(new StatusItem("    💡 Save a workspace to unlock:", "", undefined));
+            tips.push(new StatusItem("       • Solution management", "", undefined));
+            tips.push(new StatusItem("       • Cross-file navigation", "", undefined));
+            tips.push(new StatusItem("       • Build tasks", "", undefined));
+        } else if (!isTrusted) {
+            tips.push(new StatusItem("    💡 Trust this workspace to enable:", "", undefined));
+            tips.push(new StatusItem("       • Solution features", "", undefined));
+            tips.push(new StatusItem("       • Full language features", "", undefined));
+            tips.push(new StatusItem("       • Build and debug tasks", "", undefined));
+        } else if (!hasSolution) {
+            tips.push(new StatusItem("    💡 Open a solution to unlock:", "", undefined));
+            tips.push(new StatusItem("       • Project management", "", undefined));
+            tips.push(new StatusItem("       • Redirection-based file resolution", "", undefined));
+            tips.push(new StatusItem("       • Build commands", "", undefined));
+        } else if (!serverActive) {
+            tips.push(new StatusItem("    💡 Language Server not active:", "", undefined));
+            tips.push(new StatusItem("       • Check Output panel for errors", "", undefined));
+            tips.push(new StatusItem("       • Try reloading VS Code", "", undefined));
+        }
+        
+        // Only show tips section if there are issues to address
+        if (tips.length > 0) {
+            items.push(new StatusItem("", "", undefined)); // Separator
+            items.push(new StatusItem(
+                "💡 Tips",
+                "",
+                undefined,
+                tips
+            ));
+        }
 
         return items;
     }
