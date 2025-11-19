@@ -24,6 +24,7 @@ import { LanguageClientManager, isClientReady, getClientReadyPromise, setLanguag
 import { redirectionService } from './paths/RedirectionService';
 
 import { ClarionProjectInfo } from 'common/types';
+import { initializeTelemetry, trackEvent } from './telemetry';
 
 const logger = LoggerManager.getLogger("Extension");
 logger.setLevel("error");
@@ -243,6 +244,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
     const diagnosticCollection = languages.createDiagnosticCollection("clarion");
     context.subscriptions.push(diagnosticCollection);
     logger.info("🔄 Activating Clarion extension...");
+    
+    // Initialize telemetry
+    await initializeTelemetry(context);
     
     // Check if fushnisoft.clarion extension is installed
     const fushinsoftExtension = extensions.getExtension('fushnisoft.clarion');

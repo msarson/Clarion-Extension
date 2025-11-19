@@ -519,6 +519,11 @@
                     "default": "",
                     "description": "Path to the currently selected Clarion solution file."
                 },
+                "clarion.telemetry.enabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable anonymous telemetry to help improve the extension. No personal information is collected."
+                },
                 "clarion.solutions": {
                     "type": "array",
                     "items": {
