@@ -816,6 +816,7 @@
         "typescript": "^4.2.4"
     },
     "dependencies": {
+        "applicationinsights": "^3.12.0",
         "glob": "^12.0.0",
         "minimatch": "^10.0.1",
         "minimist": "^1.2.6",
