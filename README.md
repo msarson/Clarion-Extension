@@ -63,16 +63,24 @@ For a comprehensive list of all features and their locations within the extensio
 ### Requirements
 
 - **Visual Studio Code** (latest version recommended)
-- **Fushnisoft Clarion Extension** (as a base language extension)  
-  Install from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=Fushnisoft.Clarion).
 
 ### Installation Steps
 
 1. Open **Visual Studio Code**.
 2. Go to the **Extensions Marketplace** (`Ctrl+Shift+X`).
-3. Search for **Clarion Extension**.
+3. Search for **Clarion Extensions**.
 4. Click **Install**.
 5. Restart VS Code if needed.
+
+### Upgrading from v0.6.x or earlier
+
+**Important**: If you are upgrading from v0.6.x or earlier and have the **fushnisoft.clarion** extension installed:
+
+1. **First**: Uninstall **BOTH** extensions (fushnisoft.clarion AND clarion-extensions)
+2. **Then**: Reinstall **only** clarion-extensions v0.7.0 or later
+3. All syntax highlighting and language features are now included - you no longer need fushnisoft.clarion
+
+This is necessary because older versions had a dependency on fushnisoft.clarion that prevents individual uninstallation.
 
 ---
 

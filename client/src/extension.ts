@@ -244,28 +244,6 @@ export async function activate(context: ExtensionContext): Promise<void> {
     context.subscriptions.push(diagnosticCollection);
     logger.info("🔄 Activating Clarion extension...");
     
-    // Check if fushnisoft.clarion extension is installed
-    const fushinsoftExtension = extensions.getExtension('fushnisoft.clarion');
-    if (fushinsoftExtension) {
-        const hasShownFushinsoftMessage = context.globalState.get<boolean>('clarion.hasShownFushinsoftMessage', false);
-        
-        if (!hasShownFushinsoftMessage) {
-            const action = await window.showInformationMessage(
-                "The fushnisoft.clarion extension is no longer needed. All syntax highlighting and language features are now included in Clarion Extensions. You can uninstall fushnisoft.clarion from the Extensions view.",
-                "Open Extensions",
-                "Don't Show Again"
-            );
-            
-            if (action === "Open Extensions") {
-                await commands.executeCommand('workbench.extensions.action.showExtensionsWithIds', [['fushnisoft.clarion']]);
-                // Mark as shown so we don't keep bothering them
-                await context.globalState.update('clarion.hasShownFushinsoftMessage', true);
-            } else if (action === "Don't Show Again") {
-                await context.globalState.update('clarion.hasShownFushinsoftMessage', true);
-            }
-        }
-    }
-    
     // Add event listener for active editor changes to update the build status bar
     context.subscriptions.push(
         window.onDidChangeActiveTextEditor(() => {
