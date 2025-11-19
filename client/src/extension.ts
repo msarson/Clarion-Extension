@@ -1040,6 +1040,7 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
     logger.info("✅ Language features registered");
     
     await commands.executeCommand("setContext", "clarion.solutionOpen", true);
+    statusViewProvider?.refresh(); // Refresh status view when solution opens
     updateConfigurationStatusBar(globalSettings.configuration);
     updateBuildProjectStatusBar(); // Update the build project status bar
     
@@ -1604,6 +1605,14 @@ async function createStatusView(context: ExtensionContext) {
         })
     );
     
+    // Refresh status view when workspace trust changes
+    context.subscriptions.push(
+        workspace.onDidGrantWorkspaceTrust(() => {
+            statusViewProvider?.refresh();
+            logger.info("🔒 Workspace trust granted - refreshing status view");
+        })
+    );
+    
     // Export refresh function for use elsewhere
     (global as any).refreshStatusView = () => {
         statusViewProvider?.refresh();
@@ -1645,6 +1654,7 @@ export async function closeClarionSolution(context: ExtensionContext) {
         
         // Mark solution as closed
         await commands.executeCommand("setContext", "clarion.solutionOpen", false);
+        statusViewProvider?.refresh(); // Refresh status view when solution closes
         
         // Clear document link provider
         if (documentLinkProviderDisposable) {
@@ -1762,6 +1772,7 @@ export async function openSolutionFromList(context: ExtensionContext) {
         
         // Mark solution as open
         await commands.executeCommand("setContext", "clarion.solutionOpen", true);
+        statusViewProvider?.refresh(); // Refresh status view when solution opens
         vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(selectedItem.solution.solutionFile)}`);
     } catch (error) {
         const errMessage = error instanceof Error ? error.message : String(error);
@@ -1918,6 +1929,7 @@ export async function openClarionSolution(context: ExtensionContext) {
                 
                 // Mark solution as open
                 await commands.executeCommand("setContext", "clarion.solutionOpen", true);
+                statusViewProvider?.refresh(); // Refresh status view when solution opens
                 
                 vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(selectedItem.solution.solutionFile)}`);
                 
@@ -2001,6 +2013,7 @@ export async function openClarionSolution(context: ExtensionContext) {
 
         // ✅ Step 6: Mark solution as open
         await commands.executeCommand("setContext", "clarion.solutionOpen", true);
+        statusViewProvider?.refresh(); // Refresh status view when solution opens
         
         vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(globalSolutionFile)}`);
 
