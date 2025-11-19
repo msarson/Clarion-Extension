@@ -80,3 +80,19 @@ export function trackMetric(name: string, value: number, properties?: { [key: st
         });
     }
 }
+
+/**
+ * Track performance timing - call this when logging performance metrics
+ * @param operationName Name of the operation being timed
+ * @param durationMs Duration in milliseconds
+ * @param properties Additional properties to include
+ */
+export function trackPerformance(operationName: string, durationMs: number, properties?: { [key: string]: string }): void {
+    if (telemetryClient) {
+        telemetryClient.trackMetric({
+            name: `Performance.${operationName}`,
+            value: durationMs,
+            properties
+        });
+    }
+}

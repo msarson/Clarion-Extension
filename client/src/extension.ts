@@ -24,7 +24,7 @@ import { LanguageClientManager, isClientReady, getClientReadyPromise, setLanguag
 import { redirectionService } from './paths/RedirectionService';
 
 import { ClarionProjectInfo } from 'common/types';
-import { initializeTelemetry, trackEvent } from './telemetry';
+import { initializeTelemetry, trackEvent, trackPerformance } from './telemetry';
 
 const logger = LoggerManager.getLogger("Extension");
 logger.setLevel("error");
@@ -239,14 +239,18 @@ async function createSolutionFileWatchers(context: ExtensionContext) {
 }
 
 export async function activate(context: ExtensionContext): Promise<void> {
+    const activationStartTime = Date.now();
     const disposables: Disposable[] = [];
     const isRefreshingRef = { value: false };
     const diagnosticCollection = languages.createDiagnosticCollection("clarion");
     context.subscriptions.push(diagnosticCollection);
     logger.info("🔄 Activating Clarion extension...");
     
-    // Initialize telemetry
+    // Initialize telemetry (track initialization time separately)
+    const telemetryInitStart = Date.now();
     await initializeTelemetry(context);
+    const telemetryInitDuration = Date.now() - telemetryInitStart;
+    trackPerformance('TelemetryInitialization', telemetryInitDuration);
     
     // Check if fushnisoft.clarion extension is installed
     const fushinsoftExtension = extensions.getExtension('fushnisoft.clarion');
@@ -820,6 +824,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
                     
                     if (result) {
                         logger.info(`✅ Solution cache force refreshed successfully in ${(endTime - startTime).toFixed(2)}ms`);
+                        trackPerformance('SolutionCacheForceRefresh', endTime - startTime, { triggered: 'command' });
                         
                         // Refresh the solution tree view
                         if (solutionTreeDataProvider) {
@@ -900,6 +905,11 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
         // Commands for adding/removing source files are already registered above
     );
+    
+    // Track total activation time
+    const activationDuration = Date.now() - activationStartTime;
+    logger.info(`✅ Extension activation completed in ${activationDuration}ms`);
+    trackPerformance('ExtensionActivation', activationDuration);
 }
 
 async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: Disposable[]): Promise<void> {
@@ -1089,6 +1099,7 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
     
     const endTime = performance.now();
     logger.info(`✅ Solution initialization completed in ${(endTime - startTime).toFixed(2)}ms`);
+    trackPerformance('SolutionInitialization', endTime - startTime);
     
     vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(globalSolutionFile)}`);
 }
@@ -1113,7 +1124,7 @@ async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<Do
         const result = await solutionCache.initialize(globalSolutionFile);
         const cacheEndTime = performance.now();
         logger.info(`✅ SolutionCache initialized in ${(cacheEndTime - cacheStartTime).toFixed(2)}ms (${result ? 'success' : 'failed'})`);
-        
+        trackPerformance('SolutionCacheInit', cacheEndTime - cacheStartTime, { success: result ? 'true' : 'false' });        
         // If initialization failed or returned empty solution, force a refresh from server
         if (!result) {
             logger.warn("⚠️ Solution cache initialization failed. Forcing refresh from server...");
@@ -1121,7 +1132,7 @@ async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<Do
             const refreshResult = await solutionCache.refresh(true);
             const refreshEndTime = performance.now();
             logger.info(`✅ SolutionCache force refreshed in ${(refreshEndTime - refreshStartTime).toFixed(2)}ms (${refreshResult ? 'success' : 'failed'})`);
-            
+            trackPerformance('SolutionCacheRefresh', refreshEndTime - refreshStartTime, { success: refreshResult ? 'true' : 'false', forced: 'true' });            
             if (!refreshResult) {
                 logger.error("❌ Failed to refresh solution cache from server. Solution features may not work correctly.");
             }
@@ -1145,6 +1156,7 @@ async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<Do
     documentManager = await DocumentManager.create();
     const dmEndTime = performance.now();
     logger.info(`✅ DocumentManager created in ${(dmEndTime - dmStartTime).toFixed(2)}ms`);
+    trackPerformance('DocumentManagerCreation', dmEndTime - dmStartTime);
 
     if (refreshDocs) {
         logger.info("🔄 Refreshing open documents...");
@@ -1153,6 +1165,7 @@ async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<Do
 
     const endTime = performance.now();
     logger.info(`✅ Environment reinitialized in ${(endTime - startTime).toFixed(2)}ms`);
+    trackPerformance('EnvironmentReinitialization', endTime - startTime, { refreshDocs: refreshDocs ? 'true' : 'false' });
     return documentManager;
 }
 
@@ -1398,6 +1411,7 @@ async function refreshOpenDocuments() {
         const openDocuments = await getAllOpenDocuments(); // <-- Await the function here
         const docsEndTime = performance.now();
         logger.info(`✅ Retrieved ${openDocuments.length} open documents in ${(docsEndTime - docsStartTime).toFixed(2)}ms`);
+        trackPerformance('GetAllOpenDocuments', docsEndTime - docsStartTime, { documentCount: openDocuments.length.toString() });
 
         if (openDocuments.length === 0) {
             logger.warn("⚠️ No open documents found.");
@@ -1424,6 +1438,7 @@ async function refreshOpenDocuments() {
 
         const endTime = performance.now();
         logger.info(`✅ Successfully refreshed ${openDocuments.length} open documents in ${(endTime - startTime).toFixed(2)}ms`);
+        trackPerformance('RefreshOpenDocuments', endTime - startTime, { documentCount: openDocuments.length.toString() });
     } catch (error) {
         logger.error(`❌ Error in refreshOpenDocuments: ${error instanceof Error ? error.message : String(error)}`);
     }
