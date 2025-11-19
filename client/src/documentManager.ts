@@ -776,6 +776,7 @@ export class DocumentManager implements Disposable {
      * It extracts locations for "INCLUDE", "MODULE", and "MEMBER" patterns and stores these locations in the openDocuments map.
      */
     public async updateDocumentInfo(document: TextDocument) {
+        const parseStartTime = performance.now();
         logger.info(`📄 Processing document: ${document.uri.fsPath}`);
 
         // 🔹 Get latest lookup extensions
@@ -850,8 +851,21 @@ export class DocumentManager implements Disposable {
             // This prevents repeated processing of the same document
             this.openDocuments.set(document.uri.toString().toLowerCase(), { statementLocations });
 
+            const parseEndTime = performance.now();
+            const parseDuration = parseEndTime - parseStartTime;
+            const lineCount = document.lineCount;
+            const fileExtension = path.extname(document.uri.fsPath).toLowerCase();
+            
+            // Track document parse performance
+            const { trackPerformance } = await import('./telemetry');
+            trackPerformance('DocumentParse', parseDuration, { 
+                lineCount: lineCount.toString(), 
+                fileExtension,
+                statementCount: statementLocations.length.toString()
+            });
+
             if (statementLocations.length > 0) {
-                logger.info(`✅ Stored document info for ${document.uri.fsPath} with ${statementLocations.length} statement locations`);
+                logger.info(`✅ Stored document info for ${document.uri.fsPath} with ${statementLocations.length} statement locations in ${parseDuration.toFixed(2)}ms (${lineCount} lines)`);
 
                 // Log a sample of the statement locations for debugging
                 if (statementLocations.length > 0) {
@@ -859,7 +873,7 @@ export class DocumentManager implements Disposable {
                     logger.info(`🔍 Sample statement: Type=${sample.statementType}, File=${sample.fullFileName}, Position=${sample.linePosition?.line}:${sample.linePosition?.character}`);
                 }
             } else {
-                logger.info(`ℹ️ Stored empty document info for ${document.uri.fsPath}`);
+                logger.info(`ℹ️ Stored empty document info for ${document.uri.fsPath} in ${parseDuration.toFixed(2)}ms (${lineCount} lines)`);
             }
         } catch (error) {
             logger.error(`❌ Error updating document info: ${error instanceof Error ? error.message : String(error)}`);

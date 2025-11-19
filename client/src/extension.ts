@@ -1411,7 +1411,6 @@ async function refreshOpenDocuments() {
         const openDocuments = await getAllOpenDocuments(); // <-- Await the function here
         const docsEndTime = performance.now();
         logger.info(`✅ Retrieved ${openDocuments.length} open documents in ${(docsEndTime - docsStartTime).toFixed(2)}ms`);
-        trackPerformance('GetAllOpenDocuments', docsEndTime - docsStartTime, { documentCount: openDocuments.length.toString() });
 
         if (openDocuments.length === 0) {
             logger.warn("⚠️ No open documents found.");
@@ -1438,7 +1437,6 @@ async function refreshOpenDocuments() {
 
         const endTime = performance.now();
         logger.info(`✅ Successfully refreshed ${openDocuments.length} open documents in ${(endTime - startTime).toFixed(2)}ms`);
-        trackPerformance('RefreshOpenDocuments', endTime - startTime, { documentCount: openDocuments.length.toString() });
     } catch (error) {
         logger.error(`❌ Error in refreshOpenDocuments: ${error instanceof Error ? error.message : String(error)}`);
     }
