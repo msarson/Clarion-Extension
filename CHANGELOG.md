@@ -1,6 +1,17 @@
 # Change Log
 All notable changes to the "clarion-extension" extension will be documented in this file.
 
+## [0.6.0] - 2025-01-19
+
+### Bug Fixes
+
+#### Critical: Fixed Folding and Symbol Providers Not Working in Released Version
+- **Root cause identified**: Duplicate `onInitialize` and `onInitialized` event handlers in server.ts were causing the second handler to overwrite the first
+- **Impact**: In packaged extensions, the duplicate handlers prevented folding ranges and document symbols from working correctly
+- **Resolution**: Removed duplicate handlers (lines 1033-1119), consolidated functionality into the primary handlers (lines 89-172)
+- **Verification**: Folding and symbol providers now work correctly in both development and released versions
+- **Note**: These features work without requiring a Clarion solution to be selected
+
 ## [0.5.9] - 2025-11-18
 
 ### Enhancements
