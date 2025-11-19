@@ -1,0 +1,90 @@
+name: Create GitHub Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v0.6.5)'
+        required: true
+        type: string
+      vsix_path:
+        description: 'Path to VSIX file (e.g., ./clarion-extensions-0.6.5.vsix)'
+        required: false
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION="${{ github.event.inputs.tag }}"
+          VERSION="${VERSION#v}"  # Remove 'v' prefix if present
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+      
+      - name: Check if VSIX exists locally
+        id: check_vsix
+        run: |
+          if [ -n "${{ github.event.inputs.vsix_path }}" ] && [ -f "${{ github.event.inputs.vsix_path }}" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "VSIX file found at ${{ github.event.inputs.vsix_path }}"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "No VSIX file provided or found"
+          fi
+      
+      - name: Setup Node.js (if building VSIX)
+        if: steps.check_vsix.outputs.exists == 'false'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies (if building VSIX)
+        if: steps.check_vsix.outputs.exists == 'false'
+        run: npm ci
+      
+      - name: Compile extension (if building VSIX)
+        if: steps.check_vsix.outputs.exists == 'false'
+        run: npm run compile
+      
+      - name: Install vsce (if building VSIX)
+        if: steps.check_vsix.outputs.exists == 'false'
+        run: npm install -g @vscode/vsce
+      
+      - name: Package extension (if building VSIX)
+        if: steps.check_vsix.outputs.exists == 'false'
+        run: vsce package
+      
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.tag }}
+          name: Release ${{ github.event.inputs.tag }}
+          draft: false
+          prerelease: false
+          files: |
+            ${{ github.event.inputs.vsix_path || format('./clarion-extensions-{0}.vsix', steps.version.outputs.version) }}
+          generate_release_notes: true
+          body: |
+            ## Installation
+            
+            Download the VSIX file below and install it in VS Code:
+            1. Open VS Code
+            2. Go to Extensions (Ctrl+Shift+X)
+            3. Click "..." menu → "Install from VSIX..."
+            4. Select the downloaded file
+            
+            ## Marketplace
+            
+            This version is also available on the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=msarson.clarion-extensions).
+            
+            ## What's New
+            
+            See [CHANGELOG.md](https://github.com/msarson/Clarion-Extension/blob/master/CHANGELOG.md) for full details.
