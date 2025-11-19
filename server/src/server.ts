@@ -93,6 +93,9 @@ connection.onInitialize((params) => {
         logger.info(`📥 [CRITICAL] Client info: ${JSON.stringify(params.clientInfo)}`);
         logger.info(`📥 [CRITICAL] Initialization options: ${JSON.stringify(params.initializationOptions)}`);
         
+        // Store initialization options
+        globalClarionSettings = params.initializationOptions || {};
+        
         // Log workspace folders
         if (params.workspaceFolders) {
             logger.info(`📥 [CRITICAL] Workspace folders: ${JSON.stringify(params.workspaceFolders)}`);
@@ -151,6 +154,15 @@ connection.onInitialized(() => {
         
         // Set the serverInitialized flag
         serverInitialized = true;
+        
+        // Register SolutionManager handlers if it exists
+        const solutionManager = SolutionManager.getInstance();
+        if (solutionManager) {
+            solutionManager.registerHandlers(connection);
+            logger.info("✅ SolutionManager handlers registered");
+        } else {
+            logger.info("⚠️ SolutionManager not initialized yet, handlers will be registered later");
+        }
         
         // Log server process information
         logger.info(`📥 [CRITICAL] Server process ID: ${process.pid}`);
@@ -1026,25 +1038,6 @@ connection.onRequest('clarion/documentSymbols', async (params: { uri: string }) 
     return symbols;
 });
 
-
-
-
-// ✅ Server Initialization
-connection.onInitialize((params: InitializeParams): InitializeResult => {
-    logger.info("⚡  Received onInitialize request from VS Code.");
-    globalClarionSettings = params.initializationOptions || {};
-    return {
-        capabilities: {
-            foldingRangeProvider: true,
-            documentSymbolProvider: true,
-            documentFormattingProvider: true,
-            colorProvider: true,
-            definitionProvider: true,
-            hoverProvider: true
-        }
-    };
-});
-
 // Handle definition requests
 connection.onDefinition(async (params) => {
     logger.info(`📂 Received definition request for: ${params.textDocument.uri} at position ${params.position.line}:${params.position.character}`);
@@ -1103,20 +1096,11 @@ connection.onHover(async (params) => {
     }
 });
 
-// ✅ Server Fully Initialized
-connection.onInitialized(() => {
-    logger.info("✅  Clarion Language Server fully initialized.");
-    serverInitialized = true;
-    
-    // Register SolutionManager handlers if it exists
-    const solutionManager = SolutionManager.getInstance();
-    if (solutionManager) {
-        solutionManager.registerHandlers(connection);
-        logger.info("✅ SolutionManager handlers registered");
-    } else {
-        logger.info("⚠️ SolutionManager not initialized yet, handlers will be registered later");
-    }
-});
+
+
+
+
+// Note: Duplicate onInitialize/onInitialized handlers removed - see lines 89-172 for the active handlers
 
 // ✅ Start Listening
 documents.listen(connection);
