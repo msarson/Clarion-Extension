@@ -13,6 +13,7 @@
         "vscode": "^1.67.0"
     },
     "dependencies": {
+        "glob": "^12.0.0",
         "vscode-languageclient": "^7.0.0",
         "xml2js": "^0.6.2"
     },
