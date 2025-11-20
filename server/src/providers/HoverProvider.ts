@@ -3,6 +3,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import LoggerManager from '../logger';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
+import { ClarionDocumentSymbolProvider } from '../ClarionDocumentSymbolProvider';
 
 const logger = LoggerManager.getLogger("HoverProvider");
 logger.setLevel("info");
@@ -87,23 +88,34 @@ export class HoverProvider {
 
             logger.info(`Current scope: ${currentScope.value}`);
 
-            // Check if this is a parameter
-            logger.info(`Checking if ${word} is a parameter...`);
-            const parameterInfo = this.findParameterInfo(word, document, currentScope);
-            if (parameterInfo) {
-                logger.info(`Found parameter info for ${word}`);
-                return this.constructParameterHover(word, parameterInfo, currentScope);
+            // Strip prefix if present (e.g., LOC:Field -> Field)
+            const colonIndex = word.lastIndexOf(':');
+            let searchWord = word;
+            let prefixPart = '';
+            
+            if (colonIndex > 0) {
+                prefixPart = word.substring(0, colonIndex);
+                searchWord = word.substring(colonIndex + 1);
+                logger.info(`Detected prefixed variable in hover: prefix="${prefixPart}", field="${searchWord}"`);
             }
-            logger.info(`${word} is not a parameter`);
+
+            // Check if this is a parameter
+            logger.info(`Checking if ${searchWord} is a parameter...`);
+            const parameterInfo = this.findParameterInfo(searchWord, document, currentScope);
+            if (parameterInfo) {
+                logger.info(`Found parameter info for ${searchWord}`);
+                return this.constructParameterHover(searchWord, parameterInfo, currentScope);
+            }
+            logger.info(`${searchWord} is not a parameter`);
 
             // Check if this is a local variable
-            logger.info(`Checking if ${word} is a local variable...`);
-            const variableInfo = this.findLocalVariableInfo(word, tokens, currentScope, document);
+            logger.info(`Checking if ${searchWord} is a local variable...`);
+            const variableInfo = this.findLocalVariableInfo(searchWord, tokens, currentScope, document, word);
             if (variableInfo) {
-                logger.info(`Found variable info for ${word}: type=${variableInfo.type}, line=${variableInfo.line}`);
+                logger.info(`Found variable info for ${searchWord}: type=${variableInfo.type}, line=${variableInfo.line}`);
                 return this.constructVariableHover(word, variableInfo, currentScope);
             }
-            logger.info(`${word} is not a local variable`);
+            logger.info(`${searchWord} is not a local variable`);
 
             return null;
         } catch (error) {
@@ -114,6 +126,7 @@ export class HoverProvider {
 
     /**
      * Gets the word range at a position
+     * Enhanced to include colons for Clarion prefix notation (e.g., LOC:Field)
      */
     private getWordRangeAtPosition(document: TextDocument, position: Position): Range | null {
         const line = document.getText({
@@ -121,6 +134,41 @@ export class HoverProvider {
             end: { line: position.line + 1, character: 0 }
         });
 
+        // Check if we're in a context that might use prefix notation
+        // Look for USE(), PRE(), or similar patterns that indicate we should include colons
+        const includeColons = /USE\s*\(|PRE\s*\(|,PRE\s*\(/i.test(line);
+        
+        if (includeColons) {
+            // For prefix contexts, manually build the word including colons
+            let start = position.character;
+            while (start > 0) {
+                const char = line.charAt(start - 1);
+                if (/[a-zA-Z0-9_:]/.test(char)) {
+                    start--;
+                } else {
+                    break;
+                }
+            }
+            
+            let end = position.character;
+            while (end < line.length) {
+                const char = line.charAt(end);
+                if (/[a-zA-Z0-9_:]/.test(char)) {
+                    end++;
+                } else {
+                    break;
+                }
+            }
+            
+            if (start < end) {
+                return {
+                    start: { line: position.line, character: start },
+                    end: { line: position.line, character: end }
+                };
+            }
+        }
+
+        // Default behavior - no colons
         const wordPattern = /[A-Za-z_][A-Za-z0-9_]*/g;
         let match: RegExpExecArray | null;
 
@@ -141,13 +189,14 @@ export class HoverProvider {
 
     /**
      * Gets the innermost scope at a line
+     * Excludes MethodDeclaration (CLASS method declarations in DATA section)
      */
     private getInnermostScopeAtLine(tokens: Token[], line: number): Token | undefined {
         const scopes = tokens.filter(token =>
+            // Only consider actual procedure implementations and global procedures, not method declarations in CLASS
             (token.subType === TokenType.Procedure ||
                 token.subType === TokenType.GlobalProcedure ||
                 token.subType === TokenType.MethodImplementation ||
-                token.subType === TokenType.MethodDeclaration ||
                 token.subType === TokenType.Routine) &&
             token.line <= line &&
             (token.finishesAt === undefined || token.finishesAt >= line)
@@ -216,11 +265,222 @@ export class HoverProvider {
     }
 
     /**
-     * Finds local variable information
+     * Finds local variable information using the document symbol tree
+     * This is more reliable than token-based search as it uses the outline provider's hierarchy
      */
-    private findLocalVariableInfo(word: string, tokens: Token[], currentScope: Token, document: TextDocument): { type: string; line: number } | null {
-        logger.info(`findLocalVariableInfo called for word: ${word}, scope: ${currentScope.value}`);
+    private findLocalVariableInfo(word: string, tokens: Token[], currentScope: Token, document: TextDocument, originalWord?: string): { type: string; line: number } | null {
+        logger.info(`findLocalVariableInfo called for word: ${word}, scope: ${currentScope.value} at line ${currentScope.line}, subType: ${currentScope.subType}`);
         
+        // Try the document symbol approach - more reliable
+        const symbolProvider = new ClarionDocumentSymbolProvider();
+        const symbols = symbolProvider.provideDocumentSymbols(tokens, document.uri);
+        
+        // Find the procedure symbol that contains the current line
+        const procedureSymbol = this.findProcedureContainingLine(symbols, currentScope.line);
+        if (procedureSymbol) {
+            logger.info(`Found procedure symbol: ${procedureSymbol.name}`);
+            logger.info(`Procedure has ${procedureSymbol.children?.length || 0} children`);
+            
+            // Debug: Log first 10 children
+            if (procedureSymbol.children) {
+                procedureSymbol.children.slice(0, 10).forEach((child: any) => {
+                    logger.info(`  Child: name="${child.name}", kind=${child.kind}, detail="${child.detail}"`);
+                });
+            }
+            
+            // Search for the variable in the procedure's children
+            const varSymbol = this.findVariableInSymbol(procedureSymbol, word);
+            if (varSymbol) {
+                logger.info(`Found variable in symbol tree: ${varSymbol.name}, detail: ${varSymbol.detail}`);
+                return {
+                    type: varSymbol.detail || 'Unknown',
+                    line: varSymbol.range.start.line
+                };
+            }
+        }
+        
+        // Fallback to old token-based logic
+        logger.info(`Symbol tree search failed, falling back to token search`);
+        return this.findLocalVariableInfoLegacy(word, tokens, currentScope, document);
+    }
+    
+    /**
+     * Find procedure symbol that contains the given line
+     */
+    private findProcedureContainingLine(symbols: any[], line: number): any | null {
+        for (const symbol of symbols) {
+            if (symbol.range.start.line <= line && symbol.range.end.line >= line) {
+                // Check if this is a procedure
+                if (symbol.kind === 12) { // SymbolKind.Function
+                    return symbol;
+                }
+                // Recursively search children
+                if (symbol.children) {
+                    const result = this.findProcedureContainingLine(symbol.children, line);
+                    if (result) return result;
+                }
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * Find variable in symbol's children by name (handles prefixed labels)
+     */
+    private findVariableInSymbol(symbol: any, fieldName: string): any | null {
+        if (!symbol.children) return null;
+        
+        logger.info(`Searching for field "${fieldName}" in symbol with ${symbol.children.length} children`);
+        
+        for (const child of symbol.children) {
+            // Check if this is a variable symbol (SymbolKind.Variable = 13)
+            if (child.kind === 13) {
+                // The name includes the type, e.g., "LOC:SMTPbccAddress STRING(255)"
+                // Extract just the variable name part
+                const varNameMatch = child.name.match(/^([^\s]+)/);
+                if (varNameMatch) {
+                    const varName = varNameMatch[1];
+                    
+                    // Debug: Log comparison for LOC: prefixed vars
+                    if (varName.includes(':')) {
+                        logger.info(`  Comparing: varName="${varName}" vs fieldName="${fieldName}"`);
+                        logger.info(`    - Exact match? ${varName.toLowerCase() === fieldName.toLowerCase()}`);
+                        logger.info(`    - Ends with :${fieldName}? ${varName.toLowerCase().endsWith(':' + fieldName.toLowerCase())}`);
+                    }
+                    
+                    // Match exact name or prefixed name (e.g., LOC:SMTPbccAddress)
+                    if (varName.toLowerCase() === fieldName.toLowerCase() ||
+                        varName.toLowerCase().endsWith(':' + fieldName.toLowerCase())) {
+                        logger.info(`✅ Matched variable: child.name="${child.name}", extracted="${varName}", searching for="${fieldName}"`);
+                        return child;
+                    }
+                }
+            }
+            
+            // Also search nested children (for nested structures)
+            if (child.children) {
+                const result = this.findVariableInSymbol(child, fieldName);
+                if (result) return result;
+            }
+        }
+        
+        logger.info(`❌ No match found for "${fieldName}"`);
+        return null;
+    }
+    
+    /**
+     * Legacy token-based variable search (fallback)
+     */
+    private findLocalVariableInfoLegacy(word: string, tokens: Token[], currentScope: Token, document: TextDocument): { type: string; line: number } | null {
+        
+        // For PROCEDURE/METHOD: Search the DATA section (everything before CODE)
+        if (currentScope.subType === TokenType.Procedure || 
+            currentScope.subType === TokenType.MethodImplementation ||
+            currentScope.subType === TokenType.MethodDeclaration) {
+            
+            logger.info(`Entering procedure DATA section search (subType matched: ${currentScope.subType})`);
+            
+            const codeMarker = currentScope.executionMarker;
+            let dataEnd = codeMarker ? codeMarker.line : currentScope.finishesAt;
+            
+            // If we don't have a CODE marker or finishesAt, find the next procedure
+            if (dataEnd === undefined) {
+                const nextProcedure = tokens.find(t =>
+                    (t.subType === TokenType.Procedure ||
+                     t.subType === TokenType.MethodImplementation ||
+                     t.subType === TokenType.MethodDeclaration) &&
+                    t.line > currentScope.line
+                );
+                
+                if (nextProcedure) {
+                    dataEnd = nextProcedure.line;
+                    logger.info(`Using next procedure at line ${dataEnd} as DATA section boundary`);
+                } else {
+                    dataEnd = tokens[tokens.length - 1].line;
+                    logger.info(`No next procedure found, using end of file at line ${dataEnd}`);
+                }
+            }
+            
+            logger.info(`Searching procedure DATA section from line ${currentScope.line} to ${dataEnd}`);
+            
+            // Debug: Show all tokens with matching name in the range
+            const allMatchingInRange = tokens.filter(t => 
+                t.value.toLowerCase() === word.toLowerCase() &&
+                t.line > currentScope.line &&
+                (dataEnd === undefined || t.line < dataEnd)
+            );
+            logger.info(`Debug: Found ${allMatchingInRange.length} tokens matching "${word}" in range ${currentScope.line}-${dataEnd}`);
+            allMatchingInRange.forEach(t => {
+                logger.info(`  -> Line ${t.line}, Type: ${t.type}, Start: ${t.start}, Value: "${t.value}"`);
+            });
+            
+            // Look for variables in DATA section, handling prefixed labels
+            const variableTokens = tokens.filter(token => {
+                // Match by name - either exact match or as part of prefixed label
+                const exactMatch = token.value.toLowerCase() === word.toLowerCase();
+                const prefixedMatch = token.type === TokenType.Label && 
+                                     token.value.includes(':') &&
+                                     token.value.toLowerCase().endsWith(':' + word.toLowerCase());
+                
+                if (!exactMatch && !prefixedMatch) {
+                    return false;
+                }
+                
+                if (token.type !== TokenType.Variable && token.type !== TokenType.Label) {
+                    return false;
+                }
+                
+                if (token.line <= currentScope.line || (dataEnd !== undefined && token.line >= dataEnd)) {
+                    return false;
+                }
+                
+                // For exact matches, handle prefixed variables (token not at position 0)
+                if (exactMatch && token.start > 0) {
+                    const labelAtStart = tokens.find(t =>
+                        t.line === token.line &&
+                        t.start === 0 &&
+                        t.type === TokenType.Label
+                    );
+                    
+                    if (labelAtStart && labelAtStart.value.includes(':')) {
+                        logger.info(`Found prefixed label in hover: ${labelAtStart.value} with field: ${token.value} at line ${token.line}`);
+                        return true;
+                    }
+                    
+                    return false;
+                }
+                
+                // Prefixed label match or token at position 0 is valid
+                if (prefixedMatch) {
+                    logger.info(`Found prefixed label by suffix match: ${token.value} at line ${token.line}`);
+                }
+                return true;
+            });
+
+            logger.info(`Found ${variableTokens.length} variable tokens for ${word} in procedure DATA section`);
+            
+            if (variableTokens.length > 0) {
+                const varToken = variableTokens[0];
+                
+                // Get the source line to extract type information
+                const content = document.getText();
+                const lines = content.split('\n');
+                const varLine = lines[varToken.line];
+                
+                if (varLine) {
+                    // Extract type from the line - handle both simple and prefixed labels
+                    const typeMatch = varLine.match(/\s+(&?[A-Z][A-Za-z0-9_]*(?:\([^)]*\))?)/i);
+                    if (typeMatch) {
+                        return {
+                            type: typeMatch[1].trim(),
+                            line: varToken.line
+                        };
+                    }
+                }
+            }
+        }
+        
+        // Fallback to old logic for routines or if procedure search failed
         // Find variable tokens at column 0 within the current scope
         const variableTokens = tokens.filter(token =>
             (token.type === TokenType.Variable ||

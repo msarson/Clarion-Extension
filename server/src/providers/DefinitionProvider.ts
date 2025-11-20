@@ -111,6 +111,7 @@ export class DefinitionProvider {
 
     /**
      * Finds the definition of a label in the current document
+     * Now handles prefixed labels (e.g., LOC:SomeField)
      */
     private async findLabelDefinition(word: string, document: TextDocument, position: Position): Promise<Definition | null> {
         logger.info(`Looking for label definition: ${word}`);
@@ -118,15 +119,27 @@ export class DefinitionProvider {
         // Get tokens from cache
         const tokens = this.tokenCache.getTokens(document);
 
+        // Check if the word contains a colon (prefix notation like LOC:SomeField)
+        const colonIndex = word.lastIndexOf(':');
+        let searchWord = word;
+        let hasPrefix = false;
+        
+        if (colonIndex > 0) {
+            // Extract the field name after the colon
+            searchWord = word.substring(colonIndex + 1);
+            hasPrefix = true;
+            logger.info(`Detected prefixed label reference: ${word}, searching for field: ${searchWord}`);
+        }
+
         // Look for a label token that matches the word (labels are in column 1)
         const labelTokens = tokens.filter(token =>
             token.type === TokenType.Label &&
-            token.value.toLowerCase() === word.toLowerCase() &&
+            token.value.toLowerCase() === searchWord.toLowerCase() &&
             token.start === 0
         );
 
         if (labelTokens.length > 0) {
-            logger.info(`Found ${labelTokens.length} label tokens for ${word}`);
+            logger.info(`Found ${labelTokens.length} label tokens for ${searchWord}`);
 
             // Find the current scope (procedure, routine, etc.)
             const currentLine = position.line;
@@ -169,14 +182,15 @@ export class DefinitionProvider {
     }
     /**
  * Returns the innermost enclosing procedure/routine/class for a given line
+ * Excludes MethodDeclaration (CLASS method declarations in DATA section)
  */
     private getInnermostScopeAtLine(tokens: Token[], line: number): Token | undefined {
         logger.info(`🔍 Looking for scope at line ${line}`);
         const scopes = tokens.filter(token =>
+            // Only consider actual procedure implementations, not method declarations in CLASS
             (token.subType === TokenType.Procedure ||
                 token.subType === TokenType.GlobalProcedure ||
                 token.subType === TokenType.MethodImplementation ||
-                token.subType === TokenType.MethodDeclaration ||
                 token.subType === TokenType.Routine ||
                 token.subType === TokenType.Class) &&
             token.line <= line &&
@@ -223,6 +237,7 @@ export class DefinitionProvider {
      * Finds the definition of a structure field reference
      * Handles both dot notation (Structure.Field) and prefix notation (PREFIX:Field)
      * Also handles class member access (self.Member or variable.Member)
+     * Enhanced to support both structure labels and prefixes in usage
      */
     private async findStructureFieldDefinition(word: string, document: TextDocument, position: Position): Promise<Definition | null> {
         console.error(`🔥🔥🔥 findStructureFieldDefinition called for word: ${word}`);
@@ -283,7 +298,7 @@ export class DefinitionProvider {
         }
 
         // Check if this is a prefix notation reference (PREFIX:Field or Complex:Prefix:Field)
-        const colonIndex = line.lastIndexOf(':');
+        const colonIndex = line.lastIndexOf(':', position.character - 1);
         if (colonIndex > 0) {
             // Get everything before the last colon as the prefix
             const prefixPart = line.substring(0, colonIndex).trim();
@@ -317,7 +332,7 @@ export class DefinitionProvider {
                         // Find the label for this structure
                         const structureLabel = tokens.find(t =>
                             t.type === TokenType.Label &&
-                            t.line === structureToken.line - 1 &&
+                            t.line === structureToken.line &&
                             t.start === 0
                         );
 
@@ -545,16 +560,153 @@ export class DefinitionProvider {
         const tokens = this.tokenCache.getTokens(document);
         const currentLine = position.line;
         logger.info(`🔍 Current line: ${currentLine}, total tokens: ${tokens.length}`);
+        
+        // Check if word contains a colon (prefix notation like LOC:SomeField)
+        const colonIndex = word.lastIndexOf(':');
+        let searchWord = word;
+        let prefixPart = '';
+        
+        if (colonIndex > 0) {
+            prefixPart = word.substring(0, colonIndex);
+            searchWord = word.substring(colonIndex + 1);
+            logger.info(`Detected prefixed variable reference: prefix="${prefixPart}", field="${searchWord}"`);
+        }
+        
         const currentScope = this.getInnermostScopeAtLine(tokens, currentLine);
     
         if (currentScope) {
             logger.info(`Current scope: ${currentScope.value} (${currentScope.line}-${currentScope.finishesAt})`);
             
             // Check if this is a parameter in the current procedure
-            const parameterDefinition = this.findParameterDefinition(word, document, currentScope);
+            const parameterDefinition = this.findParameterDefinition(searchWord, document, currentScope);
             if (parameterDefinition) {
-                logger.info(`Found parameter definition for ${word} in procedure ${currentScope.value}`);
+                logger.info(`Found parameter definition for ${searchWord} in procedure ${currentScope.value}`);
                 return parameterDefinition;
+            }
+            
+            // For PROCEDURE/METHOD: Search the DATA section (everything before CODE)
+            // For ROUTINE: Only search explicit DATA sections
+            if (currentScope.subType === TokenType.Procedure || 
+                currentScope.subType === TokenType.MethodImplementation ||
+                currentScope.subType === TokenType.MethodDeclaration) {
+                
+                // In procedures/methods, everything before CODE is DATA
+                const codeMarker = currentScope.executionMarker;
+                let dataEnd = codeMarker ? codeMarker.line : currentScope.finishesAt;
+                
+                // If we don't have a CODE marker or finishesAt, find the next procedure or the actual end
+                if (dataEnd === undefined) {
+                    // Find the next procedure/method that starts after the current one
+                    const nextProcedure = tokens.find(t =>
+                        (t.subType === TokenType.Procedure ||
+                         t.subType === TokenType.MethodImplementation ||
+                         t.subType === TokenType.MethodDeclaration) &&
+                        t.line > currentScope.line
+                    );
+                    
+                    if (nextProcedure) {
+                        dataEnd = nextProcedure.line;
+                        logger.info(`Using next procedure at line ${dataEnd} as DATA section boundary`);
+                    } else {
+                        // No next procedure, search to end of file
+                        dataEnd = tokens[tokens.length - 1].line;
+                        logger.info(`No next procedure found, using end of file at line ${dataEnd}`);
+                    }
+                }
+                
+                logger.info(`Searching procedure DATA section from line ${currentScope.line} to ${dataEnd}`);
+                
+                // Look for variable declarations in the DATA section
+                // Need to handle both:
+                // 1. Simple variables: SomeVar STRING(20) - token at start 0
+                // 2. Prefixed labels: LOC:SomeVar STRING(20) - the field part may not be at start 0 OR the label is PREFIX:Field
+                const dataVariables = tokens.filter(token => {
+                    // Match by name - either exact match or as part of prefixed label
+                    const exactMatch = token.value.toLowerCase() === searchWord.toLowerCase();
+                    const prefixedMatch = token.type === TokenType.Label && 
+                                         token.value.includes(':') &&
+                                         token.value.toLowerCase().endsWith(':' + searchWord.toLowerCase());
+                    
+                    if (!exactMatch && !prefixedMatch) {
+                        return false;
+                    }
+                    
+                    // Must be a variable or label type
+                    if (token.type !== TokenType.Variable && token.type !== TokenType.Label) {
+                        return false;
+                    }
+                    
+                    // Must be in the DATA section (after procedure start, before CODE/next procedure)
+                    if (token.line <= currentScope.line) {
+                        return false;
+                    }
+                    if (dataEnd !== undefined && token.line >= dataEnd) {
+                        return false;
+                    }
+                    
+                    // For exact matches with prefixed variables, the field name might not be at position 0
+                    // Check if this token is part of a prefixed label
+                    // by looking at the same line for a label token at position 0
+                    if (exactMatch && token.start > 0) {
+                        // Look for a label at position 0 on the same line
+                        const labelAtStart = tokens.find(t =>
+                            t.line === token.line &&
+                            t.start === 0 &&
+                            t.type === TokenType.Label
+                        );
+                        
+                        // If there's a label at position 0, check if it contains a colon (prefix notation)
+                        if (labelAtStart && labelAtStart.value.includes(':')) {
+                            logger.info(`Found prefixed label: ${labelAtStart.value} with field: ${token.value} at line ${token.line}`);
+                            return true;
+                        }
+                        
+                        // If no prefixed label, this token must be at position 0
+                        return false;
+                    }
+                    
+                    // Prefixed label match or token at position 0 is valid
+                    if (prefixedMatch) {
+                        logger.info(`Found prefixed label by suffix match: ${token.value} at line ${token.line}`);
+                    }
+                    return true;
+                });
+                
+                if (dataVariables.length > 0) {
+                    logger.info(`Found ${dataVariables.length} variables in procedure DATA section`);
+                    
+                    // For the result, we want to return the position of the full label (including prefix)
+                    // So if we found a prefixed field, find its label token
+                    const token = dataVariables[0];
+                    
+                    if (token.start > 0) {
+                        // This is a prefixed field, find the label at position 0
+                        const labelToken = tokens.find(t =>
+                            t.line === token.line &&
+                            t.start === 0 &&
+                            t.type === TokenType.Label
+                        );
+                        
+                        if (labelToken) {
+                            logger.info(`Returning prefixed label location: ${labelToken.value} at line ${labelToken.line}`);
+                            return Location.create(document.uri, {
+                                start: { line: labelToken.line, character: 0 },
+                                end: { line: labelToken.line, character: labelToken.value.length }
+                            });
+                        }
+                    }
+                    
+                    // Return the token position as-is
+                    logger.info(`Returning variable location at line ${token.line}`);
+                    return Location.create(document.uri, {
+                        start: { line: token.line, character: token.start },
+                        end: { line: token.line, character: token.start + token.value.length }
+                    });
+                }
+            } else if (currentScope.subType === TokenType.Routine && currentScope.hasLocalData) {
+                // For routines with DATA sections, search only the DATA section
+                logger.info(`Searching routine DATA section`);
+                // The routine variable search is handled below in the general search
             }
         } else {
             logger.info(`❌ NO SCOPE FOUND at line ${currentLine} - cannot check for parameters`);
@@ -562,9 +714,9 @@ export class DefinitionProvider {
     
         // DEBUG: Log all tokens that match the word to see what we're getting
         const allMatchingTokens = tokens.filter(token => 
-            token.value.toLowerCase() === word.toLowerCase()
+            token.value.toLowerCase() === searchWord.toLowerCase()
         );
-        logger.info(`🔍 DEBUG: Found ${allMatchingTokens.length} tokens matching "${word}"`);
+        logger.info(`🔍 DEBUG: Found ${allMatchingTokens.length} tokens matching "${searchWord}"`);
         allMatchingTokens.forEach(t => 
             logger.info(`  -> Line ${t.line}, Type: ${t.type}, Start: ${t.start}, Value: "${t.value}"`)
         );
@@ -573,7 +725,7 @@ export class DefinitionProvider {
             (token.type === TokenType.Variable ||
              token.type === TokenType.ReferenceVariable ||
              token.type === TokenType.ImplicitVariable) &&
-            token.value.toLowerCase() === word.toLowerCase() &&
+            token.value.toLowerCase() === searchWord.toLowerCase() &&
             token.start === 0 &&
             !(token.line === position.line &&
               position.character >= token.start &&
@@ -581,7 +733,7 @@ export class DefinitionProvider {
         );
     
         if (variableTokens.length > 0) {
-            logger.info(`Found ${variableTokens.length} variable tokens for ${word}`);
+            logger.info(`Found ${variableTokens.length} variable tokens for ${searchWord}`);
             variableTokens.forEach(token =>
                 logger.info(`  -> Token: ${token.value} at line ${token.line}, type: ${token.type}, start: ${token.start}`)
             );
@@ -608,25 +760,30 @@ export class DefinitionProvider {
         }
     
         // 🌍 Global fallback
-        const globalLocation = await this.findGlobalDefinition(word, document.uri);
+        const globalLocation = await this.findGlobalDefinition(searchWord, document.uri);
         if (globalLocation) return globalLocation;
     
         // 🎯 Try FILE structure fallback
-        logger.info(`🧐 Still no match; checking for FILE label fallback`);
+        logger.info(`🧐 Still no match; checking for FILE/QUEUE/GROUP label fallback`);
 
         const labelToken = tokens.find(t =>
             t.type === TokenType.Label &&
-            t.value.toLowerCase() === word.toLowerCase() &&
+            t.value.toLowerCase() === searchWord.toLowerCase() &&
             t.start === 0
         );
     
         if (labelToken) {
-            logger.info(`Found label token for ${word} at line ${labelToken.line}`);
+            logger.info(`Found label token for ${searchWord} at line ${labelToken.line}`);
             const labelIndex = tokens.indexOf(labelToken);
             for (let i = labelIndex + 1; i < tokens.length; i++) {
                 const t = tokens[i];
-                if (t.type === TokenType.Structure && t.value.toUpperCase() === "FILE") {
-                    logger.info(`📄 Resolved ${word} as FILE label definition`);
+                // Check for FILE, QUEUE, GROUP, RECORD structures
+                if (t.type === TokenType.Structure && 
+                    (t.value.toUpperCase() === "FILE" || 
+                     t.value.toUpperCase() === "QUEUE" ||
+                     t.value.toUpperCase() === "GROUP" ||
+                     t.value.toUpperCase() === "RECORD")) {
+                    logger.info(`📄 Resolved ${searchWord} as ${t.value} label definition`);
                     return Location.create(document.uri, {
                         start: { line: labelToken.line, character: 0 },
                         end: { line: labelToken.line, character: labelToken.value.length }
@@ -643,29 +800,29 @@ export class DefinitionProvider {
             (token.subType === TokenType.Procedure ||
              token.subType === TokenType.Routine ||
              token.subType === TokenType.Class) &&
-            token.value.toLowerCase() === word.toLowerCase()
+            token.value.toLowerCase() === searchWord.toLowerCase()
         );
     
         if (procedureTokens.length > 0) {
             const token = procedureTokens[0];
-            logger.info(`🔧 Matched procedure/routine/class for ${word}`);
+            logger.info(`🔧 Matched procedure/routine/class for ${searchWord}`);
             return Location.create(document.uri, {
                 start: { line: token.line, character: token.start },
                 end: { line: token.line, character: token.start + token.value.length }
             });
         }
     
-        logger.info(`❌ Could not resolve definition for ${word} in current document, trying includes...`);
+        logger.info(`❌ Could not resolve definition for ${searchWord} in current document, trying includes...`);
         
         // Try to find the definition in included files as a last resort
         const documentPath = document.uri.replace("file:///", "").replace(/\//g, "\\");
-        const includeResult = await this.findDefinitionInIncludes(word, documentPath);
+        const includeResult = await this.findDefinitionInIncludes(searchWord, documentPath);
         if (includeResult) {
-            logger.info(`✅ Found definition for ${word} in included file`);
+            logger.info(`✅ Found definition for ${searchWord} in included file`);
             return includeResult;
         }
         
-        logger.info(`❌ Could not resolve definition for ${word} in any file`);
+        logger.info(`❌ Could not resolve definition for ${searchWord} in any file`);
         return null;
     }
     
@@ -719,7 +876,8 @@ export class DefinitionProvider {
      * Gets the word range at the given position
      */
     /**
-     * Gets the word range at a position (without including dots for variable lookup)
+     * Gets the word range at a position
+     * Enhanced to include colons for Clarion prefix notation (e.g., LOC:Field)
      */
     private getWordRangeAtPosition(document: TextDocument, position: Position): Range | null {
         const line = document.getText({
@@ -727,15 +885,36 @@ export class DefinitionProvider {
             end: { line: position.line, character: Number.MAX_VALUE }
         });
 
-        // Find the start and end of the word (stopping at dots)
+        // Check if we're in a context that might use prefix notation
+        // Look for USE(), PRE(), or similar patterns that indicate we should include colons
+        const includeColons = /USE\s*\(|PRE\s*\(|,PRE\s*\(/i.test(line);
+        
+        // Find the start of the word
         let start = position.character;
-        while (start > 0 && this.isWordCharacter(line.charAt(start - 1))) {
-            start--;
+        while (start > 0) {
+            const char = line.charAt(start - 1);
+            if (this.isWordCharacter(char)) {
+                start--;
+            } else if (includeColons && char === ':') {
+                // Include colon if we're in a Clarion prefix context
+                start--;
+            } else {
+                break;
+            }
         }
 
+        // Find the end of the word
         let end = position.character;
-        while (end < line.length && this.isWordCharacter(line.charAt(end))) {
-            end++;
+        while (end < line.length) {
+            const char = line.charAt(end);
+            if (this.isWordCharacter(char)) {
+                end++;
+            } else if (includeColons && char === ':') {
+                // Include colon if we're in a Clarion prefix context
+                end++;
+            } else {
+                break;
+            }
         }
 
         if (start === end) {
@@ -749,7 +928,7 @@ export class DefinitionProvider {
     }
 
     /**
-     * Checks if a character is part of a word (excluding dots for variable detection)
+     * Checks if a character is part of a word (excluding dots and colons for basic variable detection)
      */
     private isWordCharacter(char: string): boolean {
         return /[a-zA-Z0-9_]/.test(char);

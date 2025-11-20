@@ -1,7 +1,7 @@
 import { DocumentStructure } from './DocumentStructure';
 import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("Tokenizer");
-logger.setLevel("error"); // Only show errors and PERF (PERF logs directly to console)
+logger.setLevel("info"); // Only show errors and PERF (PERF logs directly to console)
 export enum TokenType {
     Comment,
     String,
@@ -565,14 +565,17 @@ export class ClarionTokenizer {
                 
                 // If in DATA section, tokenize variable declarations
                 if (inDataSection) {
-                    // Match variable declarations: varName   type
+                    logger.info(`🔍 TOKENIZER: Checking line ${lineNum} in DATA section: "${line}"`);
+                    
+                    // Match variable declarations: varName   type or varName type(size)
                     // Variables in routines start at column 0 (after any leading whitespace is removed)
-                    const varMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+(&?[A-Za-z_][A-Za-z0-9_]*)/i);
+                    // Updated to handle types with parameters like CSTRING(1024), STRING(255), etc.
+                    const varMatch = line.match(/^([A-Za-z_][A-Za-z0-9_:]*)\s+(&?[A-Za-z_][A-Za-z0-9_]*(?:\([^)]*\))?)/i);
                     if (varMatch) {
                         const varName = varMatch[1];
                         const isReference = varMatch[2].startsWith('&');
                         
-                        logger.info(`Found routine variable: ${varName} (reference: ${isReference}) at line ${lineNum}`);
+                        logger.info(`✅ TOKENIZER: Found routine variable: ${varName} (reference: ${isReference}) at line ${lineNum}`);
                         
                         // Create a Variable or ReferenceVariable token
                         const varToken: Token = {
@@ -602,13 +605,16 @@ export class ClarionTokenizer {
     private tokenizeProcedureLocalVariables(): void {
         // Find all procedures/methods/functions
         const procedures = this.tokens.filter(t => 
-            t.subType === TokenType.Procedure || 
-            t.subType === TokenType.MethodImplementation || 
-            t.subType === TokenType.Function
+            t.type === TokenType.Procedure || 
+            t.type === TokenType.Function ||
+            t.subType === TokenType.MethodImplementation
         );
+
+        logger.info(`🔍 TOKENIZER: tokenizeProcedureLocalVariables found ${procedures.length} procedures`);
 
         for (const proc of procedures) {
             const procEnd = proc.finishesAt || this.lines.length - 1;
+            logger.info(`🔍 TOKENIZER: Processing procedure "${proc.value}" from line ${proc.line} to ${procEnd}, subType: ${proc.subType}`);
             
             // Search from procedure declaration to CODE statement
             for (let lineNum = proc.line + 1; lineNum <= procEnd; lineNum++) {
@@ -617,16 +623,20 @@ export class ClarionTokenizer {
                 
                 // Stop at CODE keyword
                 if (line.match(/^\s*code\s*$/i)) {
+                    logger.info(`🔍 TOKENIZER: Found CODE keyword at line ${lineNum}, stopping variable search`);
                     break;
                 }
                 
-                // Match variable declarations at column 0: varName   type
-                const varMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+(&?[A-Za-z_][A-Za-z0-9_]*)/i);
+                logger.info(`🔍 TOKENIZER: Checking procedure line ${lineNum}: "${line}"`);
+                
+                // Match variable declarations at column 0: varName   type or varName type(size)
+                // Updated to handle types with parameters like CSTRING(1024), STRING(255), etc.
+                const varMatch = line.match(/^([A-Za-z_][A-Za-z0-9_:]*)\s+(&?[A-Za-z_][A-Za-z0-9_]*(?:\([^)]*\))?)/i);
                 if (varMatch) {
                     const varName = varMatch[1];
                     const isReference = varMatch[2].startsWith('&');
                     
-                    logger.info(`Found procedure local variable: ${varName} (reference: ${isReference}) at line ${lineNum}`);
+                    logger.info(`✅ TOKENIZER: Found procedure local variable: ${varName} (reference: ${isReference}) at line ${lineNum}`);
                     
                     // Create a Variable or ReferenceVariable token
                     const varToken: Token = {
@@ -772,7 +782,7 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Constant]: /\b(?:TRUE|FALSE|NULL|STD:*)\b/i,
     // ✅ NEW: Detects QUEUE, GROUP, RECORD when used as parameters
     [TokenType.TypeAnnotation]: /\b(?:QUEUE|GROUP|RECORD|FILE|VIEW|REPORT|MODULE)\s+\w+\)/i,
-    [TokenType.Type]: /\b(?:ANY|ASTRING|BFLOAT4|BFLOAT8|BLOB|MEMO|BOOL|BSTRING|BYTE|CSTRING|DATE|DECIMAL|DOUBLE|EQUATE|FLOAT4|LONG|LIKE|PDECIMAL|PSTRING|REAL|SHORT|SIGNED|SREAL|STRING|TIME|ULONG|UNSIGNED|USHORT|VARIANT)\b/i,
+    [TokenType.Type]: /\b(?:ANY|ASTRING|BFLOAT4|BFLOAT8|BLOB|MEMO|BOOL|BSTRING|BYTE|CSTRING|DATE|DECIMAL|DOUBLE|EQUATE|FLOAT4|LONG|LIKE|PDECIMAL|PSTRING|REAL|SHORT|SIGNED|SREAL|STRING|TIME|ULONG|UNSIGNED|USHORT|VARIANT)(?:\s*\([^)]*\))?\b/i,
     [TokenType.ImplicitVariable]: /\b[A-Za-z][A-Za-z0-9_]+(?:\$|#|")\b/i,
     [TokenType.Delimiter]: /[,():]/i,  // ❌ Remove "." from here
     [TokenType.ReferenceVariable]: /&[A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*(?::\d+)?)?/i,

@@ -1066,6 +1066,12 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
             defaultLookupExtensions: globalSettings.defaultLookupExtensions // Add default lookup extensions
         });
         logger.info("✅ Clarion paths/config/version sent to the language server.");
+        
+        // Wait a moment for the server to process the notification and initialize
+        // This prevents a race condition where we request the solution tree before it's built
+        logger.info("⏳ Waiting for server to initialize solution...");
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        logger.info("✅ Server initialization delay complete");
     } else {
         logger.error("❌ Language client is not available.");
         vscodeWindow.showErrorMessage("Error initializing Clarion solution: Language client is not available.");

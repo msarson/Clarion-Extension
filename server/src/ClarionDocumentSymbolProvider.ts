@@ -2,7 +2,7 @@ import { DocumentSymbol, Range, SymbolKind } from 'vscode-languageserver-types';
 
 import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("ClarionDocumentSymbolProvider");
-logger.setLevel("error");
+logger.setLevel("info");
 import { serverInitialized } from './server.js';
 import { Token, TokenType } from './ClarionTokenizer.js';
 
@@ -358,8 +358,11 @@ export class ClarionDocumentSymbolProvider {
                 continue;
             }
 
-            if ((type === TokenType.Type || type === TokenType.ReferenceVariable || type === TokenType.Variable) && i > 0) {
-                this.handleVariableToken(tokens, i, symbols, currentProcedure, currentStructure, lastMethodImplementation);
+            // Handle variable declarations - check for Type tokens (BYTE, LONG, etc) and TypeAnnotation (STRING(255), CSTRING(100), etc)
+            // Also check for FunctionArgumentParameter which the tokenizer uses for parametrized types like CSTRING(1024)
+            if ((type === TokenType.Type || type === TokenType.TypeAnnotation || type === TokenType.ReferenceVariable || type === TokenType.Variable || type === TokenType.FunctionArgumentParameter) && i > 0) {
+                logger.info(`✅ SymbolProvider: Calling handleVariableToken for token index=${i}, type=${type}, value="${token.value}", line=${token.line}`);
+                this.handleVariableToken(tokens, i, symbols, currentStructure, currentProcedure, lastMethodImplementation);
 
                 continue;
             }
@@ -1818,7 +1821,15 @@ export class ClarionDocumentSymbolProvider {
         const { line } = token;
         const prevToken = tokens[index - 1];
 
-        if (prevToken?.type === TokenType.Label) {
+        logger.info(`🔍 handleVariableToken called: index=${index}, token=${token.value}, type=${token.type}, line=${line}`);
+        logger.info(`   prevToken: ${prevToken ? `type=${prevToken.type}, value="${prevToken.value}"` : 'null'}`);
+
+        // Handle Label or StructurePrefix tokens (variable names)
+        // TokenType.Label (24), TokenType.StructurePrefix (41), TokenType.Variable (5)
+        if (prevToken && (prevToken.type === TokenType.Label || 
+                          prevToken.type === TokenType.StructurePrefix || 
+                          prevToken.type === TokenType.Variable)) {
+            logger.info(`   ✅ Previous token is Label or StructurePrefix - processing variable declaration`);
             // CRITICAL FIX: Capture the entire line for variable types
             // This ensures we get the full type definition including attributes
             let fullType = "";
@@ -1923,6 +1934,8 @@ export class ClarionDocumentSymbolProvider {
             }
 
             this.addSymbolToParent(variableSymbol, target, symbols);
+        } else {
+            logger.info(`   ❌ Previous token is NOT Label or StructurePrefix - skipping (prevToken type=${prevToken?.type})`);
         }
     }
 
