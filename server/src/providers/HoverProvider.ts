@@ -292,8 +292,10 @@ export class HoverProvider {
             const varSymbol = this.findVariableInSymbol(procedureSymbol, word);
             if (varSymbol) {
                 logger.info(`Found variable in symbol tree: ${varSymbol.name}, detail: ${varSymbol.detail}`);
+                // Extract type from _clarionType if available, otherwise parse from detail
+                const type = (varSymbol as any)._clarionType || varSymbol.detail || 'Unknown';
                 return {
-                    type: varSymbol.detail || 'Unknown',
+                    type: type,
                     line: varSymbol.range.start.line
                 };
             }
@@ -335,25 +337,21 @@ export class HoverProvider {
         for (const child of symbol.children) {
             // Check if this is a variable symbol (SymbolKind.Variable = 13)
             if (child.kind === 13) {
-                // The name includes the type, e.g., "LOC:SMTPbccAddress STRING(255)"
-                // Extract just the variable name part
-                const varNameMatch = child.name.match(/^([^\s]+)/);
-                if (varNameMatch) {
-                    const varName = varNameMatch[1];
-                    
-                    // Debug: Log comparison for LOC: prefixed vars
-                    if (varName.includes(':')) {
-                        logger.info(`  Comparing: varName="${varName}" vs fieldName="${fieldName}"`);
-                        logger.info(`    - Exact match? ${varName.toLowerCase() === fieldName.toLowerCase()}`);
-                        logger.info(`    - Ends with :${fieldName}? ${varName.toLowerCase().endsWith(':' + fieldName.toLowerCase())}`);
-                    }
-                    
-                    // Match exact name or prefixed name (e.g., LOC:SMTPbccAddress)
-                    if (varName.toLowerCase() === fieldName.toLowerCase() ||
-                        varName.toLowerCase().endsWith(':' + fieldName.toLowerCase())) {
-                        logger.info(`✅ Matched variable: child.name="${child.name}", extracted="${varName}", searching for="${fieldName}"`);
-                        return child;
-                    }
+                // Use _clarionVarName if available (more reliable), otherwise extract from name
+                const varName = (child as any)._clarionVarName || child.name.match(/^([^\s]+)/)?.[1] || child.name;
+                
+                // Debug: Log comparison for LOC: prefixed vars
+                if (varName.includes(':')) {
+                    logger.info(`  Comparing: varName="${varName}" vs fieldName="${fieldName}"`);
+                    logger.info(`    - Exact match? ${varName.toLowerCase() === fieldName.toLowerCase()}`);
+                    logger.info(`    - Ends with :${fieldName}? ${varName.toLowerCase().endsWith(':' + fieldName.toLowerCase())}`);
+                }
+                
+                // Match exact name or prefixed name (e.g., LOC:SMTPbccAddress)
+                if (varName.toLowerCase() === fieldName.toLowerCase() ||
+                    varName.toLowerCase().endsWith(':' + fieldName.toLowerCase())) {
+                    logger.info(`✅ Matched variable: child.name="${child.name}", extracted="${varName}", searching for="${fieldName}"`);
+                    return child;
                 }
             }
             
@@ -566,10 +564,19 @@ export class HoverProvider {
         const isRoutine = scope.subType === TokenType.Routine;
         const variableType = isRoutine ? 'Routine Variable' : 'Local Variable';
         
+        // Extract just the variable name if it has a prefix
+        let displayName = name;
+        const colonIndex = name.lastIndexOf(':');
+        if (colonIndex > 0) {
+            displayName = name.substring(colonIndex + 1);
+        }
+        
         const markdown = [
-            `**${variableType}:** \`${name}\``,
+            `**${variableType}:** \`${displayName}\``,
             ``,
             `**Type:** \`${info.type}\``,
+            ``,
+            `**Scope:** ${isRoutine ? 'Routine' : 'Procedure'}`,
             ``,
             `**Declared at:** line ${info.line + 1}`,
             ``,

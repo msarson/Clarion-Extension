@@ -1835,19 +1835,31 @@ export class ClarionDocumentSymbolProvider {
             let fullType = "";
             let j = index;
 
+            logger.info(`   🔍 Collecting type tokens starting from index ${j}`);
             // Process to the end of the line or until a comment
             while (j < tokens.length) {
                 const t = tokens[j];
 
+                logger.info(`     - Token ${j}: type=${t.type}, value="${t.value}", line=${t.line}`);
                 // Stop at the end of the line or a comment
                 if (t.line !== line || t.type === TokenType.Comment) {
+                    logger.info(`     - Stopping: line mismatch or comment`);
                     break;
                 }
 
+                // Skip label tokens (don't include the variable name in the type)
+                if (t.type === TokenType.Label || t.type === TokenType.StructurePrefix || t.type === TokenType.Variable) {
+                    logger.info(`     - Skipping label/variable token`);
+                    j++;
+                    continue;
+                }
+
                 // Add the token value to the type
-                fullType += t.value;// + " ";
+                fullType += t.value;
+                logger.info(`     - fullType now: "${fullType}"`);
                 j++;
             }
+            logger.info(`   ✅ Final fullType: "${fullType}"`);
 
             // Clean up the type
             fullType = fullType.trim();
@@ -1858,18 +1870,34 @@ export class ClarionDocumentSymbolProvider {
                 fullType = fullType.substring(0, commentIndex).trim();
             }
             fullType = fullType.trim();
-            // CRITICAL FIX: Include the variable type in the name
-            // This ensures it's displayed in the outline view
-            const displayName = `${prevToken.value} ${fullType}`;
+            
+            // Create proper detail with parent context
+            let detail = "";
+            if (currentProcedure) {
+                detail = `in ${currentProcedure.name}`;
+            } else if (lastMethodImplementation) {
+                detail = `in ${lastMethodImplementation.name}`;
+            } else if (currentStructure) {
+                detail = `in ${currentStructure.name}`;
+            }
+
+            // Create the symbol name with variable name and type
+            const symbolName = `${prevToken.value} ${fullType}`;
+            
+            logger.info(`   📝 Creating variable symbol: name="${symbolName}", detail="${detail}"`);
 
             const variableSymbol = DocumentSymbol.create(
-                displayName,  // Include the variable type in the name
-                "",  // Empty detail since we're including it in the name
+                symbolName,  // Variable name with type
+                detail,  // Context in detail
                 ClarionSymbolKind.Variable,
                 this.getTokenRange(tokens, prevToken.line, line),
                 this.getTokenRange(tokens, prevToken.line, line),
                 []
             );
+            
+            // Store the type separately for hover provider to use
+            (variableSymbol as any)._clarionType = fullType;
+            (variableSymbol as any)._clarionVarName = prevToken.value;
 
             // CRITICAL FIX: Prioritize currentProcedure over currentStructure
             // This ensures variables are attached to the method implementation they're defined in
