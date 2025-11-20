@@ -16,6 +16,7 @@ export enum TokenType {
     Property,
     Constant,
     Type,
+    DataTypeParameter,      // ✅ Parameters in data type declarations: STRING(255), CSTRING(100)
     TypeAnnotation,
     ImplicitVariable,
     Structure,
@@ -160,6 +161,7 @@ export class ClarionTokenizer {
             
             // TYPES: Before Variable
             TokenType.Type,                 // Common, specific type keywords
+            TokenType.DataTypeParameter,    // Must be after Type (captures (255) in STRING(255))
             TokenType.TypeAnnotation,       // Specific type annotations
             
             // COMPLEX PATTERNS: Before simple ones
@@ -202,7 +204,7 @@ export class ClarionTokenizer {
             'star': [TokenType.PointerParameter],
             'digit': [TokenType.Number],
             'operator': [TokenType.Operator],
-            'delimiter': [TokenType.Delimiter],
+            'delimiter': [TokenType.Delimiter, TokenType.DataTypeParameter],
             'upper': [ // Uppercase letter - identifiers, keywords, structures
                 TokenType.Label, TokenType.Keyword, TokenType.Directive,
                 TokenType.ClarionDocument, TokenType.ExecutionMarker, TokenType.EndStatement,
@@ -782,7 +784,8 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Constant]: /\b(?:TRUE|FALSE|NULL|STD:*)\b/i,
     // ✅ NEW: Detects QUEUE, GROUP, RECORD when used as parameters
     [TokenType.TypeAnnotation]: /\b(?:QUEUE|GROUP|RECORD|FILE|VIEW|REPORT|MODULE)\s+\w+\)/i,
-    [TokenType.Type]: /\b(?:ANY|ASTRING|BFLOAT4|BFLOAT8|BLOB|MEMO|BOOL|BSTRING|BYTE|CSTRING|DATE|DECIMAL|DOUBLE|EQUATE|FLOAT4|LONG|LIKE|PDECIMAL|PSTRING|REAL|SHORT|SIGNED|SREAL|STRING|TIME|ULONG|UNSIGNED|USHORT|VARIANT)(?:\s*\([^)]*\))?\b/i,
+    [TokenType.DataTypeParameter]: /\(\d+\)/i,  // ✅ Matches (255), (1024), etc. in STRING(255), CSTRING(1024)
+    [TokenType.Type]: /\b(?:ANY|ASTRING|BFLOAT4|BFLOAT8|BLOB|MEMO|BOOL|BSTRING|BYTE|CSTRING|DATE|DECIMAL|DOUBLE|EQUATE|FLOAT4|LONG|LIKE|PDECIMAL|PSTRING|REAL|SHORT|SIGNED|SREAL|STRING|TIME|ULONG|UNSIGNED|USHORT|VARIANT)\b/i,
     [TokenType.ImplicitVariable]: /\b[A-Za-z][A-Za-z0-9_]+(?:\$|#|")\b/i,
     [TokenType.Delimiter]: /[,():]/i,  // ❌ Remove "." from here
     [TokenType.ReferenceVariable]: /&[A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*(?::\d+)?)?/i,
