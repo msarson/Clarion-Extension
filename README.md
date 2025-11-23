@@ -358,6 +358,31 @@ For a comprehensive guide on using all features of the Clarion Extension, please
 
 ---
 
+## Current Limitations & Roadmap
+
+### Scope Support Status
+
+**Currently Supported:**
+- ✅ **Local/Procedure Scope**: Full support for variables declared within procedures
+  - Go to Definition works for all local variables
+  - Hover information displays correctly
+  - PREFIX structure fields fully supported (`LOC:MyVar`, `MyGroup.MyVar`)
+  - Parameter detection and navigation
+
+**Planned for Future Releases:**
+- ⏳ **Module/Global Scope**: Cross-file variable and procedure references
+  - MAP/MODULE declarations
+  - Global variables
+  - Cross-procedure navigation
+- ⏳ **Class Scope Improvements**: Enhanced class member resolution
+- ⏳ **Type Resolution**: Following variable types through assignments
+
+**Note**: The extension currently focuses on providing robust local scope support. Global scope features (MAP, MODULE, cross-file references) are planned for future versions. This ensures the foundation is solid before expanding to more complex scenarios.
+
+For feature requests or to track progress on global scope support, see our [GitHub Issues](https://github.com/msarson/Clarion-Extension/issues).
+
+---
+
 ## Troubleshooting
 
 ### Snippet Descriptions Not Showing?
