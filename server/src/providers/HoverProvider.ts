@@ -112,10 +112,10 @@ export class HoverProvider {
             logger.info(`Checking if ${searchWord} is a local variable...`);
             const variableInfo = this.findLocalVariableInfo(searchWord, tokens, currentScope, document, word);
             if (variableInfo) {
-                logger.info(`Found variable info for ${searchWord}: type=${variableInfo.type}, line=${variableInfo.line}`);
+                logger.info(`✅ HOVER-RETURN: Found variable info for ${searchWord}: type=${variableInfo.type}, line=${variableInfo.line}`);
                 return this.constructVariableHover(word, variableInfo, currentScope);
             }
-            logger.info(`${searchWord} is not a local variable`);
+            logger.info(`❌ HOVER-RETURN: ${searchWord} is not a local variable - returning null`);
 
             return null;
         } catch (error) {
@@ -134,54 +134,32 @@ export class HoverProvider {
             end: { line: position.line + 1, character: 0 }
         });
 
-        // Check if we're in a context that might use prefix notation
-        // Look for USE(), PRE(), or similar patterns that indicate we should include colons
-        const includeColons = /USE\s*\(|PRE\s*\(|,PRE\s*\(/i.test(line);
-        
-        if (includeColons) {
-            // For prefix contexts, manually build the word including colons
-            let start = position.character;
-            while (start > 0) {
-                const char = line.charAt(start - 1);
-                if (/[a-zA-Z0-9_:]/.test(char)) {
-                    start--;
-                } else {
-                    break;
-                }
-            }
-            
-            let end = position.character;
-            while (end < line.length) {
-                const char = line.charAt(end);
-                if (/[a-zA-Z0-9_:]/.test(char)) {
-                    end++;
-                } else {
-                    break;
-                }
-            }
-            
-            if (start < end) {
-                return {
-                    start: { line: position.line, character: start },
-                    end: { line: position.line, character: end }
-                };
+        // Always check for prefix notation (PREFIX:Field) by looking backwards for colon
+        let start = position.character;
+        while (start > 0) {
+            const char = line.charAt(start - 1);
+            if (/[a-zA-Z0-9_:]/.test(char)) {
+                start--;
+            } else {
+                break;
             }
         }
-
-        // Default behavior - no colons
-        const wordPattern = /[A-Za-z_][A-Za-z0-9_]*/g;
-        let match: RegExpExecArray | null;
-
-        while ((match = wordPattern.exec(line)) !== null) {
-            const start = match.index;
-            const end = start + match[0].length;
-
-            if (position.character >= start && position.character <= end) {
-                return {
-                    start: { line: position.line, character: start },
-                    end: { line: position.line, character: end }
-                };
+        
+        let end = position.character;
+        while (end < line.length) {
+            const char = line.charAt(end);
+            if (/[a-zA-Z0-9_:]/.test(char)) {
+                end++;
+            } else {
+                break;
             }
+        }
+        
+        if (start < end) {
+            return {
+                start: { line: position.line, character: start },
+                end: { line: position.line, character: end }
+            };
         }
 
         return null;
@@ -289,7 +267,10 @@ export class HoverProvider {
             }
             
             // Search for the variable in the procedure's children
-            const varSymbol = this.findVariableInSymbol(procedureSymbol, word);
+            // Use originalWord if available (includes prefix like LOC:MyVar), otherwise use word
+            const searchText = originalWord || word;
+            logger.info(`PREFIX-DEBUG: Searching with searchText="${searchText}", originalWord="${originalWord}", word="${word}"`);
+            const varSymbol = this.findVariableInSymbol(procedureSymbol, searchText);
             if (varSymbol) {
                 logger.info(`Found variable in symbol tree: ${varSymbol.name}, detail: ${varSymbol.detail}`);
                 // Extract type from _clarionType if available, otherwise parse from detail
@@ -302,7 +283,7 @@ export class HoverProvider {
         }
         
         // Fallback to old token-based logic
-        logger.info(`Symbol tree search failed, falling back to token search`);
+        logger.info(`PREFIX-DEBUG: Symbol tree search failed, falling back to token search for "${word}"`);
         return this.findLocalVariableInfoLegacy(word, tokens, currentScope, document);
     }
     
@@ -340,17 +321,37 @@ export class HoverProvider {
                 // Use _clarionVarName if available (more reliable), otherwise extract from name
                 const varName = (child as any)._clarionVarName || child.name.match(/^([^\s]+)/)?.[1] || child.name;
                 
-                // Debug: Log comparison for LOC: prefixed vars
-                if (varName.includes(':')) {
-                    logger.info(`  Comparing: varName="${varName}" vs fieldName="${fieldName}"`);
-                    logger.info(`    - Exact match? ${varName.toLowerCase() === fieldName.toLowerCase()}`);
-                    logger.info(`    - Ends with :${fieldName}? ${varName.toLowerCase().endsWith(':' + fieldName.toLowerCase())}`);
-                }
+                logger.info(`  PREFIX-CHECK: Checking child: varName="${varName}", _isPartOfStructure=${!!(child as any)._isPartOfStructure}, _possibleReferences=${(child as any)._possibleReferences ? JSON.stringify((child as any)._possibleReferences) : 'undefined'}`);
                 
-                // Match exact name or prefixed name (e.g., LOC:SMTPbccAddress)
-                if (varName.toLowerCase() === fieldName.toLowerCase() ||
-                    varName.toLowerCase().endsWith(':' + fieldName.toLowerCase())) {
-                    logger.info(`✅ Matched variable: child.name="${child.name}", extracted="${varName}", searching for="${fieldName}"`);
+                // CRITICAL FIX: Check against _possibleReferences for structure fields
+                // Structure fields can ONLY be accessed via their prefixed forms (PREFIX:Field)
+                // or dot notation (Structure.Field), NEVER by unprefixed name alone
+                if ((child as any)._isPartOfStructure && (child as any)._possibleReferences) {
+                    const possibleRefs = (child as any)._possibleReferences as string[];
+                    logger.info(`  PREFIX-CHECK: Structure field "${varName}" has possible references: ${possibleRefs.join(', ')}`);
+                    
+                    // Check if fieldName matches any of the valid prefixed/dotted references
+                    const matchesReference = possibleRefs.some(ref => 
+                        ref.toUpperCase() === fieldName.toUpperCase()
+                    );
+                    
+                    // Also check if fieldName itself is the unprefixed varName - if so, REJECT it
+                    const isUnprefixedMatch = varName.toUpperCase() === fieldName.toUpperCase();
+                    
+                    if (matchesReference && !isUnprefixedMatch) {
+                        logger.info(`✅ PREFIX-MATCH: Matched structure field "${fieldName}" via valid reference`);
+                        return child;
+                    } else if (isUnprefixedMatch) {
+                        logger.info(`❌ PREFIX-REJECT: "${fieldName}" cannot access structure field "${varName}" - must use ${possibleRefs.join(' or ')}`);
+                        continue;
+                    } else {
+                        logger.info(`❌ PREFIX-SKIP: "${fieldName}" does not match any valid reference for structure field "${varName}"`);
+                        continue;
+                    }
+                }
+                // For regular variables (not structure fields), match exact name
+                else if (varName.toLowerCase() === fieldName.toLowerCase()) {
+                    logger.info(`✅ Matched regular variable: child.name="${child.name}", extracted="${varName}", searching for="${fieldName}"`);
                     return child;
                 }
             }
@@ -370,6 +371,7 @@ export class HoverProvider {
      * Legacy token-based variable search (fallback)
      */
     private findLocalVariableInfoLegacy(word: string, tokens: Token[], currentScope: Token, document: TextDocument): { type: string; line: number } | null {
+        logger.info(`PREFIX-LEGACY-START: Entering legacy search for "${word}", currentScope.subType=${currentScope.subType}`);
         
         // For PROCEDURE/METHOD: Search the DATA section (everything before CODE)
         if (currentScope.subType === TokenType.Procedure || 
@@ -459,6 +461,16 @@ export class HoverProvider {
             
             if (variableTokens.length > 0) {
                 const varToken = variableTokens[0];
+                logger.info(`PREFIX-LEGACY: Found token - value="${varToken.value}", isStructureField=${!!varToken.isStructureField}, structurePrefix="${varToken.structurePrefix}"`);
+                
+                // CRITICAL FIX: Check if this is a structure field that requires a prefix
+                // Skip structure fields when searching for bare field names
+                if (varToken.isStructureField || varToken.structurePrefix) {
+                    logger.info(`PREFIX-LEGACY: Token "${varToken.value}" is a structure field with prefix "${varToken.structurePrefix}" - skipping for bare field name search`);
+                    // Don't return structure fields for bare name searches
+                    // They should only be accessible via prefix (LOC:Field) or dot notation (Group.Field)
+                    return null;
+                }
                 
                 // Get the source line to extract type information
                 const content = document.getText();
@@ -505,6 +517,16 @@ export class HoverProvider {
         }
 
         const varToken = variableTokens[0];
+        logger.info(`PREFIX-LEGACY-OTHER: Found token - value="${varToken.value}", line=${varToken.line}, type=${varToken.type}`);
+        logger.info(`PREFIX-LEGACY-OTHER: Token properties - isStructureField=${varToken.isStructureField}, structurePrefix=${varToken.structurePrefix}`);
+        logger.info(`PREFIX-LEGACY-OTHER: Token object keys: ${Object.keys(varToken).join(', ')}`);
+        
+        // CRITICAL FIX: Check if this is a structure field that requires a prefix
+        // Skip structure fields when searching for bare field names
+        if (varToken.isStructureField || varToken.structurePrefix) {
+            logger.info(`PREFIX-LEGACY-OTHER: Token "${varToken.value}" is a structure field with prefix "${varToken.structurePrefix}" - skipping for bare field name search`);
+            return null;
+        }
         
         // Get the source line to extract type information
         const content = document.getText();
@@ -564,12 +586,9 @@ export class HoverProvider {
         const isRoutine = scope.subType === TokenType.Routine;
         const variableType = isRoutine ? 'Routine Variable' : 'Local Variable';
         
-        // Extract just the variable name if it has a prefix
-        let displayName = name;
-        const colonIndex = name.lastIndexOf(':');
-        if (colonIndex > 0) {
-            displayName = name.substring(colonIndex + 1);
-        }
+        // CRITICAL FIX: Keep the full variable name including prefix (e.g., LOC:SMTPbccAddress)
+        // Don't strip the prefix - it's part of the variable's identity
+        const displayName = name;
         
         const markdown = [
             `**${variableType}:** \`${displayName}\``,

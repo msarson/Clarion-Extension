@@ -1029,12 +1029,12 @@ export class ClarionDocumentSymbolProvider {
             } else {
                 displayName = labelName ? `${value} (${labelName})` : value;
             }
-        } else if (upperValue === "FILE") {
-            // For FILE elements like: FILE,DRIVER('TOPSPEED'),PRE(SHI),CREATE,BINDABLE,THREAD
+        } else if (upperValue === "FILE" || upperValue === "GROUP" || upperValue === "QUEUE") {
+            // For FILE/GROUP/QUEUE elements like: FILE,DRIVER('TOPSPEED'),PRE(SHI),CREATE,BINDABLE,THREAD
             let driverValue = "";
             let preValue = "";
 
-            // Look for DRIVER and PRE attributes in the tokens following the FILE token
+            // Look for DRIVER and PRE attributes in the tokens following the structure token
             let j = index + 1;
 
             // Continue until we hit a new line or another structure
@@ -1045,8 +1045,8 @@ export class ClarionDocumentSymbolProvider {
                 if (t.line !== line && t.line !== line + 1) break;
                 if (t.type === TokenType.Structure && t !== token) break;
 
-                // Look for DRIVER token
-                if (t.value.toUpperCase() === "DRIVER" && j + 1 < tokens.length && tokens[j + 1].value === "(") {
+                // Look for DRIVER token (FILE only)
+                if (upperValue === "FILE" && t.value.toUpperCase() === "DRIVER" && j + 1 < tokens.length && tokens[j + 1].value === "(") {
                     // Extract the DRIVER parameter
                     const driverContent: string[] = [];
                     let k = j + 2;
@@ -1092,9 +1092,9 @@ export class ClarionDocumentSymbolProvider {
             let displayParts = [];
 
             if (labelName) {
-                displayParts.push(`FILE (${labelName})`);
+                displayParts.push(`${upperValue} (${labelName})`);
             } else {
-                displayParts.push("FILE");
+                displayParts.push(upperValue);
             }
 
             if (driverValue) {
@@ -1118,6 +1118,40 @@ export class ClarionDocumentSymbolProvider {
             this.getTokenRange(tokens, line, finishesAt ?? line),
             []
         );
+        
+        // Store metadata for structures that might have prefixes and labels
+        if (upperValue === "FILE" || upperValue === "GROUP" || upperValue === "QUEUE") {
+            // Re-extract preValue for storage (we already did this above in the if block)
+            let j = index + 1;
+            let preValue = "";
+            while (j < tokens.length) {
+                const t = tokens[j];
+                if (t.line !== line && t.line !== line + 1) break;
+                if (t.type === TokenType.Structure && t !== token) break;
+                if (t.value.toUpperCase() === "PRE" && j + 1 < tokens.length && tokens[j + 1].value === "(") {
+                    const preContent: string[] = [];
+                    let k = j + 2;
+                    let preParenDepth = 1;
+                    while (k < tokens.length && preParenDepth > 0) {
+                        const preToken = tokens[k];
+                        if (preToken.value === "(") preParenDepth++;
+                        else if (preToken.value === ")") preParenDepth--;
+                        if (preParenDepth > 0) preContent.push(preToken.value);
+                        k++;
+                    }
+                    preValue = preContent.join("").trim();
+                    break;
+                }
+                j++;
+            }
+            
+            if (preValue) {
+                (structureSymbol as any)._clarionPrefix = preValue;
+            }
+            if (labelName) {
+                (structureSymbol as any)._clarionLabel = labelName;
+            }
+        }
 
         // CLASS support: inject Properties/Methods
         if (upperValue === "CLASS" && labelName) {
@@ -1825,11 +1859,30 @@ export class ClarionDocumentSymbolProvider {
         logger.info(`   prevToken: ${prevToken ? `type=${prevToken.type}, value="${prevToken.value}"` : 'null'}`);
 
         // Handle Label or StructurePrefix tokens (variable names)
-        // TokenType.Label (24), TokenType.StructurePrefix (41), TokenType.Variable (5)
+        // TokenType.Label (25), TokenType.StructurePrefix (41), TokenType.Variable (5)
         if (prevToken && (prevToken.type === TokenType.Label || 
                           prevToken.type === TokenType.StructurePrefix || 
                           prevToken.type === TokenType.Variable)) {
             logger.info(`   ✅ Previous token is Label or StructurePrefix - processing variable declaration`);
+            
+            // CRITICAL FIX: Handle prefixed labels (e.g., LOC:SMTPbccAddress)
+            // If prevToken is a StructurePrefix, we need to look back one more token to get the full label
+            let variableName = prevToken.value;
+            let variableStartToken = prevToken;
+            
+            // Check if there's a label/variable token before the StructurePrefix
+            if (prevToken.type === TokenType.StructurePrefix && index >= 2) {
+                const prevPrevToken = tokens[index - 2];
+                if (prevPrevToken.line === line && 
+                    (prevPrevToken.type === TokenType.Label || prevPrevToken.type === TokenType.Variable)) {
+                    // This is a prefixed label like LOC:SMTPbccAddress
+                    variableName = prevPrevToken.value + prevToken.value;
+                    variableStartToken = prevPrevToken;
+                    logger.info(`   🔍 Detected prefixed label: "${variableName}"`);
+                }
+            }
+            
+            logger.info(`   📝 Variable name: "${variableName}"`);
             // CRITICAL FIX: Capture the entire line for variable types
             // This ensures we get the full type definition including attributes
             let fullType = "";
@@ -1882,7 +1935,7 @@ export class ClarionDocumentSymbolProvider {
             }
 
             // Create the symbol name with variable name and type
-            const symbolName = `${prevToken.value} ${fullType}`;
+            const symbolName = `${variableName} ${fullType}`;
             
             logger.info(`   📝 Creating variable symbol: name="${symbolName}", detail="${detail}"`);
 
@@ -1890,14 +1943,70 @@ export class ClarionDocumentSymbolProvider {
                 symbolName,  // Variable name with type
                 detail,  // Context in detail
                 ClarionSymbolKind.Variable,
-                this.getTokenRange(tokens, prevToken.line, line),
-                this.getTokenRange(tokens, prevToken.line, line),
+                this.getTokenRange(tokens, variableStartToken.line, line),
+                this.getTokenRange(tokens, variableStartToken.line, line),
                 []
             );
             
             // Store the type separately for hover provider to use
             (variableSymbol as any)._clarionType = fullType;
-            (variableSymbol as any)._clarionVarName = prevToken.value;
+            (variableSymbol as any)._clarionVarName = variableName;
+            
+            // Use the prefix directly from the token if available
+            if (prevToken && prevToken.structurePrefix) {
+                // If the token already has a prefix, use it directly
+                (variableSymbol as any)._isPartOfStructure = true;
+                (variableSymbol as any)._structurePrefix = prevToken.structurePrefix;
+                
+                // Build possible reference patterns (case-insensitive)
+                const possibleReferences: string[] = [];
+                
+                // Pattern 1: PREFIX:FieldName
+                possibleReferences.push(`${prevToken.structurePrefix.toUpperCase()}:${variableName.toUpperCase()}`);
+                
+                // Pattern 2: StructureName.FieldName (if we have a current structure with a label)
+                if (currentStructure) {
+                    const structureLabel = (currentStructure as any)._clarionLabel;
+                    if (structureLabel) {
+                        possibleReferences.push(`${structureLabel.toUpperCase()}.${variableName.toUpperCase()}`);
+                        (variableSymbol as any)._structureName = structureLabel;
+                    }
+                }
+                
+                (variableSymbol as any)._possibleReferences = possibleReferences;
+                
+                logger.info(`   🔍 Variable has direct prefix "${prevToken.structurePrefix}" from token`);
+                logger.info(`   📋 PREFIX: Possible references: ${possibleReferences.join(', ')}`);
+            }
+            // Fallback to structure-based prefix if token doesn't have one
+            else if (currentStructure) {
+                const structurePrefix = (currentStructure as any)._clarionPrefix;
+                const structureLabel = (currentStructure as any)._clarionLabel;
+                
+                if (structurePrefix || structureLabel) {
+                    (variableSymbol as any)._isPartOfStructure = true;
+                    (variableSymbol as any)._structureName = structureLabel;
+                    (variableSymbol as any)._structurePrefix = structurePrefix;
+                    
+                    // Build possible reference patterns (case-insensitive)
+                    const possibleReferences: string[] = [];
+                    
+                    // Pattern 1: PREFIX:FieldName (if prefix exists)
+                    if (structurePrefix) {
+                        possibleReferences.push(`${structurePrefix.toUpperCase()}:${variableName.toUpperCase()}`);
+                    }
+                    
+                    // Pattern 2: StructureName.FieldName (if label exists)
+                    if (structureLabel) {
+                        possibleReferences.push(`${structureLabel.toUpperCase()}.${variableName.toUpperCase()}`);
+                    }
+                    
+                    (variableSymbol as any)._possibleReferences = possibleReferences;
+                    
+                    logger.info(`   🔍 Variable is part of structure "${structureLabel || 'unnamed'}" with prefix "${structurePrefix || 'none'}"`);
+                    logger.info(`   📋 PREFIX: Possible references: ${possibleReferences.join(', ')}`);
+                }
+            }
 
             // CRITICAL FIX: Prioritize currentProcedure over currentStructure
             // This ensures variables are attached to the method implementation they're defined in

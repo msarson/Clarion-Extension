@@ -229,7 +229,12 @@ export function prepareBuildParameters(buildConfig: {
     const solutionDir = path.dirname(globalSolutionFile);
     const clarionBinPath = globalSettings.redirectionPath.replace(/redirection.*/i, "bin");
     const msBuildPath = "C:\\Windows\\Microsoft.NET\\Framework\\v4.0.30319\\msbuild.exe";
-    const buildLogPath = path.join(solutionDir, "build_output.log");
+    
+    // Get custom log file path or use default
+    const customLogPath = workspace.getConfiguration("clarion.build").get<string>("logFilePath", "");
+    const buildLogPath = customLogPath ?
+        customLogPath :
+        path.join(solutionDir, "build_output.log");
 
     // Extract target name correctly
     let targetName = "";
@@ -363,10 +368,25 @@ function createBuildTask(execution: ShellExecution): Task {
         command: execution.commandLine
     };
 
-    // Hide terminal output again
+    // Get the user's preference for revealing output
+    const revealSetting = workspace.getConfiguration("clarion.build").get<string>("revealOutput", "never");
+    let revealKind = TaskRevealKind.Never;
+    
+    switch (revealSetting) {
+        case "always":
+            revealKind = TaskRevealKind.Always;
+            break;
+        case "onError":
+            revealKind = TaskRevealKind.Silent; // Will be shown on error
+            break;
+        default:
+            revealKind = TaskRevealKind.Never;
+    }
+
+    // Apply presentation options based on settings
     task.presentationOptions = {
-        reveal: TaskRevealKind.Never,
-        echo: false,
+        reveal: revealKind,
+        echo: revealKind !== TaskRevealKind.Never,
         focus: false,
         panel: TaskPanelKind.Dedicated
     };
@@ -414,6 +434,15 @@ function processTaskCompletion(
             logger.info("Captured Build Output");
             logger.info(data);
 
+            // Check if we should also show in Output panel
+            const showInOutputPanel = workspace.getConfiguration("clarion.build").get<boolean>("showInOutputPanel", false);
+            if (showInOutputPanel) {
+                const outputChannel = window.createOutputChannel("Clarion Build");
+                outputChannel.clear();
+                outputChannel.append(data);
+                outputChannel.show(true);
+            }
+
             if (event.exitCode !== 0) {
                 // ❌ Failed build: parse diagnostics
                 const { errorCount, warningCount, diagnostics } = processBuildErrors(data);
@@ -458,13 +487,21 @@ function processTaskCompletion(
             }
         }
 
-        fs.unlink(buildLogPath, (unlinkErr) => {
-            if (unlinkErr) {
-                logger.info("Failed to delete build log:", unlinkErr);
-            } else {
-                logger.info("Deleted temporary build log");
-            }
-        });
+        // Check if we should preserve the log file
+        const preserveLogFile = workspace.getConfiguration("clarion.build").get<boolean>("preserveLogFile", false);
+        
+        if (!preserveLogFile) {
+            fs.unlink(buildLogPath, (unlinkErr) => {
+                if (unlinkErr) {
+                    logger.info("Failed to delete build log:", unlinkErr);
+                } else {
+                    logger.info("Deleted temporary build log");
+                }
+            });
+        } else {
+            logger.info(`Preserved build log at: ${buildLogPath}`);
+            window.showInformationMessage(`Build log saved at: ${buildLogPath}`);
+        }
     });
 }
 

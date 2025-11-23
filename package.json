@@ -19,7 +19,6 @@
         "vscode": "^1.97.0"
     },
     "activationEvents": [
-        "onLanguage:clarion",
         "onStartupFinished"
     ],
     "main": "./out/client/src/extension.js",
@@ -468,6 +467,27 @@
             "type": "object",
             "title": "Clarion Extension Configuration",
             "properties": {
+                "clarion.build.revealOutput": {
+                    "type": "string",
+                    "enum": ["never", "always", "onError"],
+                    "default": "never",
+                    "description": "Controls when to show the build output terminal. 'never': never show, 'always': always show, 'onError': only show when build fails."
+                },
+                "clarion.build.preserveLogFile": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "When enabled, preserves the build_output.log file after build completion."
+                },
+                "clarion.build.logFilePath": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Custom path for the build output log file. If empty, the log file will be created in the solution directory."
+                },
+                "clarion.build.showInOutputPanel": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "When enabled, also shows build output in the Output panel in addition to the Problems panel."
+                },
                 "clarion.fileSearchExtensions": {
                     "type": "array",
                     "items": {

@@ -3,6 +3,94 @@ All notable changes to the "clarion-extension" extension will be documented in t
 
 ---
 
+## [0.7.1] - 2025-11-23
+
+### Major Enhancements
+
+#### PREFIX and Structure Field Access Improvements
+
+**Significant improvements to how Clarion PREFIX declarations are handled.**
+
+This release includes major fixes for Go to Definition and Hover functionality when working with GROUP structures that use PREFIX:
+
+- **Full PREFIX support**: Correctly handles all three ways to access prefixed structure fields:
+  - Direct prefix notation: `LOC:MyVar`
+  - Dot notation: `MyGroup.MyVar`
+  - Bare field name: `MyVar` (when unambiguous)
+  
+- **Smart validation**: Extension now validates that structure fields are accessed correctly
+  - Prevents incorrect "bare name" access when prefix is required
+  - Understands when bare names are valid (e.g., within structure definition)
+  
+- **Improved Go to Definition**: Jump to definition now works correctly for all PREFIX scenarios
+  - `LOC:MyVar` navigates to the field declaration
+  - `MyGroup.MyVar` navigates to the field declaration
+  - Proper scoping prevents false matches
+
+- **Enhanced Hover**: Hover information correctly identifies prefixed fields
+  - Shows all valid ways to reference the field
+  - Displays full type information with GROUP context
+
+**Example:**
+```clarion
+MyGroup  GROUP,PRE(LOC)
+MyVar      STRING(100)
+         END
+
+Code
+  LOC:MyVar = 'Works!'        ! Direct prefix
+  MyGroup.MyVar = 'Works!'    ! Dot notation
+  MyVar = 'Also works!'       ! Bare name (less common)
+```
+
+#### Tokenization Improvements
+
+- **New DataTypeParameter token type**: Better parsing of parameterized types like `STRING(100)`, `CSTRING(255)`
+- **Improved STRING/CSTRING handling**: More accurate tokenization of string types with size parameters
+- **Symbol display fix**: Symbol outline now shows clean format like "MyVar STRING(100)" instead of duplicated labels
+
+### Build Output Configuration
+
+**New configurable settings for build output visibility and log file handling.**
+
+This release adds new configuration options that give developers more control over how build output is displayed and managed:
+
+#### New Settings:
+- **Build Output Visibility**: Control when the build terminal is shown
+  - Never show (default)
+  - Always show
+  - Only show on build errors
+  
+- **Log File Preservation**: Option to keep the build_output.log file after builds
+  - Automatically deleted (default)
+  - Preserved for inspection
+  
+- **Custom Log File Path**: Specify a custom location for build log files
+  
+- **Output Panel Integration**: Option to show build output in the Output panel
+  - Problems panel only (default)
+  - Both Problems and Output panels
+
+#### Benefits:
+- Better debugging of build issues
+- More flexibility for different development workflows
+- Improved visibility into the build process when needed
+
+For detailed documentation on these settings, see [Build Settings Documentation](docs/BuildSettings.md)
+
+### Telemetry and Performance
+
+**Optional telemetry to help improve the extension.**
+
+- **Application Insights integration**: Anonymous usage and performance data collection (opt-in)
+- **Performance tracking**: Monitor document parsing and symbol processing times
+- **Privacy-focused**: No personal information collected, fully respects VS Code's telemetry settings
+- **Disabled by default**: Respects `telemetry.telemetryLevel` setting
+
+The telemetry helps identify performance bottlenecks and improve the extension for large Clarion codebases.
+
+---
+
 ## [0.7.0] - 2025-11-19
 
 **🕯️ Dedicated to the memory of Brahn Partridge (4th January 1977 – 29th October 2021)**

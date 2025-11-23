@@ -237,6 +237,74 @@ export class ClarionTokenizer {
     }
 
 
+    /**
+     * Process structure fields with prefixes
+     * This method is called after document structure processing to enhance tokens with prefix information
+     */
+    private processStructureFieldPrefixes(): void {
+        logger.info("🔍 [DEBUG] Processing structure field prefixes...");
+        
+        // Find all structure tokens
+        const structures = this.tokens.filter(t =>
+            t.type === TokenType.Structure
+        );
+        
+        logger.info(`🔍 [DEBUG] Found ${structures.length} structures to check for prefixes`);
+        
+        // For each structure, check if it has a PRE attribute
+        for (const structure of structures) {
+            // Get the line number of the structure
+            const lineNum = structure.line;
+            
+            // Get the line text
+            if (!this.lines || lineNum >= this.lines.length) continue;
+            const line = this.lines[lineNum];
+            
+            // Check if the line contains PRE(
+            const preMatch = line.match(/PRE\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/i);
+            if (preMatch) {
+                const prefix = preMatch[1];
+                structure.structurePrefix = prefix;
+                logger.info(`🔍 [DEBUG] Found structure ${structure.value} with prefix ${prefix}`);
+                
+                // Find the structure's end line
+                const structureEnd = structure.finishesAt || this.lines.length - 1;
+                
+                // Find all variable tokens between the structure start and end
+                const fieldsInStructure = this.tokens.filter(t =>
+                    (t.type === TokenType.Variable || t.type === TokenType.Label) &&
+                    t.line > structure.line &&
+                    t.line < structureEnd
+                );
+                
+                logger.info(`🔍 [DEBUG] Found ${fieldsInStructure.length} potential fields in structure ${structure.value}`);
+                
+                // Mark these as structure fields and add the prefix
+                for (const field of fieldsInStructure) {
+                    field.isStructureField = true;
+                    field.structureParent = structure;
+                    field.structurePrefix = prefix;
+                    logger.info(`🔍 [DEBUG] Field ${field.value} assigned prefix ${prefix}`);
+                    logger.info(`🔍 [DEBUG] Field ${field.value} - isStructureField=${field.isStructureField}, structurePrefix=${field.structurePrefix}`);
+                }
+                
+                // Also look for direct prefix references in the code
+                const prefixPattern = new RegExp(`\\b${prefix}:\\w+\\b`, 'gi');
+                
+                for (let i = 0; i < this.lines.length; i++) {
+                    const codeLine = this.lines[i];
+                    if (!codeLine) continue;
+                    
+                    const matches = codeLine.match(prefixPattern);
+                    if (matches) {
+                        logger.info(`🔍 [DEBUG] Found prefix references in line ${i}: ${matches.join(', ')}`);
+                    }
+                }
+            }
+        }
+    }
+    
+
     /** ✅ Public method to tokenize text */
     public tokenize(): Token[] {
         // 📊 METRICS: Start performance measurement
@@ -267,6 +335,11 @@ export class ClarionTokenizer {
             const structureTime = performance.now() - structureStart;
             logger.info("🔍 [DEBUG] Document structure processed");
             
+            const prefixStart = performance.now();
+            this.processStructureFieldPrefixes(); // ✅ Step 2.5: Process structure field prefixes
+            const prefixTime = performance.now() - prefixStart;
+            logger.info(`🔍 [DEBUG] Structure field prefixes processed (${prefixTime.toFixed(2)}ms)`);
+            
             const routineVarsStart = performance.now();
             this.tokenizeRoutineVariables(); // ✅ Step 3: Tokenize routine DATA section variables
             const routineVarsTime = performance.now() - routineVarsStart;
@@ -296,7 +369,9 @@ export class ClarionTokenizer {
                 'tokenize_ms': tokenizeTime.toFixed(2),
                 'tokenize_pct': ((tokenizeTime/totalTime)*100).toFixed(1) + '%',
                 'structure_ms': structureTime.toFixed(2),
-                'structure_pct': ((structureTime/totalTime)*100).toFixed(1) + '%'
+                'structure_pct': ((structureTime/totalTime)*100).toFixed(1) + '%',
+                'prefix_ms': prefixTime.toFixed(2),
+                'prefix_pct': ((prefixTime/totalTime)*100).toFixed(1) + '%'
             });
             
             return this.tokens;
@@ -637,6 +712,23 @@ export class ClarionTokenizer {
                 if (varMatch) {
                     const varName = varMatch[1];
                     const isReference = varMatch[2].startsWith('&');
+                    
+                    // 🔍 CHECK: Skip if this variable already exists with structure field metadata
+                    const existingToken = this.tokens.find(t => 
+                        t.line === lineNum && 
+                        t.value === varName && 
+                        t.start === 0
+                    );
+                    
+                    if (existingToken) {
+                        if ((existingToken as any).isStructureField) {
+                            logger.info(`⏭️ TOKENIZER: Skipping ${varName} - already exists as structure field`);
+                            continue;
+                        }
+                        // Token exists but isn't a structure field - skip duplicate
+                        logger.info(`⏭️ TOKENIZER: Skipping ${varName} - token already exists`);
+                        continue;
+                    }
                     
                     logger.info(`✅ TOKENIZER: Found procedure local variable: ${varName} (reference: ${isReference}) at line ${lineNum}`);
                     

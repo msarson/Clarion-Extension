@@ -1,4 +1,4 @@
-import { Definition, Location, Position, Range } from 'vscode-languageserver-protocol';
+import { Definition, Location, Position, Range, DocumentSymbol } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { SolutionManager } from '../solution/solutionManager';
 import * as path from 'path';
@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import LoggerManager from '../logger';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
+import { ClarionDocumentSymbolProvider } from '../ClarionDocumentSymbolProvider';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
 logger.setLevel("info");
@@ -15,6 +16,7 @@ logger.setLevel("info");
  */
 export class DefinitionProvider {
     private tokenCache = TokenCache.getInstance();
+    private symbolProvider = new ClarionDocumentSymbolProvider();
     /**
      * Provides definition locations for a given position in a document
      * @param document The text document
@@ -120,7 +122,9 @@ export class DefinitionProvider {
         const tokens = this.tokenCache.getTokens(document);
 
         // Check if the word contains a colon (prefix notation like LOC:SomeField)
+        // or a dot (structure field notation like MyGroup.MyVar)
         const colonIndex = word.lastIndexOf(':');
+        const dotIndex = word.lastIndexOf('.');
         let searchWord = word;
         let hasPrefix = false;
         
@@ -129,12 +133,20 @@ export class DefinitionProvider {
             searchWord = word.substring(colonIndex + 1);
             hasPrefix = true;
             logger.info(`Detected prefixed label reference: ${word}, searching for field: ${searchWord}`);
+        } else if (dotIndex > 0) {
+            // Extract the field name after the dot
+            searchWord = word.substring(dotIndex + 1);
+            hasPrefix = true;
+            logger.info(`Detected dot notation label reference: ${word}, searching for field: ${searchWord}`);
         }
 
         // Look for a label token that matches the word (labels are in column 1)
+        // IMPORTANT: Search for both the extracted field name AND the full word
+        // This handles cases like LOC:SMTPbccAddress where the colon is part of the variable name
         const labelTokens = tokens.filter(token =>
             token.type === TokenType.Label &&
-            token.value.toLowerCase() === searchWord.toLowerCase() &&
+            (token.value.toLowerCase() === searchWord.toLowerCase() ||
+             token.value.toLowerCase() === word.toLowerCase()) &&
             token.start === 0
         );
 
@@ -158,24 +170,96 @@ export class DefinitionProvider {
 
                 if (scopedLabels.length > 0) {
                     logger.info(`Found ${scopedLabels.length} labels in current scope`);
-                    const token = scopedLabels[0];
+                    
+                    // Iterate through all scoped labels to find one that passes validation
+                    for (const token of scopedLabels) {
+                        // CRITICAL FIX: Check if this is a structure field that requires a prefix
+                        // Get symbol information to check _possibleReferences
+                        const symbols = this.symbolProvider.provideDocumentSymbols(tokens, document.uri);
+                        const symbol = this.findSymbolAtLine(symbols, token.line, searchWord);
+                        
+                        if (symbol && (symbol as any)._possibleReferences) {
+                            const possibleRefs = (symbol as any)._possibleReferences as string[];
+                            logger.info(`PREFIX-VALIDATION-LABEL: Token "${token.value}" at line ${token.line} has possible references: ${possibleRefs.join(', ')}`);
+                            
+                            // Check if the search word matches any of the possible references (case-insensitive)
+                            const matchesReference = possibleRefs.some(ref =>
+                                ref.toUpperCase() === word.toUpperCase()
+                            );
+                            
+                            // Explicitly check if trying to access with unprefixed name - REJECT
+                            // Compare the token value against searchWord (not word)
+                            const isUnprefixedMatch = token.value.toUpperCase() === searchWord.toUpperCase();
+                            
+                            if (!matchesReference || (isUnprefixedMatch && !hasPrefix)) {
+                                if (isUnprefixedMatch && !hasPrefix) {
+                                    logger.info(`❌ PREFIX-REJECT-LABEL: Cannot access structure field "${token.value}" with unprefixed name - must use ${possibleRefs.join(' or ')}`);
+                                } else {
+                                    logger.info(`❌ PREFIX-VALIDATION-LABEL: Search word "${word}" not in possible references - skipping this structure field`);
+                                }
+                                // Skip this label and continue checking others
+                                continue;
+                            } else {
+                                logger.info(`✅ PREFIX-VALIDATION-LABEL: Search word "${word}" matches a valid reference`);
+                            }
+                        }
 
-                    // Return the location of the label definition
-                    return Location.create(document.uri, {
-                        start: { line: token.line, character: 0 },
-                        end: { line: token.line, character: token.value.length }
-                    });
+                        // This label passed validation (or doesn't have _possibleReferences)
+                        // Return the location of the label definition
+                        logger.info(`Returning label at line ${token.line}`);
+                        return Location.create(document.uri, {
+                            start: { line: token.line, character: 0 },
+                            end: { line: token.line, character: token.value.length }
+                        });
+                    }
+                    
+                    // If we get here, all scoped labels failed validation
+                    logger.info(`All ${scopedLabels.length} scoped labels failed prefix validation`);
                 }
             }
 
-            // If no scoped labels were found, return the first label
-            const token = labelTokens[0];
+            // If no scoped labels were found or all failed validation, check all labels
+            logger.info(`Checking all ${labelTokens.length} label tokens for non-structure-field matches`);
+            const symbolsForFallback = this.symbolProvider.provideDocumentSymbols(tokens, document.uri);
+            
+            for (const token of labelTokens) {
+                // CRITICAL FIX: Check if this is a structure field that requires a prefix
+                // Get symbol information to check _possibleReferences
+                const symbol = this.findSymbolAtLine(symbolsForFallback, token.line, searchWord);
+                
+                if (symbol && (symbol as any)._possibleReferences) {
+                    const possibleRefs = (symbol as any)._possibleReferences as string[];
+                    logger.info(`PREFIX-VALIDATION-LABEL-FALLBACK: Token "${token.value}" at line ${token.line} has possible references: ${possibleRefs.join(', ')}`);
+                    
+                    // Check if the search word matches any of the possible references (case-insensitive)
+                    const matchesReference = possibleRefs.some(ref =>
+                        ref.toUpperCase() === word.toUpperCase()
+                    );
+                    
+                    // Explicitly check if trying to access with unprefixed name - REJECT
+                    const isUnprefixedMatch = token.value.toUpperCase() === word.toUpperCase();
+                    
+                    if (!matchesReference || (isUnprefixedMatch && !hasPrefix)) {
+                        if (isUnprefixedMatch && !hasPrefix) {
+                            logger.info(`❌ PREFIX-REJECT-LABEL-FALLBACK: Cannot access structure field "${token.value}" with unprefixed name - must use ${possibleRefs.join(' or ')}`);
+                        } else {
+                            logger.info(`❌ PREFIX-VALIDATION-LABEL-FALLBACK: Search word "${word}" not in possible references - skipping this structure field`);
+                        }
+                        // Skip this label and continue checking others
+                        continue;
+                    } else {
+                        logger.info(`✅ PREFIX-VALIDATION-LABEL-FALLBACK: Search word "${word}" matches a valid reference`);
+                    }
+                }
 
-            // Return the location of the label definition
-            return Location.create(document.uri, {
-                start: { line: token.line, character: 0 },
-                end: { line: token.line, character: token.value.length }
-            });
+                // This label passed validation (or doesn't have _possibleReferences)
+                // Return the location of the label definition
+                logger.info(`Returning label at line ${token.line}`);
+                return Location.create(document.uri, {
+                    start: { line: token.line, character: 0 },
+                    end: { line: token.line, character: token.value.length }
+                });
+            }
         }
 
         return null;
@@ -251,6 +335,16 @@ export class DefinitionProvider {
             start: { line: position.line, character: 0 },
             end: { line: position.line, character: Number.MAX_VALUE }
         });
+        
+        // CRITICAL FIX: Check if this is a standalone word without prefix or structure notation
+        // If it's a standalone word, we should not match structure fields
+        const isStandaloneWord = !line.includes(':' + word) && !line.includes('.' + word);
+        
+        // If this is a standalone word and not part of a qualified reference, skip structure field matching
+        if (isStandaloneWord) {
+            logger.info(`Skipping structure field matching for standalone word: ${word}`);
+            return null;
+        }
 
         // Check if this is a dot notation reference (Structure.Field or Complex:Structure:1.Field or self.Member)
         const dotIndex = line.lastIndexOf('.', position.character - 1);
@@ -487,6 +581,17 @@ export class DefinitionProvider {
         // Get tokens from cache
         const tokens = this.tokenCache.getTokens(document);
 
+        // Get the line to check context
+        const line = document.getText({
+            start: { line: position.line, character: 0 },
+            end: { line: position.line, character: Number.MAX_VALUE }
+        });
+        
+        // CRITICAL FIX: Check if this is a standalone word without prefix or structure notation
+        // If it's a standalone word, we should not match structure fields
+        const isStandaloneWord = !line.includes(':' + word) && !line.includes('.' + word);
+        logger.info(`Is standalone word in structure definition: ${isStandaloneWord}, line: "${line}"`);
+
         // Look for a label token that matches the word (structure definitions are labels in column 1)
         const labelTokens = tokens.filter(token =>
             token.type === TokenType.Label &&
@@ -562,7 +667,9 @@ export class DefinitionProvider {
         logger.info(`🔍 Current line: ${currentLine}, total tokens: ${tokens.length}`);
         
         // Check if word contains a colon (prefix notation like LOC:SomeField)
+        // or a dot (structure field notation like MyGroup.MyVar)
         const colonIndex = word.lastIndexOf(':');
+        const dotIndex = word.lastIndexOf('.');
         let searchWord = word;
         let prefixPart = '';
         
@@ -570,7 +677,24 @@ export class DefinitionProvider {
             prefixPart = word.substring(0, colonIndex);
             searchWord = word.substring(colonIndex + 1);
             logger.info(`Detected prefixed variable reference: prefix="${prefixPart}", field="${searchWord}"`);
+        } else if (dotIndex > 0) {
+            // For dot notation, prefix is the structure name
+            prefixPart = word.substring(0, dotIndex);
+            searchWord = word.substring(dotIndex + 1);
+            logger.info(`Detected dot notation variable reference: structure="${prefixPart}", field="${searchWord}"`);
         }
+        
+        // Get the line to check context
+        const line = document.getText({
+            start: { line: position.line, character: 0 },
+            end: { line: position.line, character: Number.MAX_VALUE }
+        });
+        
+        // CRITICAL FIX: Check if this is a standalone word without prefix or structure notation
+        // For goto definition, we need to handle standalone words differently than hover
+        // We should NOT allow goto definition for standalone variables if they're part of a structure
+        const isStandaloneWord = !line.includes(':' + searchWord) && !line.includes('.' + searchWord);
+        logger.info(`Is standalone word: ${isStandaloneWord}, line: "${line}"`);
         
         const currentScope = this.getInnermostScopeAtLine(tokens, currentLine);
     
@@ -621,14 +745,43 @@ export class DefinitionProvider {
                 // 1. Simple variables: SomeVar STRING(20) - token at start 0
                 // 2. Prefixed labels: LOC:SomeVar STRING(20) - the field part may not be at start 0 OR the label is PREFIX:Field
                 const dataVariables = tokens.filter(token => {
-                    // Match by name - either exact match or as part of prefixed label
-                    const exactMatch = token.value.toLowerCase() === searchWord.toLowerCase();
-                    const prefixedMatch = token.type === TokenType.Label && 
-                                         token.value.includes(':') &&
-                                         token.value.toLowerCase().endsWith(':' + searchWord.toLowerCase());
+                    // CRITICAL FIX: For structure fields, only match when properly qualified
+                    // Check if this token is a structure field
+                    const isStructureField = token.isStructureField || token.structurePrefix;
                     
-                    if (!exactMatch && !prefixedMatch) {
-                        return false;
+                    // Define these variables outside the if blocks so they're available throughout the function
+                    let exactMatch = false;
+                    let prefixedMatch = false;
+                    
+                    // Match exact name
+                    exactMatch = token.value.toLowerCase() === searchWord.toLowerCase();
+                    
+                    // Match prefixed label (e.g., LOC:SMTPbccAddress)
+                    prefixedMatch = token.type === TokenType.Label &&
+                                   token.value.includes(':') &&
+                                   token.value.toLowerCase().endsWith(':' + searchWord.toLowerCase());
+                    
+                    if (isStructureField) {
+                        // For structure fields, we should only match when:
+                        // - The search is for a prefixed field (LOC:MyVar) - prefixPart is not empty
+                        // - The search is for a structure.field notation (MyGroup.MyVar) - handled by findStructureFieldDefinition
+                        // - We should NOT match on just the field name alone (MyVar) - prefixPart is empty
+                        
+                        // If we're searching for just a field name (no prefix/qualifier), don't match structure fields
+                        if (!prefixPart && exactMatch) {
+                            logger.info(`❌ Skipping structure field match for unqualified field: "${searchWord}" (no prefix in search)`);
+                            return false;
+                        }
+                        
+                        // Only allow prefixed matches for structure fields
+                        if (!prefixedMatch) {
+                            return false;
+                        }
+                    } else {
+                        // For regular variables (not structure fields), match exact name
+                        if (!exactMatch && !prefixedMatch) {
+                            return false;
+                        }
                     }
                     
                     // Must be a variable or label type
@@ -675,33 +828,63 @@ export class DefinitionProvider {
                 if (dataVariables.length > 0) {
                     logger.info(`Found ${dataVariables.length} variables in procedure DATA section`);
                     
-                    // For the result, we want to return the position of the full label (including prefix)
-                    // So if we found a prefixed field, find its label token
-                    const token = dataVariables[0];
-                    
-                    if (token.start > 0) {
-                        // This is a prefixed field, find the label at position 0
-                        const labelToken = tokens.find(t =>
-                            t.line === token.line &&
-                            t.start === 0 &&
-                            t.type === TokenType.Label
-                        );
-                        
-                        if (labelToken) {
-                            logger.info(`Returning prefixed label location: ${labelToken.value} at line ${labelToken.line}`);
-                            return Location.create(document.uri, {
-                                start: { line: labelToken.line, character: 0 },
-                                end: { line: labelToken.line, character: labelToken.value.length }
-                            });
+                    // Iterate through all matching variables to find one that passes validation
+                    for (const token of dataVariables) {
+                        // CRITICAL FIX: Check if this token has _possibleReferences (structure field with prefix)
+                        // This is a secondary check in case token.isStructureField wasn't set during tokenization
+                        if ((token as any)._possibleReferences) {
+                            const possibleRefs = (token as any)._possibleReferences as string[];
+                            logger.info(`PREFIX-VALIDATION: Token "${token.value}" at line ${token.line} has possible references: ${possibleRefs.join(', ')}`);
+                            
+                            // Check if the search word matches any of the possible references (case-insensitive)
+                            const matchesReference = possibleRefs.some(ref => 
+                                ref.toUpperCase() === word.toUpperCase()
+                            );
+                            
+                            // Explicitly check if trying to access with unprefixed name - REJECT
+                            const isUnprefixedMatch = token.value.toUpperCase() === word.toUpperCase();
+                            
+                            if (!matchesReference || (isUnprefixedMatch && !prefixPart)) {
+                                if (isUnprefixedMatch && !prefixPart) {
+                                    logger.info(`❌ PREFIX-REJECT: Cannot access structure field "${token.value}" with unprefixed name - must use ${possibleRefs.join(' or ')}`);
+                                } else {
+                                    logger.info(`❌ PREFIX-VALIDATION: Search word "${word}" not in possible references - skipping this structure field`);
+                                }
+                                // Skip this token and continue checking others
+                                continue;
+                            } else {
+                                logger.info(`✅ PREFIX-VALIDATION: Search word "${word}" matches a valid reference`);
+                            }
                         }
+                        
+                        // This token passed validation (or doesn't have _possibleReferences)
+                        if (token.start > 0) {
+                            // This is a prefixed field, find the label at position 0
+                            const labelToken = tokens.find(t =>
+                                t.line === token.line &&
+                                t.start === 0 &&
+                                t.type === TokenType.Label
+                            );
+                            
+                            if (labelToken) {
+                                logger.info(`Returning prefixed label location: ${labelToken.value} at line ${labelToken.line}`);
+                                return Location.create(document.uri, {
+                                    start: { line: labelToken.line, character: 0 },
+                                    end: { line: labelToken.line, character: labelToken.value.length }
+                                });
+                            }
+                        }
+                        
+                        // Return the token position as-is
+                        logger.info(`Returning variable location at line ${token.line}`);
+                        return Location.create(document.uri, {
+                            start: { line: token.line, character: token.start },
+                            end: { line: token.line, character: token.start + token.value.length }
+                        });
                     }
                     
-                    // Return the token position as-is
-                    logger.info(`Returning variable location at line ${token.line}`);
-                    return Location.create(document.uri, {
-                        start: { line: token.line, character: token.start },
-                        end: { line: token.line, character: token.start + token.value.length }
-                    });
+                    // If we get here, all data variables failed validation
+                    logger.info(`All ${dataVariables.length} data variables failed prefix validation`);
                 }
             } else if (currentScope.subType === TokenType.Routine && currentScope.hasLocalData) {
                 // For routines with DATA sections, search only the DATA section
@@ -724,7 +907,8 @@ export class DefinitionProvider {
         const variableTokens = tokens.filter(token =>
             (token.type === TokenType.Variable ||
              token.type === TokenType.ReferenceVariable ||
-             token.type === TokenType.ImplicitVariable) &&
+             token.type === TokenType.ImplicitVariable ||
+             token.type === TokenType.Label) &&
             token.value.toLowerCase() === searchWord.toLowerCase() &&
             token.start === 0 &&
             !(token.line === position.line &&
@@ -747,11 +931,56 @@ export class DefinitionProvider {
                     );
                     if (scopedVariables.length > 0) {
                         logger.info(`✅ Found ${scopedVariables.length} variables in scope ${scope.value}`);
-                        const token = scopedVariables[0];
-                        return Location.create(document.uri, {
-                            start: { line: token.line, character: token.start },
-                            end: { line: token.line, character: token.start + token.value.length }
-                        });
+                        
+                        // Iterate through all scoped variables to find one that passes validation
+                        for (const token of scopedVariables) {
+                            // CRITICAL FIX: Check if this is a structure field that requires a prefix
+                            // First check: token properties set during tokenization
+                            if ((token as any).isStructureField || (token as any).structurePrefix) {
+                                logger.info(`❌ PREFIX-SKIP: Token "${token.value}" is a structure field with prefix "${(token as any).structurePrefix}" - skipping for bare field name`);
+                                continue; // Skip this token and try the next one
+                            }
+                            
+                            // Second check: _possibleReferences validation (in case token properties weren't set)
+                            if ((token as any)._possibleReferences) {
+                                const possibleRefs = (token as any)._possibleReferences as string[];
+                                logger.info(`PREFIX-VALIDATION: Token "${token.value}" at line ${token.line} has possible references: ${possibleRefs.join(', ')}`);
+                                
+                                // Check if search word matches a valid prefixed/dotted reference
+                                const matchesReference = possibleRefs.some(ref =>
+                                    ref.toUpperCase() === word.toUpperCase()
+                                );
+                                
+                                // Explicitly check if trying to access with unprefixed name - REJECT
+                                const isUnprefixedMatch = token.value.toUpperCase() === word.toUpperCase();
+                                
+                                // For standalone words (no prefix/qualifier), we should NOT match structure fields
+                                if (isStandaloneWord && isUnprefixedMatch) {
+                                    logger.info(`❌ PREFIX-REJECT-STANDALONE: Cannot access structure field "${token.value}" with unprefixed name in standalone context - must use ${possibleRefs.join(' or ')}`);
+                                    continue; // Skip this structure field and look for other matches
+                                }
+                                
+                                if (!matchesReference || (isUnprefixedMatch && !prefixPart)) {
+                                    if (isUnprefixedMatch && !prefixPart) {
+                                        logger.info(`❌ PREFIX-REJECT: Cannot access structure field "${token.value}" with unprefixed name - must use ${possibleRefs.join(' or ')}`);
+                                    } else {
+                                        logger.info(`❌ PREFIX-VALIDATION: Search word "${word}" not in possible references - skipping this structure field`);
+                                    }
+                                    continue; // Skip this token and try the next one
+                                } else {
+                                    logger.info(`✅ PREFIX-VALIDATION: Search word "${word}" matches a valid reference`);
+                                }
+                            }
+                            
+                            // This token passed validation
+                            return Location.create(document.uri, {
+                                start: { line: token.line, character: token.start },
+                                end: { line: token.line, character: token.start + token.value.length }
+                            });
+                        }
+                        
+                        // All variables in this scope failed validation, continue to next scope
+                        logger.info(`All variables in scope ${scope.value} failed prefix validation`);
                     }
                 }
             }
@@ -766,6 +995,10 @@ export class DefinitionProvider {
         // 🎯 Try FILE structure fallback
         logger.info(`🧐 Still no match; checking for FILE/QUEUE/GROUP label fallback`);
 
+        // CRITICAL FIX: Check if this is a standalone word without prefix or structure notation
+        // We already have the line and isStandaloneWord from earlier in the method
+        logger.info(`Is standalone word in label fallback: ${isStandaloneWord}, line: "${line}"`);
+
         const labelToken = tokens.find(t =>
             t.type === TokenType.Label &&
             t.value.toLowerCase() === searchWord.toLowerCase() &&
@@ -778,11 +1011,52 @@ export class DefinitionProvider {
             for (let i = labelIndex + 1; i < tokens.length; i++) {
                 const t = tokens[i];
                 // Check for FILE, QUEUE, GROUP, RECORD structures
-                if (t.type === TokenType.Structure && 
-                    (t.value.toUpperCase() === "FILE" || 
+                if (t.type === TokenType.Structure &&
+                    (t.value.toUpperCase() === "FILE" ||
                      t.value.toUpperCase() === "QUEUE" ||
                      t.value.toUpperCase() === "GROUP" ||
                      t.value.toUpperCase() === "RECORD")) {
+                    
+                    // PREFIX-CHECK: Get the symbol to check if it's a structure field with prefix requirements
+                    const symbolTokens = this.tokenCache.getTokens(document);
+                    if (!symbolTokens || symbolTokens.length === 0) {
+                        logger.error(`PREFIX-CHECK: No tokens found for document ${document.uri}`);
+                        // Don't return early - continue to check if this is a structure field
+                        // If we can't get symbols, we can't validate, so skip this match
+                        continue;
+                    }
+                    const symbols = this.symbolProvider.provideDocumentSymbols(symbolTokens, document.uri);
+                    const fieldSymbol = this.findFieldInSymbols(symbols, searchWord);
+                    
+                    if (fieldSymbol) {
+                        const possibleRefs = (fieldSymbol as any)._possibleReferences;
+                        const isStructureField = (fieldSymbol as any)._isPartOfStructure;
+                        
+                        if (isStructureField && possibleRefs && possibleRefs.length > 0) {
+                            logger.info(`PREFIX-LABEL-CHECK: Label "${searchWord}" is a structure field with possible refs: ${possibleRefs.join(', ')}`);
+                            
+                            // Check if the original word matches any of the possible references
+                            const wordUpper = word.toUpperCase();
+                            const matchesRef = possibleRefs.some((ref: string) =>
+                                ref.toUpperCase() === wordUpper
+                            );
+                            
+                            // CRITICAL FIX: For standalone words, we should NEVER match structure fields
+                            if (isStandaloneWord) {
+                                logger.info(`❌ PREFIX-LABEL-REJECT-STANDALONE: Cannot access structure field "${searchWord}" with unprefixed name in standalone context`);
+                                continue; // Skip this structure field and continue searching
+                            }
+                            
+                            if (!matchesRef) {
+                                logger.info(`❌ PREFIX-LABEL-SKIP: Structure field "${searchWord}" - word "${word}" not in possible references`);
+                                // Don't return this label - it's accessed without proper prefix
+                                continue;
+                            } else {
+                                logger.info(`✅ PREFIX-LABEL-MATCH: Structure field "${searchWord}" accessed with valid reference "${word}"`);
+                            }
+                        }
+                    }
+                    
                     logger.info(`📄 Resolved ${searchWord} as ${t.value} label definition`);
                     return Location.create(document.uri, {
                         start: { line: labelToken.line, character: 0 },
@@ -794,36 +1068,50 @@ export class DefinitionProvider {
         }
     
         logger.info(`🛑 No matching global or local variable found — skipping fallback to random match`);
-    
-        // 🔎 Procedure/method fallback
-        const procedureTokens = tokens.filter(token =>
-            (token.subType === TokenType.Procedure ||
-             token.subType === TokenType.Routine ||
-             token.subType === TokenType.Class) &&
-            token.value.toLowerCase() === searchWord.toLowerCase()
-        );
-    
-        if (procedureTokens.length > 0) {
-            const token = procedureTokens[0];
-            logger.info(`🔧 Matched procedure/routine/class for ${searchWord}`);
-            return Location.create(document.uri, {
-                start: { line: token.line, character: token.start },
-                end: { line: token.line, character: token.start + token.value.length }
-            });
-        }
-    
-        logger.info(`❌ Could not resolve definition for ${searchWord} in current document, trying includes...`);
-        
-        // Try to find the definition in included files as a last resort
-        const documentPath = document.uri.replace("file:///", "").replace(/\//g, "\\");
-        const includeResult = await this.findDefinitionInIncludes(searchWord, documentPath);
-        if (includeResult) {
-            logger.info(`✅ Found definition for ${searchWord} in included file`);
-            return includeResult;
-        }
-        
-        logger.info(`❌ Could not resolve definition for ${searchWord} in any file`);
         return null;
+    }
+
+    // Removed duplicate method
+    
+    /**
+     * Helper to find a field symbol by name (case-insensitive) in symbols tree
+     */
+    private findFieldInSymbols(symbols: DocumentSymbol[], fieldName: string): DocumentSymbol | undefined {
+        for (const symbol of symbols) {
+            const varName = (symbol as any)._clarionVarName;
+            if (varName && varName.toUpperCase() === fieldName.toUpperCase()) {
+                return symbol;
+            }
+            
+            // Recursively search children
+            if (symbol.children && symbol.children.length > 0) {
+                const found = this.findFieldInSymbols(symbol.children, fieldName);
+                if (found) return found;
+            }
+        }
+        return undefined;
+    }
+    
+    /**
+     * Helper to find a symbol at a specific line with a specific name
+     */
+    private findSymbolAtLine(symbols: DocumentSymbol[], line: number, varName: string): DocumentSymbol | undefined {
+        for (const symbol of symbols) {
+            // Check if this symbol is at the given line
+            if (symbol.range.start.line === line) {
+                const symbolVarName = (symbol as any)._clarionVarName || symbol.name.match(/^([^\s]+)/)?.[1] || symbol.name;
+                if (symbolVarName.toUpperCase() === varName.toUpperCase()) {
+                    return symbol;
+                }
+            }
+            
+            // Recursively search children
+            if (symbol.children && symbol.children.length > 0) {
+                const found = this.findSymbolAtLine(symbol.children, line, varName);
+                if (found) return found;
+            }
+        }
+        return undefined;
     }
     
 
@@ -885,9 +1173,11 @@ export class DefinitionProvider {
             end: { line: position.line, character: Number.MAX_VALUE }
         });
 
-        // Check if we're in a context that might use prefix notation
-        // Look for USE(), PRE(), or similar patterns that indicate we should include colons
-        const includeColons = /USE\s*\(|PRE\s*\(|,PRE\s*\(/i.test(line);
+        // In Clarion, colons are used for prefix notation (LOC:Field, Struct:Field, etc.)
+        // and dots are used for structure field access (MyGroup.MyField)
+        // We should always include both when extracting variable names
+        const includeColons = true;
+        const includeDots = true;
         
         // Find the start of the word
         let start = position.character;
@@ -897,6 +1187,9 @@ export class DefinitionProvider {
                 start--;
             } else if (includeColons && char === ':') {
                 // Include colon if we're in a Clarion prefix context
+                start--;
+            } else if (includeDots && char === '.') {
+                // Include dot if we're in a structure field access context
                 start--;
             } else {
                 break;
@@ -911,6 +1204,9 @@ export class DefinitionProvider {
                 end++;
             } else if (includeColons && char === ':') {
                 // Include colon if we're in a Clarion prefix context
+                end++;
+            } else if (includeDots && char === '.') {
+                // Include dot if we're in a structure field access context
                 end++;
             } else {
                 break;

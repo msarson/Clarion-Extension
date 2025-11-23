@@ -64,7 +64,7 @@ For a comprehensive list of all features and their locations within the extensio
 - **Complete Language Support**: Syntax highlighting, bracket matching, and auto-closing pairs for all Clarion file types (.clw, .inc, .txa, etc.)
 - **Solution Explorer View**: Navigate Clarion projects directly inside VS Code.
 - **Automatic Solution Parsing**: Detects all projects and redirection files in your solution.
-- **Enhanced "Go To Definition"**: Supports `INCLUDE` and `MODULE` statements, with redirection-aware searches.
+- **Enhanced "Go To Definition"**: Supports `INCLUDE` and `MODULE` statements, with redirection-aware searches. Full support for GROUP PREFIX declarations (e.g., `LOC:MyVar`, `MyGroup.MyVar`).
 - **Code Folding**: Tokenizer-based folding provider for improved code readability.
 - **Hover Provider**: Displays previews of referenced files when hovering over `INCLUDE` or `MODULE` statements.
 - **Build Configuration Support**: Easily switch between Release and Debug builds with `Clarion: Set Configuration`.
@@ -119,6 +119,42 @@ This is necessary because older versions had a dependency on fushnisoft.clarion 
 [View on Marketplace](https://marketplace.visualstudio.com/items?itemName=msarson.clarion-extensions)
 
 ---
+## Changelog (What's New in v0.7.1)
+
+### PREFIX and Structure Field Access Improvements
+
+**Major improvements to Go to Definition and Hover for GROUP structures with PREFIX.**
+
+This release includes significant fixes for working with Clarion PREFIX declarations:
+
+- **Full PREFIX support**: All three access methods now work correctly
+  - Direct prefix: `LOC:MyVar`
+  - Dot notation: `MyGroup.MyVar`
+  - Bare field name: `MyVar` (when valid)
+  
+- **Smart validation**: Extension validates correct field access patterns
+- **Enhanced navigation**: Go to Definition works for all PREFIX scenarios
+- **Better hover info**: Shows all valid ways to reference prefixed fields
+
+### Build Output Configuration
+
+**New configurable settings for build output visibility and log file handling.**
+
+- **Build Output Visibility**: Control when the build terminal is shown (never/always/on errors)
+- **Log File Preservation**: Option to keep build_output.log files for inspection
+- **Custom Log File Path**: Specify custom locations for build logs
+- **Output Panel Integration**: Show build output in Output panel alongside Problems
+
+See [Build Settings Documentation](docs/BuildSettings.md) for details.
+
+### Tokenization and Display Improvements
+
+- **Better type parsing**: Improved handling of `STRING(100)`, `CSTRING(255)`, etc.
+- **Cleaner symbol display**: Symbol outline shows clean format without duplication
+- **Performance tracking**: Optional telemetry to help identify performance bottlenecks
+
+For full details on all changes, see [CHANGELOG.md](CHANGELOG.md)
+
 ## Changelog (What's New in v0.5.8)
 
 ### Performance Improvements
