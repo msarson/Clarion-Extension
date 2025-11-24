@@ -6,6 +6,7 @@ logger.setLevel("error");
 import { serverInitialized } from '../server.js';
 import { Token, TokenType } from '../ClarionTokenizer.js';
 import { HierarchyManager } from './utils/HierarchyManager';
+import { SymbolFinder } from './utils/SymbolFinder';
 
 /**
  * Extended DocumentSymbol with Clarion-specific metadata
@@ -1058,33 +1059,7 @@ export class ClarionDocumentSymbolProvider {
      * Find a class definition symbol by name
      */
     private findClassDefinition(symbols: ClarionDocumentSymbol[], className: string): ClarionDocumentSymbol | null {
-        // First check the class symbol map
-        const classSymbol = this.classSymbolMap.get(className.toUpperCase());
-        if (classSymbol) {
-            return classSymbol;
-        }
-        
-        // If not found in the map, search through all symbols recursively
-        const findInSymbols = (symbolList: DocumentSymbol[]): DocumentSymbol | null => {
-            for (const symbol of symbolList) {
-                // Check if this is a class with the matching name
-                if (symbol.kind === SymbolKind.Class) {
-                    const symbolName = symbol.name.split(' ')[0]; // Get name without any suffix
-                    if (symbolName.toUpperCase() === className.toUpperCase()) {
-                        return symbol;
-                    }
-                }
-                
-                // Check children recursively
-                if (symbol.children && symbol.children.length > 0) {
-                    const found = findInSymbols(symbol.children);
-                    if (found) return found;
-                }
-            }
-            return null;
-        };
-        
-        return findInSymbols(symbols);
+        return SymbolFinder.findClassDefinition(symbols, className, this.classSymbolMap);
     }
 
     private findOrCreateClassImplementation(
@@ -1136,23 +1111,7 @@ export class ClarionDocumentSymbolProvider {
         // First, check if we already have a class implementation container
         let classImplementation: ClarionDocumentSymbol | null = null;
 
-        // Look for existing class implementation in symbols
-        const findClassImplementation = (symbolList: ClarionDocumentSymbol[]): ClarionDocumentSymbol | null => {
-            for (const symbol of symbolList) {
-                if (symbol.name === fullName) {
-                    return symbol;
-                }
-
-                // Also check children (for global procedures that might contain class implementations)
-                if (symbol.children && symbol.children.length > 0) {
-                    const found = findClassImplementation(symbol.children);
-                    if (found) return found;
-                }
-            }
-            return null;
-        };
-
-        classImplementation = findClassImplementation(symbols);
+        classImplementation = SymbolFinder.findClassImplementation(symbols, className);
 
         if (!classImplementation) {
             // Create a new class implementation container
@@ -1181,14 +1140,7 @@ export class ClarionDocumentSymbolProvider {
             classImplementation.children!.push(methodsContainer);
 
             // Find the most recent global procedure to attach this class implementation to
-            let mostRecentGlobalProcedure: DocumentSymbol | null = null;
-
-            for (const symbol of symbols) {
-                if (symbol.kind === SymbolKind.Function &&
-                    symbol._isGlobalProcedure === true) {
-                    mostRecentGlobalProcedure = symbol;
-                }
-            }
+            const mostRecentGlobalProcedure = SymbolFinder.findMostRecentGlobalProcedure(symbols);
 
             // If we found a global procedure, add the class implementation as its child
             if (mostRecentGlobalProcedure) {
@@ -1197,16 +1149,6 @@ export class ClarionDocumentSymbolProvider {
                 // Otherwise add to top-level symbols
                 symbols.push(classImplementation);
             }
-        }
-
-        // Update the range to encompass all methods
-        if (startLine < classImplementation.range.start.line) {
-            classImplementation.range.start.line = startLine;
-            classImplementation.selectionRange.start.line = startLine;
-        }
-        if (endLine > classImplementation.range.end.line) {
-            classImplementation.range.end.line = endLine;
-            classImplementation.selectionRange.end.line = endLine;
         }
 
         return classImplementation;
