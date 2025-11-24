@@ -1,5 +1,5 @@
-import { Token } from "../../../common/types";
-import LoggerManager from "../../../logger";
+import { Token } from "../../ClarionTokenizer";
+import LoggerManager from "../../logger";
 
 const logger = LoggerManager.getLogger("TokenProcessor");
 logger.setLevel("error");

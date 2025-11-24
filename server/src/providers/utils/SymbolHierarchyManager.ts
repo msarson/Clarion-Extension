@@ -1,23 +1,23 @@
-import * as vscode from 'vscode-languageserver/node';
-import { ClarionSymbol } from '../ClarionDocumentSymbolProvider';
+import { DocumentSymbol, SymbolKind, Range } from 'vscode-languageserver';
+import { ClarionDocumentSymbol } from '../ClarionDocumentSymbolProvider';
 
 /**
  * Manages symbol hierarchy, parent stacks, and container relationships
  */
 export class SymbolHierarchyManager {
-    private parentStack: ClarionSymbol[] = [];
+    private parentStack: ClarionDocumentSymbol[] = [];
 
     /**
      * Get the current parent from the stack
      */
-    getCurrentParent(): ClarionSymbol | null {
+    getCurrentParent(): ClarionDocumentSymbol | null {
         return this.parentStack.length > 0 ? this.parentStack[this.parentStack.length - 1] : null;
     }
 
     /**
      * Push a new parent onto the stack
      */
-    pushParent(symbol: ClarionSymbol): void {
+    pushParent(symbol: ClarionDocumentSymbol): void {
         this.parentStack.push(symbol);
     }
 
@@ -27,7 +27,7 @@ export class SymbolHierarchyManager {
     popParentsUpToLine(currentLine: number): void {
         while (this.parentStack.length > 0) {
             const parent = this.parentStack[this.parentStack.length - 1];
-            if (parent.finishesAt !== undefined && parent.finishesAt < currentLine) {
+            if (parent._finishesAt !== undefined && parent._finishesAt < currentLine) {
                 this.parentStack.pop();
             } else {
                 break;
@@ -45,7 +45,7 @@ export class SymbolHierarchyManager {
     /**
      * Add a symbol as a child to the current parent, or to root if no parent
      */
-    addSymbol(symbol: ClarionSymbol, rootSymbols: ClarionSymbol[]): void {
+    addSymbol(symbol: ClarionDocumentSymbol, rootSymbols: ClarionDocumentSymbol[]): void {
         const parent = this.getCurrentParent();
         if (parent) {
             if (!parent.children) {
@@ -62,28 +62,28 @@ export class SymbolHierarchyManager {
      */
     findOrCreateContainer(
         name: string,
-        kind: vscode.SymbolKind,
-        parent: ClarionSymbol | null,
-        rootSymbols: ClarionSymbol[],
+        kind: SymbolKind,
+        parent: ClarionDocumentSymbol | null,
+        rootSymbols: ClarionDocumentSymbol[],
         line: number
-    ): ClarionSymbol {
+    ): ClarionDocumentSymbol {
         const containerArray = parent ? parent.children : rootSymbols;
         
         if (!containerArray) {
             throw new Error('Container array is undefined');
         }
 
-        let container = containerArray.find(s => s.name === name && s.kind === kind);
+        let container = containerArray.find((s: ClarionDocumentSymbol) => s.name === name && s.kind === kind);
         
         if (!container) {
-            const range = vscode.Range.create(line, 0, line, 0);
+            const range = Range.create(line, 0, line, 0);
             container = {
                 name,
                 kind,
                 range,
                 selectionRange: range,
                 children: []
-            } as ClarionSymbol;
+            } as ClarionDocumentSymbol;
             containerArray.push(container);
         }
         
