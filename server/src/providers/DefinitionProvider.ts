@@ -7,9 +7,11 @@ import LoggerManager from '../logger';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { ClarionDocumentSymbolProvider } from '../ClarionDocumentSymbolProvider';
+import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { TokenHelper } from '../utils/TokenHelper';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
-logger.setLevel("error");
+logger.setLevel("info");
 
 /**
  * Provides goto definition functionality for Clarion files
@@ -17,6 +19,7 @@ logger.setLevel("error");
 export class DefinitionProvider {
     private tokenCache = TokenCache.getInstance();
     private symbolProvider = new ClarionDocumentSymbolProvider();
+    private memberResolver = new ClassMemberResolver();
     /**
      * Provides definition locations for a given position in a document
      * @param document The text document
@@ -28,7 +31,7 @@ export class DefinitionProvider {
 
         try {
             // Get the word at the current position
-            const wordRange = this.getWordRangeAtPosition(document, position);
+            const wordRange = TokenHelper.getWordRangeAtPosition(document, position);
             if (!wordRange) {
                 logger.info('No word found at position');
                 return null;
@@ -44,6 +47,46 @@ export class DefinitionProvider {
             });
             logger.info(`Full line text: "${line}"`);
             logger.info(`Position character: ${position.character}`);
+
+            // Check if this is a method call (e.g., "self.SaveFile()" or "obj.Method()")
+            const dotBeforeIndex = line.lastIndexOf('.', position.character - 1);
+            if (dotBeforeIndex > 0) {
+                const beforeDot = line.substring(0, dotBeforeIndex).trim();
+                const afterDot = line.substring(dotBeforeIndex + 1).trim();
+                const methodMatch = afterDot.match(/^(\w+)/);
+                
+                // Extract just the method name from word if it includes the prefix (e.g., "self.SaveFile" -> "SaveFile")
+                let methodName = word;
+                if (word.includes('.')) {
+                    const parts = word.split('.');
+                    methodName = parts[parts.length - 1];
+                }
+                
+                if (methodMatch && methodMatch[1].toLowerCase() === methodName.toLowerCase()) {
+                    // Check if this looks like a method call (has parentheses)
+                    const hasParentheses = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
+                    
+                    if (hasParentheses && (beforeDot.toLowerCase() === 'self' || beforeDot.toLowerCase().endsWith('self'))) {
+                        // This is a method call - find the declaration
+                        logger.info(`F12 on method call: ${beforeDot}.${methodName}()`);
+                        
+                        // Count parameters for overload resolution
+                        const paramCount = this.memberResolver.countParametersInCall(line, methodName);
+                        logger.info(`Method call has ${paramCount} parameters`);
+                        
+                        const tokens = this.tokenCache.getTokens(document);
+                        const memberInfo = this.memberResolver.findClassMemberInfo(methodName, document, position.line, tokens, paramCount);
+                        
+                        if (memberInfo) {
+                            logger.info(`✅ Found method declaration at ${memberInfo.file}:${memberInfo.line}`);
+                            return Location.create(
+                                memberInfo.file,
+                                Range.create(memberInfo.line, 0, memberInfo.line, 0)
+                            );
+                        }
+                    }
+                }
+            }
 
             // Check if this is a method implementation line (e.g., "StringTheory.Construct PROCEDURE")
             // and navigate to the declaration in the CLASS
@@ -155,7 +198,7 @@ export class DefinitionProvider {
 
             // Find the current scope (procedure, routine, etc.)
             const currentLine = position.line;
-            const currentScope = this.getInnermostScopeAtLine(tokens, currentLine);
+            const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, currentLine);
 
 
             // If we found a scope, first look for labels within that scope
@@ -705,7 +748,7 @@ export class DefinitionProvider {
         const isStandaloneWord = !line.includes(':' + searchWord) && !line.includes('.' + searchWord);
         logger.info(`Is standalone word: ${isStandaloneWord}, line: "${line}"`);
         
-        const currentScope = this.getInnermostScopeAtLine(tokens, currentLine);
+        const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, currentLine);
     
         if (currentScope) {
             logger.info(`Current scope: ${currentScope.value} (${currentScope.line}-${currentScope.finishesAt})`);
@@ -1666,7 +1709,7 @@ export class DefinitionProvider {
         logger.info(`Looking for class member ${memberName} in current context`);
 
         // Find the current class or method context
-        let currentScope = this.getInnermostScopeAtLine(tokens, currentLine);
+        let currentScope = TokenHelper.getInnermostScopeAtLine(tokens, currentLine);
         if (!currentScope) {
             logger.info('No scope found - cannot determine class context');
             return null;
@@ -1675,7 +1718,7 @@ export class DefinitionProvider {
         // If we're in a routine, we need the parent scope (the method/procedure) to get the class name
         if (currentScope.subType === TokenType.Routine) {
             logger.info(`Current scope is a routine (${currentScope.value}), looking for parent scope`);
-            const parentScope = this.getParentScopeOfRoutine(tokens, currentScope);
+            const parentScope = TokenHelper.getParentScopeOfRoutine(tokens, currentScope);
             if (parentScope) {
                 currentScope = parentScope;
                 logger.info(`Using parent scope: ${currentScope.value}`);
@@ -1770,7 +1813,7 @@ export class DefinitionProvider {
 
         if (varTokens.length === 0) {
             // Check if it's a parameter
-            const currentScope = this.getInnermostScopeAtLine(tokens, currentLine);
+            const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, currentLine);
             if (currentScope) {
                 // TODO: Parse parameters to get type - for now return null
                 logger.info('Variable might be a parameter - parameter type detection not yet implemented');
@@ -2014,6 +2057,169 @@ export class DefinitionProvider {
                                     start: { line: k, character: methodLine.indexOf(methodMatch[1]) },
                                     end: { line: k, character: methodLine.indexOf(methodMatch[1]) + methodName.length }
                                 });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        return null;
+    }
+
+    /**
+     * Finds class member info for definition (similar to HoverProvider logic)
+     * Returns file and line number for the member declaration
+     */
+    private findClassMemberInfoForDefinition(memberName: string, document: TextDocument, currentLine: number, tokens: Token[]): { file: string; line: number } | null {
+        logger.info(`🔍 findClassMemberInfoForDefinition called for member: ${memberName}`);
+        
+        // Find the current scope to get the class name
+        let currentScope = TokenHelper.getInnermostScopeAtLine(tokens, currentLine);
+        if (!currentScope) {
+            logger.info('❌ No scope found');
+            return null;
+        }
+        
+        logger.info(`Scope: ${currentScope.value}`);
+
+        // If we're in a routine, get the parent scope
+        if (currentScope.subType === TokenType.Routine) {
+            logger.info(`Current scope is a routine, looking for parent scope`);
+            const parentScope = TokenHelper.getParentScopeOfRoutine(tokens, currentScope);
+            if (parentScope) {
+                currentScope = parentScope;
+                logger.info(`Using parent scope: ${currentScope.value}`);
+            } else {
+                return null;
+            }
+        }
+        
+        // Extract class name from method
+        let className: string | null = null;
+        if (currentScope.value.includes('.')) {
+            className = currentScope.value.split('.')[0];
+        } else {
+            const content = document.getText();
+            const lines = content.split('\n');
+            const scopeLine = lines[currentScope.line];
+            const classMethodMatch = scopeLine.match(/^(\w+)\.(\w+)\s+PROCEDURE/i);
+            if (classMethodMatch) {
+                className = classMethodMatch[1];
+            }
+        }
+        
+        if (!className) {
+            logger.info('❌ Could not determine className');
+            return null;
+        }
+        
+        logger.info(`Looking for member ${memberName} in class ${className}`);
+        
+        // Search in current file first
+        const classTokens = tokens.filter(token =>
+            token.type === TokenType.Structure &&
+            token.value.toUpperCase() === 'CLASS' &&
+            token.line > 0
+        );
+        
+        for (const classToken of classTokens) {
+            const labelToken = tokens.find(t =>
+                t.type === TokenType.Label &&
+                t.line === classToken.line &&
+                t.value.toLowerCase() === className!.toLowerCase()
+            );
+            
+            if (labelToken) {
+                logger.info(`✅ Found class ${className} at line ${labelToken.line}`);
+                // Search for member in this class
+                for (let i = labelToken.line + 1; i < tokens.length; i++) {
+                    const lineTokens = tokens.filter(t => t.line === i);
+                    const endToken = lineTokens.find(t => t.value.toUpperCase() === 'END' && t.start === 0);
+                    if (endToken) break;
+                    
+                    const memberToken = lineTokens.find(t => 
+                        t.value.toLowerCase() === memberName.toLowerCase() && 
+                        t.start === 0
+                    );
+                    
+                    if (memberToken) {
+                        logger.info(`Found member ${memberName} at line ${i} in current file`);
+                        return { file: document.uri, line: i };
+                    }
+                }
+            }
+        }
+        
+        // If not found in current file, search INCLUDE files
+        logger.info(`⚠️ Member not found in current file - searching INCLUDE files`);
+        return this.findMemberInIncludes(className, memberName, document);
+    }
+
+    /**
+     * Searches for class member in INCLUDE files (for definition provider)
+     */
+    private findMemberInIncludes(className: string, memberName: string, document: TextDocument): { file: string; line: number } | null {
+        const content = document.getText();
+        const lines = content.split('\n');
+        
+        // Find INCLUDE statements
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const includeMatch = line.match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
+            if (!includeMatch) continue;
+            
+            const includeFileName = includeMatch[1];
+            logger.info(`Found INCLUDE: ${includeFileName}`);
+            
+            // Resolve file path
+            const filePath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
+            let resolvedPath: string | null = null;
+            
+            // Try solution-wide redirection
+            const solutionManager = SolutionManager.getInstance();
+            if (solutionManager && solutionManager.solution) {
+                for (const project of solutionManager.solution.projects) {
+                    const redirectionParser = project.getRedirectionParser();
+                    const resolved = redirectionParser.findFile(includeFileName);
+                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
+                        resolvedPath = resolved.path;
+                        break;
+                    }
+                }
+            }
+            
+            // Fallback to relative path
+            if (!resolvedPath) {
+                const currentDir = path.dirname(filePath);
+                const relativePath = path.join(currentDir, includeFileName);
+                if (fs.existsSync(relativePath)) {
+                    resolvedPath = relativePath;
+                }
+            }
+            
+            if (resolvedPath) {
+                logger.info(`Resolved to: ${resolvedPath}`);
+                const includeContent = fs.readFileSync(resolvedPath, 'utf8');
+                const includeLines = includeContent.split('\n');
+                
+                // Find the class
+                for (let j = 0; j < includeLines.length; j++) {
+                    const includeLine = includeLines[j];
+                    const classMatch = includeLine.match(new RegExp(`^${className}\\s+CLASS`, 'i'));
+                    if (classMatch) {
+                        logger.info(`Found class ${className} in INCLUDE at line ${j}`);
+                        
+                        // Find the member
+                        for (let k = j + 1; k < includeLines.length; k++) {
+                            const memberLine = includeLines[k];
+                            if (memberLine.trim().toUpperCase() === 'END') break;
+                            
+                            const memberMatch = memberLine.match(new RegExp(`^\\s*(${memberName})\\s+`, 'i'));
+                            if (memberMatch) {
+                                logger.info(`Found member ${memberName} at line ${k} in INCLUDE`);
+                                const fileUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+                                return { file: fileUri, line: k };
                             }
                         }
                     }

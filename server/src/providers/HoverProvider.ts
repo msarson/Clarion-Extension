@@ -4,15 +4,18 @@ import LoggerManager from '../logger';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { ClarionDocumentSymbolProvider } from '../ClarionDocumentSymbolProvider';
+import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { TokenHelper } from '../utils/TokenHelper';
 
 const logger = LoggerManager.getLogger("HoverProvider");
-logger.setLevel("error");
+logger.setLevel("info");
 
 /**
  * Provides hover information for local variables and parameters
  */
 export class HoverProvider {
     private tokenCache = TokenCache.getInstance();
+    private memberResolver = new ClassMemberResolver();
 
     /**
      * Provides hover information for a position in the document
@@ -22,7 +25,7 @@ export class HoverProvider {
 
         try {
             // Get the word at the current position
-            const wordRange = this.getWordRangeAtPosition(document, position);
+            const wordRange = TokenHelper.getWordRangeAtPosition(document, position);
             if (!wordRange) {
                 logger.info('No word found at position');
                 return null;
@@ -67,7 +70,7 @@ export class HoverProvider {
                 logger.info(`Detected dot notation for word: ${word}, dotIndex: ${dotIndex}`);
                 
                 const tokens = this.tokenCache.getTokens(document);
-                const currentScope = this.getInnermostScopeAtLine(tokens, position.line);
+                const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, position.line);
                 if (currentScope) {
                     // Look for the GROUP/QUEUE/etc definition
                     const structureInfo = this.findLocalVariableInfo(word, tokens, currentScope, document, word);
@@ -88,11 +91,22 @@ export class HoverProvider {
                 const fieldMatch = afterDot.match(/^(\w+)/);
                 
                 if (fieldMatch && fieldMatch[1].toLowerCase() === word.toLowerCase()) {
+                    // Check if this is a method call (has parentheses)
+                    const hasParentheses = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
+                    
                     // This is a member access (hovering over the field after the dot)
                     if (beforeDot.toLowerCase() === 'self' || beforeDot.endsWith('self')) {
                         // self.member - class member
                         const tokens = this.tokenCache.getTokens(document);
-                        const memberInfo = this.findClassMemberInfo(word, document, position.line, tokens);
+                        
+                        // If it's a method call, count parameters
+                        let paramCount: number | undefined;
+                        if (hasParentheses) {
+                            paramCount = this.memberResolver.countParametersInCall(line, word);
+                            logger.info(`Method call detected with ${paramCount} parameters`);
+                        }
+                        
+                        const memberInfo = this.memberResolver.findClassMemberInfo(word, document, position.line, tokens, paramCount);
                         if (memberInfo) {
                             return this.constructClassMemberHover(word, memberInfo);
                         }
@@ -104,7 +118,7 @@ export class HoverProvider {
                             logger.info(`Detected structure field access: ${structureName}.${word}`);
                             
                             const tokens = this.tokenCache.getTokens(document);
-                            const currentScope = this.getInnermostScopeAtLine(tokens, position.line);
+                            const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, position.line);
                             if (currentScope) {
                                 // Try to find the structure field using dot notation reference
                                 const fullReference = `${structureName}.${word}`;
@@ -121,7 +135,7 @@ export class HoverProvider {
 
             // Get tokens and find current scope
             const tokens = this.tokenCache.getTokens(document);
-            const currentScope = this.getInnermostScopeAtLine(tokens, position.line);
+            const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, position.line);
 
             if (!currentScope) {
                 logger.info('No scope found - cannot provide variable/parameter hover');
@@ -690,10 +704,10 @@ export class HoverProvider {
     /**
      * Finds class member information for hover
      */
-    private findClassMemberInfo(memberName: string, document: TextDocument, currentLine: number, tokens: Token[]): { type: string; className: string; line: number; file: string } | null {
-        logger.info(`🔍 findClassMemberInfo called for member: ${memberName}`);
+    private findClassMemberInfo(memberName: string, document: TextDocument, currentLine: number, tokens: Token[], paramCount?: number): { type: string; className: string; line: number; file: string } | null {
+        logger.info(`🔍 findClassMemberInfo called for member: ${memberName}${paramCount !== undefined ? ` with ${paramCount} parameters` : ''}`);
         // Find the current scope to get the class name
-        let currentScope = this.getInnermostScopeAtLine(tokens, currentLine);
+        let currentScope = TokenHelper.getInnermostScopeAtLine(tokens, currentLine);
         if (!currentScope) {
             logger.info('❌ No scope found');
             return null;
@@ -704,7 +718,7 @@ export class HoverProvider {
         // If we're in a routine, we need the parent scope (the method/procedure) to get the class name
         if (currentScope.subType === TokenType.Routine) {
             logger.info(`Current scope is a routine (${currentScope.value}), looking for parent scope`);
-            const parentScope = this.getParentScopeOfRoutine(tokens, currentScope);
+            const parentScope = TokenHelper.getParentScopeOfRoutine(tokens, currentScope);
             if (parentScope) {
                 currentScope = parentScope;
                 logger.info(`Using parent scope: ${currentScope.value}`);
@@ -754,6 +768,10 @@ export class HoverProvider {
             
             if (labelToken) {
                 logger.info(`✅ Found class ${className} at line ${labelToken.line}`);
+                
+                // Collect all matching members (for overload resolution)
+                const candidates: { type: string; line: number; paramCount: number }[] = [];
+                
                 // Search for member in this class
                 for (let i = labelToken.line + 1; i < tokens.length; i++) {
                     const lineTokens = tokens.filter(t => t.line === i);
@@ -767,31 +785,67 @@ export class HoverProvider {
                     
                     if (memberToken) {
                         logger.info(`Found member token: ${memberToken.value} at start ${memberToken.start}`);
-                        logger.info(`All tokens on line ${i}: ${lineTokens.map(t => `[${t.value}:${t.start}:${t.type}]`).join(' ')}`);
                         
-                        // Get the first token after the member name - this is the type
-                        // It could be a simple type (LONG, BYTE), reference type (&STRING), 
-                        // or complex type (class name like StringTheory)
+                        // Get the type signature
                         const memberEnd = memberToken.start + memberToken.value.length;
                         const typeTokens = lineTokens.filter(t => t.start > memberEnd);
-                        logger.info(`Type tokens after member: ${typeTokens.map(t => `[${t.value}:${t.start}:${t.type}]`).join(' ')}`);
                         const type = typeTokens.length > 0 ? typeTokens[0].value : 'Unknown';
-                        logger.info(`Selected type: ${type}`);
-                        return { type, className, line: i, file: document.uri };
+                        
+                        // Count parameters in declaration if it's a PROCEDURE
+                        let declParamCount = 0;
+                        if (type.toUpperCase() === 'PROCEDURE') {
+                            // Get full line to extract parameter list
+                            const content = document.getText();
+                            const lines = content.split('\n');
+                            const fullLine = lines[i];
+                            declParamCount = this.countParametersInDeclaration(fullLine);
+                        }
+                        
+                        candidates.push({ type, line: i, paramCount: declParamCount });
+                        logger.info(`Candidate: ${memberName} with ${declParamCount} parameters at line ${i}`);
                     }
+                }
+                
+                // If we have parameter count from call, find best match
+                if (paramCount !== undefined && candidates.length > 0) {
+                    // Find exact match first
+                    let bestMatch = candidates.find(c => c.paramCount === paramCount);
+                    
+                    // If no exact match, find closest (prefer higher param count for optional params)
+                    if (!bestMatch) {
+                        bestMatch = candidates.reduce((best, curr) => {
+                            const bestDiff = Math.abs(best.paramCount - paramCount);
+                            const currDiff = Math.abs(curr.paramCount - paramCount);
+                            
+                            // If same distance, prefer the one with MORE parameters (optional params)
+                            if (currDiff === bestDiff) {
+                                return curr.paramCount > best.paramCount ? curr : best;
+                            }
+                            
+                            return currDiff < bestDiff ? curr : best;
+                        });
+                    }
+                    
+                    logger.info(`Selected overload with ${bestMatch.paramCount} parameters (call had ${paramCount})`);
+                    return { type: bestMatch.type, className, line: bestMatch.line, file: document.uri };
+                }
+                
+                // No parameter count or single candidate - return first match
+                if (candidates.length > 0) {
+                    return { type: candidates[0].type, className, line: candidates[0].line, file: document.uri };
                 }
             }
         }
         
         // If not found in current file, search INCLUDE files
         logger.info(`⚠️ Class ${className} not found in current file - searching INCLUDE files`);
-        return this.findClassMemberInIncludes(className, memberName, document);
+        return this.findClassMemberInIncludes(className, memberName, document, paramCount);
     }
 
     /**
      * Searches for class member info in INCLUDE files
      */
-    private findClassMemberInIncludes(className: string, memberName: string, document: TextDocument): { type: string; className: string; line: number; file: string } | null {
+    private findClassMemberInIncludes(className: string, memberName: string, document: TextDocument, paramCount?: number): { type: string; className: string; line: number; file: string } | null {
         const content = document.getText();
         const lines = content.split('\n');
         
@@ -845,7 +899,10 @@ export class HoverProvider {
                     if (classMatch) {
                         logger.info(`Found class ${className} in INCLUDE at line ${j}`);
                         
-                        // Find the member
+                        // Collect all matching members for overload resolution
+                        const candidates: { type: string; line: number; paramCount: number }[] = [];
+                        
+                        // Find all members with this name
                         for (let k = j + 1; k < includeLines.length; k++) {
                             const memberLine = includeLines[k];
                             if (memberLine.match(/^\s*END\s*$/i) || memberLine.match(/^END\s*$/i)) {
@@ -860,9 +917,48 @@ export class HoverProvider {
                                 // Remove trailing comments (! or //)
                                 const typeWithoutComment = afterMember.split(/\s*[!\/\/]/).shift() || afterMember;
                                 const type = typeWithoutComment.trim() || 'Unknown';
-                                logger.info(`Extracted type: ${type}`);
-                                return { type, className, line: k, file: resolvedPath };
+                                
+                                // Count parameters if it's a PROCEDURE
+                                let declParamCount = 0;
+                                if (type.toUpperCase().startsWith('PROCEDURE')) {
+                                    declParamCount = this.countParametersInDeclaration(memberLine);
+                                    logger.info(`Counting params in: ${memberLine}`);
+                                    logger.info(`Detected ${declParamCount} parameters`);
+                                }
+                                
+                                candidates.push({ type, line: k, paramCount: declParamCount });
+                                logger.info(`Candidate: ${memberName} with ${declParamCount} parameters - ${type}`);
                             }
+                        }
+                        
+                        // If we have parameter count from call, find best match
+                        if (paramCount !== undefined && candidates.length > 0) {
+                            // Find exact match first
+                            let bestMatch = candidates.find(c => c.paramCount === paramCount);
+                            
+                            // If no exact match, find closest (prefer higher param count for optional params)
+                            if (!bestMatch) {
+                                bestMatch = candidates.reduce((best, curr) => {
+                                    const bestDiff = Math.abs(best.paramCount - paramCount);
+                                    const currDiff = Math.abs(curr.paramCount - paramCount);
+                                    
+                                    // If same distance, prefer the one with MORE parameters (optional params)
+                                    if (currDiff === bestDiff) {
+                                        return curr.paramCount > best.paramCount ? curr : best;
+                                    }
+                                    
+                                    return currDiff < bestDiff ? curr : best;
+                                });
+                            }
+                            
+                            logger.info(`Selected overload with ${bestMatch.paramCount} parameters (call had ${paramCount})`);
+                            return { type: bestMatch.type, className, line: bestMatch.line, file: resolvedPath };
+                        }
+                        
+                        // No parameter count or single candidate - return first match
+                        if (candidates.length > 0) {
+                            logger.info(`Returning first candidate (no param matching needed)`);
+                            return { type: candidates[0].type, className, line: candidates[0].line, file: resolvedPath };
                         }
                     }
                 }
@@ -1074,5 +1170,75 @@ export class HoverProvider {
                 value: markdown.join('\n')
             }
         };
+    }
+
+    /**
+     * Counts parameters in a method call
+     * Simple implementation: counts commas at parenthesis depth 0
+     */
+    private countParametersInCall(line: string, methodName: string): number {
+        // Find the opening parenthesis after the method name
+        const methodIndex = line.toLowerCase().indexOf(methodName.toLowerCase());
+        if (methodIndex === -1) return 0;
+        
+        const afterMethod = line.substring(methodIndex + methodName.length);
+        const parenIndex = afterMethod.indexOf('(');
+        if (parenIndex === -1) return 0;
+        
+        const paramList = afterMethod.substring(parenIndex + 1);
+        
+        let depth = 0;
+        let commaCount = 0;
+        let hasContent = false;
+        
+        for (let i = 0; i < paramList.length; i++) {
+            const char = paramList[i];
+            
+            if (char === '(') {
+                depth++;
+            } else if (char === ')') {
+                if (depth === 0) {
+                    // End of parameter list
+                    return hasContent ? commaCount + 1 : 0;
+                }
+                depth--;
+            } else if (char === ',' && depth === 0) {
+                commaCount++;
+            } else if (char.trim() !== '' && depth === 0) {
+                hasContent = true;
+            }
+        }
+        
+        return hasContent ? commaCount + 1 : 0;
+    }
+
+    /**
+     * Counts parameters in a method declaration
+     * Extracts parameter list from PROCEDURE(...) 
+     */
+    private countParametersInDeclaration(line: string): number {
+        const match = line.match(/PROCEDURE\s*\(([^)]*)\)/i);
+        if (!match) return 0;
+        
+        const paramList = match[1].trim();
+        if (paramList === '') return 0;
+        
+        // Simple comma counting (not perfect but good enough for most cases)
+        let depth = 0;
+        let commaCount = 0;
+        
+        for (let i = 0; i < paramList.length; i++) {
+            const char = paramList[i];
+            
+            if (char === '(') {
+                depth++;
+            } else if (char === ')') {
+                depth--;
+            } else if (char === ',' && depth === 0) {
+                commaCount++;
+            }
+        }
+        
+        return commaCount + 1;
     }
 }
