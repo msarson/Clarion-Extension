@@ -1,6 +1,10 @@
 import { SymbolKind } from 'vscode-languageserver';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { ClarionDocumentSymbol } from '../ClarionDocumentSymbolProvider';
+import LoggerManager from '../../logger';
+
+const logger = LoggerManager.getLogger("HierarchyManager");
+logger.setLevel("info");
 
 // Re-export ClarionSymbolKind locally since it's not exported from the main file
 const ClarionSymbolKind = {
@@ -61,6 +65,11 @@ export class HierarchyManager {
             return { shouldResetLastMethodImplementation };
         }
 
+        logger.info(`🔍 Checking stack at line ${currentLine}, stack depth: ${parentStack.length}`);
+        parentStack.forEach((entry, idx) => {
+            logger.info(`  [${idx}] ${entry.symbol.name} (finishesAt: ${entry.finishesAt}, isMethod: ${entry.symbol._isMethodImplementation}, isGlobal: ${entry.symbol._isGlobalProcedure})`);
+        });
+
         // Find all global procedures, special routines, and method implementations in the stack
         let globalProcedureIndices: number[] = [];
         let currentGlobalProcedureIndex = -1;
@@ -95,6 +104,7 @@ export class HierarchyManager {
 
         // If we're at a new global procedure, pop the current global procedure
         if (isAtNewGlobalProcedure && currentGlobalProcedureIndex !== -1) {
+            logger.info(`🚨 New global procedure at line ${currentLine}, popping from index ${currentGlobalProcedureIndex}`);
             parentStack.splice(currentGlobalProcedureIndex);
             shouldResetLastMethodImplementation = true;
             return { shouldResetLastMethodImplementation };
@@ -135,6 +145,7 @@ export class HierarchyManager {
         symbol: ClarionDocumentSymbol,
         finishesAt: number | undefined
     ): void {
+        logger.info(`📥 Pushing "${symbol.name}" onto stack (finishesAt: ${finishesAt}, isMethod: ${symbol._isMethodImplementation})`);
         parentStack.push({ symbol, finishesAt });
     }
 

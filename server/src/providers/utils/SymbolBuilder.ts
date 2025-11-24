@@ -1,5 +1,9 @@
 import { SymbolKind, Range, Position } from 'vscode-languageserver';
 import { ClarionDocumentSymbol } from '../ClarionDocumentSymbolProvider';
+import LoggerManager from '../../logger';
+
+const logger = LoggerManager.getLogger("SymbolBuilder");
+logger.setLevel("info");
 
 /**
  * Utility class for building DocumentSymbol objects with consistent formatting

@@ -2,7 +2,7 @@ import { Token } from "../../ClarionTokenizer";
 import LoggerManager from "../../logger";
 
 const logger = LoggerManager.getLogger("TokenProcessor");
-logger.setLevel("error");
+logger.setLevel("info");
 
 export class TokenProcessor {
     /**

@@ -1139,16 +1139,9 @@ export class ClarionDocumentSymbolProvider {
             classImplementation.$clarionMethods = methodsContainer;
             classImplementation.children!.push(methodsContainer);
 
-            // Find the most recent global procedure to attach this class implementation to
-            const mostRecentGlobalProcedure = SymbolFinder.findMostRecentGlobalProcedure(symbols);
-
-            // If we found a global procedure, add the class implementation as its child
-            if (mostRecentGlobalProcedure) {
-                mostRecentGlobalProcedure.children!.push(classImplementation);
-            } else {
-                // Otherwise add to top-level symbols
-                symbols.push(classImplementation);
-            }
+            // FIXED: Class implementation containers should ALWAYS be root-level
+            // Never nest them under procedures
+            symbols.push(classImplementation);
         }
 
         return classImplementation;
