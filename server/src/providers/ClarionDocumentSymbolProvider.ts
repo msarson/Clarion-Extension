@@ -7,6 +7,7 @@ import { serverInitialized } from '../server.js';
 import { Token, TokenType } from '../ClarionTokenizer.js';
 import { HierarchyManager } from './utils/HierarchyManager';
 import { SymbolFinder } from './utils/SymbolFinder';
+import { TokenProcessor } from './utils/TokenProcessor';
 
 /**
  * Extended DocumentSymbol with Clarion-specific metadata
