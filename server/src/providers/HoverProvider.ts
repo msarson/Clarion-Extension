@@ -90,7 +90,10 @@ export class HoverProvider {
                 const afterDot = line.substring(dotBeforeIndex + 1).trim();
                 const fieldMatch = afterDot.match(/^(\w+)/);
                 
-                if (fieldMatch && fieldMatch[1].toLowerCase() === word.toLowerCase()) {
+                // Extract field name from word (in case TokenHelper returned "prefix.field")
+                const fieldName = word.includes('.') ? word.split('.').pop()! : word;
+                
+                if (fieldMatch && fieldMatch[1].toLowerCase() === fieldName.toLowerCase()) {
                     // Check if this is a method call (has parentheses)
                     const hasParentheses = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
                     
@@ -102,13 +105,13 @@ export class HoverProvider {
                         // If it's a method call, count parameters
                         let paramCount: number | undefined;
                         if (hasParentheses) {
-                            paramCount = this.memberResolver.countParametersInCall(line, word);
+                            paramCount = this.memberResolver.countParametersInCall(line, fieldName);
                             logger.info(`Method call detected with ${paramCount} parameters`);
                         }
                         
-                        const memberInfo = this.memberResolver.findClassMemberInfo(word, document, position.line, tokens, paramCount);
+                        const memberInfo = this.memberResolver.findClassMemberInfo(fieldName, document, position.line, tokens, paramCount);
                         if (memberInfo) {
-                            return this.constructClassMemberHover(word, memberInfo);
+                            return this.constructClassMemberHover(fieldName, memberInfo);
                         }
                     } else {
                         // variable.member - structure field access (e.g., MyGroup.MyVar)

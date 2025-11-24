@@ -3,9 +3,73 @@ All notable changes to the "clarion-extension" extension will be documented in t
 
 ---
 
-## [0.7.1] - 2025-11-23
+## [0.7.1] - 2025-11-24
 
 ### Major Enhancements
+
+#### Code Refactoring and Architecture Improvements
+
+**Significant internal refactoring to improve code maintainability and reduce duplication.**
+
+- **New Shared Utilities**: Created reusable utility classes for common operations
+  - `ClassMemberResolver`: Handles class member lookup with method overload resolution
+  - `TokenHelper`: Provides scope navigation and word extraction utilities
+  - Both HoverProvider and DefinitionProvider now use these shared utilities
+  - Eliminated ~500+ lines of duplicate code
+
+#### Method Overload Resolution
+
+**Full support for Clarion method overloading with parameter counting.**
+
+- **Smart overload detection**: Extension now correctly identifies which method overload to use
+  - Counts parameters in method calls
+  - Matches against method declarations
+  - Selects best overload based on parameter count
+  - Prefers methods with optional parameters when counts are close
+  
+- **Works in both Hover and Go to Definition**:
+  - Hover shows the correct overload signature
+  - F12 (Go to Definition) navigates to the correct overload
+  - Ctrl+F12 (Go to Implementation) works with overloaded methods
+
+**Example:**
+```clarion
+! Class has multiple SaveFile methods
+SaveFile PROCEDURE(string fileName, bool append), long
+SaveFile PROCEDURE(*string data, string fileName, bool append, long len=0), long
+
+Code
+  self.SaveFile('test.txt', true)           ! 2 params - uses first overload
+  self.SaveFile(myData, 'test.txt', true)   ! 3 params - uses second overload (has optional 4th)
+```
+
+#### Performance Improvements
+
+**Dramatically improved performance by disabling excessive debug logging.**
+
+- **Reduced logging overhead**: Changed default log levels from "debug" to "error" for most components
+  - HoverProvider: info → error (reduces log spam)
+  - DefinitionProvider: info → error
+  - Only performance metrics remain visible
+  
+- **Measurable impact**: 
+  - Document symbol generation: ~100-150ms (was slower with excessive logging)
+  - Extension no longer locks up VS Code on large files
+  - Smoother editing experience
+
+#### Bug Fixes
+
+- **Fixed Goto Definition URI conversion**: F12 now correctly opens files from INCLUDE statements
+  - Properly converts Windows paths to file:// URIs
+  - Works correctly with drive letters
+  
+- **Fixed word extraction for dot notation**: Hover now works correctly when `getWordRangeAtPosition` returns full dotted names
+  - Properly extracts field name from "self.Method" format
+  - Maintains compatibility with improved TokenHelper
+
+- **Fixed hover duplication**: Server-side hover now properly defers to client-side for method calls
+  - Eliminated duplicate hover information
+  - Shows only relevant information (declaration + implementation hint)
 
 #### PREFIX and Structure Field Access Improvements
 

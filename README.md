@@ -64,9 +64,10 @@ For a comprehensive list of all features and their locations within the extensio
 - **Complete Language Support**: Syntax highlighting, bracket matching, and auto-closing pairs for all Clarion file types (.clw, .inc, .txa, etc.)
 - **Solution Explorer View**: Navigate Clarion projects directly inside VS Code.
 - **Automatic Solution Parsing**: Detects all projects and redirection files in your solution.
-- **Enhanced "Go To Definition"**: Supports `INCLUDE` and `MODULE` statements, with redirection-aware searches. Full support for GROUP PREFIX declarations (e.g., `LOC:MyVar`, `MyGroup.MyVar`).
+- **Enhanced "Go To Definition"**: Supports `INCLUDE` and `MODULE` statements, with redirection-aware searches. Full support for GROUP PREFIX declarations (e.g., `LOC:MyVar`, `MyGroup.MyVar`). **NEW: Method overload support** - correctly navigates to the right overload based on parameters.
+- **Method Overload Support**: Smart detection of method overloads with parameter counting for accurate navigation and hover information.
 - **Code Folding**: Tokenizer-based folding provider for improved code readability.
-- **Hover Provider**: Displays previews of referenced files when hovering over `INCLUDE` or `MODULE` statements.
+- **Hover Provider**: Displays previews of referenced files when hovering over `INCLUDE` or `MODULE` statements. Shows method signatures with correct overload resolution.
 - **Build Configuration Support**: Easily switch between Release and Debug builds with `Clarion: Set Configuration`.
 - **Redirection-Aware File Searching**: `Ctrl+P` respects local and global redirection files.
 - **Document Outlining & Breadcrumbs**: Improves navigation within large Clarion files.
@@ -120,6 +121,60 @@ This is necessary because older versions had a dependency on fushnisoft.clarion 
 
 ---
 ## Changelog (What's New in v0.7.1)
+
+### Method Overload Support
+
+**Full support for Clarion method overloading with intelligent parameter counting.**
+
+- **Smart overload resolution**: Extension now correctly identifies which method overload matches your call
+  - Counts parameters in method calls automatically
+  - Matches against all declared overloads
+  - Selects best match based on parameter count
+  - Handles optional parameters intelligently
+  
+- **Works everywhere**: 
+  - **Hover** (hover over method call to see correct signature)
+  - **Go to Definition (F12)** navigates to the correct overload
+  - **Go to Implementation (Ctrl+F12)** finds the right implementation
+
+**Example:**
+```clarion
+! Class with overloaded methods
+SaveFile PROCEDURE(string fileName, bool append), long
+SaveFile PROCEDURE(*string data, string fileName, bool append, long len=0), long
+
+Code
+  result = self.SaveFile('test.txt', true)           ! Hover/F12 shows 2-parameter version
+  result = self.SaveFile(myData, 'test.txt', true)   ! Hover/F12 shows 4-parameter version
+```
+
+### Performance Improvements
+
+**Dramatically improved performance by reducing logging overhead.**
+
+- **Reduced log spam**: Most components now log only errors by default
+  - HoverProvider: info → error
+  - DefinitionProvider: info → error
+  - Performance metrics still visible for monitoring
+  
+- **Better responsiveness**:
+  - Extension no longer locks up VS Code when opening large files
+  - Faster hover and definition lookups
+  - Smoother editing experience overall
+
+### Code Architecture Improvements
+
+**Major internal refactoring to improve maintainability.**
+
+- **New shared utilities**:
+  - `ClassMemberResolver`: Handles class member lookup with overload resolution
+  - `TokenHelper`: Provides scope navigation and word extraction
+  - Eliminated ~500+ lines of duplicate code
+  
+- **Benefits**:
+  - Consistent behavior across all features
+  - Easier to maintain and extend
+  - Bug fixes apply universally
 
 ### PREFIX and Structure Field Access Improvements
 
