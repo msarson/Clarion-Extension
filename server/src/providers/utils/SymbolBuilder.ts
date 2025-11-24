@@ -75,4 +75,67 @@ export class SymbolBuilder {
         const range = this.createRange(startLine, 0, endLine, 0);
         return this.createSymbol(name, '', kind, range, range, []);
     }
+
+    /**
+     * Creates a procedure symbol with Clarion-specific properties
+     */
+    static createProcedure(
+        name: string,
+        params: string,
+        returnType: string | undefined,
+        startLine: number,
+        endLine: number,
+        className?: string
+    ): ClarionSymbol {
+        const detail = this.formatProcedureDetail(params, returnType);
+        const range = this.createRange(startLine, 0, endLine, 0);
+        const selectionRange = this.createCollapsedRange(startLine, 0);
+        
+        const symbol = this.createSymbol(name, detail, SymbolKind.Method, range, selectionRange, []);
+        
+        // Add Clarion-specific properties
+        symbol._clarionClassName = className;
+        symbol._finishesAt = endLine;
+        
+        return symbol;
+    }
+
+    /**
+     * Creates a variable symbol
+     */
+    static createVariable(
+        name: string,
+        dataType: string,
+        line: number,
+        prefix?: string
+    ): ClarionSymbol {
+        let detail = dataType;
+        if (prefix) {
+            detail += `, PREFIX(${prefix})`;
+        }
+        
+        const range = this.createCollapsedRange(line, 0);
+        return this.createSymbol(name, detail, SymbolKind.Variable, range, range, []);
+    }
+
+    /**
+     * Creates a structure symbol (GROUP, QUEUE, etc.)
+     */
+    static createStructure(
+        name: string,
+        structureType: string,
+        line: number,
+        endLine: number,
+        prefix?: string
+    ): ClarionSymbol {
+        let detail = this.formatStructureDetail(structureType, name);
+        if (prefix) {
+            detail += `, PREFIX(${prefix})`;
+        }
+        
+        const range = this.createRange(line, 0, endLine, 0);
+        const selectionRange = this.createCollapsedRange(line, 0);
+        
+        return this.createSymbol(name, detail, SymbolKind.Struct, range, selectionRange, []);
+    }
 }
