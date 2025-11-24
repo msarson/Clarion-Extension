@@ -3,4 +3,5 @@ node_modules/
 client/out
 server/out
 out/
+Logs/
 
