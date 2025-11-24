@@ -1,5 +1,4 @@
 import { DocumentSymbol, SymbolKind, Range, Position } from 'vscode-languageserver';
-import { ClarionSymbol } from './ClarionDocumentSymbolProvider';
 
 /**
  * Helper class for building DocumentSymbol instances with consistent patterns
@@ -15,7 +14,7 @@ export class SymbolBuilder {
         range: Range,
         selectionRange: Range,
         children: DocumentSymbol[] = []
-    ): ClarionSymbol {
+    ): DocumentSymbol {
         const symbol = DocumentSymbol.create(
             name,
             detail,
@@ -23,7 +22,7 @@ export class SymbolBuilder {
             range,
             selectionRange,
             children
-        ) as ClarionSymbol;
+        );
 
         return symbol;
     }
@@ -77,7 +76,7 @@ export class SymbolBuilder {
         startLine: number,
         endLine: number,
         children: DocumentSymbol[] = []
-    ): ClarionSymbol {
+    ): DocumentSymbol {
         const range = this.createRange(startLine, 0, endLine, 999);
         return this.createSymbol(name, '', kind, range, range, children);
     }
@@ -131,7 +130,7 @@ export class SymbolBuilder {
         className: string,
         firstMethodLine: number,
         lastMethodLine: number
-    ): ClarionSymbol {
+    ): DocumentSymbol {
         const range = this.createRange(firstMethodLine, 0, lastMethodLine, 999);
         const symbol = this.createSymbol(
             `${className} (implementation)`,
@@ -151,7 +150,7 @@ export class SymbolBuilder {
         startLine: number,
         endLine: number,
         children: DocumentSymbol[] = []
-    ): ClarionSymbol {
+    ): DocumentSymbol {
         return this.createContainer('Methods', SymbolKind.Method, startLine, endLine, children);
     }
 }

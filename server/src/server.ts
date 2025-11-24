@@ -33,7 +33,7 @@ import {
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
-import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
+import { ClarionDocumentSymbolProvider } from './providers/ClarionDocumentSymbolProvider';
 
 import { Token } from './ClarionTokenizer';
 import { TokenCache } from './TokenCache';

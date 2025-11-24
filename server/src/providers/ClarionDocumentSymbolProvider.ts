@@ -1,10 +1,10 @@
 import { DocumentSymbol, Range, SymbolKind } from 'vscode-languageserver-types';
 
-import LoggerManager from './logger';
+import LoggerManager from '../logger';
 const logger = LoggerManager.getLogger("ClarionDocumentSymbolProvider");
 logger.setLevel("error");
-import { serverInitialized } from './server.js';
-import { Token, TokenType } from './ClarionTokenizer.js';
+import { serverInitialized } from '../server.js';
+import { Token, TokenType } from '../ClarionTokenizer.js';
 
 /**
  * Extended DocumentSymbol with Clarion-specific metadata
