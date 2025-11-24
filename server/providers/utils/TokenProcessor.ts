@@ -1,5 +1,5 @@
-import { Token } from "../../src/core/Tokenizer";
-import { Logger } from "../../src/logger";
+import { Token } from "../../../common/types";
+import Logger from "../../src/logger";
 
 const logger = new Logger("TokenProcessor");
 logger.setLevel("error");
