@@ -906,6 +906,22 @@ export async function activate(context: ExtensionContext): Promise<void> {
         // Commands for adding/removing source files are already registered above
     );
     
+    // ✅ Create DocumentManager early for standalone file support
+    // This enables features like Goto Implementation, Hover, etc. without a solution
+    if (!documentManager) {
+        logger.info("🔍 Creating DocumentManager for standalone file support...");
+        try {
+            documentManager = await DocumentManager.create();
+            logger.info("✅ DocumentManager created for standalone files");
+            
+            // ✅ Register language features now that documentManager exists
+            logger.info("🔍 Registering language features...");
+            registerLanguageFeatures(context);
+        } catch (error) {
+            logger.error(`❌ Error creating DocumentManager: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+    
     // Track total activation time
     const activationDuration = Date.now() - activationStartTime;
     logger.info(`✅ Extension activation completed in ${activationDuration}ms`);
@@ -1314,10 +1330,16 @@ let definitionProviderDisposable: Disposable | null = null;
 let semanticTokensProviderDisposable: Disposable | null = null;
 
 function registerLanguageFeatures(context: ExtensionContext) {
+    console.log("🔥🔥🔥 registerLanguageFeatures CALLED 🔥🔥🔥");
+    logger.info("🔥🔥🔥 registerLanguageFeatures CALLED 🔥🔥🔥");
+    
     if (!documentManager) {
         logger.warn("⚠️ Cannot register language features: documentManager is undefined!");
+        console.log("🔥🔥🔥 documentManager is UNDEFINED 🔥🔥🔥");
         return;
     }
+    
+    console.log("🔥🔥🔥 documentManager EXISTS 🔥🔥🔥");
 
     // ✅ Fix: Ensure only one Document Link Provider is registered
     if (documentLinkProviderDisposable) {
@@ -1364,6 +1386,7 @@ function registerLanguageFeatures(context: ExtensionContext) {
     }
     
     logger.info("🔍 Registering Implementation Provider...");
+    console.log("🔥🔥🔥 REGISTERING ClarionImplementationProvider 🔥🔥🔥");
     implementationProviderDisposable = languages.registerImplementationProvider(
         documentSelectors,
         new ClarionImplementationProvider(documentManager)

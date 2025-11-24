@@ -130,6 +130,7 @@ connection.onInitialize((params) => {
                 foldingRangeProvider: true,
                 colorProvider: true,
                 definitionProvider: true,
+                // Note: implementationProvider is handled client-side in extension.ts
                 hoverProvider: true
             }
         };

@@ -3,7 +3,7 @@ import { DocumentManager } from '../documentManager';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ImplementationProvider");
-logger.setLevel("error");
+logger.setLevel("info");
 
 /**
  * Provides "Go to Implementation" functionality for Clarion method declarations.
@@ -143,6 +143,8 @@ export class ClarionImplementationProvider implements ImplementationProvider {
         position: Position,
         token: CancellationToken
     ): ProviderResult<Definition | LocationLink[]> {
+        console.log('🔥🔥🔥 ClarionImplementationProvider.provideImplementation CALLED 🔥🔥🔥');
+        logger.info('🔥🔥🔥 ClarionImplementationProvider.provideImplementation CALLED 🔥🔥🔥');
         return this._provideImplementation(document, position, token);
     }
 

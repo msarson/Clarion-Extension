@@ -6,7 +6,7 @@ import { TokenCache } from '../TokenCache';
 import { ClarionDocumentSymbolProvider } from '../ClarionDocumentSymbolProvider';
 
 const logger = LoggerManager.getLogger("HoverProvider");
-logger.setLevel("info");
+logger.setLevel("error");
 
 /**
  * Provides hover information for local variables and parameters
@@ -57,21 +57,63 @@ export class HoverProvider {
                 }
             }
 
+            // Check if this is a structure/group name followed by a dot (e.g., hovering over "MyGroup" in "MyGroup.MyVar")
+            // Search for a dot starting from the word's position in the line
+            const wordStartInLine = line.indexOf(word, Math.max(0, position.character - word.length));
+            const dotIndex = line.indexOf('.', wordStartInLine);
+            
+            if (dotIndex > wordStartInLine && dotIndex < wordStartInLine + word.length + 5) {
+                // There's a dot right after the word - this looks like structure.field notation
+                logger.info(`Detected dot notation for word: ${word}, dotIndex: ${dotIndex}`);
+                
+                const tokens = this.tokenCache.getTokens(document);
+                const currentScope = this.getInnermostScopeAtLine(tokens, position.line);
+                if (currentScope) {
+                    // Look for the GROUP/QUEUE/etc definition
+                    const structureInfo = this.findLocalVariableInfo(word, tokens, currentScope, document, word);
+                    if (structureInfo) {
+                        logger.info(`✅ HOVER-RETURN: Found structure info for ${word}`);
+                        return this.constructVariableHover(word, structureInfo, currentScope);
+                    } else {
+                        logger.info(`❌ HOVER-MISS: Could not find structure info for ${word}`);
+                    }
+                }
+            }
+
             // Check if this is a class member access (self.member or variable.member)
-            const dotIndex = line.lastIndexOf('.', position.character - 1);
-            if (dotIndex > 0) {
-                const beforeDot = line.substring(0, dotIndex).trim();
-                const afterDot = line.substring(dotIndex + 1).trim();
+            const dotBeforeIndex = line.lastIndexOf('.', position.character - 1);
+            if (dotBeforeIndex > 0) {
+                const beforeDot = line.substring(0, dotBeforeIndex).trim();
+                const afterDot = line.substring(dotBeforeIndex + 1).trim();
                 const fieldMatch = afterDot.match(/^(\w+)/);
                 
                 if (fieldMatch && fieldMatch[1].toLowerCase() === word.toLowerCase()) {
-                    // This is a member access
+                    // This is a member access (hovering over the field after the dot)
                     if (beforeDot.toLowerCase() === 'self' || beforeDot.endsWith('self')) {
                         // self.member - class member
                         const tokens = this.tokenCache.getTokens(document);
                         const memberInfo = this.findClassMemberInfo(word, document, position.line, tokens);
                         if (memberInfo) {
                             return this.constructClassMemberHover(word, memberInfo);
+                        }
+                    } else {
+                        // variable.member - structure field access (e.g., MyGroup.MyVar)
+                        const structureNameMatch = beforeDot.match(/(\w+)\s*$/);
+                        if (structureNameMatch) {
+                            const structureName = structureNameMatch[1];
+                            logger.info(`Detected structure field access: ${structureName}.${word}`);
+                            
+                            const tokens = this.tokenCache.getTokens(document);
+                            const currentScope = this.getInnermostScopeAtLine(tokens, position.line);
+                            if (currentScope) {
+                                // Try to find the structure field using dot notation reference
+                                const fullReference = `${structureName}.${word}`;
+                                const variableInfo = this.findLocalVariableInfo(word, tokens, currentScope, document, fullReference);
+                                if (variableInfo) {
+                                    logger.info(`✅ HOVER-RETURN: Found structure field info for ${fullReference}`);
+                                    return this.constructVariableHover(fullReference, variableInfo, currentScope);
+                                }
+                            }
                         }
                     }
                 }
@@ -272,9 +314,21 @@ export class HoverProvider {
             logger.info(`PREFIX-DEBUG: Searching with searchText="${searchText}", originalWord="${originalWord}", word="${word}"`);
             const varSymbol = this.findVariableInSymbol(procedureSymbol, searchText);
             if (varSymbol) {
-                logger.info(`Found variable in symbol tree: ${varSymbol.name}, detail: ${varSymbol.detail}`);
+                logger.info(`Found variable in symbol tree: ${varSymbol.name}, detail: ${varSymbol.detail}, kind: ${varSymbol.kind}`);
+                
                 // Extract type from _clarionType if available, otherwise parse from detail
-                const type = (varSymbol as any)._clarionType || varSymbol.detail || 'Unknown';
+                let type = (varSymbol as any)._clarionType || varSymbol.detail || 'Unknown';
+                
+                // Special handling for GROUP/QUEUE/FILE structures (kind = 23)
+                if (varSymbol.kind === 23 && type === 'Unknown') {
+                    // Extract structure type from name pattern like "GROUP (MyGroup)"
+                    const structTypeMatch = varSymbol.name.match(/^(\w+)\s*\(/);
+                    if (structTypeMatch) {
+                        type = structTypeMatch[1]; // e.g., "GROUP", "QUEUE", "FILE"
+                        logger.info(`Extracted structure type from name: ${type}`);
+                    }
+                }
+                
                 return {
                     type: type,
                     line: varSymbol.range.start.line
@@ -316,8 +370,26 @@ export class HoverProvider {
         logger.info(`Searching for field "${fieldName}" in symbol with ${symbol.children.length} children`);
         
         for (const child of symbol.children) {
+            // Check if this is a GROUP/QUEUE/FILE structure symbol (SymbolKind.Struct = 23)
+            if (child.kind === 23) {
+                // Extract group name from pattern like "GROUP (MyGroup)" or "QUEUE (MyQueue)"
+                const groupNameMatch = child.name.match(/\(([^)]+)\)/);
+                if (groupNameMatch) {
+                    const groupName = groupNameMatch[1];
+                    if (groupName.toLowerCase() === fieldName.toLowerCase()) {
+                        logger.info(`✅ Matched GROUP/QUEUE/FILE structure: ${groupName}`);
+                        return child;
+                    }
+                }
+                
+                // Also search within the structure's children
+                if (child.children) {
+                    const result = this.findVariableInSymbol(child, fieldName);
+                    if (result) return result;
+                }
+            }
             // Check if this is a variable symbol (SymbolKind.Variable = 13)
-            if (child.kind === 13) {
+            else if (child.kind === 13) {
                 // Use _clarionVarName if available (more reliable), otherwise extract from name
                 const varName = (child as any)._clarionVarName || child.name.match(/^([^\s]+)/)?.[1] || child.name;
                 
@@ -354,10 +426,15 @@ export class HoverProvider {
                     logger.info(`✅ Matched regular variable: child.name="${child.name}", extracted="${varName}", searching for="${fieldName}"`);
                     return child;
                 }
+                
+                // Also search nested children if this is a structure variable
+                if (child.children) {
+                    const result = this.findVariableInSymbol(child, fieldName);
+                    if (result) return result;
+                }
             }
-            
-            // Also search nested children (for nested structures)
-            if (child.children) {
+            // For other kinds, still search children
+            else if (child.children) {
                 const result = this.findVariableInSymbol(child, fieldName);
                 if (result) return result;
             }
@@ -827,12 +904,23 @@ export class HoverProvider {
             markdown.push(``);
             markdown.push(`**Declared in:** \`${fileName}\` at line **${info.line + 1}**`);
             markdown.push(``);
-            markdown.push(`*(F12 will navigate to the definition)*`);
+            
+            // Add navigation hints - F12 for definition, Ctrl+F12 for implementation (methods only)
+            if (isMethod) {
+                markdown.push(`*(F12 to definition | Ctrl+F12 to implementation)*`);
+            } else {
+                markdown.push(`*(F12 will navigate to the definition)*`);
+            }
         } else {
             markdown.push(``);
             markdown.push(`**Declared in:** ${info.file}`);
             markdown.push(``);
-            markdown.push(`*Press F12 to go to definition*`);
+            
+            if (isMethod) {
+                markdown.push(`*(F12 to definition | Ctrl+F12 to implementation)*`);
+            } else {
+                markdown.push(`*Press F12 to go to definition*`);
+            }
         }
         
         return {

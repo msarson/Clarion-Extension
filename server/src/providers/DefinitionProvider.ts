@@ -9,7 +9,7 @@ import { TokenCache } from '../TokenCache';
 import { ClarionDocumentSymbolProvider } from '../ClarionDocumentSymbolProvider';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
-logger.setLevel("info");
+logger.setLevel("error");
 
 /**
  * Provides goto definition functionality for Clarion files
@@ -352,41 +352,50 @@ export class DefinitionProvider {
             const beforeDot = line.substring(0, dotIndex).trim();
             const afterDot = line.substring(dotIndex + 1).trim();
 
-            // Extract just the field name without any trailing characters
+            // Extract structure name and field name
+            const structureMatch = beforeDot.match(/(\w+)\s*$/);
             const fieldMatch = afterDot.match(/^(\w+)/);
-            if (fieldMatch && fieldMatch[1].toLowerCase() === word.toLowerCase()) {
+            
+            if (structureMatch && fieldMatch) {
+                const structureName = structureMatch[1];
                 const fieldName = fieldMatch[1];
-                logger.info(`Detected dot notation: ${beforeDot}.${fieldName}`);
+                
+                // Check if cursor is on the structure name or the field name
+                if (word.toLowerCase() === structureName.toLowerCase()) {
+                    // Cursor is on structure name - find the structure declaration
+                    logger.info(`Detected dot notation: cursor on structure "${structureName}" in ${structureName}.${fieldName}`);
+                    return this.findLabelDefinition(structureName, document, position);
+                } else if (word.toLowerCase() === fieldName.toLowerCase()) {
+                    // Cursor is on field name - find the field within the structure
+                    logger.info(`Detected dot notation: cursor on field "${fieldName}" in ${structureName}.${fieldName}`);
 
-                // Check if this is self.Member - class member access
-                if (beforeDot.toLowerCase() === 'self' || beforeDot.endsWith('self')) {
-                    logger.info(`Detected self.${fieldName} - looking for class member`);
-                    return this.findClassMember(tokens, fieldName, document, position.line);
-                }
+                    // Check if this is self.Member - class member access
+                    if (structureName.toLowerCase() === 'self') {
+                        logger.info(`Detected self.${fieldName} - looking for class member`);
+                        return this.findClassMember(tokens, fieldName, document, position.line);
+                    }
 
-                // Try to find as a typed variable (e.g., otherValue.value where otherValue is StringTheory)
-                const variableName = beforeDot.split(/[^a-zA-Z0-9_]/).pop(); // Get last word
-                if (variableName) {
-                    const classType = this.findVariableType(tokens, variableName, position.line);
+                    // Try to find as a typed variable (e.g., otherValue.value where otherValue is StringTheory)
+                    const classType = this.findVariableType(tokens, structureName, position.line);
                     if (classType) {
-                        logger.info(`Variable ${variableName} is of type ${classType}, looking for member ${fieldName}`);
+                        logger.info(`Variable ${structureName} is of type ${classType}, looking for member ${fieldName}`);
                         const result = await this.findClassMemberInType(tokens, classType, fieldName, document);
                         if (result) {
                             return result;
                         }
                     }
-                }
 
-                // Find the structure definition - handle complex structure names
-                const structureTokens = tokens.filter(token =>
-                    token.type === TokenType.Label &&
-                    token.value.toLowerCase() === beforeDot.toLowerCase() &&
-                    token.start === 0
-                );
+                    // Find the structure definition - handle complex structure names
+                    const structureTokens = tokens.filter(token =>
+                        token.type === TokenType.Label &&
+                        token.value.toLowerCase() === structureName.toLowerCase() &&
+                        token.start === 0
+                    );
 
-                if (structureTokens.length > 0) {
-                    // Find the field within the structure
-                    return this.findFieldInStructure(tokens, structureTokens[0], fieldName, document, position);
+                    if (structureTokens.length > 0) {
+                        // Find the field within the structure
+                        return this.findFieldInStructure(tokens, structureTokens[0], fieldName, document, position);
+                    }
                 }
             }
         }
@@ -1175,41 +1184,62 @@ export class DefinitionProvider {
 
         // In Clarion, colons are used for prefix notation (LOC:Field, Struct:Field, etc.)
         // and dots are used for structure field access (MyGroup.MyField)
-        // We should always include both when extracting variable names
         const includeColons = true;
-        const includeDots = true;
         
-        // Find the start of the word
-        let start = position.character;
-        while (start > 0) {
-            const char = line.charAt(start - 1);
-            if (this.isWordCharacter(char)) {
-                start--;
-            } else if (includeColons && char === ':') {
-                // Include colon if we're in a Clarion prefix context
-                start--;
-            } else if (includeDots && char === '.') {
-                // Include dot if we're in a structure field access context
-                start--;
+        // For dot notation, we need to be position-aware
+        // If cursor is on "MyGroup" in "MyGroup.MyVar", return only "MyGroup"
+        // If cursor is on "MyVar" in "MyGroup.MyVar", return "MyGroup.MyVar"
+        
+        // First, find the immediate word at cursor position (without dots)
+        let wordStart = position.character;
+        let wordEnd = position.character;
+        
+        // Find start of current word segment
+        while (wordStart > 0) {
+            const char = line.charAt(wordStart - 1);
+            if (this.isWordCharacter(char) || (includeColons && char === ':')) {
+                wordStart--;
             } else {
                 break;
             }
         }
-
-        // Find the end of the word
-        let end = position.character;
-        while (end < line.length) {
-            const char = line.charAt(end);
+        
+        // Find end of current word segment  
+        while (wordEnd < line.length) {
+            const char = line.charAt(wordEnd);
             if (this.isWordCharacter(char)) {
-                end++;
+                wordEnd++;
             } else if (includeColons && char === ':') {
-                // Include colon if we're in a Clarion prefix context
-                end++;
-            } else if (includeDots && char === '.') {
-                // Include dot if we're in a structure field access context
-                end++;
+                // Include colon in prefix notation
+                wordEnd++;
             } else {
                 break;
+            }
+        }
+        
+        // Now check if there's a dot before or after this word segment
+        // If dot is BEFORE the word, we're on the field part - include the prefix
+        // If dot is AFTER the word, we're on the prefix part - only return the prefix
+        let start = wordStart;
+        let end = wordEnd;
+        
+        // Check for dot AFTER current word (e.g., cursor on "MyGroup" in "MyGroup.MyVar")
+        if (wordEnd < line.length && line.charAt(wordEnd) === '.') {
+            // Cursor is on the structure name part, just return that part
+            // Don't include the dot or field name
+        }
+        // Check for dot BEFORE current word (e.g., cursor on "MyVar" in "MyGroup.MyVar")
+        else if (wordStart > 0 && line.charAt(wordStart - 1) === '.') {
+            // Cursor is on the field part, include the structure name
+            // Walk backwards to include "MyGroup."
+            start = wordStart - 1; // Include the dot
+            while (start > 0) {
+                const char = line.charAt(start - 1);
+                if (this.isWordCharacter(char)) {
+                    start--;
+                } else {
+                    break;
+                }
             }
         }
 
