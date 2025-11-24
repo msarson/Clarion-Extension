@@ -1,7 +1,7 @@
-import { Token } from "../../src/ClarionTokenizer";
-import { getLogger } from "../../src/logger";
+import { Token } from "../../../common/types";
+import LoggerManager from "../../../logger";
 
-const logger = getLogger();
+const logger = LoggerManager.getLogger("TokenProcessor");
 logger.setLevel("error");
 
 export class TokenProcessor {
