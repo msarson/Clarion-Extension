@@ -5,6 +5,7 @@ const logger = LoggerManager.getLogger("ClarionDocumentSymbolProvider");
 logger.setLevel("error");
 import { serverInitialized } from '../server.js';
 import { Token, TokenType } from '../ClarionTokenizer.js';
+import { HierarchyManager } from './utils/HierarchyManager';
 
 /**
  * Extended DocumentSymbol with Clarion-specific metadata
@@ -204,13 +205,18 @@ export class ClarionDocumentSymbolProvider {
             // Check if we've moved to a new line
             if (line > lastProcessedLine) {
                 // Check if any structures should be popped based on finishesAt
-                this.checkAndPopCompletedStructures(parentStack, line, symbols, tokens, this.tokensByLine, hasMethodImplementations);
+                const result = HierarchyManager.checkAndPopCompletedStructures(
+                    parentStack, 
+                    line, 
+                    tokens, 
+                    this.tokensByLine, 
+                    hasMethodImplementations
+                );
 
                 // CRITICAL FIX: Check if we need to reset lastMethodImplementation
                 // This happens when a new global procedure is encountered
-                if ((token as any)._resetLastMethodImplementation) {
+                if (result.shouldResetLastMethodImplementation) {
                     lastMethodImplementation = null;
-                    delete (token as any)._resetLastMethodImplementation;
                 }
 
                 // Update current structure and procedure references
@@ -546,165 +552,6 @@ export class ClarionDocumentSymbolProvider {
 
         const target = currentStructure || currentProcedure;
         this.addSymbolToParent(projectSymbol, target, symbols);
-    }
-
-
-
-    /**
-     * Checks if any structures in the parent stack have been completed based on their finishesAt line
-     * and pops them from the stack if needed.
-     *
-     * Special rule: Method implementations (className.MethodName) don't end procedure scope.
-     * Procedure scope only ends when another procedure is found that is not a method or EOF.
-     *
-     * Global procedures should contain everything defined after them until another global procedure or EOF.
-     */
-    private checkAndPopCompletedStructures(
-        parentStack: Array<{ symbol: ClarionDocumentSymbol, finishesAt: number | undefined }>,
-        currentLine: number,
-        symbols: ClarionDocumentSymbol[],
-        tokens: Token[],
-        tokensByLine: Map<number, Token[]>,
-        hasMethodImplementations: boolean
-    ): void {
-        // CRITICAL FIX: Reset lastMethodImplementation when a new global procedure is encountered
-        // This is a reference to the class property that needs to be updated
-        let resetLastMethodImplementation = false;
-        // If the stack is empty, nothing to do
-        if (parentStack.length === 0) {
-            return;
-        }
-
-        // Find all global procedures, special routines, and method implementations in the stack
-        let globalProcedureIndices: number[] = [];
-        let specialRoutineIndices: number[] = [];
-        let methodImplementationIndices: number[] = [];
-        let currentGlobalProcedureIndex = -1;
-
-        // First, identify all special types in the stack
-        for (let i = 0; i < parentStack.length; i++) {
-            const entry = parentStack[i];
-
-            // Check if this is a global procedure
-            const isGlobalProcedure = entry.symbol.kind === SymbolKind.Function &&
-                (entry.symbol._isGlobalProcedure === true ||
-                    (entry.symbol.kind === SymbolKind.Function &&
-                        !entry.symbol._isMethodImplementation &&
-                        !entry.symbol.name.includes('.')));
-
-            // Check if this is a special routine
-            const isSpecialRoutine = entry.symbol.kind === ClarionSymbolKind.Routine &&
-                entry.symbol._isSpecialRoutine;
-
-            // Check if this is a method implementation
-            const isMethodImplementation = entry.symbol._isMethodImplementation === true;
-
-            if (isGlobalProcedure) {
-                globalProcedureIndices.push(i);
-                currentGlobalProcedureIndex = i; // Track the most recent global procedure
-            }
-
-            if (isSpecialRoutine) {
-                specialRoutineIndices.push(i);
-            }
-
-            if (isMethodImplementation) {
-                methodImplementationIndices.push(i);
-            }
-        }
-
-        // Check if we're at the end of the file
-        const isEndOfFile = currentLine === tokens[tokens.length - 1].line;
-
-        // Check if we're at a new global procedure
-        let isAtNewGlobalProcedure = false;
-        let newGlobalProcedureToken: Token | null = null;
-
-        // 🚀 PERFORMANCE: Use indexed lookup instead of looping through all tokens
-        const lineTokens = tokensByLine.get(currentLine) || [];
-        for (const token of lineTokens) {
-            if (token.subType === TokenType.GlobalProcedure ||
-                (token as any)._isGlobalProcedure === true) {
-                isAtNewGlobalProcedure = true;
-                newGlobalProcedureToken = token;
-                break;
-            }
-        }
-
-        // If we're at a new global procedure, pop the current global procedure
-        // This ensures that when we encounter a new global procedure, we end the scope of the previous one
-        if (isAtNewGlobalProcedure && currentGlobalProcedureIndex !== -1) {
-            // Pop the current global procedure and everything after it
-            parentStack.splice(currentGlobalProcedureIndex);
-
-            // CRITICAL FIX: Mark that we need to reset lastMethodImplementation
-            resetLastMethodImplementation = true;
-            return;
-        }
-
-        // 🚀 PERFORMANCE: Use passed flag instead of recursively scanning symbol tree
-        // If we have method implementations and global procedures, keep the global procedures
-        // This ensures global procedures contain method implementations
-        if (hasMethodImplementations && globalProcedureIndices.length > 0) {
-            // Process the stack, but skip all global procedures
-            let i = parentStack.length - 1;
-            while (i >= 0) {
-                // Skip global procedures
-                if (globalProcedureIndices.includes(i)) {
-                    i--;
-                    continue;
-                }
-
-                const entry = parentStack[i];
-                // Pop if we've passed the finishesAt line
-                if (entry.finishesAt !== undefined && currentLine > entry.finishesAt) {
-                    parentStack.splice(i, 1);
-                }
-                i--;
-            }
-            return;
-        }
-
-        // Standard case: pop structures based on their finishesAt line
-        let i = parentStack.length - 1;
-        while (i >= 0) {
-            const entry = parentStack[i];
-
-            // Always pop special routines when we reach their finishesAt line
-            const isSpecialRoutine = entry.symbol.kind === ClarionSymbolKind.Routine &&
-                entry.symbol._isSpecialRoutine;
-
-            // Don't pop the last method implementation if we're at the end of the file
-            const isLastMethodImplementation = isEndOfFile &&
-                methodImplementationIndices.length > 0 &&
-                methodImplementationIndices[methodImplementationIndices.length - 1] === i;
-
-            // Don't pop global procedures unless we're at a new global procedure or EOF
-            const isGlobalProcedure = globalProcedureIndices.includes(i);
-            const shouldPopGlobalProcedure = isGlobalProcedure &&
-                (isAtNewGlobalProcedure || (isEndOfFile && i !== currentGlobalProcedureIndex));
-
-            if (((entry.finishesAt !== undefined && currentLine > entry.finishesAt) ||
-                isSpecialRoutine || shouldPopGlobalProcedure) &&
-                !isLastMethodImplementation &&
-                !(isGlobalProcedure && !shouldPopGlobalProcedure)) {
-                parentStack.splice(i, 1);
-            }
-            i--;
-        }
-
-        // CRITICAL FIX: If we detected a new global procedure, reset lastMethodImplementation
-        if (resetLastMethodImplementation) {
-            // We need to communicate this back to the main method
-            // Since we can't directly modify lastMethodImplementation here (it's in the parent scope)
-            // We'll add a property to the first token in the current line
-            for (const token of tokens) {
-                if (token.line === currentLine) {
-                    (token as any)._resetLastMethodImplementation = true;
-                    break;
-                }
-            }
-        }
     }
 
     private handleStructureToken(
