@@ -139,6 +139,33 @@ export class HierarchyManager {
     }
 
     /**
+     * Get the current parent symbol (top of stack)
+     */
+    static getCurrentParent(parentStack: ParentStackEntry[]): ClarionDocumentSymbol | null {
+        return parentStack.length > 0 ? parentStack[parentStack.length - 1].symbol : null;
+    }
+
+    /**
+     * Get the current procedure from stack (searches backwards for first procedure)
+     */
+    static getCurrentProcedure(parentStack: ParentStackEntry[]): ClarionDocumentSymbol | null {
+        for (let i = parentStack.length - 1; i >= 0; i--) {
+            const symbol = parentStack[i].symbol;
+            if (symbol.kind === ClarionSymbolKind.Procedure) {
+                return symbol;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Check if stack is empty
+     */
+    static isStackEmpty(parentStack: ParentStackEntry[]): boolean {
+        return parentStack.length === 0;
+    }
+
+    /**
      * Checks if a symbol has method implementations in its tree
      */
     static hasMethodImplementationsInTree(symbol: ClarionDocumentSymbol): boolean {

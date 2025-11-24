@@ -220,7 +220,7 @@ export class ClarionDocumentSymbolProvider {
                 }
 
                 // Update current structure and procedure references
-                currentStructure = parentStack.length > 0 ? parentStack[parentStack.length - 1].symbol : null;
+                currentStructure = HierarchyManager.getCurrentParent(parentStack);
 
                 // Update the procedure reference if the current structure is a procedure
                 currentProcedure = currentStructure?.kind === ClarionSymbolKind.Procedure ? currentStructure : null;
@@ -240,7 +240,7 @@ export class ClarionDocumentSymbolProvider {
 
             if (type === TokenType.Structure) {
                 this.handleStructureToken(tokens, i, symbols, parentStack, currentStructure, this.tokensByLine);
-                currentStructure = parentStack.length > 0 ? parentStack[parentStack.length - 1].symbol : null;
+                currentStructure = HierarchyManager.getCurrentParent(parentStack);
                 
                 // Special handling for MAP and MODULE structures
                 if (value.toUpperCase() === "MAP" || value.toUpperCase() === "MODULE") {
@@ -324,10 +324,7 @@ export class ClarionDocumentSymbolProvider {
 
                         // Add method implementation to parent stack with its finishesAt value if available
                         if (result.procedureSymbol._finishesAt !== undefined) {
-                            parentStack.push({
-                                symbol: result.procedureSymbol,
-                                finishesAt: result.procedureSymbol._finishesAt
-                            });
+                            HierarchyManager.pushToStack(parentStack, result.procedureSymbol, result.procedureSymbol._finishesAt);
                             currentStructure = result.procedureSymbol;
                         }
                     } else {
@@ -342,10 +339,7 @@ export class ClarionDocumentSymbolProvider {
 
                         // Add procedure to parent stack with its finishesAt value if available
                         if (result.procedureSymbol._finishesAt !== undefined) {
-                            parentStack.push({
-                                symbol: result.procedureSymbol,
-                                finishesAt: result.procedureSymbol._finishesAt
-                            });
+                            HierarchyManager.pushToStack(parentStack, result.procedureSymbol, result.procedureSymbol._finishesAt);
                             currentStructure = result.procedureSymbol;
                         }
                     }
@@ -357,10 +351,7 @@ export class ClarionDocumentSymbolProvider {
                     // Check if we need to add this procedure definition to the parent stack
                     // This would be the case for procedure definitions with a finishesAt value
                     if (procedureDefSymbol._finishesAt !== undefined) {
-                        parentStack.push({
-                            symbol: procedureDefSymbol,
-                            finishesAt: procedureDefSymbol._finishesAt
-                        });
+                        HierarchyManager.pushToStack(parentStack, procedureDefSymbol, procedureDefSymbol._finishesAt);
                         // Update current structure reference
                         currentStructure = procedureDefSymbol;
                     }
@@ -391,10 +382,7 @@ export class ClarionDocumentSymbolProvider {
                 // Check if we need to add this procedure definition to the parent stack
                 // This would be the case for procedure definitions with a finishesAt value
                 if (procedureDefSymbol._finishesAt !== undefined) {
-                    parentStack.push({
-                        symbol: procedureDefSymbol,
-                        finishesAt: procedureDefSymbol._finishesAt
-                    });
+                    HierarchyManager.pushToStack(parentStack, procedureDefSymbol, procedureDefSymbol._finishesAt);
                     // Update current structure reference
                     currentStructure = procedureDefSymbol;
                 }
@@ -470,10 +458,7 @@ export class ClarionDocumentSymbolProvider {
                 // CRITICAL FIX: Only add special routines to the parent stack
                 // This prevents variables from being incorrectly attached to empty routines
                 if (isSpecialRoutine || token.finishesAt) {
-                    parentStack.push({
-                        symbol: routineSymbol,
-                        finishesAt: token.finishesAt
-                    });
+                    HierarchyManager.pushToStack(parentStack, routineSymbol, token.finishesAt);
                 }
 
                 continue;
@@ -493,7 +478,7 @@ export class ClarionDocumentSymbolProvider {
                 // The actual structure popping happens based on finishesAt lines
                 // But we'll still use this to handle cases where finishesAt isn't available
                 this.handleEndStatementToken(parentStack, line);
-                currentStructure = parentStack.length > 0 ? parentStack[parentStack.length - 1].symbol : null;
+                currentStructure = HierarchyManager.getCurrentParent(parentStack);
                 currentProcedure = currentStructure?.kind === ClarionSymbolKind.Procedure ? currentStructure : null;
             }
         }
@@ -849,10 +834,7 @@ export class ClarionDocumentSymbolProvider {
 
         this.addSymbolToParent(structureSymbol, currentStructure, symbols);
         // Push to the parent stack with finishesAt information
-        parentStack.push({
-            symbol: structureSymbol,
-            finishesAt: finishesAt
-        });
+        HierarchyManager.pushToStack(parentStack, structureSymbol, finishesAt);
     }
 
 
