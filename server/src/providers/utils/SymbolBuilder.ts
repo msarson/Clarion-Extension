@@ -1,12 +1,12 @@
-import { DocumentSymbol, SymbolKind, Range, Position } from 'vscode-languageserver';
-import { ClarionSymbol } from '../ClarionDocumentSymbolProvider';
+import { SymbolKind, Range, Position } from 'vscode-languageserver';
+import { ClarionDocumentSymbol } from '../ClarionDocumentSymbolProvider';
 
 /**
  * Utility class for building DocumentSymbol objects with consistent formatting
  */
 export class SymbolBuilder {
     /**
-     * Creates a DocumentSymbol with standardized properties
+     * Creates a ClarionDocumentSymbol with standardized properties
      */
     static createSymbol(
         name: string,
@@ -14,9 +14,9 @@ export class SymbolBuilder {
         kind: SymbolKind,
         range: Range,
         selectionRange: Range,
-        children?: DocumentSymbol[]
-    ): ClarionSymbol {
-        const symbol: ClarionSymbol = {
+        children?: ClarionDocumentSymbol[]
+    ): ClarionDocumentSymbol {
+        const symbol: ClarionDocumentSymbol = {
             name,
             detail,
             kind,
@@ -71,7 +71,7 @@ export class SymbolBuilder {
         kind: SymbolKind,
         startLine: number,
         endLine: number
-    ): ClarionSymbol {
+    ): ClarionDocumentSymbol {
         const range = this.createRange(startLine, 0, endLine, 0);
         return this.createSymbol(name, '', kind, range, range, []);
     }
@@ -86,7 +86,7 @@ export class SymbolBuilder {
         startLine: number,
         endLine: number,
         className?: string
-    ): ClarionSymbol {
+    ): ClarionDocumentSymbol {
         const detail = this.formatProcedureDetail(params, returnType);
         const range = this.createRange(startLine, 0, endLine, 0);
         const selectionRange = this.createCollapsedRange(startLine, 0);
@@ -94,7 +94,6 @@ export class SymbolBuilder {
         const symbol = this.createSymbol(name, detail, SymbolKind.Method, range, selectionRange, []);
         
         // Add Clarion-specific properties
-        symbol._clarionClassName = className;
         symbol._finishesAt = endLine;
         
         return symbol;
@@ -108,7 +107,7 @@ export class SymbolBuilder {
         dataType: string,
         line: number,
         prefix?: string
-    ): ClarionSymbol {
+    ): ClarionDocumentSymbol {
         let detail = dataType;
         if (prefix) {
             detail += `, PREFIX(${prefix})`;
@@ -127,7 +126,7 @@ export class SymbolBuilder {
         line: number,
         endLine: number,
         prefix?: string
-    ): ClarionSymbol {
+    ): ClarionDocumentSymbol {
         let detail = this.formatStructureDetail(structureType, name);
         if (prefix) {
             detail += `, PREFIX(${prefix})`;
