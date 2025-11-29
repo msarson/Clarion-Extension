@@ -192,6 +192,7 @@ export class ClarionDocumentSymbolProvider {
         let currentClassImplementation: ClarionDocumentSymbol | null = null;
         let insideDefinitionBlock = false;
         let lastProcessedLine = -1;
+        let pastCodeStatement = false; // Track if we're past CODE (no more variables allowed)
 
         // 🚀 PERFORMANCE: Track method implementations incrementally instead of scanning tree repeatedly
         let hasMethodImplementations = false;
@@ -237,6 +238,23 @@ export class ClarionDocumentSymbolProvider {
 
             if (executionMarker?.value.toUpperCase() === "CODE") {
                 insideDefinitionBlock = false;
+            }
+
+            // Check if current token is CODE execution marker - stop variable processing
+            if (type === TokenType.ExecutionMarker && value.toUpperCase() === "CODE") {
+                pastCodeStatement = true;
+                
+                // For method implementations, just clear currentProcedure
+                // Don't skip - we need to process subsequent tokens normally
+                if (currentProcedure && currentProcedure._isMethodImplementation) {
+                    currentProcedure = null;
+                }
+                // For global procedures, don't clear currentProcedure as they may have routines
+            }
+
+            // Check if current token is DATA execution marker - allow variable processing for routines
+            if (type === TokenType.ExecutionMarker && value.toUpperCase() === "DATA") {
+                pastCodeStatement = false;
             }
 
             if (type === TokenType.Structure) {
@@ -304,8 +322,25 @@ export class ClarionDocumentSymbolProvider {
 
                 const isImplementation = token.executionMarker?.value.toUpperCase() === "CODE";
                 if (isImplementation || token.finishesAt !== undefined) {
-                    // CRITICAL FIX: Pass the correct subType to handleProcedureOrClassToken
-                    // This ensures GlobalProcedure tokens are properly handled
+                    // CRITICAL FIX: Before processing a new method implementation, FORCE pop all methods from stack
+                    // Don't wait for checkAndPopCompletedStructures - do it NOW
+                    if ((token.subType === TokenType.MethodImplementation || subType === TokenType.MethodImplementation)) {
+                        logger.error(`📍 Processing method implementation at line ${line}`);
+                        
+                        // FORCE remove ALL method implementations from the stack
+                        for (let si = parentStack.length - 1; si >= 0; si--) {
+                            if (parentStack[si].symbol._isMethodImplementation) {
+                                logger.error(`  🗑️ Removing method from stack: ${parentStack[si].symbol.name}`);
+                                parentStack.splice(si, 1);
+                            }
+                        }
+                        
+                        // Update currentStructure to remove stale references
+                        currentStructure = HierarchyManager.getCurrentParent(parentStack);
+                        logger.error(`  currentStructure after cleanup: ${currentStructure?.name || 'null'}`);
+                    }
+                    
+                    // Now process the new procedure/method
                     const result = this.handleProcedureOrClassToken(tokens, i, symbols, currentStructure, token.subType || subType);
 
                     // Check if this is a method implementation (e.g., ThisWindow.Init)
@@ -323,7 +358,8 @@ export class ClarionDocumentSymbolProvider {
                         // CRITICAL FIX: Track the last method implementation
                         lastMethodImplementation = result.procedureSymbol;
 
-                        // Add method implementation to parent stack with its finishesAt value if available
+                        // Add method implementation to parent stack with its finishesAt value
+                        // This ensures structures/routines inside are properly nested
                         if (result.procedureSymbol._finishesAt !== undefined) {
                             HierarchyManager.pushToStack(parentStack, result.procedureSymbol, result.procedureSymbol._finishesAt);
                             currentStructure = result.procedureSymbol;
@@ -344,6 +380,12 @@ export class ClarionDocumentSymbolProvider {
                             currentStructure = result.procedureSymbol;
                         }
                     }
+
+                    // Skip tokens that were already processed (parameters on the procedure line)
+                    i = result.lastTokenIndex;
+
+                    // Reset pastCodeStatement flag when entering new procedure/method
+                    pastCodeStatement = false;
 
                     insideDefinitionBlock = true;
                 } else {
@@ -462,12 +504,19 @@ export class ClarionDocumentSymbolProvider {
                     HierarchyManager.pushToStack(parentStack, routineSymbol, token.finishesAt);
                 }
 
+                // Reset pastCodeStatement if this routine has local data (DATA section)
+                // Variables are allowed between DATA and CODE in routines
+                if (token.hasLocalData) {
+                    pastCodeStatement = false;
+                }
+
                 continue;
             }
 
             // Handle variable declarations - check for Type tokens (BYTE, LONG, etc) and TypeAnnotation (STRING(255), CSTRING(100), etc)
             // Also check for FunctionArgumentParameter which the tokenizer uses for parametrized types like CSTRING(1024)
-            if ((type === TokenType.Type || type === TokenType.TypeAnnotation || type === TokenType.ReferenceVariable || type === TokenType.Variable || type === TokenType.FunctionArgumentParameter) && i > 0) {
+            // CRITICAL: Don't process variables after CODE statement
+            if (!pastCodeStatement && (type === TokenType.Type || type === TokenType.TypeAnnotation || type === TokenType.ReferenceVariable || type === TokenType.Variable || type === TokenType.FunctionArgumentParameter) && i > 0) {
                 logger.info(`✅ SymbolProvider: Calling handleVariableToken for token index=${i}, type=${type}, value="${token.value}", line=${token.line}`);
                 this.handleVariableToken(tokens, i, symbols, currentStructure, currentProcedure, lastMethodImplementation);
 
@@ -885,7 +934,7 @@ export class ClarionDocumentSymbolProvider {
         symbols: ClarionDocumentSymbol[],
         currentStructure: ClarionDocumentSymbol | null,
         subType: TokenType | undefined = undefined
-    ): { procedureSymbol: ClarionDocumentSymbol, classImplementation: ClarionDocumentSymbol | null } {
+    ): { procedureSymbol: ClarionDocumentSymbol, classImplementation: ClarionDocumentSymbol | null, lastTokenIndex: number } {
         const token = tokens[index];
         const { line, finishesAt } = token;
         const prevToken = tokens[index - 1];
@@ -897,34 +946,55 @@ export class ClarionDocumentSymbolProvider {
         let classImplementation: ClarionDocumentSymbol | null = null;
 
         // IMPORTANT: For method implementations, we need to handle them differently
-        if (classMatch) {
+        // Use token.subType instead of dot-notation check for consistency with tokenizer
+        if (token.subType === TokenType.MethodImplementation || subType === TokenType.MethodImplementation) {
             // This is a method implementation (e.g., ThisWindow.Init)
-            // First, try to find the class definition in the symbols
-            const classDefinition = this.findClassDefinition(symbols, classMatch);
+            // Verify that classMatch is valid (tokenizer should have ensured procedure name contains a dot)
+            if (!classMatch) {
+                // Safety fallback: if no classMatch but tokenizer says it's a method implementation,
+                // treat it as a global procedure instead
+                container = null;
+                (token as any)._isGlobalProcedure = true;
+            } else {
+                // First, try to find the class definition in the symbols
+                const classDefinition = this.findClassDefinition(symbols, classMatch);
             
-            if (classDefinition) {
-                // If we found the class definition, look for the method declaration
-                const methodsContainer = classDefinition.children?.find(c => c.name === "Methods");
-                
-                if (methodsContainer) {
-                    // Look for the method declaration by name (without parameters)
-                    const methodDeclaration = methodsContainer.children?.find(m => {
-                        // Extract just the method name without parameters
-                        const mName = m.name.split(' ')[0];
-                        return mName === methodName;
-                    });
+                if (classDefinition) {
+                    // If we found the class definition, look for the method declaration
+                    const methodsContainer = classDefinition.children?.find(c => c.name === "Methods");
                     
-                    if (methodDeclaration) {
-                        // We found the method declaration, use it as the container
-                        container = methodDeclaration;
+                    if (methodsContainer) {
+                        // Look for the method declaration by name (without parameters)
+                        const methodDeclaration = methodsContainer.children?.find(m => {
+                            // Extract just the method name without parameters
+                            const mName = m.name.split(' ')[0];
+                            return mName === methodName;
+                        });
                         
-                        // Mark this as a method implementation
-                        (token as any)._isMethodImplementation = true;
-                        
-                        // We don't need to create a class implementation container
-                        classImplementation = null;
+                        if (methodDeclaration) {
+                            // We found the method declaration, use it as the container
+                            container = methodDeclaration;
+                            
+                            // Mark this as a method implementation
+                            (token as any)._isMethodImplementation = true;
+                            
+                            // We don't need to create a class implementation container
+                            classImplementation = null;
+                        } else {
+                            // Method declaration not found, fall back to the old behavior
+                            classImplementation = this.findOrCreateClassImplementation(
+                                symbols, classMatch, tokens, line, finishesAt ?? line
+                            );
+                            
+                            // Use the methods container as the parent
+                            const implMethodsContainer = classImplementation.$clarionMethods || classImplementation;
+                            container = implMethodsContainer;
+                            
+                            // Mark this as a method implementation
+                            (token as any)._isMethodImplementation = true;
+                        }
                     } else {
-                        // Method declaration not found, fall back to the old behavior
+                        // Methods container not found, fall back to the old behavior
                         classImplementation = this.findOrCreateClassImplementation(
                             symbols, classMatch, tokens, line, finishesAt ?? line
                         );
@@ -937,7 +1007,7 @@ export class ClarionDocumentSymbolProvider {
                         (token as any)._isMethodImplementation = true;
                     }
                 } else {
-                    // Methods container not found, fall back to the old behavior
+                    // Class definition not found, fall back to the old behavior
                     classImplementation = this.findOrCreateClassImplementation(
                         symbols, classMatch, tokens, line, finishesAt ?? line
                     );
@@ -949,18 +1019,6 @@ export class ClarionDocumentSymbolProvider {
                     // Mark this as a method implementation
                     (token as any)._isMethodImplementation = true;
                 }
-            } else {
-                // Class definition not found, fall back to the old behavior
-                classImplementation = this.findOrCreateClassImplementation(
-                    symbols, classMatch, tokens, line, finishesAt ?? line
-                );
-                
-                // Use the methods container as the parent
-                const implMethodsContainer = classImplementation.$clarionMethods || classImplementation;
-                container = implMethodsContainer;
-                
-                // Mark this as a method implementation
-                (token as any)._isMethodImplementation = true;
             }
         } else {
             // For regular procedures (not class methods), use the current structure
@@ -1020,7 +1078,7 @@ export class ClarionDocumentSymbolProvider {
         );
 
         // For method implementations, mark the symbol
-        if (classMatch) {
+        if (token.subType === TokenType.MethodImplementation || subType === TokenType.MethodImplementation) {
             procedureSymbol._isMethodImplementation = true;
             
             // If this is a method implementation and we found the declaration,
@@ -1036,7 +1094,7 @@ export class ClarionDocumentSymbolProvider {
         }
 
         // Add the procedure to its container
-        if (classMatch) {
+        if (token.subType === TokenType.MethodImplementation || subType === TokenType.MethodImplementation) {
             // For method implementations, add directly to the container
             container!.children!.push(procedureSymbol);
         } else {
@@ -1052,7 +1110,7 @@ export class ClarionDocumentSymbolProvider {
             procedureSymbol._finishesAt = finishesAt;
         }
 
-        return { procedureSymbol, classImplementation };
+        return { procedureSymbol, classImplementation, lastTokenIndex: j };
     }
     
     /**

@@ -821,7 +821,8 @@
     "scripts": {
         "vscode:prepublish": "npm run compile",
         "compile": "tsc -b",
-        "watch": "tsc -b -w"
+        "watch": "tsc -b -w",
+        "test": "npm run compile && mocha out/server/src/test/**/*.test.js"
     },
     "devDependencies": {
         "@types/mocha": "^8.2.2",

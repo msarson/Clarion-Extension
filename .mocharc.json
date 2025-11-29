@@ -1,0 +1,5 @@
+{
+  "ui": "tdd",
+  "timeout": 5000,
+  "spec": "out/server/src/test/**/*.test.js"
+}
