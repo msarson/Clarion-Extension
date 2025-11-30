@@ -2,7 +2,7 @@ import { DocumentSymbol, Range, SymbolKind } from 'vscode-languageserver-types';
 
 import LoggerManager from '../logger';
 const logger = LoggerManager.getLogger("ClarionDocumentSymbolProvider");
-logger.setLevel("error");
+logger.setLevel("info");
 import { serverInitialized } from '../server.js';
 import { Token, TokenType } from '../ClarionTokenizer.js';
 import { HierarchyManager } from './utils/HierarchyManager';
@@ -1454,10 +1454,16 @@ export class ClarionDocumentSymbolProvider {
         // CRITICAL FIX: Skip if we're inside a PROCEDURE declaration's parameter list
         // Check if there's a PROCEDURE keyword on the same line before this token
         let foundProcedureKeyword = false;
+        logger.info(`   🔍 Searching backwards for PROCEDURE keyword on line ${line}`);
         for (let k = index - 1; k >= 0; k--) {
             const t = tokens[k];
-            if (t.line !== line) break; // Different line, stop searching
+            logger.info(`      - Token ${k}: line=${t.line}, type=${t.type}, value="${t.value}"`);
+            if (t.line !== line) {
+                logger.info(`      - Different line, stopping search`);
+                break; // Different line, stop searching
+            }
             if (t.type === TokenType.Keyword && t.value.toUpperCase() === 'PROCEDURE') {
+                logger.info(`      - ✅ Found PROCEDURE keyword!`);
                 foundProcedureKeyword = true;
                 break;
             }
@@ -1467,6 +1473,7 @@ export class ClarionDocumentSymbolProvider {
             logger.info(`   ⚠️ Skipping - this token is part of a PROCEDURE declaration`);
             return;
         }
+        logger.info(`   ℹ️ No PROCEDURE keyword found, proceeding with variable parsing`);
 
         // Handle Label or StructurePrefix tokens (variable names)
         // TokenType.Label (25), TokenType.StructurePrefix (41), TokenType.Variable (5)
