@@ -37,6 +37,14 @@ All notable changes to the "clarion-extension" extension will be documented in t
   - Distinguishes between statement separators (;) and structure terminators (.)
   - Supports both `END` and `.` as equivalent terminators
 
+#### Structure View Enhancements
+- **Follow Cursor Feature (WIP)**: Structure view can now track cursor position
+  - Toggle command: `clarion.structureView.toggleFollowCursor`
+  - Menu item in structure view title bar
+  - Debounced selection tracking (100ms) for performance
+  - **Known Limitation**: Tree reveal for nested items (functions under MAP/MODULE) not yet working
+  - Checkmark indicator in menu needs fixing
+
 #### Test Suite Enhancements
 - **Created Test Files**: `docs/clarion-tests/test_clarion_syntax.clw` and `test_clarion_syntax_fixed.clw`
   - Tests for dot terminator syntax
