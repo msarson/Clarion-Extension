@@ -57,11 +57,10 @@ import { ClarionSolutionInfo } from 'common/types';
 
 import * as fs from 'fs';
 import { URI } from 'vscode-languageserver';
+import { setServerInitialized, serverInitialized } from './serverState';
+
 const logger = LoggerManager.getLogger("Server");
 logger.setLevel("error");
-
-// Track server initialization state
-export let serverInitialized = false;
 
 // Track if a solution operation is in progress
 export let solutionOperationInProgress = false;
@@ -155,7 +154,7 @@ connection.onInitialized(() => {
         logger.info(`📥 [CRITICAL] Server is now fully initialized`);
         
         // Set the serverInitialized flag
-        serverInitialized = true;
+        setServerInitialized(true);
         
         // Register SolutionManager handlers if it exists
         const solutionManager = SolutionManager.getInstance();

@@ -3,7 +3,7 @@ import { DocumentSymbol, Range, SymbolKind } from 'vscode-languageserver-types';
 import LoggerManager from '../logger';
 const logger = LoggerManager.getLogger("ClarionDocumentSymbolProvider");
 logger.setLevel("info");
-import { serverInitialized } from '../server.js';
+import { serverInitialized } from '../serverState';
 import { Token, TokenType } from '../ClarionTokenizer.js';
 import { HierarchyManager } from './utils/HierarchyManager';
 import { SymbolFinder } from './utils/SymbolFinder';
