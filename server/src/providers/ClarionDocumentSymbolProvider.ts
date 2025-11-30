@@ -934,7 +934,9 @@ export class ClarionDocumentSymbolProvider {
         const token = tokens[index];
         const { line, finishesAt } = token;
         const prevToken = tokens[index - 1];
-        const procedureName = prevToken?.type === TokenType.Label ? prevToken.value : "UnnamedProcedure";
+        
+        // FIXED: Check token.label first (tokenizer stores it there), fallback to prevToken
+        const procedureName = token.label || (prevToken?.type === TokenType.Label ? prevToken.value : "UnnamedProcedure");
         const classMatch = procedureName.includes('.') ? procedureName.split('.')[0] : null;
         const methodName = classMatch ? procedureName.replace(`${classMatch}.`, "") : procedureName;
 
