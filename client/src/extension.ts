@@ -27,7 +27,7 @@ import { ClarionProjectInfo } from 'common/types';
 import { initializeTelemetry, trackEvent, trackPerformance } from './telemetry';
 
 const logger = LoggerManager.getLogger("Extension");
-logger.setLevel("debug");
+logger.setLevel("error"); // PERF: Only log errors to reduce overhead
 let client: LanguageClient | undefined;
 // clientReady is now managed by LanguageClientManager
 let treeView: TreeView<TreeNode> | undefined;

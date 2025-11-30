@@ -3,7 +3,7 @@ import { ClarionDocumentSymbol } from '../ClarionDocumentSymbolProvider';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("SymbolBuilder");
-logger.setLevel("info");
+logger.setLevel("error"); // PERF: Only log errors to reduce overhead
 
 /**
  * Utility class for building DocumentSymbol objects with consistent formatting

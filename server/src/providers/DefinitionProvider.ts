@@ -11,7 +11,7 @@ import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
-logger.setLevel("info");
+logger.setLevel("error"); // PERF: Only log errors to reduce overhead
 
 /**
  * Provides goto definition functionality for Clarion files

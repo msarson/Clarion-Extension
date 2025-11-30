@@ -17,11 +17,11 @@ import {
 import { DocumentSymbol, SymbolKind as LSPSymbolKind } from 'vscode-languageserver-types';
 import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("StructureViewProvider");
-logger.setLevel("debug");
+logger.setLevel("error"); // PERF: Only log errors to reduce overhead
 
 // 📊 PERFORMANCE: Create perf logger that always logs
 const perfLogger = LoggerManager.getLogger("StructureViewPerf");
-perfLogger.setLevel("info"); // Keep perf logs visible
+perfLogger.setLevel("warn"); // Reduce perf logging noise
 
 // No thresholds needed - solution view priority is handled on the server side
 

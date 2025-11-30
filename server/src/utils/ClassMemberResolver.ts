@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ClassMemberResolver");
-logger.setLevel("info");
+logger.setLevel("error"); // PERF: Only log errors to reduce overhead
 
 /**
  * Shared utility for resolving class members (methods, properties)

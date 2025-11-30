@@ -4,7 +4,7 @@ import { ClarionDocumentSymbol } from '../ClarionDocumentSymbolProvider';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("HierarchyManager");
-logger.setLevel("info");
+logger.setLevel("error"); // PERF: Only log errors to reduce overhead
 
 // Re-export ClarionSymbolKind locally since it's not exported from the main file
 const ClarionSymbolKind = {
