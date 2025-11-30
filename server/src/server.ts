@@ -51,6 +51,7 @@ import { SolutionManager } from './solution/solutionManager';
 import { RedirectionFileParserServer } from './solution/redirectionFileParserServer';
 import { DefinitionProvider } from './providers/DefinitionProvider';
 import { HoverProvider } from './providers/HoverProvider';
+import { DiagnosticProvider } from './providers/DiagnosticProvider';
 import path = require('path');
 import { ClarionSolutionInfo } from 'common/types';
 
@@ -226,6 +227,9 @@ documents.onDidOpen((event) => {
                 logger.error(`❌ [CRITICAL] Error checking XML content: ${xmlError instanceof Error ? xmlError.message : String(xmlError)}`);
             }
         }
+        
+        // Validate document for diagnostics
+        validateTextDocument(document);
     } catch (error) {
         logger.error(`❌ [CRITICAL] Error in onDidOpen: ${error instanceof Error ? error.message : String(error)}`);
         logger.error(`❌ [CRITICAL] Error stack: ${error instanceof Error && error.stack ? error.stack : 'No stack available'}`);
@@ -238,6 +242,27 @@ let globalSolution: ClarionSolutionInfo | null = null;
 const tokenCache = TokenCache.getInstance();
 
 export let globalClarionSettings: any = {};
+
+// ✅ Diagnostic validation function
+function validateTextDocument(document: TextDocument): void {
+    try {
+        // Skip non-Clarion files
+        if (!document.uri.toLowerCase().endsWith('.clw') && 
+            !document.uri.toLowerCase().endsWith('.inc') &&
+            !document.uri.toLowerCase().endsWith('.equ')) {
+            return;
+        }
+
+        logger.info(`🔍 Validating document: ${document.uri}`);
+        const diagnostics = DiagnosticProvider.validateDocument(document);
+        logger.info(`🔍 Found ${diagnostics.length} diagnostics for: ${document.uri}`);
+        
+        // Send diagnostics to client
+        connection.sendDiagnostics({ uri: document.uri, diagnostics });
+    } catch (error) {
+        logger.error(`❌ Error validating document: ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
 
 // ✅ Token Cache for Performance
 
@@ -374,6 +399,9 @@ documents.onDidChangeContent(event => {
                 logger.info(`🔍 [CRITICAL] Debounce timeout triggered, refreshing tokens for: ${uri}`);
                 const tokens = getTokens(document); // ⬅️ refreshes the cache
                 logger.info(`🔍 [CRITICAL] Successfully refreshed tokens after edit: ${uri}, got ${tokens.length} tokens`);
+                
+                // Validate document after refresh
+                validateTextDocument(document);
             } catch (tokenError) {
                 logger.error(`❌ [CRITICAL] Error refreshing tokens in debounce: ${tokenError instanceof Error ? tokenError.message : String(tokenError)}`);
             }
