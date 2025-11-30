@@ -298,7 +298,7 @@ Field2 STRING(20)
 MyGroup GROUP
 Field1 LONG
 Field2 STRING(20)
-.
+  .
   CODE
   RETURN`;
             

@@ -204,7 +204,7 @@ export class ClarionTokenizer {
             'star': [TokenType.PointerParameter],
             'digit': [TokenType.Number],
             'operator': [TokenType.Operator],
-            'delimiter': [TokenType.Delimiter, TokenType.DataTypeParameter],
+            'delimiter': [TokenType.Delimiter, TokenType.DataTypeParameter, TokenType.EndStatement],
             'upper': [ // Uppercase letter - identifiers, keywords, structures
                 TokenType.Label, TokenType.Keyword, TokenType.Directive,
                 TokenType.ClarionDocument, TokenType.ExecutionMarker, TokenType.EndStatement,
@@ -427,6 +427,7 @@ export class ClarionTokenizer {
                     if (!pattern) continue;
 
                     if (tokenType === TokenType.Label && column !== 0) continue; // ✅ Labels must be in column 0
+                    if (tokenType === TokenType.EndStatement && column === 0) continue; // ✅ END/. must NOT be at column 0
 
                     // 🔬 PROFILING: Time each pattern test
                     const testStart = performance.now();
@@ -784,13 +785,14 @@ export class ClarionTokenizer {
 const orderedTokenTypes: TokenType[] = [
     TokenType.Directive,TokenType.Comment, TokenType.ClarionDocument, TokenType.ExecutionMarker, TokenType.Label, TokenType.LineContinuation, TokenType.String, TokenType.ReferenceVariable,
     TokenType.Type, TokenType.PointerParameter, TokenType.FieldEquateLabel, TokenType.Property,
-    TokenType.PropertyFunction, TokenType.EndStatement, TokenType.Keyword, TokenType.Structure,
+    TokenType.PropertyFunction, TokenType.Keyword, TokenType.Structure,
     // ✅ Add StructurePrefix and StructureField before other variable types
     TokenType.StructurePrefix, TokenType.StructureField,
     // ✅ Add WindowElement after Structure elements but before other types
     TokenType.WindowElement,
     TokenType.ConditionalContinuation, TokenType.Function,  // ✅ Placed after Structure, before FunctionArgumentParameter
     TokenType.FunctionArgumentParameter, TokenType.TypeAnnotation, TokenType.PictureFormat, TokenType.Number,
+    TokenType.EndStatement,  // ✅ MOVED AFTER Number to avoid matching dots in decimals
     TokenType.Operator, TokenType.Class, TokenType.Attribute, TokenType.Constant, TokenType.Variable,
     TokenType.ImplicitVariable, TokenType.Delimiter, TokenType.Unknown
 ];
@@ -838,7 +840,7 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Comment]: /!.*/i,
     [TokenType.LineContinuation]: /&?\s*\|.*/i,
     [TokenType.String]: /'([^']|'')*'/i,
-    [TokenType.EndStatement]: /^\s*(END|\.)\s*(?:!.*)?$/i,  // ✅ Matches `END` or `.`
+    [TokenType.EndStatement]: /^\s*END\s*(?:!.*)?$|^\s*\.\s*(?:!.*)?$|\.\s*(?:!.*)?$/i,  // ✅ END or dot at end of line
     [TokenType.FunctionArgumentParameter]: /\b[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)/i,  // Captures anything inside ()
     [TokenType.PointerParameter]: /\*\s*\b[A-Za-z_][A-Za-z0-9_]*\b/i,
     [TokenType.FieldEquateLabel]: /\?[A-Za-z_][A-Za-z0-9_]*/i,

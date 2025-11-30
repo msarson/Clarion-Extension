@@ -149,6 +149,33 @@ UtilityProc PROCEDURE()
   - Member implementations/definitions
   - Data structure declarations (GROUP, QUEUE, FILE, etc.)
 
+### Keywords That Must NOT Be at Column 0
+- **MAP, END, and dot (.) terminators must NOT be at column 0**
+- These keywords/terminators must be indented (at least one space)
+- Best practice: Follow the Clarion IDE formatter conventions for indentation
+- Examples:
+  ```clarion
+  MyProc PROCEDURE()
+LocalVar LONG
+    CODE
+    IF x > 0 THEN
+      y = 1
+    .              ! Dot terminator - indented, not at column 0
+    RETURN
+  
+MyData GROUP
+Field1 LONG
+  END            ! END terminator - indented, not at column 0
+  ```
+
+### Column 0 vs Indented Elements Summary
+| Must be at Column 0 | Must be Indented (NOT column 0) |
+|---------------------|----------------------------------|
+| Variable labels | MAP |
+| Procedure names | END |
+| GROUP/QUEUE/FILE labels | Dot (.) terminators |
+| ROUTINE labels | Module-level: PROGRAM, MEMBER (best practice) |
+
 ### CODE Section Rule
 - In PROCEDURE/MEMBER implementations, **all data definitions must appear before the CODE statement**
 - **Procedures and methods never use a DATA keyword** - everything before CODE is considered a data definition
@@ -157,32 +184,6 @@ UtilityProc PROCEDURE()
   ```clarion
   MyProc PROCEDURE()
 ! Everything here is data definition (no DATA keyword needed)
-LocalVar LONG
-TempString STRING(100)
-    CODE
-    ! Executable statements go here
-    LocalVar = 10
-    RETURN
-  ```
-
-## Column Rules and Source Code Structure
-
-### Column 0 (Column One) Rules
-- **All labels must start at column 0** (first column)
-- Labels include:
-  - Variable definitions
-  - Procedure declarations
-  - Procedure implementations
-  - Member implementations/definitions
-  - Data structure declarations (GROUP, QUEUE, FILE, etc.)
-
-### CODE Section Rule
-- In PROCEDURE/MEMBER implementations, **all data definitions must appear before the CODE statement**
-- The CODE keyword marks the beginning of executable statements
-- Example:
-  ```clarion
-  MyProc PROCEDURE()
-! All data definitions must be here, before CODE
 LocalVar LONG
 TempString STRING(100)
     CODE
