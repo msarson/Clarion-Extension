@@ -246,8 +246,7 @@
             },
             {
                 "command": "clarion.structureView.toggleFollowCursor",
-                "title": "Follow Cursor",
-                "checked": "clarion.followCursorEnabled"
+                "title": "Follow Cursor"
             },
             {
                 "command": "clarion.solutionView.filter",
@@ -413,8 +412,7 @@
             "clarion.structureView.menu": [
                 {
                     "command": "clarion.structureView.toggleFollowCursor",
-                    "group": "navigation@1",
-                    "checked": "clarion.followCursorEnabled"
+                    "group": "navigation@1"
                 }
             ]
         },
