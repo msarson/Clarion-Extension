@@ -17,7 +17,7 @@ import {
 import { DocumentSymbol, SymbolKind as LSPSymbolKind } from 'vscode-languageserver-types';
 import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("StructureViewProvider");
-logger.setLevel("error");
+logger.setLevel("debug");
 
 // 📊 PERFORMANCE: Create perf logger that always logs
 const perfLogger = LoggerManager.getLogger("StructureViewPerf");
@@ -123,10 +123,12 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
      */
     toggleFollowCursor(): boolean {
         this.followCursor = !this.followCursor;
-        logger.info(`🔄 Follow cursor ${this.followCursor ? 'enabled' : 'disabled'}`);
+        logger.debug(`🔄 Follow cursor toggled to ${this.followCursor ? 'enabled' : 'disabled'}`);
+        logger.debug(`   Current state: followCursor=${this.followCursor}, activeEditor=${!!this.activeEditor}, treeView=${!!this.treeView}`);
         
         // If we just enabled follow cursor, immediately reveal the current selection
         if (this.followCursor) {
+            logger.debug(`   Revealing active selection after enabling follow cursor`);
             this.revealActiveSelection();
         } else {
             // Clear the current highlighted symbol when disabling
@@ -134,6 +136,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             this._onDidChangeTreeData.fire();
         }
         
+        logger.debug(`   Returning state: ${this.followCursor}`);
         return this.followCursor;
     }
     
@@ -148,31 +151,41 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
      * Finds and reveals the symbol at the current cursor position
      */
     private async revealActiveSelection(): Promise<void> {
+        logger.debug(`🔍 revealActiveSelection called`);
+        logger.debug(`   activeEditor=${!!this.activeEditor}, treeView=${!!this.treeView}, followCursor=${this.followCursor}`);
+        
         if (!this.activeEditor || !this.treeView) {
+            logger.debug(`   Exiting: missing activeEditor or treeView`);
             return;
         }
         
         try {
             // Get the current cursor position
             const position = this.activeEditor.selection.active;
+            logger.debug(`   Current cursor position: line ${position.line}`);
             
             // Get all symbols for the current document
             const symbols = await this.getChildren();
+            logger.debug(`   Got ${symbols?.length || 0} symbols from getChildren()`);
             if (!symbols || symbols.length === 0) {
+                logger.debug(`   Exiting: no symbols`);
                 return;
             }
             
             // Find the symbol that contains the cursor position
             const symbol = this.findSymbolAtPosition(symbols, position.line);
+            logger.debug(`   Found symbol at position: ${symbol ? symbol.name : 'none'}`);
             if (symbol) {
                 // Store the currently highlighted symbol
                 this.currentHighlightedSymbol = symbol;
                 
+                logger.debug(`   Revealing symbol: ${symbol.name} at range [${symbol.range.start.line}, ${symbol.range.end.line}]`);
                 // Reveal the symbol in the tree view
                 await this.treeView.reveal(symbol, { select: true, focus: false });
                 
                 // Force refresh to apply highlighting
                 this._onDidChangeTreeData.fire(symbol);
+                logger.debug(`   Symbol revealed successfully`);
             }
         } catch (error) {
             // This can happen if VS Code hasn't finished building the tree yet or if the symbol structure changed

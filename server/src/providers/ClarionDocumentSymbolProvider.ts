@@ -325,19 +325,15 @@ export class ClarionDocumentSymbolProvider {
                     // CRITICAL FIX: Before processing a new method implementation, FORCE pop all methods from stack
                     // Don't wait for checkAndPopCompletedStructures - do it NOW
                     if ((token.subType === TokenType.MethodImplementation || subType === TokenType.MethodImplementation)) {
-                        logger.error(`📍 Processing method implementation at line ${line}`);
-                        
                         // FORCE remove ALL method implementations from the stack
                         for (let si = parentStack.length - 1; si >= 0; si--) {
                             if (parentStack[si].symbol._isMethodImplementation) {
-                                logger.error(`  🗑️ Removing method from stack: ${parentStack[si].symbol.name}`);
                                 parentStack.splice(si, 1);
                             }
                         }
                         
                         // Update currentStructure to remove stale references
                         currentStructure = HierarchyManager.getCurrentParent(parentStack);
-                        logger.error(`  currentStructure after cleanup: ${currentStructure?.name || 'null'}`);
                     }
                     
                     // Now process the new procedure/method

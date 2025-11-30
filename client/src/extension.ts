@@ -27,7 +27,7 @@ import { ClarionProjectInfo } from 'common/types';
 import { initializeTelemetry, trackEvent, trackPerformance } from './telemetry';
 
 const logger = LoggerManager.getLogger("Extension");
-logger.setLevel("error");
+logger.setLevel("debug");
 let client: LanguageClient | undefined;
 // clientReady is now managed by LanguageClientManager
 let treeView: TreeView<TreeNode> | undefined;
@@ -1624,15 +1624,22 @@ async function createStructureView(context: ExtensionContext) {
         context.subscriptions.push(clearFilterCommand);
         // Register the toggle follow cursor command
         const toggleFollowCursorCommand = commands.registerCommand('clarion.structureView.toggleFollowCursor', async () => {
+            logger.debug(`🎯 toggleFollowCursor command invoked`);
             if (structureViewProvider) {
+                logger.debug(`   structureViewProvider exists, calling toggleFollowCursor()`);
                 const isEnabled = structureViewProvider.toggleFollowCursor();
+                logger.debug(`   toggleFollowCursor() returned: ${isEnabled}`);
+                
                 // Set context variable for the menu checkmark
                 await commands.executeCommand('setContext', 'clarion.followCursorEnabled', isEnabled);
-                logger.info(`Set clarion.followCursorEnabled context to ${isEnabled}`);
+                logger.debug(`   Set clarion.followCursorEnabled context to ${isEnabled}`);
                 
                 // Force refresh the menu by triggering a context change
                 await commands.executeCommand('setContext', 'clarionStructureViewVisible', false);
                 await commands.executeCommand('setContext', 'clarionStructureViewVisible', true);
+                logger.debug(`   Refreshed menu contexts`);
+            } else {
+                logger.debug(`   ERROR: structureViewProvider is undefined!`);
             }
         });
         context.subscriptions.push(toggleFollowCursorCommand);
