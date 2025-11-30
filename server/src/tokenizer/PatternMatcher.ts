@@ -47,6 +47,11 @@ export class PatternMatcher {
             TokenType.Structure,            // Must be before Variable
             TokenType.WindowElement,        // Specific window controls
             
+            // TYPES: Must be before Function to avoid STRING(50) being parsed as function call
+            TokenType.Type,                 // Common, specific type keywords
+            TokenType.DataTypeParameter,    // Must be after Type (captures (255) in STRING(255))
+            TokenType.TypeAnnotation,       // Specific type annotations
+            
             // FUNCTIONS & PROPERTIES: Specific patterns
             TokenType.Function,             // Must be before FunctionArgumentParameter
             TokenType.FunctionArgumentParameter, // Must be before Variable
@@ -57,11 +62,6 @@ export class PatternMatcher {
             TokenType.StructurePrefix,      // Must be before Variable (PREFIX:Field)
             TokenType.StructureField,       // Must be before Variable (Structure.Field)
             TokenType.Class,                // Must be before Variable (Class.Method)
-            
-            // TYPES: Before Variable
-            TokenType.Type,                 // Common, specific type keywords
-            TokenType.DataTypeParameter,    // Must be after Type (captures (255) in STRING(255))
-            TokenType.TypeAnnotation,       // Specific type annotations
             
             // COMPLEX PATTERNS: Before simple ones
             TokenType.PointerParameter,     // *Variable before Variable
@@ -108,17 +108,19 @@ export class PatternMatcher {
                 TokenType.Label, TokenType.Keyword, TokenType.Directive,
                 TokenType.ClarionDocument, TokenType.ExecutionMarker, TokenType.EndStatement,
                 TokenType.ConditionalContinuation, TokenType.Structure, TokenType.WindowElement,
+                TokenType.Type, TokenType.TypeAnnotation, // MUST be before Function to avoid STRING(50) as function
                 TokenType.Function, TokenType.FunctionArgumentParameter, TokenType.PropertyFunction,
                 TokenType.Property, TokenType.StructurePrefix, TokenType.StructureField, TokenType.Class,
-                TokenType.Type, TokenType.TypeAnnotation, TokenType.Attribute, TokenType.Constant,
+                TokenType.Attribute, TokenType.Constant,
                 TokenType.ImplicitVariable, TokenType.Variable, TokenType.Unknown
             ],
             'lower': [ // Lowercase letter - identifiers, keywords (case-insensitive)
                 TokenType.Keyword, TokenType.Directive, TokenType.ClarionDocument,
                 TokenType.ExecutionMarker, TokenType.ConditionalContinuation, TokenType.Structure,
+                TokenType.Type, TokenType.TypeAnnotation, // MUST be before Function
                 TokenType.Function, TokenType.FunctionArgumentParameter, TokenType.PropertyFunction,
                 TokenType.Property, TokenType.StructurePrefix, TokenType.StructureField, TokenType.Class,
-                TokenType.Type, TokenType.TypeAnnotation, TokenType.Attribute, TokenType.Constant,
+                TokenType.Attribute, TokenType.Constant,
                 TokenType.ImplicitVariable, TokenType.Variable, TokenType.Unknown
             ],
             'underscore': [ // Underscore - identifiers only

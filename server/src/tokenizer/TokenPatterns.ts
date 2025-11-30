@@ -57,11 +57,11 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Keyword]: /\b(?:RETURN|THEN|UNTIL|WHILE|EXIT|NEW|PROCEDURE|ROUTINE|PROC|BREAK|KEY)\b/i, // Added KEY to keywords
     [TokenType.PictureFormat]: /(@N[^\s,]*|@[Ee][^\s,]*|@S\d+|@D\d{1,2}[.\-_'`<>]?\d{0,2}B?|@T\d{1,2}[.\-_'`]?[B]?|@[Pp][^Pp\n]+[Pp]B?|@[Kk][^Kk\n]+[Kk]B?)/i,
     [TokenType.ExecutionMarker]: /\b(?:CODE|DATA)\b/i,
-    [TokenType.Type]: /\b(?:BYTE|SHORT|USHORT|LONG|ULONG|REAL|SREAL|DECIMAL|PDECIMAL|STRING|CSTRING|PSTRING|DATE|TIME|ASTRING|ANY|BSTRING|MEMO|NAME|SIGNED|UNSIGNED)\b/i,
+    [TokenType.Type]: /\b(?:BYTE|SHORT|USHORT|LONG|ULONG|REAL|SREAL|DECIMAL|PDECIMAL|STRING|CSTRING|PSTRING|DATE|TIME|ASTRING|ANY|BSTRING|MEMO|NAME|SIGNED|UNSIGNED)(?=\(|\s|$)/i,
     [TokenType.TypeAnnotation]: /:\s*(?:byte|short|ushort|long|ulong|real|sreal|decimal|pdecimal|string|cstring|pstring|date|time)\b/i,
     [TokenType.Directive]: /\b(?:COMPILE|EMBED|SECTION|ENDSECTION)\b/i,
     [TokenType.Structure]: new RegExp(Object.values(STRUCTURE_PATTERNS).map(p => p.source).join('|'), 'i'),
-    [TokenType.WindowElement]: /\b(?:BUTTON|STRING|ENTRY|TEXT|LIST|COMBO|CHECK|RADIO|OPTION|SHEET|TAB|IMAGE|LINE|BOX|ELLIPSE|PANEL|PROGRESS|REGION|PROMPT|SPIN|ITEM|GROUP)\b/i,
+    [TokenType.WindowElement]: /\b(?:BUTTON|ENTRY|TEXT|LIST|COMBO|CHECK|RADIO|OPTION|SHEET|TAB|IMAGE|LINE|BOX|ELLIPSE|PANEL|PROGRESS|REGION|PROMPT|SPIN|ITEM|GROUP)\b|STRING\s*\(@[^)]*\)/i,
     [TokenType.Attribute]: /\b(?:ALONE|AUTO|BINARY|BINDABLE|CENTERED|CREATE|CURSOR|DEFAULT|DLL|DOUBLE|DROP|DRIVER|DUP|EXTERNAL|FILL|FILTER|FIRST|FLAT|HLP|ICON|IMM|INS|MASK|MAX|MDI|MODAL|MSG|NAME|NOBAR|NOCASE|NOFRAME|NOMERGE|NOSHEET|OEM|OVER|OVR|OWNER|PAGE|PASCAL|PRE|PRIMARY|PRIVATE|PROTECTED|RAW|RECLAIM|REQ|RESIZE|RIGHT|SCROLL|STATUS|STATIC|STD|SYSTEM|THREAD|TIMER|TIP|TIMES|TRN|UPR|USE|VBX|VCR|WALLPAPER|REF)\b/i,
     [TokenType.Constant]: /\b(?:TRUE|FALSE|NULL|LEVEL:BENIGN|LEVEL:NOTIFY|LEVEL:FATAL|ICON:Asterisk|ICON:Exclamation|ICON:Hand|ICON:Question|BUTTON:YES|BUTTON:NO|BUTTON:OK|BUTTON:CANCEL|CENTER|LEFT|RIGHT)\b/i,
     [TokenType.Property]: /\b(?:color|width|height|top|left|right|bottom|text|visible|enabled|font|size|style|value|caption)\b/i,
