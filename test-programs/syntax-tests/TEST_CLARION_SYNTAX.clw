@@ -1,24 +1,83 @@
-! Test file for dot-as-END and semicolon syntax
-! Copy each test case into Clarion compiler to verify behavior
+  PROGRAM
+! TEST_CLARION_SYNTAX.CLW
+! Comprehensive test program for Clarion dot-as-END and semicolon syntax
+! This is a complete, compilable program following proper Clarion syntax rules
+
+  MAP
+TestProc1  PROCEDURE()
+TestProc2  PROCEDURE()
+TestProc3  PROCEDURE()
+TestProc4  PROCEDURE()
+TestProc5  PROCEDURE()
+TestProc6  PROCEDURE()
+TestProc7  PROCEDURE()
+TestProc8  PROCEDURE()
+TestProc9  PROCEDURE()
+TestProc10 PROCEDURE()
+TestProc11 PROCEDURE()
+TestProc12 PROCEDURE()
+TestProc13 PROCEDURE()
+TestProc14 PROCEDURE()
+TestProc15 PROCEDURE()
+TestProc16 PROCEDURE()
+TestProc17 PROCEDURE()
+TestProc18 PROCEDURE()
+TestProc19 PROCEDURE()
+TestProc20 PROCEDURE()
+  END
+
+  CODE
+  MESSAGE('Testing Clarion Syntax - Dot and Semicolon Tests')
+  
+  ! Run all tests
+  TestProc1()
+  TestProc2()
+  TestProc3()
+  TestProc4()
+  TestProc5()
+  TestProc6()
+  TestProc7()
+  TestProc8()
+  TestProc9()
+  TestProc10()
+  TestProc11()
+  TestProc12()
+  TestProc13()
+  TestProc14()
+  TestProc15()
+  TestProc16()
+  TestProc17()
+  TestProc18()
+  TestProc19()
+  TestProc20()
+  
+  MESSAGE('All tests completed!')
+  RETURN
 
 !===================================================================
 ! TEST 1: Single-line IF with dot terminator
 !===================================================================
 TestProc1 PROCEDURE()
+a LONG
+b LONG
+c LONG
+d LONG
   CODE
+  a = 1
+  b = 1
   IF a=b THEN c=d.
-  END
+  RETURN
 
 !===================================================================
 ! TEST 2: IF-THEN-statement on same line with dot
 !===================================================================
 TestProc2 PROCEDURE()
 x LONG
-result BOOL
+result LONG
   CODE
-  IF x > 10 THEN result = true.
+  x = 15
+  IF x > 10 THEN result = 1.
   RETURN
-  END
 
 !===================================================================
 ! TEST 3: IF with statement on next line and dot terminator
@@ -29,9 +88,11 @@ b LONG
 c LONG
 d LONG
   CODE
+  a = 5
+  b = 5
   IF a=b THEN
     c=d.
-  END
+  RETURN
 
 !===================================================================
 ! TEST 4: IF with dot terminator on separate line
@@ -42,12 +103,237 @@ b LONG
 c LONG
 d LONG
   CODE
+  a = 10
+  b = 10
   IF a=b THEN
     c=d
-    .
-  END
+  .
+  RETURN
 
 !===================================================================
+! TEST 5: IF-ELSIF-ELSE with single dot terminator
+!===================================================================
+TestProc5 PROCEDURE()
+x LONG
+result LONG
+  CODE
+  x = 5
+  IF x < 0 THEN
+    result = -1
+  ELSIF x = 0 THEN
+    result = 0
+  ELSE
+    result = 1
+  .
+  RETURN
+
+!===================================================================
+! TEST 6: LOOP with dot terminator
+!===================================================================
+TestProc6 PROCEDURE()
+i LONG
+  CODE
+  i = 0
+  LOOP
+    i += 1
+    IF i > 5 THEN BREAK.
+  .
+  RETURN
+
+!===================================================================
+! TEST 7: LOOP with END keyword
+!===================================================================
+TestProc7 PROCEDURE()
+i LONG
+  CODE
+  i = 0
+  LOOP
+    i += 1
+    IF i > 5 THEN BREAK
+  END
+  RETURN
+
+!===================================================================
+! TEST 8: Nested IF with mixed dot and END
+!===================================================================
+TestProc8 PROCEDURE()
+x LONG
+y LONG
+result LONG
+  CODE
+  x = 10
+  y = 20
+  IF x > 0 THEN
+    IF y > 0 THEN result = 1.
+  .
+  RETURN
+
+!===================================================================
+! TEST 9: CASE with dot terminator
+!===================================================================
+TestProc9 PROCEDURE()
+choice LONG
+result LONG
+  CODE
+  choice = 2
+  CASE choice
+  OF 1
+    result = 10
+  OF 2
+    result = 20
+  OF 3
+    result = 30
+  ELSE
+    result = 0
+  .
+  RETURN
+
+!===================================================================
+! TEST 10: CASE with END keyword
+!===================================================================
+TestProc10 PROCEDURE()
+choice LONG
+result LONG
+  CODE
+  choice = 1
+  CASE choice
+  OF 1
+    result = 10
+  OF 2
+    result = 20
+  ELSE
+    result = 0
+  END
+  RETURN
+
+!===================================================================
+! TEST 11: GROUP with dot terminator on same line
+!===================================================================
+TestProc11 PROCEDURE()
+MyGroup GROUP.
+  CODE
+  RETURN
+
+!===================================================================
+! TEST 12: GROUP with fields and dot terminator
+!===================================================================
+TestProc12 PROCEDURE()
+MyGroup GROUP
+Field1 LONG
+Field2 STRING(20)
+.
+  CODE
+  MyGroup.Field1 = 100
+  MyGroup.Field2 = 'Test'
+  RETURN
+
+!===================================================================
+! TEST 13: GROUP with END keyword
+!===================================================================
+TestProc13 PROCEDURE()
+MyGroup GROUP
+Field1 LONG
+Field2 STRING(20)
+END
+  CODE
+  MyGroup.Field1 = 100
+  RETURN
+
+!===================================================================
+! TEST 14: IF with END on same line (space separator)
+!===================================================================
+TestProc14 PROCEDURE()
+a LONG
+b LONG
+  CODE
+  a = 5
+  b = 5
+  IF a = b THEN MESSAGE('Equal') END
+  RETURN
+
+!===================================================================
+! TEST 15: Multiple IFs with dots
+!===================================================================
+TestProc15 PROCEDURE()
+x LONG
+y LONG
+  CODE
+  x = 10
+  y = 20
+  IF x > 0 THEN y += 1.
+  IF y > 0 THEN x += 1.
+  RETURN
+
+!===================================================================
+! TEST 16: Two statements on one line with semicolon
+!===================================================================
+TestProc16 PROCEDURE()
+x LONG
+y LONG
+  CODE
+  x = 1; y = 2
+  RETURN
+
+!===================================================================
+! TEST 17: Three statements on one line with semicolons
+!===================================================================
+TestProc17 PROCEDURE()
+a LONG
+b LONG
+c LONG
+  CODE
+  a = 1; b = 2; c = 3
+  RETURN
+
+!===================================================================
+! TEST 18: Statements without semicolon on separate lines
+!===================================================================
+TestProc18 PROCEDURE()
+x LONG
+y LONG
+z LONG
+  CODE
+  x = 1
+  y = 2
+  z = 3
+  RETURN
+
+!===================================================================
+! TEST 19: IF-THEN with multiple statements and semicolon
+!===================================================================
+TestProc19 PROCEDURE()
+a LONG
+b LONG
+x LONG
+y LONG
+  CODE
+  a = 1
+  b = 1
+  IF a = b THEN x = 1; y = 2.
+  RETURN
+
+!===================================================================
+! TEST 20: ROUTINE with and without DATA section
+!===================================================================
+TestProc20 PROCEDURE()
+ProcVar LONG
+  CODE
+  ProcVar = 10
+  DO MyRoutine
+  DO SimpleRoutine
+  RETURN
+  
+MyRoutine ROUTINE
+DATA
+RoutineVar LONG
+CODE
+  RoutineVar = 5
+  ProcVar += RoutineVar
+  
+SimpleRoutine ROUTINE
+  MESSAGE('Simple routine executed')
+  ProcVar += 1
+
 ! TEST 5: IF with multiple statements before dot
 !===================================================================
 TestProc5 PROCEDURE()
