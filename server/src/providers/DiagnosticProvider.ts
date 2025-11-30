@@ -13,18 +13,27 @@ export class DiagnosticProvider {
     /**
      * Validate a Clarion document and return diagnostics
      * @param document - TextDocument to validate
+     * @param tokens - Pre-tokenized tokens (optional, will tokenize if not provided)
      * @returns Array of Diagnostic objects
      */
-    public static validateDocument(document: TextDocument): Diagnostic[] {
-        const code = document.getText();
-        const tokenizer = new ClarionTokenizer(code);
-        const tokens = tokenizer.tokenize();
+    public static validateDocument(document: TextDocument, tokens?: Token[]): Diagnostic[] {
+        const perfStart = performance.now();
+        
+        // Use provided tokens or tokenize if not provided
+        if (!tokens) {
+            const code = document.getText();
+            const tokenizer = new ClarionTokenizer(code);
+            tokens = tokenizer.tokenize();
+        }
         
         const diagnostics: Diagnostic[] = [];
         
         // Validate structure terminators
         const structureDiagnostics = this.validateStructureTerminators(tokens, document);
         diagnostics.push(...structureDiagnostics);
+        
+        const perfTime = performance.now() - perfStart;
+        console.log(`[DiagnosticProvider] 📊 PERF: Validation complete | time_ms=${perfTime.toFixed(2)}, tokens=${tokens.length}, diagnostics=${diagnostics.length}`);
         
         return diagnostics;
     }

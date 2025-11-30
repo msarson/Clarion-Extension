@@ -253,7 +253,11 @@ function validateTextDocument(document: TextDocument): void {
         }
 
         logger.info(`🔍 Validating document: ${document.uri}`);
-        const diagnostics = DiagnosticProvider.validateDocument(document);
+        
+        // PERFORMANCE: Use cached tokens instead of re-tokenizing
+        const tokens = getTokens(document);
+        const diagnostics = DiagnosticProvider.validateDocument(document, tokens);
+        
         logger.info(`🔍 Found ${diagnostics.length} diagnostics for: ${document.uri}`);
         
         // Send diagnostics to client
@@ -396,10 +400,12 @@ documents.onDidChangeContent(event => {
         debounceTimeout = setTimeout(() => {
             try {
                 logger.info(`🔍 [CRITICAL] Debounce timeout triggered, refreshing tokens for: ${uri}`);
+                
+                // PERFORMANCE: Refresh tokens once, then use for both diagnostics and other operations
                 const tokens = getTokens(document); // ⬅️ refreshes the cache
                 logger.info(`🔍 [CRITICAL] Successfully refreshed tokens after edit: ${uri}, got ${tokens.length} tokens`);
                 
-                // Validate document after refresh
+                // Validate document using cached tokens (no re-tokenization needed)
                 validateTextDocument(document);
             } catch (tokenError) {
                 logger.error(`❌ [CRITICAL] Error refreshing tokens in debounce: ${tokenError instanceof Error ? tokenError.message : String(tokenError)}`);
