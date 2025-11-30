@@ -850,6 +850,79 @@ LOC:Var LONG
   RETURN
 ```
 
+---
+
+## CLASS and INTERFACE Structures
+
+### Purpose
+- CLASS and INTERFACE are structure declarations that group data members and method prototypes
+- Similar to MAP, they contain member/method declarations, NOT implementations
+- Used for object-oriented programming in Clarion
+- Must be terminated with END or dot (.)
+
+### CLASS Structure
+
+**Definition:**
+```clarion
+ClassName        Class(), type, [attributes]
+! Data members
+Field1             Type
+Field2             Type
+! Method prototypes
+Method1            PROCEDURE([parameters])
+Method2            PROCEDURE([parameters]),ReturnType
+                 End
+```
+
+**Key Rules:**
+1. **Termination**: CLASS structures MUST be terminated with `END` or `.`
+2. **Method Declarations**: PROCEDURE tokens inside CLASS are prototypes, NOT implementations
+3. **Scope Boundary**: PROCEDURE/METHOD declarations inside CLASS do NOT start new scope boundaries
+4. **MODULE Attribute**: CLASS can have MODULE attribute: `Class(), Module('file.clw')`
+5. **No CODE**: CLASS structures cannot contain CODE sections - only declarations
+6. **Members Before END**: All members and methods must be declared before the terminating END
+
+### Examples
+
+**Simple CLASS:**
+```clarion
+Person           Class(), type
+Name               STRING(50)
+Age                LONG
+GetName            PROCEDURE(),STRING
+SetAge             PROCEDURE(LONG pAge)
+                 End
+```
+
+**CLASS with MODULE (External Implementation):**
+```clarion
+StringTheory     Class(), type, Module('StringTheory.clw'), Link('StringTheory.clw')
+value              &string,PRIVATE
+streamFileName     &string,PRIVATE
+Append             PROCEDURE(STRING pValue)
+GetValue           PROCEDURE(),STRING
+                 End
+```
+
+**INTERFACE Structure:**
+```clarion
+ILogger          Interface
+LogMessage         PROCEDURE(STRING pMessage)
+LogError           PROCEDURE(STRING pError)
+                 End
+```
+
+### Comparison with MAP
+
+| Feature | MAP | CLASS |
+|---------|-----|-------|
+| Purpose | Procedure prototypes | Object definition with data + methods |
+| Contains | Only PROCEDURE declarations | Data members + PROCEDURE declarations |
+| Implementations | External (in MEMBER files) | Can be external (MODULE) or inline |
+| Termination | Requires END | Requires END or . |
+| MODULE Inside | MODULE needs END | MODULE does NOT need END |
+```
+
 #### MAP with MODULE for External Libraries
 ```clarion
   MAP

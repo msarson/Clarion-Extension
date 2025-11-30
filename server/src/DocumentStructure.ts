@@ -80,6 +80,11 @@ export class DocumentStructure {
                     case "DATA":
                         this.handleExecutionMarker(token);
                         break;
+                    case "WHILE":
+                    case "UNTIL":
+                        // Check if this WHILE/UNTIL terminates a LOOP
+                        this.handleLoopTerminator(token, i);
+                        break;
                 }
             } else if (token.type === TokenType.Structure) {
                 this.handleStructureToken(token);
@@ -501,7 +506,50 @@ export class DocumentStructure {
         }
     }
 
+    private handleLoopTerminator(token: Token, index: number): void {
+        // WHILE or UNTIL can terminate a LOOP if:
+        // 1. It's not at the beginning of the LOOP (LOOP WHILE... or LOOP UNTIL...)
+        // 2. There's a LOOP on the structure stack
+        
+        // Check if there's a LOOP in the structure stack
+        const loopIndex = this.structureStack.findIndex(s => s.value.toUpperCase() === 'LOOP');
+        if (loopIndex === -1) {
+            // No LOOP to terminate - this must be LOOP WHILE/UNTIL (at the start)
+            return;
+        }
+        
+        const loopStructure = this.structureStack[loopIndex];
+        
+        // Check if this WHILE/UNTIL is on the same line as the LOOP
+        // If so, it's the opening condition, not a terminator
+        if (loopStructure.line === token.line) {
+            return;
+        }
+        
+        // This WHILE/UNTIL terminates the LOOP
+        // Pop everything from the stack until we get to (and including) the LOOP
+        while (this.structureStack.length > loopIndex) {
+            const poppedStructure = this.structureStack.pop()!;
+            poppedStructure.finishesAt = token.line;
+            logger.info(`🔚 Closed ${poppedStructure.value} at Line ${token.line} (terminated by ${token.value.toUpperCase()})`);
+        }
+    }
+
     private handleEndStatementForStructure(token: Token): void {
+        // ✅ Check if this END/period is an inline terminator
+        // If there's a structure keyword on the same line, this END/period terminates that structure, not the stack
+        const sameLine = this.tokensByLine.get(token.line) || [];
+        const structureOnSameLine = sameLine.find(t => 
+            t.type === TokenType.Structure && t !== token
+        );
+        
+        if (structureOnSameLine) {
+            // This is an inline terminator - don't pop from stack
+            logger.info(`🔚 Inline terminator '${token.value}' at Line ${token.line} for '${structureOnSameLine.value}' (not popping stack)`);
+            return;
+        }
+        
+        // This END/period terminates a structure from the stack
         const lastStructure = this.structureStack.pop();
         if (lastStructure) {
             lastStructure.finishesAt = token.line;

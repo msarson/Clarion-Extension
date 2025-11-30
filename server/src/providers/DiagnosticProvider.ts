@@ -72,7 +72,7 @@ export class DiagnosticProvider {
             }
             
             // Check if this token closes a structure
-            else if (this.isStructureClose(token, prevToken, nextToken)) {
+            else if (this.isStructureClose(token, prevToken, nextToken, structureStack)) {
                 if (structureStack.length > 0) {
                     // Pop the most recent structure
                     structureStack.pop();
@@ -120,20 +120,24 @@ export class DiagnosticProvider {
     
     /**
      * Check if token closes a structure (END, dot terminator, WHILE, or UNTIL)
+     * @param structureStack - Current stack to check what we're closing
      */
-    private static isStructureClose(token: Token, prevToken: Token | null, nextToken: Token | null): boolean {
+    private static isStructureClose(token: Token, prevToken: Token | null, nextToken: Token | null, structureStack?: StructureStackItem[]): boolean {
         // END keyword
         if (token.type === TokenType.EndStatement) {
             return true;
         }
         
-        // WHILE and UNTIL keywords - these terminate LOOP structures
+        // WHILE and UNTIL keywords - these terminate LOOP structures ONLY
         if (token.type === TokenType.Keyword) {
             const keyword = token.value.toUpperCase();
             if (keyword === 'WHILE' || keyword === 'UNTIL') {
-                // These are loop terminators when at statement level
-                // (not when used in expressions like "DO WHILE condition")
-                return true;
+                // Only closes LOOP if we have a LOOP on the stack
+                if (structureStack && structureStack.length > 0) {
+                    const topStructure = structureStack[structureStack.length - 1];
+                    return topStructure.structureType === 'LOOP';
+                }
+                return false;
             }
         }
         
@@ -171,13 +175,17 @@ export class DiagnosticProvider {
         }
         
         // PROCEDURE and ROUTINE are scope boundaries when they follow a label at column 0
-        // UNLESS we're currently inside a MAP (where they're declarations, not implementations)
+        // UNLESS we're currently inside a MAP or CLASS (where they're declarations, not implementations)
         if (token.type === TokenType.Procedure || token.type === TokenType.Routine) {
             // Check if previous token was a label at column 0
             if (prevToken && prevToken.type === TokenType.Label && prevToken.start === 0) {
-                // Check if we're inside a MAP - if so, this is a declaration, not implementation
-                const insideMap = structureStack.some(item => item.structureType === 'MAP');
-                return !insideMap; // Only a scope boundary if NOT inside MAP
+                // Check if we're inside a MAP or CLASS - if so, this is a declaration, not implementation
+                const insideMapOrClass = structureStack.some(item => 
+                    item.structureType === 'MAP' || 
+                    item.structureType === 'CLASS' || 
+                    item.structureType === 'INTERFACE'
+                );
+                return !insideMapOrClass; // Only a scope boundary if NOT inside MAP/CLASS/INTERFACE
             }
             // Fallback: check if PROCEDURE itself is at column 0 (shouldn't happen but be safe)
             return token.start === 0;

@@ -691,11 +691,60 @@ MODULE('USER32')
   END
 MyLocalProc PROCEDURE()
   END`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            assert.strictEqual(diagnostics.length, 0, 'Complex MAP with MODULE should validate correctly');
+        });
+    });
+
+    suite('CLASS Definitions', () => {
+        
+        test('Should NOT flag CLASS with END terminator', () => {
+            const code = `  PROGRAM
+  MAP
+  END
+MyClass                  Class(),type
+Field1                     LONG
+Method1                    PROCEDURE()
+                         End
+  CODE
+  RETURN`;
             
             const document = createDocument(code);
             const diagnostics = DiagnosticProvider.validateDocument(document);
             
-            assert.strictEqual(diagnostics.length, 0, 'Complex MAP with MODULE should validate correctly');
+            assert.strictEqual(diagnostics.length, 0, 'CLASS with END should validate correctly');
+        });
+
+        test('Should detect CLASS without terminator', () => {
+            const code = `  PROGRAM
+  MAP
+  END
+MyClass                  Class(),type
+Field1                     LONG
+Method1                    PROCEDURE()
+  CODE
+  RETURN`;
+            
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            assert.strictEqual(diagnostics.length, 1, 'Should have 1 diagnostic');
+            assert.ok(diagnostics[0].message.includes('CLASS'), 'Message should mention CLASS');
+        });
+
+        test('Should handle CLASS with MODULE attribute', () => {
+            const code = `StringTheory        Class(), type, Module('StringTheory.clw')
+value                     &string,PRIVATE
+Method1                    PROCEDURE()
+                         End`;
+            
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            assert.strictEqual(diagnostics.length, 0, 'CLASS with MODULE attribute should validate correctly');
         });
     });
 });
