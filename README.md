@@ -244,6 +244,34 @@ Large Clarion files (14k+ lines) now have significantly improved response times.
 For full details, see [CHANGELOG.md](CHANGELOG.md)
 
 ---
+## Upcoming Release (In Development)
+
+### New Features (2025-11-30)
+
+#### Clarion Language Knowledge Base
+- **Comprehensive Documentation**: New knowledge base documenting Clarion syntax rules and conventions
+- **Reference for Development**: Serves as authoritative source for extension features and AI assistance
+
+#### Structure Termination Diagnostics
+- **Real-time Validation**: Extension now validates that IF, LOOP, and CLASS structures are properly terminated
+- **Smart Detection**: Understands inline dot terminators (e.g., `IF x THEN y.`)
+- **Context-Aware**: Knows MODULE termination rules differ between MAP and CLASS contexts
+- **Helpful Messages**: Clear diagnostic messages when structures aren't terminated correctly
+
+#### Enhanced Code Folding
+- **Fixed Dot Terminators**: Folding now correctly handles single-line structures with dot terminators
+- **Prevents Corruption**: Fixed issue where invalid fold ranges would break subsequent folds
+
+#### Structure View Enhancement
+- **Cursor Synchronization**: Structure view now automatically highlights the symbol containing the cursor
+- **Improved Navigation**: Matches behavior of VS Code's built-in Outline view
+
+### Testing
+- **Test-Driven Development**: All new features developed using TDD approach
+- **Compiler Validated**: Test files compile successfully with Clarion compiler
+- **Comprehensive Coverage**: 13 unit tests covering all structure termination scenarios
+
+---
 ## Current Release (v0.5.9)
 ### Enhancements
 - **Improved Method Hover Display**: Method hovers now show up to 15 lines of actual implementation code after the CODE statement

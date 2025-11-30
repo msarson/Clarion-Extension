@@ -3,6 +3,88 @@ All notable changes to the "clarion-extension" extension will be documented in t
 
 ---
 
+## [Unreleased]
+
+### Added - 2025-11-30
+
+#### Clarion Language Knowledge Base
+- **New Documentation**: Created comprehensive `docs/clarion-knowledge-base.md` documenting Clarion language syntax and rules
+  - Column 0 rules: Labels must be at column 0, keywords (MAP, END, PROGRAM, MEMBER) must NOT be at column 0
+  - Structure termination: END vs dot (.) terminators, when each is required
+  - PROGRAM/MEMBER requirements: Must be first statement (line 1), no comments before
+  - Data scope: PROGRAM (global), MEMBER (module), PROCEDURE (local), ROUTINE (routine local)
+  - IF/ELSIF/ELSE: Only IF requires END/., ELSIF and ELSE do not
+  - LOOP termination: Can be terminated with END/., UNTIL, or WHILE
+  - MODULE context: In MAP requires END, in CLASS does not
+  - PROCEDURE/METHOD: No END statement, terminated by next procedure/routine/EOF
+  - ROUTINE: Optional DATA/CODE sections, implicit EXIT at end
+  - THEN keyword: Always followed by statement (same line or next line)
+  - Case insensitivity: Clarion is mostly case-insensitive
+  - ANSI/ASCII only: No Unicode characters allowed in source files
+
+#### Structure Termination Diagnostics
+- **New Feature**: Real-time validation of unterminated structures
+  - Detects IF statements not terminated with END or dot (.)
+  - Detects LOOP statements not terminated with END, dot (.), UNTIL, or WHILE
+  - Detects CLASS statements not terminated with END or dot (.)
+  - Context-aware: Understands inline dot terminators (e.g., `IF x THEN y.`)
+  - Scope-aware: Tracks nested structures correctly
+  - Works with all Clarion file types (.clw, .inc, etc.)
+
+#### Enhanced Tokenizer
+- **Improved Dot Detection**: Tokenizer now properly identifies inline dot terminators
+  - Detects dots that appear on same line as structure keywords
+  - Distinguishes between statement separators (;) and structure terminators (.)
+  - Supports both `END` and `.` as equivalent terminators
+
+#### Test Suite Enhancements
+- **Created Test Files**: `docs/clarion-tests/test_clarion_syntax.clw` and `test_clarion_syntax_fixed.clw`
+  - Tests for dot terminator syntax
+  - Tests for IF/ELSIF/ELSE structures
+  - Tests for LOOP variations (count TIMES, TO/BY, UNTIL, WHILE)
+  - Tests for nested structures
+  - Tests for column 0 rules
+  - All test files compile successfully with Clarion compiler
+- **Unit Tests**: `server/src/test/diagnostics/structureTermination.test.ts`
+  - 13 test cases covering all structure types
+  - Tests for inline dot terminators
+  - Tests for nested structures
+  - Tests for MODULE context-awareness
+  - All tests passing
+
+#### Structure View Improvements
+- **Cursor Sync**: Structure view now highlights current symbol as cursor moves through code
+  - Matches VS Code's built-in Outline view behavior
+  - Automatically selects the symbol containing the cursor
+  - Improves code navigation and awareness
+
+### Fixed - 2025-11-30
+
+#### Folding Provider
+- **Fixed Dot Terminator Folding**: Folding provider now correctly handles inline dot terminators
+  - Single-line structures (e.g., `IF x THEN y.`) no longer create invalid fold ranges
+  - Multi-line structures with dot terminators fold correctly
+  - Prevents fold range corruption that broke subsequent folds
+
+#### Knowledge Base Corrections
+- **Fixed Column 0 Rules**: Corrected documentation about what must/must not be at column 0
+- **Fixed END Rules**: Clarified that only structures require END, procedures/methods do not
+- **Fixed MODULE Rules**: Documented context-dependent MODULE termination rules
+
+### Developer Notes - 2025-11-30
+
+#### Test-Driven Development
+- Followed TDD approach: wrote tests first, then implemented features until tests passed
+- Knowledge base serves as reference for both AI and developers
+- All syntax rules validated against real Clarion compiler
+
+#### Repository Organization
+- Moved test files to `docs/clarion-tests/` directory
+- Knowledge base in `docs/clarion-knowledge-base.md`
+- Feature analysis in `docs/clarion-tests/structure-termination-diagnostics.md`
+
+---
+
 ## [0.7.1] - 2025-11-24
 
 ### Major Enhancements
