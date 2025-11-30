@@ -48,6 +48,14 @@ All notable changes to the "clarion-extension" extension will be documented in t
 - **Unit Tests**: `server/src/test/diagnostics/structureTermination.test.ts`
   - 13 test cases covering all structure types
   - Tests for inline dot terminators
+
+#### Structure View Improvements
+- **Cursor Synchronization**: Added "Follow Cursor" toggle command
+  - Right-click menu option in Structure View
+  - Successfully tracks cursor position and identifies current symbol
+  - **Known Limitation**: Cannot reveal deeply nested items in collapsed tree nodes
+  - Works perfectly for top-level symbols
+  - Feature enabled by default
   - Tests for nested structures
   - Tests for MODULE context-awareness
   - All tests passing
