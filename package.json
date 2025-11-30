@@ -245,8 +245,12 @@
                 "icon": "$(clear-all)"
             },
             {
-                "command": "clarion.structureView.toggleFollowCursor",
-                "title": "Follow Cursor"
+                "command": "clarion.structureView.enableFollowCursor",
+                "title": "Enable Follow Cursor"
+            },
+            {
+                "command": "clarion.structureView.disableFollowCursor",
+                "title": "Disable Follow Cursor"
             },
             {
                 "command": "clarion.solutionView.filter",
@@ -411,8 +415,14 @@
             "view/title/context": [],
             "clarion.structureView.menu": [
                 {
-                    "command": "clarion.structureView.toggleFollowCursor",
-                    "group": "navigation@1"
+                    "command": "clarion.structureView.enableFollowCursor",
+                    "group": "navigation@1",
+                    "when": "!clarion.followCursorEnabled"
+                },
+                {
+                    "command": "clarion.structureView.disableFollowCursor",
+                    "group": "navigation@1",
+                    "when": "clarion.followCursorEnabled"
                 }
             ]
         },

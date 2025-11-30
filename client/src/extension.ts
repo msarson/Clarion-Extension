@@ -1622,27 +1622,27 @@ async function createStructureView(context: ExtensionContext) {
             }
         });
         context.subscriptions.push(clearFilterCommand);
-        // Register the toggle follow cursor command
-        const toggleFollowCursorCommand = commands.registerCommand('clarion.structureView.toggleFollowCursor', async () => {
-            logger.debug(`🎯 toggleFollowCursor command invoked`);
+        // Register the enable follow cursor command
+        const enableFollowCursorCommand = commands.registerCommand('clarion.structureView.enableFollowCursor', async () => {
+            logger.debug(`🎯 enableFollowCursor command invoked`);
             if (structureViewProvider) {
-                logger.debug(`   structureViewProvider exists, calling toggleFollowCursor()`);
-                const isEnabled = structureViewProvider.toggleFollowCursor();
-                logger.debug(`   toggleFollowCursor() returned: ${isEnabled}`);
-                
-                // Set context variable for the menu checkmark
-                await commands.executeCommand('setContext', 'clarion.followCursorEnabled', isEnabled);
-                logger.debug(`   Set clarion.followCursorEnabled context to ${isEnabled}`);
-                
-                // Force refresh the menu by triggering a context change
-                await commands.executeCommand('setContext', 'clarionStructureViewVisible', false);
-                await commands.executeCommand('setContext', 'clarionStructureViewVisible', true);
-                logger.debug(`   Refreshed menu contexts`);
-            } else {
-                logger.debug(`   ERROR: structureViewProvider is undefined!`);
+                structureViewProvider.setFollowCursor(true);
+                await commands.executeCommand('setContext', 'clarion.followCursorEnabled', true);
+                logger.debug(`   Enabled follow cursor`);
             }
         });
-        context.subscriptions.push(toggleFollowCursorCommand);
+        context.subscriptions.push(enableFollowCursorCommand);
+        
+        // Register the disable follow cursor command
+        const disableFollowCursorCommand = commands.registerCommand('clarion.structureView.disableFollowCursor', async () => {
+            logger.debug(`🎯 disableFollowCursor command invoked`);
+            if (structureViewProvider) {
+                structureViewProvider.setFollowCursor(false);
+                await commands.executeCommand('setContext', 'clarion.followCursorEnabled', false);
+                logger.debug(`   Disabled follow cursor`);
+            }
+        });
+        context.subscriptions.push(disableFollowCursorCommand);
         
         // Register the structure view menu command (empty handler for the submenu)
         const structureViewMenuCommand = commands.registerCommand('clarion.structureView.menu', () => {

@@ -123,12 +123,12 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     }
     
     /**
-     * Toggles the "Follow Cursor" functionality
-     * @returns The new state of the follow cursor setting
+     * Sets the "Follow Cursor" functionality to a specific state
+     * @param enabled Whether to enable or disable follow cursor
      */
-    toggleFollowCursor(): boolean {
-        this.followCursor = !this.followCursor;
-        logger.debug(`🔄 Follow cursor toggled to ${this.followCursor ? 'enabled' : 'disabled'}`);
+    setFollowCursor(enabled: boolean): void {
+        this.followCursor = enabled;
+        logger.debug(`🔄 Follow cursor set to ${this.followCursor ? 'enabled' : 'disabled'}`);
         logger.debug(`   Current state: followCursor=${this.followCursor}, activeEditor=${!!this.activeEditor}, treeView=${!!this.treeView}`);
         
         // If we just enabled follow cursor, immediately reveal the current selection
@@ -140,8 +140,14 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             this.currentHighlightedSymbol = undefined;
             this._onDidChangeTreeData.fire();
         }
-        
-        logger.debug(`   Returning state: ${this.followCursor}`);
+    }
+    
+    /**
+     * Toggles the "Follow Cursor" functionality
+     * @returns The new state of the follow cursor setting
+     */
+    toggleFollowCursor(): boolean {
+        this.setFollowCursor(!this.followCursor);
         return this.followCursor;
     }
     
