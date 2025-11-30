@@ -840,7 +840,7 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Comment]: /!.*/i,
     [TokenType.LineContinuation]: /&?\s*\|.*/i,
     [TokenType.String]: /'([^']|'')*'/i,
-    [TokenType.EndStatement]: /^\s*END\s*(?:!.*)?$|^\s*\.\s*(?:!.*)?$|\.\s*(?:!.*)?$/i,  // ✅ END or dot at end of line
+    [TokenType.EndStatement]: /^\s*(END)\b|^\s*(\.)(?=\s|!|$)|(\.)(?=\s|!|$)/i,  // END keyword or dot terminator (not capturing trailing content)
     [TokenType.FunctionArgumentParameter]: /\b[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)/i,  // Captures anything inside ()
     [TokenType.PointerParameter]: /\*\s*\b[A-Za-z_][A-Za-z0-9_]*\b/i,
     [TokenType.FieldEquateLabel]: /\?[A-Za-z_][A-Za-z0-9_]*/i,
@@ -881,7 +881,7 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.DataTypeParameter]: /\(\d+\)/i,  // ✅ Matches (255), (1024), etc. in STRING(255), CSTRING(1024)
     [TokenType.Type]: /\b(?:ANY|ASTRING|BFLOAT4|BFLOAT8|BLOB|MEMO|BOOL|BSTRING|BYTE|CSTRING|DATE|DECIMAL|DOUBLE|EQUATE|FLOAT4|LONG|LIKE|PDECIMAL|PSTRING|REAL|SHORT|SIGNED|SREAL|STRING|TIME|ULONG|UNSIGNED|USHORT|VARIANT)\b/i,
     [TokenType.ImplicitVariable]: /\b[A-Za-z][A-Za-z0-9_]+(?:\$|#|")\b/i,
-    [TokenType.Delimiter]: /[,():]/i,  // ❌ Remove "." from here
+    [TokenType.Delimiter]: /[,():\[\]]/i,  // Delimiters including square brackets for array indexing
     [TokenType.ReferenceVariable]: /&[A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*(?::\d+)?)?/i,
     [TokenType.Unknown]: /\S+/i,
     

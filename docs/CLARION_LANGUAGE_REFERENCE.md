@@ -1,6 +1,6 @@
 # Clarion Language Reference
 
-## Character Encoding
+## Character Encoding and Case Sensitivity
 
 ### ANSI/ASCII Only
 - **Clarion source files MUST use ANSI/ASCII characters only**
@@ -12,6 +12,13 @@
   - Comments
   - String constants
   - All program text
+
+### Case Sensitivity
+- **Clarion is case-insensitive** for keywords, labels, and identifiers
+- `IF`, `if`, and `If` are all equivalent
+- Variable names, procedure names, labels are case-insensitive
+- `MyVariable`, `myvariable`, and `MYVARIABLE` refer to the same variable
+- String literals ARE case-sensitive: `'Hello'` ≠ `'hello'`
 
 ## Source File Structure
 
@@ -468,6 +475,14 @@ END
 - Only the `IF` statement requires `END` or `.` to close the entire structure
 - `ELSIF` and `ELSE` do NOT require their own `END` or `.`
 - The single `END` or `.` closes the entire IF/ELSIF/ELSE structure
+- **THEN keyword**: Optional keyword after the condition
+  - Provides syntactic clarity but does NOT affect structure
+  - A statement MUST follow THEN (can be on same line or next line)
+  - Common patterns:
+    - `IF a = 1 THEN RETURN.` - statement on same line with dot terminator
+    - `IF a = 1 THEN b = 2.` - inline assignment with dot terminator
+    - `IF a = 1 THEN b = 2 END` - inline with END (space separates)
+    - `IF a = 1 THEN` followed by statements on next lines
 
 ```clarion
 IF condition
@@ -479,13 +494,14 @@ ELSE
 END
 
 ! Or with dot terminator
-IF condition
-  [statements]
-ELSIF condition
-  [statements]
-ELSE
-  [statements]
+IF condition THEN [statement]
+  [more statements]
 .
+
+! Inline forms
+IF a = 1 THEN RETURN.
+IF x > 10 THEN y = 5.
+IF valid THEN process() END
 ```
 
 #### CASE
