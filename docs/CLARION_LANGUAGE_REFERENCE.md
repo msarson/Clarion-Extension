@@ -418,12 +418,24 @@ Field2 STRING(20)
   
 ### PROCEDURE Syntax
 ```clarion
-ProcedureName PROCEDURE([parameters])
+ProcedureName PROCEDURE([parameters])[,return-type]
 [local data declarations]
   CODE
   [statements]
-! Next procedure or EOF implicitly ends this procedure
+  [ROUTINE definitions]
+! Next procedure or ROUTINE or EOF implicitly ends this procedure
 ```
+
+**IMPORTANT:**
+- **PROCEDURE implementations do NOT have END statements**
+- **A PROCEDURE ends when:**
+  - Another PROCEDURE implementation starts
+  - A ROUTINE implementation starts  
+  - End of file (EOF) is reached
+- **RETURN statement:**
+  - Only REQUIRED if PROCEDURE has a return type (e.g., `,LONG`, `,STRING`)
+  - If no return type specified, RETURN is optional (implicit return at end)
+  - If return type specified, RETURN must provide a value
 
 ### Example
 ```clarion

@@ -80,7 +80,7 @@ export class DiagnosticProvider {
             }
             
             // Check if we hit a scope boundary that should close structures
-            else if (this.isScopeBoundary(token)) {
+            else if (this.isScopeBoundary(token, prevToken, structureStack)) {
                 // Check if there are unclosed structures
                 while (structureStack.length > 0) {
                     const unclosed = structureStack.pop()!;
@@ -153,17 +153,23 @@ export class DiagnosticProvider {
      * Check if token is a scope boundary (PROCEDURE, ROUTINE, CODE, etc.)
      * RETURN is NOT a scope boundary - it can appear inside structures
      */
-    private static isScopeBoundary(token: Token): boolean {
+    private static isScopeBoundary(token: Token, prevToken: Token | null, structureStack: StructureStackItem[]): boolean {
         if (token.type === TokenType.Keyword) {
             const keyword = token.value.toUpperCase();
             // Only CODE is a scope boundary, not RETURN
             return keyword === 'CODE';
         }
         
-        // PROCEDURE and ROUTINE are only scope boundaries when they're at column 0 (labels/implementations)
-        // PROCEDURE declarations inside MAP/MODULE are NOT scope boundaries
+        // PROCEDURE and ROUTINE are scope boundaries when they follow a label at column 0
+        // UNLESS we're currently inside a MAP (where they're declarations, not implementations)
         if (token.type === TokenType.Procedure || token.type === TokenType.Routine) {
-            // Check if this is at column 0 (implementation) vs indented (declaration)
+            // Check if previous token was a label at column 0
+            if (prevToken && prevToken.type === TokenType.Label && prevToken.start === 0) {
+                // Check if we're inside a MAP - if so, this is a declaration, not implementation
+                const insideMap = structureStack.some(item => item.structureType === 'MAP');
+                return !insideMap; // Only a scope boundary if NOT inside MAP
+            }
+            // Fallback: check if PROCEDURE itself is at column 0 (shouldn't happen but be safe)
             return token.start === 0;
         }
         
