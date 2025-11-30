@@ -1451,6 +1451,23 @@ export class ClarionDocumentSymbolProvider {
         logger.info(`🔍 handleVariableToken called: index=${index}, token=${token.value}, type=${token.type}, line=${line}`);
         logger.info(`   prevToken: ${prevToken ? `type=${prevToken.type}, value="${prevToken.value}"` : 'null'}`);
 
+        // CRITICAL FIX: Skip if we're inside a PROCEDURE declaration's parameter list
+        // Check if there's a PROCEDURE keyword on the same line before this token
+        let foundProcedureKeyword = false;
+        for (let k = index - 1; k >= 0; k--) {
+            const t = tokens[k];
+            if (t.line !== line) break; // Different line, stop searching
+            if (t.type === TokenType.Keyword && t.value.toUpperCase() === 'PROCEDURE') {
+                foundProcedureKeyword = true;
+                break;
+            }
+        }
+        
+        if (foundProcedureKeyword) {
+            logger.info(`   ⚠️ Skipping - this token is part of a PROCEDURE declaration`);
+            return;
+        }
+
         // Handle Label or StructurePrefix tokens (variable names)
         // TokenType.Label (25), TokenType.StructurePrefix (41), TokenType.Variable (5)
         if (prevToken && (prevToken.type === TokenType.Label || 
