@@ -1587,6 +1587,10 @@ async function createStructureView(context: ExtensionContext) {
         // 🔥 Inject the TreeView back into the provider!
         structureViewProvider.setTreeView(structureView);
 
+        // Initialize the follow cursor context
+        await commands.executeCommand('setContext', 'clarion.followCursorEnabled', structureViewProvider.isFollowCursorEnabled());
+        logger.info(`Initialized clarion.followCursorEnabled context to ${structureViewProvider.isFollowCursorEnabled()}`);
+
         // Register the expand all command
         context.subscriptions.push(
             commands.registerCommand('clarion.structureView.expandAll', async () => {

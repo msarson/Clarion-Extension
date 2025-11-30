@@ -53,16 +53,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     constructor(treeView?: TreeView<DocumentSymbol>) {
         this.treeView = treeView;
         
-        // Initialize the follow cursor context - make sure to use await in an async IIFE
-        (async () => {
-            try {
-                await commands.executeCommand('setContext', 'clarion.followCursorEnabled', this.followCursor);
-                logger.info(`Initialized clarion.followCursorEnabled context to ${this.followCursor}`);
-            } catch (error) {
-                logger.error(`Failed to set context: ${error}`);
-            }
-        })();
-
+        // Note: The follow cursor context is initialized in extension.ts after tree view creation
+        
         // Listen for active editor changes
         window.onDidChangeActiveTextEditor(editor => {
             perfLogger.info(`📊 PERF: Active editor changed to: ${editor?.document.fileName || 'none'}`);
