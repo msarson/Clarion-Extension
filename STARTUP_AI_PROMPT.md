@@ -219,7 +219,8 @@ When starting work:
 1. Acknowledge this prompt
 2. Check current branch: `git branch --show-current`
 3. Check for uncommitted changes: `git status`
-4. Ask user for task/direction
+4. **If user says "read TODO"**: Read and review `TODO.md` file for context
+5. Ask user for task/direction
 
 When completing work:
 1. Summarize changes made
