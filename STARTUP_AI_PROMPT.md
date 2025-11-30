@@ -10,19 +10,24 @@ You are an AI assistant working on the Clarion-Extension VS Code extension. This
 
 ## Critical Knowledge Base
 
-**ALWAYS refer to:** `docs/CLARION_LANGUAGE_REFERENCE.md`
+**ALWAYS refer to these files:**
 
-This is the authoritative knowledge base for Clarion language syntax rules. It contains:
-- Character encoding (ANSI/ASCII only - NO Unicode)
-- Source file structure (PROGRAM/MEMBER requirements)
-- Column 0 rules (labels at column 0, keywords indented)
-- Structure terminators (dot vs END)
-- Procedure syntax (no END, no DATA keyword)
-- ROUTINE syntax (with/without DATA section)
-- IF/ELSIF/ELSE rules (single terminator)
-- Semicolon usage
-- Data scopes (Global, Module, Local, Routine Local)
-- MAP structures
+1. **`docs/clarion-knowledge-base.md`** - Clarion language syntax rules
+   - Character encoding (ANSI/ASCII only - NO Unicode)
+   - Source file structure (PROGRAM/MEMBER requirements)
+   - Column 0 rules (labels at column 0, keywords indented)
+   - Structure terminators (dot vs END)
+   - Procedure syntax (no END, no DATA keyword)
+   - ROUTINE syntax (with/without DATA section)
+   - IF/ELSIF/ELSE rules (single terminator)
+   - Semicolon usage
+   - Data scopes (Global, Module, Local, Routine Local)
+   - MAP structures
+
+2. **`TODO.md`** - Outstanding tasks, bugs, and improvements
+   - Check this when user mentions "TODO" or asks about pending work
+   - Update as tasks are completed or new issues discovered
+   - Organized by priority and category
 
 **Before making any changes to Clarion-related code or documentation, consult the knowledge base.**
 
@@ -34,13 +39,13 @@ Clarion-Extension/
 ├── server/               # Language server
 ├── common/               # Shared code
 ├── docs/                 # All documentation
-│   ├── CLARION_LANGUAGE_REFERENCE.md  ★ KNOWLEDGE BASE
-│   ├── TEST_RESULTS.md
+│   ├── clarion-knowledge-base.md  ★ KNOWLEDGE BASE
+│   ├── clarion-tests/             # Clarion test files
+│   ├── STRUCTURE_TERMINATION_DIAGNOSTICS.md
 │   └── [other docs]
-├── test-programs/        # Clarion test files
-│   └── syntax-tests/     # Comprehensive syntax tests
 ├── syntaxes/             # TextMate grammar
 ├── snippets/             # Code snippets
+├── TODO.md               ★ TASK TRACKER
 └── package.json          # Extension manifest
 ```
 
