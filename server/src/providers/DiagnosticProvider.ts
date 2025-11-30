@@ -41,6 +41,8 @@ export class DiagnosticProvider {
         
         for (let i = 0; i < tokens.length; i++) {
             const token = tokens[i];
+            const prevToken = i > 0 ? tokens[i - 1] : null;
+            const nextToken = i < tokens.length - 1 ? tokens[i + 1] : null;
             
             // Check if this token opens a structure that needs termination
             if (this.isStructureOpen(token)) {
@@ -56,7 +58,7 @@ export class DiagnosticProvider {
             }
             
             // Check if this token closes a structure
-            else if (this.isStructureClose(token)) {
+            else if (this.isStructureClose(token, prevToken, nextToken)) {
                 if (structureStack.length > 0) {
                     // Pop the most recent structure
                     structureStack.pop();
@@ -99,7 +101,7 @@ export class DiagnosticProvider {
     /**
      * Check if token closes a structure (END or dot terminator)
      */
-    private static isStructureClose(token: Token): boolean {
+    private static isStructureClose(token: Token, prevToken: Token | null, nextToken: Token | null): boolean {
         // END keyword
         if (token.type === TokenType.EndStatement) {
             return true;
@@ -108,8 +110,19 @@ export class DiagnosticProvider {
         // Dot terminator - check if it's a structure terminator
         // (not a decimal point or member access)
         if (token.type === TokenType.Delimiter && token.value === '.') {
-            // Simple heuristic: if dot is on its own line or after a statement, it's likely a terminator
-            // More sophisticated logic could be added here
+            // If there's a previous token and it's a number, this is likely a decimal point
+            if (prevToken && prevToken.type === TokenType.Number) {
+                return false;
+            }
+            
+            // If next token exists and is on same line, probably not a terminator
+            // (member access or other use)
+            if (nextToken && nextToken.line === token.line && 
+                (nextToken.type === TokenType.Variable || nextToken.type === TokenType.Label)) {
+                return false;
+            }
+            
+            // Otherwise, treat as structure terminator
             return true;
         }
         
