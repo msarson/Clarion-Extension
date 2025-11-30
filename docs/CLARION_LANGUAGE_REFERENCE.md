@@ -20,6 +20,18 @@
 - `MyVariable`, `myvariable`, and `MYVARIABLE` refer to the same variable
 - String literals ARE case-sensitive: `'Hello'` ≠ `'hello'`
 
+### Array Indexing and String Slicing
+- **Square brackets `[]`** are used for array/string indexing and slicing
+- **Syntax**: `Variable[index]` or `Variable[start : end]`
+- Arrays are 1-based (first element is index 1)
+- Examples:
+  ```clarion
+  MyArray[5]              ! Access element 5
+  MyString[1 : 10]        ! Substring from position 1 to 10
+  MyQueue[Index].Field    ! Access field in queue element
+  MyArray[i + 1]          ! Expression as index
+  ```
+
 ## Source File Structure
 
 ### Required First Statement
@@ -461,8 +473,35 @@ AnotherProc PROCEDURE()
 
 ## Structures That Require END
 
+### Dot (.) as Structure Terminator
+- The dot `.` is an alternative to the `END` keyword for closing structures
+- **The dot terminates ONLY the immediately enclosing structure**
+- Can appear inline with the last statement: `IF a = 1 THEN b = 2.`
+- Or on its own line (must be indented, NOT at column 0)
+- **Only the dot character itself is the terminator** - trailing whitespace and comments are separate
+- Works for any structure that accepts END: IF, LOOP, GROUP, etc.
+
+Examples:
+```clarion
+! Inline dot terminator
+IF x > 10 THEN y = 5.
+
+! Dot on its own line
+IF a = 1
+  b = 2
+  c = 3
+.
+
+! Nested structures with mixed END and dot
+IF condition1
+  LOOP
+    IF condition2 THEN BREAK.
+  END
+.
+```
+
 ### Control Structures
-The following structures **require** an `END` statement to close them:
+The following structures **require** an `END` statement (or `.` terminator) to close them:
 
 #### LOOP
 ```clarion
