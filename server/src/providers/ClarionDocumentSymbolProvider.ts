@@ -453,8 +453,8 @@ export class ClarionDocumentSymbolProvider {
                 }
 
                 // CRITICAL FIX: Determine the correct parent for this ROUTINE
-                // First, check if we're inside a procedure
-                let routineParent: ClarionDocumentSymbol | null = currentProcedure;
+                // Get the current parent from the stack (don't rely on currentProcedure which might be stale)
+                let routineParent: ClarionDocumentSymbol | null = HierarchyManager.getCurrentParent(parentStack);
 
                 // If we're not inside a procedure, check if we're inside a method implementation
                 if (!routineParent) {

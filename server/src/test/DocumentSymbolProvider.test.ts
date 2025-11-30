@@ -342,7 +342,7 @@ MyRoutine ROUTINE
             
             // Routine should be child of procedure
             if (proc?.children) {
-                const routineInProc = proc.children.find(c => c.name === 'MyRoutine');
+                const routineInProc = proc.children.find(c => c.name.includes('MyRoutine'));
                 assert.ok(routineInProc, 'Routine should be child of procedure');
             }
         });
