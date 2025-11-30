@@ -47,7 +47,21 @@ export class DiagnosticProvider {
             // Check if this token opens a structure that needs termination
             if (this.isStructureOpen(token)) {
                 const structureType = this.getStructureType(token);
-                if (this.requiresTerminator(structureType)) {
+                
+                // Special handling for MODULE - depends on parent context
+                if (structureType === 'MODULE') {
+                    const parentContext = this.getParentContext(structureStack);
+                    const needsTerminator = this.moduleNeedsTerminator(parentContext);
+                    
+                    if (needsTerminator) {
+                        structureStack.push({
+                            token,
+                            structureType,
+                            line: token.line,
+                            column: token.start
+                        });
+                    }
+                } else if (this.requiresTerminator(structureType)) {
                     structureStack.push({
                         token,
                         structureType,
@@ -95,6 +109,12 @@ export class DiagnosticProvider {
             return ['IF', 'LOOP', 'CASE', 'GROUP', 'QUEUE', 'RECORD', 'FILE', 
                     'CLASS', 'INTERFACE', 'MAP', 'MODULE', 'BEGIN', 'EXECUTE'].includes(structType);
         }
+        
+        // MODULE is sometimes tokenized as Label instead of Structure
+        if (token.type === TokenType.Label && token.value.toUpperCase() === 'MODULE') {
+            return true;
+        }
+        
         return false;
     }
     
@@ -140,8 +160,11 @@ export class DiagnosticProvider {
             return keyword === 'CODE';
         }
         
+        // PROCEDURE and ROUTINE are only scope boundaries when they're at column 0 (labels/implementations)
+        // PROCEDURE declarations inside MAP/MODULE are NOT scope boundaries
         if (token.type === TokenType.Procedure || token.type === TokenType.Routine) {
-            return true;
+            // Check if this is at column 0 (implementation) vs indented (declaration)
+            return token.start === 0;
         }
         
         return false;
@@ -154,6 +177,12 @@ export class DiagnosticProvider {
         if (token.type === TokenType.Structure) {
             return token.value.toUpperCase();
         }
+        
+        // MODULE is sometimes tokenized as Label
+        if (token.type === TokenType.Label && token.value.toUpperCase() === 'MODULE') {
+            return 'MODULE';
+        }
+        
         return '';
     }
     
@@ -162,13 +191,48 @@ export class DiagnosticProvider {
      */
     private static requiresTerminator(structureType: string): boolean {
         // Structures that require END or dot terminator
+        // Note: MODULE is handled separately based on context
         const requiresTermination = [
             'IF', 'LOOP', 'CASE', 'EXECUTE', 'BEGIN',
             'GROUP', 'QUEUE', 'RECORD', 'FILE',
-            'CLASS', 'INTERFACE', 'MAP', 'MODULE'
+            'CLASS', 'INTERFACE', 'MAP'
         ];
         
         return requiresTermination.includes(structureType);
+    }
+    
+    /**
+     * Get the parent structure context from the stack
+     */
+    private static getParentContext(stack: StructureStackItem[]): string | null {
+        if (stack.length === 0) {
+            return null;
+        }
+        // Return the most recent structure type on the stack
+        return stack[stack.length - 1].structureType;
+    }
+    
+    /**
+     * Check if MODULE needs a terminator based on parent context
+     * MODULE requires END inside MAP, but NOT inside CLASS
+     */
+    private static moduleNeedsTerminator(parentContext: string | null): boolean {
+        if (parentContext === null) {
+            return false; // MODULE at top level doesn't need terminator
+        }
+        
+        // MODULE inside MAP requires END
+        if (parentContext === 'MAP') {
+            return true;
+        }
+        
+        // MODULE inside CLASS does NOT require END
+        if (parentContext === 'CLASS' || parentContext === 'INTERFACE') {
+            return false;
+        }
+        
+        // Default: no terminator needed
+        return false;
     }
     
     /**

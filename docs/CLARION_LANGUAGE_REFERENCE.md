@@ -700,13 +700,23 @@ LocalHelper PROCEDURE(STRING pData)
 ### MODULE Structure Within MAP
 - MODULE declares an external source module that contains procedure definitions
 - Used to reference procedures from external libraries or separate compilation units
+- **MODULE termination rules**:
+  - **Inside MAP**: MODULE must be terminated with `END`
+  - **Inside CLASS**: MODULE does NOT require a terminator
 - Syntax:
   ```clarion
   MAP
 MODULE('library_name')
   ExternalProc PROCEDURE([parameters])
-  END
-  END
+  END              ! MODULE END required inside MAP
+  END              ! MAP END
+  ```
+  ```clarion
+  MyClass CLASS
+MODULE('library_name')
+  ExternalProc PROCEDURE([parameters])
+  ! No END for MODULE inside CLASS
+  END              ! CLASS END only
   ```
 
 ### Automatic Includes

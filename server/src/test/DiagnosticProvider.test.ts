@@ -556,4 +556,78 @@ str StringTheory
         // are not recognized as separate END tokens. Fix tokenizer first.
         // test('Should NOT flag complex nested IF/ELSE structure', () => { ... });
     });
+
+    suite('MODULE Termination Rules', () => {
+        
+        test('Should detect unterminated MODULE inside MAP', () => {
+            const code = `TestProc PROCEDURE()
+  MAP
+MODULE('KERNEL32')
+  GetTickCount PROCEDURE(),ULONG
+  ! Missing END for MODULE (and MAP)`;
+            
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            // With no ENDs, MODULE will be on stack when we hit EOF
+            assert.ok(diagnostics.length >= 1, 'Should have at least 1 diagnostic');
+            const hasModuleDiag = diagnostics.some(d => d.message.includes('MODULE'));
+            assert.ok(hasModuleDiag, 'Should report unterminated MODULE');
+        });
+
+        test('Should NOT flag MODULE with END inside MAP', () => {
+            const code = `TestProc PROCEDURE()
+  MAP
+MODULE('KERNEL32')
+  GetTickCount PROCEDURE(),ULONG
+  END
+  END`;
+            
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            assert.strictEqual(diagnostics.length, 0, 'MODULE with END inside MAP is valid');
+        });
+
+        test('Should NOT flag MODULE without END inside CLASS', () => {
+            const code = `MyClass CLASS
+MODULE('KERNEL32')
+  GetTickCount PROCEDURE(),ULONG
+  END`;
+            
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            assert.strictEqual(diagnostics.length, 0, 'MODULE without END inside CLASS is valid');
+        });
+
+        test('Should NOT flag MODULE with END inside CLASS', () => {
+            const code = `MyClass CLASS
+MODULE('KERNEL32')
+  GetTickCount PROCEDURE(),ULONG
+  END
+  END`;
+            
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            assert.strictEqual(diagnostics.length, 0, 'MODULE with END inside CLASS is also valid');
+        });
+
+        test('Should handle nested MAP with MODULE', () => {
+            const code = `TestProc PROCEDURE()
+  MAP
+INCLUDE('prototypes.inc')
+MODULE('USER32')
+  MessageBoxA PROCEDURE(),LONG
+  END
+MyLocalProc PROCEDURE()
+  END`;
+            
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            assert.strictEqual(diagnostics.length, 0, 'Complex MAP with MODULE should validate correctly');
+        });
+    });
 });
