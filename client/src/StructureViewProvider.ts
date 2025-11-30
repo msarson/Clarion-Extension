@@ -49,6 +49,9 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     private _filterDebounceTimeout: NodeJS.Timeout | null = null;
     private _filteredNodesCache: Map<string, DocumentSymbol[]> = new Map();
     private _debounceDelay: number = 300; // 300ms debounce delay
+    
+    // Parent tracking for tree navigation
+    private parentMap: Map<string, DocumentSymbol | null> = new Map();
 
     constructor(treeView?: TreeView<DocumentSymbol>) {
         this.treeView = treeView;
@@ -116,6 +119,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         this._filteredNodesCache.clear();
         // Clear the visibility map
         this.visibilityMap.clear();
+        // Clear the parent map
+        this.parentMap.clear();
         this._onDidChangeTreeData.fire();
         
         const perfTime = performance.now() - perfStart;
@@ -405,6 +410,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 for (const child of element.children) {
                     const childKey = this.getElementKey(child);
                     this.elementMap.set(childKey, child);
+                    this.parentMap.set(childKey, element); // Track parent relationship
                 }
             }
             
@@ -456,12 +462,13 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             
             this.elementMap.clear();
 
-            const trackSymbols = (symbolList: DocumentSymbol[]) => {
+            const trackSymbols = (symbolList: DocumentSymbol[], parent: DocumentSymbol | null = null) => {
                 for (const symbol of symbolList) {
                     const key = this.getElementKey(symbol);
                     this.elementMap.set(key, symbol);
+                    this.parentMap.set(key, parent);
                     if (symbol.children?.length) {
-                        trackSymbols(symbol.children);
+                        trackSymbols(symbol.children, symbol);
                     }
                 }
             };
@@ -709,7 +716,10 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
      * @returns The parent element, or null if the element is a root element
      */
     getParent(element: DocumentSymbol): Promise<DocumentSymbol | null> {
-        return Promise.resolve(null); // Root elements have no parent
+        const key = this.getElementKey(element);
+        const parent = this.parentMap.get(key) || null;
+        logger.debug(`getParent called for ${element.name}, returning: ${parent ? parent.name : 'null'}`);
+        return Promise.resolve(parent);
     }
     // Helper method to filter nodes based on text
     private filterNodes(nodes: DocumentSymbol[], filterText: string): DocumentSymbol[] {
