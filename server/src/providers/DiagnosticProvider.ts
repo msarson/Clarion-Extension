@@ -267,8 +267,12 @@ export class DiagnosticProvider {
         document: TextDocument
     ): Diagnostic {
         const line = structure.line;
-        const startPos = { line, character: structure.token.start };
-        const endPos = { line, character: structure.token.start + structure.token.value.length };
+        const lineText = document.getText({ start: { line, character: 0 }, end: { line, character: 1000 } });
+        
+        // Find the actual keyword position in the line (first non-whitespace occurrence)
+        const keywordIndex = lineText.search(/\S/);
+        const startPos = { line, character: keywordIndex >= 0 ? keywordIndex : 0 };
+        const endPos = { line, character: startPos.character + structure.token.value.length };
         
         const diagnostic: Diagnostic = {
             severity: DiagnosticSeverity.Error,
