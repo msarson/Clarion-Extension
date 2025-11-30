@@ -84,13 +84,18 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         
         // Listen for selection changes to implement "Follow Cursor" functionality
         window.onDidChangeTextEditorSelection(event => {
+            logger.debug(`📍 Selection changed in editor: ${event.textEditor.document.fileName}`);
+            logger.debug(`   followCursor=${this.followCursor}, activeEditor=${!!this.activeEditor}, match=${event.textEditor === this.activeEditor}`);
+            
             if (this.followCursor && this.activeEditor && event.textEditor === this.activeEditor) {
+                logger.debug(`   Triggering debounced reveal after 100ms`);
                 // Debounce the selection change to avoid excessive updates
                 if (this.selectionChangeDebounceTimeout) {
                     clearTimeout(this.selectionChangeDebounceTimeout);
                 }
                 
                 this.selectionChangeDebounceTimeout = setTimeout(() => {
+                    logger.debug(`   Debounce timeout fired, calling revealActiveSelection()`);
                     this.revealActiveSelection();
                     this.selectionChangeDebounceTimeout = null;
                 }, 100); // 100ms debounce delay for cursor movements
@@ -172,7 +177,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 return;
             }
             
-            // Find the symbol that contains the cursor position
+            // Find the symbol that contains the cursor position (searches recursively through all symbols and children)
             const symbol = this.findSymbolAtPosition(symbols, position.line);
             logger.debug(`   Found symbol at position: ${symbol ? symbol.name : 'none'}`);
             if (symbol) {
@@ -180,12 +185,23 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 this.currentHighlightedSymbol = symbol;
                 
                 logger.debug(`   Revealing symbol: ${symbol.name} at range [${symbol.range.start.line}, ${symbol.range.end.line}]`);
-                // Reveal the symbol in the tree view
-                await this.treeView.reveal(symbol, { select: true, focus: false });
                 
-                // Force refresh to apply highlighting
-                this._onDidChangeTreeData.fire(symbol);
-                logger.debug(`   Symbol revealed successfully`);
+                // Get the tracked instance from elementMap
+                const key = this.getElementKey(symbol);
+                const trackedSymbol = this.elementMap.get(key);
+                logger.debug(`   Looking up tracked symbol with key: ${key}`);
+                logger.debug(`   Found in elementMap: ${!!trackedSymbol}`);
+                
+                if (trackedSymbol) {
+                    // Reveal using the tracked instance that VS Code knows about
+                    await this.treeView.reveal(trackedSymbol, { select: true, focus: false, expand: true });
+                    
+                    // Force refresh to apply highlighting
+                    this._onDidChangeTreeData.fire(trackedSymbol);
+                    logger.debug(`   Symbol revealed successfully`);
+                } else {
+                    logger.debug(`   Could not find tracked symbol in elementMap`);
+                }
             }
         } catch (error) {
             // This can happen if VS Code hasn't finished building the tree yet or if the symbol structure changed
