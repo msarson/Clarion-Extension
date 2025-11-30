@@ -1462,7 +1462,9 @@ export class ClarionDocumentSymbolProvider {
                 logger.info(`      - Different line, stopping search`);
                 break; // Different line, stop searching
             }
-            if (t.type === TokenType.Keyword && t.value.toUpperCase() === 'PROCEDURE') {
+            // FIXED: Check for TokenType.Procedure, not TokenType.Keyword
+            if (t.type === TokenType.Procedure || 
+                (t.type === TokenType.Keyword && t.value.toUpperCase() === 'PROCEDURE')) {
                 logger.info(`      - ✅ Found PROCEDURE keyword!`);
                 foundProcedureKeyword = true;
                 break;
