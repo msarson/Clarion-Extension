@@ -119,12 +119,22 @@ export class DiagnosticProvider {
     }
     
     /**
-     * Check if token closes a structure (END or dot terminator)
+     * Check if token closes a structure (END, dot terminator, WHILE, or UNTIL)
      */
     private static isStructureClose(token: Token, prevToken: Token | null, nextToken: Token | null): boolean {
         // END keyword
         if (token.type === TokenType.EndStatement) {
             return true;
+        }
+        
+        // WHILE and UNTIL keywords - these terminate LOOP structures
+        if (token.type === TokenType.Keyword) {
+            const keyword = token.value.toUpperCase();
+            if (keyword === 'WHILE' || keyword === 'UNTIL') {
+                // These are loop terminators when at statement level
+                // (not when used in expressions like "DO WHILE condition")
+                return true;
+            }
         }
         
         // Dot terminator - check if it's a structure terminator

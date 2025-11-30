@@ -199,6 +199,74 @@ i LONG
             
             assert.strictEqual(diagnostics.length, 0, 'Should have no diagnostics');
         });
+
+        test('Should NOT flag LOOP with WHILE terminator', () => {
+            const code = `TestProc PROCEDURE()
+i LONG
+  CODE
+  i = 0
+  LOOP
+    i += 1
+  WHILE i < 10
+  RETURN`;
+            
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            assert.strictEqual(diagnostics.length, 0, 'Should have no diagnostics');
+        });
+
+        test('Should NOT flag LOOP with UNTIL terminator', () => {
+            const code = `TestProc PROCEDURE()
+i LONG
+  CODE
+  i = 0
+  LOOP
+    i += 1
+  UNTIL i > 10
+  RETURN`;
+            
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            assert.strictEqual(diagnostics.length, 0, 'Should have no diagnostics');
+        });
+
+        test('Should NOT flag FOR-style LOOP with WHILE terminator', () => {
+            const code = `TestProc PROCEDURE()
+x LONG
+pAdr LONG
+last LONG
+  CODE
+  pAdr = 1000h
+  last = 2000h
+  LOOP
+    x = pAdr
+  UNTIL pAdr > last
+  RETURN`;
+            
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            assert.strictEqual(diagnostics.length, 0, 'Should have no diagnostics');
+        });
+
+        test('Should NOT flag nested LOOP with WHILE in outer loop', () => {
+            const code = `TestProc PROCEDURE()
+x LONG
+oldLen LONG
+y LONG
+  CODE
+  LOOP x = oldLen TO 1 BY -1
+    y -= 1
+  WHILE x < y
+  RETURN`;
+            
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            assert.strictEqual(diagnostics.length, 0, 'Should have no diagnostics');
+        });
     });
 
     suite('Unterminated CASE Statements', () => {

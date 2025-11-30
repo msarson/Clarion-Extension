@@ -504,11 +504,39 @@ IF condition1
 The following structures **require** an `END` statement (or `.` terminator) to close them:
 
 #### LOOP
+- The LOOP structure can be terminated in three ways:
+  1. `END` or `.` keyword
+  2. `WHILE condition` - post-fix loop condition (evaluates at end of loop)
+  3. `UNTIL condition` - post-fix loop condition (evaluates at end of loop)
+
 ```clarion
+! Standard LOOP with END
 LOOP
   [statements]
 END
+
+! LOOP with WHILE terminator
+LOOP
+  [statements]
+WHILE condition
+
+! LOOP with UNTIL terminator  
+LOOP
+  [statements]
+UNTIL condition
+
+! FOR-style LOOP with counter
+LOOP x = 1 TO 10
+  [statements]
+END
+
+! FOR-style with WHILE/UNTIL
+LOOP x = 1 TO 10 BY 2
+  [statements]
+WHILE condition
 ```
+
+**Important**: `WHILE` and `UNTIL` are loop terminators when they appear at the LOOP level, not conditions inside the loop body.
 
 #### IF/ELSIF/ELSE
 - Only the `IF` statement requires `END` or `.` to close the entire structure

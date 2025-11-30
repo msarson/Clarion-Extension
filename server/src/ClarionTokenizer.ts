@@ -846,7 +846,7 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.FieldEquateLabel]: /\?[A-Za-z_][A-Za-z0-9_]*/i,
     [TokenType.ClarionDocument]: /\b(?:PROGRAM|MEMBER)\b/i,
     [TokenType.ConditionalContinuation]: /\b(?:ELSE|ELSIF|OF)\b/i,  // ✅ New type for ELSE and ELSIF
-    [TokenType.Keyword]: /\b(?:RETURN|THEN|UNTIL|EXIT|NEW|PROCEDURE|ROUTINE|PROC|BREAK|KEY)\b/i, // Added KEY to keywords
+    [TokenType.Keyword]: /\b(?:RETURN|THEN|UNTIL|WHILE|EXIT|NEW|PROCEDURE|ROUTINE|PROC|BREAK|KEY)\b/i, // Added KEY to keywords
     [TokenType.PictureFormat]: /(@N[^\s,]*|@[Ee][^\s,]*|@S\d+|@D\d{1,2}[.\-_'`<>]?\d{0,2}B?|@T\d{1,2}[.\-_'`]?[B]?|@[Pp][^Pp\n]+[Pp]B?|@[Kk][^Kk\n]+[Kk]B?)/i,
 
     [TokenType.Structure]: new RegExp(
