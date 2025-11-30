@@ -531,4 +531,25 @@ x LONG
             assert.strictEqual(diagnostics.length, 1, 'Should detect unterminated IF at EOF');
         });
     });
+
+    suite('Real-World Examples', () => {
+        
+        test('Should NOT flag StringTheory method with nested IF/ELSE', () => {
+            const code = `StringTheory._EqualsUnicode        Procedure(*String otherValue, Long pOptions = st:UnicodeCompare)
+str StringTheory
+  code
+  if band(pOptions,st:Clip)
+    str.SetValue(otherValue,st:clip)
+    return self._EqualsUnicode(str,pOptions-st:clip-st:UnicodeCompare)
+  else
+    str.SetValue(otherValue)
+    return self._EqualsUnicode(str,pOptions-st:UnicodeCompare)
+  end`;
+            
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            assert.strictEqual(diagnostics.length, 0, 'Should have no diagnostics for valid IF/ELSE with END');
+        });
+    });
 });

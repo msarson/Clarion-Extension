@@ -130,12 +130,14 @@ export class DiagnosticProvider {
     }
     
     /**
-     * Check if token is a scope boundary (RETURN, PROCEDURE, ROUTINE, CODE, etc.)
+     * Check if token is a scope boundary (PROCEDURE, ROUTINE, CODE, etc.)
+     * RETURN is NOT a scope boundary - it can appear inside structures
      */
     private static isScopeBoundary(token: Token): boolean {
         if (token.type === TokenType.Keyword) {
             const keyword = token.value.toUpperCase();
-            return keyword === 'RETURN' || keyword === 'CODE';
+            // Only CODE is a scope boundary, not RETURN
+            return keyword === 'CODE';
         }
         
         if (token.type === TokenType.Procedure || token.type === TokenType.Routine) {
