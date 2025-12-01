@@ -68,7 +68,7 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Number]: /\b[0-9]+(\.[0-9]+)?\b/i,
     [TokenType.Operator]: /[\+\-\*\/\=\>\<\&\|\~]/,
     [TokenType.Delimiter]: /[\(\)\[\]\{\}\,\:\;]/,
-    [TokenType.Label]: /^[A-Za-z_][A-Za-z0-9_:]*/,  // Starts at column 0, can include colons
+    [TokenType.Label]: /^(?!(?:COMPILE|OMIT|EMBED|SECTION|ENDSECTION)\b)[A-Za-z_][A-Za-z0-9_:]*/i,  // Starts at column 0, can include colons, but NOT directive keywords
     [TokenType.Variable]: /\b[A-Za-z_][A-Za-z0-9_]*\b/i,
     [TokenType.ImplicitVariable]: /\b[A-Za-z_][A-Za-z0-9_]*[$#"]/i,  // ✅ Variables ending with implicit type suffixes
     [TokenType.Function]: /\b[A-Za-z_][A-Za-z0-9_]*(?=\()/i,

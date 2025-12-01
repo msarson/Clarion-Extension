@@ -740,11 +740,160 @@ Method1                    PROCEDURE()
 value                     &string,PRIVATE
 Method1                    PROCEDURE()
                          End`;
-            
+
             const document = createDocument(code);
             const diagnostics = DiagnosticProvider.validateDocument(document);
-            
+
             assert.strictEqual(diagnostics.length, 0, 'CLASS with MODULE attribute should validate correctly');
+        });
+    });
+
+    suite('OMIT/COMPILE Blocks', () => {
+
+        test('Should detect OMIT without terminator', () => {
+            const code = `  PROGRAM
+OMIT('**END**')
+StringTheory.Flush Procedure(StringTheory pStr)
+  code
+  return self.flush(pStr.GetValuePtr())
+  CODE
+  RETURN`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            assert.strictEqual(diagnostics.length, 1, 'Should have 1 diagnostic');
+            assert.ok(diagnostics[0].message.includes('OMIT'), 'Message should mention OMIT');
+            assert.ok(diagnostics[0].message.includes("'**END**'"), 'Message should mention the terminator string');
+        });
+
+        test('Should NOT flag OMIT with terminator on its own line', () => {
+            const code = `  PROGRAM
+OMIT('**END**')
+StringTheory.Flush Procedure(StringTheory pStr)
+  code
+  return self.flush(pStr.GetValuePtr())
+**END**
+  CODE
+  RETURN`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            assert.strictEqual(diagnostics.length, 0, 'OMIT with terminator should validate correctly');
+        });
+
+        test('Should NOT flag OMIT with terminator in comment', () => {
+            const code = `  PROGRAM
+OMIT('**END**')
+StringTheory.Flush Procedure(StringTheory pStr)
+  code
+  return self.flush(pStr.GetValuePtr())
+! **END**
+  CODE
+  RETURN`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            assert.strictEqual(diagnostics.length, 0, 'OMIT with terminator in comment should validate correctly');
+        });
+
+        test('Should NOT flag OMIT with terminator after code on same line', () => {
+            const code = `  PROGRAM
+OMIT('**END**')
+StringTheory.Flush Procedure(StringTheory pStr)
+  code
+  return self.flush(pStr.GetValuePtr())
+  SomeCode() **END**
+  CODE
+  RETURN`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            assert.strictEqual(diagnostics.length, 0, 'OMIT with terminator after code should validate correctly');
+        });
+
+        test('Should detect OMIT with wrong case terminator', () => {
+            const code = `  PROGRAM
+OMIT('**END**')
+StringTheory.Flush Procedure(StringTheory pStr)
+  code
+  return self.flush(pStr.GetValuePtr())
+**end**
+  CODE
+  RETURN`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            assert.strictEqual(diagnostics.length, 1, 'Should have 1 diagnostic for case mismatch');
+            assert.ok(diagnostics[0].message.includes('OMIT'), 'Message should mention OMIT');
+        });
+
+        test('Should detect COMPILE without terminator', () => {
+            const code = `  PROGRAM
+COMPILE('***',_WIDTH32_)
+SIGNED   EQUATE(LONG)
+UNSIGNED  EQUATE(ULONG)
+  CODE
+  RETURN`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            assert.strictEqual(diagnostics.length, 1, 'Should have 1 diagnostic');
+            assert.ok(diagnostics[0].message.includes('COMPILE'), 'Message should mention COMPILE');
+        });
+
+        test('Should NOT flag COMPILE with terminator', () => {
+            const code = `  PROGRAM
+COMPILE('***',_WIDTH32_)
+SIGNED   EQUATE(LONG)
+UNSIGNED  EQUATE(ULONG)
+***
+  CODE
+  RETURN`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            assert.strictEqual(diagnostics.length, 0, 'COMPILE with terminator should validate correctly');
+        });
+
+        test('Should handle nested OMIT/COMPILE blocks', () => {
+            const code = `  PROGRAM
+COMPILE('**32bit**',_width32_)
+  COMPILE('*debug*',_debug_)
+    DEBUGGER::BUTTONLIST Equate('&Continue|&Halt|&Debug')
+  !*debug*
+  OMIT('*debug*',_debug_)
+    DEBUGGER::BUTTONLIST Equate('&Continue|&Halt')
+  !*debug*
+!**32bit**
+  CODE
+  RETURN`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            assert.strictEqual(diagnostics.length, 0, 'Nested OMIT/COMPILE should validate correctly');
+        });
+
+        test('Should detect multiple unterminated OMIT blocks', () => {
+            const code = `  PROGRAM
+OMIT('**END1**')
+  code1
+OMIT('**END2**')
+  code2
+  CODE
+  RETURN`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            assert.strictEqual(diagnostics.length, 2, 'Should have 2 diagnostics for 2 unterminated blocks');
         });
     });
 });

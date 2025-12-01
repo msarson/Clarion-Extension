@@ -132,7 +132,7 @@ export class DocumentStructure {
         for (const token of this.tokens) {
             const insideExecutionCode = this.procedureStack.length > 0;
 
-            if (!insideExecutionCode && token.start === 0 && token.type !== TokenType.Comment && token.value !== '?') {
+            if (!insideExecutionCode && token.start === 0 && token.type !== TokenType.Comment && token.type !== TokenType.Directive && token.value !== '?') {
                 token.type = TokenType.Label;
                 token.label = token.value;
                 maxLabelWidth = Math.max(maxLabelWidth, token.value.length);

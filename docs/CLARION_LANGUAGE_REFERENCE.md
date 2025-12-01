@@ -867,6 +867,38 @@ LOC:Var LONG
 - Block executes (code is omitted) when expression evaluates to TRUE
 - If expression contains undefined EQUATE, it's assumed to be 0
 
+#### Terminator String Matching Rules
+- **CASE-SENSITIVE**: The terminator string must match exactly (including case)
+  - Unlike Clarion keywords (which are case-insensitive), terminator strings use **exact string comparison**
+  - `'**END**'` will NOT match `**end**` or `**End**`
+- **SUBSTRING SEARCH**: The terminator can appear **anywhere** on the line
+  - Doesn't need to start at column 0
+  - Can be in code, comments, or standalone
+  - Can have other text before or after it
+- **The entire terminating line is included in the OMIT/COMPILE block**
+- Examples:
+  ```clarion
+  OMIT('**END**')
+    code here
+  **END**                    ! ✅ Valid - exact match
+  
+  OMIT('**END**')
+    code here
+  ! **END**                  ! ✅ Valid - in comment
+  
+  OMIT('**END**')
+    code here
+    SomeCode() **END**       ! ✅ Valid - after code
+  
+  OMIT('**END**')
+    code here
+  **end**                    ! ❌ INVALID - case mismatch
+  
+  OMIT('EndOfFile')
+    code here
+  ! EndOfFile                ! ✅ Valid - string found in comment
+  ```
+
 #### OMIT Examples
 ```clarion
 ! Unconditional OMIT (always omit the block)

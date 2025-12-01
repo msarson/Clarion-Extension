@@ -30,6 +30,9 @@ export class PatternMatcher {
             TokenType.LineContinuation,     // Must be early (can contain other tokens)
             TokenType.String,               // Must be before Variable (strings can contain variable-like text)
             
+            // DIRECTIVES: Must be before Label (OMIT/COMPILE at column 0)
+            TokenType.Directive,            // Specific keywords with special syntax (OMIT, COMPILE, etc.)
+            
             // LABELS & SPECIAL: Must be before general identifiers
             TokenType.Label,                // Must be before Variable (labels are identifiers at column 0)
             TokenType.FieldEquateLabel,     // Must be before Variable (?FieldName)
@@ -41,7 +44,6 @@ export class PatternMatcher {
             TokenType.EndStatement,         // Specific (END/.)
             TokenType.ConditionalContinuation, // Specific (ELSE/ELSIF/OF)
             TokenType.Keyword,              // Common, more specific than Variable
-            TokenType.Directive,            // Specific keywords with special syntax
             
             // STRUCTURES: Before Variable but after keywords
             TokenType.Structure,            // Must be before Variable
@@ -105,7 +107,7 @@ export class PatternMatcher {
             'operator': [TokenType.Operator],
             'delimiter': [TokenType.Delimiter, TokenType.DataTypeParameter, TokenType.EndStatement],
             'upper': [ // Uppercase letter - identifiers, keywords, structures
-                TokenType.Label, TokenType.Keyword, TokenType.Directive,
+                TokenType.Directive, TokenType.Label, TokenType.Keyword,
                 TokenType.ClarionDocument, TokenType.ExecutionMarker, TokenType.EndStatement,
                 TokenType.ConditionalContinuation, TokenType.Structure, TokenType.WindowElement,
                 TokenType.Type, TokenType.TypeAnnotation, // MUST be before Function to avoid STRING(50) as function

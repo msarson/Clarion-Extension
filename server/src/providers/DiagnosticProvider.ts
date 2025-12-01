@@ -346,23 +346,70 @@ export class DiagnosticProvider {
             }
             
             // Check if this line contains a terminator for any open block
-            if (blockStack.length > 0 && token.type === TokenType.Comment) {
+            // Note: We check on each token to avoid missing terminators,
+            // but we track which lines we've already checked to avoid duplicates
+            if (blockStack.length > 0) {
+                // Only check once per line
+                const shouldCheckLine = i === 0 || tokens[i - 1].line !== token.line;
+                
+                if (shouldCheckLine) {
+                    const lineText = document.getText({ 
+                        start: { line: token.line, character: 0 }, 
+                        end: { line: token.line, character: 1000 }
+                    }).trim();
+                    
+                    // Check each open block to see if this line contains its terminator
+                    for (let b = blockStack.length - 1; b >= 0; b--) {
+                        const block = blockStack[b];
+                        
+                        // Don't check the same line as the OMIT/COMPILE directive
+                        // (the terminator string appears in the directive itself!)
+                        if (token.line === block.line) {
+                            continue;
+                        }
+                        
+                        // The terminator must appear on the line as-is (case-sensitive)
+                        // The entire terminating line is included in the OMIT/COMPILE block
+                        if (lineText.includes(block.terminator)) {
+                            // Found matching terminator - remove from stack
+                            blockStack.splice(b, 1);
+                            break;  // Only match one block per line
+                        }
+                    }
+                }
+            }
+        }
+        
+        // After processing all tokens, check ALL lines for terminators
+        // (some lines may not have tokens, e.g., comment-only lines like "***")
+        if (blockStack.length > 0) {
+            const lineCount = document.lineCount;
+            for (let lineNum = 0; lineNum < lineCount; lineNum++) {
                 const lineText = document.getText({ 
-                    start: { line: token.line, character: 0 }, 
-                    end: { line: token.line, character: 1000 }
-                });
+                    start: { line: lineNum, character: 0 }, 
+                    end: { line: lineNum, character: 1000 }
+                }).trim();
                 
                 // Check each open block to see if this line contains its terminator
                 for (let b = blockStack.length - 1; b >= 0; b--) {
                     const block = blockStack[b];
                     
-                    // Check if the line contains the terminator string
-                    // (case-sensitive check as per Clarion spec)
+                    // Don't check lines before or on the OMIT/COMPILE line
+                    if (lineNum <= block.line) {
+                        continue;
+                    }
+                    
+                    // The terminator must appear on the line as-is (case-sensitive)
                     if (lineText.includes(block.terminator)) {
                         // Found matching terminator - remove from stack
                         blockStack.splice(b, 1);
                         break;  // Only match one block per line
                     }
+                }
+                
+                // If all blocks are closed, no need to check more lines
+                if (blockStack.length === 0) {
+                    break;
                 }
             }
         }
