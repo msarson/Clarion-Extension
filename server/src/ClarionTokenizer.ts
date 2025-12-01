@@ -96,7 +96,11 @@ export class ClarionTokenizer {
                 'structure_ms': structureTime.toFixed(2),
                 'structure_pct': ((structureTime/totalTime)*100).toFixed(1) + '%',
                 'prefix_ms': prefixTime.toFixed(2),
-                'prefix_pct': ((prefixTime/totalTime)*100).toFixed(1) + '%'
+                'prefix_pct': ((prefixTime/totalTime)*100).toFixed(1) + '%',
+                'routine_vars_ms': routineVarsTime.toFixed(2),
+                'routine_vars_pct': ((routineVarsTime/totalTime)*100).toFixed(1) + '%',
+                'procedure_vars_ms': procedureVarsTime.toFixed(2),
+                'procedure_vars_pct': ((procedureVarsTime/totalTime)*100).toFixed(1) + '%'
             });
             
             return this.tokens;
@@ -355,21 +359,17 @@ export class ClarionTokenizer {
                 // Check for DATA keyword
                 if (line.match(/^\s*data\s*$/i)) {
                     inDataSection = true;
-                    logger.info(`Found DATA section in routine ${routine.value} at line ${lineNum}`);
                     continue;
                 }
                 
                 // Check for CODE keyword (ends DATA section)
                 if (line.match(/^\s*code\s*$/i)) {
                     inDataSection = false;
-                    logger.info(`DATA section ended at line ${lineNum}`);
                     break;
                 }
                 
                 // If in DATA section, tokenize variable declarations
                 if (inDataSection) {
-                    logger.info(`🔍 TOKENIZER: Checking line ${lineNum} in DATA section: "${line}"`);
-                    
                     // Match variable declarations: varName   type or varName type(size)
                     // Variables in routines start at column 0 (after any leading whitespace is removed)
                     // Updated to handle types with parameters like CSTRING(1024), STRING(255), etc.
@@ -377,8 +377,6 @@ export class ClarionTokenizer {
                     if (varMatch) {
                         const varName = varMatch[1];
                         const isReference = varMatch[2].startsWith('&');
-                        
-                        logger.info(`✅ TOKENIZER: Found routine variable: ${varName} (reference: ${isReference}) at line ${lineNum}`);
                         
                         // Create a Variable or ReferenceVariable token
                         const varToken: Token = {
@@ -413,11 +411,8 @@ export class ClarionTokenizer {
             t.subType === TokenType.MethodImplementation
         );
 
-        logger.info(`🔍 TOKENIZER: tokenizeProcedureLocalVariables found ${procedures.length} procedures`);
-
         for (const proc of procedures) {
             const procEnd = proc.finishesAt || this.lines.length - 1;
-            logger.info(`🔍 TOKENIZER: Processing procedure "${proc.value}" from line ${proc.line} to ${procEnd}, subType: ${proc.subType}`);
             
             // Search from procedure declaration to CODE statement
             for (let lineNum = proc.line + 1; lineNum <= procEnd; lineNum++) {
@@ -426,11 +421,8 @@ export class ClarionTokenizer {
                 
                 // Stop at CODE keyword
                 if (line.match(/^\s*code\s*$/i)) {
-                    logger.info(`🔍 TOKENIZER: Found CODE keyword at line ${lineNum}, stopping variable search`);
                     break;
                 }
-                
-                logger.info(`🔍 TOKENIZER: Checking procedure line ${lineNum}: "${line}"`);
                 
                 // Match variable declarations at column 0: varName   type or varName type(size)
                 // Updated to handle types with parameters like CSTRING(1024), STRING(255), etc.
@@ -447,16 +439,8 @@ export class ClarionTokenizer {
                     );
                     
                     if (existingToken) {
-                        if ((existingToken as any).isStructureField) {
-                            logger.info(`⏭️ TOKENIZER: Skipping ${varName} - already exists as structure field`);
-                            continue;
-                        }
-                        // Token exists but isn't a structure field - skip duplicate
-                        logger.info(`⏭️ TOKENIZER: Skipping ${varName} - token already exists`);
                         continue;
                     }
-                    
-                    logger.info(`✅ TOKENIZER: Found procedure local variable: ${varName} (reference: ${isReference}) at line ${lineNum}`);
                     
                     // Create a Variable or ReferenceVariable token
                     const varToken: Token = {
