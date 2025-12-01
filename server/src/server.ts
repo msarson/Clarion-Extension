@@ -18,7 +18,9 @@ process.on('unhandledRejection', (reason, promise) => {
 import {
     DocumentFormattingParams,
     DocumentSymbolParams,
+    DocumentSymbol,
     FoldingRangeParams,
+    FoldingRange,
     InitializeParams,
     InitializeResult,
     TextEdit,
@@ -60,7 +62,7 @@ import { URI } from 'vscode-languageserver';
 import { setServerInitialized, serverInitialized } from './serverState';
 
 const logger = LoggerManager.getLogger("Server");
-logger.setLevel("error");
+logger.setLevel("info");
 
 // Track if a solution operation is in progress
 export let solutionOperationInProgress = false;
@@ -271,6 +273,12 @@ function validateTextDocument(document: TextDocument): void {
 
 // 🚀 PERF: Per-document debounce map
 const debounceTimeouts = new Map<string, NodeJS.Timeout>();
+
+// 🚀 PERF: Track documents being actively edited (serve stale tokens during typing)
+const documentsBeingEdited = new Set<string>();
+
+// 🚀 PERF: Track last processed document version to avoid redundant work
+const lastProcessedVersions = new Map<string, number>();
 /**
  * ✅ Retrieves cached tokens or tokenizes the document if not cached.
  */
@@ -329,9 +337,22 @@ connection.onFoldingRanges((params: FoldingRangeParams) => {
 
         logger.info(`📂 [DEBUG] Computing folding ranges for: ${uri}, language: ${document.languageId}`);
         
+        // 🚀 PERF: If document is being edited, return cached folding ranges immediately
+        if (documentsBeingEdited.has(uri) && foldingCache.has(uri)) {
+            logger.info(`⚡ [PERF] Document being edited, returning cached folding ranges`);
+            return foldingCache.get(uri)!;
+        }
+        
         const tokenStart = performance.now();
         const tokens = getTokens(document);
         const tokenTime = performance.now() - tokenStart;
+        
+        // If tokenization took > 50ms, return cached folding ranges to avoid blocking the UI
+        if (tokenTime > 50 && foldingCache.has(uri)) {
+            logger.info(`⚡ [PERF] Returning cached folding ranges (tokenization took ${tokenTime.toFixed(0)}ms)`);
+            return foldingCache.get(uri)!;
+        }
+        
         logger.info(`🔍 [DEBUG] Got ${tokens.length} tokens for folding ranges`);
         logger.perf('Folding: getTokens', { time_ms: tokenTime.toFixed(2), tokens: tokens.length });
         
@@ -339,6 +360,10 @@ connection.onFoldingRanges((params: FoldingRangeParams) => {
         const foldingProvider = new ClarionFoldingProvider(tokens);
         const ranges = foldingProvider.computeFoldingRanges();
         const foldTime = performance.now() - foldStart;
+        
+        // 🚀 PERF: Cache the folding ranges
+        foldingCache.set(uri, ranges);
+        
         logger.info(`📂 [DEBUG] Computed ${ranges.length} folding ranges for: ${uri}`);
         
         const totalTime = performance.now() - perfStart;
@@ -363,13 +388,24 @@ documents.onDidChangeContent(event => {
     try {
         const document = event.document;
         const uri = document.uri;
+        const currentVersion = document.version;
         
-        logger.info(`📝 onDidChangeContent: ${uri} version=${document.version}`);
+        // 🚀 PERF: Skip if we've already processed this version
+        const lastVersion = lastProcessedVersions.get(uri);
+        if (lastVersion !== undefined && lastVersion >= currentVersion) {
+            logger.info(`⏭️ Skipping duplicate onDidChangeContent: ${uri} version=${currentVersion} (already processed ${lastVersion})`);
+            return;
+        }
+        
+        logger.info(`📝 onDidChangeContent: ${uri} version=${currentVersion}`);
         
         // Skip XML files
         if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
             return;
         }
+
+        // Update last processed version
+        lastProcessedVersions.set(uri, currentVersion);
 
         // 🚀 PERF: Per-document debounce - clear existing timeout for THIS document
         const existingTimeout = debounceTimeouts.get(uri);
@@ -378,14 +414,20 @@ documents.onDidChangeContent(event => {
             clearTimeout(existingTimeout);
         }
 
+        // 🚀 PERF: Mark document as being edited (serve stale tokens)
+        documentsBeingEdited.add(uri);
+
         // 🚀 PERF: Don't clear cache until debounce completes
         // This allows other features to use stale tokens while user is typing
         const timeout = setTimeout(() => {
             try {
                 logger.info(`🔍 Debounce timeout triggered, refreshing tokens for: ${uri}`);
                 
-                // Clear cache and refresh tokens TOGETHER atomically
-                tokenCache.clearTokens(document.uri);
+                // Clear "being edited" flag FIRST
+                documentsBeingEdited.delete(uri);
+                
+                // 🚀 PERF: DON'T clear cache - let getTokens do incremental update
+                // tokenCache.clearTokens(document.uri);  // ❌ This defeats incremental tokenization!
                 const tokens = getTokens(document);
                 logger.info(`🔍 Successfully refreshed tokens after edit: ${uri}, got ${tokens.length} tokens`);
                 
@@ -396,6 +438,7 @@ documents.onDidChangeContent(event => {
                 debounceTimeouts.delete(uri);
             } catch (tokenError) {
                 logger.error(`❌ Error refreshing tokens in debounce: ${tokenError instanceof Error ? tokenError.message : String(tokenError)}`);
+                documentsBeingEdited.delete(uri); // Cleanup on error
             }
         }, 500);
         
@@ -455,6 +498,10 @@ connection.onDocumentFormatting((params: DocumentFormattingParams): TextEdit[] =
 });
 
 
+// Cache for document symbols to avoid recomputing during rapid typing
+const symbolCache = new Map<string, DocumentSymbol[]>();
+const foldingCache = new Map<string, FoldingRange[]>();
+
 connection.onDocumentSymbol((params: DocumentSymbolParams) => {
     const perfStart = performance.now();
     try {
@@ -486,15 +533,32 @@ connection.onDocumentSymbol((params: DocumentSymbolParams) => {
 
         logger.info(`📂 [DEBUG] Computing document symbols for: ${uri}, language: ${document.languageId}`);
         
+        // 🚀 PERF: If document is being edited, return cached symbols immediately
+        if (documentsBeingEdited.has(uri) && symbolCache.has(uri)) {
+            logger.info(`⚡ [PERF] Document being edited, returning cached symbols`);
+            return symbolCache.get(uri)!;
+        }
+        
         const tokenStart = performance.now();
         const tokens = getTokens(document);  // ✅ No need for async
         const tokenTime = performance.now() - tokenStart;
+        
+        // If tokenization took > 50ms, return cached symbols to avoid blocking the UI
+        if (tokenTime > 50 && symbolCache.has(uri)) {
+            logger.info(`⚡ [PERF] Returning cached symbols (tokenization took ${tokenTime.toFixed(0)}ms)`);
+            return symbolCache.get(uri)!;
+        }
+        
         logger.info(`🔍 [DEBUG] Got ${tokens.length} tokens for document symbols`);
         logger.perf('Symbols: getTokens', { time_ms: tokenTime.toFixed(2), tokens: tokens.length });
         
         const symbolStart = performance.now();
         const symbols = clarionDocumentSymbolProvider.provideDocumentSymbols(tokens, uri);
         const symbolTime = performance.now() - symbolStart;
+        
+        // Cache the symbols for quick retrieval during typing
+        symbolCache.set(uri, symbols);
+        
         logger.info(`🧩 [DEBUG] Returned ${symbols.length} document symbols for ${uri}`);
 
         const totalTime = performance.now() - perfStart;
@@ -619,6 +683,8 @@ documents.onDidClose(event => {
         logger.info(`🔍 [CRITICAL] Clearing tokens for document: ${uri}`);
         try {
             tokenCache.clearTokens(uri);
+            symbolCache.delete(uri);
+            foldingCache.delete(uri);
             logger.info(`🔍 [CRITICAL] Successfully cleared tokens for document: ${uri}`);
         } catch (cacheError) {
             logger.error(`❌ [CRITICAL] Error clearing tokens: ${cacheError instanceof Error ? cacheError.message : String(cacheError)}`);

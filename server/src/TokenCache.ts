@@ -76,6 +76,13 @@ export class TokenCache {
                 return cached.tokens;
             }
             
+            // 🚀 DEBUG: Log incremental check
+            if (cached) {
+                logger.info(`🔍 [INCREMENTAL CHECK] cached=${!!cached}, hasDocText=${!!cached.documentText}, canIncremental=${cached.documentText ? this.canUseIncrementalUpdate(currentText, cached.documentText) : false}`);
+            } else {
+                logger.info(`🔍 [INCREMENTAL CHECK] No cached data available`);
+            }
+            
             // 🚀 PERFORMANCE: Try incremental update if we have cached data
             if (cached && cached.documentText && this.canUseIncrementalUpdate(currentText, cached.documentText)) {
                 logger.info(`🚀 [PERF] Attempting incremental tokenization for ${document.uri}`);

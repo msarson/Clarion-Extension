@@ -91,11 +91,13 @@ export class DiagnosticProvider {
             // Check if we hit a scope boundary that should close structures
             else if (this.isScopeBoundary(token, prevToken, structureStack)) {
                 // Check if there are unclosed structures
+                // Report them but DON'T stop checking the rest of the file
                 while (structureStack.length > 0) {
                     const unclosed = structureStack.pop()!;
                     const diagnostic = this.createUnterminatedStructureDiagnostic(unclosed, document);
                     diagnostics.push(diagnostic);
                 }
+                // Stack is now empty, continue processing rest of file normally
             }
         }
         
@@ -183,11 +185,11 @@ export class DiagnosticProvider {
             return keyword === 'CODE';
         }
         
-        // PROCEDURE and ROUTINE are scope boundaries when they follow a label at column 0
+        // PROCEDURE and ROUTINE are scope boundaries when they follow a label
         // UNLESS we're currently inside a MAP or CLASS (where they're declarations, not implementations)
         if (token.type === TokenType.Procedure || token.type === TokenType.Routine) {
-            // Check if previous token was a label at column 0
-            if (prevToken && prevToken.type === TokenType.Label && prevToken.start === 0) {
+            // Check if previous token was a label (column position doesn't matter for class methods)
+            if (prevToken && prevToken.type === TokenType.Label) {
                 // Check if we're inside a MAP or CLASS - if so, this is a declaration, not implementation
                 const insideMapOrClass = structureStack.some(item => 
                     item.structureType === 'MAP' || 
@@ -196,8 +198,8 @@ export class DiagnosticProvider {
                 );
                 return !insideMapOrClass; // Only a scope boundary if NOT inside MAP/CLASS/INTERFACE
             }
-            // Fallback: check if PROCEDURE itself is at column 0 (shouldn't happen but be safe)
-            return token.start === 0;
+            // Fallback: PROCEDURE itself at any position can be a scope boundary
+            return true;
         }
         
         return false;
