@@ -364,6 +364,8 @@ documents.onDidChangeContent(event => {
         const document = event.document;
         const uri = document.uri;
         
+        logger.info(`📝 onDidChangeContent: ${uri} version=${document.version}`);
+        
         // Skip XML files
         if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
             return;
@@ -372,23 +374,22 @@ documents.onDidChangeContent(event => {
         // 🚀 PERF: Per-document debounce - clear existing timeout for THIS document
         const existingTimeout = debounceTimeouts.get(uri);
         if (existingTimeout) {
+            logger.info(`🔄 Resetting debounce for: ${uri}`);
             clearTimeout(existingTimeout);
         }
 
-        // 🚀 PERF: Increase debounce to 500ms and don't clear cache until then
-        // This allows structure tree and other features to use stale tokens while typing
+        // 🚀 PERF: Don't clear cache until debounce completes
+        // This allows other features to use stale tokens while user is typing
         const timeout = setTimeout(() => {
             try {
                 logger.info(`🔍 Debounce timeout triggered, refreshing tokens for: ${uri}`);
                 
-                // NOW clear cache and refresh
+                // Clear cache and refresh tokens TOGETHER atomically
                 tokenCache.clearTokens(document.uri);
-                
-                // PERFORMANCE: Refresh tokens once, then use for both diagnostics and other operations
-                const tokens = getTokens(document); // ⬅️ refreshes the cache
+                const tokens = getTokens(document);
                 logger.info(`🔍 Successfully refreshed tokens after edit: ${uri}, got ${tokens.length} tokens`);
                 
-                // Validate document using cached tokens (no re-tokenization needed)
+                // Validate document using fresh tokens
                 validateTextDocument(document);
                 
                 // Clean up timeout from map
@@ -396,7 +397,7 @@ documents.onDidChangeContent(event => {
             } catch (tokenError) {
                 logger.error(`❌ Error refreshing tokens in debounce: ${tokenError instanceof Error ? tokenError.message : String(tokenError)}`);
             }
-        }, 500); // Increased from 300ms to 500ms
+        }, 500);
         
         // Store timeout for this document
         debounceTimeouts.set(uri, timeout);
