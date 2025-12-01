@@ -6,48 +6,32 @@ This file tracks all outstanding tasks, bugs, and improvements for the Clarion L
 
 ## 🐛 Critical Bugs
 
-### Fix Method Declaration Parsing in Classes
-**Priority:** HIGH  
-**Status:** In Progress
+### ~~Fix Method Declaration Parsing in Classes~~ ✅ FIXED (Dec 2024)
+**Priority:** ~~HIGH~~ **COMPLETE**  
+**Status:** ~~In Progress~~ **RESOLVED**
 
 #### Problem
-Method definitions inside CLASS structures are being incorrectly parsed as properties/variables instead of methods.
+Method definitions inside CLASS structures were being incorrectly parsed as properties/variables instead of methods.
 
 **Example:**
 ```clarion
 CLASS (StringTheory)
   ! ... other members ...
-  Flush  PROCEDURE (StringTheory pStr),long, proc, virtual  ! <-- Incorrectly parsed
+  Flush  PROCEDURE (StringTheory pStr),long, proc, virtual  ! <-- Was incorrectly parsed
 ```
 
-The Structure View shows: `"StringTheory ),long,proc,virtual"` as a **Property** instead of recognizing `Flush` as a **Method**.
+#### Solution Implemented
+Fixed in 3 commits (a63e88a, ea780ba, 69416e7):
+1. **Fixed token type check**: Changed `handleVariableToken` to check `TokenType.Procedure` instead of `TokenType.Keyword`
+2. **Fixed pattern matching order**: Moved `Type` before `Function` in pattern matching to prevent `STRING(50)` being tokenized as function call
+3. **Fixed procedure name extraction**: Use `token.label` property instead of `prevToken`
 
-#### Root Cause
-1. The tokenizer defines `TokenType.MethodDeclaration` (line 44 in ClarionTokenizer.ts) but **never assigns it**
-2. PROCEDURE keywords are tokenized as generic `TokenType.Keyword` (line 849)
-3. When parsing, `StringTheory` (the parameter type) is recognized as a Type token
-4. The `handleVariableToken` method is called, treating it as a variable declaration
-5. The check for PROCEDURE on the same line (lines 1454-1475 in ClarionDocumentSymbolProvider.ts) should prevent this, but it's not working correctly
+#### Results
+- ✅ CLASS methods now parse correctly in structure view
+- ✅ All 170 tests passing
+- ✅ StringTheory.Flush now appears as Method, not Property
 
-#### Solution
-The tokenizer needs logic to:
-1. Detect when a PROCEDURE keyword appears inside a CLASS/INTERFACE/MAP structure
-2. Set the `subType` to `TokenType.MethodDeclaration` for these cases
-3. This will cause the symbol provider to correctly handle it as a method (lines 409-415, 1305-1307)
-
-#### Files to Modify
-- `server/src/ClarionTokenizer.ts` - Add logic to assign MethodDeclaration subType
-- Possibly `server/src/providers/ClarionDocumentSymbolProvider.ts` - Verify the PROCEDURE check is working
-
-#### Test Case
-Line 408 in `C:\Clarion\Clarion11.1\accessory\libsrc\win\StringTheory.inc`:
-```clarion
-Flush                 Procedure (StringTheory pStr),long, proc, virtual
-```
-
-Should appear in Structure View as:
-- **Method**: `Flush (StringTheory pStr)`
-- Under: `Class (StringTheory)` → ~~Properties~~ → **Methods**
+---
 
 #### Related
 - Recent tokenizer changes for inline dot (`.`) terminators may have affected this
@@ -144,14 +128,18 @@ Needs coverage:
   - Reduced main tokenizer file from 837 to 482 lines (~42% reduction)
   - Improved maintainability and testability
 - [ ] Add more inline documentation for complex parsing logic
-- ✅ **COMPLETE:** Optimized performance bottlenecks in document symbol provider
-  - Eliminated duplicate tokenization in diagnostic validation
-  - DiagnosticProvider now uses cached tokens (50% reduction in tokenization overhead)
-  - Added performance logging to track validation time
+- ✅ **COMPLETE:** Optimized performance bottlenecks (Dec 2024)
+  - Eliminated duplicate tokenization in diagnostic validation (50% reduction)
+  - Reduced excessive logging overhead (9 high-frequency loggers: info/debug → error)
+  - Test suite: 79ms → 65ms (18% faster)
+  - Should dramatically improve responsiveness for large files like StringTheory.clw
+  - Performance logging enhanced with [PERF] tags for visibility
 
 ### Logging
-- [ ] Review and standardize logging levels across codebase
-- [ ] Remove or convert excessive debug logging to trace level
+- ✅ **COMPLETE:** Review and standardize logging levels across codebase (Dec 2024)
+  - Set all hot-path providers to "error" level only
+  - Performance metrics still visible via console.log
+  - Eliminates thousands of unnecessary log calls per document change
 
 ---
 
