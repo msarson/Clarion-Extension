@@ -1,22 +1,36 @@
 # Documentation
 
-## Core Documentation
-- **CLARION_LANGUAGE_REFERENCE.md** - Comprehensive Clarion language syntax reference and knowledge base
+This folder contains **user-facing documentation** for the Clarion Extension.
 
-## Test Documentation
-- **TEST_RESULTS.md** - Unit test results and validation report
-- **UNICODE_FIX.md** - Unicode character removal documentation
+## 📚 User Guides
 
-## Development Notes
-- **FIX_GOTO_DEFINITION_PREFIX.md** - Goto definition feature fixes
-- **FIX_STRUCTURE_PREFIX.md** - Structure prefix handling fixes
-- **HOTFIX_0.6.0.md** - Version 0.6.0 hotfix notes
-- **RELEASE_NOTES_v0.5.8.md** - Release notes for v0.5.8
-- **RELEASE_SUMMARY.md** - General release summary
+### Getting Started
+- **CheatSheet.md** - Quick reference for common features
+- **BuildSettings.md** - Build configuration guide
 
-## Other Documentation
-See root directory for:
-- README.md - Main project README
-- CHANGELOG.md - Version history
-- TESTING.md - Testing guide
-- PUBLISHING_GUIDE.md - Publishing instructions
+### Language Reference
+- **clarion-knowledge-base.md** - Clarion language rules and syntax patterns
+- **CLARION_LANGUAGE_REFERENCE.md** - Comprehensive language reference
+
+### Test Files
+- **clarion-tests/** - Example Clarion code for testing language features
+
+## 📋 Release Information
+- **RELEASE_NOTES_v0.5.8.md** - What's new in v0.5.8
+
+## 🔧 Developer Documentation
+Internal development docs have been moved to the **`dev/`** subfolder:
+- Bug fix analyses
+- Refactoring plans
+- Test session summaries
+- Technical deep-dives
+
+See **`dev/README.md`** for the full developer documentation index.
+
+## 🔗 Project Documentation
+High-level project docs are in the **root directory**:
+- `README.md` - Project overview and installation
+- `CHANGELOG.md` - Complete version history
+- `TODO.md` - Feature tracking and roadmap
+- `TESTING.md` - How to run tests
+- `PUBLISHING_GUIDE.md` - Publishing to marketplace
