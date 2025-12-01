@@ -847,6 +847,105 @@ ComputeIt PROCEDURE
 LOC:Var LONG
   CODE
   LOC:Var = 10
+```
+
+---
+
+## Conditional Compilation Directives
+
+### OMIT and COMPILE
+- Control which sections of source code are included or excluded from compilation
+- Use terminator strings to mark the end of a block
+- Support conditional expressions based on EQUATE values
+- Can be nested up to 8 levels deep (plus one additional level for omitted code)
+- **IMPORTANT**: Not compatible with ABC Application Class Parser
+
+### OMIT Directive
+- Excludes a block of source code from compilation
+- Syntax: `OMIT(terminator [,expression])`
+- The entire line containing the terminator is included in the OMIT block
+- Block executes (code is omitted) when expression evaluates to TRUE
+- If expression contains undefined EQUATE, it's assumed to be 0
+
+#### OMIT Examples
+```clarion
+! Unconditional OMIT (always omit the block)
+OMIT('**END**')
+  ! This code is never compiled
+  Message('Debug Info')
+**END**
+
+! Conditional OMIT (omit only if _WIDTH32_ is true)
+OMIT('***',_WIDTH32_)
+  SIGNED EQUATE(SHORT)    ! Only for 16-bit
+***
+
+! Complex conditional with comparison operator
+Demo EQUATE(0)
+OMIT('EndDemoChk',Demo = 0)  ! Omit when Demo is off
+  DO DemoCheck
+! EndDemoChk
+
+! Conditional OMIT with undefined EQUATE
+OMIT('EndOfFile',OnceOnly)   ! Compiles first time (OnceOnly assumed 0)
+  ! Code here compiled first pass only
+OnceOnly EQUATE(1)            ! Defined after OMIT
+! EndOfFile
+```
+
+### COMPILE Directive
+- Includes a block of source code in compilation (opposite of OMIT)
+- Syntax: `COMPILE(terminator [,expression])`
+- Block executes (code is compiled) when expression evaluates to TRUE
+- Without expression parameter, COMPILE is redundant (all code compiles by default)
+- If expression contains undefined EQUATE, it's assumed to be 0
+
+#### COMPILE Examples
+```clarion
+! Conditional COMPILE (compile only if _WIDTH32_ is true)
+COMPILE('***',_WIDTH32_)
+  SIGNED EQUATE(LONG)      ! Only for 32-bit
+  UNSIGNED EQUATE(ULONG)
+***
+
+! Complex conditional expression
+Demo EQUATE(1)
+COMPILE('EndDemoChk',Demo = 1)  ! Compile when Demo is on
+  DO DemoCheck
+! EndDemoChk
+```
+
+### Supported Conditional Operators
+Both OMIT and COMPILE support these comparison operators:
+- `<equate>` - Check if EQUATE is non-zero
+- `<equate> = <integer>` - Equal to
+- `<equate> <> <integer>` - Not equal to
+- `<equate> > <integer>` - Greater than
+- `<equate> < <integer>` - Less than
+- `<equate> >= <integer>` - Greater than or equal
+- `<equate> <= <integer>` - Less than or equal
+
+### Nested OMIT/COMPILE
+```clarion
+! Outer COMPILE for 32-bit builds
+COMPILE ('**32bit**',_width32_)
+
+  ! Inner COMPILE for debug mode
+  COMPILE ('*debug*',_debug_)
+    DEBUGGER::BUTTONLIST Equate('&Continue|&Halt|&Debug')
+  !end- COMPILE ('*debug*',_debug_)
+
+  ! Inner OMIT for debug mode (opposite logic)
+  OMIT ('*debug*',_debug_)
+    DEBUGGER::BUTTONLIST Equate('&Continue|&Halt')
+  !end- OMIT ('*debug*',_debug_)
+
+!end- COMPILE ('**32bit**',_width32_)
+
+! Alternative OMIT for non-32-bit builds
+OMIT ('**32bit**',_width32_)
+  DEBUGGER::BUTTONLIST Equate('&Continue|&Halt')
+!end- OMIT ('**32bit**',_width32_)
   RETURN
 ```
 

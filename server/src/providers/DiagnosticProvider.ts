@@ -32,6 +32,10 @@ export class DiagnosticProvider {
         const structureDiagnostics = this.validateStructureTerminators(tokens, document);
         diagnostics.push(...structureDiagnostics);
         
+        // Validate OMIT/COMPILE blocks
+        const conditionalDiagnostics = this.validateConditionalBlocks(tokens, document);
+        diagnostics.push(...conditionalDiagnostics);
+        
         const perfTime = performance.now() - perfStart;
         console.log(`[DiagnosticProvider] 📊 PERF: Validation complete | time_ms=${perfTime.toFixed(2)}, tokens=${tokens.length}, diagnostics=${diagnostics.length}`);
         
@@ -297,6 +301,107 @@ export class DiagnosticProvider {
         
         return diagnostic;
     }
+    
+    /**
+     * Validate OMIT/COMPILE blocks are properly terminated with matching terminator string
+     * @param tokens - Tokenized document
+     * @param document - Original TextDocument for position mapping
+     * @returns Array of Diagnostic objects for unterminated OMIT/COMPILE blocks
+     */
+    public static validateConditionalBlocks(tokens: Token[], document: TextDocument): Diagnostic[] {
+        const diagnostics: Diagnostic[] = [];
+        const blockStack: ConditionalBlockStackItem[] = [];
+        
+        for (let i = 0; i < tokens.length; i++) {
+            const token = tokens[i];
+            
+            // Check if this is an OMIT or COMPILE directive
+            if (token.type === TokenType.Directive) {
+                const directiveType = token.value.toUpperCase();
+                
+                if (directiveType === 'OMIT' || directiveType === 'COMPILE') {
+                    // Look for the terminator string in the following tokens
+                    // Format: OMIT('terminator') or COMPILE('terminator',expression)
+                    let terminatorString: string | null = null;
+                    
+                    // Find the string token that follows (should be in parentheses)
+                    for (let j = i + 1; j < Math.min(i + 5, tokens.length); j++) {
+                        if (tokens[j].type === TokenType.String) {
+                            // Extract the string value (remove quotes)
+                            terminatorString = tokens[j].value.replace(/^'(.*)'$/, '$1');
+                            break;
+                        }
+                    }
+                    
+                    if (terminatorString) {
+                        blockStack.push({
+                            token,
+                            blockType: directiveType,
+                            terminator: terminatorString,
+                            line: token.line,
+                            column: token.start
+                        });
+                    }
+                }
+            }
+            
+            // Check if this line contains a terminator for any open block
+            if (blockStack.length > 0 && token.type === TokenType.Comment) {
+                const lineText = document.getText({ 
+                    start: { line: token.line, character: 0 }, 
+                    end: { line: token.line, character: 1000 }
+                });
+                
+                // Check each open block to see if this line contains its terminator
+                for (let b = blockStack.length - 1; b >= 0; b--) {
+                    const block = blockStack[b];
+                    
+                    // Check if the line contains the terminator string
+                    // (case-sensitive check as per Clarion spec)
+                    if (lineText.includes(block.terminator)) {
+                        // Found matching terminator - remove from stack
+                        blockStack.splice(b, 1);
+                        break;  // Only match one block per line
+                    }
+                }
+            }
+        }
+        
+        // Any remaining blocks in the stack are unterminated
+        for (const block of blockStack) {
+            diagnostics.push(this.createUnterminatedConditionalBlockDiagnostic(block, document));
+        }
+        
+        return diagnostics;
+    }
+    
+    /**
+     * Create diagnostic for unterminated OMIT/COMPILE block
+     */
+    private static createUnterminatedConditionalBlockDiagnostic(
+        block: ConditionalBlockStackItem,
+        document: TextDocument
+    ): Diagnostic {
+        const line = block.line;
+        const lineText = document.getText({ start: { line, character: 0 }, end: { line, character: 1000 } });
+        
+        // Find the actual keyword position
+        const keywordIndex = lineText.search(/\S/);
+        const startPos = { line, character: keywordIndex >= 0 ? keywordIndex : 0 };
+        const endPos = { line, character: startPos.character + block.token.value.length };
+        
+        const diagnostic: Diagnostic = {
+            severity: DiagnosticSeverity.Error,
+            range: {
+                start: startPos,
+                end: endPos
+            },
+            message: `${block.blockType} block is not terminated with terminator string '${block.terminator}'`,
+            source: 'clarion'
+        };
+        
+        return diagnostic;
+    }
 }
 
 /**
@@ -305,6 +410,17 @@ export class DiagnosticProvider {
 interface StructureStackItem {
     token: Token;
     structureType: string;
+    line: number;
+    column: number;
+}
+
+/**
+ * Conditional block stack item for tracking OMIT/COMPILE blocks
+ */
+interface ConditionalBlockStackItem {
+    token: Token;
+    blockType: string;  // 'OMIT' or 'COMPILE'
+    terminator: string;  // The terminator string to look for
     line: number;
     column: number;
 }

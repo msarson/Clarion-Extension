@@ -54,15 +54,36 @@ Follow cursor functionality has been implemented with:
 
 ## 📋 Enhancements
 
-### Diagnostics - Unterminated Structure Detection
-**Priority:** MEDIUM  
+### ~~Diagnostics - Unterminated Structure Detection~~ ✅ COMPLETE (Dec 2024)
+**Priority:** ~~MEDIUM~~ **COMPLETE**  
 **Status:** Complete ✅
 
 Added diagnostic provider that detects:
-- IF statements not terminated with END or `.`
-- LOOP statements not terminated with END, WHILE, or UNTIL
-- Supports inline dot terminators (e.g., `IF A=B THEN C=D.`)
-- Properly handles LOOP...WHILE and LOOP...UNTIL variations
+- ✅ IF statements not terminated with END or `.`
+- ✅ LOOP statements not terminated with END, WHILE, or UNTIL
+- ✅ Supports inline dot terminators (e.g., `IF A=B THEN C=D.`)
+- ✅ Properly handles LOOP...WHILE and LOOP...UNTIL variations
+- ✅ OMIT/COMPILE blocks not terminated with matching terminator string
+- ✅ Fixed parser state corruption in large files (Dec 2024)
+
+### Performance Optimizations ✅ COMPLETE (Dec 2024)
+**Priority:** HIGH  
+**Status:** Complete ✅
+
+Major performance improvements for large files:
+- ✅ **Symbol caching**: Document symbols cached during editing, only recomputed on debounce
+- ✅ **Folding range caching**: Folding ranges cached during editing, only recomputed on debounce  
+- ✅ **Result**: ~1.5 second delay eliminated on every keystroke in large files (e.g., StringTheory.clw with 14K lines)
+- ✅ Smooth editing experience - no more freezing while typing
+
+**Before optimization:**
+- Each keystroke triggered 1.5s full re-tokenization for symbol/folding updates
+- Editing large files was extremely sluggish
+
+**After optimization:**
+- Symbols: `⚡ Document being edited, returning cached symbols`
+- Folding: `⚡ Document being edited, returning cached folding ranges`
+- Re-tokenization only happens once after 500ms of no edits (debounce)
 
 ---
 
@@ -85,6 +106,7 @@ Current coverage:
 - ✅ MAP structure rules
 - ✅ MODULE termination context rules
 - ✅ Character encoding (ANSI/ASCII only)
+- ✅ OMIT/COMPILE conditional compilation directives (Dec 2024)
 
 Needs expansion:
 - [ ] CASE structure
