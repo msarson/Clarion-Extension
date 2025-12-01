@@ -269,7 +269,8 @@ function validateTextDocument(document: TextDocument): void {
 
 // ✅ Token Cache for Performance
 
-let debounceTimeout: NodeJS.Timeout | null = null;
+// 🚀 PERF: Per-document debounce map
+const debounceTimeouts = new Map<string, NodeJS.Timeout>();
 /**
  * ✅ Retrieves cached tokens or tokenizes the document if not cached.
  */
@@ -368,14 +369,15 @@ documents.onDidChangeContent(event => {
             return;
         }
 
-        // Set up debounced token refresh
-        if (debounceTimeout) {
-            clearTimeout(debounceTimeout);
+        // 🚀 PERF: Per-document debounce - clear existing timeout for THIS document
+        const existingTimeout = debounceTimeouts.get(uri);
+        if (existingTimeout) {
+            clearTimeout(existingTimeout);
         }
 
         // 🚀 PERF: Increase debounce to 500ms and don't clear cache until then
         // This allows structure tree and other features to use stale tokens while typing
-        debounceTimeout = setTimeout(() => {
+        const timeout = setTimeout(() => {
             try {
                 logger.info(`🔍 Debounce timeout triggered, refreshing tokens for: ${uri}`);
                 
@@ -388,10 +390,16 @@ documents.onDidChangeContent(event => {
                 
                 // Validate document using cached tokens (no re-tokenization needed)
                 validateTextDocument(document);
+                
+                // Clean up timeout from map
+                debounceTimeouts.delete(uri);
             } catch (tokenError) {
                 logger.error(`❌ Error refreshing tokens in debounce: ${tokenError instanceof Error ? tokenError.message : String(tokenError)}`);
             }
         }, 500); // Increased from 300ms to 500ms
+        
+        // Store timeout for this document
+        debounceTimeouts.set(uri, timeout);
     } catch (error) {
         logger.error(`❌ Error in onDidChangeContent: ${error instanceof Error ? error.message : String(error)}`);
         logger.error(`❌ Error stack: ${error instanceof Error && error.stack ? error.stack : 'No stack available'}`);
