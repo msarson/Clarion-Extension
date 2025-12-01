@@ -167,10 +167,33 @@ Needs coverage:
 
 ## 📦 Repository Organization
 
+### Documentation Structure ✅ COMPLETE (Dec 2024)
+**Status:** Complete ✅
+
+Reorganized documentation with clear separation:
+- ✅ User-facing docs remain in `docs/` root
+- ✅ Developer/technical docs moved to `docs/dev/`
+- ✅ Created `docs/README.md` as user-facing index
+- ✅ Created `docs/dev/README.md` as developer guide
+- ✅ "What Goes Where" guidelines for future docs
+
+**User docs** (`docs/`):
+- CheatSheet.md, BuildSettings.md (guides)
+- clarion-knowledge-base.md, CLARION_LANGUAGE_REFERENCE.md (language ref)
+- RELEASE_NOTES_*.md (user release notes)
+- clarion-tests/ (example code)
+
+**Developer docs** (`docs/dev/`):
+- Bug fix analyses (FIX_*.md, HOTFIX_*.md)
+- Feature development (DIAGNOSTIC_*.md, SYMBOL_PROVIDER_*.md)
+- Test summaries (TDD_SESSION_*.md, TEST_*.md)
+- Technical fixes (TOKENIZER_BUG_*.md, UNICODE_FIX.md)
+
 ### Recent Changes
 - ✅ Created `docs/clarion-tests/` for test Clarion code
 - ✅ Created `docs/clarion-knowledge-base.md` for language reference
 - ✅ Consolidated documentation in `docs/` directory
+- ✅ Separated user and developer documentation (Dec 2024)
 
 ---
 
