@@ -363,57 +363,38 @@ documents.onDidChangeContent(event => {
         const document = event.document;
         const uri = document.uri;
         
-        // Log all document details
-        logger.info(`📝 [CRITICAL] Document content changed: ${uri}`);
-        logger.info(`📝 [CRITICAL] Document details:
-            - URI: ${uri}
-            - Language ID: ${document.languageId}
-            - Version: ${document.version}
-            - Line Count: ${document.lineCount}
-            - Content Length: ${document.getText().length}
-            - First 100 chars: ${document.getText().substring(0, 100).replace(/\n/g, '\\n')}
-        `);
-        
         // Skip XML files
         if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
-            logger.info(`🔍 [CRITICAL] XML file content changed: ${uri}`);
-            logger.info(`🔍 [CRITICAL] XML file content (first 200 chars): ${document.getText().substring(0, 200).replace(/\n/g, '\\n')}`);
             return;
-        }
-
-        // Clear tokens from cache
-        logger.info(`🔍 [CRITICAL] Clearing tokens for changed document: ${uri}`);
-        try {
-            tokenCache.clearTokens(document.uri); // 🔥 Always clear immediately
-            logger.info(`🔍 [CRITICAL] Successfully cleared tokens for document: ${uri}`);
-        } catch (cacheError) {
-            logger.error(`❌ [CRITICAL] Error clearing tokens: ${cacheError instanceof Error ? cacheError.message : String(cacheError)}`);
         }
 
         // Set up debounced token refresh
         if (debounceTimeout) {
-            logger.info(`🔍 [CRITICAL] Clearing existing debounce timeout for: ${uri}`);
             clearTimeout(debounceTimeout);
         }
 
-        logger.info(`🔍 [CRITICAL] Setting up debounced token refresh for: ${uri}`);
+        // 🚀 PERF: Increase debounce to 500ms and don't clear cache until then
+        // This allows structure tree and other features to use stale tokens while typing
         debounceTimeout = setTimeout(() => {
             try {
-                logger.info(`🔍 [CRITICAL] Debounce timeout triggered, refreshing tokens for: ${uri}`);
+                logger.info(`🔍 Debounce timeout triggered, refreshing tokens for: ${uri}`);
+                
+                // NOW clear cache and refresh
+                tokenCache.clearTokens(document.uri);
                 
                 // PERFORMANCE: Refresh tokens once, then use for both diagnostics and other operations
                 const tokens = getTokens(document); // ⬅️ refreshes the cache
-                logger.info(`🔍 [CRITICAL] Successfully refreshed tokens after edit: ${uri}, got ${tokens.length} tokens`);
+                logger.info(`🔍 Successfully refreshed tokens after edit: ${uri}, got ${tokens.length} tokens`);
                 
                 // Validate document using cached tokens (no re-tokenization needed)
                 validateTextDocument(document);
             } catch (tokenError) {
-                logger.error(`❌ [CRITICAL] Error refreshing tokens in debounce: ${tokenError instanceof Error ? tokenError.message : String(tokenError)}`);
+                logger.error(`❌ Error refreshing tokens in debounce: ${tokenError instanceof Error ? tokenError.message : String(tokenError)}`);
             }
-        }, 300);
+        }, 500); // Increased from 300ms to 500ms
     } catch (error) {
-        logger.error(`❌ [CRITICAL] Error in onDidChangeContent: ${error instanceof Error ? error.message : String(error)}`);
-        logger.error(`❌ [CRITICAL] Error stack: ${error instanceof Error && error.stack ? error.stack : 'No stack available'}`);
+        logger.error(`❌ Error in onDidChangeContent: ${error instanceof Error ? error.message : String(error)}`);
+        logger.error(`❌ Error stack: ${error instanceof Error && error.stack ? error.stack : 'No stack available'}`);
     }
 });
 
