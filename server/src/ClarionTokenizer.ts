@@ -411,6 +411,18 @@ export class ClarionTokenizer {
             t.subType === TokenType.MethodImplementation
         );
 
+        // 🚀 PERF: Build line-to-token index ONCE (O(n) instead of O(n²))
+        const tokensByLine = new Map<number, Token[]>();
+        for (const token of this.tokens) {
+            if (!tokensByLine.has(token.line)) {
+                tokensByLine.set(token.line, []);
+            }
+            tokensByLine.get(token.line)!.push(token);
+        }
+
+        // Collect new tokens to add (batch insert at end)
+        const newTokens: Token[] = [];
+
         for (const proc of procedures) {
             const procEnd = proc.finishesAt || this.lines.length - 1;
             
@@ -425,18 +437,14 @@ export class ClarionTokenizer {
                 }
                 
                 // Match variable declarations at column 0: varName   type or varName type(size)
-                // Updated to handle types with parameters like CSTRING(1024), STRING(255), etc.
                 const varMatch = line.match(/^([A-Za-z_][A-Za-z0-9_:]*)\s+(&?[A-Za-z_][A-Za-z0-9_]*(?:\([^)]*\))?)/i);
                 if (varMatch) {
                     const varName = varMatch[1];
                     const isReference = varMatch[2].startsWith('&');
                     
-                    // 🔍 CHECK: Skip if this variable already exists with structure field metadata
-                    const existingToken = this.tokens.find(t => 
-                        t.line === lineNum && 
-                        t.value === varName && 
-                        t.start === 0
-                    );
+                    // 🚀 PERF: O(1) lookup instead of O(n) find
+                    const lineTokens = tokensByLine.get(lineNum);
+                    const existingToken = lineTokens?.find(t => t.value === varName && t.start === 0);
                     
                     if (existingToken) {
                         continue;
@@ -452,15 +460,15 @@ export class ClarionTokenizer {
                         maxLabelLength: 0
                     };
                     
-                    // Insert the token in the correct position
-                    let insertIndex = this.tokens.findIndex(t => t.line > lineNum);
-                    if (insertIndex === -1) {
-                        insertIndex = this.tokens.length;
-                    }
-                    
-                    this.tokens.splice(insertIndex, 0, varToken);
+                    newTokens.push(varToken);
                 }
             }
+        }
+
+        // 🚀 PERF: Batch insert and sort ONCE instead of repeated splice operations
+        if (newTokens.length > 0) {
+            this.tokens.push(...newTokens);
+            this.tokens.sort((a, b) => a.line - b.line || a.start - b.start);
         }
     }
 }
