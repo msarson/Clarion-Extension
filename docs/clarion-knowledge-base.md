@@ -319,6 +319,99 @@ Price = CHOOSE(Quantity, 10.00, 9.50, 9.00, 8.50)
 - Return type determined by value parameter types
 - More efficient than IF/ELSIF chains for simple selections
 
+### EXECUTE Structure
+```clarion
+EXECUTE expression
+  statement 1
+  statement 2
+  [BEGIN
+    statements
+  END]
+  statement n
+[ELSE]
+  statement
+END
+```
+
+**Purpose:** Single statement execution structure based on numeric index (1 to n).
+
+**Key Rules:**
+- `expression` - Numeric expression or integer variable
+- Each statement position corresponds to the expression value (1-based)
+- If expression = 1, executes statement 1
+- If expression = 2, executes statement 2
+- If expression = n, executes statement n
+- If expression = 0 or > n, executes ELSE statement (if present)
+- Must terminate with END or `.`
+
+**BEGIN Structure:**
+- Allows multiple statements to be treated as a single EXECUTE option
+- Terminated by END or `.`
+- Counts as one statement in the EXECUTE sequence
+
+**Important Notes:**
+- Most efficient structure for integer-based branching (1 to n)
+- More efficient than CASE or IF/ELSIF for sequential integer values
+- ELSE is optional - if omitted and expression is out of range, execution continues after EXECUTE
+- Can nest other structures (IF, CASE, LOOP, EXECUTE, BEGIN) within EXECUTE
+- EXECUTE can be nested within other structures
+
+**Examples:**
+```clarion
+! Simple EXECUTE
+EXECUTE MenuChoice
+  ProcessNew()
+  ProcessEdit()
+  ProcessDelete()
+  ProcessPrint()
+ELSE
+  Message('Invalid menu choice')
+END
+
+! EXECUTE with BEGIN blocks
+EXECUTE Action
+  InsertRecord()
+  BEGIN
+    LocateRecord()
+    UpdateRecord()
+  END
+  DeleteRecord()
+END
+
+! Nested structures
+EXECUTE ReportType
+  BEGIN
+    IF DetailLevel = 1 THEN
+      SummaryReport()
+    ELSE
+      DetailedReport()
+    END
+  END
+  QuickReport()
+  CustomReport()
+ELSE
+  Message('Unknown report type')
+END
+
+! Inline terminator
+EXECUTE Choice
+  X = 1
+  X = 2
+  X = 3
+.
+```
+
+**Diagnostic Rules:**
+- EXECUTE must be terminated with END or `.`
+- Expression must evaluate to a numeric value
+- BEGIN blocks within EXECUTE must be properly terminated
+- ELSE is optional but must appear after all statement options if present
+
+**Performance Comparison:**
+- **EXECUTE** - Most efficient for sequential integers (1 to n)
+- **CASE** - More efficient than IF/ELSIF for multiple discrete values
+- **IF/ELSIF** - Least efficient for multiple conditions
+
 ---
 
 ## Module Structure
