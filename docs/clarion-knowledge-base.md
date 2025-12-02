@@ -1120,6 +1120,178 @@ CODE
   FREE(MyQueue)  ! Free all entries
 ```
 
+### GROUP Structure
+```clarion
+label GROUP([group])
+       [,PRE(prefix)] [,DIM(dimensions)] [,OVER(variable)] [,NAME('name')]
+       [,EXTERNAL] [,DLL] [,STATIC] [,THREAD] [,BINDABLE] [,TYPE]
+       [,PRIVATE] [,PROTECTED]
+  declarations
+END
+```
+
+**Purpose:** Declares a compound data structure for organizing related variables.
+
+---
+
+### GROUP Attributes
+
+**group (optional)**
+- Label of previously declared GROUP or QUEUE
+- GROUP inherits fields from the named group
+- Can add additional fields after inherited ones
+- If inheriting from QUEUE/RECORD, only fields inherited (not functionality)
+
+**PRE(prefix)**
+- Declares label prefix for variables within the structure
+- NOT valid on GROUP within FILE structure
+
+**DIM(dimensions)**
+- Dimensions variables into an array
+- Creates structured array
+- Access using Field Qualification syntax with subscripts
+
+**OVER(variable)**
+- Shares memory location with another variable or structure
+- Variables occupy same memory space
+
+**NAME('name')**
+- Specifies alternate "external" name for the field
+
+**EXTERNAL**
+- Variable defined in external library
+- Memory allocated by external library
+- NOT valid within FILE, QUEUE, or GROUP declarations
+
+**DLL**
+- Variable defined in .DLL
+- Required in addition to EXTERNAL attribute
+
+**STATIC**
+- Variable's memory permanently allocated
+- For procedure-local GROUPs, makes data persistent
+
+**THREAD**
+- Memory allocated once per execution thread
+- Implicitly adds STATIC attribute on procedure-local data
+
+**BINDABLE**
+- All variables available for dynamic expressions
+- Enables `BIND(group)` for all fields
+- Uses NAME attribute (or label with prefix) as logical name
+- Creates larger .EXE - use only when many fields used dynamically
+
+**TYPE**
+- GROUP is type definition (no memory allocated)
+- Used for GROUPs passed as PROCEDURE parameters
+- Allows receiving procedure to directly address component fields
+- Parameter declaration instantiates local prefix
+
+**PRIVATE**
+- GROUP and all component fields not visible outside module containing CLASS methods
+- Valid only in CLASS
+
+**PROTECTED**
+- Variable not visible outside base CLASS and derived CLASS methods
+- Valid only in CLASS
+
+---
+
+### Important Characteristics
+
+**String Treatment:**
+- When referenced in statement/expression, GROUP treated as STRING
+- Composed of all variables within structure
+
+**Numeric Storage Warning:**
+- Numeric variables (except DECIMAL) don't collate properly when treated as strings
+- Building KEY on GROUP with numeric variables may produce unexpected collating sequence
+
+**Nesting:**
+- GROUP may be nested within RECORD or another GROUP
+- Supports hierarchical data organization
+
+**Field Access:**
+- Use Field Qualification syntax (e.g., `GroupName.FieldName`)
+- WHAT() and WHERE() procedures allow positional field access
+
+---
+
+**Examples:**
+```clarion
+! Simple GROUP
+NameGroup GROUP
+FirstName   STRING(20)
+MiddleInit  STRING(1)
+LastName    STRING(20)
+          END
+
+! GROUP with prefix
+AddressGrp GROUP,PRE(ADR)
+ADR:Street   STRING(50)
+ADR:City     STRING(30)
+ADR:State    STRING(2)
+ADR:Zip      STRING(10)
+           END
+
+! GROUP inheriting from another GROUP
+PersonType GROUP,TYPE
+Name         STRING(30)
+Age          LONG
+           END
+
+Employee GROUP(PersonType)  ! Inherits Name and Age
+EmployeeID   LONG           ! Additional field
+Department   STRING(20)
+         END
+
+! Dimensioned GROUP (structured array)
+DateTimeGrp GROUP,DIM(10)
+Date          LONG                    ! Referenced as DateTimeGrp[1].Date
+StartStopTime LONG,DIM(2)             ! Referenced as DateTimeGrp[1].StartStopTime[1]
+            END
+
+! BINDABLE GROUP for dynamic expressions
+FileNames GROUP,BINDABLE
+FileName    STRING(8),NAME('FILE')
+Dot         STRING('.'),NAME('Dot')
+Extension   STRING(3),NAME('EXT')
+          END
+! Now can use: BIND(FileNames) and evaluate dynamic expressions
+
+! TYPE GROUP for parameter passing
+PassGroup GROUP,TYPE
+F1          STRING(20)
+F2          STRING(1)
+F3          STRING(20)
+          END
+
+ProcessData PROCEDURE(PassGroup PG)  ! PG: prefix
+CODE
+  Message(PG.F1)  ! Access using field qualification
+
+! OVER attribute - shared memory
+TotalAmount DECIMAL(12,2)
+AmountParts GROUP,OVER(TotalAmount)
+Dollars       LONG
+Cents         SHORT
+            END
+! TotalAmount and AmountParts occupy same memory
+
+! Nested GROUP
+CustomerRec GROUP
+Name          STRING(50)
+Address       GROUP
+  Street        STRING(50)
+  City          STRING(30)
+  State         STRING(2)
+  Zip           STRING(10)
+              END
+Phone         STRING(20)
+            END
+! Access as CustomerRec.Address.City
+```
+
 ---
 
 ## Module Structure
