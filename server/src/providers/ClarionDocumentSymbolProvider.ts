@@ -935,6 +935,70 @@ export class ClarionDocumentSymbolProvider {
                 }
             }
         }
+        // VIEW support: add JOIN hierarchy and PROJECT fields for better structure view
+        else if (upperValue === "VIEW") {
+            // Look ahead to find JOIN and PROJECT
+            let nestLevel = 0;
+            let currentJoinSymbol: ClarionDocumentSymbol | null = null;
+            let joinStack: ClarionDocumentSymbol[] = [];
+            
+            for (let j = index + 1; j < tokens.length && tokens[j].line <= (finishesAt ?? line); j++) {
+                const childToken = tokens[j];
+                const childValue = childToken.value.toUpperCase();
+                
+                // Handle PROJECT
+                if (childValue === "PROJECT") {
+                    const projectContent = this.extractParenContent(tokens, j + 2);
+                    const projectSymbol = this.createSymbol(
+                        `PROJECT(${projectContent.content})`,
+                        "",
+                        SymbolKind.Field,
+                        this.getTokenRange(tokens, childToken.line, childToken.line),
+                        this.getTokenRange(tokens, childToken.line, childToken.line),
+                        []
+                    );
+                    
+                    // Add to current JOIN or to VIEW root
+                    if (currentJoinSymbol) {
+                        currentJoinSymbol.children!.push(projectSymbol);
+                    } else {
+                        structureSymbol.children!.push(projectSymbol);
+                    }
+                }
+                // Handle JOIN
+                else if (childValue === "JOIN") {
+                    const joinContent = this.extractParenContent(tokens, j + 2);
+                    const joinSymbol = this.createSymbol(
+                        `JOIN(${joinContent.content})`,
+                        "",
+                        SymbolKind.Event,  // 🟢 JOIN gets event icon
+                        this.getTokenRange(tokens, childToken.line, childToken.line),
+                        this.getTokenRange(tokens, childToken.line, childToken.line),
+                        []
+                    );
+                    
+                    // Add to parent JOIN or VIEW root
+                    if (currentJoinSymbol) {
+                        currentJoinSymbol.children!.push(joinSymbol);
+                        joinStack.push(currentJoinSymbol);
+                    } else {
+                        structureSymbol.children!.push(joinSymbol);
+                    }
+                    
+                    currentJoinSymbol = joinSymbol;
+                    nestLevel++;
+                }
+                // Handle END for JOIN
+                else if (childValue === "END" && nestLevel > 0) {
+                    nestLevel--;
+                    if (joinStack.length > 0) {
+                        currentJoinSymbol = joinStack.pop()!;
+                    } else {
+                        currentJoinSymbol = null;
+                    }
+                }
+            }
+        }
         // MAP support: add Functions container to organize MAP procedures
         else if (upperValue === "MAP") {
             const functionsContainer = this.createSymbol(
