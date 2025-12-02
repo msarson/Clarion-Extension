@@ -543,6 +543,183 @@ GET(MyQueue, +QUE:LastName, +QUE:FirstName)
 GET(MyQueue, '+LastName,+FirstName')
 ```
 
+### SET Statement
+```clarion
+! FILE usage - physical order
+SET(file)
+SET(file, key)
+SET(file, filepointer)
+
+! KEY usage - keyed sequence
+SET(key)
+SET(key, key)
+SET(key, keypointer)
+SET(key, key, filepointer)
+
+! VIEW usage
+SET(view)
+SET(view, number)
+```
+
+**Purpose:** Initializes sequential processing of a FILE or VIEW for NEXT/PREVIOUS operations.
+
+**Important:** SET does not retrieve a record - it only sets up processing order and starting point.
+
+---
+
+### FILE Usage
+
+**SET(file)**
+- Physical record order processing
+- Positions to beginning (for NEXT) or end (for PREVIOUS)
+- No starting point specified
+
+**SET(file, key)**
+- Physical record order processing
+- Positions to first record matching key component field values
+- **RARELY USED** - only useful if file physically sorted in key order
+- **Common mistake:** Using this instead of `SET(key, key)`
+
+**SET(file, filepointer)**
+- Physical record order processing
+- Positions to record at filepointer position
+- filepointer from POINTER(file) - driver dependent value
+
+---
+
+### KEY Usage
+
+**SET(key)**
+- Keyed sequence processing in key sort order
+- Positions to beginning (for NEXT) or end (for PREVIOUS)
+- No starting point specified
+
+**SET(key, key)**
+- Keyed sequence processing in key sort order
+- Positions to first/last record matching key component field values
+- **Both key parameters must be the same**
+- If exact match: NEXT reads first match, PREVIOUS reads last match
+- If no exact match: NEXT reads next greater, PREVIOUS reads next lesser
+
+**SET(key, keypointer)**
+- Keyed sequence processing in key sort order
+- Positions to record at keypointer position within key
+- keypointer from POINTER(key) - driver dependent value
+
+**SET(key, key, filepointer)**
+- Keyed sequence processing in key sort order
+- Positions to record matching key values at exact record number (filepointer)
+- **Both key parameters must be the same**
+- Combines key matching with specific record position
+
+---
+
+### VIEW Usage
+
+**SET(view)**
+- Sequential processing for VIEW
+- Positions to beginning or end of filtered record set
+- Records sorted by ORDER attribute
+- VIEW must be OPEN before SET
+
+**SET(view, number)**
+- Sequential processing for VIEW with partial ORDER
+- `number` - Limits to first N expressions in ORDER attribute
+- Assumes values in first N ORDER expressions are fixed
+- VIEW must be OPEN before SET
+
+---
+
+**Important Notes:**
+- SET combined with NEXT processes forward through file/key
+- SET combined with PREVIOUS processes backward through file/key
+- filepointer/keypointer values are file driver dependent
+- Attempting to SET past end of file sets EOF() to true
+- Attempting to SET before beginning of file sets BOF() to true
+
+**Examples:**
+```clarion
+! FILE - Sequential processing from start
+SET(Customer)
+LOOP
+  NEXT(Customer)
+  IF ERROR() THEN BREAK .
+  ! Process record
+END
+
+! KEY - Process in key order
+SET(CUS:NameKey)
+LOOP
+  NEXT(Customer)
+  IF ERROR() THEN BREAK .
+  ! Process in name order
+END
+
+! KEY - Start at specific value
+CUS:LastName = 'Smith'
+SET(CUS:NameKey, CUS:NameKey)
+LOOP
+  NEXT(Customer)
+  IF ERROR() THEN BREAK .
+  IF CUS:LastName <> 'Smith' THEN BREAK .  ! Stop when past 'Smith'
+  ! Process all Smith records
+END
+
+! FILE - Resume from saved position
+SavePos# = POINTER(Customer)
+! ... later ...
+SET(Customer, SavePos#)
+NEXT(Customer)
+
+! KEY - Resume from saved key position
+SavePos# = POINTER(CUS:NameKey)
+! ... later ...
+SET(CUS:NameKey, SavePos#)
+NEXT(Customer)
+
+! VIEW - Sequential processing
+OPEN(CustomerView)
+SET(CustomerView)
+LOOP
+  NEXT(CustomerView)
+  IF ERROR() THEN BREAK .
+  ! Process filtered records
+END
+
+! VIEW - Partial ORDER
+SET(CustomerView, 2)  ! First 2 ORDER expressions fixed
+LOOP
+  NEXT(CustomerView)
+  IF ERROR() THEN BREAK .
+  ! Process subset
+END
+```
+
+**Common Patterns:**
+```clarion
+! Forward scan
+SET(key)
+LOOP
+  NEXT(file)
+  IF ERROR() THEN BREAK .
+END
+
+! Backward scan
+SET(key)
+LOOP
+  PREVIOUS(file)
+  IF ERROR() THEN BREAK .
+END
+
+! Range scan
+key:field = StartValue
+SET(key, key)
+LOOP
+  NEXT(file)
+  IF ERROR() OR key:field > EndValue THEN BREAK .
+END
+```
+
 ---
 
 ## Module Structure
