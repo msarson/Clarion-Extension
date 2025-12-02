@@ -289,8 +289,11 @@ export class ClarionDocumentSymbolProvider {
                         // Format: ProcedureName(parameters),returnType
                         else if (nextToken.type === TokenType.Label &&
                                 j + 1 < tokens.length &&
-                                tokens[j + 1].value === "(") {
+                                tokens[j + 1].value === "(" &&
+                                nextToken.value.toUpperCase() !== "MODULE" &&
+                                nextToken.value.toUpperCase() !== "MAP") {
                             // This looks like a procedure declaration in shorthand MAP syntax
+                            // But exclude MODULE and MAP keywords themselves
                             nextToken.subType = TokenType.MapProcedure;
                             logger.info(`Marked shorthand procedure ${nextToken.value} at line ${nextToken.line} as MAP/MODULE procedure`);
                         }
@@ -2061,6 +2064,8 @@ export class ClarionDocumentSymbolProvider {
             // Handle MAP and MODULE procedures
             else if (isMapProcedure ||
                     (symbol.kind === SymbolKind.Function &&
+                     !symbol.name.startsWith("MODULE") &&  // Don't treat MODULE structure as a function
+                     !symbol.name.startsWith("MAP") &&      // Don't treat MAP structure as a function
                      (parent?.name?.startsWith("MAP") || parent?.name?.startsWith("MODULE")))) {
                 // For MAP and MODULE, use the Functions container if available
                 if (parent.$clarionFunctions) {
