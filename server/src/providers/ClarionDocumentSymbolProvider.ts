@@ -760,10 +760,18 @@ export class ClarionDocumentSymbolProvider {
                 { value: "", nextIndex: index + 1 };
             const preResult = this.extractAttribute(tokens, index + 1, "PRE", line, token);
             
+            // For GROUP: extract OVER and DIM attributes
+            const overResult = upperValue === "GROUP" ? 
+                this.extractAttribute(tokens, index + 1, "OVER", line, token) : 
+                { value: "", nextIndex: index + 1 };
+            const dimResult = this.extractAttribute(tokens, index + 1, "DIM", line, token);
+            
             const driverValue = driverResult.value ? this.extractStringContents(driverResult.value) : "";
             const preValue = preResult.value;
+            const overValue = overResult.value;
+            const dimValue = dimResult.value;
 
-            // Create a display name with the DRIVER and PRE values
+            // Create a display name with the DRIVER, PRE, OVER, and DIM values
             let displayParts = [];
 
             if (labelName) {
@@ -778,6 +786,14 @@ export class ClarionDocumentSymbolProvider {
 
             if (preValue) {
                 displayParts.push(`PRE(${preValue})`);
+            }
+            
+            if (overValue) {
+                displayParts.push(`OVER(${overValue})`);
+            }
+            
+            if (dimValue) {
+                displayParts.push(`DIM(${dimValue})`);
             }
 
             displayName = displayParts.join(",");
