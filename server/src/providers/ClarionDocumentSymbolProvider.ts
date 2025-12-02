@@ -287,7 +287,8 @@ export class ClarionDocumentSymbolProvider {
                         }
                         // Special case for MAP: Look for procedure declarations without PROCEDURE keyword
                         // Format: ProcedureName(parameters),returnType
-                        else if (nextToken.type === TokenType.Label &&
+                        // Can be either Label token (with space: "ToUpper (byte)") or Function token (no space: "MemCmp(long)")
+                        else if ((nextToken.type === TokenType.Label || nextToken.type === TokenType.Function) &&
                                 j + 1 < tokens.length &&
                                 tokens[j + 1].value === "(" &&
                                 nextToken.value.toUpperCase() !== "MODULE" &&

@@ -17,7 +17,7 @@ import {
 import { DocumentSymbol, SymbolKind as LSPSymbolKind } from 'vscode-languageserver-types';
 import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("StructureViewProvider");
-logger.setLevel("error"); // PERF: Only log errors to reduce overhead
+logger.setLevel("info"); // PERF: Only log errors to reduce overhead
 
 // 📊 PERFORMANCE: Create perf logger that always logs
 const perfLogger = LoggerManager.getLogger("StructureViewPerf");

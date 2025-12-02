@@ -722,6 +722,90 @@ END
 
 ---
 
+## MAP - External Procedure Declarations
+
+### Overview
+MAP declares external procedures from libraries, DLLs, or other modules. MAP provides two syntax forms for procedure declarations.
+
+### Syntax Forms
+
+#### Form 1: With PROCEDURE Keyword (Column 0)
+**Rule:** When using the PROCEDURE keyword, the procedure label MUST be at column 0.
+
+```clarion
+MAP
+MyProc PROCEDURE(STRING pName),LONG    ! Label at column 0
+SaveData PROCEDURE(*DataGroup),BYTE   ! Label at column 0
+END
+```
+
+#### Form 2: Shorthand Syntax (Indented)
+**Rule:** When omitting the PROCEDURE keyword, the procedure name MUST be indented (NOT at column 0).
+
+**CRITICAL:** This is the ONLY place in Clarion where an identifier at indented position (not column 0) can be a procedure declaration.
+
+```clarion
+MAP
+  ToUpper(byte char), byte             ! Indented, no PROCEDURE keyword
+  ToLower(byte char), byte             ! Indented, no PROCEDURE keyword
+  MemCmp(long buf1, long buf2, unsigned count), long  ! With or without space before (
+END
+```
+
+**Space before parenthesis is optional:**
+- `ToUpper (byte char)` - Valid (with space)
+- `MemCmp(long buf1)` - Valid (without space)
+
+### MODULE within MAP
+
+MODULE sections within MAP group procedures from the same external library:
+
+```clarion
+MAP
+  ! Direct MAP procedures
+  SortCaseSensitive(*LinesGroupType p1, *LinesGroupType p2), Long
+  SortLength(*LinesGroupType p1, *LinesGroupType p2), Long
+  
+  MODULE('kernel32.dll')
+    GetTickCount(), ULONG              ! Indented, inside MODULE
+    GetCurrentProcessId(), ULONG       ! Indented, inside MODULE
+  END                                   ! Terminates MODULE
+  
+  MODULE('user32.dll')
+    MessageBoxA(LONG, *CSTRING, *CSTRING, LONG), LONG
+  END
+END
+```
+
+**Important MODULE Rules:**
+- MODULE is terminated by END or by the start of another MODULE
+- Procedures inside MODULE use the same shorthand syntax (indented, no PROCEDURE keyword)
+- MODULE cannot appear outside of MAP
+- MODULE can have the MODULE attribute in CLASS declarations (different usage)
+
+### Validation Rules
+
+**Valid:**
+```clarion
+MAP
+  ! Shorthand - indented, no PROCEDURE keyword
+  MyFunc(long x), long
+  
+  ! Traditional - column 0, with PROCEDURE keyword  
+MyProc PROCEDURE(string s), byte
+END
+```
+
+**Invalid:**
+```clarion
+MAP
+MyFunc(long x), long          ! ERROR: Shorthand form must be indented
+  MyProc PROCEDURE(string s)  ! ERROR: PROCEDURE keyword requires column 0 label
+END
+```
+
+---
+
 ## File Declarations
 
 ### FILE Structure
