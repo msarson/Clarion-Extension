@@ -259,6 +259,66 @@ END
 - TO requires two expressions (lower and upper bounds)
 - OROF must be associated with a preceding OF
 
+### CHOOSE Function
+```clarion
+! Index-based selection
+CHOOSE(expression, value, value [,value...])
+
+! Condition-based selection
+CHOOSE(condition [,truevalue, falsevalue])
+```
+
+**Purpose:** Returns a chosen value from a list based on an expression or condition.
+
+**Syntax Forms:**
+
+1. **Index-based:** `CHOOSE(expression, value1, value2, value3, ...)`
+   - `expression` - Arithmetic expression that resolves to a positive integer
+   - Returns the value at position indicated by expression (1-based)
+   - If expression is out of range, returns the **last** value parameter
+
+2. **Condition-based:** `CHOOSE(condition [,truevalue, falsevalue])`
+   - `condition` - Logical expression
+   - Returns `truevalue` if true, `falsevalue` if false
+   - If no values provided, returns 1 (true) or 0 (false)
+
+**Return Data Type Rules:**
+| All Value Parameters | Return Data Type |
+|---------------------|------------------|
+| All LONG | LONG |
+| DECIMAL or LONG | DECIMAL |
+| All STRING | STRING |
+| DECIMAL, LONG, or STRING | DECIMAL |
+| Anything else | REAL |
+
+**Examples:**
+```clarion
+! Index-based selection
+DayName = CHOOSE(DayOfWeek, 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat')
+! If DayOfWeek = 1, returns 'Sun'
+! If DayOfWeek = 3, returns 'Tue'
+! If DayOfWeek = 99, returns 'Sat' (last value)
+
+! Condition-based (with values)
+Status = CHOOSE(Score >= 60, 'Pass', 'Fail')
+! Returns 'Pass' if Score >= 60, else 'Fail'
+
+! Condition-based (no values)
+Result = CHOOSE(X > Y)
+! Returns 1 if X > Y, else 0
+
+! Complex expression
+Price = CHOOSE(Quantity, 10.00, 9.50, 9.00, 8.50)
+! Quantity=1: $10.00, Quantity=2: $9.50, Quantity=3+: $8.50
+```
+
+**Key Notes:**
+- CHOOSE is a function, not a structure (no END required)
+- Expression/condition is evaluated first
+- Out-of-range index returns last value (not first or error)
+- Return type determined by value parameter types
+- More efficient than IF/ELSIF chains for simple selections
+
 ---
 
 ## Module Structure
