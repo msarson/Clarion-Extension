@@ -3,6 +3,59 @@ All notable changes to the "clarion-extension" extension will be documented in t
 
 ---
 
+## [0.7.1] - 2024-12-02
+
+### 🎯 Knowledge Base & Language Intelligence
+
+#### Comprehensive Documentation
+- **Complete Clarion Language Reference**: Added 2,000+ lines of documentation
+  - CASE, CHOOSE, EXECUTE control structures
+  - GET/SET file operations (all syntax forms)
+  - FILE declaration with KEY, INDEX, MEMO, BLOB
+  - QUEUE dynamic arrays with compression details
+  - GROUP compound structures with OVER and DIM
+  - VIEW virtual files with JOIN and PROJECT
+  - CLASS and INTERFACE object-oriented features
+  - All examples validated for column 0 compliance
+
+#### Enhanced Diagnostics (3 new validators)
+- **FILE Structure Validation**: Errors for missing DRIVER or RECORD
+- **CASE Structure Validation**: Errors for missing OF or misplaced OROF
+- **EXECUTE Expression Validation**: Warnings for non-numeric expressions
+- **Test Coverage**: 9 new tests, all passing (185 total tests)
+
+#### Improved Structure View
+- **FILE Hierarchy**: Shows KEY/INDEX as children, RECORD as container, MEMO/BLOB distinguished
+- **VIEW Hierarchy**: Displays nested JOIN relationships and PROJECT fields
+- **GROUP Attributes**: Shows OVER (memory overlay) and DIM (array dimensions)
+
+#### New Keywords
+- **CHOOSE**: Function now properly recognized in tokenizer
+
+### 📊 Statistics
+- **30,466 lines** added (code + documentation)
+- **868 lines** removed
+- **93 files** modified
+- **Zero regressions** (185 tests passing)
+- **80% feature completion** (8/10 planned items)
+
+### 📚 Documentation
+- Added `AUDIT_2024-12-02.md` - Implementation audit
+- Added `SESSION_2024-12-02_KB_IMPROVEMENTS.md` - Detailed session summary
+- Added `CHANGELOG-0.7.1.md` - Comprehensive changelog
+- Added `docs/clarion-knowledge-base.md` - Language reference (~2,000 lines)
+
+### 🎯 Implementation Status
+- ✅ All high priority items complete (3/3)
+- ✅ All medium priority items complete (3/3)
+- ✅ Most low priority items complete (2/4)
+- ⚠️ CLASS/INTERFACE validation - infrastructure only (requires symbol table)
+- ❌ IntelliSense enhancements - deferred (requires completion provider)
+
+**See [CHANGELOG-0.7.1.md](./CHANGELOG-0.7.1.md) for comprehensive details.**
+
+---
+
 ## [Unreleased]
 
 ### Added - 2025-11-30

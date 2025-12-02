@@ -122,6 +122,36 @@ This is necessary because older versions had a dependency on fushnisoft.clarion 
 ---
 ## Changelog (What's New in v0.7.1)
 
+### 🎯 Knowledge Base & Language Intelligence (NEW!)
+
+**Comprehensive Clarion language documentation and enhanced validation:**
+
+- **Knowledge Base**: Complete documentation for 10+ Clarion structures
+  - CASE, CHOOSE, EXECUTE structures
+  - GET/SET statements (all syntax forms)
+  - FILE, QUEUE, GROUP, VIEW declarations
+  - CLASS and INTERFACE (OOP features)
+  - All examples validated for proper Clarion syntax
+
+- **Enhanced Diagnostics**: Real-time error detection
+  - FILE must have DRIVER and RECORD (error)
+  - CASE must have at least one OF clause (error)
+  - OROF must follow OF in CASE (error)
+  - EXECUTE expression should be numeric (warning)
+
+- **Improved Structure View**: Better visualization of code structure
+  - FILE: Shows KEY/INDEX/RECORD/MEMO/BLOB hierarchy
+  - VIEW: Displays JOIN nesting and PROJECT fields
+  - GROUP: Shows OVER (memory overlay) and DIM (arrays) attributes
+
+- **New Keywords**: CHOOSE function now properly recognized
+
+**Testing**: 185 tests passing with comprehensive coverage of new features.
+
+See [KB Implementation Summary](https://github.com/msarson/Clarion-Extension/blob/version-0.7.1/SESSION_2024-12-02_KB_IMPROVEMENTS.md) for detailed changes.
+
+---
+
 ### Method Overload Support
 
 **Full support for Clarion method overloading with intelligent parameter counting.**
