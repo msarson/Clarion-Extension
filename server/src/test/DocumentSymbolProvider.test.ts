@@ -481,7 +481,8 @@ CODE
             allProcs.forEach(sym => {
                 if (sym._isMapProcedure || sym.kind === SymbolKind.Function) {
                     const kindName = Object.keys(SymbolKind).find(key => SymbolKind[key as keyof typeof SymbolKind] === sym.kind);
-                    console.log(`  ${sym.name} (${kindName}) - MapProc: ${sym._isMapProcedure || false}`);
+                    const mapProc = sym._isMapProcedure ? 'YES' : 'no';
+                    console.log(`  ${sym.name} (${kindName}) - MapProc: ${mapProc}`);
                 }
             });
             
