@@ -54,7 +54,6 @@ import { RedirectionFileParserServer } from './solution/redirectionFileParserSer
 import { DefinitionProvider } from './providers/DefinitionProvider';
 import { HoverProvider } from './providers/HoverProvider';
 import { DiagnosticProvider } from './providers/DiagnosticProvider';
-import { CompletionProvider } from './providers/CompletionProvider';
 import path = require('path');
 import { ClarionSolutionInfo } from 'common/types';
 
@@ -76,7 +75,6 @@ export let solutionOperationInProgress = false;
 const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider();
 const definitionProvider = new DefinitionProvider();
 const hoverProvider = new HoverProvider();
-const completionProvider = new CompletionProvider();
 
 // ✅ Create Connection and Documents Manager
 const connection = createConnection(ProposedFeatures.all);
@@ -135,11 +133,7 @@ connection.onInitialize((params) => {
                 colorProvider: true,
                 definitionProvider: true,
                 // Note: implementationProvider is handled client-side in extension.ts
-                hoverProvider: true,
-                completionProvider: {
-                    resolveProvider: false,
-                    triggerCharacters: [' ', '\n']
-                }
+                hoverProvider: true
             }
         };
     } catch (error) {
@@ -1192,35 +1186,6 @@ connection.onHover(async (params) => {
         return hover;
     } catch (error) {
         logger.error(`❌ Error providing hover: ${error instanceof Error ? error.message : String(error)}`);
-        return null;
-    }
-});
-
-// Handle completion requests
-connection.onCompletion(async (params) => {
-    logger.info(`📂 Received completion request for: ${params.textDocument.uri} at position ${params.position.line}:${params.position.character}`);
-    
-    if (!serverInitialized) {
-        logger.info(`⚠️ [DELAY] Server not initialized yet, delaying completion request`);
-        return null;
-    }
-    
-    const document = documents.get(params.textDocument.uri);
-    if (!document) {
-        logger.info(`⚠️ Document not found: ${params.textDocument.uri}`);
-        return null;
-    }
-    
-    try {
-        const completions = completionProvider.provideCompletionItems(document, params.position);
-        if (completions && completions.length > 0) {
-            logger.info(`✅ Found ${completions.length} completion items for ${params.textDocument.uri}`);
-        } else {
-            logger.info(`⚠️ No completion items found for ${params.textDocument.uri}`);
-        }
-        return completions;
-    } catch (error) {
-        logger.error(`❌ Error providing completions: ${error instanceof Error ? error.message : String(error)}`);
         return null;
     }
 });
