@@ -414,6 +414,137 @@ EXECUTE Choice
 
 ---
 
+## File and Queue Operations
+
+### GET Statement
+```clarion
+! FILE usage - by key
+GET(file, key)
+
+! FILE usage - by file pointer
+GET(file, filepointer [,length])
+
+! FILE usage - by key pointer
+GET(key, keypointer)
+
+! QUEUE usage - by position
+GET(queue, pointer)
+
+! QUEUE usage - by key field(s)
+GET(queue, [+]key,...,[-]key)
+
+! QUEUE usage - by name string
+GET(queue, name)
+
+! QUEUE usage - by function
+GET(queue, function)
+```
+
+**Purpose:** Retrieves a specific record from a FILE or entry from a QUEUE.
+
+---
+
+### FILE Usage
+
+**GET(file, key)**
+- Gets the first record from the file matching the key component field values
+- Key must be declared as KEY or INDEX in the file structure
+- If no match found, posts "Record Not Found" error (35)
+
+**GET(file, filepointer [,length])**
+- Gets a record by relative position within the file
+- `filepointer` - Value returned by POINTER(file), file driver dependent
+- `length` - Optional bytes to read (1 to RECORD length, defaults to full RECORD)
+- If filepointer = 0, clears current record pointer (no record retrieved)
+- Out of range filepointer posts "Record Not Found" error (35)
+
+**GET(key, keypointer)**
+- Gets a record by relative position within the key
+- `keypointer` - Value returned by POINTER(key), file driver dependent
+- Out of range keypointer posts "Record Not Found" error (35)
+
+**Important FILE Notes:**
+- If GET is unsuccessful, RECORD buffer content is not affected
+- Filepointer/keypointer values are file driver dependent (could be record number, byte position, etc.)
+- Use `GET(file, 0)` to clear record pointer before using DUPLICATE for ADD
+
+---
+
+### QUEUE Usage
+
+**GET(queue, pointer)**
+- Retrieves entry at relative position (1-based)
+- Order is as entries were added or last SORTed
+- If pointer = 0, POINTER procedure returns 0
+- Out of range posts "Entry Not Found" error (30)
+
+**GET(queue, [+]key,...,[-]key)**
+- Searches for first QUEUE entry matching key field value(s)
+- Multiple key parameters allowed (up to 16), comma-separated
+- `+` prefix = ascending sort, `-` prefix = descending sort
+- If QUEUE not SORTed on these fields, creates "alternate sort order" cache
+- Posts "Entry Not Found" error (30) if no match
+
+**GET(queue, name)**
+- Searches by NAME attributes of fields
+- `name` - String containing NAME attributes, comma-separated
+- Optional `+` or `-` prefix for each field name
+- Case sensitive
+- Creates alternate sort order cache if not already sorted
+- Posts "Entry Not Found" error (30) if no match
+
+**GET(queue, function)**
+- Reads from positional value returned by function
+- Function must have two parameters (*GROUP or named GROUP passed by address)
+- Both parameters same type, cannot be omitted
+- Function returns SIGNED value
+- RAW, C, PASCAL attributes not permitted in prototype
+
+---
+
+**Common Error Codes:**
+| Code | Error |
+|------|-------|
+| 08 | Insufficient Memory |
+| 30 | Entry Not Found (QUEUE) |
+| 35 | Record Not Found (FILE) |
+| 36 | File Not Open |
+| 43 | Record Is Already Held |
+| 75 | Invalid Field Type Descriptor |
+
+**Examples:**
+```clarion
+! FILE - Get by key match
+CUS:Name = 'Smith'
+GET(Customer, CUS:NameKey)
+IF ERROR() THEN Message('Customer not found') .
+
+! FILE - Get by position
+FilePos# = POINTER(Customer)
+! ... later ...
+GET(Customer, FilePos#)
+
+! FILE - Clear record pointer
+GET(Customer, 0)  ! Clears pointer for DUPLICATE
+
+! QUEUE - Get by position
+GET(MyQueue, 5)  ! Get 5th entry
+
+! QUEUE - Get by field value
+QUE:Status = 'Active'
+GET(MyQueue, QUE:Status)
+
+! QUEUE - Get by multiple keys (sorted)
+QUE:LastName = 'Smith'
+QUE:FirstName = 'John'
+GET(MyQueue, +QUE:LastName, +QUE:FirstName)
+
+! QUEUE - Get by name string
+GET(MyQueue, '+LastName,+FirstName')
+```
+
+---
+
 ## Module Structure
 
 ### Program Structure
