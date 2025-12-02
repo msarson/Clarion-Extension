@@ -845,6 +845,96 @@ export class ClarionDocumentSymbolProvider {
             // Just mark it as an interface for reference
             structureSymbol._isInterface = true;
         }
+        // FILE support: add KEY/INDEX/RECORD as children for better structure view
+        else if (upperValue === "FILE") {
+            // Look ahead to find KEY, INDEX, MEMO, BLOB, and RECORD
+            for (let j = index + 1; j < tokens.length && tokens[j].line <= (finishesAt ?? line); j++) {
+                const childToken = tokens[j];
+                const childValue = childToken.value.toUpperCase();
+                
+                // Add KEY as child
+                if (childValue === "KEY") {
+                    const keyContent = this.extractParenContent(tokens, j + 2);
+                    const keySymbol = this.createSymbol(
+                        `KEY(${keyContent.content})`,
+                        "",
+                        SymbolKind.Key,
+                        this.getTokenRange(tokens, childToken.line, childToken.line),
+                        this.getTokenRange(tokens, childToken.line, childToken.line),
+                        []
+                    );
+                    structureSymbol.children!.push(keySymbol);
+                }
+                // Add INDEX as child
+                else if (childValue === "INDEX") {
+                    const indexContent = this.extractParenContent(tokens, j + 2);
+                    const indexSymbol = this.createSymbol(
+                        `INDEX(${indexContent.content})`,
+                        "",
+                        SymbolKind.Field,
+                        this.getTokenRange(tokens, childToken.line, childToken.line),
+                        this.getTokenRange(tokens, childToken.line, childToken.line),
+                        []
+                    );
+                    structureSymbol.children!.push(indexSymbol);
+                }
+                // Add RECORD as container
+                else if (childValue === "RECORD") {
+                    // Find the END of RECORD
+                    let recordEndLine = childToken.line;
+                    for (let k = j + 1; k < tokens.length; k++) {
+                        if (tokens[k].value.toUpperCase() === "END" && 
+                            tokens[k].type === TokenType.EndStatement) {
+                            recordEndLine = tokens[k].line;
+                            break;
+                        }
+                    }
+                    
+                    const recordSymbol = this.createSymbol(
+                        "RECORD",
+                        "",
+                        SymbolKind.Struct,
+                        this.getTokenRange(tokens, childToken.line, recordEndLine),
+                        this.getTokenRange(tokens, childToken.line, recordEndLine),
+                        []
+                    );
+                    
+                    // Look for MEMO/BLOB fields within RECORD
+                    for (let k = j + 1; k < tokens.length && tokens[k].line < recordEndLine; k++) {
+                        const fieldToken = tokens[k];
+                        const fieldValue = fieldToken.value.toUpperCase();
+                        
+                        if (fieldValue === "MEMO") {
+                            const memoContent = this.extractParenContent(tokens, k + 1);
+                            const fieldLabel = tokens[k - 1]?.value || "MEMO";
+                            const memoSymbol = this.createSymbol(
+                                `${fieldLabel} MEMO(${memoContent.content})`,
+                                "",
+                                SymbolKind.String,  // 📝 MEMO gets string icon
+                                this.getTokenRange(tokens, fieldToken.line, fieldToken.line),
+                                this.getTokenRange(tokens, fieldToken.line, fieldToken.line),
+                                []
+                            );
+                            recordSymbol.children!.push(memoSymbol);
+                        }
+                        else if (fieldValue === "BLOB") {
+                            const fieldLabel = tokens[k - 1]?.value || "BLOB";
+                            const blobSymbol = this.createSymbol(
+                                `${fieldLabel} BLOB`,
+                                "",
+                                SymbolKind.Object,  // 🧱 BLOB gets object icon
+                                this.getTokenRange(tokens, fieldToken.line, fieldToken.line),
+                                this.getTokenRange(tokens, fieldToken.line, fieldToken.line),
+                                []
+                            );
+                            recordSymbol.children!.push(blobSymbol);
+                        }
+                    }
+                    
+                    structureSymbol.children!.push(recordSymbol);
+                }
+            }
+        }
         // MAP support: add Functions container to organize MAP procedures
         else if (upperValue === "MAP") {
             const functionsContainer = this.createSymbol(
