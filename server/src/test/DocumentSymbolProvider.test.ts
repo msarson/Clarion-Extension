@@ -494,8 +494,8 @@ SaveData    PROCEDURE(STRING pFilename)
             const mapFunctions = mapSymbol?.children?.find(c => c.name === 'Functions');
             assert.ok(mapFunctions, 'MAP should have Functions container');
             
-            const sortInMap = mapFunctions?.children?.find(c => c.name.startsWith('SortCaseSensitive'));
-            const stMemInMap = mapFunctions?.children?.find(c => c.name.startsWith('stMemCpyLeft'));
+            const sortInMap = mapFunctions?.children?.find(c => c.name === 'SortCaseSensitive');
+            const stMemInMap = mapFunctions?.children?.find(c => c.name === 'stMemCpyLeft');
             
             assert.ok(sortInMap, 'SortCaseSensitive should be child of MAP > Functions');
             assert.ok(stMemInMap, 'stMemCpyLeft should be child of MAP > Functions');
@@ -506,8 +506,8 @@ SaveData    PROCEDURE(STRING pFilename)
             const emptyModuleFunctions = emptyModule?.children?.find(c => c.name === 'Functions');
             assert.ok(emptyModuleFunctions, "MODULE('') should have Functions container");
             
-            const toUpperInModule = emptyModuleFunctions?.children?.find(c => c.name.startsWith('ToUpper'));
-            const memCmpInModule = emptyModuleFunctions?.children?.find(c => c.name.startsWith('MemCmp'));
+            const toUpperInModule = emptyModuleFunctions?.children?.find(c => c.name === 'ToUpper');
+            const memCmpInModule = emptyModuleFunctions?.children?.find(c => c.name === 'MemCmp');
             
             assert.ok(toUpperInModule, "ToUpper should be child of MODULE('') > Functions");
             assert.ok(memCmpInModule, "MemCmp should be child of MODULE('') > Functions");

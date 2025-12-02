@@ -1521,13 +1521,11 @@ export class ClarionDocumentSymbolProvider {
             fullDefinition = detail ? detail : "()";
         }
 
-        // Improve breadcrumb navigation by separating name and detail
-        // Include the full definition in the display name
-        const displayName = `${procedureDefName} ${fullDefinition}`;
-
+        // The name should be just the procedure name
+        // The detail should contain the signature/definition
         const procedureDefSymbol = this.createSymbol(
-            displayName,
-            "Declaration",  // Mark as Declaration to distinguish from Implementation
+            procedureDefName,
+            fullDefinition,  // Use signature as detail
             symbolKind,
             this.getTokenRange(tokens, line, finishesAt ?? line),
             // Use a more precise selection range for better navigation

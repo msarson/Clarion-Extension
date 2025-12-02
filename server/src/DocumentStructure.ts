@@ -495,7 +495,7 @@ export class DocumentStructure {
                 mapToken.children.push(token);
                 
                 // Extract the procedure name (everything before the opening parenthesis)
-                const procName = token.value.split("(")[0];
+                const procName = token.value.split("(")[0].trim();
                 
                 // CRITICAL FIX: Set the token's label to the procedure name
                 // This ensures it will be displayed correctly in the outline view
