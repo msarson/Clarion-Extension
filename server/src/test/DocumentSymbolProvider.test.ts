@@ -67,6 +67,130 @@ suite('ClarionDocumentSymbolProvider - Structure View Tests', () => {
         return results;
     }
 
+    /**
+     * Enhanced debug output - shows all symbol properties in detail
+     */
+    function formatSymbolTreeVerbose(symbols: ClarionDocumentSymbol[], indent: string = ''): string {
+        let output = '';
+        for (const symbol of symbols) {
+            const kindName = Object.keys(SymbolKind).find(key => SymbolKind[key as keyof typeof SymbolKind] === symbol.kind) || String(symbol.kind);
+            
+            // Collect all flags and properties
+            const flags = [];
+            if (symbol._isMethodImplementation) flags.push('MethodImpl');
+            if (symbol._isMethodDeclaration) flags.push('MethodDecl');
+            if (symbol._isGlobalProcedure) flags.push('GlobalProc');
+            if (symbol._isMapProcedure) flags.push('MapProc');
+            if (symbol._isInterface) flags.push('Interface');
+            
+            const properties = [];
+            if (symbol.detail) properties.push(`detail="${symbol.detail}"`);
+            if (symbol.sortText) properties.push(`sort="${symbol.sortText}"`);
+            if ((symbol as any).$clarionFunctions) properties.push('hasFunctionsContainer');
+            if ((symbol as any).$clarionProperties) properties.push('hasPropertiesContainer');
+            if ((symbol as any).$clarionMethods) properties.push('hasMethodsContainer');
+            
+            const flagStr = flags.length > 0 ? ` [${flags.join(', ')}]` : '';
+            const propStr = properties.length > 0 ? ` {${properties.join(', ')}}` : '';
+            const childCount = symbol.children ? ` (${symbol.children.length} children)` : '';
+            
+            output += `${indent}${symbol.name} (${kindName})${flagStr}${propStr}${childCount}\n`;
+            
+            if (symbol.children && symbol.children.length > 0) {
+                output += formatSymbolTreeVerbose(symbol.children, indent + '  ');
+            }
+        }
+        return output;
+    }
+
+    /**
+     * Get symbol tree as JSON for detailed inspection
+     */
+    function symbolTreeToJSON(symbols: ClarionDocumentSymbol[]): string {
+        const simplify = (sym: ClarionDocumentSymbol): any => {
+            const kindName = Object.keys(SymbolKind).find(key => SymbolKind[key as keyof typeof SymbolKind] === sym.kind);
+            return {
+                name: sym.name,
+                kind: kindName,
+                detail: sym.detail,
+                sortText: sym.sortText,
+                flags: {
+                    isMethodImpl: sym._isMethodImplementation || false,
+                    isMethodDecl: sym._isMethodDeclaration || false,
+                    isGlobalProc: sym._isGlobalProcedure || false,
+                    isMapProc: sym._isMapProcedure || false,
+                    isInterface: sym._isInterface || false
+                },
+                containers: {
+                    functions: (sym as any).$clarionFunctions ? 'yes' : 'no',
+                    properties: (sym as any).$clarionProperties ? 'yes' : 'no',
+                    methods: (sym as any).$clarionMethods ? 'yes' : 'no'
+                },
+                childCount: sym.children ? sym.children.length : 0,
+                children: sym.children ? sym.children.map(simplify) : []
+            };
+        };
+        return JSON.stringify(symbols.map(simplify), null, 2);
+    }
+
+    /**
+     * Filter symbols by name pattern (regex)
+     */
+    function filterSymbolsByName(symbols: ClarionDocumentSymbol[], pattern: string): ClarionDocumentSymbol[] {
+        const regex = new RegExp(pattern, 'i');
+        const results: ClarionDocumentSymbol[] = [];
+        
+        for (const symbol of symbols) {
+            if (regex.test(symbol.name)) {
+                results.push(symbol);
+            }
+            if (symbol.children) {
+                results.push(...filterSymbolsByName(symbol.children, pattern));
+            }
+        }
+        return results;
+    }
+
+    /**
+     * Get flattened list of all symbols with their path
+     */
+    function flattenSymbolTree(symbols: ClarionDocumentSymbol[], parentPath: string = ''): Array<{path: string, symbol: ClarionDocumentSymbol}> {
+        const results: Array<{path: string, symbol: ClarionDocumentSymbol}> = [];
+        
+        for (const symbol of symbols) {
+            const path = parentPath ? `${parentPath} > ${symbol.name}` : symbol.name;
+            results.push({ path, symbol });
+            
+            if (symbol.children) {
+                results.push(...flattenSymbolTree(symbol.children, path));
+            }
+        }
+        return results;
+    }
+
+    /**
+     * Print symbol counts by kind
+     */
+    function printSymbolStats(symbols: ClarionDocumentSymbol[]): string {
+        const stats = new Map<string, number>();
+        
+        const count = (syms: ClarionDocumentSymbol[]) => {
+            for (const sym of syms) {
+                const kindName = Object.keys(SymbolKind).find(key => SymbolKind[key as keyof typeof SymbolKind] === sym.kind) || 'Unknown';
+                stats.set(kindName, (stats.get(kindName) || 0) + 1);
+                if (sym.children) count(sym.children);
+            }
+        };
+        
+        count(symbols);
+        
+        let output = 'Symbol Statistics:\n';
+        for (const [kind, count] of Array.from(stats.entries()).sort()) {
+            output += `  ${kind}: ${count}\n`;
+        }
+        return output;
+    }
+
     suite('CLASS Structure Tests', () => {
         
         test('Should parse CLASS with method declarations', () => {
@@ -282,11 +406,34 @@ SaveData    PROCEDURE(STRING pFilename)
             const provider = new ClarionDocumentSymbolProvider();
             const symbols = provider.provideDocumentSymbols(tokens, 'test://test.clw');
             
-            console.log('\n=== MAP with MODULE ===');
+            console.log('\n=== MAP with MODULE - Basic Tree ===');
             console.log(formatSymbolTree(symbols));
             
-            // Verify MAP exists
+            console.log('\n=== MAP with MODULE - Verbose Output ===');
+            console.log(formatSymbolTreeVerbose(symbols));
+            
+            console.log('\n=== Symbol Statistics ===');
+            console.log(printSymbolStats(symbols));
+            
+            console.log('\n=== Flattened Symbol Paths ===');
+            const flattened = flattenSymbolTree(symbols);
+            flattened.forEach(({path, symbol}) => {
+                const kindName = Object.keys(SymbolKind).find(key => SymbolKind[key as keyof typeof SymbolKind] === symbol.kind);
+                console.log(`  ${path} (${kindName})`);
+            });
+            
+            console.log('\n=== MAP Children Details ===');
             const mapSymbol = findSymbol(symbols, 'MAP');
+            if (mapSymbol && mapSymbol.children) {
+                console.log(`MAP has ${mapSymbol.children.length} direct children:`);
+                mapSymbol.children.forEach((child, index) => {
+                    const kindName = Object.keys(SymbolKind).find(key => SymbolKind[key as keyof typeof SymbolKind] === child.kind);
+                    const childCount = child.children ? child.children.length : 0;
+                    console.log(`  [${index}] ${child.name} (${kindName}) - ${childCount} children`);
+                });
+            }
+            
+            // Verify MAP exists
             assert.ok(mapSymbol, 'MAP should exist');
             
             // Verify MODULE exists as child of MAP
@@ -296,6 +443,54 @@ SaveData    PROCEDURE(STRING pFilename)
             // Verify GetTickCount exists
             const getTickCount = findSymbol(symbols, 'GetTickCount');
             assert.ok(getTickCount, 'GetTickCount should exist somewhere');
+        });
+
+        test('Should parse complex MAP with multiple MODULEs and attributes', () => {
+            const code = `
+PROGRAM
+Map
+  SortCaseSensitive(*LinesGroupType p1,*LinesGroupType p2),Long
+  stMemCpyLeft (long dest, long src,  unsigned count)
+  Module ('')
+    ToUpper (byte char), byte, name('Cla$isftoupper'),dll(DLL_Mode)
+    MemCmp(long buf1, long buf2, unsigned count), long, name('_memcmp'),dll(DLL_Mode)
+  end
+  MODULE('Zlib')
+    stDeflateInit2_(ulong pStream, long pLevel),long,Pascal,raw,dll(_fp_)
+    stDeflate(ulong pStream, long pFlush),long,Pascal,raw,dll(_fp_)
+  End
+end
+CODE
+`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionDocumentSymbolProvider();
+            const symbols = provider.provideDocumentSymbols(tokens, 'test://test.clw');
+            
+            console.log('\n=== COMPLEX MAP - Basic Tree ===');
+            console.log(formatSymbolTree(symbols));
+            
+            console.log('\n=== COMPLEX MAP - Verbose Output ===');
+            console.log(formatSymbolTreeVerbose(symbols));
+            
+            console.log('\n=== Symbol Statistics ===');
+            console.log(printSymbolStats(symbols));
+            
+            console.log('\n=== All Procedures (MapProc flag) ===');
+            const allProcs = filterSymbolsByName(symbols, '');
+            allProcs.forEach(sym => {
+                if (sym._isMapProcedure || sym.kind === SymbolKind.Function) {
+                    const kindName = Object.keys(SymbolKind).find(key => SymbolKind[key as keyof typeof SymbolKind] === sym.kind);
+                    console.log(`  ${sym.name} (${kindName}) - MapProc: ${sym._isMapProcedure || false}`);
+                }
+            });
+            
+            console.log('\n=== Flattened Symbol Paths ===');
+            const flattened = flattenSymbolTree(symbols);
+            flattened.forEach(({path, symbol}) => {
+                const kindName = Object.keys(SymbolKind).find(key => SymbolKind[key as keyof typeof SymbolKind] === symbol.kind);
+                console.log(`  ${path} (${kindName})`);
+            });
         });
     });
 

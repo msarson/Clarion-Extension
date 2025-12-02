@@ -114,6 +114,19 @@ export class ClarionDocumentSymbolProvider {
     }
 
     /**
+     * Check if a token value is a procedure attribute keyword (not a procedure name)
+     * These are keywords that appear in MAP procedure declarations but are not procedure names
+     */
+    private isAttributeKeyword(value: string): boolean {
+        const attributeKeywords = [
+            'DLL', 'NAME', 'RAW', 'PASCAL', 'PROC', 'C',
+            'PRIVATE', 'PROTECTED', 'PUBLIC',
+            'VIRTUAL', 'DERIVED'
+        ];
+        return attributeKeywords.includes(value.toUpperCase());
+    }
+
+    /**
      * Create a Clarion document symbol (wrapper around DocumentSymbol.create with proper typing)
      */
     private createSymbol(
@@ -288,14 +301,17 @@ export class ClarionDocumentSymbolProvider {
                         // Special case for MAP: Look for procedure declarations without PROCEDURE keyword
                         // Format: ProcedureName(parameters),returnType
                         // Can be either Label token (with space: "ToUpper (byte)") or Function token (no space: "MemCmp(long)")
+                        // BUT exclude attribute keywords: dll, name, raw, pascal, proc, etc.
                         else if ((nextToken.type === TokenType.Label || nextToken.type === TokenType.Function) &&
                                 j + 1 < tokens.length &&
                                 tokens[j + 1].value === "(" &&
                                 nextToken.value.toUpperCase() !== "MODULE" &&
-                                nextToken.value.toUpperCase() !== "MAP") {
+                                nextToken.value.toUpperCase() !== "MAP" &&
+                                !this.isAttributeKeyword(nextToken.value)) {
                             // This looks like a procedure declaration in shorthand MAP syntax
-                            // But exclude MODULE and MAP keywords themselves
                             nextToken.subType = TokenType.MapProcedure;
+                            // CRITICAL: Set token.label to just the procedure name (nextToken.value is already just the name)
+                            nextToken.label = nextToken.value;
                             logger.info(`Marked shorthand procedure ${nextToken.value} at line ${nextToken.line} as MAP/MODULE procedure`);
                         }
                         
