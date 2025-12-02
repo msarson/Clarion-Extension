@@ -257,17 +257,39 @@ export class ClarionDocumentSymbolProvider {
             if (type === TokenType.ExecutionMarker && value.toUpperCase() === "CODE") {
                 pastCodeStatement = true;
                 
-                // For method implementations, just clear currentProcedure
-                // Don't skip - we need to process subsequent tokens normally
+                // For method implementations, clear currentProcedure
+                // This prevents variables/symbols after CODE from being attached
                 if (currentProcedure && currentProcedure._isMethodImplementation) {
                     currentProcedure = null;
                 }
-                // For global procedures, don't clear currentProcedure as they may have routines
+                
+                // Continue to next token - don't process anything on CODE line
+                continue;
             }
 
             // Check if current token is DATA execution marker - allow variable processing for routines
             if (type === TokenType.ExecutionMarker && value.toUpperCase() === "DATA") {
                 pastCodeStatement = false;
+            }
+
+            // CRITICAL: After CODE, only process ROUTINE tokens and new PROCEDURE declarations
+            // Skip everything else (function calls, assignments, control structures, etc.)
+            if (pastCodeStatement) {
+                // Allow ROUTINE declarations
+                if (type === TokenType.Label && i + 1 < tokens.length && 
+                    tokens[i + 1].value.toUpperCase() === "ROUTINE") {
+                    // Let it fall through to ROUTINE handling below
+                } 
+                // Allow new PROCEDURE/METHOD implementations (start of new procedure)
+                else if ((subType === TokenType.Procedure || subType === TokenType.GlobalProcedure || 
+                          subType === TokenType.MethodImplementation) &&
+                         token.executionMarker?.value.toUpperCase() !== "CODE") {
+                    // Let it fall through to procedure handling
+                }
+                // Skip everything else
+                else {
+                    continue;
+                }
             }
 
             if (type === TokenType.Structure) {
