@@ -340,7 +340,7 @@ export class ClarionDocumentSymbolProvider {
 
             if ((subType === TokenType.Procedure || subType === TokenType.Class ||
                 subType === TokenType.GlobalProcedure || subType === TokenType.MethodImplementation ||
-                subType === TokenType.InterfaceMethod)) {
+                subType === TokenType.InterfaceMethod || subType === TokenType.MapProcedure)) {
 
                 const isImplementation = token.executionMarker?.value.toUpperCase() === "CODE";
                 if (isImplementation || token.finishesAt !== undefined) {
