@@ -1499,6 +1499,291 @@ Non-labels must NOT start in column 0 (use indentation).
 
 ---
 
+## Object-Oriented Programming
+
+### CLASS Structure
+```clarion
+label CLASS([parentclass])
+       [,EXTERNAL] [,IMPLEMENTS(interface)] [,DLL(module)] [,STATIC]
+       [,THREAD] [,BINDABLE] [,MODULE(source)] [,LINK(source)]
+       [,TYPE] [,DIM(dimension)] [,NETCLASS] [,PARTIAL]
+  [data members]
+  [method prototypes]
+END
+```
+
+**Purpose:** Declares an object containing data members (properties) and methods that operate on the data.
+
+---
+
+### CLASS Attributes
+
+**parentclass (optional)**
+- Label of previously declared CLASS to inherit from (derived class)
+- Inherits all data members and methods
+- May add own data members and methods
+- May override inherited methods
+
+**EXTERNAL**
+- Object defined in external library
+- Memory allocated by external library
+
+**IMPLEMENTS(interface)**
+- Specifies INTERFACE for the CLASS
+- Adds interface methods to implementation
+
+**DLL(module)**
+- Object defined in .DLL
+- Required in addition to EXTERNAL
+
+**STATIC**
+- Data members' memory permanently allocated
+
+**THREAD**
+- Memory allocated once per execution thread
+- Constructors/Destructors called on thread start/exit
+
+**BINDABLE**
+- All variables available for dynamic expressions
+
+**MODULE(source)**
+- Specifies source module containing member PROCEDURE definitions
+- Functions like MODULE in MAP structure
+
+**LINK(source)**
+- Automatically adds source module to compiler's link list
+
+**TYPE**
+- CLASS is only type definition, not an instance
+- Used for parameter passing
+
+**DIM(dimension)**
+- Declares CLASS as an array
+
+**NETCLASS**
+- Switches off additional Clarion-specific code generation
+
+**PARTIAL**
+- CLASS definition split into multiple physical files
+
+---
+
+### Key Concepts
+
+**Inheritance (Derived Classes):**
+- Derived class inherits all data and methods from parentclass
+- Can add new data members and methods
+- Can override inherited methods (same name, same parameters)
+- Polymorphic methods (same name, different parameters) follow overloading rules
+
+**Encapsulation (Properties):**
+- Each instance contains its own set of data members
+- Data members may be PUBLIC, PRIVATE, or PROTECTED
+- Only one copy of methods (shared across instances)
+
+**Polymorphism (VIRTUAL Methods):**
+- VIRTUAL attribute allows parentclass to call derived class methods
+- Derived class VIRTUAL methods can call PARENT.Method
+- DERIVED attribute verifies virtual method exists in base class
+
+**Scoping:**
+- Global data: In scope throughout application
+- Module data: In scope throughout module
+- Local data: In scope only in procedure
+- Local Derived Methods: Share declaring procedure's scope
+
+---
+
+### Instantiation
+
+**Direct Declaration:**
+```clarion
+MyClass CLASS,TYPE
+  Field LONG
+END
+
+Obj1 MyClass  ! Declared instance (smaller, quicker)
+```
+
+**Reference with NEW:**
+```clarion
+Obj2 &MyClass  ! Reference variable
+CODE
+  Obj2 &= NEW(MyClass)  ! Explicit lifetime control
+  DISPOSE(Obj2)
+```
+
+---
+
+### Constructors and Destructors
+
+**Construct Method:**
+- Automatically invoked when object comes into scope
+- Called after data members allocated/initialized
+- May not receive parameters (unless multiple constructors)
+- May not use VIRTUAL attribute
+- Can be explicitly called
+
+**Destruct Method:**
+- Automatically invoked when object leaves scope
+- Called before data members de-allocated
+- May not receive parameters
+- Can be explicitly called
+
+**Inheritance:**
+- Parentclass constructor called before derived class (unless REPLACE)
+- Parentclass destructor called after derived class (unless REPLACE)
+
+---
+
+### Access Control
+
+**PUBLIC** (default)
+- Visible to all methods and any code where object is in scope
+
+**PRIVATE**
+- Visible only to methods within declaring CLASS
+- Visible to procedures in same source module
+
+**PROTECTED**
+- Visible to methods of declaring CLASS
+- Visible to methods of derived CLASSes
+
+---
+
+### Method Definition
+
+**Two syntax forms:**
+```clarion
+! Form 1: Prepend CLASS name
+MyClass.MyMethod PROCEDURE(LONG Param)
+CODE
+  ! Implementation
+
+! Form 2: CLASS as first implicit parameter
+MyMethod PROCEDURE(MyClass SELF, LONG Param)
+CODE
+  ! Implementation
+```
+
+---
+
+### SELF and PARENT
+
+**SELF**
+- References current object instance
+- Used within methods to access data members and methods
+- Allows generic reference regardless of class type
+
+**PARENT**
+- References parentclass from derived class methods
+- Allows calling base class methods
+- Cannot be used as formal parameter name
+
+---
+
+**Example:**
+```clarion
+! Base class
+BaseClass CLASS,TYPE
+Name        STRING(30)
+Init        PROCEDURE
+Process     PROCEDURE,VIRTUAL
+          END
+
+! Derived class
+DerivedClass CLASS(BaseClass)
+ExtraField   LONG
+Process      PROCEDURE,VIRTUAL,DERIVED
+           END
+
+! Instance
+MyObj DerivedClass
+
+CODE
+  MyObj.Name = 'Test'
+  MyObj.Init()
+  MyObj.Process()
+
+! Method definitions
+BaseClass.Init PROCEDURE
+CODE
+  SELF.Name = 'Initialized'
+
+BaseClass.Process PROCEDURE
+CODE
+  MESSAGE('Base Process')
+
+DerivedClass.Process PROCEDURE
+CODE
+  PARENT.Process()  ! Call base class method
+  MESSAGE('Derived Process: ' & SELF.ExtraField)
+```
+
+---
+
+### INTERFACE Structure
+```clarion
+label INTERFACE([parentinterface])
+       [,TYPE] [,COM]
+  [method prototypes]
+END
+```
+
+**Purpose:** Collection of methods defining behavior to be implemented by a CLASS.
+
+---
+
+### INTERFACE Characteristics
+
+**parentinterface (optional)**
+- Inherits methods from parent interface
+- May add own methods
+- May override inherited methods
+
+**TYPE**
+- INTERFACE is type definition only (implicit)
+- May be explicitly specified
+
+**COM**
+- All methods use PASCAL calling convention
+- Used for COM implementation
+
+**Methods:**
+- Only PROCEDURE prototypes (no properties)
+- All methods implicitly VIRTUAL
+- Must be defined by implementing CLASS
+
+**Inheritance:**
+- Can create derived interfaces
+- Follows same override and overloading rules as CLASS
+
+---
+
+### Implementing INTERFACE
+
+**Declaration:**
+```clarion
+MyInterface INTERFACE
+DoSomething   PROCEDURE(LONG Param)
+            END
+
+MyClass CLASS,IMPLEMENTS(MyInterface)
+        END
+```
+
+**Calling Interface Methods:**
+```clarion
+CODE
+  MyClass.MyInterface.DoSomething(10)  ! Use dot notation
+```
+
+**Method Definition:**
+- All interface methods must be defined in implementing CLASS
+- Use CLASS.INTERFACE.Method syntax in definition
+
+---
+
 ## Character Encoding
 
 Clarion source files use **ANSI/ASCII encoding only**. They do NOT support:
