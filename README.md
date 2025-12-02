@@ -133,16 +133,19 @@ This is necessary because older versions had a dependency on fushnisoft.clarion 
   - CLASS and INTERFACE (OOP features)
   - All examples validated for proper Clarion syntax
 
-- **Enhanced Diagnostics**: Real-time error detection
-  - FILE must have DRIVER and RECORD (error)
-  - CASE must have at least one OF clause (error)
-  - OROF must follow OF in CASE (error)
-  - EXECUTE expression should be numeric (warning)
+- **Enhanced Diagnostics**: Real-time error detection (5 validators)
+  - **Structure Termination**: Unterminated IF/LOOP/CLASS structures
+  - **FILE Validation**: Must have DRIVER and RECORD (error)
+  - **CASE Validation**: Must have at least one OF clause (error)
+  - **OROF Placement**: Must follow OF in CASE (error)
+  - **EXECUTE Validation**: Expression should be numeric (warning)
+  - **OMIT/COMPILE**: Validates directive block pairing
 
 - **Improved Structure View**: Better visualization of code structure
-  - FILE: Shows KEY/INDEX/RECORD/MEMO/BLOB hierarchy
-  - VIEW: Displays JOIN nesting and PROJECT fields
-  - GROUP: Shows OVER (memory overlay) and DIM (arrays) attributes
+  - **FILE**: Shows KEY/INDEX/RECORD/MEMO/BLOB hierarchy
+  - **VIEW**: Displays JOIN nesting and PROJECT fields
+  - **GROUP**: Shows OVER (memory overlay) and DIM (arrays) attributes
+  - **Follow Cursor**: Auto-selects symbol at cursor position (toggle in view)
 
 - **New Keywords**: CHOOSE function now properly recognized
 
@@ -178,7 +181,95 @@ Code
   result = self.SaveFile(myData, 'test.txt', true)   ! Hover/F12 shows 4-parameter version
 ```
 
-### Performance Improvements
+---
+
+### 🚀 Major Performance Improvements
+
+**Dramatic performance enhancements addressing previous slowdowns:**
+
+- **Caching System**
+  - Symbol provider results cached per document
+  - Folding ranges cached (600ms → instant on re-open)
+  - Token cache with change detection
+  - Eliminates redundant tokenization
+
+- **Tokenization Optimizations**
+  - Fixed O(n²) catastrophic performance bug in procedure variables
+  - Reduced duplicate tokenizations (3-4x → 1x per edit)
+  - Per-document debouncing (100ms) prevents typing lag
+  - Removed hot-path logger calls
+
+- **Diagnostic Optimizations**
+  - Eliminated duplicate tokenization in validation
+  - Reduced OMIT/COMPILE block scanning overhead
+
+**Result**: Files that previously caused VS Code to freeze now edit smoothly.
+
+See [Performance Session](https://github.com/msarson/Clarion-Extension/blob/version-0.7.1/PERFORMANCE_SESSION_2024-12-01.md) for detailed metrics.
+
+---
+
+### 🧪 Test-Driven Development & Quality
+
+**Comprehensive test suite ensures reliability:**
+
+- **185 Tests Total** (100% pass rate)
+  - 16 DefinitionProvider tests
+  - 31 Clarion legacy syntax tests
+  - 140+ DiagnosticProvider tests (TDD approach)
+  - 9 KB validation tests
+  - TokenHelper and FoldingProvider tests
+
+- **Testing Framework**
+  - Mocha test runner integrated
+  - Comprehensive test files in `test-programs/`
+  - All tests validated against Clarion compiler
+
+- **Quality Improvements**
+  - Zero regressions policy
+  - Every fix validated with test
+  - Edge cases documented and tested
+
+---
+
+### 🔧 Bug Fixes & Improvements
+
+**Critical fixes for language parsing:**
+
+- **Tokenizer Fixes**
+  - Inline dot terminators now properly recognized (`IF x THEN y.`)
+  - WHILE/UNTIL keywords recognized as loop terminators
+  - Fixed array subscript dot handling (`MyArray[x].Field`)
+  - RETURN no longer treated as scope boundary
+  - PROCEDURE parameters not parsed as class properties
+
+- **Structure View Fixes**
+  - Fixed duplicate Methods container in classes
+  - Correct MODULE termination rules (context-aware: MAP vs CLASS)
+  - Fixed ROUTINE nesting under parent PROCEDURE
+  - Token type precedence corrected (Type vs Function)
+  - Colon support restored in label patterns
+
+- **Diagnostic Fixes**
+  - Squiggly underlines now positioned on keyword itself
+  - Better detection of structure terminators
+  - Context-aware MODULE validation
+
+---
+
+### 📊 Statistics (v0.7.1)
+
+- **104 commits** in this release
+- **30,466 lines added** (code + documentation + tests)
+- **868 lines removed**
+- **93 files modified**
+- **185 tests passing** (zero regressions)
+- **5 diagnostic validators** (structure, FILE, CASE, EXECUTE, OMIT/COMPILE)
+- **80% feature completion** (8/10 planned KB items)
+
+---
+
+### Performance Improvements (Additional)
 
 **Dramatically improved performance by reducing logging overhead.**
 
