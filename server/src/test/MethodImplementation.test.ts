@@ -17,21 +17,21 @@ describe('ClarionDocumentSymbolProvider - Method Implementations', () => {
 
 StringTheory._GetNextBufferSize PROCEDURE(long pLen)
 LocalVar  LONG
-CODE
-  LocalVar = pLen * 2
-  RETURN LocalVar
+  CODE
+    LocalVar = pLen * 2
+    RETURN LocalVar
 
 StringTheory._EqualsUnicode PROCEDURE(string str)
 str2  STRING(100)
-CODE
-  str2 = CLIP(str)
-  RETURN str2
+  CODE
+    str2 = CLIP(str)
+    RETURN str2
 
 StringTheory._Equals PROCEDURE(long ln)
 result  BYTE
-CODE
-  result = 1
-  RETURN result
+  CODE
+    result = 1
+    RETURN result
 `;
 
         const tokenizer = new ClarionTokenizer(source);
@@ -77,16 +77,31 @@ CODE
 
 StringTheory._Test PROCEDURE()
 LocalVar  LONG
-CODE
-  LocalVar = CLIP('test')
-  len = LEN(LocalVar)
-  RETURN LocalVar
+  CODE
+    LocalVar = CLIP('test')
+    len = LEN(LocalVar)
+    RETURN LocalVar
 `;
 
         const tokenizer = new ClarionTokenizer(source);
         const tokens = tokenizer.tokenize();
         provider = new ClarionDocumentSymbolProvider();
         const symbols = provider.provideDocumentSymbols(tokens, 'test://test.clw');
+
+        console.log('\n=== ALL SYMBOLS ===');
+        for (const symbol of symbols) {
+            console.log(`Symbol: ${symbol.name}, kind: ${symbol.kind}, children: ${symbol.children?.length || 0}`);
+            if (symbol.children) {
+                for (const child of symbol.children) {
+                    console.log(`  Child: ${child.name}, kind: ${child.kind}, children: ${child.children?.length || 0}`);
+                    if (child.children) {
+                        for (const grandchild of child.children) {
+                            console.log(`    Grandchild: ${grandchild.name}`);
+                        }
+                    }
+                }
+            }
+        }
 
         // Find the method
         const classContainer = symbols.find(s => s.name.includes('StringTheory'));
@@ -108,20 +123,20 @@ CODE
 
 GlobalVar  LONG
 
-CODE
-  RETURN
+  CODE
+    RETURN
 
 MyProc1 PROCEDURE
 LocalVar1  LONG
-CODE
-  LocalVar1 = 1
-  RETURN
+  CODE
+    LocalVar1 = 1
+    RETURN
 
 MyProc2 PROCEDURE
 LocalVar2  LONG
-CODE
-  LocalVar2 = 2
-  RETURN
+  CODE
+    LocalVar2 = 2
+    RETURN
 `;
 
         const tokenizer = new ClarionTokenizer(source);

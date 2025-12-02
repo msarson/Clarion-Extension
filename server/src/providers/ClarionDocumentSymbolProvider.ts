@@ -1697,6 +1697,22 @@ export class ClarionDocumentSymbolProvider {
         }
         logger.info(`   ℹ️ No PROCEDURE keyword found, proceeding with variable parsing`);
 
+        // CRITICAL: Skip if previous token is a Label that's part of a method name
+        // Pattern: Label(ClassName) + Variable(MethodName) + PROCEDURE
+        // e.g., StringTheory._Test PROCEDURE()
+        if (prevToken && prevToken.type === TokenType.Label && token.type === TokenType.Variable) {
+            // Check if there's another variable/label followed by PROCEDURE on this line
+            let nextIdx = index + 1;
+            while (nextIdx < tokens.length && tokens[nextIdx].line === line) {
+                if (tokens[nextIdx].type === TokenType.Procedure ||
+                    (tokens[nextIdx].type === TokenType.Keyword && tokens[nextIdx].value.toUpperCase() === 'PROCEDURE')) {
+                    logger.info(`   ⚠️ Skipping - previous Label "${prevToken.value}" is part of method name`);
+                    return;
+                }
+                nextIdx++;
+            }
+        }
+
         // Handle Label or StructurePrefix tokens (variable names)
         // TokenType.Label (25), TokenType.StructurePrefix (41), TokenType.Variable (5)
         if (prevToken && (prevToken.type === TokenType.Label || 
