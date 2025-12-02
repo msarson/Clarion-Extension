@@ -2,7 +2,7 @@ import { Token, TokenType } from "./ClarionTokenizer";
 import LoggerManager from "./logger";
 
 const logger = LoggerManager.getLogger("DocumentStructure");
-logger.setLevel("error"); // Back to error-only logging
+logger.setLevel("info"); // TEMP: Enable for debugging method implementations
 
 export class DocumentStructure {
     private structureStack: Token[] = [];
@@ -610,9 +610,29 @@ export class DocumentStructure {
             this.handleProcedureClosure(token.line - 1);
         }
         
-        const isMethodImpl = prevToken?.type === TokenType.Label && prevToken.value.includes(".");
+        // Check for method implementation: Look for pattern like "ClassName.MethodName PROCEDURE"
+        // This could be tokenized as: Label(ClassName) + Variable(MethodName) + Keyword(PROCEDURE)
+        // Or in some cases: Label(ClassName.MethodName) + Keyword(PROCEDURE)
+        let isMethodImpl = false;
+        let fullProcedureName = prevToken?.value ?? "AnonymousProcedure";
         
-        token.label = prevToken?.value ?? "AnonymousProcedure";
+        // Check if prevToken is a label or variable that might be part of a method name
+        if (prevToken?.type === TokenType.Label || prevToken?.type === TokenType.Variable) {
+            // Look back one more token to see if there's a class name
+            const tokenBeforePrev = index >= 2 ? this.tokens[index - 2] : null;
+            if (tokenBeforePrev?.type === TokenType.Label && tokenBeforePrev.line === token.line) {
+                // We have: Label + (Label|Variable) + PROCEDURE on same line
+                // This is likely: ClassName.MethodName PROCEDURE
+                fullProcedureName = `${tokenBeforePrev.value}.${prevToken.value}`;
+                isMethodImpl = true;
+            } else if (prevToken.value.includes(".")) {
+                // The previous token itself contains a dot (entire name in one token)
+                fullProcedureName = prevToken.value;
+                isMethodImpl = true;
+            }
+        }
+        
+        token.label = fullProcedureName;
         token.type = TokenType.Procedure; // ✅ Always keep as Procedure
         token.subType = isMethodImpl ? TokenType.MethodImplementation : TokenType.GlobalProcedure;
         

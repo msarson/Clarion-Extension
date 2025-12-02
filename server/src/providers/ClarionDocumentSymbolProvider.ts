@@ -270,6 +270,7 @@ export class ClarionDocumentSymbolProvider {
             // Check if current token is DATA execution marker - allow variable processing for routines
             if (type === TokenType.ExecutionMarker && value.toUpperCase() === "DATA") {
                 pastCodeStatement = false;
+                continue;
             }
 
             // CRITICAL: After CODE, only process ROUTINE tokens and new PROCEDURE declarations
@@ -280,10 +281,12 @@ export class ClarionDocumentSymbolProvider {
                     tokens[i + 1].value.toUpperCase() === "ROUTINE") {
                     // Let it fall through to ROUTINE handling below
                 } 
-                // Allow new PROCEDURE/METHOD implementations (start of new procedure)
+                // Allow new PROCEDURE/METHOD implementations with CODE marker (new procedure starting)
                 else if ((subType === TokenType.Procedure || subType === TokenType.GlobalProcedure || 
                           subType === TokenType.MethodImplementation) &&
-                         token.executionMarker?.value.toUpperCase() !== "CODE") {
+                         token.executionMarker?.value.toUpperCase() === "CODE") {
+                    // This is a NEW procedure/method starting - reset pastCodeStatement
+                    pastCodeStatement = false;
                     // Let it fall through to procedure handling
                 }
                 // Skip everything else
@@ -1167,11 +1170,13 @@ export class ClarionDocumentSymbolProvider {
         // IMPORTANT: For method implementations, we need to handle them differently
         // Use token.subType instead of dot-notation check for consistency with tokenizer
         if (token.subType === TokenType.MethodImplementation || subType === TokenType.MethodImplementation) {
-            // This is a method implementation (e.g., ThisWindow.Init)
+            logger.info(`🔍 Method implementation detected: ${procedureName}, classMatch: ${classMatch}`);
+            
             // Verify that classMatch is valid (tokenizer should have ensured procedure name contains a dot)
             if (!classMatch) {
                 // Safety fallback: if no classMatch but tokenizer says it's a method implementation,
                 // treat it as a global procedure instead
+                logger.warn(`⚠️ Method implementation ${procedureName} has no classMatch - treating as global procedure`);
                 container = null;
                 (token as any)._isGlobalProcedure = true;
             } else {
