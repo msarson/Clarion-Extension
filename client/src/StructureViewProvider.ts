@@ -50,6 +50,10 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     private _filteredNodesCache: Map<string, DocumentSymbol[]> = new Map();
     private _debounceDelay: number = 300; // 300ms debounce delay
     
+    // Document change debouncing
+    private documentChangeDebounceTimeout: NodeJS.Timeout | null = null;
+    private documentChangeDebounceDelay: number = 500; // 500ms debounce for document changes
+    
     // Parent tracking for tree navigation
     private parentMap: Map<string, DocumentSymbol | null> = new Map();
 

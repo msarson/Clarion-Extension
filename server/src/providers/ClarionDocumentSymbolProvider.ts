@@ -2,7 +2,7 @@ import { DocumentSymbol, Range, SymbolKind } from 'vscode-languageserver-types';
 
 import LoggerManager from '../logger';
 const logger = LoggerManager.getLogger("ClarionDocumentSymbolProvider");
-logger.setLevel("error"); // PERF: Only log errors to reduce overhead
+logger.setLevel("info"); // DEBUG: Enable info logging for MAP procedure debugging
 import { serverInitialized } from '../serverState';
 import { Token, TokenType } from '../ClarionTokenizer.js';
 import { HierarchyManager } from './utils/HierarchyManager';
@@ -342,6 +342,8 @@ export class ClarionDocumentSymbolProvider {
                 subType === TokenType.GlobalProcedure || subType === TokenType.MethodImplementation ||
                 subType === TokenType.InterfaceMethod || subType === TokenType.MapProcedure)) {
 
+                logger.info(`Processing token type=${type}, subType=${subType}, value='${value}', line=${token.line}, label='${token.label}'`);
+                
                 const isImplementation = token.executionMarker?.value.toUpperCase() === "CODE";
                 if (isImplementation || token.finishesAt !== undefined) {
                     // CRITICAL FIX: Before processing a new method implementation, FORCE pop all methods from stack
@@ -1127,8 +1129,13 @@ export class ClarionDocumentSymbolProvider {
         const { line, finishesAt } = token;
         const prevToken = tokens[index - 1];
         
+        logger.info(`handleProcedureOrClassToken: token.type=${token.type}, token.subType=${token.subType}, subType param=${subType}, token.value='${token.value}', token.label='${token.label}', line=${line}`);
+        
         // FIXED: Check token.label first (tokenizer stores it there), fallback to prevToken
         const procedureName = token.label || (prevToken?.type === TokenType.Label ? prevToken.value : "UnnamedProcedure");
+        
+        logger.info(`handleProcedureOrClassToken: procedureName='${procedureName}', currentStructure=${currentStructure?.name || 'null'}`);
+        
         const classMatch = procedureName.includes('.') ? procedureName.split('.')[0] : null;
         const methodName = classMatch ? procedureName.replace(`${classMatch}.`, "") : procedureName;
 
@@ -1549,25 +1556,12 @@ export class ClarionDocumentSymbolProvider {
         }
 
         // ✅ Prefer attaching to MODULE or MAP if that's the current structure
-        if (currentStructure?.name?.startsWith("MODULE") ||
-            currentStructure?.name === "Functions") {
+        const upperName = currentStructure?.name?.toUpperCase();
+        if (currentStructure && (upperName?.startsWith("MODULE") || upperName?.startsWith("MAP") ||
+            currentStructure.name === "Functions")) {
             
             // If we're already in the Functions container, add directly to it
-            if (currentStructure?.name === "Functions") {
-                currentStructure.children!.push(procedureDefSymbol);
-            }
-            // Otherwise, use the Functions container if available
-            else if (currentStructure.$clarionFunctions) {
-                currentStructure.$clarionFunctions.children!.push(procedureDefSymbol);
-            } else {
-                currentStructure.children!.push(procedureDefSymbol);
-            }
-            return procedureDefSymbol;
-        } else if (currentStructure?.name?.startsWith("MAP") ||
-                  currentStructure?.name === "Functions") {
-            
-            // If we're already in the Functions container, add directly to it
-            if (currentStructure?.name === "Functions") {
+            if (currentStructure.name === "Functions") {
                 currentStructure.children!.push(procedureDefSymbol);
             }
             // Otherwise, use the Functions container if available
@@ -2081,9 +2075,9 @@ export class ClarionDocumentSymbolProvider {
             // Handle MAP and MODULE procedures
             else if (isMapProcedure ||
                     (symbol.kind === SymbolKind.Function &&
-                     !symbol.name.startsWith("MODULE") &&  // Don't treat MODULE structure as a function
-                     !symbol.name.startsWith("MAP") &&      // Don't treat MAP structure as a function
-                     (parent?.name?.startsWith("MAP") || parent?.name?.startsWith("MODULE")))) {
+                     !symbol.name.toUpperCase().startsWith("MODULE") &&  // Don't treat MODULE structure as a function
+                     !symbol.name.toUpperCase().startsWith("MAP") &&      // Don't treat MAP structure as a function
+                     (parent?.name?.toUpperCase().startsWith("MAP") || parent?.name?.toUpperCase().startsWith("MODULE")))) {
                 // For MAP and MODULE, use the Functions container if available
                 if (parent.$clarionFunctions) {
                     parent.$clarionFunctions.children!.push(symbol);

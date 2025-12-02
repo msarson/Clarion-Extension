@@ -2562,6 +2562,14 @@ async function startClientServer(context: ExtensionContext, hasOpenXmlFiles: boo
             logger.error("❌ Server does NOT report definitionProvider capability!");
             logger.error(`❌ Capabilities object: ${JSON.stringify(capabilities)}`);
         }
+        
+        // 🔄 Listen for symbol refresh notifications from server
+        client.onNotification('clarion/symbolsRefreshed', (params: { uri: string }) => {
+            logger.info(`🔄 Received symbolsRefreshed notification for: ${params.uri}`);
+            if (structureViewProvider) {
+                structureViewProvider.refresh();
+            }
+        });
     } catch (err) {
         logger.error("❌ Language client failed to start properly", err);
         vscodeWindow.showWarningMessage("Clarion Language Server had issues during startup. Some features may not work correctly.");

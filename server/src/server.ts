@@ -416,6 +416,10 @@ documents.onDidChangeContent(event => {
 
         // 🚀 PERF: Mark document as being edited (serve stale tokens)
         documentsBeingEdited.add(uri);
+        
+        // 🚀 PERF: Invalidate caches immediately so fresh data is computed after debounce
+        symbolCache.delete(uri);
+        foldingCache.delete(uri);
 
         // 🚀 PERF: Don't clear cache until debounce completes
         // This allows other features to use stale tokens while user is typing
@@ -426,6 +430,8 @@ documents.onDidChangeContent(event => {
                 // Clear "being edited" flag FIRST
                 documentsBeingEdited.delete(uri);
                 
+                // Caches already cleared immediately on change - no need to clear again
+                
                 // 🚀 PERF: DON'T clear cache - let getTokens do incremental update
                 // tokenCache.clearTokens(document.uri);  // ❌ This defeats incremental tokenization!
                 const tokens = getTokens(document);
@@ -433,6 +439,10 @@ documents.onDidChangeContent(event => {
                 
                 // Validate document using fresh tokens
                 validateTextDocument(document);
+                
+                // 🔄 Notify client that document symbols have changed
+                // This triggers structure view to refresh with fresh symbols
+                connection.sendNotification('clarion/symbolsRefreshed', { uri });
                 
                 // Clean up timeout from map
                 debounceTimeouts.delete(uri);
@@ -532,12 +542,6 @@ connection.onDocumentSymbol((params: DocumentSymbolParams) => {
         }
 
         logger.info(`📂 [DEBUG] Computing document symbols for: ${uri}, language: ${document.languageId}`);
-        
-        // 🚀 PERF: If document is being edited, return cached symbols immediately
-        if (documentsBeingEdited.has(uri) && symbolCache.has(uri)) {
-            logger.info(`⚡ [PERF] Document being edited, returning cached symbols`);
-            return symbolCache.get(uri)!;
-        }
         
         const tokenStart = performance.now();
         const tokens = getTokens(document);  // ✅ No need for async
