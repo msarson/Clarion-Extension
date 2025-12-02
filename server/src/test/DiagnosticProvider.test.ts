@@ -629,10 +629,10 @@ str StringTheory
         
         test('Should detect unterminated MODULE inside MAP', () => {
             const code = `TestProc PROCEDURE()
-  MAP
-MODULE('KERNEL32')
-  GetTickCount PROCEDURE(),ULONG
-  ! Missing END for MODULE (and MAP)`;
+        MAP
+            MODULE('KERNEL32')
+                GetTickCount PROCEDURE(),ULONG
+            ! Missing END for MODULE (and MAP)`;
             
             const document = createDocument(code);
             const diagnostics = DiagnosticProvider.validateDocument(document);
@@ -645,23 +645,28 @@ MODULE('KERNEL32')
 
         test('Should NOT flag MODULE with END inside MAP', () => {
             const code = `TestProc PROCEDURE()
-  MAP
-MODULE('KERNEL32')
-  GetTickCount PROCEDURE(),ULONG
-  END
-  END`;
+        MAP
+            MODULE('KERNEL32')
+                GetTickCount PROCEDURE(),ULONG
+            END
+        END`;
             
             const document = createDocument(code);
             const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            if (diagnostics.length > 0) {
+                console.log('Unexpected diagnostics:');
+                diagnostics.forEach(d => console.log(`  - ${d.message} (line ${d.range.start.line})`));
+            }
             
             assert.strictEqual(diagnostics.length, 0, 'MODULE with END inside MAP is valid');
         });
 
         test('Should NOT flag MODULE without END inside CLASS', () => {
             const code = `MyClass CLASS
-MODULE('KERNEL32')
-  GetTickCount PROCEDURE(),ULONG
-  END`;
+            MODULE('KERNEL32')
+                GetTickCount PROCEDURE(),ULONG
+        END`;
             
             const document = createDocument(code);
             const diagnostics = DiagnosticProvider.validateDocument(document);
@@ -671,10 +676,10 @@ MODULE('KERNEL32')
 
         test('Should NOT flag MODULE with END inside CLASS', () => {
             const code = `MyClass CLASS
-MODULE('KERNEL32')
-  GetTickCount PROCEDURE(),ULONG
-  END
-  END`;
+            MODULE('KERNEL32')
+                GetTickCount PROCEDURE(),ULONG
+            END
+        END`;
             
             const document = createDocument(code);
             const diagnostics = DiagnosticProvider.validateDocument(document);
@@ -684,13 +689,13 @@ MODULE('KERNEL32')
 
         test('Should handle nested MAP with MODULE', () => {
             const code = `TestProc PROCEDURE()
-  MAP
-INCLUDE('prototypes.inc')
-MODULE('USER32')
-  MessageBoxA PROCEDURE(),LONG
-  END
-MyLocalProc PROCEDURE()
-  END`;
+        MAP
+            INCLUDE('prototypes.inc')
+            MODULE('USER32')
+                MessageBoxA PROCEDURE(),LONG
+            END
+            MyLocalProc PROCEDURE()
+        END`;
 
             const document = createDocument(code);
             const diagnostics = DiagnosticProvider.validateDocument(document);

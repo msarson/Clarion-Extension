@@ -447,42 +447,23 @@ SaveData    PROCEDURE(STRING pFilename)
 
         test('Should parse complex MAP with multiple MODULEs and attributes', () => {
             const code = `
-PROGRAM
-MAP
-  SortCaseSensitive(*LinesGroupType p1,*LinesGroupType p2),Long
-  stMemCpyLeft (long dest, long src,  unsigned count)
-  Module ('')
-    ToUpper (byte char), byte, name('Cla$isftoupper'),dll(DLL_Mode)
-    MemCmp(long buf1, long buf2, unsigned count), long, name('_memcmp'),dll(DLL_Mode)
-  end
-  MODULE('Zlib')
-    stDeflateInit2_(ulong pStream, long pLevel),long,Pascal,raw,dll(_fp_)
-    stDeflate(ulong pStream, long pFlush),long,Pascal,raw,dll(_fp_)
-  End
-end
-CODE
+        PROGRAM
+        MAP
+            SortCaseSensitive(*LinesGroupType p1,*LinesGroupType p2),Long
+            stMemCpyLeft (long dest, long src,  unsigned count)
+            Module ('')
+                ToUpper (byte char), byte, name('Cla$isftoupper'),dll(DLL_Mode)
+                MemCmp(long buf1, long buf2, unsigned count), long, name('_memcmp'),dll(DLL_Mode)
+            end
+            MODULE('Zlib')
+                stDeflateInit2_(ulong pStream, long pLevel),long,Pascal,raw,dll(_fp_)
+                stDeflate(ulong pStream, long pFlush),long,Pascal,raw,dll(_fp_)
+            End
+        end
+        CODE
 `;
             const tokenizer = new ClarionTokenizer(code);
             const tokens = tokenizer.tokenize();
-            
-            console.log('\n=== All Structure Tokens ===');
-            tokens.forEach((t, idx) => {
-                if (t.type === TokenType.Structure) {
-                    console.log(`[${idx}] Line ${t.line}: ${t.value} (finishesAt: ${t.finishesAt})`);
-                }
-            });
-            
-            console.log('\n=== All Tokens (first 30) ===');
-            tokens.slice(0, 30).forEach((t, idx) => {
-                console.log(`[${idx}] Line ${t.line}: "${t.value}" (type: ${TokenType[t.type]})`);
-            });
-            
-            console.log('\n=== MapProcedure Tokens ===');
-            tokens.forEach((t, idx) => {
-                if (t.subType === TokenType.MapProcedure) {
-                    console.log(`[${idx}] Line ${t.line}: ${t.value} (type: ${TokenType[t.type]}, label: ${t.label})`);
-                }
-            });
             
             const provider = new ClarionDocumentSymbolProvider();
             const symbols = provider.provideDocumentSymbols(tokens, 'test://test.clw');
@@ -496,27 +477,16 @@ CODE
             console.log('\n=== Symbol Statistics ===');
             console.log(printSymbolStats(symbols));
             
-            console.log('\n=== All Procedures (MapProc flag) ===');
-            const allProcs = filterSymbolsByName(symbols, '');
-            allProcs.forEach(sym => {
-                if (sym._isMapProcedure || sym.kind === SymbolKind.Function) {
-                    const kindName = Object.keys(SymbolKind).find(key => SymbolKind[key as keyof typeof SymbolKind] === sym.kind);
-                    const mapProc = sym._isMapProcedure ? 'YES' : 'no';
-                    console.log(`  ${sym.name} (${kindName}) - MapProc: ${mapProc}`);
-                }
-            });
-            
-            // Verify we have all expected procedures
+            // Verify all expected procedures are found
             const sortCaseSensitive = findSymbol(symbols, 'SortCaseSensitive');
             const stMemCpyLeft = findSymbol(symbols, 'stMemCpyLeft');
             const toUpper = findSymbol(symbols, 'ToUpper');
             const memCmp = findSymbol(symbols, 'MemCmp');
             
-            console.log('\n=== Missing Procedures Check ===');
-            console.log(`SortCaseSensitive: ${sortCaseSensitive ? 'FOUND' : 'MISSING'}`);
-            console.log(`stMemCpyLeft: ${stMemCpyLeft ? 'FOUND' : 'MISSING'}`);
-            console.log(`ToUpper: ${toUpper ? 'FOUND' : 'MISSING'}`);
-            console.log(`MemCmp: ${memCmp ? 'FOUND' : 'MISSING'}`);
+            assert.ok(sortCaseSensitive, 'SortCaseSensitive procedure should be found');
+            assert.ok(stMemCpyLeft, 'stMemCpyLeft procedure should be found');
+            assert.ok(toUpper, 'ToUpper procedure should be found');
+            assert.ok(memCmp, 'MemCmp procedure should be found');
             
             console.log('\n=== Flattened Symbol Paths ===');
             const flattened = flattenSymbolTree(symbols);
