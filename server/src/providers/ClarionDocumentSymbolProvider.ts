@@ -276,6 +276,7 @@ export class ClarionDocumentSymbolProvider {
                 
                 // Special handling for MAP and MODULE structures
                 if (value.toUpperCase() === "MAP" || value.toUpperCase() === "MODULE") {
+                    logger.info(`🔍 Look-ahead for ${value.toUpperCase()} at line ${line}`);
                     // Look ahead for procedure declarations inside this structure
                     let j = i + 1;
                     let endFound = false;
@@ -314,11 +315,13 @@ export class ClarionDocumentSymbolProvider {
                             nextToken.subType = TokenType.MapProcedure;
                             // CRITICAL: Set token.label to just the procedure name (nextToken.value is already just the name)
                             nextToken.label = nextToken.value;
-                            logger.info(`Marked shorthand procedure ${nextToken.value} at line ${nextToken.line} as MAP/MODULE procedure`);
+                            logger.info(`✅ Marked shorthand procedure ${nextToken.value} at line ${nextToken.line} as MAP/MODULE procedure (type: ${TokenType[nextToken.type]})`);
                         }
                         
                         j++;
                     }
+                    
+                    logger.info(`🔍 Look-ahead for ${value.toUpperCase()} completed, checked ${j - i - 1} tokens`);
                 }
                 
                 continue;

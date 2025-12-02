@@ -448,7 +448,7 @@ SaveData    PROCEDURE(STRING pFilename)
         test('Should parse complex MAP with multiple MODULEs and attributes', () => {
             const code = `
 PROGRAM
-Map
+MAP
   SortCaseSensitive(*LinesGroupType p1,*LinesGroupType p2),Long
   stMemCpyLeft (long dest, long src,  unsigned count)
   Module ('')
@@ -464,6 +464,26 @@ CODE
 `;
             const tokenizer = new ClarionTokenizer(code);
             const tokens = tokenizer.tokenize();
+            
+            console.log('\n=== All Structure Tokens ===');
+            tokens.forEach((t, idx) => {
+                if (t.type === TokenType.Structure) {
+                    console.log(`[${idx}] Line ${t.line}: ${t.value} (finishesAt: ${t.finishesAt})`);
+                }
+            });
+            
+            console.log('\n=== All Tokens (first 30) ===');
+            tokens.slice(0, 30).forEach((t, idx) => {
+                console.log(`[${idx}] Line ${t.line}: "${t.value}" (type: ${TokenType[t.type]})`);
+            });
+            
+            console.log('\n=== MapProcedure Tokens ===');
+            tokens.forEach((t, idx) => {
+                if (t.subType === TokenType.MapProcedure) {
+                    console.log(`[${idx}] Line ${t.line}: ${t.value} (type: ${TokenType[t.type]}, label: ${t.label})`);
+                }
+            });
+            
             const provider = new ClarionDocumentSymbolProvider();
             const symbols = provider.provideDocumentSymbols(tokens, 'test://test.clw');
             
@@ -485,6 +505,18 @@ CODE
                     console.log(`  ${sym.name} (${kindName}) - MapProc: ${mapProc}`);
                 }
             });
+            
+            // Verify we have all expected procedures
+            const sortCaseSensitive = findSymbol(symbols, 'SortCaseSensitive');
+            const stMemCpyLeft = findSymbol(symbols, 'stMemCpyLeft');
+            const toUpper = findSymbol(symbols, 'ToUpper');
+            const memCmp = findSymbol(symbols, 'MemCmp');
+            
+            console.log('\n=== Missing Procedures Check ===');
+            console.log(`SortCaseSensitive: ${sortCaseSensitive ? 'FOUND' : 'MISSING'}`);
+            console.log(`stMemCpyLeft: ${stMemCpyLeft ? 'FOUND' : 'MISSING'}`);
+            console.log(`ToUpper: ${toUpper ? 'FOUND' : 'MISSING'}`);
+            console.log(`MemCmp: ${memCmp ? 'FOUND' : 'MISSING'}`);
             
             console.log('\n=== Flattened Symbol Paths ===');
             const flattened = flattenSymbolTree(symbols);
