@@ -36,6 +36,14 @@ export class DiagnosticProvider {
         const conditionalDiagnostics = this.validateConditionalBlocks(tokens, document);
         diagnostics.push(...conditionalDiagnostics);
         
+        // Validate FILE structures
+        const fileDiagnostics = this.validateFileStructures(tokens, document);
+        diagnostics.push(...fileDiagnostics);
+        
+        // Validate CASE structures
+        const caseDiagnostics = this.validateCaseStructures(tokens, document);
+        diagnostics.push(...caseDiagnostics);
+        
         const perfTime = performance.now() - perfStart;
         console.log(`[DiagnosticProvider] 📊 PERF: Validation complete | time_ms=${perfTime.toFixed(2)}, tokens=${tokens.length}, diagnostics=${diagnostics.length}`);
         
@@ -448,6 +456,169 @@ export class DiagnosticProvider {
         };
         
         return diagnostic;
+    }
+    
+    /**
+     * Validate FILE structures have required attributes
+     * KB Rule: FILE must have DRIVER and RECORD
+     * @param tokens - Tokenized document
+     * @param document - Original TextDocument for position mapping
+     * @returns Array of Diagnostic objects for invalid FILE structures
+     */
+    private static validateFileStructures(tokens: Token[], document: TextDocument): Diagnostic[] {
+        const diagnostics: Diagnostic[] = [];
+        
+        for (let i = 0; i < tokens.length; i++) {
+            const token = tokens[i];
+            
+            // Check if this is a FILE declaration
+            if (token.type === TokenType.Structure && token.value.toUpperCase() === 'FILE') {
+                let hasDriver = false;
+                let hasRecord = false;
+                let fileEndIndex = -1;
+                
+                // Look ahead to find DRIVER, RECORD, and END
+                for (let j = i + 1; j < tokens.length; j++) {
+                    const nextToken = tokens[j];
+                    const upperValue = nextToken.value.toUpperCase();
+                    
+                    // Check for DRIVER attribute
+                    if (upperValue === 'DRIVER') {
+                        hasDriver = true;
+                    }
+                    
+                    // Check for RECORD section
+                    if (upperValue === 'RECORD') {
+                        hasRecord = true;
+                    }
+                    
+                    // Stop at END or another structure declaration
+                    if (upperValue === 'END' && nextToken.type === TokenType.EndStatement) {
+                        fileEndIndex = j;
+                        break;
+                    }
+                    
+                    // Stop if we hit another structure at column 0
+                    if (nextToken.type === TokenType.Structure && nextToken.start === 0 && nextToken.line > token.line) {
+                        fileEndIndex = j - 1;
+                        break;
+                    }
+                }
+                
+                // Report missing DRIVER
+                if (!hasDriver) {
+                    const range = {
+                        start: { line: token.line, character: token.start },
+                        end: { line: token.line, character: token.start + token.value.length }
+                    };
+                    
+                    diagnostics.push({
+                        severity: DiagnosticSeverity.Error,
+                        range: range,
+                        message: `FILE declaration missing required DRIVER attribute`,
+                        source: 'clarion'
+                    });
+                }
+                
+                // Report missing RECORD
+                if (!hasRecord) {
+                    const range = {
+                        start: { line: token.line, character: token.start },
+                        end: { line: token.line, character: token.start + token.value.length }
+                    };
+                    
+                    diagnostics.push({
+                        severity: DiagnosticSeverity.Error,
+                        range: range,
+                        message: `FILE declaration missing required RECORD section`,
+                        source: 'clarion'
+                    });
+                }
+            }
+        }
+        
+        return diagnostics;
+    }
+    
+    /**
+     * Validate CASE structures have required OF clause
+     * KB Rule: CASE must have at least one OF, OROF must follow OF
+     * @param tokens - Tokenized document
+     * @param document - Original TextDocument for position mapping
+     * @returns Array of Diagnostic objects for invalid CASE structures
+     */
+    private static validateCaseStructures(tokens: Token[], document: TextDocument): Diagnostic[] {
+        const diagnostics: Diagnostic[] = [];
+        
+        for (let i = 0; i < tokens.length; i++) {
+            const token = tokens[i];
+            
+            // Check if this is a CASE statement
+            if (token.type === TokenType.Structure && token.value.toUpperCase() === 'CASE') {
+                let hasOf = false;
+                let lastOfIndex = -1;
+                let caseEndIndex = -1;
+                
+                // Look ahead to find OF, OROF, and END
+                for (let j = i + 1; j < tokens.length; j++) {
+                    const nextToken = tokens[j];
+                    const upperValue = nextToken.value.toUpperCase();
+                    
+                    // Check for OF
+                    if (upperValue === 'OF') {
+                        hasOf = true;
+                        lastOfIndex = j;
+                    }
+                    
+                    // Check for OROF
+                    if (upperValue === 'OROF') {
+                        // OROF must come after an OF
+                        if (!hasOf || lastOfIndex === -1) {
+                            const range = {
+                                start: { line: nextToken.line, character: nextToken.start },
+                                end: { line: nextToken.line, character: nextToken.start + nextToken.value.length }
+                            };
+                            
+                            diagnostics.push({
+                                severity: DiagnosticSeverity.Error,
+                                range: range,
+                                message: `OROF must be preceded by an OF clause in CASE structure`,
+                                source: 'clarion'
+                            });
+                        }
+                    }
+                    
+                    // Stop at END
+                    if (upperValue === 'END' && nextToken.type === TokenType.EndStatement) {
+                        caseEndIndex = j;
+                        break;
+                    }
+                    
+                    // Stop if we hit another structure
+                    if (nextToken.type === TokenType.Structure && nextToken.line > token.line) {
+                        caseEndIndex = j - 1;
+                        break;
+                    }
+                }
+                
+                // Report missing OF
+                if (!hasOf) {
+                    const range = {
+                        start: { line: token.line, character: token.start },
+                        end: { line: token.line, character: token.start + token.value.length }
+                    };
+                    
+                    diagnostics.push({
+                        severity: DiagnosticSeverity.Error,
+                        range: range,
+                        message: `CASE structure must have at least one OF clause`,
+                        source: 'clarion'
+                    });
+                }
+            }
+        }
+        
+        return diagnostics;
     }
 }
 
