@@ -44,6 +44,10 @@ export class DiagnosticProvider {
         const caseDiagnostics = this.validateCaseStructures(tokens, document);
         diagnostics.push(...caseDiagnostics);
         
+        // Validate EXECUTE structures
+        const executeDiagnostics = this.validateExecuteStructures(tokens, document);
+        diagnostics.push(...executeDiagnostics);
+        
         const perfTime = performance.now() - perfStart;
         console.log(`[DiagnosticProvider] 📊 PERF: Validation complete | time_ms=${perfTime.toFixed(2)}, tokens=${tokens.length}, diagnostics=${diagnostics.length}`);
         
@@ -614,6 +618,51 @@ export class DiagnosticProvider {
                         message: `CASE structure must have at least one OF clause`,
                         source: 'clarion'
                     });
+                }
+            }
+        }
+        
+        return diagnostics;
+    }
+    
+    /**
+     * Validate EXECUTE structures have numeric expression
+     * KB Rule: EXECUTE expression must evaluate to numeric
+     * Note: This is a simple heuristic - we check if the expression starts with
+     * a variable/function that looks numeric or is a literal number
+     * @param tokens - Tokenized document
+     * @param document - Original TextDocument for position mapping
+     * @returns Array of Diagnostic objects for invalid EXECUTE structures
+     */
+    private static validateExecuteStructures(tokens: Token[], document: TextDocument): Diagnostic[] {
+        const diagnostics: Diagnostic[] = [];
+        
+        for (let i = 0; i < tokens.length; i++) {
+            const token = tokens[i];
+            
+            // Check if this is an EXECUTE statement
+            if (token.type === TokenType.Structure && token.value.toUpperCase() === 'EXECUTE') {
+                // Look at the next non-whitespace token to check the expression
+                let expressionToken = i + 1 < tokens.length ? tokens[i + 1] : null;
+                
+                if (expressionToken) {
+                    const expValue = expressionToken.value;
+                    
+                    // Simple heuristic checks for obviously non-numeric expressions
+                    // Check if it starts with a string literal
+                    if (expValue.startsWith("'") || expValue.startsWith('"')) {
+                        const range = {
+                            start: { line: expressionToken.line, character: expressionToken.start },
+                            end: { line: expressionToken.line, character: expressionToken.start + expValue.length }
+                        };
+                        
+                        diagnostics.push({
+                            severity: DiagnosticSeverity.Warning,
+                            range: range,
+                            message: `EXECUTE expression should evaluate to a numeric value (found string literal)`,
+                            source: 'clarion'
+                        });
+                    }
                 }
             }
         }

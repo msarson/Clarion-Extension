@@ -181,3 +181,45 @@ CODE
         assert.strictEqual(chooseErrors.length, 0, 'Should not have CHOOSE errors');
     });
 });
+
+suite('EXECUTE Structure Validation', () => {
+    
+    test('should warn when EXECUTE has string literal expression', () => {
+        const code = `
+CODE
+  EXECUTE 'Hello'
+    ProcessFirst()
+    ProcessSecond()
+  END
+        `;
+        
+        const document = TextDocument.create('test://test.clw', 'clarion', 1, code);
+        const diagnostics = DiagnosticProvider.validateDocument(document);
+        
+        const executeWarning = diagnostics.find(d => 
+            d.message.includes('EXECUTE expression should evaluate to a numeric')
+        );
+        
+        assert.ok(executeWarning, 'Should have EXECUTE warning');
+        assert.strictEqual(executeWarning?.severity, DiagnosticSeverity.Warning);
+    });
+    
+    test('should not warn when EXECUTE has valid numeric expression', () => {
+        const code = `
+CODE
+  EXECUTE Choice
+    ProcessFirst()
+    ProcessSecond()
+  END
+        `;
+        
+        const document = TextDocument.create('test://test.clw', 'clarion', 1, code);
+        const diagnostics = DiagnosticProvider.validateDocument(document);
+        
+        const executeErrors = diagnostics.filter(d => 
+            d.message.includes('EXECUTE')
+        );
+        
+        assert.strictEqual(executeErrors.length, 0, 'Should not have EXECUTE errors');
+    });
+});
