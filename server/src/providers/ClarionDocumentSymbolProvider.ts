@@ -1315,7 +1315,14 @@ export class ClarionDocumentSymbolProvider {
         // Add the procedure to its container
         if (token.subType === TokenType.MethodImplementation || subType === TokenType.MethodImplementation) {
             // For method implementations, add directly to the container
-            container!.children!.push(procedureSymbol);
+            if (container) {
+                container.children!.push(procedureSymbol);
+            } else {
+                // FALLBACK: If no container was found, add to top level
+                // This shouldn't happen if findOrCreateClassImplementation worked correctly
+                logger.error(`❌ Method implementation ${procedureName} has no container! Adding to root.`);
+                symbols.push(procedureSymbol);
+            }
         } else {
             // For regular procedures, use addSymbolToParent
             this.addSymbolToParent(procedureSymbol, container, symbols);
