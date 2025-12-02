@@ -18,30 +18,62 @@ export class CompletionProvider {
         document: TextDocument,
         position: { line: number; character: number }
     ): CompletionItem[] {
-        const line = document.getText({
+        // Check if we're on a blank line or at end of IF/LOOP/CASE line
+        const currentLine = document.getText({
             start: { line: position.line, character: 0 },
             end: position
         });
 
-        // Get the indentation of the current line (where IF/LOOP/CASE is)
-        const indent = this.getIndentation(line);
+        // Check previous line if current line is empty/whitespace
+        const isPreviousLineCheck = /^\s*$/.test(currentLine) && position.line > 0;
         
-        // Check if line starts with IF (case-insensitive)
-        const ifMatch = /^\s*IF\s+\S/i.test(line);
-        if (ifMatch) {
-            return this.createIfCompletions(indent);
-        }
+        if (isPreviousLineCheck) {
+            // Get previous line
+            const prevLine = document.getText({
+                start: { line: position.line - 1, character: 0 },
+                end: { line: position.line, character: 0 }
+            }).trimEnd();
+            
+            const indent = this.getIndentation(prevLine);
+            
+            // Check if previous line was IF
+            const ifMatch = /^\s*IF\s+.+$/i.test(prevLine);
+            if (ifMatch) {
+                return this.createIfCompletions(indent, true);
+            }
 
-        // Check if line starts with LOOP (case-insensitive)
-        const loopMatch = /^\s*LOOP\s*$/i.test(line);
-        if (loopMatch) {
-            return this.createLoopCompletions(indent);
-        }
+            // Check if previous line was LOOP
+            const loopMatch = /^\s*LOOP\s*$/i.test(prevLine);
+            if (loopMatch) {
+                return this.createLoopCompletions(indent, true);
+            }
 
-        // Check if line starts with CASE (case-insensitive)
-        const caseMatch = /^\s*CASE\s+\S/i.test(line);
-        if (caseMatch) {
-            return this.createCaseCompletions(indent);
+            // Check if previous line was CASE
+            const caseMatch = /^\s*CASE\s+.+$/i.test(prevLine);
+            if (caseMatch) {
+                return this.createCaseCompletions(indent, true);
+            }
+        } else {
+            // On same line as IF/LOOP/CASE - traditional trigger
+            const indent = this.getIndentation(currentLine);
+            
+            // Check if line starts with IF (case-insensitive)
+            const ifMatch = /^\s*IF\s+\S/i.test(currentLine);
+            if (ifMatch) {
+                return this.createIfCompletions(indent, false);
+            }
+
+            // Check if line starts with LOOP (case-insensitive)
+            const loopMatch = /^\s*LOOP\s*$/i.test(currentLine);
+            if (loopMatch) {
+                return this.createLoopCompletions(indent, false);
+            }
+
+            // Check if line starts with CASE (case-insensitive)
+            const caseMatch = /^\s*CASE\s+\S/i.test(currentLine);
+            if (caseMatch) {
+                return this.createCaseCompletions(indent, false);
+            }
         }
 
         return [];
@@ -57,121 +89,148 @@ export class CompletionProvider {
 
     /**
      * Create IF structure completions
+     * @param indent The indentation of the IF line
+     * @param afterNewline True if cursor is on line after IF
      */
-    private createIfCompletions(indent: string): CompletionItem[] {
+    private createIfCompletions(indent: string, afterNewline: boolean): CompletionItem[] {
         const items: CompletionItem[] = [];
 
-        // IF...END (without THEN)
-        items.push({
-            label: 'Complete IF structure (no THEN)',
-            kind: CompletionItemKind.Snippet,
-            detail: 'IF condition\n  statements\nEND',
-            documentation: 'Insert IF structure without THEN keyword',
-            insertTextFormat: InsertTextFormat.Snippet,
-            // Use $0 for final cursor position, blank line forces proper indent
-            insertText: `\n\t\$0\n${indent}END`,
-            preselect: true
-        });
+        if (afterNewline) {
+            // Cursor is already on next line, VS Code has handled indent
+            // Just insert body placeholder + END/ELSE
+            items.push({
+                label: 'Complete IF structure',
+                kind: CompletionItemKind.Snippet,
+                detail: 'Add END terminator',
+                documentation: 'Insert IF...END structure',
+                insertTextFormat: InsertTextFormat.Snippet,
+                insertText: `$0\n${indent}END`,
+                preselect: true
+            });
 
-        // IF...THEN...END
-        items.push({
-            label: 'Complete IF structure (with THEN)',
-            kind: CompletionItemKind.Snippet,
-            detail: 'IF condition THEN\n  statements\nEND',
-            documentation: 'Insert IF structure with THEN keyword',
-            insertTextFormat: InsertTextFormat.Snippet,
-            insertText: ` THEN\n\t\$0\n${indent}END`
-        });
+            items.push({
+                label: 'Complete IF...ELSE structure',
+                kind: CompletionItemKind.Snippet,
+                detail: 'Add ELSE and END',
+                documentation: 'Insert IF...ELSE...END structure',
+                insertTextFormat: InsertTextFormat.Snippet,
+                insertText: `$1\n${indent}ELSE\n$0\n${indent}END`
+            });
+        } else {
+            // On same line as IF - add THEN + structure
+            items.push({
+                label: 'Add THEN + END',
+                kind: CompletionItemKind.Snippet,
+                detail: 'IF condition THEN\n  statements\nEND',
+                documentation: 'Insert THEN keyword and END terminator',
+                insertTextFormat: InsertTextFormat.Snippet,
+                insertText: ` THEN$0\n${indent}END`
+            });
 
-        // IF...ELSE...END (without THEN)
-        items.push({
-            label: 'Complete IF...ELSE structure (no THEN)',
-            kind: CompletionItemKind.Snippet,
-            detail: 'IF condition\n  statements\nELSE\n  statements\nEND',
-            documentation: 'Insert IF...ELSE structure without THEN keyword',
-            insertTextFormat: InsertTextFormat.Snippet,
-            insertText: `\n\t\${1}\n${indent}ELSE\n\t\$0\n${indent}END`
-        });
-
-        // IF...THEN...ELSE...END
-        items.push({
-            label: 'Complete IF...ELSE structure (with THEN)',
-            kind: CompletionItemKind.Snippet,
-            detail: 'IF condition THEN\n  statements\nELSE\n  statements\nEND',
-            documentation: 'Insert IF...ELSE structure with THEN keyword',
-            insertTextFormat: InsertTextFormat.Snippet,
-            insertText: ` THEN\n\t\${1}\n${indent}ELSE\n\t\$0\n${indent}END`
-        });
+            items.push({
+                label: 'Add THEN + ELSE + END',
+                kind: CompletionItemKind.Snippet,
+                detail: 'IF condition THEN\n  statements\nELSE\n  statements\nEND',
+                documentation: 'Insert THEN keyword with ELSE and END',
+                insertTextFormat: InsertTextFormat.Snippet,
+                insertText: ` THEN$1\n${indent}ELSE\n$0\n${indent}END`
+            });
+        }
 
         return items;
     }
 
     /**
      * Create LOOP structure completions
+     * @param indent The indentation of the LOOP line  
+     * @param afterNewline True if cursor is on line after LOOP
      */
-    private createLoopCompletions(indent: string): CompletionItem[] {
+    private createLoopCompletions(indent: string, afterNewline: boolean): CompletionItem[] {
         const items: CompletionItem[] = [];
 
-        // LOOP...END
-        items.push({
-            label: 'Complete LOOP structure',
-            kind: CompletionItemKind.Snippet,
-            detail: 'LOOP\n  statements\nEND',
-            documentation: 'Insert LOOP...END structure',
-            insertTextFormat: InsertTextFormat.Snippet,
-            insertText: `\n\t\$0\n${indent}END`,
-            preselect: true
-        });
+        if (afterNewline) {
+            // Cursor already on next line
+            items.push({
+                label: 'Complete LOOP with END',
+                kind: CompletionItemKind.Snippet,
+                detail: 'Add END terminator',
+                documentation: 'Insert LOOP...END structure',
+                insertTextFormat: InsertTextFormat.Snippet,
+                insertText: `$0\n${indent}END`,
+                preselect: true
+            });
 
-        // LOOP...WHILE
-        items.push({
-            label: 'Complete LOOP...WHILE structure',
-            kind: CompletionItemKind.Snippet,
-            detail: 'LOOP\n  statements\nWHILE condition',
-            documentation: 'Insert LOOP with WHILE terminator',
-            insertTextFormat: InsertTextFormat.Snippet,
-            insertText: `\n\t\${1}\n${indent}WHILE \${0:condition}`
-        });
+            items.push({
+                label: 'Complete LOOP with WHILE',
+                kind: CompletionItemKind.Snippet,
+                detail: 'Add WHILE condition',
+                documentation: 'Insert LOOP...WHILE structure',
+                insertTextFormat: InsertTextFormat.Snippet,
+                insertText: `$1\n${indent}WHILE $0`
+            });
 
-        // LOOP...UNTIL
-        items.push({
-            label: 'Complete LOOP...UNTIL structure',
-            kind: CompletionItemKind.Snippet,
-            detail: 'LOOP\n  statements\nUNTIL condition',
-            documentation: 'Insert LOOP with UNTIL terminator',
-            insertTextFormat: InsertTextFormat.Snippet,
-            insertText: `\n\t\${1}\n${indent}UNTIL \${0:condition}`
-        });
+            items.push({
+                label: 'Complete LOOP with UNTIL',
+                kind: CompletionItemKind.Snippet,
+                detail: 'Add UNTIL condition',
+                documentation: 'Insert LOOP...UNTIL structure',
+                insertTextFormat: InsertTextFormat.Snippet,
+                insertText: `$1\n${indent}UNTIL $0`
+            });
+        } else {
+            // On same line - not typical for LOOP
+            items.push({
+                label: 'Add structure',
+                kind: CompletionItemKind.Snippet,
+                detail: 'Complete LOOP',
+                documentation: 'Complete LOOP structure',
+                insertTextFormat: InsertTextFormat.Snippet,
+                insertText: `$0\n${indent}END`
+            });
+        }
 
         return items;
     }
 
     /**
      * Create CASE structure completions
+     * @param indent The indentation of the CASE line
+     * @param afterNewline True if cursor is on line after CASE
      */
-    private createCaseCompletions(indent: string): CompletionItem[] {
+    private createCaseCompletions(indent: string, afterNewline: boolean): CompletionItem[] {
         const items: CompletionItem[] = [];
 
-        // CASE...OF...END
-        items.push({
-            label: 'Complete CASE structure',
-            kind: CompletionItemKind.Snippet,
-            detail: 'CASE condition\nOF value\n  statements\nEND',
-            documentation: 'Insert CASE...OF...END structure',
-            insertTextFormat: InsertTextFormat.Snippet,
-            insertText: `\n${indent}OF \${1:value}\n\t\$0\n${indent}END`,
-            preselect: true
-        });
+        if (afterNewline) {
+            // Cursor already on next line
+            items.push({
+                label: 'Complete CASE with OF',
+                kind: CompletionItemKind.Snippet,
+                detail: 'Add OF clause',
+                documentation: 'Insert CASE...OF...END structure',
+                insertTextFormat: InsertTextFormat.Snippet,
+                insertText: `${indent}OF $1\n$0\n${indent}END`,
+                preselect: true
+            });
 
-        // CASE...OF...ELSE...END
-        items.push({
-            label: 'Complete CASE...ELSE structure',
-            kind: CompletionItemKind.Snippet,
-            detail: 'CASE condition\nOF value\n  statements\nELSE\n  statements\nEND',
-            documentation: 'Insert CASE...OF...ELSE...END structure',
-            insertTextFormat: InsertTextFormat.Snippet,
-            insertText: `\n${indent}OF \${1:value}\n\t\${2}\n${indent}ELSE\n\t\$0\n${indent}END`
-        });
+            items.push({
+                label: 'Complete CASE with OF...ELSE',
+                kind: CompletionItemKind.Snippet,
+                detail: 'Add OF and ELSE clauses',
+                documentation: 'Insert CASE...OF...ELSE...END structure',
+                insertTextFormat: InsertTextFormat.Snippet,
+                insertText: `${indent}OF $1\n$2\n${indent}ELSE\n$0\n${indent}END`
+            });
+        } else {
+            // On same line - not typical for CASE
+            items.push({
+                label: 'Add OF clause',
+                kind: CompletionItemKind.Snippet,
+                detail: 'Complete CASE',
+                documentation: 'Complete CASE structure',
+                insertTextFormat: InsertTextFormat.Snippet,
+                insertText: `\n${indent}OF $1\n$0\n${indent}END`
+            });
+        }
 
         return items;
     }
