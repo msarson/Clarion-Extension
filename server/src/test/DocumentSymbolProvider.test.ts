@@ -488,6 +488,30 @@ SaveData    PROCEDURE(STRING pFilename)
             assert.ok(toUpper, 'ToUpper procedure should be found');
             assert.ok(memCmp, 'MemCmp procedure should be found');
             
+            // Verify hierarchy - MAP procedures (before any MODULE) should be under MAP > Functions
+            const mapSymbol = findSymbol(symbols, 'MAP');
+            assert.ok(mapSymbol, 'MAP should be found');
+            const mapFunctions = mapSymbol?.children?.find(c => c.name === 'Functions');
+            assert.ok(mapFunctions, 'MAP should have Functions container');
+            
+            const sortInMap = mapFunctions?.children?.find(c => c.name.startsWith('SortCaseSensitive'));
+            const stMemInMap = mapFunctions?.children?.find(c => c.name.startsWith('stMemCpyLeft'));
+            
+            assert.ok(sortInMap, 'SortCaseSensitive should be child of MAP > Functions');
+            assert.ok(stMemInMap, 'stMemCpyLeft should be child of MAP > Functions');
+            
+            // Verify MODULE procedures are under their respective MODULEs
+            const emptyModule = mapSymbol?.children?.find(c => c.name.startsWith("MODULE("));
+            assert.ok(emptyModule, "MODULE('') should exist");
+            const emptyModuleFunctions = emptyModule?.children?.find(c => c.name === 'Functions');
+            assert.ok(emptyModuleFunctions, "MODULE('') should have Functions container");
+            
+            const toUpperInModule = emptyModuleFunctions?.children?.find(c => c.name.startsWith('ToUpper'));
+            const memCmpInModule = emptyModuleFunctions?.children?.find(c => c.name.startsWith('MemCmp'));
+            
+            assert.ok(toUpperInModule, "ToUpper should be child of MODULE('') > Functions");
+            assert.ok(memCmpInModule, "MemCmp should be child of MODULE('') > Functions");
+            
             console.log('\n=== Flattened Symbol Paths ===');
             const flattened = flattenSymbolTree(symbols);
             flattened.forEach(({path, symbol}) => {
