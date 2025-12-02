@@ -871,60 +871,60 @@ END
 ```clarion
 ! Simple file declaration
 Customer FILE,DRIVER('TOPSPEED'),PRE(CUS),CREATE,RECLAIM
-  KEY(CUS:ID),PRIMARY
-  INDEX(CUS:LastName),DUP,NOCASE
-  RECORD
-CUS:ID        LONG
-CUS:LastName  STRING(30)
-CUS:FirstName STRING(30)
-CUS:Address   STRING(50)
-CUS:Notes     MEMO(1000)
-  END
-END
+          KEY(CUS:ID),PRIMARY
+          INDEX(CUS:LastName),DUP,NOCASE
+          RECORD
+CUS:ID         LONG
+CUS:LastName   STRING(30)
+CUS:FirstName  STRING(30)
+CUS:Address    STRING(50)
+CUS:Notes      MEMO(1000)
+          END
+        END
 
 ! File with BINDABLE for dynamic expressions
-Report FILE,DRIVER('TOPSPEED'),BINDABLE,NAME('REPORT.TPS')
-  RECORD
-ReportDate    DATE,NAME('Date')
-ReportAmount  DECIMAL(12,2),NAME('Amount')
-ReportStatus  STRING(20),NAME('Status')
-  END
-END
+Report   FILE,DRIVER('TOPSPEED'),BINDABLE,NAME('REPORT.TPS')
+          RECORD
+ReportDate     DATE,NAME('Date')
+ReportAmount   DECIMAL(12,2),NAME('Amount')
+ReportStatus   STRING(20),NAME('Status')
+          END
+        END
 ! Now can use: BIND(Report) and evaluate 'Amount * 1.1'
 
 ! Threaded file for multi-threading
-LogFile FILE,DRIVER('ASCII'),THREAD,NAME('LOG.TXT')
-  RECORD
-LogEntry STRING(200)
-  END
-END
+LogFile  FILE,DRIVER('ASCII'),THREAD,NAME('LOG.TXT')
+          RECORD
+LogEntry  STRING(200)
+          END
+        END
 
 ! Encrypted file with owner password
-Secure FILE,DRIVER('TOPSPEED'),ENCRYPT,OWNER('MyPassword'),CREATE
-  KEY(SEC:ID),PRIMARY
-  RECORD
-SEC:ID        LONG
-SEC:Data      STRING(100)
-  END
-END
+Secure   FILE,DRIVER('TOPSPEED'),ENCRYPT,OWNER('MyPassword'),CREATE
+          KEY(SEC:ID),PRIMARY
+          RECORD
+SEC:ID    LONG
+SEC:Data  STRING(100)
+          END
+        END
 
 ! External file from library
 External FILE,DRIVER('TOPSPEED'),EXTERNAL,PRE(EXT)
-  RECORD
-EXT:Field1 STRING(20)
-EXT:Field2 LONG
-  END
-END
+          RECORD
+EXT:Field1  STRING(20)
+EXT:Field2  LONG
+          END
+        END
 
 ! File with BLOB for large data
 Document FILE,DRIVER('TOPSPEED'),CREATE
-  KEY(DOC:ID),PRIMARY
-  RECORD
-DOC:ID       LONG
-DOC:Title    STRING(100)
-DOC:Content  BLOB  ! Can exceed 64K
-  END
-END
+          KEY(DOC:ID),PRIMARY
+          RECORD
+DOC:ID      LONG
+DOC:Title   STRING(100)
+DOC:Content BLOB  ! Can exceed 64K
+          END
+        END
 ```
 
 ---
@@ -1044,50 +1044,50 @@ END
 **Examples:**
 ```clarion
 ! Simple QUEUE
-MyQueue QUEUE
-Name    STRING(30)
-Age     LONG
-Status  STRING(20)
+MyQueue  QUEUE
+Name      STRING(30)
+Age       LONG
+Status    STRING(20)
         END
 
 ! QUEUE with prefix
 CustomerQueue QUEUE,PRE(CQ)
-CQ:ID         LONG
-CQ:Name       STRING(50)
-CQ:Balance    DECIMAL(12,2)
+CQ:ID          LONG
+CQ:Name        STRING(50)
+CQ:Balance     DECIMAL(12,2)
               END
 
 ! QUEUE inheriting from GROUP
 PersonGroup GROUP
-Name          STRING(30)
-Age           LONG
+Name         STRING(30)
+Age          LONG
             END
 
 PersonQueue QUEUE(PersonGroup)  ! Inherits Name and Age
-Address       STRING(50)        ! Additional field
+Address      STRING(50)        ! Additional field
             END
 
 ! QUEUE with BINDABLE for dynamic expressions
 ReportQueue QUEUE,BINDABLE
-Amount        DECIMAL(12,2),NAME('Amount')
-Quantity      LONG,NAME('Qty')
-Total         DECIMAL(12,2),NAME('Total')
+Amount       DECIMAL(12,2),NAME('Amount')
+Quantity     LONG,NAME('Qty')
+Total        DECIMAL(12,2),NAME('Total')
             END
 ! Now can use: BIND(ReportQueue) and evaluate 'Amount * Qty'
 
 ! STATIC QUEUE for persistent data
-MyProc PROCEDURE
+MyProc   PROCEDURE
 LocalQueue QUEUE,STATIC  ! Persists between calls
-Value        LONG
+Value       LONG
            END
 CODE
   ! Queue data persists across procedure calls
 
 ! TYPE QUEUE for parameter passing
 EmployeeType QUEUE,TYPE
-EmpID          LONG
-EmpName        STRING(50)
-EmpSalary      DECIMAL(10,2)
+EmpID         LONG
+EmpName       STRING(50)
+EmpSalary     DECIMAL(10,2)
              END
 
 ProcessEmployee PROCEDURE(EmployeeType EMP)  ! EMP: prefix
@@ -1096,12 +1096,12 @@ CODE
 
 ! Threaded QUEUE for multi-threading
 ThreadQueue QUEUE,THREAD
-ThreadData    STRING(100)
-ThreadCount   LONG
+ThreadData   STRING(100)
+ThreadCount  LONG
             END
 
 ! Simple usage
-MyQueue QUEUE
+MyQueue  QUEUE
 Item      STRING(20)
         END
 CODE
@@ -1221,49 +1221,49 @@ END
 ```clarion
 ! Simple GROUP
 NameGroup GROUP
-FirstName   STRING(20)
-MiddleInit  STRING(1)
-LastName    STRING(20)
+FirstName  STRING(20)
+MiddleInit STRING(1)
+LastName   STRING(20)
           END
 
 ! GROUP with prefix
 AddressGrp GROUP,PRE(ADR)
-ADR:Street   STRING(50)
-ADR:City     STRING(30)
-ADR:State    STRING(2)
-ADR:Zip      STRING(10)
+ADR:Street  STRING(50)
+ADR:City    STRING(30)
+ADR:State   STRING(2)
+ADR:Zip     STRING(10)
            END
 
 ! GROUP inheriting from another GROUP
 PersonType GROUP,TYPE
-Name         STRING(30)
-Age          LONG
+Name        STRING(30)
+Age         LONG
            END
 
-Employee GROUP(PersonType)  ! Inherits Name and Age
-EmployeeID   LONG           ! Additional field
-Department   STRING(20)
+Employee   GROUP(PersonType)  ! Inherits Name and Age
+EmployeeID  LONG           ! Additional field
+Department  STRING(20)
          END
 
 ! Dimensioned GROUP (structured array)
 DateTimeGrp GROUP,DIM(10)
-Date          LONG                    ! Referenced as DateTimeGrp[1].Date
-StartStopTime LONG,DIM(2)             ! Referenced as DateTimeGrp[1].StartStopTime[1]
+Date           LONG                    ! Referenced as DateTimeGrp[1].Date
+StartStopTime  LONG,DIM(2)             ! Referenced as DateTimeGrp[1].StartStopTime[1]
             END
 
 ! BINDABLE GROUP for dynamic expressions
 FileNames GROUP,BINDABLE
-FileName    STRING(8),NAME('FILE')
-Dot         STRING('.'),NAME('Dot')
-Extension   STRING(3),NAME('EXT')
+FileName   STRING(8),NAME('FILE')
+Dot        STRING('.'),NAME('Dot')
+Extension  STRING(3),NAME('EXT')
           END
 ! Now can use: BIND(FileNames) and evaluate dynamic expressions
 
 ! TYPE GROUP for parameter passing
 PassGroup GROUP,TYPE
-F1          STRING(20)
-F2          STRING(1)
-F3          STRING(20)
+F1         STRING(20)
+F2         STRING(1)
+F3         STRING(20)
           END
 
 ProcessData PROCEDURE(PassGroup PG)  ! PG: prefix
@@ -1273,21 +1273,21 @@ CODE
 ! OVER attribute - shared memory
 TotalAmount DECIMAL(12,2)
 AmountParts GROUP,OVER(TotalAmount)
-Dollars       LONG
-Cents         SHORT
+Dollars      LONG
+Cents        SHORT
             END
 ! TotalAmount and AmountParts occupy same memory
 
 ! Nested GROUP
 CustomerRec GROUP
-Name          STRING(50)
-Address       GROUP
-  Street        STRING(50)
-  City          STRING(30)
-  State         STRING(2)
-  Zip           STRING(10)
+Name         STRING(50)
+Address      GROUP
+  Street      STRING(50)
+  City        STRING(30)
+  State       STRING(2)
+  Zip         STRING(10)
               END
-Phone         STRING(20)
+Phone        STRING(20)
             END
 ! Access as CustomerRec.Address.City
 ```
@@ -1392,33 +1392,33 @@ END
 **Example:**
 ```clarion
 Customer FILE,DRIVER('TOPSPEED'),PRE(CUS)
-  KEY(CUS:AcctNumber),PRIMARY
-  RECORD
+          KEY(CUS:AcctNumber),PRIMARY
+          RECORD
 CUS:AcctNumber LONG
 CUS:Name       STRING(30)
 CUS:City       STRING(20)
-  END
-END
+          END
+        END
 
-Orders FILE,DRIVER('TOPSPEED'),PRE(ORD)
-  KEY(ORD:AcctNumber)
-  RECORD
+Orders   FILE,DRIVER('TOPSPEED'),PRE(ORD)
+          KEY(ORD:AcctNumber)
+          RECORD
 ORD:AcctNumber  LONG
 ORD:OrderNumber LONG
 ORD:OrderDate   LONG
 ORD:Amount      DECIMAL(12,2)
-  END
-END
+          END
+        END
 
 ! VIEW joining Customer and Orders
 CustomerOrders VIEW(Customer)
-  PROJECT(CUS:AcctNumber, CUS:Name)
-  FILTER(CUS:City = 'Seattle')
-  ORDER(CUS:Name)
-  JOIN(ORD:AcctNumber, CUS:AcctNumber)
-    PROJECT(ORD:OrderNumber, ORD:Amount)
-  END
-END
+                PROJECT(CUS:AcctNumber, CUS:Name)
+                FILTER(CUS:City = 'Seattle')
+                ORDER(CUS:Name)
+                JOIN(ORD:AcctNumber, CUS:AcctNumber)
+                  PROJECT(ORD:OrderNumber, ORD:Amount)
+                END
+              END
 
 CODE
   OPEN(Customer)
@@ -1598,16 +1598,16 @@ END
 
 **Direct Declaration:**
 ```clarion
-MyClass CLASS,TYPE
-  Field LONG
-END
+MyClass  CLASS,TYPE
+Field     LONG
+        END
 
-Obj1 MyClass  ! Declared instance (smaller, quicker)
+Obj1     MyClass  ! Declared instance (smaller, quicker)
 ```
 
 **Reference with NEW:**
 ```clarion
-Obj2 &MyClass  ! Reference variable
+Obj2     &MyClass  ! Reference variable
 CODE
   Obj2 &= NEW(MyClass)  ! Explicit lifetime control
   DISPOSE(Obj2)
@@ -1686,19 +1686,19 @@ CODE
 ```clarion
 ! Base class
 BaseClass CLASS,TYPE
-Name        STRING(30)
-Init        PROCEDURE
-Process     PROCEDURE,VIRTUAL
+Name       STRING(30)
+Init       PROCEDURE
+Process    PROCEDURE,VIRTUAL
           END
 
 ! Derived class
 DerivedClass CLASS(BaseClass)
-ExtraField   LONG
-Process      PROCEDURE,VIRTUAL,DERIVED
+ExtraField    LONG
+Process       PROCEDURE,VIRTUAL,DERIVED
            END
 
 ! Instance
-MyObj DerivedClass
+MyObj    DerivedClass
 
 CODE
   MyObj.Name = 'Test'
@@ -1765,11 +1765,11 @@ END
 **Declaration:**
 ```clarion
 MyInterface INTERFACE
-DoSomething   PROCEDURE(LONG Param)
+DoSomething  PROCEDURE(LONG Param)
             END
 
-MyClass CLASS,IMPLEMENTS(MyInterface)
-        END
+MyClass     CLASS,IMPLEMENTS(MyInterface)
+            END
 ```
 
 **Calling Interface Methods:**
