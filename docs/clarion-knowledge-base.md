@@ -188,6 +188,77 @@ LOOP UNTIL condition.
 - LOOP must be terminated with END, WHILE, UNTIL, or `.`
 - WHILE and UNTIL provide conditional termination
 
+### CASE Statement
+```clarion
+CASE condition
+OF expression [TO expression]
+  [statements]
+[OROF expression [TO expression]]
+  [statements]
+[ELSE]
+  [statements]
+END
+```
+
+**Purpose:** Selective execution structure based on condition matching.
+
+**Key Rules:**
+- `condition` - A numeric or string variable or expression to evaluate
+- `OF expression` - Executes statements when expression equals condition
+- `TO` - Allows a range of values (inclusive): `OF 1 TO 10`
+- `OROF expression` - Alternative match for the same OF block (control "falls through")
+- `ELSE` - Executes when no OF/OROF matches (optional, must be last)
+- Must terminate with END or `.`
+
+**Important Notes:**
+- Multiple OF options allowed in one CASE
+- Multiple OROF options can be associated with one OF
+- OROF does not terminate preceding statement groups (fall-through behavior)
+- More efficient than complex IF/ELSIF structures for multiple conditions
+- Both range expressions (OF-TO, OROF-TO) are evaluated even if condition is less than lower boundary
+
+**Examples:**
+```clarion
+! Simple CASE
+CASE UserChoice
+OF 1
+  Message('Option One')
+OF 2
+  Message('Option Two')
+ELSE
+  Message('Invalid Choice')
+END
+
+! CASE with ranges
+CASE Score
+OF 90 TO 100
+  Grade = 'A'
+OF 80 TO 89
+  Grade = 'B'
+OF 70 TO 79
+  Grade = 'C'
+ELSE
+  Grade = 'F'
+END
+
+! CASE with OROF (fall-through)
+CASE KeyCode
+OF MouseLeft
+OROF MouseRight
+  HandleMouseClick()
+OF KeyEnter
+OROF KeySpace
+  ProcessSelection()
+END
+```
+
+**Diagnostic Rules:**
+- CASE must be terminated with END or `.`
+- OF is required (at least one)
+- ELSE is optional but must be last if present
+- TO requires two expressions (lower and upper bounds)
+- OROF must be associated with a preceding OF
+
 ---
 
 ## Module Structure

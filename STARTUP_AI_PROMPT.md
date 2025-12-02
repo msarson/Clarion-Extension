@@ -10,7 +10,7 @@ You are an AI assistant working on the Clarion-Extension VS Code extension. This
 
 ## Critical Knowledge Base
 
-**ALWAYS refer to these files:**
+**ALWAYS refer to these files and please read them after reading this file:**
 
 1. **`docs/clarion-knowledge-base.md`** - Clarion language syntax rules
    - Character encoding (ANSI/ASCII only - NO Unicode)
