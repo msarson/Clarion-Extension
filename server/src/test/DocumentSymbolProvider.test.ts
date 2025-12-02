@@ -269,10 +269,10 @@ SaveData    PROCEDURE(STRING pFilename)
             const code = `
   PROGRAM
   MAP
-MODULE('KERNEL32')
-  GetTickCount PROCEDURE(),ULONG
-  END
-HelperProc PROCEDURE()
+    MODULE('KERNEL32')
+      GetTickCount PROCEDURE(),ULONG
+    END
+    HelperProc PROCEDURE()
   END
   CODE
   RETURN
@@ -284,6 +284,18 @@ HelperProc PROCEDURE()
             
             console.log('\n=== MAP with MODULE ===');
             console.log(formatSymbolTree(symbols));
+            
+            // Verify MAP exists
+            const mapSymbol = findSymbol(symbols, 'MAP');
+            assert.ok(mapSymbol, 'MAP should exist');
+            
+            // Verify MODULE exists as child of MAP
+            const moduleSymbol = findSymbol(mapSymbol.children || [], 'MODULE');
+            assert.ok(moduleSymbol, 'MODULE should exist as child of MAP');
+            
+            // Verify GetTickCount exists
+            const getTickCount = findSymbol(symbols, 'GetTickCount');
+            assert.ok(getTickCount, 'GetTickCount should exist somewhere');
         });
     });
 
