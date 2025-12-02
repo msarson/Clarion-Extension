@@ -722,12 +722,46 @@ END
 
 ---
 
-## MAP - External Procedure Declarations
+## MAP - Procedure Prototype Declarations
+
+### Syntax
+```clarion
+MAP
+  prototypes
+  [MODULE(filename)
+    prototypes
+  END]
+END
+```
+
+### Official Definition
+
+**MAP** - Contains the prototypes which declare the procedures and external source modules used in a PROGRAM, MEMBER module, or PROCEDURE.
+
+**prototypes** - Declare PROCEDUREs.
+
+**MODULE** - Declare a member source module that contains the definitions of the prototypes in the MODULE.
 
 ### Overview
-MAP declares external procedures from libraries, DLLs, or other modules. MAP provides two syntax forms for procedure declarations.
 
-### Syntax Forms
+A MAP structure contains the prototypes which declare the PROCEDUREs and external source modules used in a PROGRAM, MEMBER module, or PROCEDURE which are **not members of a CLASS structure**.
+
+### Scope Rules
+
+**PROGRAM MAP** - Declares prototypes of PROCEDUREs available for use throughout the program.
+
+**MEMBER MAP** - Declares prototypes of PROCEDUREs that are explicitly available in that MEMBER module. The same prototypes may be placed in multiple MEMBER modules to make them explicitly available in each.
+
+**PROCEDURE MAP** - Can be included within a PROCEDURE declaration. All prototypes of PROCEDUREs declared in a local PROCEDURE MAP may only be referenced within the PROCEDURE itself.
+
+### Automatic Includes
+
+A MAP structure is mandatory for any non-trivial Clarion program because:
+- **BUILTINS.CLW** is automatically included in your PROGRAM's MAP structure by the compiler
+- This file contains prototypes of most procedures in the Clarion internal library
+- **EQUATES.CLW** is also automatically included (contains constant EQUATEs used by BUILTINS.CLW)
+
+### Prototype Syntax Forms
 
 #### Form 1: With PROCEDURE Keyword (Column 0)
 **Rule:** When using the PROCEDURE keyword, the procedure label MUST be at column 0.
@@ -758,11 +792,11 @@ END
 
 ### MODULE within MAP
 
-MODULE sections within MAP group procedures from the same external library:
+MODULE sections within MAP declare a member source module that contains the definitions of the prototypes:
 
 ```clarion
 MAP
-  ! Direct MAP procedures
+  ! Direct MAP procedures (prototypes)
   SortCaseSensitive(*LinesGroupType p1, *LinesGroupType p2), Long
   SortLength(*LinesGroupType p1, *LinesGroupType p2), Long
   
@@ -778,10 +812,11 @@ END
 ```
 
 **Important MODULE Rules:**
+- MODULE declares an external source module filename
 - MODULE is terminated by END or by the start of another MODULE
 - Procedures inside MODULE use the same shorthand syntax (indented, no PROCEDURE keyword)
 - MODULE cannot appear outside of MAP
-- MODULE can have the MODULE attribute in CLASS declarations (different usage)
+- MODULE can also be used as an attribute in CLASS declarations (different usage)
 
 ### Validation Rules
 
@@ -793,6 +828,11 @@ MAP
   
   ! Traditional - column 0, with PROCEDURE keyword  
 MyProc PROCEDURE(string s), byte
+  
+  ! MODULE with prototypes
+  MODULE('mylib.dll')
+    LibFunc(long x), long
+  END
 END
 ```
 
