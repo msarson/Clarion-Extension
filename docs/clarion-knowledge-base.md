@@ -1292,6 +1292,152 @@ Phone         STRING(20)
 ! Access as CustomerRec.Address.City
 ```
 
+### VIEW Structure
+```clarion
+label VIEW(primary_file)
+       [,FILTER(expression)]
+       [,ORDER(expression)]
+  [PROJECT(fields)]
+  [JOIN(secondary_file, relationship)
+    [PROJECT(fields)]
+    [JOIN(tertiary_file, relationship)
+      [PROJECT(fields)]
+    END]
+  END]
+END
+```
+
+**Purpose:** Declares a "virtual" file as a composite of related FILEs (relational Join and Project operations).
+
+---
+
+### VIEW Components
+
+**primary_file**
+- Label of the primary FILE of the VIEW
+- Must be previously OPENed before VIEW is OPENed
+
+**FILTER(expression)**
+- Expression to filter valid records for the VIEW
+- May include any fields declared in PROJECT statements
+- Operates across all levels of JOIN
+- Property: PROP:FILTER
+
+**ORDER(expression)**
+- Expression or list of expressions defining sorted order
+- Defines processing sequence for NEXT/PREVIOUS
+- Properties: PROP:ORDER, PROP:SQLOrder
+
+**PROJECT(fields)**
+- Specifies which fields to retrieve from file
+- If omitted, all fields retrieved
+- Only PROJECTed fields have defined contents
+- Implements relational "Project" operation
+
+**JOIN(secondary_file, relationship)**
+- Declares secondary related file
+- Implements relational "Join" operation
+- Multiple JOINs allowed (may be nested)
+- Default: "left outer join" (all primary records retrieved)
+- Use INNER attribute for "inner join" (only matching records)
+
+---
+
+### Important Characteristics
+
+**Virtual File:**
+- Data elements don't physically exist in VIEW
+- Logical construct addressing data from multiple FILEs
+- Fields reside in their respective FILE record buffers
+- No separate data buffer allocated for VIEW
+
+**Usage Requirements:**
+- VIEW must be explicitly OPENed
+- All primary and secondary FILEs must be previously OPENed
+- Must issue SET before or after OPEN to establish processing order
+- Use NEXT(view) or PREVIOUS(view) for sequential access
+- REGET available for random access
+
+**After CLOSE(view):**
+- Processing sequence of files undefined
+- Record buffers set to no current record (unless REGET issued before CLOSE)
+- Must use SET or RESET to re-establish file processing order
+
+**Threading:**
+- No explicit THREAD attribute on VIEW
+- Local VIEWs (PROCEDURE/ROUTINE) automatically threaded
+- Global/module VIEWs threaded if at least one joined FILE is threaded
+
+**Client-Server Performance:**
+- Designed for efficient database access on client-server systems
+- Join and Project operations performed on file server
+- Only results sent to client (dramatically improves network performance)
+
+---
+
+**Relational Operations:**
+
+**Join:**
+- Retrieves data from multiple files based on relationships
+- Default: Left outer join (all primary records, secondary fields CLEARed if no match)
+- Inner join: Only records with matches in all files
+
+**Project:**
+- Retrieves only specified fields, not entire record
+- Automatically implemented by PROJECT statements
+- Reduces data transfer overhead
+
+---
+
+**Example:**
+```clarion
+Customer FILE,DRIVER('TOPSPEED'),PRE(CUS)
+  KEY(CUS:AcctNumber),PRIMARY
+  RECORD
+CUS:AcctNumber LONG
+CUS:Name       STRING(30)
+CUS:City       STRING(20)
+  END
+END
+
+Orders FILE,DRIVER('TOPSPEED'),PRE(ORD)
+  KEY(ORD:AcctNumber)
+  RECORD
+ORD:AcctNumber  LONG
+ORD:OrderNumber LONG
+ORD:OrderDate   LONG
+ORD:Amount      DECIMAL(12,2)
+  END
+END
+
+! VIEW joining Customer and Orders
+CustomerOrders VIEW(Customer)
+  PROJECT(CUS:AcctNumber, CUS:Name)
+  FILTER(CUS:City = 'Seattle')
+  ORDER(CUS:Name)
+  JOIN(ORD:AcctNumber, CUS:AcctNumber)
+    PROJECT(ORD:OrderNumber, ORD:Amount)
+  END
+END
+
+CODE
+  OPEN(Customer)
+  OPEN(Orders)
+  OPEN(CustomerOrders)
+  
+  SET(CustomerOrders)
+  LOOP
+    NEXT(CustomerOrders)
+    IF ERROR() THEN BREAK.
+    ! Process CUS:Name and ORD:Amount
+    MESSAGE(CUS:Name & ': $' & ORD:Amount)
+  END
+  
+  CLOSE(CustomerOrders)
+  CLOSE(Orders)
+  CLOSE(Customer)
+```
+
 ---
 
 ## Module Structure
