@@ -929,6 +929,199 @@ END
 
 ---
 
+## Data Structures
+
+### QUEUE Structure
+```clarion
+label QUEUE([group])
+       [,PRE(prefix)] [,STATIC] [,THREAD] [,TYPE] [,BINDABLE]
+       [,EXTERNAL] [,DLL]
+  fieldlabel variable [,NAME('name')]
+  ...
+END
+```
+
+**Purpose:** Declares a memory QUEUE structure (dynamic array with run-length compression).
+
+---
+
+### QUEUE Attributes
+
+**group (optional)**
+- Label of previously declared GROUP, QUEUE, or RECORD
+- QUEUE inherits fields from the named group
+- Can add additional fields after inherited ones
+- If no additional fields needed, can use group label as data type directly
+
+**PRE(prefix)**
+- Declares fieldlabel prefix for the structure
+- All field labels automatically prefixed
+
+**STATIC**
+- Declares procedure-local QUEUE with static memory allocation
+- Buffer remains persistent between procedure calls
+- Otherwise, procedure-local QUEUEs allocated on stack
+
+**THREAD**
+- Memory allocated once per execution thread
+- Implies STATIC attribute for procedure-local data
+- Separate QUEUE instance per thread
+
+**TYPE**
+- QUEUE is just a type definition (no memory allocated)
+- Used for QUEUEs passed as PROCEDURE parameters
+- Allows receiving procedure to directly address component fields
+- Parameter declaration instantiates local prefix (e.g., `PROCEDURE(LOC:PassedQueue)`)
+
+**BINDABLE**
+- All variables available for dynamic expressions
+- Enables `BIND(queue)` for all fields
+- Uses NAME attribute (or label with prefix) as logical name
+- Creates larger .EXE - use only when many fields used dynamically
+
+**EXTERNAL**
+- QUEUE defined in external library
+- Memory allocated by external library
+- Allows access to public QUEUEs from external libraries
+
+**DLL**
+- QUEUE defined in .DLL
+- Required in addition to EXTERNAL attribute
+
+---
+
+### Memory Management
+
+**Compression:**
+- Each entry run-length compressed during ADD or PUT
+- De-compressed during GET
+- Minimizes memory usage automatically
+
+**Overhead:**
+- 8 bytes per entry (uncompressed records)
+- 12 bytes per entry (compressed records)
+
+**Memory Allocation:**
+- **Procedure-local (no STATIC):**
+  - Buffer allocated on stack (if not too large)
+  - Entry memory freed when QUEUE FREEd or PROCEDURE RETURNs
+  - QUEUE automatically FREEd on RETURN
+  
+- **Global/Module/Local with STATIC:**
+  - Buffer allocated in static memory
+  - Data persistent between procedure calls
+  - Entry memory freed only when QUEUE explicitly FREEd
+
+**Entry Limits:**
+- Theoretical maximum: 2^26 (67,108,864) entries
+- Actual limit: Dependent on available virtual memory
+- Maximum size per entry: 4MB (sum of all variables)
+
+**Initialization:**
+- Variables in buffer NOT automatically initialized
+- Must explicitly assign values
+- Do NOT assume blanks or zeros
+
+---
+
+### Usage Notes
+
+**When Used in Expressions:**
+- QUEUE treated like GROUP data type
+- Can be used in assignments, expressions, parameter lists
+
+**Field Access:**
+- Use WHAT() and WHERE() procedures for positional field access
+- Direct field access using fieldlabel (with prefix if defined)
+
+**Dynamic Addition/Deletion:**
+- Memory dynamically allocated when entries added (ADD)
+- Memory freed when entries deleted (DELETE)
+- Entries compressed to minimize memory
+
+---
+
+**Examples:**
+```clarion
+! Simple QUEUE
+MyQueue QUEUE
+Name    STRING(30)
+Age     LONG
+Status  STRING(20)
+        END
+
+! QUEUE with prefix
+CustomerQueue QUEUE,PRE(CQ)
+CQ:ID         LONG
+CQ:Name       STRING(50)
+CQ:Balance    DECIMAL(12,2)
+              END
+
+! QUEUE inheriting from GROUP
+PersonGroup GROUP
+Name          STRING(30)
+Age           LONG
+            END
+
+PersonQueue QUEUE(PersonGroup)  ! Inherits Name and Age
+Address       STRING(50)        ! Additional field
+            END
+
+! QUEUE with BINDABLE for dynamic expressions
+ReportQueue QUEUE,BINDABLE
+Amount        DECIMAL(12,2),NAME('Amount')
+Quantity      LONG,NAME('Qty')
+Total         DECIMAL(12,2),NAME('Total')
+            END
+! Now can use: BIND(ReportQueue) and evaluate 'Amount * Qty'
+
+! STATIC QUEUE for persistent data
+MyProc PROCEDURE
+LocalQueue QUEUE,STATIC  ! Persists between calls
+Value        LONG
+           END
+CODE
+  ! Queue data persists across procedure calls
+
+! TYPE QUEUE for parameter passing
+EmployeeType QUEUE,TYPE
+EmpID          LONG
+EmpName        STRING(50)
+EmpSalary      DECIMAL(10,2)
+             END
+
+ProcessEmployee PROCEDURE(EmployeeType EMP)  ! EMP: prefix
+CODE
+  ! Access fields as EMP:EmpID, EMP:EmpName, etc.
+
+! Threaded QUEUE for multi-threading
+ThreadQueue QUEUE,THREAD
+ThreadData    STRING(100)
+ThreadCount   LONG
+            END
+
+! Simple usage
+MyQueue QUEUE
+Item      STRING(20)
+        END
+CODE
+  CLEAR(MyQueue)
+  MyQueue.Item = 'First'
+  ADD(MyQueue)
+  
+  MyQueue.Item = 'Second'
+  ADD(MyQueue)
+  
+  LOOP X# = 1 TO RECORDS(MyQueue)
+    GET(MyQueue, X#)
+    MESSAGE(MyQueue.Item)
+  END
+  
+  FREE(MyQueue)  ! Free all entries
+```
+
+---
+
 ## Module Structure
 
 ### Program Structure
