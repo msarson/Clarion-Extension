@@ -68,7 +68,7 @@ export class CompletionProvider {
             detail: 'IF condition\n  statements\nEND',
             documentation: 'Insert IF structure without THEN keyword',
             insertTextFormat: InsertTextFormat.Snippet,
-            insertText: `\n${indent}  \${0:statements}\n${indent}END`,
+            insertText: `\n${indent}\t\${0:statements}\n${indent}END`,
             preselect: true
         });
 
@@ -79,7 +79,7 @@ export class CompletionProvider {
             detail: 'IF condition THEN\n  statements\nEND',
             documentation: 'Insert IF structure with THEN keyword',
             insertTextFormat: InsertTextFormat.Snippet,
-            insertText: ` THEN\n${indent}  \${0:statements}\n${indent}END`
+            insertText: ` THEN\n${indent}\t\${0:statements}\n${indent}END`
         });
 
         // IF...ELSE...END (without THEN)
@@ -89,7 +89,7 @@ export class CompletionProvider {
             detail: 'IF condition\n  statements\nELSE\n  statements\nEND',
             documentation: 'Insert IF...ELSE structure without THEN keyword',
             insertTextFormat: InsertTextFormat.Snippet,
-            insertText: `\n${indent}  \${1:true statements}\n${indent}ELSE\n${indent}  \${0:false statements}\n${indent}END`
+            insertText: `\n${indent}\t\${1:true statements}\n${indent}ELSE\n${indent}\t\${0:false statements}\n${indent}END`
         });
 
         // IF...THEN...ELSE...END
@@ -99,7 +99,7 @@ export class CompletionProvider {
             detail: 'IF condition THEN\n  statements\nELSE\n  statements\nEND',
             documentation: 'Insert IF...ELSE structure with THEN keyword',
             insertTextFormat: InsertTextFormat.Snippet,
-            insertText: ` THEN\n${indent}  \${1:true statements}\n${indent}ELSE\n${indent}  \${0:false statements}\n${indent}END`
+            insertText: ` THEN\n${indent}\t\${1:true statements}\n${indent}ELSE\n${indent}\t\${0:false statements}\n${indent}END`
         });
 
         return items;
@@ -118,7 +118,7 @@ export class CompletionProvider {
             detail: 'LOOP\n  statements\nEND',
             documentation: 'Insert LOOP...END structure',
             insertTextFormat: InsertTextFormat.Snippet,
-            insertText: `\n${indent}  \${0:statements}\n${indent}END`,
+            insertText: `\n${indent}\t\${0:statements}\n${indent}END`,
             preselect: true
         });
 
@@ -129,7 +129,7 @@ export class CompletionProvider {
             detail: 'LOOP\n  statements\nWHILE condition',
             documentation: 'Insert LOOP with WHILE terminator',
             insertTextFormat: InsertTextFormat.Snippet,
-            insertText: `\n${indent}  \${1:statements}\n${indent}WHILE \${0:condition}`
+            insertText: `\n${indent}\t\${1:statements}\n${indent}WHILE \${0:condition}`
         });
 
         // LOOP...UNTIL
@@ -139,7 +139,7 @@ export class CompletionProvider {
             detail: 'LOOP\n  statements\nUNTIL condition',
             documentation: 'Insert LOOP with UNTIL terminator',
             insertTextFormat: InsertTextFormat.Snippet,
-            insertText: `\n${indent}  \${1:statements}\n${indent}UNTIL \${0:condition}`
+            insertText: `\n${indent}\t\${1:statements}\n${indent}UNTIL \${0:condition}`
         });
 
         return items;
@@ -158,7 +158,7 @@ export class CompletionProvider {
             detail: 'CASE condition\nOF value\n  statements\nEND',
             documentation: 'Insert CASE...OF...END structure',
             insertTextFormat: InsertTextFormat.Snippet,
-            insertText: `\n${indent}OF \${1:value}\n${indent}  \${0:statements}\n${indent}END`,
+            insertText: `\n${indent}OF \${1:value}\n${indent}\t\${0:statements}\n${indent}END`,
             preselect: true
         });
 
@@ -169,7 +169,7 @@ export class CompletionProvider {
             detail: 'CASE condition\nOF value\n  statements\nELSE\n  statements\nEND',
             documentation: 'Insert CASE...OF...ELSE...END structure',
             insertTextFormat: InsertTextFormat.Snippet,
-            insertText: `\n${indent}OF \${1:value}\n${indent}  \${2:statements}\n${indent}ELSE\n${indent}  \${0:statements}\n${indent}END`
+            insertText: `\n${indent}OF \${1:value}\n${indent}\t\${2:statements}\n${indent}ELSE\n${indent}\t\${0:statements}\n${indent}END`
         });
 
         return items;
