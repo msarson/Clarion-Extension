@@ -722,6 +722,213 @@ END
 
 ---
 
+## File Declarations
+
+### FILE Structure
+```clarion
+label FILE,DRIVER('driver')
+       [,CREATE] [,RECLAIM] [,OWNER('password')] [,ENCRYPT]
+       [,NAME('filename')] [,PRE(prefix)]
+       [,BINDABLE] [,TYPE] [,THREAD] [,EXTERNAL] [,DLL] [,OEM]
+  label KEY(components) [,attributes]
+  label INDEX(components) [,attributes]
+  label MEMO(size) [,attributes]
+  label BLOB [,attributes]
+  [label] RECORD
+    fields
+  END
+END
+```
+
+**Purpose:** Declares a data file structure describing a disk file.
+
+**Required Attributes:**
+- **DRIVER('driver')** - Specifies file type (PROP:DRIVER) - **REQUIRED**
+- **RECORD** - Declares record structure for fields - **REQUIRED**
+
+---
+
+### FILE Attributes
+
+**CREATE**
+- Allows file creation with CREATE statement during execution
+- Property: PROP:CREATE
+
+**RECLAIM**
+- Specifies reuse of deleted record space
+- Property: PROP:RECLAIM
+
+**OWNER('password')**
+- Specifies password for data encryption
+- Property: PROP:OWNER
+
+**ENCRYPT**
+- Encrypts the data file
+- Property: PROP:ENCRYPT
+
+**NAME('filename')**
+- Sets the filename
+- Property: PROP:NAME
+- Can be STRING,STATIC with THREAD attribute for per-thread filenames
+
+**PRE(prefix)**
+- Declares label prefix for the structure
+- All field labels automatically prefixed
+
+**BINDABLE**
+- All RECORD variables available for dynamic expressions
+- Enables BIND(file) for all fields
+- Uses NAME attribute (or label with prefix) as logical name
+- Creates larger .EXE - use only when many fields used dynamically
+
+**TYPE**
+- FILE is type definition for parameters
+- **Only available for Clarion#**
+
+**THREAD**
+- Separate record buffer allocated per execution thread
+- Buffer allocated only when thread OPENs file
+- Use with NAME('STRING,STATIC') for per-thread filenames
+- Property: PROP:THREAD
+- **Note:** Local FILEs (in PROCEDURE/ROUTINE) are automatically threaded
+
+**EXTERNAL**
+- FILE defined in external library
+- Memory allocated by external library
+- Allows access to public FILEs from external libraries
+
+**DLL**
+- FILE defined in .DLL
+- Required in addition to EXTERNAL attribute
+
+**OEM**
+- String data converted OEM ↔ ANSI on disk I/O
+- OEM ASCII to ANSI when reading
+- ANSI to OEM ASCII when writing
+- Property: PROP:OEM
+
+---
+
+### KEY and INDEX
+
+**KEY(components)**
+- Dynamically updated file access index
+- Components: field1[,field2,...]
+- Automatically maintained by file driver
+
+**INDEX(components)**
+- Static file access index
+- Must be built at run time
+- Not automatically maintained
+
+**Common KEY/INDEX Attributes:**
+- DUP - Allow duplicate key values
+- NOCASE - Case-insensitive comparison
+- OPT - Optional (null) key values
+- PRIMARY - Primary key
+
+---
+
+### MEMO and BLOB
+
+**MEMO(size)**
+- Variable length text field
+- Maximum 64K length
+- Memory allocated when FILE opened
+- De-allocated when FILE closed
+
+**BLOB**
+- Variable length memo field
+- May exceed 64K length
+- Memory allocated as needed when FILE open
+
+---
+
+### Important Notes
+
+**Memory Allocation:**
+- RECORD buffer allocated as static memory on heap
+- Remains static even if FILE declared in local data section
+- MEMO memory allocated at OPEN, de-allocated at CLOSE
+- BLOB memory allocated as needed after OPEN
+
+**Thread Safety:**
+- Local FILEs (in PROCEDURE/ROUTINE) automatically threaded
+- Global FILEs need explicit THREAD attribute for per-thread buffers
+- Thread buffer allocated only if thread OPENs the file
+
+**Driver Dependency:**
+- All attributes and data types depend on file driver support
+- Unsupported features cause error when FILE opened
+- Check driver documentation for restrictions
+
+**Termination:**
+- FILE structure must end with END or `.`
+
+---
+
+**Examples:**
+```clarion
+! Simple file declaration
+Customer FILE,DRIVER('TOPSPEED'),PRE(CUS),CREATE,RECLAIM
+  KEY(CUS:ID),PRIMARY
+  INDEX(CUS:LastName),DUP,NOCASE
+  RECORD
+CUS:ID        LONG
+CUS:LastName  STRING(30)
+CUS:FirstName STRING(30)
+CUS:Address   STRING(50)
+CUS:Notes     MEMO(1000)
+  END
+END
+
+! File with BINDABLE for dynamic expressions
+Report FILE,DRIVER('TOPSPEED'),BINDABLE,NAME('REPORT.TPS')
+  RECORD
+ReportDate    DATE,NAME('Date')
+ReportAmount  DECIMAL(12,2),NAME('Amount')
+ReportStatus  STRING(20),NAME('Status')
+  END
+END
+! Now can use: BIND(Report) and evaluate 'Amount * 1.1'
+
+! Threaded file for multi-threading
+LogFile FILE,DRIVER('ASCII'),THREAD,NAME('LOG.TXT')
+  RECORD
+LogEntry STRING(200)
+  END
+END
+
+! Encrypted file with owner password
+Secure FILE,DRIVER('TOPSPEED'),ENCRYPT,OWNER('MyPassword'),CREATE
+  KEY(SEC:ID),PRIMARY
+  RECORD
+SEC:ID        LONG
+SEC:Data      STRING(100)
+  END
+END
+
+! External file from library
+External FILE,DRIVER('TOPSPEED'),EXTERNAL,PRE(EXT)
+  RECORD
+EXT:Field1 STRING(20)
+EXT:Field2 LONG
+  END
+END
+
+! File with BLOB for large data
+Document FILE,DRIVER('TOPSPEED'),CREATE
+  KEY(DOC:ID),PRIMARY
+  RECORD
+DOC:ID       LONG
+DOC:Title    STRING(100)
+DOC:Content  BLOB  ! Can exceed 64K
+  END
+END
+```
+
+---
+
 ## Module Structure
 
 ### Program Structure
