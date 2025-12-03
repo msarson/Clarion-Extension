@@ -422,7 +422,7 @@ export class ClarionDocumentSymbolProvider {
                             // Mark this as a MAP/MODULE procedure
                             nextToken.subType = TokenType.MapProcedure;
                             lastProcedureLine = nextToken.line;
-                            logger.info(`[TREE-DUMP] Marked procedure at line ${nextToken.line} as MAP/MODULE procedure`);
+                            logger.debug(`Marked procedure at line ${nextToken.line} as MAP/MODULE procedure`);
                         }
                         // Special case for MAP: Look for procedure declarations without PROCEDURE keyword
                         // Format: ProcedureName(parameters),returnType
@@ -444,7 +444,7 @@ export class ClarionDocumentSymbolProvider {
                             // CRITICAL: Set token.label to just the procedure name (nextToken.value is already just the name)
                             nextToken.label = nextToken.value;
                             lastProcedureLine = nextToken.line; // Track this line as having a procedure
-                            logger.info(`[TREE-DUMP] Marked shorthand procedure ${nextToken.value} at line ${nextToken.line} as MAP/MODULE procedure`);
+                            logger.debug(`Marked shorthand procedure ${nextToken.value} at line ${nextToken.line} as MAP/MODULE procedure`);
                         }
                         
                         j++;
@@ -688,21 +688,22 @@ export class ClarionDocumentSymbolProvider {
         // No need for final sorting here since we're sorting as symbols are added
         // This ensures symbols are already in the correct order when VS Code renders the outline
         
-        // 🌳 DEBUG: Output tree in multiple formats for analysis
-        console.log("[TREE-DUMP] ========================================");
-        console.log("[TREE-DUMP] Symbol Tree - Detailed View");
-        console.log("[TREE-DUMP] ========================================");
-        this.dumpSymbolTree(symbols);
+        // 🌳 DEBUG: Tree dump disabled for performance
+        // Uncomment these lines if you need to debug the symbol tree structure
+        // console.log("[TREE-DUMP] ========================================");
+        // console.log("[TREE-DUMP] Symbol Tree - Detailed View");
+        // console.log("[TREE-DUMP] ========================================");
+        // this.dumpSymbolTree(symbols);
         
-        console.log("\n[TREE-COMPACT] ========================================");
-        console.log("[TREE-COMPACT] Symbol Tree - Compact View");
-        console.log("[TREE-COMPACT] ========================================");
-        this.dumpSymbolTreeCompact(symbols);
+        // console.log("\n[TREE-COMPACT] ========================================");
+        // console.log("[TREE-COMPACT] Symbol Tree - Compact View");
+        // console.log("[TREE-COMPACT] ========================================");
+        // this.dumpSymbolTreeCompact(symbols);
         
-        console.log("\n[TREE-JSON] ========================================");
-        console.log("[TREE-JSON] Symbol Tree - JSON (for programmatic analysis)");
-        console.log("[TREE-JSON] ========================================");
-        console.log("[TREE-JSON]", JSON.stringify(symbols, null, 2));
+        // console.log("\n[TREE-JSON] ========================================");
+        // console.log("[TREE-JSON] Symbol Tree - JSON (for programmatic analysis)");
+        // console.log("[TREE-JSON] ========================================");
+        // console.log("[TREE-JSON]", JSON.stringify(symbols, null, 2));
 
         return symbols;
     }
