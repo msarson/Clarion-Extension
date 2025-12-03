@@ -26,17 +26,14 @@ This file tracks all outstanding tasks, bugs, and improvements for the Clarion L
 - ✅ Added SIZE as special case (function that can be used in declarations)
 - ✅ Created comprehensive test suite for variable type extraction
 - ✅ Created utility module for attribute keyword detection (`AttributeKeywords.ts`)
+- ✅ **FIXED: Unlabeled GROUP structures now nest correctly**
+  - Example: `GROUP,OVER(bits),PRE()` without a label
+  - Fields `triplet1`, `triplet2`, `triplet3` now correctly appear as children of the GROUP
+  - Fixed symbol builder to properly handle unlabeled groups and their END terminators
+  - Group fields no longer appear as siblings of the GROUP
 
 #### Remaining Issues - In Progress
-**Unlabeled GROUP structures not nesting correctly.**
-
-Problems observed:
-- [ ] **CRITICAL**: Unlabeled GROUP fields appear as method children instead of group children
-  - Example: `GROUP,OVER(bits),PRE()` without a label
-  - Fields `triplet1`, `triplet2`, `triplet3` should be children of the GROUP
-  - Currently appear as siblings of the GROUP in the method
-- [ ] Need to verify tokenizer correctly sets `finishesAt` for unlabeled structures
-- [ ] Symbol builder needs to handle unlabeled groups properly
+None currently identified. All major issues from Dec 2-3 sessions have been resolved.
 
 **Test files created:**
 - `server/src/test/MethodImplementation.test.ts` - TDD tests for method structure
