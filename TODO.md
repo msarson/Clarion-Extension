@@ -6,6 +6,63 @@ This file tracks all outstanding tasks, bugs, and improvements for the Clarion L
 
 ## 🐛 Critical Bugs
 
+### Structure View - Method Implementation Issues (Dec 2024)
+**Priority:** HIGH  
+**Status:** Partially Fixed - Needs More Work
+
+#### What Was Fixed (Session Dec 2, 2024)
+- ✅ Method implementations now detected (StringTheory._Method pattern)
+- ✅ Class hierarchy created (StringTheory (Implementation) → Methods)
+- ✅ Variable scoping fixed (procedures don't inherit each other's variables)
+- ✅ CODE filtering works (items after CODE don't appear in structure)
+- ✅ Fixed spurious variable symbols for class name labels
+- ✅ Tests: 188 passing (was 185), 5 failing (was 9)
+
+#### What Was Fixed (Session Dec 3, 2024)
+- ✅ Variable type display now shows correct types in outline (e.g., `x long` shows as "long" not "STRING")
+- ✅ String initializers shown in type (e.g., `string('ABC...')` displays properly)
+- ✅ Fixed hard-coded attribute keywords - now using tokenizer definitions
+- ✅ Removed SIGNED/UNSIGNED from attributes (they are data types, not attributes)
+- ✅ Added SIZE as special case (function that can be used in declarations)
+- ✅ Created comprehensive test suite for variable type extraction
+- ✅ Created utility module for attribute keyword detection (`AttributeKeywords.ts`)
+
+#### Remaining Issues - In Progress
+**Unlabeled GROUP structures not nesting correctly.**
+
+Problems observed:
+- [ ] **CRITICAL**: Unlabeled GROUP fields appear as method children instead of group children
+  - Example: `GROUP,OVER(bits),PRE()` without a label
+  - Fields `triplet1`, `triplet2`, `triplet3` should be children of the GROUP
+  - Currently appear as siblings of the GROUP in the method
+- [ ] Need to verify tokenizer correctly sets `finishesAt` for unlabeled structures
+- [ ] Symbol builder needs to handle unlabeled groups properly
+
+**Test files created:**
+- `server/src/test/MethodImplementation.test.ts` - TDD tests for method structure
+- `server/src/test-tokenizer-debug.ts` - Debug script for tokenization
+
+**Key files involved:**
+- `server/src/providers/ClarionDocumentSymbolProvider.ts` - Main symbol provider
+- `server/src/DocumentStructure.ts` - Handles procedure/method detection (lines 605-640)
+- `server/src/ClarionTokenizer.ts` - Tokenization logic
+
+**Important Notes:**
+- CODE statements MUST be indented, not at column 0
+- Dot (`.`) used for: structure field access (Class.Method) AND structure terminator
+- Label + Variable + PROCEDURE pattern = method implementation
+- Need to respect Clarion's column 0 rules for labels
+
+#### Next Steps
+1. Review actual user workflow with method implementations
+2. Check real-world StringTheory.clw structure view
+3. Identify specific navigation/usability issues
+4. Fix symbol hierarchy organization
+5. Improve method display names
+6. Test with actual Clarion projects
+
+---
+
 ### ~~Fix Method Declaration Parsing in Classes~~ ✅ FIXED (Dec 2024)
 **Priority:** ~~HIGH~~ **COMPLETE**  
 **Status:** ~~In Progress~~ **RESOLVED**

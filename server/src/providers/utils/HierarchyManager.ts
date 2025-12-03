@@ -18,7 +18,7 @@ const ClarionSymbolKind = {
     Directive: SymbolKind.Constant,
 };
 
-interface ParentStackEntry {
+export interface ParentStackEntry {
     symbol: ClarionDocumentSymbol;
     finishesAt: number | undefined;
 }

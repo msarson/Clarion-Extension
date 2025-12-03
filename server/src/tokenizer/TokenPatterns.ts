@@ -57,7 +57,7 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Keyword]: /\b(?:RETURN|THEN|UNTIL|WHILE|EXIT|NEW|PROCEDURE|ROUTINE|PROC|BREAK|KEY)\b/i, // Added KEY to keywords
     [TokenType.PictureFormat]: /(@N[^\s,]*|@[Ee][^\s,]*|@S\d+|@D\d{1,2}[.\-_'`<>]?\d{0,2}B?|@T\d{1,2}[.\-_'`]?[B]?|@[Pp][^Pp\n]+[Pp]B?|@[Kk][^Kk\n]+[Kk]B?)/i,
     [TokenType.ExecutionMarker]: /\b(?:CODE|DATA)\b/i,
-    [TokenType.Type]: /\b(?:BYTE|SHORT|USHORT|LONG|ULONG|REAL|SREAL|DECIMAL|PDECIMAL|STRING|CSTRING|PSTRING|DATE|TIME|ASTRING|ANY|BSTRING|MEMO|NAME|SIGNED|UNSIGNED)(?=\(|\s|$)/i,
+    [TokenType.Type]: /\b(?:BYTE|SHORT|USHORT|LONG|ULONG|REAL|SREAL|DECIMAL|PDECIMAL|STRING|CSTRING|PSTRING|DATE|TIME|ASTRING|ANY|BSTRING|MEMO|NAME|SIGNED|UNSIGNED)(?=\(|\s|,|$)/i,
     [TokenType.TypeAnnotation]: /:\s*(?:byte|short|ushort|long|ulong|real|sreal|decimal|pdecimal|string|cstring|pstring|date|time)\b/i,
     [TokenType.Directive]: /\b(?:COMPILE|OMIT|EMBED|SECTION|ENDSECTION)\b/i,
     [TokenType.Structure]: new RegExp(Object.values(STRUCTURE_PATTERNS).map(p => p.source).join('|'), 'i'),

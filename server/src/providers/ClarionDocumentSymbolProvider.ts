@@ -5,8 +5,9 @@ const logger = LoggerManager.getLogger("ClarionDocumentSymbolProvider");
 logger.setLevel("info"); // DEBUG: Enable info logging for MAP procedure debugging
 import { serverInitialized } from '../serverState';
 import { Token, TokenType } from '../ClarionTokenizer.js';
-import { HierarchyManager } from './utils/HierarchyManager';
+import { HierarchyManager, ParentStackEntry } from './utils/HierarchyManager';
 import { SymbolFinder } from './utils/SymbolFinder';
+import { isAttributeKeyword, isDataType } from '../utils/AttributeKeywords';
 
 /**
  * Extended DocumentSymbol with Clarion-specific metadata
@@ -26,7 +27,8 @@ export interface ClarionDocumentSymbol extends DocumentSymbol {
     _clarionLabel?: string;
     
     // Variable metadata
-    _clarionType?: string;
+    _clarionType?: string;  // Just the data type (e.g., "long", "string(20)")
+    _clarionDeclaration?: string;  // Complete declaration with attributes
     _clarionVarName?: string;
     _isPartOfStructure?: boolean;
     _structurePrefix?: string;
@@ -205,14 +207,10 @@ export class ClarionDocumentSymbolProvider {
     /**
      * Check if a token value is a procedure attribute keyword (not a procedure name)
      * These are keywords that appear in MAP procedure declarations but are not procedure names
+     * Now uses the centralized attribute list from the tokenizer
      */
     private isAttributeKeyword(value: string): boolean {
-        const attributeKeywords = [
-            'DLL', 'NAME', 'RAW', 'PASCAL', 'PROC', 'C',
-            'PRIVATE', 'PROTECTED', 'PUBLIC',
-            'VIRTUAL', 'DERIVED'
-        ];
-        return attributeKeywords.includes(value.toUpperCase());
+        return isAttributeKeyword(value);
     }
 
     /**
@@ -346,10 +344,22 @@ export class ClarionDocumentSymbolProvider {
             if (type === TokenType.ExecutionMarker && value.toUpperCase() === "CODE") {
                 pastCodeStatement = true;
                 
-                // For method implementations, clear currentProcedure
+                // For method implementations, clear currentProcedure AND pop from parent stack
                 // This prevents variables/symbols after CODE from being attached
                 if (currentProcedure && currentProcedure._isMethodImplementation) {
                     currentProcedure = null;
+                    
+                    // CRITICAL: Also pop the method from parentStack and update currentStructure
+                    // This ensures the next method implementation isn't added as a child
+                    for (let si = parentStack.length - 1; si >= 0; si--) {
+                        if (parentStack[si].symbol._isMethodImplementation) {
+                            parentStack.splice(si, 1);
+                            break; // Only pop the current method, not all methods
+                        }
+                    }
+                    
+                    // Update currentStructure to point to the parent (should be Methods container)
+                    currentStructure = HierarchyManager.getCurrentParent(parentStack);
                 }
                 
                 // Continue to next token - don't process anything on CODE line
@@ -393,6 +403,7 @@ export class ClarionDocumentSymbolProvider {
                     // Look ahead for procedure declarations inside this structure
                     let j = i + 1;
                     let endFound = false;
+                    let lastProcedureLine = -1; // Track the line of the last identified procedure
                     
                     while (j < tokens.length && !endFound) {
                         const nextToken = tokens[j];
@@ -410,15 +421,19 @@ export class ClarionDocumentSymbolProvider {
                             nextToken.value.toUpperCase() === "PROCEDURE") {
                             // Mark this as a MAP/MODULE procedure
                             nextToken.subType = TokenType.MapProcedure;
-                            logger.info(`Marked procedure at line ${nextToken.line} as MAP/MODULE procedure`);
+                            lastProcedureLine = nextToken.line;
+                            logger.info(`[TREE-DUMP] Marked procedure at line ${nextToken.line} as MAP/MODULE procedure`);
                         }
                         // Special case for MAP: Look for procedure declarations without PROCEDURE keyword
                         // Format: ProcedureName(parameters),returnType
                         // Can be Label token (column 0), Function token (no space), or Variable token (indented with space)
                         // BUT exclude attribute keywords: dll, name, raw, pascal, proc, etc.
+                        // CRITICAL FIX: Only mark as procedure if it's on a NEW line (not the same line as last procedure)
+                        // This prevents attribute keywords on the same line from being treated as procedures
                         else if ((nextToken.type === TokenType.Label || 
                                  nextToken.type === TokenType.Function ||
                                  nextToken.type === TokenType.Variable) &&
+                                nextToken.line !== lastProcedureLine && // NEW: Must be on different line
                                 j + 1 < tokens.length &&
                                 tokens[j + 1].value === "(" &&
                                 nextToken.value.toUpperCase() !== "MODULE" &&
@@ -428,7 +443,8 @@ export class ClarionDocumentSymbolProvider {
                             nextToken.subType = TokenType.MapProcedure;
                             // CRITICAL: Set token.label to just the procedure name (nextToken.value is already just the name)
                             nextToken.label = nextToken.value;
-                            logger.info(`Marked shorthand procedure ${nextToken.value} at line ${nextToken.line} as MAP/MODULE procedure`);
+                            lastProcedureLine = nextToken.line; // Track this line as having a procedure
+                            logger.info(`[TREE-DUMP] Marked shorthand procedure ${nextToken.value} at line ${nextToken.line} as MAP/MODULE procedure`);
                         }
                         
                         j++;
@@ -652,7 +668,7 @@ export class ClarionDocumentSymbolProvider {
             // CRITICAL: Don't process variables after CODE statement
             if (!pastCodeStatement && (type === TokenType.Type || type === TokenType.TypeAnnotation || type === TokenType.ReferenceVariable || type === TokenType.Variable || type === TokenType.FunctionArgumentParameter) && i > 0) {
                 logger.info(`✅ SymbolProvider: Calling handleVariableToken for token index=${i}, type=${type}, value="${token.value}", line=${token.line}`);
-                this.handleVariableToken(tokens, i, symbols, currentStructure, currentProcedure, lastMethodImplementation);
+                this.handleVariableToken(tokens, i, symbols, currentStructure, currentProcedure, lastMethodImplementation, parentStack);
 
                 continue;
             }
@@ -1203,6 +1219,7 @@ export class ClarionDocumentSymbolProvider {
         this.addSymbolToParent(structureSymbol, currentStructure, symbols);
         // Push to the parent stack with finishesAt information
         HierarchyManager.pushToStack(parentStack, structureSymbol, finishesAt);
+        logger.info(`[handleStructureToken] ✅ Pushed "${displayName}" to parentStack (finishesAt=${finishesAt}, depth now: ${parentStack.length})`);
     }
 
 
@@ -1291,35 +1308,15 @@ export class ClarionDocumentSymbolProvider {
                     const methodsContainer = classDefinition.children?.find(c => c.name === "Methods");
                     
                     if (methodsContainer) {
-                        // Look for the method declaration by name (without parameters)
-                        const methodDeclaration = methodsContainer.children?.find(m => {
-                            // Extract just the method name without parameters
-                            const mName = m.name.split(' ')[0];
-                            return mName === methodName;
-                        });
+                        // CRITICAL: Always use the Methods container as the parent for method implementations
+                        // This ensures overloads are siblings, not nested
+                        container = methodsContainer;
                         
-                        if (methodDeclaration) {
-                            // We found the method declaration, use it as the container
-                            container = methodDeclaration;
-                            
-                            // Mark this as a method implementation
-                            (token as any)._isMethodImplementation = true;
-                            
-                            // We don't need to create a class implementation container
-                            classImplementation = null;
-                        } else {
-                            // Method declaration not found, fall back to the old behavior
-                            classImplementation = this.findOrCreateClassImplementation(
-                                symbols, classMatch, tokens, line, finishesAt ?? line
-                            );
-                            
-                            // Use the methods container as the parent
-                            const implMethodsContainer = classImplementation.$clarionMethods || classImplementation;
-                            container = implMethodsContainer;
-                            
-                            // Mark this as a method implementation
-                            (token as any)._isMethodImplementation = true;
-                        }
+                        // Mark this as a method implementation
+                        (token as any)._isMethodImplementation = true;
+                        
+                        // We don't need to create a class implementation container
+                        classImplementation = null;
                     } else {
                         // Methods container not found, fall back to the old behavior
                         classImplementation = this.findOrCreateClassImplementation(
@@ -1765,7 +1762,8 @@ export class ClarionDocumentSymbolProvider {
         symbols: ClarionDocumentSymbol[],
         currentStructure: ClarionDocumentSymbol | null,
         currentProcedure: ClarionDocumentSymbol | null,
-        lastMethodImplementation: ClarionDocumentSymbol | null
+        lastMethodImplementation: ClarionDocumentSymbol | null,
+        parentStack: ParentStackEntry[]
     ): void {
         const token = tokens[index];
         const { line } = token;
@@ -1773,6 +1771,50 @@ export class ClarionDocumentSymbolProvider {
 
         logger.info(`🔍 handleVariableToken called: index=${index}, token=${token.value}, type=${token.type}, line=${line}`);
         logger.info(`   prevToken: ${prevToken ? `type=${prevToken.type}, value="${prevToken.value}"` : 'null'}`);
+
+        // CRITICAL FIX: Handle unlabeled structures (GROUP, QUEUE, FILE without a label)
+        // Example: "            group,over(bits),pre()"
+        // In this case, token.value is "group" and prevToken might be null or not a label
+        const upperValue = token.value.toUpperCase();
+        if ((upperValue === 'GROUP' || upperValue === 'QUEUE' || upperValue === 'FILE') &&
+            (!prevToken || prevToken.line !== line || 
+             (prevToken.type !== TokenType.Label && prevToken.type !== TokenType.Variable))) {
+            logger.info(`   📦 Detected unlabeled structure: ${token.value}`);
+            
+            // Collect attributes for the structure (e.g., OVER(), PRE())
+            let attributes = "";
+            let j = index + 1;
+            while (j < tokens.length && tokens[j].line === line) {
+                if (tokens[j].type === TokenType.Comment) break;
+                attributes += tokens[j].value;
+                j++;
+            }
+            
+            const displayName = attributes ? `${upperValue},${attributes}` : upperValue;
+            logger.info(`   📦 Creating unlabeled structure symbol: "${displayName}"`);
+            
+            // Create a symbol for the unlabeled structure
+            const structSymbol = this.createSymbol(
+                displayName,
+                "",
+                SymbolKind.Struct,
+                this.getTokenRange(tokens, line, line),
+                this.getTokenRange(tokens, line, line),
+                []
+            );
+            
+            // Add it to the current context
+            const target = currentProcedure || lastMethodImplementation || currentStructure;
+            this.addSymbolToParent(structSymbol, target, symbols);
+            
+            // Push it onto the parent stack so subsequent variables become children
+            // The structure will be popped when we encounter END
+            // Use the token's finishesAt property to know when to close this structure
+            parentStack.push({ symbol: structSymbol, finishesAt: token.finishesAt });
+            logger.info(`   ✅ Added unlabeled structure to parentStack (finishesAt=${token.finishesAt}, depth now: ${parentStack.length})`);
+            
+            return; // Done processing this structure declaration
+        }
 
         // CRITICAL FIX: Skip if we're inside a PROCEDURE declaration's parameter list
         // Check if there's a PROCEDURE keyword on the same line before this token
@@ -1841,10 +1883,12 @@ export class ClarionDocumentSymbolProvider {
             }
             
             logger.info(`   📝 Variable name: "${variableName}"`);
-            // CRITICAL FIX: Capture the entire line for variable types
-            // This ensures we get the full type definition including attributes
+            // CRITICAL FIX: Extract only the data type, not attributes
+            // Example: "x long,auto" should show type as "long", not "long,auto"
             let fullType = "";
+            let fullDeclaration = ""; // Store the complete declaration for _clarionType
             let j = index;
+            let foundType = false; // Track if we've found the actual type
 
             logger.info(`   🔍 Collecting type tokens starting from index ${j}`);
             // Process to the end of the line or until a comment
@@ -1865,22 +1909,101 @@ export class ClarionDocumentSymbolProvider {
                     continue;
                 }
 
-                // Add the token value to the type
-                fullType += t.value;
+                // Store complete declaration for metadata
+                fullDeclaration += t.value;
+
+                // Check if this is an attribute keyword - if so, stop collecting the type
+                if (t.type === TokenType.Keyword && isAttributeKeyword(t.value)) {
+                    logger.info(`     - Found attribute keyword "${t.value}", stopping type collection`);
+                    foundType = true; // We've already collected the type before this attribute
+                    j++;
+                    continue; // Continue to collect fullDeclaration but not fullType
+                }
+
+                // Stop collecting type if we hit a comma - this separates type from attributes
+                // This handles: "x long,auto" or "x long, auto" - we want "long", not "long,auto"
+                if (t.type === TokenType.Delimiter && t.value === ',') {
+                    logger.info(`     - Found comma, stopping type collection`);
+                    foundType = true; // Mark that we've collected the type
+                    j++;
+                    continue; // Continue to collect fullDeclaration but not fullType
+                }
+
+                // Only add to fullType if we haven't completed type collection yet
+                if (!foundType) {
+                    // Add type components to fullType
+                    if (t.type === TokenType.Type || 
+                        (t.type === TokenType.Keyword && !isAttributeKeyword(t.value)) ||
+                        t.type === TokenType.Number) {
+                        fullType += t.value;
+                        logger.info(`     - Adding to fullType: "${t.value}"`);
+                    } else if (t.type === TokenType.Delimiter && (t.value === '(' || t.value === ')')) {
+                        // Before adding '(', check if next token is a string literal (indicates value initialization)
+                        if (t.value === '(' && j + 1 < tokens.length && tokens[j + 1].type === TokenType.String) {
+                            // Add the opening paren
+                            fullType += t.value;
+                            j++; // Move to the string token
+                            const stringToken = tokens[j];
+                            // Abbreviate the string content if it's long
+                            const stringValue = stringToken.value;
+                            // The tokenizer includes the quotes, so stringValue looks like: 'ABCDEF...'
+                            // We want to show: 'ABCDEFGHIJ...
+                            const maxCharsToShow = 10; // Show first 10 chars of actual content (not including quotes)
+                            if (stringValue.length > maxCharsToShow + 2) { // +2 for the two quotes
+                                // Take opening quote + first 10 chars of content + ...
+                                fullType += stringValue.substring(0, maxCharsToShow + 1) + '...';
+                            } else {
+                                fullType += stringValue;
+                            }
+                            logger.info(`     - Added abbreviated string literal to fullType: "${stringValue}"`);
+                            // Check if there's a closing paren
+                            if (j + 1 < tokens.length && tokens[j + 1].type === TokenType.Delimiter && tokens[j + 1].value === ')') {
+                                j++; // Move to closing paren
+                                fullType += tokens[j].value;
+                                logger.info(`     - Added closing paren to fullType`);
+                            }
+                            foundType = true; // We've completed the type
+                            j++;
+                            continue;
+                        }
+                        // Include delimiters that are part of the type definition (e.g., STRING(20))
+                        fullType += t.value;
+                        logger.info(`     - Adding delimiter to fullType: "${t.value}"`);
+                    } else if (t.type === TokenType.String) {
+                        // String literal - this is a VALUE initialization, stop collecting type
+                        logger.info(`     - Found string literal, stopping type collection: "${t.value}"`);
+                        break;
+                    }
+                }
+                
                 logger.info(`     - fullType now: "${fullType}"`);
                 j++;
             }
             logger.info(`   ✅ Final fullType: "${fullType}"`);
+            logger.info(`   ✅ Final fullDeclaration: "${fullDeclaration}"`);
 
             // Clean up the type
             fullType = fullType.trim();
+            fullDeclaration = fullDeclaration.trim();
 
             // Remove any trailing comments
             const commentIndex = fullType.indexOf("!");
             if (commentIndex !== -1) {
                 fullType = fullType.substring(0, commentIndex).trim();
             }
+            const declCommentIndex = fullDeclaration.indexOf("!");
+            if (declCommentIndex !== -1) {
+                fullDeclaration = fullDeclaration.substring(0, declCommentIndex).trim();
+            }
             fullType = fullType.trim();
+            fullDeclaration = fullDeclaration.trim();
+            
+            // CRITICAL FIX: If no type was specified, Clarion defaults to STRING
+            // This handles cases like: x ,auto  (no explicit type, just attributes)
+            if (!fullType || fullType === '') {
+                fullType = 'STRING';
+                logger.info(`   ℹ️ No explicit type found, defaulting to STRING`);
+            }
             
             // Create proper detail with parent context
             let detail = "";
@@ -1906,8 +2029,9 @@ export class ClarionDocumentSymbolProvider {
                 []
             );
             
-            // Store the type separately for hover provider to use
-            variableSymbol._clarionType = fullType;
+            // Store both the type and the complete declaration for later use
+            variableSymbol._clarionType = fullType; // Just the type (e.g., "long", "string(20)")
+            variableSymbol._clarionDeclaration = fullDeclaration; // Complete declaration with attributes
             variableSymbol._clarionVarName = variableName;
             
             // Use the prefix directly from the token if available
@@ -1966,14 +2090,40 @@ export class ClarionDocumentSymbolProvider {
                 }
             }
 
-            // CRITICAL FIX: Prioritize currentProcedure over currentStructure
-            // This ensures variables are attached to the method implementation they're defined in
+            // CRITICAL FIX: Prioritize immediate parent structures (like GROUP) over procedures
+            // Variables should be attached to the most immediate structure they're defined in
             let target: DocumentSymbol | null = null;
 
-            if (currentProcedure) {
+            // BUGFIX: Check the parentStack directly for the most immediate GROUP structure
+            // This handles unlabeled GROUPs that might not be set in currentStructure
+            logger.info(`   🔍 Searching parentStack for immediate struct parent (stack depth: ${parentStack.length}, current line: ${line})`);
+            for (let stackIdx = parentStack.length - 1; stackIdx >= 0; stackIdx--) {
+                const stackEntry = parentStack[stackIdx];
+                const symbol = stackEntry.symbol;
+                
+                const isStruct = symbol.kind === SymbolKind.Struct;
+                const isActive = !stackEntry.finishesAt || stackEntry.finishesAt >= line;
+                logger.info(`     - Stack[${stackIdx}]: "${symbol.name}", kind=${symbol.kind}, finishesAt=${stackEntry.finishesAt}, isStruct=${isStruct}, isActive=${isActive}`);
+                
+                // Check if this is a GROUP, QUEUE, or other Struct that's still active
+                if (symbol.kind === SymbolKind.Struct && 
+                    (!stackEntry.finishesAt || stackEntry.finishesAt >= line)) {
+                    // Found the most immediate struct parent
+                    target = symbol;
+                    logger.info(`   🎯 Found immediate struct parent in stack: "${symbol.name}"`);
+                    break;
+                }
+            }
+
+            // If no struct found in stack, fall back to currentStructure
+            if (!target && currentStructure && currentStructure.kind === SymbolKind.Struct) {
+                // We're inside a GROUP/QUEUE/etc - attach to it
+                target = currentStructure;
+                logger.info(`   🎯 Using currentStructure as target: "${currentStructure.name}"`);
+            } else if (!target && currentProcedure) {
                 // If we're in a procedure, attach to it
                 target = currentProcedure;
-            } else if (lastMethodImplementation) {
+            } else if (!target && lastMethodImplementation) {
                 // If we're not in a procedure but we have a last method implementation,
                 // use that as the target for variables
                 target = lastMethodImplementation;
@@ -2028,6 +2178,14 @@ export class ClarionDocumentSymbolProvider {
                 }
             }
 
+            // CRITICAL FIX: Update the variable's detail to match its actual parent
+            // This ensures variables inside GROUPs show "in GROUP(...)" instead of "in Method(...)"
+            if (target) {
+                logger.info(`   🔍 DEBUG: target type=${target.kind}, target.name="${target.name}"`);
+                variableSymbol.detail = `in ${target.name}`;
+                logger.info(`   ✅ Updated variable detail to match target: "${variableSymbol.detail}"`);
+            }
+            
             this.addSymbolToParent(variableSymbol, target, symbols);
         } else {
             logger.info(`   ❌ Previous token is NOT Label or StructurePrefix - skipping (prevToken type=${prevToken?.type})`);
