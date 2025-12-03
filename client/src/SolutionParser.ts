@@ -5,7 +5,7 @@ import LoggerManager from './logger';
 import { CwprojParser } from './project/CwprojParser';
 
 const logger = LoggerManager.getLogger("SolutionParser");
-logger.setLevel("error");
+logger.setLevel("info");
 
 // Create a specialized debug logger for file resolution issues
 const fileResolutionLogger = LoggerManager.getLogger("FileResolution");
