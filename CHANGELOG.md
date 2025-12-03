@@ -5,6 +5,9 @@ All notable changes to the "clarion-extension" extension will be documented in t
 
 ## [0.7.1] - 2025-12-03
 
+### ⚠️ Documentation Update
+**Note**: Version 0.7.1 was initially released with incomplete documentation. This update corrects the changelog to reflect all changes that were actually included in the 0.7.1 release.
+
 ### 🔧 ClarionCl.exe Integration (APP Generation)
 - **Generate Applications**: Right-click context menu commands to generate Clarion applications
   - **Generate All Applications**: Right-click on Applications node to generate all APPs in solution
@@ -31,8 +34,10 @@ All notable changes to the "clarion-extension" extension will be documented in t
   - Previously incorrectly flagged valid empty CASE statements as errors
   - Now properly validates: `CASE TRUE` followed by `END` is valid Clarion syntax
 
+### 📈 Performance & Quality (from November 2024)
+The following improvements were included in 0.7.1 but not documented in the initial release:
 
-- **Test Coverage**: 185 total tests, all passing
+- **Test Coverage**: 185 total tests, all passing (zero regressions)
 
 #### Improved Structure View
 - **FILE Hierarchy**: Shows KEY/INDEX as children, RECORD as container, MEMO/BLOB distinguished
