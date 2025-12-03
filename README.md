@@ -145,11 +145,11 @@ This is necessary because older versions had a dependency on fushnisoft.clarion 
   - .APP files no longer open as text when clicked
   - Cleaner user experience in solution explorer
 
-### 🎯 Knowledge Base & Language Intelligence
+### 🎯 Enhanced Diagnostics & Validation
 
-**Comprehensive Clarion language documentation and enhanced validation:**
+**Real-time error detection and improved validation:**
 
-- **Enhanced Diagnostics**: Real-time error detection (5 validators)
+- **Enhanced Diagnostics**: Real-time error detection (6 validators)
   - **Structure Termination**: Unterminated IF/LOOP/CLASS structures
   - **FILE Validation**: Must have DRIVER and RECORD (error)
   - **CASE Validation**: CASE statements can have zero or more OF clauses
@@ -157,7 +157,7 @@ This is necessary because older versions had a dependency on fushnisoft.clarion 
   - **EXECUTE Validation**: Expression should be numeric (warning)
   - **OMIT/COMPILE**: Validates directive block pairing
 
-- **Improved Structure View**: Better visualization of code structure
+- **Improved Structure View**: Better visualization of code structure including FILE/VIEW hierarchy
   - **FILE**: Shows KEY/INDEX/RECORD/MEMO/BLOB hierarchy
   - **VIEW**: Displays JOIN nesting and PROJECT fields
   - **GROUP**: Shows OVER (memory overlay) and DIM (arrays) attributes
@@ -374,10 +374,6 @@ Large Clarion files (14k+ lines) now have significantly improved response times.
 ## Upcoming Release (In Development)
 
 ### New Features (2025-11-30)
-
-#### Clarion Language Knowledge Base
-- **Comprehensive Documentation**: New knowledge base documenting Clarion syntax rules and conventions
-- **Reference for Development**: Serves as authoritative source for extension features and AI assistance
 
 #### Structure Termination Diagnostics
 - **Real-time Validation**: Extension now validates that IF, LOOP, and CLASS structures are properly terminated
