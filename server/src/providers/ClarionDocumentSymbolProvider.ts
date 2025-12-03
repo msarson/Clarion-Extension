@@ -1,10 +1,51 @@
 import { DocumentSymbol, Range, SymbolKind } from 'vscode-languageserver-types';
 
-import LoggerManager from './logger';
+import LoggerManager from '../logger';
 const logger = LoggerManager.getLogger("ClarionDocumentSymbolProvider");
-logger.setLevel("error");
-import { serverInitialized } from './server.js';
-import { Token, TokenType } from './ClarionTokenizer.js';
+logger.setLevel("error"); // DEBUG: Enable info logging for MAP procedure debugging
+import { serverInitialized } from '../serverState';
+import { Token, TokenType } from '../ClarionTokenizer.js';
+import { HierarchyManager, ParentStackEntry } from './utils/HierarchyManager';
+import { SymbolFinder } from './utils/SymbolFinder';
+import { isAttributeKeyword, isDataType } from '../utils/AttributeKeywords';
+
+/**
+ * Extended DocumentSymbol with Clarion-specific metadata
+ */
+export interface ClarionDocumentSymbol extends DocumentSymbol {
+    // Procedure/Method flags
+    _isMethodImplementation?: boolean;
+    _isMethodDeclaration?: boolean;
+    _isGlobalProcedure?: boolean;
+    _isSpecialRoutine?: boolean;
+    _isInterface?: boolean;
+    _isMapProcedure?: boolean;
+    _finishesAt?: number;
+    
+    // Structure metadata
+    _clarionPrefix?: string;
+    _clarionLabel?: string;
+    
+    // Variable metadata
+    _clarionType?: string;  // Just the data type (e.g., "long", "string(20)")
+    _clarionDeclaration?: string;  // Complete declaration with attributes
+    _clarionVarName?: string;
+    _isPartOfStructure?: boolean;
+    _structurePrefix?: string;
+    _structureName?: string;
+    _possibleReferences?: string[];
+    
+    // Container references
+    $clarionProps?: ClarionDocumentSymbol;
+    $clarionMethods?: ClarionDocumentSymbol;
+    $clarionFunctions?: ClarionDocumentSymbol;
+    
+    // Sorting
+    sortText?: string;
+    
+    // Override children to use our type
+    children?: ClarionDocumentSymbol[];
+}
 
 const ClarionSymbolKind = {
     Root: SymbolKind.Module,
@@ -41,16 +82,189 @@ const clarionStructureKindMap: Record<string, SymbolKind> = {
     STRING: SymbolKind.String           // 📝
 };
 export class ClarionDocumentSymbolProvider {
-    classSymbolMap: Map<string, DocumentSymbol> = new Map();
+    classSymbolMap: Map<string, ClarionDocumentSymbol> = new Map();
     // 🚀 PERFORMANCE: Store tokensByLine as instance variable to avoid passing it everywhere
     private tokensByLine: Map<number, Token[]> = new Map();
+    
+    /**
+     * 🌳 DEBUG: Dump symbol tree in human-readable format
+     * Prefix: [TREE-DUMP] for easy filtering in logs
+     */
+    private dumpSymbolTree(symbols: ClarionDocumentSymbol[], depth = 0): void {
+        const indent = "  ".repeat(depth);
+        
+        for (const symbol of symbols) {
+            // Build symbol info
+            const kindName = this.getSymbolKindName(symbol.kind);
+            const line = symbol.range.start.line + 1; // Convert to 1-based
+            const flags: string[] = [];
+            
+            // Add relevant flags
+            if (symbol._isMethodImplementation) flags.push("METHOD-IMPL");
+            if (symbol._isMethodDeclaration) flags.push("METHOD-DECL");
+            if (symbol._isGlobalProcedure) flags.push("GLOBAL-PROC");
+            if (symbol._isMapProcedure) flags.push("MAP-PROC");
+            if (symbol._isSpecialRoutine) flags.push("SPECIAL-ROUTINE");
+            if (symbol._clarionType) flags.push(`type:${symbol._clarionType}`);
+            
+            const flagStr = flags.length > 0 ? ` [${flags.join(", ")}]` : "";
+            
+            console.log(`[TREE-DUMP] ${indent}├─ ${symbol.name}`);
+            console.log(`[TREE-DUMP] ${indent}│  kind=${kindName}, detail="${symbol.detail}", line=${line}${flagStr}`);
+            
+            // Recurse into children
+            if (symbol.children && symbol.children.length > 0) {
+                this.dumpSymbolTree(symbol.children, depth + 1);
+            }
+        }
+    }
+    
+    /**
+     * 🌳 DEBUG: Dump symbol tree in compact format (single line per symbol)
+     * Prefix: [TREE-COMPACT] for easy filtering in logs
+     */
+    private dumpSymbolTreeCompact(symbols: ClarionDocumentSymbol[], depth = 0): void {
+        const indent = "│ ".repeat(depth);
+        
+        for (const symbol of symbols) {
+            const line = symbol.range.start.line + 1;
+            const childCount = symbol.children?.length || 0;
+            const detail = symbol.detail ? ` "${symbol.detail}"` : "";
+            const kindName = this.getSymbolKindName(symbol.kind);
+            
+            console.log(`[TREE-COMPACT] ${indent}├─ ${symbol.name}${detail} @L${line} [${kindName}] (${childCount} children)`);
+            
+            if (symbol.children && symbol.children.length > 0) {
+                this.dumpSymbolTreeCompact(symbol.children, depth + 1);
+            }
+        }
+    }
+    
+    /**
+     * Helper to convert SymbolKind enum value to readable string
+     */
+    private getSymbolKindName(kind: SymbolKind): string {
+        const kindNames: { [key: number]: string } = {
+            [SymbolKind.File]: "File",
+            [SymbolKind.Module]: "Module",
+            [SymbolKind.Namespace]: "Namespace",
+            [SymbolKind.Package]: "Package",
+            [SymbolKind.Class]: "Class",
+            [SymbolKind.Method]: "Method",
+            [SymbolKind.Property]: "Property",
+            [SymbolKind.Field]: "Field",
+            [SymbolKind.Constructor]: "Constructor",
+            [SymbolKind.Enum]: "Enum",
+            [SymbolKind.Interface]: "Interface",
+            [SymbolKind.Function]: "Function",
+            [SymbolKind.Variable]: "Variable",
+            [SymbolKind.Constant]: "Constant",
+            [SymbolKind.String]: "String",
+            [SymbolKind.Number]: "Number",
+            [SymbolKind.Boolean]: "Boolean",
+            [SymbolKind.Array]: "Array",
+            [SymbolKind.Object]: "Object",
+            [SymbolKind.Key]: "Key",
+            [SymbolKind.Null]: "Null",
+            [SymbolKind.EnumMember]: "EnumMember",
+            [SymbolKind.Struct]: "Struct",
+            [SymbolKind.Event]: "Event",
+            [SymbolKind.Operator]: "Operator",
+            [SymbolKind.TypeParameter]: "TypeParameter"
+        };
+        return kindNames[kind] || `Unknown(${kind})`;
+    }
     
     public extractStringContents(rawString: string): string {
         const match = rawString.match(/'([^']+)'/);
         return match ? match[1] : rawString;
     }
 
-    public provideDocumentSymbols(tokens: Token[], documentUri: string): DocumentSymbol[] {
+    /**
+     * Extract content from parentheses starting at the given token index.
+     * Returns the content and the index after the closing parenthesis.
+     */
+    private extractParenContent(tokens: Token[], startIndex: number): { content: string, nextIndex: number } {
+        const parenContent: string[] = [];
+        let j = startIndex;
+        let parenDepth = 1;
+
+        while (j < tokens.length && parenDepth > 0) {
+            const t = tokens[j];
+            if (t.value === "(") parenDepth++;
+            else if (t.value === ")") parenDepth--;
+
+            if (parenDepth > 0) parenContent.push(t.value);
+            j++;
+        }
+
+        return {
+            content: parenContent.join("").trim(),
+            nextIndex: j
+        };
+    }
+
+    /**
+     * Check if a token value is a procedure attribute keyword (not a procedure name)
+     * These are keywords that appear in MAP procedure declarations but are not procedure names
+     * Now uses the centralized attribute list from the tokenizer
+     */
+    private isAttributeKeyword(value: string): boolean {
+        return isAttributeKeyword(value);
+    }
+
+    /**
+     * Create a Clarion document symbol (wrapper around DocumentSymbol.create with proper typing)
+     */
+    private createSymbol(
+        name: string,
+        detail: string,
+        kind: SymbolKind,
+        range: Range,
+        selectionRange: Range,
+        children: ClarionDocumentSymbol[]
+    ): ClarionDocumentSymbol {
+        return DocumentSymbol.create(name, detail, kind, range, selectionRange, children) as ClarionDocumentSymbol;
+    }
+
+    /**
+     * Extract a specific attribute (like USE, DRIVER, PRE, AT) from tokens.
+     * Returns the attribute content and the index after parsing.
+     */
+    private extractAttribute(
+        tokens: Token[],
+        startIndex: number,
+        attributeName: string,
+        line: number,
+        sourceToken: Token
+    ): { value: string, nextIndex: number } {
+        let j = startIndex;
+
+        while (j < tokens.length) {
+            const t = tokens[j];
+
+            // Stop if we hit a new line or another structure
+            if (t.line !== line && t.line !== line + 1) break;
+            if (t.type === TokenType.Structure && t !== sourceToken) break;
+
+            // Look for the attribute token
+            if (t.value.toUpperCase() === attributeName.toUpperCase() && 
+                j + 1 < tokens.length && 
+                tokens[j + 1].value === "(") {
+                const result = this.extractParenContent(tokens, j + 2);
+                return {
+                    value: result.content,
+                    nextIndex: result.nextIndex
+                };
+            }
+
+            j++;
+        }
+
+        return { value: "", nextIndex: j };
+    }
+
+    public provideDocumentSymbols(tokens: Token[], documentUri: string): ClarionDocumentSymbol[] {
         if (!serverInitialized) {
             logger.warn(`⚠️ Server not initialized, skipping document symbols for: ${documentUri}`);
             return [];
@@ -69,21 +283,22 @@ export class ClarionDocumentSymbolProvider {
         logger.perf('Symbol: build index', { time_ms: perfIndexTime.toFixed(2), lines: this.tokensByLine.size });
         
         this.classSymbolMap.clear();
-        const symbols: DocumentSymbol[] = [];
+        const symbols: ClarionDocumentSymbol[] = [];
 
         // Enhanced parent stack that tracks finishesAt for each symbol
-        const parentStack: Array<{ symbol: DocumentSymbol, finishesAt: number | undefined }> = [];
-        let currentStructure: DocumentSymbol | null = null;
-        let currentProcedure: DocumentSymbol | null = null;
-        let currentClassImplementation: DocumentSymbol | null = null;
+        const parentStack: Array<{ symbol: ClarionDocumentSymbol, finishesAt: number | undefined }> = [];
+        let currentStructure: ClarionDocumentSymbol | null = null;
+        let currentProcedure: ClarionDocumentSymbol | null = null;
+        let currentClassImplementation: ClarionDocumentSymbol | null = null;
         let insideDefinitionBlock = false;
         let lastProcessedLine = -1;
+        let pastCodeStatement = false; // Track if we're past CODE (no more variables allowed)
 
-        // Track if we have method implementations in the file
+        // 🚀 PERFORMANCE: Track method implementations incrementally instead of scanning tree repeatedly
         let hasMethodImplementations = false;
 
         // CRITICAL FIX: Track the last method implementation to ensure variables are properly attached
-        let lastMethodImplementation: DocumentSymbol | null = null;
+        let lastMethodImplementation: ClarionDocumentSymbol | null = null;
 
         for (let i = 0; i < tokens.length; i++) {
             const token = tokens[i];
@@ -92,17 +307,22 @@ export class ClarionDocumentSymbolProvider {
             // Check if we've moved to a new line
             if (line > lastProcessedLine) {
                 // Check if any structures should be popped based on finishesAt
-                this.checkAndPopCompletedStructures(parentStack, line, symbols, tokens, this.tokensByLine);
+                const result = HierarchyManager.checkAndPopCompletedStructures(
+                    parentStack, 
+                    line, 
+                    tokens, 
+                    this.tokensByLine, 
+                    hasMethodImplementations
+                );
 
                 // CRITICAL FIX: Check if we need to reset lastMethodImplementation
                 // This happens when a new global procedure is encountered
-                if ((token as any)._resetLastMethodImplementation) {
+                if (result.shouldResetLastMethodImplementation) {
                     lastMethodImplementation = null;
-                    delete (token as any)._resetLastMethodImplementation;
                 }
 
                 // Update current structure and procedure references
-                currentStructure = parentStack.length > 0 ? parentStack[parentStack.length - 1].symbol : null;
+                currentStructure = HierarchyManager.getCurrentParent(parentStack);
 
                 // Update the procedure reference if the current structure is a procedure
                 currentProcedure = currentStructure?.kind === ClarionSymbolKind.Procedure ? currentStructure : null;
@@ -120,15 +340,70 @@ export class ClarionDocumentSymbolProvider {
                 insideDefinitionBlock = false;
             }
 
+            // Check if current token is CODE execution marker - stop variable processing
+            if (type === TokenType.ExecutionMarker && value.toUpperCase() === "CODE") {
+                pastCodeStatement = true;
+                
+                // For method implementations, clear currentProcedure AND pop from parent stack
+                // This prevents variables/symbols after CODE from being attached
+                if (currentProcedure && currentProcedure._isMethodImplementation) {
+                    currentProcedure = null;
+                    
+                    // CRITICAL: Also pop the method from parentStack and update currentStructure
+                    // This ensures the next method implementation isn't added as a child
+                    for (let si = parentStack.length - 1; si >= 0; si--) {
+                        if (parentStack[si].symbol._isMethodImplementation) {
+                            parentStack.splice(si, 1);
+                            break; // Only pop the current method, not all methods
+                        }
+                    }
+                    
+                    // Update currentStructure to point to the parent (should be Methods container)
+                    currentStructure = HierarchyManager.getCurrentParent(parentStack);
+                }
+                
+                // Continue to next token - don't process anything on CODE line
+                continue;
+            }
+
+            // Check if current token is DATA execution marker - allow variable processing for routines
+            if (type === TokenType.ExecutionMarker && value.toUpperCase() === "DATA") {
+                pastCodeStatement = false;
+                continue;
+            }
+
+            // CRITICAL: After CODE, only process ROUTINE tokens and new PROCEDURE declarations
+            // Skip everything else (function calls, assignments, control structures, etc.)
+            if (pastCodeStatement) {
+                // Allow ROUTINE declarations
+                if (type === TokenType.Label && i + 1 < tokens.length && 
+                    tokens[i + 1].value.toUpperCase() === "ROUTINE") {
+                    // Let it fall through to ROUTINE handling below
+                } 
+                // Allow new PROCEDURE/METHOD implementations with CODE marker (new procedure starting)
+                else if ((subType === TokenType.Procedure || subType === TokenType.GlobalProcedure || 
+                          subType === TokenType.MethodImplementation) &&
+                         token.executionMarker?.value.toUpperCase() === "CODE") {
+                    // This is a NEW procedure/method starting - reset pastCodeStatement
+                    pastCodeStatement = false;
+                    // Let it fall through to procedure handling
+                }
+                // Skip everything else
+                else {
+                    continue;
+                }
+            }
+
             if (type === TokenType.Structure) {
                 this.handleStructureToken(tokens, i, symbols, parentStack, currentStructure, this.tokensByLine);
-                currentStructure = parentStack.length > 0 ? parentStack[parentStack.length - 1].symbol : null;
+                currentStructure = HierarchyManager.getCurrentParent(parentStack);
                 
                 // Special handling for MAP and MODULE structures
                 if (value.toUpperCase() === "MAP" || value.toUpperCase() === "MODULE") {
                     // Look ahead for procedure declarations inside this structure
                     let j = i + 1;
                     let endFound = false;
+                    let lastProcedureLine = -1; // Track the line of the last identified procedure
                     
                     while (j < tokens.length && !endFound) {
                         const nextToken = tokens[j];
@@ -146,16 +421,30 @@ export class ClarionDocumentSymbolProvider {
                             nextToken.value.toUpperCase() === "PROCEDURE") {
                             // Mark this as a MAP/MODULE procedure
                             nextToken.subType = TokenType.MapProcedure;
-                            logger.info(`Marked procedure at line ${nextToken.line} as MAP/MODULE procedure`);
+                            lastProcedureLine = nextToken.line;
+                            logger.debug(`Marked procedure at line ${nextToken.line} as MAP/MODULE procedure`);
                         }
                         // Special case for MAP: Look for procedure declarations without PROCEDURE keyword
                         // Format: ProcedureName(parameters),returnType
-                        else if (nextToken.type === TokenType.Label &&
+                        // Can be Label token (column 0), Function token (no space), or Variable token (indented with space)
+                        // BUT exclude attribute keywords: dll, name, raw, pascal, proc, etc.
+                        // CRITICAL FIX: Only mark as procedure if it's on a NEW line (not the same line as last procedure)
+                        // This prevents attribute keywords on the same line from being treated as procedures
+                        else if ((nextToken.type === TokenType.Label || 
+                                 nextToken.type === TokenType.Function ||
+                                 nextToken.type === TokenType.Variable) &&
+                                nextToken.line !== lastProcedureLine && // NEW: Must be on different line
                                 j + 1 < tokens.length &&
-                                tokens[j + 1].value === "(") {
+                                tokens[j + 1].value === "(" &&
+                                nextToken.value.toUpperCase() !== "MODULE" &&
+                                nextToken.value.toUpperCase() !== "MAP" &&
+                                !this.isAttributeKeyword(nextToken.value)) {
                             // This looks like a procedure declaration in shorthand MAP syntax
                             nextToken.subType = TokenType.MapProcedure;
-                            logger.info(`Marked shorthand procedure ${nextToken.value} at line ${nextToken.line} as MAP/MODULE procedure`);
+                            // CRITICAL: Set token.label to just the procedure name (nextToken.value is already just the name)
+                            nextToken.label = nextToken.value;
+                            lastProcedureLine = nextToken.line; // Track this line as having a procedure
+                            logger.debug(`Marked shorthand procedure ${nextToken.value} at line ${nextToken.line} as MAP/MODULE procedure`);
                         }
                         
                         j++;
@@ -181,18 +470,36 @@ export class ClarionDocumentSymbolProvider {
 
             if ((subType === TokenType.Procedure || subType === TokenType.Class ||
                 subType === TokenType.GlobalProcedure || subType === TokenType.MethodImplementation ||
-                subType === TokenType.InterfaceMethod)) {
+                subType === TokenType.InterfaceMethod || subType === TokenType.MapProcedure)) {
 
+                logger.info(`Processing token type=${type}, subType=${subType}, value='${value}', line=${token.line}, label='${token.label}'`);
+                
                 const isImplementation = token.executionMarker?.value.toUpperCase() === "CODE";
                 if (isImplementation || token.finishesAt !== undefined) {
-                    // CRITICAL FIX: Pass the correct subType to handleProcedureOrClassToken
-                    // This ensures GlobalProcedure tokens are properly handled
+                    // CRITICAL FIX: Before processing a new method implementation, FORCE pop all methods from stack
+                    // Don't wait for checkAndPopCompletedStructures - do it NOW
+                    if ((token.subType === TokenType.MethodImplementation || subType === TokenType.MethodImplementation)) {
+                        // FORCE remove ALL method implementations from the stack
+                        for (let si = parentStack.length - 1; si >= 0; si--) {
+                            if (parentStack[si].symbol._isMethodImplementation) {
+                                parentStack.splice(si, 1);
+                            }
+                        }
+                        
+                        // Update currentStructure to remove stale references
+                        currentStructure = HierarchyManager.getCurrentParent(parentStack);
+                    }
+                    
+                    // Now process the new procedure/method
                     const result = this.handleProcedureOrClassToken(tokens, i, symbols, currentStructure, token.subType || subType);
 
                     // Check if this is a method implementation (e.g., ThisWindow.Init)
-                    const isMethodImplementation = (result.procedureSymbol as any)._isMethodImplementation;
+                    const isMethodImplementation = result.procedureSymbol._isMethodImplementation;
 
                     if (isMethodImplementation) {
+                        // 🚀 PERFORMANCE: Set flag to avoid recursive tree scanning later
+                        hasMethodImplementations = true;
+                        
                         // CRITICAL FIX: For method implementations, we DO need to update currentProcedure
                         // This ensures variables defined inside the method are attached to it
                         currentProcedure = result.procedureSymbol;
@@ -201,12 +508,10 @@ export class ClarionDocumentSymbolProvider {
                         // CRITICAL FIX: Track the last method implementation
                         lastMethodImplementation = result.procedureSymbol;
 
-                        // Add method implementation to parent stack with its finishesAt value if available
-                        if ((result.procedureSymbol as any)._finishesAt !== undefined) {
-                            parentStack.push({
-                                symbol: result.procedureSymbol,
-                                finishesAt: (result.procedureSymbol as any)._finishesAt
-                            });
+                        // Add method implementation to parent stack with its finishesAt value
+                        // This ensures structures/routines inside are properly nested
+                        if (result.procedureSymbol._finishesAt !== undefined) {
+                            HierarchyManager.pushToStack(parentStack, result.procedureSymbol, result.procedureSymbol._finishesAt);
                             currentStructure = result.procedureSymbol;
                         }
                     } else {
@@ -215,19 +520,22 @@ export class ClarionDocumentSymbolProvider {
                         currentClassImplementation = result.classImplementation;
 
                         // CRITICAL FIX: Reset lastMethodImplementation when a new global procedure is encountered
-                        if ((result.procedureSymbol as any)._isGlobalProcedure) {
+                        if (result.procedureSymbol._isGlobalProcedure) {
                             lastMethodImplementation = null;
                         }
 
                         // Add procedure to parent stack with its finishesAt value if available
-                        if ((result.procedureSymbol as any)._finishesAt !== undefined) {
-                            parentStack.push({
-                                symbol: result.procedureSymbol,
-                                finishesAt: (result.procedureSymbol as any)._finishesAt
-                            });
+                        if (result.procedureSymbol._finishesAt !== undefined) {
+                            HierarchyManager.pushToStack(parentStack, result.procedureSymbol, result.procedureSymbol._finishesAt);
                             currentStructure = result.procedureSymbol;
                         }
                     }
+
+                    // Skip tokens that were already processed (parameters on the procedure line)
+                    i = result.lastTokenIndex;
+
+                    // Reset pastCodeStatement flag when entering new procedure/method
+                    pastCodeStatement = false;
 
                     insideDefinitionBlock = true;
                 } else {
@@ -235,11 +543,8 @@ export class ClarionDocumentSymbolProvider {
 
                     // Check if we need to add this procedure definition to the parent stack
                     // This would be the case for procedure definitions with a finishesAt value
-                    if ((procedureDefSymbol as any)._finishesAt !== undefined) {
-                        parentStack.push({
-                            symbol: procedureDefSymbol,
-                            finishesAt: (procedureDefSymbol as any)._finishesAt
-                        });
+                    if (procedureDefSymbol._finishesAt !== undefined) {
+                        HierarchyManager.pushToStack(parentStack, procedureDefSymbol, procedureDefSymbol._finishesAt);
                         // Update current structure reference
                         currentStructure = procedureDefSymbol;
                     }
@@ -269,11 +574,8 @@ export class ClarionDocumentSymbolProvider {
 
                 // Check if we need to add this procedure definition to the parent stack
                 // This would be the case for procedure definitions with a finishesAt value
-                if ((procedureDefSymbol as any)._finishesAt !== undefined) {
-                    parentStack.push({
-                        symbol: procedureDefSymbol,
-                        finishesAt: (procedureDefSymbol as any)._finishesAt
-                    });
+                if (procedureDefSymbol._finishesAt !== undefined) {
+                    HierarchyManager.pushToStack(parentStack, procedureDefSymbol, procedureDefSymbol._finishesAt);
                     // Update current structure reference
                     currentStructure = procedureDefSymbol;
                 }
@@ -290,7 +592,7 @@ export class ClarionDocumentSymbolProvider {
                 const isSpecialRoutine = routineName.includes("::");
 
                 // Create the routine symbol with (Routine) suffix in the name
-                const routineSymbol = DocumentSymbol.create(
+                const routineSymbol = this.createSymbol(
                     `${routineName} (Routine)`,
                     "",  // Empty detail since we're including it in the name
                     ClarionSymbolKind.Routine,
@@ -301,12 +603,12 @@ export class ClarionDocumentSymbolProvider {
 
                 // Mark special routines
                 if (isSpecialRoutine) {
-                    (routineSymbol as any)._isSpecialRoutine = true;
+                    routineSymbol._isSpecialRoutine = true;
                 }
 
                 // CRITICAL FIX: Determine the correct parent for this ROUTINE
-                // First, check if we're inside a procedure
-                let routineParent: DocumentSymbol | null = currentProcedure;
+                // Get the current parent from the stack (don't rely on currentProcedure which might be stale)
+                let routineParent: ClarionDocumentSymbol | null = HierarchyManager.getCurrentParent(parentStack);
 
                 // If we're not inside a procedure, check if we're inside a method implementation
                 if (!routineParent) {
@@ -349,17 +651,24 @@ export class ClarionDocumentSymbolProvider {
                 // CRITICAL FIX: Only add special routines to the parent stack
                 // This prevents variables from being incorrectly attached to empty routines
                 if (isSpecialRoutine || token.finishesAt) {
-                    parentStack.push({
-                        symbol: routineSymbol,
-                        finishesAt: token.finishesAt
-                    });
+                    HierarchyManager.pushToStack(parentStack, routineSymbol, token.finishesAt);
+                }
+
+                // Reset pastCodeStatement if this routine has local data (DATA section)
+                // Variables are allowed between DATA and CODE in routines
+                if (token.hasLocalData) {
+                    pastCodeStatement = false;
                 }
 
                 continue;
             }
 
-            if ((type === TokenType.Type || type === TokenType.ReferenceVariable || type === TokenType.Variable) && i > 0) {
-                this.handleVariableToken(tokens, i, symbols, currentProcedure, currentStructure, lastMethodImplementation);
+            // Handle variable declarations - check for Type tokens (BYTE, LONG, etc) and TypeAnnotation (STRING(255), CSTRING(100), etc)
+            // Also check for FunctionArgumentParameter which the tokenizer uses for parametrized types like CSTRING(1024)
+            // CRITICAL: Don't process variables after CODE statement
+            if (!pastCodeStatement && (type === TokenType.Type || type === TokenType.TypeAnnotation || type === TokenType.ReferenceVariable || type === TokenType.Variable || type === TokenType.FunctionArgumentParameter) && i > 0) {
+                logger.info(`✅ SymbolProvider: Calling handleVariableToken for token index=${i}, type=${type}, value="${token.value}", line=${token.line}`);
+                this.handleVariableToken(tokens, i, symbols, currentStructure, currentProcedure, lastMethodImplementation, parentStack);
 
                 continue;
             }
@@ -369,7 +678,7 @@ export class ClarionDocumentSymbolProvider {
                 // The actual structure popping happens based on finishesAt lines
                 // But we'll still use this to handle cases where finishesAt isn't available
                 this.handleEndStatementToken(parentStack, line);
-                currentStructure = parentStack.length > 0 ? parentStack[parentStack.length - 1].symbol : null;
+                currentStructure = HierarchyManager.getCurrentParent(parentStack);
                 currentProcedure = currentStructure?.kind === ClarionSymbolKind.Procedure ? currentStructure : null;
             }
         }
@@ -378,17 +687,32 @@ export class ClarionDocumentSymbolProvider {
 
         // No need for final sorting here since we're sorting as symbols are added
         // This ensures symbols are already in the correct order when VS Code renders the outline
-        logger.info("🧠 Full symbol tree:");
-        logger.info(JSON.stringify(symbols, null, 2));
+        
+        // 🌳 DEBUG: Tree dump disabled for performance
+        // Uncomment these lines if you need to debug the symbol tree structure
+        // console.log("[TREE-DUMP] ========================================");
+        // console.log("[TREE-DUMP] Symbol Tree - Detailed View");
+        // console.log("[TREE-DUMP] ========================================");
+        // this.dumpSymbolTree(symbols);
+        
+        // console.log("\n[TREE-COMPACT] ========================================");
+        // console.log("[TREE-COMPACT] Symbol Tree - Compact View");
+        // console.log("[TREE-COMPACT] ========================================");
+        // this.dumpSymbolTreeCompact(symbols);
+        
+        // console.log("\n[TREE-JSON] ========================================");
+        // console.log("[TREE-JSON] Symbol Tree - JSON (for programmatic analysis)");
+        // console.log("[TREE-JSON] ========================================");
+        // console.log("[TREE-JSON]", JSON.stringify(symbols, null, 2));
 
         return symbols;
     }
     private handleProjectToken(
         tokens: Token[],
         index: number,
-        symbols: DocumentSymbol[],
-        currentStructure: DocumentSymbol | null,
-        currentProcedure: DocumentSymbol | null
+        symbols: ClarionDocumentSymbol[],
+        currentStructure: ClarionDocumentSymbol | null,
+        currentProcedure: ClarionDocumentSymbol | null
     ): void {
         const token = tokens[index];
         const { line } = token;
@@ -417,7 +741,7 @@ export class ClarionDocumentSymbolProvider {
         // Create a more descriptive display name that shows the field being projected
         const displayName = `PROJECT(${projectValue})`;
 
-        const projectSymbol = DocumentSymbol.create(
+        const projectSymbol = this.createSymbol(
             displayName,
             "", // Empty detail since we're including it in the name
             SymbolKind.Property,
@@ -430,188 +754,12 @@ export class ClarionDocumentSymbolProvider {
         this.addSymbolToParent(projectSymbol, target, symbols);
     }
 
-
-
-    /**
-     * Checks if any structures in the parent stack have been completed based on their finishesAt line
-     * and pops them from the stack if needed.
-     *
-     * Special rule: Method implementations (className.MethodName) don't end procedure scope.
-     * Procedure scope only ends when another procedure is found that is not a method or EOF.
-     *
-     * Global procedures should contain everything defined after them until another global procedure or EOF.
-     */
-    private checkAndPopCompletedStructures(
-        parentStack: Array<{ symbol: DocumentSymbol, finishesAt: number | undefined }>,
-        currentLine: number,
-        symbols: DocumentSymbol[],
-        tokens: Token[],
-        tokensByLine: Map<number, Token[]>
-    ): void {
-        // CRITICAL FIX: Reset lastMethodImplementation when a new global procedure is encountered
-        // This is a reference to the class property that needs to be updated
-        let resetLastMethodImplementation = false;
-        // If the stack is empty, nothing to do
-        if (parentStack.length === 0) {
-            return;
-        }
-
-        // Find all global procedures, special routines, and method implementations in the stack
-        let globalProcedureIndices: number[] = [];
-        let specialRoutineIndices: number[] = [];
-        let methodImplementationIndices: number[] = [];
-        let currentGlobalProcedureIndex = -1;
-
-        // First, identify all special types in the stack
-        for (let i = 0; i < parentStack.length; i++) {
-            const entry = parentStack[i];
-
-            // Check if this is a global procedure
-            const isGlobalProcedure = entry.symbol.kind === SymbolKind.Function &&
-                ((entry.symbol as any)._isGlobalProcedure === true ||
-                    (entry.symbol.kind === SymbolKind.Function &&
-                        !(entry.symbol as any)._isMethodImplementation &&
-                        !entry.symbol.name.includes('.')));
-
-            // Check if this is a special routine
-            const isSpecialRoutine = entry.symbol.kind === ClarionSymbolKind.Routine &&
-                (entry.symbol as any)._isSpecialRoutine;
-
-            // Check if this is a method implementation
-            const isMethodImplementation = (entry.symbol as any)._isMethodImplementation === true;
-
-            if (isGlobalProcedure) {
-                globalProcedureIndices.push(i);
-                currentGlobalProcedureIndex = i; // Track the most recent global procedure
-            }
-
-            if (isSpecialRoutine) {
-                specialRoutineIndices.push(i);
-            }
-
-            if (isMethodImplementation) {
-                methodImplementationIndices.push(i);
-            }
-        }
-
-        // Check if we're at the end of the file
-        const isEndOfFile = currentLine === tokens[tokens.length - 1].line;
-
-        // Check if we're at a new global procedure
-        let isAtNewGlobalProcedure = false;
-        let newGlobalProcedureToken: Token | null = null;
-
-        // 🚀 PERFORMANCE: Use indexed lookup instead of looping through all tokens
-        const lineTokens = tokensByLine.get(currentLine) || [];
-        for (const token of lineTokens) {
-            if (token.subType === TokenType.GlobalProcedure ||
-                (token as any)._isGlobalProcedure === true) {
-                isAtNewGlobalProcedure = true;
-                newGlobalProcedureToken = token;
-                break;
-            }
-        }
-
-        // If we're at a new global procedure, pop the current global procedure
-        // This ensures that when we encounter a new global procedure, we end the scope of the previous one
-        if (isAtNewGlobalProcedure && currentGlobalProcedureIndex !== -1) {
-            // Pop the current global procedure and everything after it
-            parentStack.splice(currentGlobalProcedureIndex);
-
-            // CRITICAL FIX: Mark that we need to reset lastMethodImplementation
-            resetLastMethodImplementation = true;
-            return;
-        }
-
-        // If we have method implementations, handle them specially
-        let hasMethodImplementations = false;
-        const checkForMethodImplementations = (symbolList: DocumentSymbol[]): boolean => {
-            for (const sym of symbolList) {
-                if ((sym as any)._isMethodImplementation ||
-                    (sym.name.includes(' (Implementation)') && sym.kind === SymbolKind.Class)) {
-                    return true;
-                }
-                if (sym.children && sym.children.length > 0) {
-                    if (checkForMethodImplementations(sym.children)) {
-                        return true;
-                    }
-                }
-            }
-            return false;
-        };
-
-        hasMethodImplementations = checkForMethodImplementations(symbols);
-
-        // If we have method implementations and global procedures, keep the global procedures
-        // This ensures global procedures contain method implementations
-        if (hasMethodImplementations && globalProcedureIndices.length > 0) {
-            // Process the stack, but skip all global procedures
-            let i = parentStack.length - 1;
-            while (i >= 0) {
-                // Skip global procedures
-                if (globalProcedureIndices.includes(i)) {
-                    i--;
-                    continue;
-                }
-
-                const entry = parentStack[i];
-                // Pop if we've passed the finishesAt line
-                if (entry.finishesAt !== undefined && currentLine > entry.finishesAt) {
-                    parentStack.splice(i, 1);
-                }
-                i--;
-            }
-            return;
-        }
-
-        // Standard case: pop structures based on their finishesAt line
-        let i = parentStack.length - 1;
-        while (i >= 0) {
-            const entry = parentStack[i];
-
-            // Always pop special routines when we reach their finishesAt line
-            const isSpecialRoutine = entry.symbol.kind === ClarionSymbolKind.Routine &&
-                (entry.symbol as any)._isSpecialRoutine;
-
-            // Don't pop the last method implementation if we're at the end of the file
-            const isLastMethodImplementation = isEndOfFile &&
-                methodImplementationIndices.length > 0 &&
-                methodImplementationIndices[methodImplementationIndices.length - 1] === i;
-
-            // Don't pop global procedures unless we're at a new global procedure or EOF
-            const isGlobalProcedure = globalProcedureIndices.includes(i);
-            const shouldPopGlobalProcedure = isGlobalProcedure &&
-                (isAtNewGlobalProcedure || (isEndOfFile && i !== currentGlobalProcedureIndex));
-
-            if (((entry.finishesAt !== undefined && currentLine > entry.finishesAt) ||
-                isSpecialRoutine || shouldPopGlobalProcedure) &&
-                !isLastMethodImplementation &&
-                !(isGlobalProcedure && !shouldPopGlobalProcedure)) {
-                parentStack.splice(i, 1);
-            }
-            i--;
-        }
-
-        // CRITICAL FIX: If we detected a new global procedure, reset lastMethodImplementation
-        if (resetLastMethodImplementation) {
-            // We need to communicate this back to the main method
-            // Since we can't directly modify lastMethodImplementation here (it's in the parent scope)
-            // We'll add a property to the first token in the current line
-            for (const token of tokens) {
-                if (token.line === currentLine) {
-                    (token as any)._resetLastMethodImplementation = true;
-                    break;
-                }
-            }
-        }
-    }
-
     private handleStructureToken(
         tokens: Token[],
         index: number,
-        symbols: DocumentSymbol[],
-        parentStack: Array<{ symbol: DocumentSymbol, finishesAt: number | undefined }>,
-        currentStructure: DocumentSymbol | null,
+        symbols: ClarionDocumentSymbol[],
+        parentStack: Array<{ symbol: ClarionDocumentSymbol, finishesAt: number | undefined }>,
+        currentStructure: ClarionDocumentSymbol | null,
         tokensByLine: Map<number, Token[]>
     ): void {
         const token = tokens[index];
@@ -648,107 +796,36 @@ export class ClarionDocumentSymbolProvider {
 
         let displayName: string;
         if (upperValue === "JOIN") {
-            let joinArgs = "";
-            const parenContent: string[] = [];
-            let j = index + 2;
-            let parenDepth = 1;
-
-            while (j < tokens.length && parenDepth > 0) {
-                const t = tokens[j];
-                if (t.value === "(") parenDepth++;
-                else if (t.value === ")") parenDepth--;
-
-                if (parenDepth > 0) parenContent.push(t.value);
-                j++;
-            }
-
-            joinArgs = parenContent.join("").trim();
-            displayName = `JOIN (${joinArgs})`;
-        } else if (upperValue === "MODULE") {
-            // Extract file path from MODULE('filepath') if present
-            let filePath = "";
             const nextToken = tokens[index + 1];
             if (nextToken && nextToken.value === "(") {
-                const parenContent: string[] = [];
-                let j = index + 2;
-                let parenDepth = 1;
-
-                while (j < tokens.length && parenDepth > 0) {
-                    const t = tokens[j];
-                    if (t.value === "(") parenDepth++;
-                    else if (t.value === ")") parenDepth--;
-
-                    if (parenDepth > 0) parenContent.push(t.value);
-                    j++;
-                }
-
-                filePath = parenContent.join("").trim();
-                // Remove quotes if present
-                filePath = this.extractStringContents(filePath);
+                const result = this.extractParenContent(tokens, index + 2);
+                displayName = `JOIN (${result.content})`;
+            } else {
+                displayName = labelName ? `${value} (${labelName})` : value;
+            }
+        } else if (upperValue === "MODULE") {
+            // Extract file path from MODULE('filepath') if present
+            const nextToken = tokens[index + 1];
+            if (nextToken && nextToken.value === "(") {
+                const result = this.extractParenContent(tokens, index + 2);
+                const filePath = this.extractStringContents(result.content);
                 displayName = labelName ? `MODULE('${filePath}') (${labelName})` : `MODULE('${filePath}')`;
             } else {
                 displayName = labelName ? `${value} (${labelName})` : value;
             }
         } else if (upperValue === "TAB") {
             // Extract tab name from TAB('Tracking') syntax
-            let tabName = "";
-            let useParam = "";
-
-            // First, look for the tab name in parentheses
             const nextToken = tokens[index + 1];
             if (nextToken && nextToken.value === "(") {
-                const parenContent: string[] = [];
-                let j = index + 2;
-                let parenDepth = 1;
-
-                while (j < tokens.length && parenDepth > 0) {
-                    const t = tokens[j];
-                    if (t.value === "(") parenDepth++;
-                    else if (t.value === ")") parenDepth--;
-
-                    if (parenDepth > 0) parenContent.push(t.value);
-                    j++;
-                }
-
-                tabName = parenContent.join("").trim();
-                // Remove quotes if present
-                tabName = this.extractStringContents(tabName);
-
-                // Now look for USE parameter after the tab name
-                // Search for USE token after the TAB declaration
-                while (j < tokens.length) {
-                    const t = tokens[j];
-
-                    // Stop if we hit a new line or another structure
-                    if (t.line !== line && t.line !== line + 1) break;
-                    if (t.type === TokenType.Structure && t !== token) break;
-
-                    // Look for USE token
-                    if (t.value.toUpperCase() === "USE" && j + 1 < tokens.length && tokens[j + 1].value === "(") {
-                        // Extract the USE parameter
-                        const useContent: string[] = [];
-                        let k = j + 2;
-                        let useParenDepth = 1;
-
-                        while (k < tokens.length && useParenDepth > 0) {
-                            const useToken = tokens[k];
-                            if (useToken.value === "(") useParenDepth++;
-                            else if (useToken.value === ")") useParenDepth--;
-
-                            if (useParenDepth > 0) useContent.push(useToken.value);
-                            k++;
-                        }
-
-                        useParam = useContent.join("").trim();
-                        break;
-                    }
-
-                    j++;
-                }
-
+                const parenResult = this.extractParenContent(tokens, index + 2);
+                const tabName = this.extractStringContents(parenResult.content);
+                
+                // Look for USE parameter after the tab name
+                const useResult = this.extractAttribute(tokens, parenResult.nextIndex, "USE", line, token);
+                
                 // Create a display name with the tab name and USE parameter
-                if (tabName && useParam) {
-                    displayName = `TAB('${tabName}') USE(${useParam})`;
+                if (tabName && useResult.value) {
+                    displayName = `TAB('${tabName}') USE(${useResult.value})`;
                 } else if (tabName) {
                     displayName = `TAB('${tabName}')`;
                 } else {
@@ -759,64 +836,17 @@ export class ClarionDocumentSymbolProvider {
             }
         } else if (upperValue === "MENU") {
             // For MENU elements like: MENU('&File'),USE(?FileMenu)
-            let menuText = "";
-            let useParam = "";
-
-            // First, look for the menu text in parentheses
             const nextToken = tokens[index + 1];
             if (nextToken && nextToken.value === "(") {
-                const parenContent: string[] = [];
-                let j = index + 2;
-                let parenDepth = 1;
-
-                while (j < tokens.length && parenDepth > 0) {
-                    const t = tokens[j];
-                    if (t.value === "(") parenDepth++;
-                    else if (t.value === ")") parenDepth--;
-
-                    if (parenDepth > 0) parenContent.push(t.value);
-                    j++;
-                }
-
-                menuText = parenContent.join("").trim();
-                // Remove quotes if present
-                menuText = this.extractStringContents(menuText);
-
-                // Now look for USE parameter after the menu text
-                // Search for USE token after the MENU declaration
-                while (j < tokens.length) {
-                    const t = tokens[j];
-
-                    // Stop if we hit a new line or another structure
-                    if (t.line !== line && t.line !== line + 1) break;
-                    if (t.type === TokenType.Structure && t !== token) break;
-
-                    // Look for USE token
-                    if (t.value.toUpperCase() === "USE" && j + 1 < tokens.length && tokens[j + 1].value === "(") {
-                        // Extract the USE parameter
-                        const useContent: string[] = [];
-                        let k = j + 2;
-                        let useParenDepth = 1;
-
-                        while (k < tokens.length && useParenDepth > 0) {
-                            const useToken = tokens[k];
-                            if (useToken.value === "(") useParenDepth++;
-                            else if (useToken.value === ")") useParenDepth--;
-
-                            if (useParenDepth > 0) useContent.push(useToken.value);
-                            k++;
-                        }
-
-                        useParam = useContent.join("").trim();
-                        break;
-                    }
-
-                    j++;
-                }
-
+                const parenResult = this.extractParenContent(tokens, index + 2);
+                const menuText = this.extractStringContents(parenResult.content);
+                
+                // Look for USE parameter after the menu text
+                const useResult = this.extractAttribute(tokens, parenResult.nextIndex, "USE", line, token);
+                
                 // Create a display name with the menu text and USE parameter
-                if (menuText && useParam) {
-                    displayName = `MENU('${menuText}') USE(${useParam})`;
+                if (menuText && useResult.value) {
+                    displayName = `MENU('${menuText}') USE(${useResult.value})`;
                 } else if (menuText) {
                     displayName = `MENU('${menuText}')`;
                 } else {
@@ -827,161 +857,42 @@ export class ClarionDocumentSymbolProvider {
             }
         } else if (upperValue === "SHEET") {
             // For SHEET elements like: SHEET,AT(0,0,758,387),USE(?WindowSheet),NOSHEET,WIZARD
-            let useParam = "";
-
-            // Look for the USE attribute in the tokens following the SHEET token
-            let j = index + 1;
-
-            // Continue until we hit a new line or another structure
-            while (j < tokens.length) {
-                const t = tokens[j];
-
-                // Stop if we hit a new line or another structure
-                if (t.line !== line && t.line !== line + 1) break;
-                if (t.type === TokenType.Structure && t !== token) break;
-
-                // Look for USE token
-                if (t.value.toUpperCase() === "USE" && j + 1 < tokens.length && tokens[j + 1].value === "(") {
-                    // Extract the USE parameter
-                    const useContent: string[] = [];
-                    let k = j + 2;
-                    let useParenDepth = 1;
-
-                    while (k < tokens.length && useParenDepth > 0) {
-                        const useToken = tokens[k];
-                        if (useToken.value === "(") useParenDepth++;
-                        else if (useToken.value === ")") useParenDepth--;
-
-                        if (useParenDepth > 0) useContent.push(useToken.value);
-                        k++;
-                    }
-
-                    useParam = useContent.join("").trim();
-                    break;
-                }
-
-                j++;
-            }
-
+            const useResult = this.extractAttribute(tokens, index + 1, "USE", line, token);
+            
             // Create a display name with the USE parameter
-            if (useParam) {
-                displayName = `SHEET USE(${useParam})`;
+            if (useResult.value) {
+                displayName = `SHEET USE(${useResult.value})`;
             } else {
                 displayName = labelName ? `${value} (${labelName})` : value;
             }
         } else if (upperValue === "OLE") {
             // For OLE elements like: OLE,AT(3,2,753,229),USE(?SchedulerControl),COMPATIBILITY(021H)
-            let useParam = "";
-
-            // Look for the USE attribute in the tokens following the OLE token
-            let j = index + 1;
-
-            // Continue until we hit a new line or another structure
-            while (j < tokens.length) {
-                const t = tokens[j];
-
-                // Stop if we hit a new line or another structure
-                if (t.line !== line && t.line !== line + 1) break;
-                if (t.type === TokenType.Structure && t !== token) break;
-
-                // Look for USE token
-                if (t.value.toUpperCase() === "USE" && j + 1 < tokens.length && tokens[j + 1].value === "(") {
-                    // Extract the USE parameter
-                    const useContent: string[] = [];
-                    let k = j + 2;
-                    let useParenDepth = 1;
-
-                    while (k < tokens.length && useParenDepth > 0) {
-                        const useToken = tokens[k];
-                        if (useToken.value === "(") useParenDepth++;
-                        else if (useToken.value === ")") useParenDepth--;
-
-                        if (useParenDepth > 0) useContent.push(useToken.value);
-                        k++;
-                    }
-
-                    useParam = useContent.join("").trim();
-                    break;
-                }
-
-                j++;
-            }
-
+            const useResult = this.extractAttribute(tokens, index + 1, "USE", line, token);
+            
             // Create a display name with the USE parameter
-            if (useParam) {
-                displayName = `OLE USE(${useParam})`;
+            if (useResult.value) {
+                displayName = `OLE USE(${useResult.value})`;
             } else {
                 displayName = labelName ? `${value} (${labelName})` : value;
             }
         } else if (upperValue === "MENUBAR") {
             // For MENUBAR elements like: MENUBAR,USE(?Menubar)
-            let useParam = "";
-
-            // Look for the USE attribute in the tokens following the MENUBAR token
-            let j = index + 1;
-
-            // Continue until we hit a new line or another structure
-            while (j < tokens.length) {
-                const t = tokens[j];
-
-                // Stop if we hit a new line or another structure
-                if (t.line !== line && t.line !== line + 1) break;
-                if (t.type === TokenType.Structure && t !== token) break;
-
-                // Look for USE token
-                if (t.value.toUpperCase() === "USE" && j + 1 < tokens.length && tokens[j + 1].value === "(") {
-                    // Extract the USE parameter
-                    const useContent: string[] = [];
-                    let k = j + 2;
-                    let useParenDepth = 1;
-
-                    while (k < tokens.length && useParenDepth > 0) {
-                        const useToken = tokens[k];
-                        if (useToken.value === "(") useParenDepth++;
-                        else if (useToken.value === ")") useParenDepth--;
-
-                        if (useParenDepth > 0) useContent.push(useToken.value);
-                        k++;
-                    }
-
-                    useParam = useContent.join("").trim();
-                    break;
-                }
-
-                j++;
-            }
-
+            const useResult = this.extractAttribute(tokens, index + 1, "USE", line, token);
+            
             // Create a display name with the USE parameter
-            if (useParam) {
-                displayName = `MENUBAR USE(${useParam})`;
+            if (useResult.value) {
+                displayName = `MENUBAR USE(${useResult.value})`;
             } else {
                 displayName = labelName ? `${value} (${labelName})` : value;
             }
         } else if (upperValue === "WINDOW" || upperValue === "APPLICATION") {
             // For WINDOW elements like: WINDOW('Accura scheduling'),AT(,,759,389),FONT('Segoe UI',8,,FONT:regular),RESIZE,ALRT(CtrlZ)
             // or APPLICATION elements which are similar
-            let title = "";
-
-            // Look for the title in parentheses
             const nextToken = tokens[index + 1];
             if (nextToken && nextToken.value === "(") {
-                const parenContent: string[] = [];
-                let j = index + 2;
-                let parenDepth = 1;
-
-                while (j < tokens.length && parenDepth > 0) {
-                    const t = tokens[j];
-                    if (t.value === "(") parenDepth++;
-                    else if (t.value === ")") parenDepth--;
-
-                    if (parenDepth > 0) parenContent.push(t.value);
-                    j++;
-                }
-
-                title = parenContent.join("").trim();
-                // Remove quotes if present
-                title = this.extractStringContents(title);
-
+                const parenResult = this.extractParenContent(tokens, index + 2);
+                const title = this.extractStringContents(parenResult.content);
+                
                 // Create a display name with the title and label
                 if (title) {
                     displayName = labelName ?
@@ -995,26 +906,11 @@ export class ClarionDocumentSymbolProvider {
             }
         } else if (upperValue === "VIEW") {
             // For VIEW elements like: VIEW(Entries)
-            let viewFile = "";
-
-            // Look for the file name in parentheses
             const nextToken = tokens[index + 1];
             if (nextToken && nextToken.value === "(") {
-                const parenContent: string[] = [];
-                let j = index + 2;
-                let parenDepth = 1;
-
-                while (j < tokens.length && parenDepth > 0) {
-                    const t = tokens[j];
-                    if (t.value === "(") parenDepth++;
-                    else if (t.value === ")") parenDepth--;
-
-                    if (parenDepth > 0) parenContent.push(t.value);
-                    j++;
-                }
-
-                viewFile = parenContent.join("").trim();
-
+                const parenResult = this.extractParenContent(tokens, index + 2);
+                const viewFile = parenResult.content;
+                
                 // Create a display name with the view file
                 if (viewFile) {
                     displayName = labelName ?
@@ -1026,72 +922,31 @@ export class ClarionDocumentSymbolProvider {
             } else {
                 displayName = labelName ? `${value} (${labelName})` : value;
             }
-        } else if (upperValue === "FILE") {
-            // For FILE elements like: FILE,DRIVER('TOPSPEED'),PRE(SHI),CREATE,BINDABLE,THREAD
-            let driverValue = "";
-            let preValue = "";
+        } else if (upperValue === "FILE" || upperValue === "GROUP" || upperValue === "QUEUE") {
+            // For FILE/GROUP/QUEUE elements like: FILE,DRIVER('TOPSPEED'),PRE(SHI),CREATE,BINDABLE,THREAD
+            const driverResult = upperValue === "FILE" ? 
+                this.extractAttribute(tokens, index + 1, "DRIVER", line, token) : 
+                { value: "", nextIndex: index + 1 };
+            const preResult = this.extractAttribute(tokens, index + 1, "PRE", line, token);
+            
+            // For GROUP: extract OVER and DIM attributes
+            const overResult = upperValue === "GROUP" ? 
+                this.extractAttribute(tokens, index + 1, "OVER", line, token) : 
+                { value: "", nextIndex: index + 1 };
+            const dimResult = this.extractAttribute(tokens, index + 1, "DIM", line, token);
+            
+            const driverValue = driverResult.value ? this.extractStringContents(driverResult.value) : "";
+            const preValue = preResult.value;
+            const overValue = overResult.value;
+            const dimValue = dimResult.value;
 
-            // Look for DRIVER and PRE attributes in the tokens following the FILE token
-            let j = index + 1;
-
-            // Continue until we hit a new line or another structure
-            while (j < tokens.length) {
-                const t = tokens[j];
-
-                // Stop if we hit a new line or another structure
-                if (t.line !== line && t.line !== line + 1) break;
-                if (t.type === TokenType.Structure && t !== token) break;
-
-                // Look for DRIVER token
-                if (t.value.toUpperCase() === "DRIVER" && j + 1 < tokens.length && tokens[j + 1].value === "(") {
-                    // Extract the DRIVER parameter
-                    const driverContent: string[] = [];
-                    let k = j + 2;
-                    let driverParenDepth = 1;
-
-                    while (k < tokens.length && driverParenDepth > 0) {
-                        const driverToken = tokens[k];
-                        if (driverToken.value === "(") driverParenDepth++;
-                        else if (driverToken.value === ")") driverParenDepth--;
-
-                        if (driverParenDepth > 0) driverContent.push(driverToken.value);
-                        k++;
-                    }
-
-                    driverValue = driverContent.join("").trim();
-                    // Remove quotes if present
-                    driverValue = this.extractStringContents(driverValue);
-                }
-
-                // Look for PRE token
-                if (t.value.toUpperCase() === "PRE" && j + 1 < tokens.length && tokens[j + 1].value === "(") {
-                    // Extract the PRE parameter
-                    const preContent: string[] = [];
-                    let k = j + 2;
-                    let preParenDepth = 1;
-
-                    while (k < tokens.length && preParenDepth > 0) {
-                        const preToken = tokens[k];
-                        if (preToken.value === "(") preParenDepth++;
-                        else if (preToken.value === ")") preParenDepth--;
-
-                        if (preParenDepth > 0) preContent.push(preToken.value);
-                        k++;
-                    }
-
-                    preValue = preContent.join("").trim();
-                }
-
-                j++;
-            }
-
-            // Create a display name with the DRIVER and PRE values
+            // Create a display name with the DRIVER, PRE, OVER, and DIM values
             let displayParts = [];
 
             if (labelName) {
-                displayParts.push(`FILE (${labelName})`);
+                displayParts.push(`${upperValue} (${labelName})`);
             } else {
-                displayParts.push("FILE");
+                displayParts.push(upperValue);
             }
 
             if (driverValue) {
@@ -1101,13 +956,21 @@ export class ClarionDocumentSymbolProvider {
             if (preValue) {
                 displayParts.push(`PRE(${preValue})`);
             }
+            
+            if (overValue) {
+                displayParts.push(`OVER(${overValue})`);
+            }
+            
+            if (dimValue) {
+                displayParts.push(`DIM(${dimValue})`);
+            }
 
             displayName = displayParts.join(",");
         } else {
             displayName = labelName ? `${value} (${labelName})` : value;
         }
 
-        const structureSymbol = DocumentSymbol.create(
+        const structureSymbol = this.createSymbol(
             displayName,
             "",
             structureKind,
@@ -1115,12 +978,24 @@ export class ClarionDocumentSymbolProvider {
             this.getTokenRange(tokens, line, finishesAt ?? line),
             []
         );
+        
+        // Store metadata for structures that might have prefixes and labels
+        if (upperValue === "FILE" || upperValue === "GROUP" || upperValue === "QUEUE") {
+            const preResult = this.extractAttribute(tokens, index + 1, "PRE", line, token);
+            
+            if (preResult.value) {
+                structureSymbol._clarionPrefix = preResult.value;
+            }
+            if (labelName) {
+                structureSymbol._clarionLabel = labelName;
+            }
+        }
 
         // CLASS support: inject Properties/Methods
         if (upperValue === "CLASS" && labelName) {
             this.classSymbolMap.set(labelName.toUpperCase(), structureSymbol);
 
-            const propsContainer = DocumentSymbol.create(
+            const propsContainer = this.createSymbol(
                 "Properties",
                 "",
                 SymbolKind.Property,
@@ -1128,9 +1003,9 @@ export class ClarionDocumentSymbolProvider {
                 structureSymbol.range,
                 []
             );
-            (propsContainer as any).sortText = "0001";
+            propsContainer.sortText = "0001";
 
-            const methodsContainer = DocumentSymbol.create(
+            const methodsContainer = this.createSymbol(
                 "Methods",
                 "",
                 SymbolKind.Method,
@@ -1138,10 +1013,10 @@ export class ClarionDocumentSymbolProvider {
                 structureSymbol.range,
                 []
             );
-            (methodsContainer as any).sortText = "0002";
+            methodsContainer.sortText = "0002";
 
-            (structureSymbol as any).$clarionProps = propsContainer;
-            (structureSymbol as any).$clarionMethods = methodsContainer;
+            structureSymbol.$clarionProps = propsContainer;
+            structureSymbol.$clarionMethods = methodsContainer;
 
             structureSymbol.children!.push(propsContainer);
             structureSymbol.children!.push(methodsContainer);
@@ -1153,11 +1028,165 @@ export class ClarionDocumentSymbolProvider {
             // For interfaces, we don't need to add Properties/Methods containers
             // since interfaces only declare methods
             // Just mark it as an interface for reference
-            (structureSymbol as any)._isInterface = true;
+            structureSymbol._isInterface = true;
+        }
+        // FILE support: add KEY/INDEX/RECORD as children for better structure view
+        else if (upperValue === "FILE") {
+            // Look ahead to find KEY, INDEX, MEMO, BLOB, and RECORD
+            for (let j = index + 1; j < tokens.length && tokens[j].line <= (finishesAt ?? line); j++) {
+                const childToken = tokens[j];
+                const childValue = childToken.value.toUpperCase();
+                
+                // Add KEY as child
+                if (childValue === "KEY") {
+                    const keyContent = this.extractParenContent(tokens, j + 2);
+                    const keySymbol = this.createSymbol(
+                        `KEY(${keyContent.content})`,
+                        "",
+                        SymbolKind.Key,
+                        this.getTokenRange(tokens, childToken.line, childToken.line),
+                        this.getTokenRange(tokens, childToken.line, childToken.line),
+                        []
+                    );
+                    structureSymbol.children!.push(keySymbol);
+                }
+                // Add INDEX as child
+                else if (childValue === "INDEX") {
+                    const indexContent = this.extractParenContent(tokens, j + 2);
+                    const indexSymbol = this.createSymbol(
+                        `INDEX(${indexContent.content})`,
+                        "",
+                        SymbolKind.Field,
+                        this.getTokenRange(tokens, childToken.line, childToken.line),
+                        this.getTokenRange(tokens, childToken.line, childToken.line),
+                        []
+                    );
+                    structureSymbol.children!.push(indexSymbol);
+                }
+                // Add RECORD as container
+                else if (childValue === "RECORD") {
+                    // Find the END of RECORD
+                    let recordEndLine = childToken.line;
+                    for (let k = j + 1; k < tokens.length; k++) {
+                        if (tokens[k].value.toUpperCase() === "END" && 
+                            tokens[k].type === TokenType.EndStatement) {
+                            recordEndLine = tokens[k].line;
+                            break;
+                        }
+                    }
+                    
+                    const recordSymbol = this.createSymbol(
+                        "RECORD",
+                        "",
+                        SymbolKind.Struct,
+                        this.getTokenRange(tokens, childToken.line, recordEndLine),
+                        this.getTokenRange(tokens, childToken.line, recordEndLine),
+                        []
+                    );
+                    
+                    // Look for MEMO/BLOB fields within RECORD
+                    for (let k = j + 1; k < tokens.length && tokens[k].line < recordEndLine; k++) {
+                        const fieldToken = tokens[k];
+                        const fieldValue = fieldToken.value.toUpperCase();
+                        
+                        if (fieldValue === "MEMO") {
+                            const memoContent = this.extractParenContent(tokens, k + 1);
+                            const fieldLabel = tokens[k - 1]?.value || "MEMO";
+                            const memoSymbol = this.createSymbol(
+                                `${fieldLabel} MEMO(${memoContent.content})`,
+                                "",
+                                SymbolKind.String,  // 📝 MEMO gets string icon
+                                this.getTokenRange(tokens, fieldToken.line, fieldToken.line),
+                                this.getTokenRange(tokens, fieldToken.line, fieldToken.line),
+                                []
+                            );
+                            recordSymbol.children!.push(memoSymbol);
+                        }
+                        else if (fieldValue === "BLOB") {
+                            const fieldLabel = tokens[k - 1]?.value || "BLOB";
+                            const blobSymbol = this.createSymbol(
+                                `${fieldLabel} BLOB`,
+                                "",
+                                SymbolKind.Object,  // 🧱 BLOB gets object icon
+                                this.getTokenRange(tokens, fieldToken.line, fieldToken.line),
+                                this.getTokenRange(tokens, fieldToken.line, fieldToken.line),
+                                []
+                            );
+                            recordSymbol.children!.push(blobSymbol);
+                        }
+                    }
+                    
+                    structureSymbol.children!.push(recordSymbol);
+                }
+            }
+        }
+        // VIEW support: add JOIN hierarchy and PROJECT fields for better structure view
+        else if (upperValue === "VIEW") {
+            // Look ahead to find JOIN and PROJECT
+            let nestLevel = 0;
+            let currentJoinSymbol: ClarionDocumentSymbol | null = null;
+            let joinStack: ClarionDocumentSymbol[] = [];
+            
+            for (let j = index + 1; j < tokens.length && tokens[j].line <= (finishesAt ?? line); j++) {
+                const childToken = tokens[j];
+                const childValue = childToken.value.toUpperCase();
+                
+                // Handle PROJECT
+                if (childValue === "PROJECT") {
+                    const projectContent = this.extractParenContent(tokens, j + 2);
+                    const projectSymbol = this.createSymbol(
+                        `PROJECT(${projectContent.content})`,
+                        "",
+                        SymbolKind.Field,
+                        this.getTokenRange(tokens, childToken.line, childToken.line),
+                        this.getTokenRange(tokens, childToken.line, childToken.line),
+                        []
+                    );
+                    
+                    // Add to current JOIN or to VIEW root
+                    if (currentJoinSymbol) {
+                        currentJoinSymbol.children!.push(projectSymbol);
+                    } else {
+                        structureSymbol.children!.push(projectSymbol);
+                    }
+                }
+                // Handle JOIN
+                else if (childValue === "JOIN") {
+                    const joinContent = this.extractParenContent(tokens, j + 2);
+                    const joinSymbol = this.createSymbol(
+                        `JOIN(${joinContent.content})`,
+                        "",
+                        SymbolKind.Event,  // 🟢 JOIN gets event icon
+                        this.getTokenRange(tokens, childToken.line, childToken.line),
+                        this.getTokenRange(tokens, childToken.line, childToken.line),
+                        []
+                    );
+                    
+                    // Add to parent JOIN or VIEW root
+                    if (currentJoinSymbol) {
+                        currentJoinSymbol.children!.push(joinSymbol);
+                        joinStack.push(currentJoinSymbol);
+                    } else {
+                        structureSymbol.children!.push(joinSymbol);
+                    }
+                    
+                    currentJoinSymbol = joinSymbol;
+                    nestLevel++;
+                }
+                // Handle END for JOIN
+                else if (childValue === "END" && nestLevel > 0) {
+                    nestLevel--;
+                    if (joinStack.length > 0) {
+                        currentJoinSymbol = joinStack.pop()!;
+                    } else {
+                        currentJoinSymbol = null;
+                    }
+                }
+            }
         }
         // MAP support: add Functions container to organize MAP procedures
         else if (upperValue === "MAP") {
-            const functionsContainer = DocumentSymbol.create(
+            const functionsContainer = this.createSymbol(
                 "Functions",
                 "",
                 SymbolKind.Function,
@@ -1165,15 +1194,15 @@ export class ClarionDocumentSymbolProvider {
                 structureSymbol.range,
                 []
             );
-            (functionsContainer as any).sortText = "0001";
+            functionsContainer.sortText = "0001";
 
             // Store the functions container for easy access
-            (structureSymbol as any).$clarionFunctions = functionsContainer;
+            structureSymbol.$clarionFunctions = functionsContainer;
             structureSymbol.children!.push(functionsContainer);
         }
         // MODULE support: add Functions container to organize MODULE procedures
         else if (upperValue === "MODULE") {
-            const functionsContainer = DocumentSymbol.create(
+            const functionsContainer = this.createSymbol(
                 "Functions",
                 "",
                 SymbolKind.Function,
@@ -1181,19 +1210,17 @@ export class ClarionDocumentSymbolProvider {
                 structureSymbol.range,
                 []
             );
-            (functionsContainer as any).sortText = "0001";
+            functionsContainer.sortText = "0001";
 
             // Store the functions container for easy access
-            (structureSymbol as any).$clarionFunctions = functionsContainer;
+            structureSymbol.$clarionFunctions = functionsContainer;
             structureSymbol.children!.push(functionsContainer);
         }
 
         this.addSymbolToParent(structureSymbol, currentStructure, symbols);
         // Push to the parent stack with finishesAt information
-        parentStack.push({
-            symbol: structureSymbol,
-            finishesAt: finishesAt
-        });
+        HierarchyManager.pushToStack(parentStack, structureSymbol, finishesAt);
+        logger.info(`[handleStructureToken] ✅ Pushed "${displayName}" to parentStack (finishesAt=${finishesAt}, depth now: ${parentStack.length})`);
     }
 
 
@@ -1227,8 +1254,8 @@ export class ClarionDocumentSymbolProvider {
         name: string,
         startLine: number,
         endLine: number
-    ): DocumentSymbol {
-        return DocumentSymbol.create(
+    ): ClarionDocumentSymbol {
+        return this.createSymbol(
             name,
             "",
             ClarionSymbolKind.TablesGroup,
@@ -1240,41 +1267,51 @@ export class ClarionDocumentSymbolProvider {
     private handleProcedureOrClassToken(
         tokens: Token[],
         index: number,
-        symbols: DocumentSymbol[],
-        currentStructure: DocumentSymbol | null,
+        symbols: ClarionDocumentSymbol[],
+        currentStructure: ClarionDocumentSymbol | null,
         subType: TokenType | undefined = undefined
-    ): { procedureSymbol: DocumentSymbol, classImplementation: DocumentSymbol | null } {
+    ): { procedureSymbol: ClarionDocumentSymbol, classImplementation: ClarionDocumentSymbol | null, lastTokenIndex: number } {
         const token = tokens[index];
         const { line, finishesAt } = token;
         const prevToken = tokens[index - 1];
-        const procedureName = prevToken?.type === TokenType.Label ? prevToken.value : "UnnamedProcedure";
+        
+        logger.info(`handleProcedureOrClassToken: token.type=${token.type}, token.subType=${token.subType}, subType param=${subType}, token.value='${token.value}', token.label='${token.label}', line=${line}`);
+        
+        // FIXED: Check token.label first (tokenizer stores it there), fallback to prevToken
+        const procedureName = token.label || (prevToken?.type === TokenType.Label ? prevToken.value : "UnnamedProcedure");
+        
+        logger.info(`handleProcedureOrClassToken: procedureName='${procedureName}', currentStructure=${currentStructure?.name || 'null'}`);
+        
         const classMatch = procedureName.includes('.') ? procedureName.split('.')[0] : null;
         const methodName = classMatch ? procedureName.replace(`${classMatch}.`, "") : procedureName;
 
         let container: DocumentSymbol | null = null;
-        let classImplementation: DocumentSymbol | null = null;
+        let classImplementation: ClarionDocumentSymbol | null = null;
 
         // IMPORTANT: For method implementations, we need to handle them differently
-        if (classMatch) {
-            // This is a method implementation (e.g., ThisWindow.Init)
-            // First, try to find the class definition in the symbols
-            const classDefinition = this.findClassDefinition(symbols, classMatch);
+        // Use token.subType instead of dot-notation check for consistency with tokenizer
+        if (token.subType === TokenType.MethodImplementation || subType === TokenType.MethodImplementation) {
+            logger.info(`🔍 Method implementation detected: ${procedureName}, classMatch: ${classMatch}`);
             
-            if (classDefinition) {
-                // If we found the class definition, look for the method declaration
-                const methodsContainer = classDefinition.children?.find(c => c.name === "Methods");
-                
-                if (methodsContainer) {
-                    // Look for the method declaration by name (without parameters)
-                    const methodDeclaration = methodsContainer.children?.find(m => {
-                        // Extract just the method name without parameters
-                        const mName = m.name.split(' ')[0];
-                        return mName === methodName;
-                    });
+            // Verify that classMatch is valid (tokenizer should have ensured procedure name contains a dot)
+            if (!classMatch) {
+                // Safety fallback: if no classMatch but tokenizer says it's a method implementation,
+                // treat it as a global procedure instead
+                logger.warn(`⚠️ Method implementation ${procedureName} has no classMatch - treating as global procedure`);
+                container = null;
+                (token as any)._isGlobalProcedure = true;
+            } else {
+                // First, try to find the class definition in the symbols
+                const classDefinition = this.findClassDefinition(symbols, classMatch);
+            
+                if (classDefinition) {
+                    // If we found the class definition, look for the method declaration
+                    const methodsContainer = classDefinition.children?.find(c => c.name === "Methods");
                     
-                    if (methodDeclaration) {
-                        // We found the method declaration, use it as the container
-                        container = methodDeclaration;
+                    if (methodsContainer) {
+                        // CRITICAL: Always use the Methods container as the parent for method implementations
+                        // This ensures overloads are siblings, not nested
+                        container = methodsContainer;
                         
                         // Mark this as a method implementation
                         (token as any)._isMethodImplementation = true;
@@ -1282,43 +1319,31 @@ export class ClarionDocumentSymbolProvider {
                         // We don't need to create a class implementation container
                         classImplementation = null;
                     } else {
-                        // Method declaration not found, fall back to the old behavior
+                        // Methods container not found, fall back to the old behavior
                         classImplementation = this.findOrCreateClassImplementation(
                             symbols, classMatch, tokens, line, finishesAt ?? line
                         );
                         
                         // Use the methods container as the parent
-                        const implMethodsContainer = (classImplementation as any).$clarionMethods || classImplementation;
+                        const implMethodsContainer = classImplementation.$clarionMethods || classImplementation;
                         container = implMethodsContainer;
                         
                         // Mark this as a method implementation
                         (token as any)._isMethodImplementation = true;
                     }
                 } else {
-                    // Methods container not found, fall back to the old behavior
+                    // Class definition not found, fall back to the old behavior
                     classImplementation = this.findOrCreateClassImplementation(
                         symbols, classMatch, tokens, line, finishesAt ?? line
                     );
                     
                     // Use the methods container as the parent
-                    const implMethodsContainer = (classImplementation as any).$clarionMethods || classImplementation;
+                    const implMethodsContainer = classImplementation.$clarionMethods || classImplementation;
                     container = implMethodsContainer;
                     
                     // Mark this as a method implementation
                     (token as any)._isMethodImplementation = true;
                 }
-            } else {
-                // Class definition not found, fall back to the old behavior
-                classImplementation = this.findOrCreateClassImplementation(
-                    symbols, classMatch, tokens, line, finishesAt ?? line
-                );
-                
-                // Use the methods container as the parent
-                const implMethodsContainer = (classImplementation as any).$clarionMethods || classImplementation;
-                container = implMethodsContainer;
-                
-                // Mark this as a method implementation
-                (token as any)._isMethodImplementation = true;
             }
         } else {
             // For regular procedures (not class methods), use the current structure
@@ -1378,8 +1403,8 @@ export class ClarionDocumentSymbolProvider {
         );
 
         // For method implementations, mark the symbol
-        if (classMatch) {
-            (procedureSymbol as any)._isMethodImplementation = true;
+        if (token.subType === TokenType.MethodImplementation || subType === TokenType.MethodImplementation) {
+            procedureSymbol._isMethodImplementation = true;
             
             // If this is a method implementation and we found the declaration,
             // set the detail to "Implementation" to distinguish it
@@ -1390,13 +1415,20 @@ export class ClarionDocumentSymbolProvider {
             }
         } else if (token.subType === TokenType.GlobalProcedure || subType === TokenType.GlobalProcedure) {
             // Mark global procedures
-            (procedureSymbol as any)._isGlobalProcedure = true;
+            procedureSymbol._isGlobalProcedure = true;
         }
 
         // Add the procedure to its container
-        if (classMatch) {
+        if (token.subType === TokenType.MethodImplementation || subType === TokenType.MethodImplementation) {
             // For method implementations, add directly to the container
-            container!.children!.push(procedureSymbol);
+            if (container) {
+                container.children!.push(procedureSymbol);
+            } else {
+                // FALLBACK: If no container was found, add to top level
+                // This shouldn't happen if findOrCreateClassImplementation worked correctly
+                logger.error(`❌ Method implementation ${procedureName} has no container! Adding to root.`);
+                symbols.push(procedureSymbol);
+            }
         } else {
             // For regular procedures, use addSymbolToParent
             this.addSymbolToParent(procedureSymbol, container, symbols);
@@ -1407,52 +1439,26 @@ export class ClarionDocumentSymbolProvider {
         if (finishesAt !== undefined) {
             // We need to add this to the parentStack in the main method
             // We'll return it and let the caller add it to the stack
-            (procedureSymbol as any)._finishesAt = finishesAt;
+            procedureSymbol._finishesAt = finishesAt;
         }
 
-        return { procedureSymbol, classImplementation };
+        return { procedureSymbol, classImplementation, lastTokenIndex: j };
     }
     
     /**
      * Find a class definition symbol by name
      */
-    private findClassDefinition(symbols: DocumentSymbol[], className: string): DocumentSymbol | null {
-        // First check the class symbol map
-        const classSymbol = this.classSymbolMap.get(className.toUpperCase());
-        if (classSymbol) {
-            return classSymbol;
-        }
-        
-        // If not found in the map, search through all symbols recursively
-        const findInSymbols = (symbolList: DocumentSymbol[]): DocumentSymbol | null => {
-            for (const symbol of symbolList) {
-                // Check if this is a class with the matching name
-                if (symbol.kind === SymbolKind.Class) {
-                    const symbolName = symbol.name.split(' ')[0]; // Get name without any suffix
-                    if (symbolName.toUpperCase() === className.toUpperCase()) {
-                        return symbol;
-                    }
-                }
-                
-                // Check children recursively
-                if (symbol.children && symbol.children.length > 0) {
-                    const found = findInSymbols(symbol.children);
-                    if (found) return found;
-                }
-            }
-            return null;
-        };
-        
-        return findInSymbols(symbols);
+    private findClassDefinition(symbols: ClarionDocumentSymbol[], className: string): ClarionDocumentSymbol | null {
+        return SymbolFinder.findClassDefinition(symbols, className, this.classSymbolMap);
     }
 
     private findOrCreateClassImplementation(
-        symbols: DocumentSymbol[],
+        symbols: ClarionDocumentSymbol[],
         className: string,
         tokens: Token[],
         startLine: number,
         endLine: number
-    ): DocumentSymbol {
+    ): ClarionDocumentSymbol {
         // First, try to find the class definition
         const classDefinition = this.findClassDefinition(symbols, className);
         
@@ -1463,7 +1469,7 @@ export class ClarionDocumentSymbolProvider {
             
             if (!methodsContainer) {
                 // Create a Methods container if it doesn't exist
-                methodsContainer = DocumentSymbol.create(
+                methodsContainer = this.createSymbol(
                     "Methods",
                     "",
                     SymbolKind.Method,
@@ -1471,9 +1477,9 @@ export class ClarionDocumentSymbolProvider {
                     classDefinition.range,
                     []
                 );
-                (methodsContainer as any).sortText = "0002";
+                methodsContainer.sortText = "0002";
                 classDefinition.children!.push(methodsContainer);
-                (classDefinition as any).$clarionMethods = methodsContainer;
+                classDefinition.$clarionMethods = methodsContainer;
             }
             
             // Update the range to encompass the implementation
@@ -1493,29 +1499,13 @@ export class ClarionDocumentSymbolProvider {
         const fullName = `${className} (Implementation)`;
 
         // First, check if we already have a class implementation container
-        let classImplementation: DocumentSymbol | null = null;
+        let classImplementation: ClarionDocumentSymbol | null = null;
 
-        // Look for existing class implementation in symbols
-        const findClassImplementation = (symbolList: DocumentSymbol[]): DocumentSymbol | null => {
-            for (const symbol of symbolList) {
-                if (symbol.name === fullName) {
-                    return symbol;
-                }
-
-                // Also check children (for global procedures that might contain class implementations)
-                if (symbol.children && symbol.children.length > 0) {
-                    const found = findClassImplementation(symbol.children);
-                    if (found) return found;
-                }
-            }
-            return null;
-        };
-
-        classImplementation = findClassImplementation(symbols);
+        classImplementation = SymbolFinder.findClassImplementation(symbols, className);
 
         if (!classImplementation) {
             // Create a new class implementation container
-            classImplementation = DocumentSymbol.create(
+            classImplementation = this.createSymbol(
                 fullName,
                 "Class Method Implementation",
                 ClarionSymbolKind.Class,
@@ -1525,7 +1515,7 @@ export class ClarionDocumentSymbolProvider {
             );
 
             // Add methods container for organization
-            const methodsContainer = DocumentSymbol.create(
+            const methodsContainer = this.createSymbol(
                 "Methods",
                 "",
                 SymbolKind.Method,
@@ -1533,39 +1523,15 @@ export class ClarionDocumentSymbolProvider {
                 classImplementation.range,
                 []
             );
-            (methodsContainer as any).sortText = "0001";
+            methodsContainer.sortText = "0001";
 
             // Store the methods container for easy access
-            (classImplementation as any).$clarionMethods = methodsContainer;
+            classImplementation.$clarionMethods = methodsContainer;
             classImplementation.children!.push(methodsContainer);
 
-            // Find the most recent global procedure to attach this class implementation to
-            let mostRecentGlobalProcedure: DocumentSymbol | null = null;
-
-            for (const symbol of symbols) {
-                if (symbol.kind === SymbolKind.Function &&
-                    (symbol as any)._isGlobalProcedure === true) {
-                    mostRecentGlobalProcedure = symbol;
-                }
-            }
-
-            // If we found a global procedure, add the class implementation as its child
-            if (mostRecentGlobalProcedure) {
-                mostRecentGlobalProcedure.children!.push(classImplementation);
-            } else {
-                // Otherwise add to top-level symbols
-                symbols.push(classImplementation);
-            }
-        }
-
-        // Update the range to encompass all methods
-        if (startLine < classImplementation.range.start.line) {
-            classImplementation.range.start.line = startLine;
-            classImplementation.selectionRange.start.line = startLine;
-        }
-        if (endLine > classImplementation.range.end.line) {
-            classImplementation.range.end.line = endLine;
-            classImplementation.selectionRange.end.line = endLine;
+            // FIXED: Class implementation containers should ALWAYS be root-level
+            // Never nest them under procedures
+            symbols.push(classImplementation);
         }
 
         return classImplementation;
@@ -1580,7 +1546,7 @@ export class ClarionDocumentSymbolProvider {
         startLine: number,
         endLine: number,
         subType?: TokenType
-    ): DocumentSymbol {
+    ): ClarionDocumentSymbol {
         const range = this.getTokenRange(tokens, startLine, endLine);
 
         // Improve breadcrumb navigation by providing better context
@@ -1602,7 +1568,7 @@ export class ClarionDocumentSymbolProvider {
             }
         }
 
-        return DocumentSymbol.create(
+        return this.createSymbol(
             displayName,
             detail,
             this.mapSubTypeToSymbolKind(subType),
@@ -1616,9 +1582,9 @@ export class ClarionDocumentSymbolProvider {
     private handleProcedureDefinitionToken(
         tokens: Token[],
         index: number,
-        symbols: DocumentSymbol[],
-        currentStructure: DocumentSymbol | null
-    ): DocumentSymbol {
+        symbols: ClarionDocumentSymbol[],
+        currentStructure: ClarionDocumentSymbol | null
+    ): ClarionDocumentSymbol {
         // Mark MAP procedures for special handling
         const isMapProcedure = currentStructure?.name?.startsWith("MAP") ||
                                currentStructure?.name === "Functions";
@@ -1697,13 +1663,11 @@ export class ClarionDocumentSymbolProvider {
             fullDefinition = detail ? detail : "()";
         }
 
-        // Improve breadcrumb navigation by separating name and detail
-        // Include the full definition in the display name
-        const displayName = `${procedureDefName} ${fullDefinition}`;
-
-        const procedureDefSymbol = DocumentSymbol.create(
-            displayName,
-            "Declaration",  // Mark as Declaration to distinguish from Implementation
+        // The name should be just the procedure name
+        // The detail should contain the signature/definition
+        const procedureDefSymbol = this.createSymbol(
+            procedureDefName,
+            fullDefinition,  // Use signature as detail
             symbolKind,
             this.getTokenRange(tokens, line, finishesAt ?? line),
             // Use a more precise selection range for better navigation
@@ -1713,44 +1677,31 @@ export class ClarionDocumentSymbolProvider {
 
         // Mark method declarations
         if (token.subType === TokenType.MethodDeclaration) {
-            (procedureDefSymbol as any)._isMethodDeclaration = true;
+            procedureDefSymbol._isMethodDeclaration = true;
         }
         
         // Mark MAP procedures
         if (isMapProcedure || token.subType === TokenType.MapProcedure) {
-            (procedureDefSymbol as any)._isMapProcedure = true;
+            procedureDefSymbol._isMapProcedure = true;
         }
 
         // Store finishesAt value for procedure definitions if available
         if (finishesAt !== undefined) {
-            (procedureDefSymbol as any)._finishesAt = finishesAt;
+            procedureDefSymbol._finishesAt = finishesAt;
         }
 
         // ✅ Prefer attaching to MODULE or MAP if that's the current structure
-        if (currentStructure?.name?.startsWith("MODULE") ||
-            currentStructure?.name === "Functions") {
+        const upperName = currentStructure?.name?.toUpperCase();
+        if (currentStructure && (upperName?.startsWith("MODULE") || upperName?.startsWith("MAP") ||
+            currentStructure.name === "Functions")) {
             
             // If we're already in the Functions container, add directly to it
-            if (currentStructure?.name === "Functions") {
+            if (currentStructure.name === "Functions") {
                 currentStructure.children!.push(procedureDefSymbol);
             }
             // Otherwise, use the Functions container if available
-            else if ((currentStructure as any).$clarionFunctions) {
-                (currentStructure as any).$clarionFunctions.children!.push(procedureDefSymbol);
-            } else {
-                currentStructure.children!.push(procedureDefSymbol);
-            }
-            return procedureDefSymbol;
-        } else if (currentStructure?.name?.startsWith("MAP") ||
-                  currentStructure?.name === "Functions") {
-            
-            // If we're already in the Functions container, add directly to it
-            if (currentStructure?.name === "Functions") {
-                currentStructure.children!.push(procedureDefSymbol);
-            }
-            // Otherwise, use the Functions container if available
-            else if ((currentStructure as any).$clarionFunctions) {
-                (currentStructure as any).$clarionFunctions.children!.push(procedureDefSymbol);
+            else if (currentStructure.$clarionFunctions) {
+                currentStructure.$clarionFunctions.children!.push(procedureDefSymbol);
             } else {
                 currentStructure.children!.push(procedureDefSymbol);
             }
@@ -1762,7 +1713,7 @@ export class ClarionDocumentSymbolProvider {
         let methodTarget = parentSymbol;
 
         // CRITICAL FIX: Handle interface methods differently
-        if (parentSymbol?.kind === ClarionSymbolKind.Class && !(parentSymbol as any)._isInterface) {
+        if (parentSymbol?.kind === ClarionSymbolKind.Class && !parentSymbol._isInterface) {
             // For classes, use the Methods container
             methodTarget = parentSymbol.children?.find(c =>
                 c.name === "Methods" && c.kind === SymbolKind.Method
@@ -1781,9 +1732,9 @@ export class ClarionDocumentSymbolProvider {
 
     private findSymbolForParentToken(
         parentToken: Token | undefined,
-        symbols: DocumentSymbol[],
+        symbols: ClarionDocumentSymbol[],
         currentLine: number
-    ): DocumentSymbol | null {
+    ): ClarionDocumentSymbol | null {
         const methodLabel = parentToken?.value ?? '';
         const nameParts = methodLabel.split('.');
         const possibleClassName = nameParts.length > 1 ? nameParts[0].toUpperCase() : null;
@@ -1809,78 +1760,384 @@ export class ClarionDocumentSymbolProvider {
     private handleVariableToken(
         tokens: Token[],
         index: number,
-        symbols: DocumentSymbol[],
-        currentStructure: DocumentSymbol | null,
-        currentProcedure: DocumentSymbol | null,
-        lastMethodImplementation: DocumentSymbol | null
+        symbols: ClarionDocumentSymbol[],
+        currentStructure: ClarionDocumentSymbol | null,
+        currentProcedure: ClarionDocumentSymbol | null,
+        lastMethodImplementation: ClarionDocumentSymbol | null,
+        parentStack: ParentStackEntry[]
     ): void {
         const token = tokens[index];
         const { line } = token;
         const prevToken = tokens[index - 1];
 
-        if (prevToken?.type === TokenType.Label) {
-            // CRITICAL FIX: Capture the entire line for variable types
-            // This ensures we get the full type definition including attributes
-            let fullType = "";
-            let j = index;
+        logger.info(`🔍 handleVariableToken called: index=${index}, token=${token.value}, type=${token.type}, line=${line}`);
+        logger.info(`   prevToken: ${prevToken ? `type=${prevToken.type}, value="${prevToken.value}"` : 'null'}`);
 
+        // CRITICAL FIX: Handle unlabeled structures (GROUP, QUEUE, FILE without a label)
+        // Example: "            group,over(bits),pre()"
+        // In this case, token.value is "group" and prevToken might be null or not a label
+        const upperValue = token.value.toUpperCase();
+        if ((upperValue === 'GROUP' || upperValue === 'QUEUE' || upperValue === 'FILE') &&
+            (!prevToken || prevToken.line !== line || 
+             (prevToken.type !== TokenType.Label && prevToken.type !== TokenType.Variable))) {
+            logger.info(`   📦 Detected unlabeled structure: ${token.value}`);
+            
+            // Collect attributes for the structure (e.g., OVER(), PRE())
+            let attributes = "";
+            let j = index + 1;
+            while (j < tokens.length && tokens[j].line === line) {
+                if (tokens[j].type === TokenType.Comment) break;
+                attributes += tokens[j].value;
+                j++;
+            }
+            
+            const displayName = attributes ? `${upperValue},${attributes}` : upperValue;
+            logger.info(`   📦 Creating unlabeled structure symbol: "${displayName}"`);
+            
+            // Create a symbol for the unlabeled structure
+            const structSymbol = this.createSymbol(
+                displayName,
+                "",
+                SymbolKind.Struct,
+                this.getTokenRange(tokens, line, line),
+                this.getTokenRange(tokens, line, line),
+                []
+            );
+            
+            // Add it to the current context
+            const target = currentProcedure || lastMethodImplementation || currentStructure;
+            this.addSymbolToParent(structSymbol, target, symbols);
+            
+            // Push it onto the parent stack so subsequent variables become children
+            // The structure will be popped when we encounter END
+            // Use the token's finishesAt property to know when to close this structure
+            parentStack.push({ symbol: structSymbol, finishesAt: token.finishesAt });
+            logger.info(`   ✅ Added unlabeled structure to parentStack (finishesAt=${token.finishesAt}, depth now: ${parentStack.length})`);
+            
+            return; // Done processing this structure declaration
+        }
+
+        // CRITICAL FIX: Skip if we're inside a PROCEDURE declaration's parameter list
+        // Check if there's a PROCEDURE keyword on the same line before this token
+        let foundProcedureKeyword = false;
+        logger.info(`   🔍 Searching backwards for PROCEDURE keyword on line ${line}`);
+        for (let k = index - 1; k >= 0; k--) {
+            const t = tokens[k];
+            logger.info(`      - Token ${k}: line=${t.line}, type=${t.type}, value="${t.value}"`);
+            if (t.line !== line) {
+                logger.info(`      - Different line, stopping search`);
+                break; // Different line, stop searching
+            }
+            // FIXED: Check for TokenType.Procedure, not TokenType.Keyword
+            if (t.type === TokenType.Procedure || 
+                (t.type === TokenType.Keyword && t.value.toUpperCase() === 'PROCEDURE')) {
+                logger.info(`      - ✅ Found PROCEDURE keyword!`);
+                foundProcedureKeyword = true;
+                break;
+            }
+        }
+        
+        if (foundProcedureKeyword) {
+            logger.info(`   ⚠️ Skipping - this token is part of a PROCEDURE declaration`);
+            return;
+        }
+        logger.info(`   ℹ️ No PROCEDURE keyword found, proceeding with variable parsing`);
+
+        // CRITICAL: Skip if previous token is a Label that's part of a method name
+        // Pattern: Label(ClassName) + Variable(MethodName) + PROCEDURE
+        // e.g., StringTheory._Test PROCEDURE()
+        if (prevToken && prevToken.type === TokenType.Label && token.type === TokenType.Variable) {
+            // Check if there's another variable/label followed by PROCEDURE on this line
+            let nextIdx = index + 1;
+            while (nextIdx < tokens.length && tokens[nextIdx].line === line) {
+                if (tokens[nextIdx].type === TokenType.Procedure ||
+                    (tokens[nextIdx].type === TokenType.Keyword && tokens[nextIdx].value.toUpperCase() === 'PROCEDURE')) {
+                    logger.info(`   ⚠️ Skipping - previous Label "${prevToken.value}" is part of method name`);
+                    return;
+                }
+                nextIdx++;
+            }
+        }
+
+        // Handle Label or StructurePrefix tokens (variable names)
+        // TokenType.Label (25), TokenType.StructurePrefix (41), TokenType.Variable (5)
+        if (prevToken && (prevToken.type === TokenType.Label || 
+                          prevToken.type === TokenType.StructurePrefix || 
+                          prevToken.type === TokenType.Variable)) {
+            logger.info(`   ✅ Previous token is Label or StructurePrefix - processing variable declaration`);
+            
+            // CRITICAL FIX: Handle prefixed labels (e.g., LOC:SMTPbccAddress)
+            // If prevToken is a StructurePrefix, we need to look back one more token to get the full label
+            let variableName = prevToken.value;
+            let variableStartToken = prevToken;
+            
+            // Check if there's a label/variable token before the StructurePrefix
+            if (prevToken.type === TokenType.StructurePrefix && index >= 2) {
+                const prevPrevToken = tokens[index - 2];
+                if (prevPrevToken.line === line && 
+                    (prevPrevToken.type === TokenType.Label || prevPrevToken.type === TokenType.Variable)) {
+                    // This is a prefixed label like LOC:SMTPbccAddress
+                    variableName = prevPrevToken.value + prevToken.value;
+                    variableStartToken = prevPrevToken;
+                    logger.info(`   🔍 Detected prefixed label: "${variableName}"`);
+                }
+            }
+            
+            logger.info(`   📝 Variable name: "${variableName}"`);
+            // CRITICAL FIX: Extract only the data type, not attributes
+            // Example: "x long,auto" should show type as "long", not "long,auto"
+            let fullType = "";
+            let fullDeclaration = ""; // Store the complete declaration for _clarionType
+            let j = index;
+            let foundType = false; // Track if we've found the actual type
+
+            logger.info(`   🔍 Collecting type tokens starting from index ${j}`);
             // Process to the end of the line or until a comment
             while (j < tokens.length) {
                 const t = tokens[j];
 
+                logger.info(`     - Token ${j}: type=${t.type}, value="${t.value}", line=${t.line}`);
                 // Stop at the end of the line or a comment
                 if (t.line !== line || t.type === TokenType.Comment) {
+                    logger.info(`     - Stopping: line mismatch or comment`);
                     break;
                 }
 
-                // Add the token value to the type
-                fullType += t.value;// + " ";
+                // Skip label tokens (don't include the variable name in the type)
+                if (t.type === TokenType.Label || t.type === TokenType.StructurePrefix || t.type === TokenType.Variable) {
+                    logger.info(`     - Skipping label/variable token`);
+                    j++;
+                    continue;
+                }
+
+                // Store complete declaration for metadata
+                fullDeclaration += t.value;
+
+                // Check if this is an attribute keyword - if so, stop collecting the type
+                if (t.type === TokenType.Keyword && isAttributeKeyword(t.value)) {
+                    logger.info(`     - Found attribute keyword "${t.value}", stopping type collection`);
+                    foundType = true; // We've already collected the type before this attribute
+                    j++;
+                    continue; // Continue to collect fullDeclaration but not fullType
+                }
+
+                // Stop collecting type if we hit a comma - this separates type from attributes
+                // This handles: "x long,auto" or "x long, auto" - we want "long", not "long,auto"
+                if (t.type === TokenType.Delimiter && t.value === ',') {
+                    logger.info(`     - Found comma, stopping type collection`);
+                    foundType = true; // Mark that we've collected the type
+                    j++;
+                    continue; // Continue to collect fullDeclaration but not fullType
+                }
+
+                // Only add to fullType if we haven't completed type collection yet
+                if (!foundType) {
+                    // Add type components to fullType
+                    if (t.type === TokenType.Type || 
+                        (t.type === TokenType.Keyword && !isAttributeKeyword(t.value)) ||
+                        t.type === TokenType.Number) {
+                        fullType += t.value;
+                        logger.info(`     - Adding to fullType: "${t.value}"`);
+                    } else if (t.type === TokenType.Delimiter && (t.value === '(' || t.value === ')')) {
+                        // Before adding '(', check if next token is a string literal (indicates value initialization)
+                        if (t.value === '(' && j + 1 < tokens.length && tokens[j + 1].type === TokenType.String) {
+                            // Add the opening paren
+                            fullType += t.value;
+                            j++; // Move to the string token
+                            const stringToken = tokens[j];
+                            // Abbreviate the string content if it's long
+                            const stringValue = stringToken.value;
+                            // The tokenizer includes the quotes, so stringValue looks like: 'ABCDEF...'
+                            // We want to show: 'ABCDEFGHIJ...
+                            const maxCharsToShow = 10; // Show first 10 chars of actual content (not including quotes)
+                            if (stringValue.length > maxCharsToShow + 2) { // +2 for the two quotes
+                                // Take opening quote + first 10 chars of content + ...
+                                fullType += stringValue.substring(0, maxCharsToShow + 1) + '...';
+                            } else {
+                                fullType += stringValue;
+                            }
+                            logger.info(`     - Added abbreviated string literal to fullType: "${stringValue}"`);
+                            // Check if there's a closing paren
+                            if (j + 1 < tokens.length && tokens[j + 1].type === TokenType.Delimiter && tokens[j + 1].value === ')') {
+                                j++; // Move to closing paren
+                                fullType += tokens[j].value;
+                                logger.info(`     - Added closing paren to fullType`);
+                            }
+                            foundType = true; // We've completed the type
+                            j++;
+                            continue;
+                        }
+                        // Include delimiters that are part of the type definition (e.g., STRING(20))
+                        fullType += t.value;
+                        logger.info(`     - Adding delimiter to fullType: "${t.value}"`);
+                    } else if (t.type === TokenType.String) {
+                        // String literal - this is a VALUE initialization, stop collecting type
+                        logger.info(`     - Found string literal, stopping type collection: "${t.value}"`);
+                        break;
+                    }
+                }
+                
+                logger.info(`     - fullType now: "${fullType}"`);
                 j++;
             }
+            logger.info(`   ✅ Final fullType: "${fullType}"`);
+            logger.info(`   ✅ Final fullDeclaration: "${fullDeclaration}"`);
 
             // Clean up the type
             fullType = fullType.trim();
+            fullDeclaration = fullDeclaration.trim();
 
             // Remove any trailing comments
             const commentIndex = fullType.indexOf("!");
             if (commentIndex !== -1) {
                 fullType = fullType.substring(0, commentIndex).trim();
             }
+            const declCommentIndex = fullDeclaration.indexOf("!");
+            if (declCommentIndex !== -1) {
+                fullDeclaration = fullDeclaration.substring(0, declCommentIndex).trim();
+            }
             fullType = fullType.trim();
-            // CRITICAL FIX: Include the variable type in the name
-            // This ensures it's displayed in the outline view
-            const displayName = `${prevToken.value} ${fullType}`;
+            fullDeclaration = fullDeclaration.trim();
+            
+            // CRITICAL FIX: If no type was specified, Clarion defaults to STRING
+            // This handles cases like: x ,auto  (no explicit type, just attributes)
+            if (!fullType || fullType === '') {
+                fullType = 'STRING';
+                logger.info(`   ℹ️ No explicit type found, defaulting to STRING`);
+            }
+            
+            // Create proper detail with parent context
+            let detail = "";
+            if (currentProcedure) {
+                detail = `in ${currentProcedure.name}`;
+            } else if (lastMethodImplementation) {
+                detail = `in ${lastMethodImplementation.name}`;
+            } else if (currentStructure) {
+                detail = `in ${currentStructure.name}`;
+            }
 
-            const variableSymbol = DocumentSymbol.create(
-                displayName,  // Include the variable type in the name
-                "",  // Empty detail since we're including it in the name
+            // Create the symbol name with variable name and type
+            const symbolName = `${variableName} ${fullType}`;
+            
+            logger.info(`   📝 Creating variable symbol: name="${symbolName}", detail="${detail}"`);
+
+            const variableSymbol = this.createSymbol(
+                symbolName,  // Variable name with type
+                detail,  // Context in detail
                 ClarionSymbolKind.Variable,
-                this.getTokenRange(tokens, prevToken.line, line),
-                this.getTokenRange(tokens, prevToken.line, line),
+                this.getTokenRange(tokens, variableStartToken.line, line),
+                this.getTokenRange(tokens, variableStartToken.line, line),
                 []
             );
+            
+            // Store both the type and the complete declaration for later use
+            variableSymbol._clarionType = fullType; // Just the type (e.g., "long", "string(20)")
+            variableSymbol._clarionDeclaration = fullDeclaration; // Complete declaration with attributes
+            variableSymbol._clarionVarName = variableName;
+            
+            // Use the prefix directly from the token if available
+            if (prevToken && prevToken.structurePrefix) {
+                // If the token already has a prefix, use it directly
+                variableSymbol._isPartOfStructure = true;
+                variableSymbol._structurePrefix = prevToken.structurePrefix;
+                
+                // Build possible reference patterns (case-insensitive)
+                const possibleReferences: string[] = [];
+                
+                // Pattern 1: PREFIX:FieldName
+                possibleReferences.push(`${prevToken.structurePrefix.toUpperCase()}:${variableName.toUpperCase()}`);
+                
+                // Pattern 2: StructureName.FieldName (if we have a current structure with a label)
+                if (currentStructure) {
+                    const structureLabel = currentStructure._clarionLabel;
+                    if (structureLabel) {
+                        possibleReferences.push(`${structureLabel.toUpperCase()}.${variableName.toUpperCase()}`);
+                        variableSymbol._structureName = structureLabel;
+                    }
+                }
+                
+                variableSymbol._possibleReferences = possibleReferences;
+                
+                logger.info(`   🔍 Variable has direct prefix "${prevToken.structurePrefix}" from token`);
+                logger.info(`   📋 PREFIX: Possible references: ${possibleReferences.join(', ')}`);
+            }
+            // Fallback to structure-based prefix if token doesn't have one
+            else if (currentStructure) {
+                const structurePrefix = currentStructure._clarionPrefix;
+                const structureLabel = currentStructure._clarionLabel;
+                
+                if (structurePrefix || structureLabel) {
+                    variableSymbol._isPartOfStructure = true;
+                    variableSymbol._structureName = structureLabel;
+                    variableSymbol._structurePrefix = structurePrefix;
+                    
+                    // Build possible reference patterns (case-insensitive)
+                    const possibleReferences: string[] = [];
+                    
+                    // Pattern 1: PREFIX:FieldName (if prefix exists)
+                    if (structurePrefix) {
+                        possibleReferences.push(`${structurePrefix.toUpperCase()}:${variableName.toUpperCase()}`);
+                    }
+                    
+                    // Pattern 2: StructureName.FieldName (if label exists)
+                    if (structureLabel) {
+                        possibleReferences.push(`${structureLabel.toUpperCase()}.${variableName.toUpperCase()}`);
+                    }
+                    
+                    variableSymbol._possibleReferences = possibleReferences;
+                    
+                    logger.info(`   🔍 Variable is part of structure "${structureLabel || 'unnamed'}" with prefix "${structurePrefix || 'none'}"`);
+                    logger.info(`   📋 PREFIX: Possible references: ${possibleReferences.join(', ')}`);
+                }
+            }
 
-            // CRITICAL FIX: Prioritize currentProcedure over currentStructure
-            // This ensures variables are attached to the method implementation they're defined in
+            // CRITICAL FIX: Prioritize immediate parent structures (like GROUP) over procedures
+            // Variables should be attached to the most immediate structure they're defined in
             let target: DocumentSymbol | null = null;
 
-            if (currentProcedure) {
+            // BUGFIX: Check the parentStack directly for the most immediate GROUP structure
+            // This handles unlabeled GROUPs that might not be set in currentStructure
+            logger.info(`   🔍 Searching parentStack for immediate struct parent (stack depth: ${parentStack.length}, current line: ${line})`);
+            for (let stackIdx = parentStack.length - 1; stackIdx >= 0; stackIdx--) {
+                const stackEntry = parentStack[stackIdx];
+                const symbol = stackEntry.symbol;
+                
+                const isStruct = symbol.kind === SymbolKind.Struct;
+                const isActive = !stackEntry.finishesAt || stackEntry.finishesAt >= line;
+                logger.info(`     - Stack[${stackIdx}]: "${symbol.name}", kind=${symbol.kind}, finishesAt=${stackEntry.finishesAt}, isStruct=${isStruct}, isActive=${isActive}`);
+                
+                // Check if this is a GROUP, QUEUE, or other Struct that's still active
+                if (symbol.kind === SymbolKind.Struct && 
+                    (!stackEntry.finishesAt || stackEntry.finishesAt >= line)) {
+                    // Found the most immediate struct parent
+                    target = symbol;
+                    logger.info(`   🎯 Found immediate struct parent in stack: "${symbol.name}"`);
+                    break;
+                }
+            }
+
+            // If no struct found in stack, fall back to currentStructure
+            if (!target && currentStructure && currentStructure.kind === SymbolKind.Struct) {
+                // We're inside a GROUP/QUEUE/etc - attach to it
+                target = currentStructure;
+                logger.info(`   🎯 Using currentStructure as target: "${currentStructure.name}"`);
+            } else if (!target && currentProcedure) {
                 // If we're in a procedure, attach to it
                 target = currentProcedure;
-            } else if (lastMethodImplementation) {
+            } else if (!target && lastMethodImplementation) {
                 // If we're not in a procedure but we have a last method implementation,
                 // use that as the target for variables
                 target = lastMethodImplementation;
             } else if (currentStructure) {
                 // Don't attach to special routines
                 if (currentStructure.kind === ClarionSymbolKind.Routine &&
-                    (currentStructure as any)._isSpecialRoutine) {
+                    currentStructure._isSpecialRoutine) {
                     // Skip special routines and look for a better parent
 
                     // First, try to find a global procedure in the symbols
                     for (const symbol of symbols) {
                         if (symbol.kind === SymbolKind.Function &&
-                            (symbol as any)._isGlobalProcedure === true) {
+                            symbol._isGlobalProcedure === true) {
                             target = symbol;
                             break;
                         }
@@ -1912,7 +2169,7 @@ export class ClarionDocumentSymbolProvider {
                 // Find the most recent global procedure by looking at all top-level symbols
                 for (const symbol of symbols) {
                     if (symbol.kind === SymbolKind.Function &&
-                        (symbol as any)._isGlobalProcedure === true) {
+                        symbol._isGlobalProcedure === true) {
                         mostRecentGlobalProcedure = symbol;
                     }
                 }
@@ -1922,12 +2179,22 @@ export class ClarionDocumentSymbolProvider {
                 }
             }
 
+            // CRITICAL FIX: Update the variable's detail to match its actual parent
+            // This ensures variables inside GROUPs show "in GROUP(...)" instead of "in Method(...)"
+            if (target) {
+                logger.info(`   🔍 DEBUG: target type=${target.kind}, target.name="${target.name}"`);
+                variableSymbol.detail = `in ${target.name}`;
+                logger.info(`   ✅ Updated variable detail to match target: "${variableSymbol.detail}"`);
+            }
+            
             this.addSymbolToParent(variableSymbol, target, symbols);
+        } else {
+            logger.info(`   ❌ Previous token is NOT Label or StructurePrefix - skipping (prevToken type=${prevToken?.type})`);
         }
     }
 
     private handleEndStatementToken(
-        parentStack: Array<{ symbol: DocumentSymbol, finishesAt: number | undefined }>,
+        parentStack: Array<{ symbol: ClarionDocumentSymbol, finishesAt: number | undefined }>,
         line: number
     ): void {
         // Only pop structures that don't have a finishesAt value
@@ -1949,9 +2216,9 @@ export class ClarionDocumentSymbolProvider {
     private handleKeyToken(
         tokens: Token[],
         index: number,
-        symbols: DocumentSymbol[],
-        currentProcedure: DocumentSymbol | null,
-        currentStructure: DocumentSymbol | null
+        symbols: ClarionDocumentSymbol[],
+        currentProcedure: ClarionDocumentSymbol | null,
+        currentStructure: ClarionDocumentSymbol | null
     ): void {
         const token = tokens[index];
         const { line } = token;
@@ -2016,7 +2283,7 @@ export class ClarionDocumentSymbolProvider {
 
         const displayName = displayParts.join(",");
 
-        const keySymbol = DocumentSymbol.create(
+        const keySymbol = this.createSymbol(
             displayName,
             "",  // Empty detail since we're including it in the name
             SymbolKind.Key,
@@ -2031,9 +2298,9 @@ export class ClarionDocumentSymbolProvider {
 
 
     private addSymbolToParent(
-        symbol: DocumentSymbol,
-        parent: DocumentSymbol | null,
-        symbols: DocumentSymbol[]
+        symbol: ClarionDocumentSymbol,
+        parent: ClarionDocumentSymbol | null,
+        symbols: ClarionDocumentSymbol[]
     ): void {
         const isVariable = symbol.kind === ClarionSymbolKind.Variable;
 
@@ -2044,11 +2311,11 @@ export class ClarionDocumentSymbolProvider {
 
         // CRITICAL FIX: Also check if this is a method declaration
         const isMethodDeclaration = symbol.kind === ClarionSymbolKind.Method ||
-            (symbol as any)._isMethodDeclaration === true;
+            symbol._isMethodDeclaration === true;
 
         // Check if this is a MAP procedure
         const isMapProcedure = symbol.kind === SymbolKind.Function &&
-            (symbol as any)._isMapProcedure === true;
+            symbol._isMapProcedure === true;
 
         const isClassImplementation = parent?.name.includes(" (Implementation)");
         const isMethodImplementation = (parent as any)?._isMethodImplementation === true;
@@ -2061,7 +2328,7 @@ export class ClarionDocumentSymbolProvider {
             sortName = symbol.name.split('  ')[0];
         }
 
-        (symbol as any).sortText = sortName.toLowerCase();
+        symbol.sortText = sortName.toLowerCase();
 
         // Enhance breadcrumb navigation by improving symbol details
         if (!symbol.detail && parent) {
@@ -2086,19 +2353,19 @@ export class ClarionDocumentSymbolProvider {
                 parent.children!.push(symbol);
             }
             // Handle class properties (but not for method implementations)
-            else if (isVariable && (parent as any).$clarionProps && !isMethodImplementation) {
-                const propsContainer = (parent as any).$clarionProps;
+            else if (isVariable && parent.$clarionProps && !isMethodImplementation) {
+                const propsContainer = parent.$clarionProps;
                 propsContainer.children!.push(symbol);
                 this.sortContainerChildren(propsContainer);
             }
 
             // Handle methods (in class or class implementation containers)
             else if ((isMethod || isMethodDeclaration) &&
-                ((parent as any).$clarionMethods || isClassImplementation)) {
+                (parent.$clarionMethods || isClassImplementation)) {
                 let methodsContainer;
 
-                if ((parent as any).$clarionMethods) {
-                    methodsContainer = (parent as any).$clarionMethods;
+                if (parent.$clarionMethods) {
+                    methodsContainer = parent.$clarionMethods;
                 } else if (isClassImplementation) {
                     methodsContainer = parent.children!.find(c => c.name === "Methods") || parent;
                 } else {
@@ -2111,7 +2378,7 @@ export class ClarionDocumentSymbolProvider {
                 }
             }
             // CRITICAL FIX: Handle interface methods
-            else if ((isMethod || isMethodDeclaration) && (parent as any)._isInterface) {
+            else if ((isMethod || isMethodDeclaration) && parent._isInterface) {
                 // For interfaces, add methods directly to the interface
                 // No need for a Methods container
                 parent.children!.push(symbol);
@@ -2120,11 +2387,13 @@ export class ClarionDocumentSymbolProvider {
             // Handle MAP and MODULE procedures
             else if (isMapProcedure ||
                     (symbol.kind === SymbolKind.Function &&
-                     (parent?.name?.startsWith("MAP") || parent?.name?.startsWith("MODULE")))) {
+                     !symbol.name.toUpperCase().startsWith("MODULE") &&  // Don't treat MODULE structure as a function
+                     !symbol.name.toUpperCase().startsWith("MAP") &&      // Don't treat MAP structure as a function
+                     (parent?.name?.toUpperCase().startsWith("MAP") || parent?.name?.toUpperCase().startsWith("MODULE")))) {
                 // For MAP and MODULE, use the Functions container if available
-                if ((parent as any).$clarionFunctions) {
-                    (parent as any).$clarionFunctions.children!.push(symbol);
-                    this.sortContainerChildren((parent as any).$clarionFunctions);
+                if (parent.$clarionFunctions) {
+                    parent.$clarionFunctions.children!.push(symbol);
+                    this.sortContainerChildren(parent.$clarionFunctions);
                 } else {
                     parent.children!.push(symbol);
                 }
@@ -2149,7 +2418,7 @@ export class ClarionDocumentSymbolProvider {
     /**
      * Sort children of a container alphabetically
      */
-    private sortContainerChildren(container: DocumentSymbol): void {
+    private sortContainerChildren(container: ClarionDocumentSymbol): void {
         if (!container.children || container.children.length <= 1) {
             return; // Nothing to sort
         }
@@ -2175,7 +2444,7 @@ export class ClarionDocumentSymbolProvider {
         // Update sortText to match the new order
         for (let i = 0; i < container.children.length; i++) {
             const child = container.children[i];
-            (child as any).sortText = i.toString().padStart(4, "0");
+            child.sortText = i.toString().padStart(4, "0");
         }
     }
 
@@ -2235,9 +2504,9 @@ export class ClarionDocumentSymbolProvider {
     private handleWindowElementToken(
         tokens: Token[],
         index: number,
-        symbols: DocumentSymbol[],
-        currentProcedure: DocumentSymbol | null,
-        currentStructure: DocumentSymbol | null
+        symbols: ClarionDocumentSymbol[],
+        currentProcedure: ClarionDocumentSymbol | null,
+        currentStructure: ClarionDocumentSymbol | null
     ): void {
         logger.debug(`Processing window element at line ${tokens[index].line}: ${tokens[index].value}`);
         const token = tokens[index];
@@ -2452,7 +2721,7 @@ export class ClarionDocumentSymbolProvider {
         logger.debug(`  - Final display name: "${displayName}"`);
         logger.debug(`  - Final detail: "${detail}"`);
 
-        const elementSymbol = DocumentSymbol.create(
+        const elementSymbol = this.createSymbol(
             displayName,
             detail,  // detail field
             symbolKind,

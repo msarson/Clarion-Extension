@@ -3,6 +3,335 @@ All notable changes to the "clarion-extension" extension will be documented in t
 
 ---
 
+## [0.7.1] - 2025-12-03
+
+### 🔧 ClarionCl.exe Integration (APP Generation)
+- **Generate Applications**: Right-click context menu commands to generate Clarion applications
+  - **Generate All Applications**: Right-click on Applications node to generate all APPs in solution
+  - **Generate Application**: Right-click on individual app to generate single APP
+  - Uses `ClarionCl.exe /win /ag` command with proper working directory
+  - Streams output to dedicated "Clarion Generator" output channel
+  - Shows success/error notifications on completion
+  - Automatically resolves ClarionCl.exe path from solution's Clarion BIN directory
+
+### 🌳 Solution Tree Improvements
+- **Binary File Prevention**: Clicking on .APP files in tree no longer attempts to open them as text
+  - APP nodes now use `TreeItemCollapsibleState.None` without resourceUri
+  - Prevents VS Code from loading binary files in editor tabs
+  - Cleaner user experience when navigating solution structure
+
+### 🔍 Enhanced Solution Manager
+- **Clarion Directory Detection**: Solution manager now provides Clarion BIN path
+  - Extracts Clarion directory from .sln file configuration
+  - Makes path available to all extension features
+  - Enables reliable ClarionCl.exe execution
+
+### 🐛 Bug Fixes
+- **CASE Statement Validation**: Fixed validation to allow CASE statements with zero OF clauses
+  - Previously incorrectly flagged valid empty CASE statements as errors
+  - Now properly validates: `CASE TRUE` followed by `END` is valid Clarion syntax
+
+### 🎯 Knowledge Base & Language Intelligence
+
+#### Comprehensive Documentation
+- **Complete Clarion Language Reference**: Added 2,000+ lines of documentation
+  - CASE, CHOOSE, EXECUTE control structures
+  - GET/SET file operations (all syntax forms)
+  - FILE declaration with KEY, INDEX, MEMO, BLOB
+  - QUEUE dynamic arrays with compression details
+  - GROUP compound structures with OVER and DIM
+  - VIEW virtual files with JOIN and PROJECT
+  - CLASS and INTERFACE object-oriented features
+  - All examples validated for column 0 compliance
+
+#### Enhanced Diagnostics (3 new validators)
+- **FILE Structure Validation**: Errors for missing DRIVER or RECORD
+- **CASE Structure Validation**: Errors for misplaced OROF (CASE can have zero or more OF clauses)
+- **EXECUTE Expression Validation**: Warnings for non-numeric expressions
+- **Test Coverage**: 185 total tests, all passing
+
+#### Improved Structure View
+- **FILE Hierarchy**: Shows KEY/INDEX as children, RECORD as container, MEMO/BLOB distinguished
+- **VIEW Hierarchy**: Displays nested JOIN relationships and PROJECT fields
+- **GROUP Attributes**: Shows OVER (memory overlay) and DIM (array dimensions)
+
+#### New Keywords
+- **CHOOSE**: Function now properly recognized in tokenizer
+
+### 📊 Statistics
+- **30,466 lines** added (code + documentation)
+- **868 lines** removed
+- **93 files** modified
+- **Zero regressions** (185 tests passing)
+- **80% feature completion** (8/10 planned items)
+
+### 📚 Documentation
+- Added `AUDIT_2024-12-02.md` - Implementation audit
+- Added `SESSION_2024-12-02_KB_IMPROVEMENTS.md` - Detailed session summary
+- Added `CHANGELOG-0.7.1.md` - Comprehensive changelog
+- Added `docs/clarion-knowledge-base.md` - Language reference (~2,000 lines)
+
+### 🎯 Implementation Status
+- ✅ All high priority items complete (3/3)
+- ✅ All medium priority items complete (3/3)
+- ✅ Most low priority items complete (2/4)
+- ⚠️ CLASS/INTERFACE validation - infrastructure only (requires symbol table)
+- ❌ IntelliSense enhancements - deferred (requires completion provider)
+
+**See [CHANGELOG-0.7.1.md](./CHANGELOG-0.7.1.md) for comprehensive details.**
+
+---
+
+## [Unreleased]
+
+### Added - 2025-11-30
+
+#### Clarion Language Knowledge Base
+- **New Documentation**: Created comprehensive `docs/clarion-knowledge-base.md` documenting Clarion language syntax and rules
+  - Column 0 rules: Labels must be at column 0, keywords (MAP, END, PROGRAM, MEMBER) must NOT be at column 0
+  - Structure termination: END vs dot (.) terminators, when each is required
+  - PROGRAM/MEMBER requirements: Must be first statement (line 1), no comments before
+  - Data scope: PROGRAM (global), MEMBER (module), PROCEDURE (local), ROUTINE (routine local)
+  - IF/ELSIF/ELSE: Only IF requires END/., ELSIF and ELSE do not
+  - LOOP termination: Can be terminated with END/., UNTIL, or WHILE
+  - MODULE context: In MAP requires END, in CLASS does not
+  - PROCEDURE/METHOD: No END statement, terminated by next procedure/routine/EOF
+  - ROUTINE: Optional DATA/CODE sections, implicit EXIT at end
+  - THEN keyword: Always followed by statement (same line or next line)
+  - Case insensitivity: Clarion is mostly case-insensitive
+  - ANSI/ASCII only: No Unicode characters allowed in source files
+
+#### Structure Termination Diagnostics
+- **New Feature**: Real-time validation of unterminated structures
+  - Detects IF statements not terminated with END or dot (.)
+  - Detects LOOP statements not terminated with END, dot (.), UNTIL, or WHILE
+  - Detects CLASS statements not terminated with END or dot (.)
+  - Context-aware: Understands inline dot terminators (e.g., `IF x THEN y.`)
+  - Scope-aware: Tracks nested structures correctly
+  - Works with all Clarion file types (.clw, .inc, etc.)
+
+#### Enhanced Tokenizer
+- **Improved Dot Detection**: Tokenizer now properly identifies inline dot terminators
+  - Detects dots that appear on same line as structure keywords
+  - Distinguishes between statement separators (;) and structure terminators (.)
+  - Supports both `END` and `.` as equivalent terminators
+
+#### Structure View Enhancements
+- **Follow Cursor Feature (WIP)**: Structure view can now track cursor position
+  - Toggle command: `clarion.structureView.toggleFollowCursor`
+  - Menu item in structure view title bar
+  - Debounced selection tracking (100ms) for performance
+  - **Known Limitation**: Tree reveal for nested items (functions under MAP/MODULE) not yet working
+  - Checkmark indicator in menu needs fixing
+
+#### Test Suite Enhancements
+- **Created Test Files**: `docs/clarion-tests/test_clarion_syntax.clw` and `test_clarion_syntax_fixed.clw`
+  - Tests for dot terminator syntax
+  - Tests for IF/ELSIF/ELSE structures
+  - Tests for LOOP variations (count TIMES, TO/BY, UNTIL, WHILE)
+  - Tests for nested structures
+  - Tests for column 0 rules
+  - All test files compile successfully with Clarion compiler
+- **Unit Tests**: `server/src/test/diagnostics/structureTermination.test.ts`
+  - 13 test cases covering all structure types
+  - Tests for inline dot terminators
+
+#### Structure View Improvements
+- **Cursor Synchronization**: Added "Follow Cursor" toggle command
+  - Right-click menu option in Structure View
+  - Successfully tracks cursor position and identifies current symbol
+  - **Known Limitation**: Cannot reveal deeply nested items in collapsed tree nodes
+  - Works perfectly for top-level symbols
+  - Feature enabled by default
+  - Tests for nested structures
+  - Tests for MODULE context-awareness
+  - All tests passing
+
+#### Structure View Improvements
+- **Cursor Sync**: Structure view now highlights current symbol as cursor moves through code
+  - Matches VS Code's built-in Outline view behavior
+  - Automatically selects the symbol containing the cursor
+  - Improves code navigation and awareness
+
+### Fixed - 2025-11-30
+
+#### Folding Provider
+- **Fixed Dot Terminator Folding**: Folding provider now correctly handles inline dot terminators
+  - Single-line structures (e.g., `IF x THEN y.`) no longer create invalid fold ranges
+  - Multi-line structures with dot terminators fold correctly
+  - Prevents fold range corruption that broke subsequent folds
+
+#### Knowledge Base Corrections
+- **Fixed Column 0 Rules**: Corrected documentation about what must/must not be at column 0
+- **Fixed END Rules**: Clarified that only structures require END, procedures/methods do not
+- **Fixed MODULE Rules**: Documented context-dependent MODULE termination rules
+
+### Developer Notes - 2025-11-30
+
+#### Test-Driven Development
+- Followed TDD approach: wrote tests first, then implemented features until tests passed
+- Knowledge base serves as reference for both AI and developers
+- All syntax rules validated against real Clarion compiler
+
+#### Repository Organization
+- Moved test files to `docs/clarion-tests/` directory
+- Knowledge base in `docs/clarion-knowledge-base.md`
+- Feature analysis in `docs/clarion-tests/structure-termination-diagnostics.md`
+
+---
+
+## [0.7.1] - 2025-11-24
+
+### Major Enhancements
+
+#### Code Refactoring and Architecture Improvements
+
+**Significant internal refactoring to improve code maintainability and reduce duplication.**
+
+- **New Shared Utilities**: Created reusable utility classes for common operations
+  - `ClassMemberResolver`: Handles class member lookup with method overload resolution
+  - `TokenHelper`: Provides scope navigation and word extraction utilities
+  - Both HoverProvider and DefinitionProvider now use these shared utilities
+  - Eliminated ~500+ lines of duplicate code
+
+#### Method Overload Resolution
+
+**Full support for Clarion method overloading with parameter counting.**
+
+- **Smart overload detection**: Extension now correctly identifies which method overload to use
+  - Counts parameters in method calls
+  - Matches against method declarations
+  - Selects best overload based on parameter count
+  - Prefers methods with optional parameters when counts are close
+  
+- **Works in both Hover and Go to Definition**:
+  - Hover shows the correct overload signature
+  - F12 (Go to Definition) navigates to the correct overload
+  - Ctrl+F12 (Go to Implementation) works with overloaded methods
+
+**Example:**
+```clarion
+! Class has multiple SaveFile methods
+SaveFile PROCEDURE(string fileName, bool append), long
+SaveFile PROCEDURE(*string data, string fileName, bool append, long len=0), long
+
+Code
+  self.SaveFile('test.txt', true)           ! 2 params - uses first overload
+  self.SaveFile(myData, 'test.txt', true)   ! 3 params - uses second overload (has optional 4th)
+```
+
+#### Performance Improvements
+
+**Dramatically improved performance by disabling excessive debug logging.**
+
+- **Reduced logging overhead**: Changed default log levels from "debug" to "error" for most components
+  - HoverProvider: info → error (reduces log spam)
+  - DefinitionProvider: info → error
+  - Only performance metrics remain visible
+  
+- **Measurable impact**: 
+  - Document symbol generation: ~100-150ms (was slower with excessive logging)
+  - Extension no longer locks up VS Code on large files
+  - Smoother editing experience
+
+#### Bug Fixes
+
+- **Fixed Goto Definition URI conversion**: F12 now correctly opens files from INCLUDE statements
+  - Properly converts Windows paths to file:// URIs
+  - Works correctly with drive letters
+  
+- **Fixed word extraction for dot notation**: Hover now works correctly when `getWordRangeAtPosition` returns full dotted names
+  - Properly extracts field name from "self.Method" format
+  - Maintains compatibility with improved TokenHelper
+
+- **Fixed hover duplication**: Server-side hover now properly defers to client-side for method calls
+  - Eliminated duplicate hover information
+  - Shows only relevant information (declaration + implementation hint)
+
+#### PREFIX and Structure Field Access Improvements
+
+**Significant improvements to how Clarion PREFIX declarations are handled.**
+
+This release includes major fixes for Go to Definition and Hover functionality when working with GROUP structures that use PREFIX:
+
+- **Full PREFIX support**: Correctly handles all three ways to access prefixed structure fields:
+  - Direct prefix notation: `LOC:MyVar`
+  - Dot notation: `MyGroup.MyVar`
+  - Bare field name: `MyVar` (when unambiguous)
+  
+- **Smart validation**: Extension now validates that structure fields are accessed correctly
+  - Prevents incorrect "bare name" access when prefix is required
+  - Understands when bare names are valid (e.g., within structure definition)
+  
+- **Improved Go to Definition**: Jump to definition now works correctly for all PREFIX scenarios
+  - `LOC:MyVar` navigates to the field declaration
+  - `MyGroup.MyVar` navigates to the field declaration
+  - Proper scoping prevents false matches
+
+- **Enhanced Hover**: Hover information correctly identifies prefixed fields
+  - Shows all valid ways to reference the field
+  - Displays full type information with GROUP context
+
+**Example:**
+```clarion
+MyGroup  GROUP,PRE(LOC)
+MyVar      STRING(100)
+         END
+
+Code
+  LOC:MyVar = 'Works!'        ! Direct prefix
+  MyGroup.MyVar = 'Works!'    ! Dot notation
+  MyVar = 'Also works!'       ! Bare name (less common)
+```
+
+#### Tokenization Improvements
+
+- **New DataTypeParameter token type**: Better parsing of parameterized types like `STRING(100)`, `CSTRING(255)`
+- **Improved STRING/CSTRING handling**: More accurate tokenization of string types with size parameters
+- **Symbol display fix**: Symbol outline now shows clean format like "MyVar STRING(100)" instead of duplicated labels
+
+### Build Output Configuration
+
+**New configurable settings for build output visibility and log file handling.**
+
+This release adds new configuration options that give developers more control over how build output is displayed and managed:
+
+#### New Settings:
+- **Build Output Visibility**: Control when the build terminal is shown
+  - Never show (default)
+  - Always show
+  - Only show on build errors
+  
+- **Log File Preservation**: Option to keep the build_output.log file after builds
+  - Automatically deleted (default)
+  - Preserved for inspection
+  
+- **Custom Log File Path**: Specify a custom location for build log files
+  
+- **Output Panel Integration**: Option to show build output in the Output panel
+  - Problems panel only (default)
+  - Both Problems and Output panels
+
+#### Benefits:
+- Better debugging of build issues
+- More flexibility for different development workflows
+- Improved visibility into the build process when needed
+
+For detailed documentation on these settings, see [Build Settings Documentation](docs/BuildSettings.md)
+
+### Telemetry and Performance
+
+**Optional telemetry to help improve the extension.**
+
+- **Application Insights integration**: Anonymous usage and performance data collection (opt-in)
+- **Performance tracking**: Monitor document parsing and symbol processing times
+- **Privacy-focused**: No personal information collected, fully respects VS Code's telemetry settings
+- **Disabled by default**: Respects `telemetry.telemetryLevel` setting
+
+The telemetry helps identify performance bottlenecks and improve the extension for large Clarion codebases.
+
+---
+
 ## [0.7.0] - 2025-11-19
 
 **🕯️ Dedicated to the memory of Brahn Partridge (4th January 1977 – 29th October 2021)**

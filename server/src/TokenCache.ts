@@ -76,16 +76,29 @@ export class TokenCache {
                 return cached.tokens;
             }
             
+            // 🚀 DEBUG: Log incremental check
+            if (cached) {
+                logger.info(`🔍 [INCREMENTAL CHECK] cached=${!!cached}, hasDocText=${!!cached.documentText}, canIncremental=${cached.documentText ? this.canUseIncrementalUpdate(currentText, cached.documentText) : false}`);
+            } else {
+                logger.info(`🔍 [INCREMENTAL CHECK] No cached data available`);
+            }
+            
             // 🚀 PERFORMANCE: Try incremental update if we have cached data
             if (cached && cached.documentText && this.canUseIncrementalUpdate(currentText, cached.documentText)) {
-                logger.info(`🚀 Attempting incremental tokenization for ${document.uri}`);
+                logger.info(`🚀 [PERF] Attempting incremental tokenization for ${document.uri}`);
                 const incStart = performance.now();
                 try {
                     const tokens = this.incrementalTokenize(document, cached, currentText);
                     if (tokens) {
                         const incTime = performance.now() - incStart;
                         const totalTime = performance.now() - perfStart;
-                        logger.info(`✅ Incremental tokenization successful, got ${tokens.length} tokens (${incTime.toFixed(2)}ms tokenize, ${totalTime.toFixed(2)}ms total)`);
+                        logger.perf('Incremental tokenization', {
+                            'total_ms': totalTime.toFixed(2),
+                            'tokenize_ms': incTime.toFixed(2),
+                            'tokens': tokens.length,
+                            'uri': document.uri
+                        });
+                        logger.info(`✅ [PERF] Incremental tokenization successful: ${tokens.length} tokens in ${incTime.toFixed(2)}ms (${totalTime.toFixed(2)}ms total)`);
                         return tokens;
                     }
                 } catch (incError) {
@@ -94,7 +107,7 @@ export class TokenCache {
             }
 
             // Full tokenization
-            logger.info(`🟢 Running full tokenizer for ${document.uri} (version ${document.version})`);
+            logger.info(`🟢 [PERF] Running full tokenizer for ${document.uri} (version ${document.version}) - no incremental cache available`);
             const fullStart = performance.now();
             
             try {

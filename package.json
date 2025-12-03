@@ -2,7 +2,7 @@
     "name": "clarion-extensions",
     "displayName": "Clarion Extensions",
     "description": "Extension for Clarion Language",
-    "version": "0.7.0",
+    "version": "0.7.1",
     "publisher": "msarson",
     "repository": {
         "type": "git",
@@ -19,7 +19,6 @@
         "vscode": "^1.97.0"
     },
     "activationEvents": [
-        "onLanguage:clarion",
         "onStartupFinished"
     ],
     "main": "./out/client/src/extension.js",
@@ -246,9 +245,12 @@
                 "icon": "$(clear-all)"
             },
             {
-                "command": "clarion.structureView.toggleFollowCursor",
-                "title": "Follow Cursor",
-                "checked": "clarion.followCursorEnabled"
+                "command": "clarion.structureView.enableFollowCursor",
+                "title": "Enable Follow Cursor"
+            },
+            {
+                "command": "clarion.structureView.disableFollowCursor",
+                "title": "Disable Follow Cursor"
             },
             {
                 "command": "clarion.solutionView.filter",
@@ -261,6 +263,14 @@
                 "title": "Clear Filter",
                 "icon": "$(clear-all)",
                 "when": "clarion.solutionOpen"
+            },
+            {
+                "command": "clarion.generateAllApps",
+                "title": "Generate All Applications"
+            },
+            {
+                "command": "clarion.generateApp",
+                "title": "Generate Application"
             }
         ],
         "menus": {
@@ -304,6 +314,16 @@
                     "command": "clarion.removeSourceFile",
                     "when": "view == solutionView && viewItem == clarionFile",
                     "group": "1_modification"
+                },
+                {
+                    "command": "clarion.generateAllApps",
+                    "when": "view == solutionView && viewItem == clarionApplicationsGroup",
+                    "group": "generate"
+                },
+                {
+                    "command": "clarion.generateApp",
+                    "when": "view == solutionView && viewItem == clarionApp",
+                    "group": "generate"
                 }
             ],
             "commandPalette": [
@@ -413,9 +433,14 @@
             "view/title/context": [],
             "clarion.structureView.menu": [
                 {
-                    "command": "clarion.structureView.toggleFollowCursor",
+                    "command": "clarion.structureView.enableFollowCursor",
                     "group": "navigation@1",
-                    "checked": "clarion.followCursorEnabled"
+                    "when": "!clarion.followCursorEnabled"
+                },
+                {
+                    "command": "clarion.structureView.disableFollowCursor",
+                    "group": "navigation@1",
+                    "when": "clarion.followCursorEnabled"
                 }
             ]
         },
@@ -468,6 +493,27 @@
             "type": "object",
             "title": "Clarion Extension Configuration",
             "properties": {
+                "clarion.build.revealOutput": {
+                    "type": "string",
+                    "enum": ["never", "always", "onError"],
+                    "default": "never",
+                    "description": "Controls when to show the build output terminal. 'never': never show, 'always': always show, 'onError': only show when build fails."
+                },
+                "clarion.build.preserveLogFile": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "When enabled, preserves the build_output.log file after build completion."
+                },
+                "clarion.build.logFilePath": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Custom path for the build output log file. If empty, the log file will be created in the solution directory."
+                },
+                "clarion.build.showInOutputPanel": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "When enabled, also shows build output in the Output panel in addition to the Problems panel."
+                },
                 "clarion.fileSearchExtensions": {
                     "type": "array",
                     "items": {
@@ -518,6 +564,11 @@
                     "type": "string",
                     "default": "",
                     "description": "Path to the currently selected Clarion solution file."
+                },
+                "clarion.telemetry.enabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable anonymous telemetry to help improve the extension. No personal information is collected."
                 },
                 "clarion.solutions": {
                     "type": "array",
@@ -796,7 +847,8 @@
     "scripts": {
         "vscode:prepublish": "npm run compile",
         "compile": "tsc -b",
-        "watch": "tsc -b -w"
+        "watch": "tsc -b -w",
+        "test": "npm run compile && mocha out/server/src/test/**/*.test.js"
     },
     "devDependencies": {
         "@types/mocha": "^8.2.2",
@@ -811,6 +863,7 @@
         "typescript": "^4.2.4"
     },
     "dependencies": {
+        "applicationinsights": "^3.12.0",
         "glob": "^12.0.0",
         "minimatch": "^10.0.1",
         "minimist": "^1.2.6",

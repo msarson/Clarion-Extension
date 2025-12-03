@@ -18,15 +18,17 @@ import { StatusViewProvider } from './StatusViewProvider';
 import { TreeNode } from './TreeNode';
 import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile, setGlobalClarionSelection, ClarionSolutionSettings } from './globals';
 import * as buildTasks from './buildTasks';
+import * as clarionClHelper from './clarionClHelper';
 import LoggerManager from './logger';
 import { SolutionCache } from './SolutionCache';
 import { LanguageClientManager, isClientReady, getClientReadyPromise, setLanguageClient } from './LanguageClientManager';
 import { redirectionService } from './paths/RedirectionService';
 
 import { ClarionProjectInfo } from 'common/types';
+import { initializeTelemetry, trackEvent, trackPerformance } from './telemetry';
 
 const logger = LoggerManager.getLogger("Extension");
-logger.setLevel("error");
+logger.setLevel("error"); // PERF: Only log errors to reduce overhead
 let client: LanguageClient | undefined;
 // clientReady is now managed by LanguageClientManager
 let treeView: TreeView<TreeNode> | undefined;
@@ -238,11 +240,18 @@ async function createSolutionFileWatchers(context: ExtensionContext) {
 }
 
 export async function activate(context: ExtensionContext): Promise<void> {
+    const activationStartTime = Date.now();
     const disposables: Disposable[] = [];
     const isRefreshingRef = { value: false };
     const diagnosticCollection = languages.createDiagnosticCollection("clarion");
     context.subscriptions.push(diagnosticCollection);
     logger.info("🔄 Activating Clarion extension...");
+    
+    // Initialize telemetry (track initialization time separately)
+    const telemetryInitStart = Date.now();
+    await initializeTelemetry(context);
+    const telemetryInitDuration = Date.now() - telemetryInitStart;
+    trackPerformance('TelemetryInitialization', telemetryInitDuration);
     
     // Check if fushnisoft.clarion extension is installed
     const fushinsoftExtension = extensions.getExtension('fushnisoft.clarion');
@@ -768,6 +777,19 @@ export async function activate(context: ExtensionContext): Promise<void> {
             }
         }),
 
+        // Add ClarionCl generator commands
+        commands.registerCommand('clarion.generateAllApps', async (node) => {
+            await clarionClHelper.generateAllApps();
+        }),
+
+        commands.registerCommand('clarion.generateApp', async (node) => {
+            if (node && node.data && node.data.absolutePath) {
+                await clarionClHelper.generateApp(node.data.absolutePath);
+            } else {
+                window.showErrorMessage("Cannot determine which application to generate.");
+            }
+        }),
+
         // Add reinitialize solution command
         commands.registerCommand('clarion.reinitializeSolution', async () => {
             logger.info("🔄 Manually reinitializing solution...");
@@ -816,6 +838,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
                     
                     if (result) {
                         logger.info(`✅ Solution cache force refreshed successfully in ${(endTime - startTime).toFixed(2)}ms`);
+                        trackPerformance('SolutionCacheForceRefresh', endTime - startTime, { triggered: 'command' });
                         
                         // Refresh the solution tree view
                         if (solutionTreeDataProvider) {
@@ -896,6 +919,27 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
         // Commands for adding/removing source files are already registered above
     );
+    
+    // ✅ Create DocumentManager early for standalone file support
+    // This enables features like Goto Implementation, Hover, etc. without a solution
+    if (!documentManager) {
+        logger.info("🔍 Creating DocumentManager for standalone file support...");
+        try {
+            documentManager = await DocumentManager.create();
+            logger.info("✅ DocumentManager created for standalone files");
+            
+            // ✅ Register language features now that documentManager exists
+            logger.info("🔍 Registering language features...");
+            registerLanguageFeatures(context);
+        } catch (error) {
+            logger.error(`❌ Error creating DocumentManager: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+    
+    // Track total activation time
+    const activationDuration = Date.now() - activationStartTime;
+    logger.info(`✅ Extension activation completed in ${activationDuration}ms`);
+    trackPerformance('ExtensionActivation', activationDuration);
 }
 
 async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: Disposable[]): Promise<void> {
@@ -1052,6 +1096,12 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
             defaultLookupExtensions: globalSettings.defaultLookupExtensions // Add default lookup extensions
         });
         logger.info("✅ Clarion paths/config/version sent to the language server.");
+        
+        // Wait a moment for the server to process the notification and initialize
+        // This prevents a race condition where we request the solution tree before it's built
+        logger.info("⏳ Waiting for server to initialize solution...");
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        logger.info("✅ Server initialization delay complete");
     } else {
         logger.error("❌ Language client is not available.");
         vscodeWindow.showErrorMessage("Error initializing Clarion solution: Language client is not available.");
@@ -1085,6 +1135,7 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
     
     const endTime = performance.now();
     logger.info(`✅ Solution initialization completed in ${(endTime - startTime).toFixed(2)}ms`);
+    trackPerformance('SolutionInitialization', endTime - startTime);
     
     vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(globalSolutionFile)}`);
 }
@@ -1109,7 +1160,7 @@ async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<Do
         const result = await solutionCache.initialize(globalSolutionFile);
         const cacheEndTime = performance.now();
         logger.info(`✅ SolutionCache initialized in ${(cacheEndTime - cacheStartTime).toFixed(2)}ms (${result ? 'success' : 'failed'})`);
-        
+        trackPerformance('SolutionCacheInit', cacheEndTime - cacheStartTime, { success: result ? 'true' : 'false' });        
         // If initialization failed or returned empty solution, force a refresh from server
         if (!result) {
             logger.warn("⚠️ Solution cache initialization failed. Forcing refresh from server...");
@@ -1117,7 +1168,7 @@ async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<Do
             const refreshResult = await solutionCache.refresh(true);
             const refreshEndTime = performance.now();
             logger.info(`✅ SolutionCache force refreshed in ${(refreshEndTime - refreshStartTime).toFixed(2)}ms (${refreshResult ? 'success' : 'failed'})`);
-            
+            trackPerformance('SolutionCacheRefresh', refreshEndTime - refreshStartTime, { success: refreshResult ? 'true' : 'false', forced: 'true' });            
             if (!refreshResult) {
                 logger.error("❌ Failed to refresh solution cache from server. Solution features may not work correctly.");
             }
@@ -1141,6 +1192,7 @@ async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<Do
     documentManager = await DocumentManager.create();
     const dmEndTime = performance.now();
     logger.info(`✅ DocumentManager created in ${(dmEndTime - dmStartTime).toFixed(2)}ms`);
+    trackPerformance('DocumentManagerCreation', dmEndTime - dmStartTime);
 
     if (refreshDocs) {
         logger.info("🔄 Refreshing open documents...");
@@ -1149,6 +1201,7 @@ async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<Do
 
     const endTime = performance.now();
     logger.info(`✅ Environment reinitialized in ${(endTime - startTime).toFixed(2)}ms`);
+    trackPerformance('EnvironmentReinitialization', endTime - startTime, { refreshDocs: refreshDocs ? 'true' : 'false' });
     return documentManager;
 }
 
@@ -1291,10 +1344,16 @@ let definitionProviderDisposable: Disposable | null = null;
 let semanticTokensProviderDisposable: Disposable | null = null;
 
 function registerLanguageFeatures(context: ExtensionContext) {
+    console.log("🔥🔥🔥 registerLanguageFeatures CALLED 🔥🔥🔥");
+    logger.info("🔥🔥🔥 registerLanguageFeatures CALLED 🔥🔥🔥");
+    
     if (!documentManager) {
         logger.warn("⚠️ Cannot register language features: documentManager is undefined!");
+        console.log("🔥🔥🔥 documentManager is UNDEFINED 🔥🔥🔥");
         return;
     }
+    
+    console.log("🔥🔥🔥 documentManager EXISTS 🔥🔥🔥");
 
     // ✅ Fix: Ensure only one Document Link Provider is registered
     if (documentLinkProviderDisposable) {
@@ -1341,6 +1400,7 @@ function registerLanguageFeatures(context: ExtensionContext) {
     }
     
     logger.info("🔍 Registering Implementation Provider...");
+    console.log("🔥🔥🔥 REGISTERING ClarionImplementationProvider 🔥🔥🔥");
     implementationProviderDisposable = languages.registerImplementationProvider(
         documentSelectors,
         new ClarionImplementationProvider(documentManager)
@@ -1541,6 +1601,10 @@ async function createStructureView(context: ExtensionContext) {
         // 🔥 Inject the TreeView back into the provider!
         structureViewProvider.setTreeView(structureView);
 
+        // Initialize the follow cursor context
+        await commands.executeCommand('setContext', 'clarion.followCursorEnabled', structureViewProvider.isFollowCursorEnabled());
+        logger.info(`Initialized clarion.followCursorEnabled context to ${structureViewProvider.isFollowCursorEnabled()}`);
+
         // Register the expand all command
         context.subscriptions.push(
             commands.registerCommand('clarion.structureView.expandAll', async () => {
@@ -1572,20 +1636,27 @@ async function createStructureView(context: ExtensionContext) {
             }
         });
         context.subscriptions.push(clearFilterCommand);
-        // Register the toggle follow cursor command
-        const toggleFollowCursorCommand = commands.registerCommand('clarion.structureView.toggleFollowCursor', async () => {
+        // Register the enable follow cursor command
+        const enableFollowCursorCommand = commands.registerCommand('clarion.structureView.enableFollowCursor', async () => {
+            logger.debug(`🎯 enableFollowCursor command invoked`);
             if (structureViewProvider) {
-                const isEnabled = structureViewProvider.toggleFollowCursor();
-                // Set context variable for the menu checkmark
-                await commands.executeCommand('setContext', 'clarion.followCursorEnabled', isEnabled);
-                logger.info(`Set clarion.followCursorEnabled context to ${isEnabled}`);
-                
-                // Force refresh the menu by triggering a context change
-                await commands.executeCommand('setContext', 'clarionStructureViewVisible', false);
-                await commands.executeCommand('setContext', 'clarionStructureViewVisible', true);
+                structureViewProvider.setFollowCursor(true);
+                await commands.executeCommand('setContext', 'clarion.followCursorEnabled', true);
+                logger.debug(`   Enabled follow cursor`);
             }
         });
-        context.subscriptions.push(toggleFollowCursorCommand);
+        context.subscriptions.push(enableFollowCursorCommand);
+        
+        // Register the disable follow cursor command
+        const disableFollowCursorCommand = commands.registerCommand('clarion.structureView.disableFollowCursor', async () => {
+            logger.debug(`🎯 disableFollowCursor command invoked`);
+            if (structureViewProvider) {
+                structureViewProvider.setFollowCursor(false);
+                await commands.executeCommand('setContext', 'clarion.followCursorEnabled', false);
+                logger.debug(`   Disabled follow cursor`);
+            }
+        });
+        context.subscriptions.push(disableFollowCursorCommand);
         
         // Register the structure view menu command (empty handler for the submenu)
         const structureViewMenuCommand = commands.registerCommand('clarion.structureView.menu', () => {
@@ -2505,6 +2576,14 @@ async function startClientServer(context: ExtensionContext, hasOpenXmlFiles: boo
             logger.error("❌ Server does NOT report definitionProvider capability!");
             logger.error(`❌ Capabilities object: ${JSON.stringify(capabilities)}`);
         }
+        
+        // 🔄 Listen for symbol refresh notifications from server
+        client.onNotification('clarion/symbolsRefreshed', (params: { uri: string }) => {
+            logger.info(`🔄 Received symbolsRefreshed notification for: ${params.uri}`);
+            if (structureViewProvider) {
+                structureViewProvider.refresh();
+            }
+        });
     } catch (err) {
         logger.error("❌ Language client failed to start properly", err);
         vscodeWindow.showWarningMessage("Clarion Language Server had issues during startup. Some features may not work correctly.");

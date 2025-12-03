@@ -508,6 +508,33 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             return treeItem;
         }
         
+        // Handle Applications group node
+        if ((data as any)?.type === 'applications-group') {
+            treeItem.iconPath = new ThemeIcon('extensions');
+            treeItem.contextValue = 'clarionApplicationsGroup';
+            treeItem.tooltip = 'Clarion Application Files';
+            return treeItem;
+        }
+        
+        // Handle individual Clarion APP file nodes
+        if ((data as any)?.type === 'clarionApp') {
+            const appData = data as any;
+            const exists = fs.existsSync(appData.absolutePath);
+            
+            if (exists) {
+                treeItem.iconPath = new ThemeIcon('symbol-class'); // Application icon
+                treeItem.tooltip = appData.absolutePath;
+                // Don't set a command - APP files are binary and shouldn't open in editor
+            } else {
+                treeItem.iconPath = new ThemeIcon('warning');
+                treeItem.tooltip = `APP file not found: ${appData.absolutePath}`;
+            }
+            
+            treeItem.contextValue = 'clarionApp';
+            treeItem.resourceUri = Uri.file(appData.absolutePath);
+            return treeItem;
+        }
+        
         // Handle specific item types
         if ((data as any)?.type === 'fileDriver') {
             treeItem.iconPath = new ThemeIcon('database');
@@ -795,6 +822,34 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 solution
             );
 
+            // Add Applications group if there are any applications
+            if (solution.applications && solution.applications.length > 0) {
+                const applicationsGroupNode = new TreeNode(
+                    "Applications",
+                    TreeItemCollapsibleState.Expanded,
+                    { type: 'applications-group' },
+                    solutionNode
+                );
+
+                // Add APP file nodes
+                for (const app of solution.applications) {
+                    const appNode = new TreeNode(
+                        app.name,
+                        TreeItemCollapsibleState.None,
+                        {
+                            type: 'clarionApp',
+                            name: app.name,
+                            relativePath: app.relativePath,
+                            absolutePath: app.absolutePath
+                        },
+                        applicationsGroupNode
+                    );
+                    applicationsGroupNode.children.push(appNode);
+                }
+
+                solutionNode.children.push(applicationsGroupNode);
+                logger.info(`✅ Added Applications group with ${solution.applications.length} APP file(s)`);
+            }
 
             // Add project nodes with minimal information - details will be loaded on demand
             for (const project of solution.projects.filter(Boolean)) {

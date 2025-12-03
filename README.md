@@ -64,9 +64,15 @@ For a comprehensive list of all features and their locations within the extensio
 - **Complete Language Support**: Syntax highlighting, bracket matching, and auto-closing pairs for all Clarion file types (.clw, .inc, .txa, etc.)
 - **Solution Explorer View**: Navigate Clarion projects directly inside VS Code.
 - **Automatic Solution Parsing**: Detects all projects and redirection files in your solution.
-- **Enhanced "Go To Definition"**: Supports `INCLUDE` and `MODULE` statements, with redirection-aware searches.
+- **ClarionCl.exe Integration**: **NEW!** Generate Clarion applications directly from the solution tree
+  - Right-click on Applications node to generate all APPs in solution
+  - Right-click on individual APP to generate single application
+  - Live output streaming to "Clarion Generator" channel
+  - Success/error notifications on completion
+- **Enhanced "Go To Definition"**: Supports `INCLUDE` and `MODULE` statements, with redirection-aware searches. Full support for GROUP PREFIX declarations (e.g., `LOC:MyVar`, `MyGroup.MyVar`). **NEW: Method overload support** - correctly navigates to the right overload based on parameters.
+- **Method Overload Support**: Smart detection of method overloads with parameter counting for accurate navigation and hover information.
 - **Code Folding**: Tokenizer-based folding provider for improved code readability.
-- **Hover Provider**: Displays previews of referenced files when hovering over `INCLUDE` or `MODULE` statements.
+- **Hover Provider**: Displays previews of referenced files when hovering over `INCLUDE` or `MODULE` statements. Shows method signatures with correct overload resolution.
 - **Build Configuration Support**: Easily switch between Release and Debug builds with `Clarion: Set Configuration`.
 - **Redirection-Aware File Searching**: `Ctrl+P` respects local and global redirection files.
 - **Document Outlining & Breadcrumbs**: Improves navigation within large Clarion files.
@@ -112,13 +118,227 @@ This is necessary because older versions had a dependency on fushnisoft.clarion 
 ## Marketplace Information
 
 - **Identifier**: `msarson.clarion-extensions`
-- **Version**: `0.5.8`
+- **Version**: `0.7.1`
 - **Published**: 2018-08-19
-- **Last Release**: 2025-11-17
+- **Last Release**: 2025-12-03
 
 [View on Marketplace](https://marketplace.visualstudio.com/items?itemName=msarson.clarion-extensions)
 
 ---
+## Changelog (What's New in v0.7.1)
+
+### 🔧 ClarionCl.exe Integration (NEW!)
+
+**Generate Clarion applications directly from VS Code:**
+
+- **Right-Click Generation**: Generate applications from the solution tree
+  - Right-click on Applications node to generate all APPs in solution
+  - Right-click on individual APP to generate single application
+  - Live output streaming to "Clarion Generator" channel
+  - Success/error notifications on completion
+
+- **Smart Path Resolution**: Automatically detects ClarionCl.exe location
+  - Uses Clarion BIN directory from solution configuration
+  - No manual configuration required
+
+- **Binary File Handling**: Improved tree navigation
+  - .APP files no longer open as text when clicked
+  - Cleaner user experience in solution explorer
+
+### 🎯 Knowledge Base & Language Intelligence
+
+**Comprehensive Clarion language documentation and enhanced validation:**
+
+- **Enhanced Diagnostics**: Real-time error detection (5 validators)
+  - **Structure Termination**: Unterminated IF/LOOP/CLASS structures
+  - **FILE Validation**: Must have DRIVER and RECORD (error)
+  - **CASE Validation**: CASE statements can have zero or more OF clauses
+  - **OROF Placement**: Must follow OF in CASE (error)
+  - **EXECUTE Validation**: Expression should be numeric (warning)
+  - **OMIT/COMPILE**: Validates directive block pairing
+
+- **Improved Structure View**: Better visualization of code structure
+  - **FILE**: Shows KEY/INDEX/RECORD/MEMO/BLOB hierarchy
+  - **VIEW**: Displays JOIN nesting and PROJECT fields
+  - **GROUP**: Shows OVER (memory overlay) and DIM (arrays) attributes
+  - **Follow Cursor**: Auto-selects symbol at cursor position (toggle in view)
+
+- **New Keywords**: CHOOSE function now properly recognized
+
+---
+
+### Method Overload Support
+
+**Full support for Clarion method overloading with intelligent parameter counting.**
+
+- **Smart overload resolution**: Extension now correctly identifies which method overload matches your call
+  - Counts parameters in method calls automatically
+  - Matches against all declared overloads
+  - Selects best match based on parameter count
+  - Handles optional parameters intelligently
+  
+- **Works everywhere**: 
+  - **Hover** (hover over method call to see correct signature)
+  - **Go to Definition (F12)** navigates to the correct overload
+  - **Go to Implementation (Ctrl+F12)** finds the right implementation
+
+**Example:**
+```clarion
+! Class with overloaded methods
+SaveFile PROCEDURE(string fileName, bool append), long
+SaveFile PROCEDURE(*string data, string fileName, bool append, long len=0), long
+
+Code
+  result = self.SaveFile('test.txt', true)           ! Hover/F12 shows 2-parameter version
+  result = self.SaveFile(myData, 'test.txt', true)   ! Hover/F12 shows 4-parameter version
+```
+
+---
+
+### 🚀 Major Performance Improvements
+
+**Dramatic performance enhancements addressing previous slowdowns:**
+
+- **Caching System**
+  - Symbol provider results cached per document
+  - Folding ranges cached (600ms → instant on re-open)
+  - Token cache with change detection
+  - Eliminates redundant tokenization
+
+- **Tokenization Optimizations**
+  - Fixed O(n²) catastrophic performance bug in procedure variables
+  - Reduced duplicate tokenizations (3-4x → 1x per edit)
+  - Per-document debouncing (100ms) prevents typing lag
+  - Removed hot-path logger calls
+
+- **Diagnostic Optimizations**
+  - Eliminated duplicate tokenization in validation
+  - Reduced OMIT/COMPILE block scanning overhead
+
+**Result**: Files that previously caused VS Code to freeze now edit smoothly.
+
+See [Performance Session](https://github.com/msarson/Clarion-Extension/blob/version-0.7.1/PERFORMANCE_SESSION_2024-12-01.md) for detailed metrics.
+
+---
+
+### 🧪 Test-Driven Development & Quality
+
+**Comprehensive test suite ensures reliability:**
+
+- **185 Tests Total** (100% pass rate)
+  - 16 DefinitionProvider tests
+  - 31 Clarion legacy syntax tests
+  - 140+ DiagnosticProvider tests (TDD approach)
+  - 9 KB validation tests
+  - TokenHelper and FoldingProvider tests
+
+- **Testing Framework**
+  - Mocha test runner integrated
+  - Comprehensive test files in `test-programs/`
+  - All tests validated against Clarion compiler
+
+- **Quality Improvements**
+  - Zero regressions policy
+  - Every fix validated with test
+  - Edge cases documented and tested
+
+---
+
+### 🔧 Bug Fixes & Improvements
+
+**Critical fixes for language parsing:**
+
+- **Tokenizer Fixes**
+  - Inline dot terminators now properly recognized (`IF x THEN y.`)
+  - WHILE/UNTIL keywords recognized as loop terminators
+  - Fixed array subscript dot handling (`MyArray[x].Field`)
+  - RETURN no longer treated as scope boundary
+  - PROCEDURE parameters not parsed as class properties
+
+- **Structure View Fixes**
+  - Fixed duplicate Methods container in classes
+  - Correct MODULE termination rules (context-aware: MAP vs CLASS)
+  - Fixed ROUTINE nesting under parent PROCEDURE
+  - Token type precedence corrected (Type vs Function)
+  - Colon support restored in label patterns
+
+- **Diagnostic Fixes**
+  - Squiggly underlines now positioned on keyword itself
+  - Better detection of structure terminators
+  - Context-aware MODULE validation
+
+---
+
+### 📊 Statistics (v0.7.1)
+
+- **185 tests passing** (comprehensive test coverage)
+- **5 diagnostic validators** (structure, FILE, CASE, EXECUTE, OMIT/COMPILE)
+- **Real-time validation** for better code quality
+
+---
+
+### Performance Improvements (Additional)
+
+**Dramatically improved performance by reducing logging overhead.**
+
+- **Reduced log spam**: Most components now log only errors by default
+  - HoverProvider: info → error
+  - DefinitionProvider: info → error
+  - Performance metrics still visible for monitoring
+  
+- **Better responsiveness**:
+  - Extension no longer locks up VS Code when opening large files
+  - Faster hover and definition lookups
+  - Smoother editing experience overall
+
+### Code Architecture Improvements
+
+**Major internal refactoring to improve maintainability.**
+
+- **New shared utilities**:
+  - `ClassMemberResolver`: Handles class member lookup with overload resolution
+  - `TokenHelper`: Provides scope navigation and word extraction
+  - Eliminated ~500+ lines of duplicate code
+  
+- **Benefits**:
+  - Consistent behavior across all features
+  - Easier to maintain and extend
+  - Bug fixes apply universally
+
+### PREFIX and Structure Field Access Improvements
+
+**Major improvements to Go to Definition and Hover for GROUP structures with PREFIX.**
+
+This release includes significant fixes for working with Clarion PREFIX declarations:
+
+- **Full PREFIX support**: All three access methods now work correctly
+  - Direct prefix: `LOC:MyVar`
+  - Dot notation: `MyGroup.MyVar`
+  - Bare field name: `MyVar` (when valid)
+  
+- **Smart validation**: Extension validates correct field access patterns
+- **Enhanced navigation**: Go to Definition works for all PREFIX scenarios
+- **Better hover info**: Shows all valid ways to reference prefixed fields
+
+### Build Output Configuration
+
+**New configurable settings for build output visibility and log file handling.**
+
+- **Build Output Visibility**: Control when the build terminal is shown (never/always/on errors)
+- **Log File Preservation**: Option to keep build_output.log files for inspection
+- **Custom Log File Path**: Specify custom locations for build logs
+- **Output Panel Integration**: Show build output in Output panel alongside Problems
+
+See [Build Settings Documentation](docs/BuildSettings.md) for details.
+
+### Tokenization and Display Improvements
+
+- **Better type parsing**: Improved handling of `STRING(100)`, `CSTRING(255)`, etc.
+- **Cleaner symbol display**: Symbol outline shows clean format without duplication
+- **Performance tracking**: Optional telemetry to help identify performance bottlenecks
+
+For full details on all changes, see [CHANGELOG.md](CHANGELOG.md)
+
 ## Changelog (What's New in v0.5.8)
 
 ### Performance Improvements
@@ -150,7 +370,33 @@ This release significantly improves performance through systematic optimization.
 
 Large Clarion files (14k+ lines) now have significantly improved response times.
 
-For full details, see [CHANGELOG.md](CHANGELOG.md)
+---
+## Upcoming Release (In Development)
+
+### New Features (2025-11-30)
+
+#### Clarion Language Knowledge Base
+- **Comprehensive Documentation**: New knowledge base documenting Clarion syntax rules and conventions
+- **Reference for Development**: Serves as authoritative source for extension features and AI assistance
+
+#### Structure Termination Diagnostics
+- **Real-time Validation**: Extension now validates that IF, LOOP, and CLASS structures are properly terminated
+- **Smart Detection**: Understands inline dot terminators (e.g., `IF x THEN y.`)
+- **Context-Aware**: Knows MODULE termination rules differ between MAP and CLASS contexts
+- **Helpful Messages**: Clear diagnostic messages when structures aren't terminated correctly
+
+#### Enhanced Code Folding
+- **Fixed Dot Terminators**: Folding now correctly handles single-line structures with dot terminators
+- **Prevents Corruption**: Fixed issue where invalid fold ranges would break subsequent folds
+
+#### Structure View Enhancement
+- **Cursor Synchronization**: Structure view now automatically highlights the symbol containing the cursor
+- **Improved Navigation**: Matches behavior of VS Code's built-in Outline view
+
+### Testing
+- **Test-Driven Development**: All new features developed using TDD approach
+- **Compiler Validated**: Test files compile successfully with Clarion compiler
+- **Comprehensive Coverage**: 13 unit tests covering all structure termination scenarios
 
 ---
 ## Current Release (v0.5.9)
@@ -319,6 +565,31 @@ For a comprehensive guide on using all features of the Clarion Extension, please
 
 4. **(Optional) Save Workspace**
    - Save the workspace for easier future access.
+
+---
+
+## Current Limitations & Roadmap
+
+### Scope Support Status
+
+**Currently Supported:**
+- ✅ **Local/Procedure Scope**: Full support for variables declared within procedures
+  - Go to Definition works for all local variables
+  - Hover information displays correctly
+  - PREFIX structure fields fully supported (`LOC:MyVar`, `MyGroup.MyVar`)
+  - Parameter detection and navigation
+
+**Planned for Future Releases:**
+- ⏳ **Module/Global Scope**: Cross-file variable and procedure references
+  - MAP/MODULE declarations
+  - Global variables
+  - Cross-procedure navigation
+- ⏳ **Class Scope Improvements**: Enhanced class member resolution
+- ⏳ **Type Resolution**: Following variable types through assignments
+
+**Note**: The extension currently focuses on providing robust local scope support. Global scope features (MAP, MODULE, cross-file references) are planned for future versions. This ensures the foundation is solid before expanding to more complex scenarios.
+
+For feature requests or to track progress on global scope support, see our [GitHub Issues](https://github.com/msarson/Clarion-Extension/issues).
 
 ---
 

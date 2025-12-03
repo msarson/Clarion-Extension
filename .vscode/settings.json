@@ -1,0 +1,4 @@
+{
+  "testExplorer.useNativeTesting": true,
+  "testing.automaticallyOpenPeekView": "failureInVisibleDocument"
+}

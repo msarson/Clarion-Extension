@@ -44,6 +44,7 @@ export enum LexEnum {
     BY,
     CASE,
     CATCH,
+    CHOOSE,
     CODE,
     COMPILE,
     CONST,

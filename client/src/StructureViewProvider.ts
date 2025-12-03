@@ -17,11 +17,11 @@ import {
 import { DocumentSymbol, SymbolKind as LSPSymbolKind } from 'vscode-languageserver-types';
 import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("StructureViewProvider");
-logger.setLevel("error");
+logger.setLevel("info"); // PERF: Only log errors to reduce overhead
 
 // 📊 PERFORMANCE: Create perf logger that always logs
 const perfLogger = LoggerManager.getLogger("StructureViewPerf");
-perfLogger.setLevel("info"); // Keep perf logs visible
+perfLogger.setLevel("warn"); // Reduce perf logging noise
 
 // No thresholds needed - solution view priority is handled on the server side
 
@@ -49,20 +49,19 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     private _filterDebounceTimeout: NodeJS.Timeout | null = null;
     private _filteredNodesCache: Map<string, DocumentSymbol[]> = new Map();
     private _debounceDelay: number = 300; // 300ms debounce delay
+    
+    // Document change debouncing
+    private documentChangeDebounceTimeout: NodeJS.Timeout | null = null;
+    private documentChangeDebounceDelay: number = 500; // 500ms debounce for document changes
+    
+    // Parent tracking for tree navigation
+    private parentMap: Map<string, DocumentSymbol | null> = new Map();
 
     constructor(treeView?: TreeView<DocumentSymbol>) {
         this.treeView = treeView;
         
-        // Initialize the follow cursor context - make sure to use await in an async IIFE
-        (async () => {
-            try {
-                await commands.executeCommand('setContext', 'clarion.followCursorEnabled', this.followCursor);
-                logger.info(`Initialized clarion.followCursorEnabled context to ${this.followCursor}`);
-            } catch (error) {
-                logger.error(`Failed to set context: ${error}`);
-            }
-        })();
-
+        // Note: The follow cursor context is initialized in extension.ts after tree view creation
+        
         // Listen for active editor changes
         window.onDidChangeActiveTextEditor(editor => {
             perfLogger.info(`📊 PERF: Active editor changed to: ${editor?.document.fileName || 'none'}`);
@@ -92,13 +91,18 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         
         // Listen for selection changes to implement "Follow Cursor" functionality
         window.onDidChangeTextEditorSelection(event => {
+            logger.debug(`📍 Selection changed in editor: ${event.textEditor.document.fileName}`);
+            logger.debug(`   followCursor=${this.followCursor}, activeEditor=${!!this.activeEditor}, match=${event.textEditor === this.activeEditor}`);
+            
             if (this.followCursor && this.activeEditor && event.textEditor === this.activeEditor) {
+                logger.debug(`   Triggering debounced reveal after 100ms`);
                 // Debounce the selection change to avoid excessive updates
                 if (this.selectionChangeDebounceTimeout) {
                     clearTimeout(this.selectionChangeDebounceTimeout);
                 }
                 
                 this.selectionChangeDebounceTimeout = setTimeout(() => {
+                    logger.debug(`   Debounce timeout fired, calling revealActiveSelection()`);
                     this.revealActiveSelection();
                     this.selectionChangeDebounceTimeout = null;
                 }, 100); // 100ms debounce delay for cursor movements
@@ -119,6 +123,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         this._filteredNodesCache.clear();
         // Clear the visibility map
         this.visibilityMap.clear();
+        // Clear the parent map
+        this.parentMap.clear();
         this._onDidChangeTreeData.fire();
         
         const perfTime = performance.now() - perfStart;
@@ -126,22 +132,31 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     }
     
     /**
-     * Toggles the "Follow Cursor" functionality
-     * @returns The new state of the follow cursor setting
+     * Sets the "Follow Cursor" functionality to a specific state
+     * @param enabled Whether to enable or disable follow cursor
      */
-    toggleFollowCursor(): boolean {
-        this.followCursor = !this.followCursor;
-        logger.info(`🔄 Follow cursor ${this.followCursor ? 'enabled' : 'disabled'}`);
+    setFollowCursor(enabled: boolean): void {
+        this.followCursor = enabled;
+        logger.debug(`🔄 Follow cursor set to ${this.followCursor ? 'enabled' : 'disabled'}`);
+        logger.debug(`   Current state: followCursor=${this.followCursor}, activeEditor=${!!this.activeEditor}, treeView=${!!this.treeView}`);
         
         // If we just enabled follow cursor, immediately reveal the current selection
         if (this.followCursor) {
+            logger.debug(`   Revealing active selection after enabling follow cursor`);
             this.revealActiveSelection();
         } else {
             // Clear the current highlighted symbol when disabling
             this.currentHighlightedSymbol = undefined;
             this._onDidChangeTreeData.fire();
         }
-        
+    }
+    
+    /**
+     * Toggles the "Follow Cursor" functionality
+     * @returns The new state of the follow cursor setting
+     */
+    toggleFollowCursor(): boolean {
+        this.setFollowCursor(!this.followCursor);
         return this.followCursor;
     }
     
@@ -156,31 +171,52 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
      * Finds and reveals the symbol at the current cursor position
      */
     private async revealActiveSelection(): Promise<void> {
+        logger.debug(`🔍 revealActiveSelection called`);
+        logger.debug(`   activeEditor=${!!this.activeEditor}, treeView=${!!this.treeView}, followCursor=${this.followCursor}`);
+        
         if (!this.activeEditor || !this.treeView) {
+            logger.debug(`   Exiting: missing activeEditor or treeView`);
             return;
         }
         
         try {
             // Get the current cursor position
             const position = this.activeEditor.selection.active;
+            logger.debug(`   Current cursor position: line ${position.line}`);
             
             // Get all symbols for the current document
             const symbols = await this.getChildren();
+            logger.debug(`   Got ${symbols?.length || 0} symbols from getChildren()`);
             if (!symbols || symbols.length === 0) {
+                logger.debug(`   Exiting: no symbols`);
                 return;
             }
             
-            // Find the symbol that contains the cursor position
+            // Find the symbol that contains the cursor position (searches recursively through all symbols and children)
             const symbol = this.findSymbolAtPosition(symbols, position.line);
+            logger.debug(`   Found symbol at position: ${symbol ? symbol.name : 'none'}`);
             if (symbol) {
                 // Store the currently highlighted symbol
                 this.currentHighlightedSymbol = symbol;
                 
-                // Reveal the symbol in the tree view
-                await this.treeView.reveal(symbol, { select: true, focus: false });
+                logger.debug(`   Revealing symbol: ${symbol.name} at range [${symbol.range.start.line}, ${symbol.range.end.line}]`);
                 
-                // Force refresh to apply highlighting
-                this._onDidChangeTreeData.fire(symbol);
+                // Get the tracked instance from elementMap
+                const key = this.getElementKey(symbol);
+                const trackedSymbol = this.elementMap.get(key);
+                logger.debug(`   Looking up tracked symbol with key: ${key}`);
+                logger.debug(`   Found in elementMap: ${!!trackedSymbol}`);
+                
+                if (trackedSymbol) {
+                    // Reveal using the tracked instance that VS Code knows about
+                    await this.treeView.reveal(trackedSymbol, { select: true, focus: false, expand: true });
+                    
+                    // Force refresh to apply highlighting
+                    this._onDidChangeTreeData.fire(trackedSymbol);
+                    logger.debug(`   Symbol revealed successfully`);
+                } else {
+                    logger.debug(`   Could not find tracked symbol in elementMap`);
+                }
             }
         } catch (error) {
             // This can happen if VS Code hasn't finished building the tree yet or if the symbol structure changed
@@ -378,6 +414,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 for (const child of element.children) {
                     const childKey = this.getElementKey(child);
                     this.elementMap.set(childKey, child);
+                    this.parentMap.set(childKey, element); // Track parent relationship
                 }
             }
             
@@ -429,12 +466,13 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             
             this.elementMap.clear();
 
-            const trackSymbols = (symbolList: DocumentSymbol[]) => {
+            const trackSymbols = (symbolList: DocumentSymbol[], parent: DocumentSymbol | null = null) => {
                 for (const symbol of symbolList) {
                     const key = this.getElementKey(symbol);
                     this.elementMap.set(key, symbol);
+                    this.parentMap.set(key, parent);
                     if (symbol.children?.length) {
-                        trackSymbols(symbol.children);
+                        trackSymbols(symbol.children, symbol);
                     }
                 }
             };
@@ -682,7 +720,10 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
      * @returns The parent element, or null if the element is a root element
      */
     getParent(element: DocumentSymbol): Promise<DocumentSymbol | null> {
-        return Promise.resolve(null); // Root elements have no parent
+        const key = this.getElementKey(element);
+        const parent = this.parentMap.get(key) || null;
+        logger.debug(`getParent called for ${element.name}, returning: ${parent ? parent.name : 'null'}`);
+        return Promise.resolve(parent);
     }
     // Helper method to filter nodes based on text
     private filterNodes(nodes: DocumentSymbol[], filterText: string): DocumentSymbol[] {

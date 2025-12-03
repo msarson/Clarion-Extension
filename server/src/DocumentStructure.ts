@@ -2,7 +2,7 @@ import { Token, TokenType } from "./ClarionTokenizer";
 import LoggerManager from "./logger";
 
 const logger = LoggerManager.getLogger("DocumentStructure");
-logger.setLevel("error"); // Back to error-only logging
+logger.setLevel("error"); // TEMP: Enable for debugging method implementations
 
 export class DocumentStructure {
     private structureStack: Token[] = [];
@@ -80,6 +80,11 @@ export class DocumentStructure {
                     case "DATA":
                         this.handleExecutionMarker(token);
                         break;
+                    case "WHILE":
+                    case "UNTIL":
+                        // Check if this WHILE/UNTIL terminates a LOOP
+                        this.handleLoopTerminator(token, i);
+                        break;
                 }
             } else if (token.type === TokenType.Structure) {
                 this.handleStructureToken(token);
@@ -127,7 +132,7 @@ export class DocumentStructure {
         for (const token of this.tokens) {
             const insideExecutionCode = this.procedureStack.length > 0;
 
-            if (!insideExecutionCode && token.start === 0 && token.type !== TokenType.Comment && token.value !== '?') {
+            if (!insideExecutionCode && token.start === 0 && token.type !== TokenType.Comment && token.type !== TokenType.Directive && token.value !== '?') {
                 token.type = TokenType.Label;
                 token.label = token.value;
                 maxLabelWidth = Math.max(maxLabelWidth, token.value.length);
@@ -490,7 +495,7 @@ export class DocumentStructure {
                 mapToken.children.push(token);
                 
                 // Extract the procedure name (everything before the opening parenthesis)
-                const procName = token.value.split("(")[0];
+                const procName = token.value.split("(")[0].trim();
                 
                 // CRITICAL FIX: Set the token's label to the procedure name
                 // This ensures it will be displayed correctly in the outline view
@@ -501,7 +506,50 @@ export class DocumentStructure {
         }
     }
 
+    private handleLoopTerminator(token: Token, index: number): void {
+        // WHILE or UNTIL can terminate a LOOP if:
+        // 1. It's not at the beginning of the LOOP (LOOP WHILE... or LOOP UNTIL...)
+        // 2. There's a LOOP on the structure stack
+        
+        // Check if there's a LOOP in the structure stack
+        const loopIndex = this.structureStack.findIndex(s => s.value.toUpperCase() === 'LOOP');
+        if (loopIndex === -1) {
+            // No LOOP to terminate - this must be LOOP WHILE/UNTIL (at the start)
+            return;
+        }
+        
+        const loopStructure = this.structureStack[loopIndex];
+        
+        // Check if this WHILE/UNTIL is on the same line as the LOOP
+        // If so, it's the opening condition, not a terminator
+        if (loopStructure.line === token.line) {
+            return;
+        }
+        
+        // This WHILE/UNTIL terminates the LOOP
+        // Pop everything from the stack until we get to (and including) the LOOP
+        while (this.structureStack.length > loopIndex) {
+            const poppedStructure = this.structureStack.pop()!;
+            poppedStructure.finishesAt = token.line;
+            logger.info(`🔚 Closed ${poppedStructure.value} at Line ${token.line} (terminated by ${token.value.toUpperCase()})`);
+        }
+    }
+
     private handleEndStatementForStructure(token: Token): void {
+        // ✅ Check if this END/period is an inline terminator
+        // If there's a structure keyword on the same line, this END/period terminates that structure, not the stack
+        const sameLine = this.tokensByLine.get(token.line) || [];
+        const structureOnSameLine = sameLine.find(t => 
+            t.type === TokenType.Structure && t !== token
+        );
+        
+        if (structureOnSameLine) {
+            // This is an inline terminator - don't pop from stack
+            logger.info(`🔚 Inline terminator '${token.value}' at Line ${token.line} for '${structureOnSameLine.value}' (not popping stack)`);
+            return;
+        }
+        
+        // This END/period terminates a structure from the stack
         const lastStructure = this.structureStack.pop();
         if (lastStructure) {
             lastStructure.finishesAt = token.line;
@@ -562,9 +610,29 @@ export class DocumentStructure {
             this.handleProcedureClosure(token.line - 1);
         }
         
-        const isMethodImpl = prevToken?.type === TokenType.Label && prevToken.value.includes(".");
+        // Check for method implementation: Look for pattern like "ClassName.MethodName PROCEDURE"
+        // This could be tokenized as: Label(ClassName) + Variable(MethodName) + Keyword(PROCEDURE)
+        // Or in some cases: Label(ClassName.MethodName) + Keyword(PROCEDURE)
+        let isMethodImpl = false;
+        let fullProcedureName = prevToken?.value ?? "AnonymousProcedure";
         
-        token.label = prevToken?.value ?? "AnonymousProcedure";
+        // Check if prevToken is a label or variable that might be part of a method name
+        if (prevToken?.type === TokenType.Label || prevToken?.type === TokenType.Variable) {
+            // Look back one more token to see if there's a class name
+            const tokenBeforePrev = index >= 2 ? this.tokens[index - 2] : null;
+            if (tokenBeforePrev?.type === TokenType.Label && tokenBeforePrev.line === token.line) {
+                // We have: Label + (Label|Variable) + PROCEDURE on same line
+                // This is likely: ClassName.MethodName PROCEDURE
+                fullProcedureName = `${tokenBeforePrev.value}.${prevToken.value}`;
+                isMethodImpl = true;
+            } else if (prevToken.value.includes(".")) {
+                // The previous token itself contains a dot (entire name in one token)
+                fullProcedureName = prevToken.value;
+                isMethodImpl = true;
+            }
+        }
+        
+        token.label = fullProcedureName;
         token.type = TokenType.Procedure; // ✅ Always keep as Procedure
         token.subType = isMethodImpl ? TokenType.MethodImplementation : TokenType.GlobalProcedure;
         

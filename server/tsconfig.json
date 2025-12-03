@@ -3,7 +3,7 @@
 	"compilerOptions": {
 	  "outDir": "../out",
 	  "rootDir": "..",
-	  "types": []
+	  "types": ["node", "mocha"]
 	},
 	"include": ["src/**/*", "../common/src/**/*"],
 	"exclude": ["node_modules"]

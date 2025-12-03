@@ -45,20 +45,11 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
         const methodCallInfo = this.detectMethodCall(document, position);
         if (methodCallInfo) {
             logger.info(`Detected method call to ${methodCallInfo.methodName} with ${methodCallInfo.paramCount} parameters`);
-            const implementationLocation = await this.findMethodImplementationForCall(document, methodCallInfo.methodName, methodCallInfo.paramCount);
-            if (implementationLocation) {
-                // Create a ClarionLocation-like object for the method implementation
-                const clarionLocation: ClarionLocation = {
-                    fullFileName: implementationLocation.uri.fsPath,
-                    statementType: "METHOD",
-                    sectionLineLocation: implementationLocation.range.start,
-                    linePosition: implementationLocation.range.start,
-                    methodName: methodCallInfo.methodName,
-                    implementationResolved: true
-                };
-                const hoverMessage = await this.constructHoverMessage(clarionLocation);
-                return new vscode.Hover(hoverMessage);
-            }
+            
+            // For method calls, defer to server hover which shows declaration info
+            // Just return undefined so server handles it - server has the complete signature with return type
+            logger.info(`Deferring method call hover to server for complete declaration info`);
+            return undefined;
         }
         
         // If not a method call, proceed with existing logic for declarations
@@ -242,7 +233,7 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
         return hoverMessage;
     }
 
-    private async constructHoverMessage(location: ClarionLocation): Promise<vscode.MarkdownString> {
+    private async constructHoverMessage(location: ClarionLocation, declarationInfo?: { signature: string; file: string; line: number } | null): Promise<vscode.MarkdownString> {
         const linesToShow = 10;
         const hoverMessage = new vscode.MarkdownString();
         hoverMessage.isTrusted = true; // Enable command links in hover
@@ -256,7 +247,15 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
             
             if (statementType === "METHOD") {
                 logger.info(`Showing method implementation from: ${location.fullFileName}`);
-                hoverMessage.appendMarkdown(`**Method Implementation in: ${location.fullFileName}**\n\n`);
+                
+                // Show signature first if available
+                if (declarationInfo) {
+                    hoverMessage.appendMarkdown(`**Method Signature:**\n\n`);
+                    hoverMessage.appendCodeblock(declarationInfo.signature, 'clarion');
+                    hoverMessage.appendMarkdown(`\n---\n\n`);
+                }
+                
+                hoverMessage.appendMarkdown(`**Implementation in: ${location.fullFileName}**\n\n`);
             } else {
                 hoverMessage.appendMarkdown(`**${location.statementType}: ${location.fullFileName}**\n\n`);
             }
@@ -280,10 +279,10 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
                 startLine = location.sectionLineLocation.line;
             }
 
-            // For method implementations, show signature and first 15 lines of implementation
+            // For method implementations, show signature and first 3 lines of implementation
             // Case-insensitive comparison
             if ((location.statementType || "").toUpperCase() === "METHOD") {
-                const maxLinesToShow = 15;
+                const maxLinesToShow = 3;  // Reduced to 3 to show both client and server hover info
                 let codeLineIndex = -1;
                 let endLine = startLine + maxLinesToShow;
                 
