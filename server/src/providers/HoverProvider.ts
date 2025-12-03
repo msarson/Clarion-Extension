@@ -40,10 +40,14 @@ export class HoverProvider {
                 end: { line: position.line, character: Number.MAX_VALUE }
             });
             
-            const methodImplMatch = line.match(/^(\w+)\.(\w+)\s+PROCEDURE/i);
+            const methodImplMatch = line.match(/^(\w+)\.(\w+)\s+PROCEDURE\s*\((.*?)\)/i);
             if (methodImplMatch) {
                 const className = methodImplMatch[1];
                 const methodName = methodImplMatch[2];
+                const paramListText = methodImplMatch[3];
+                
+                // Count parameters from the implementation signature
+                const paramCount = this.memberResolver.countParametersInDeclaration(line);
                 
                 // Check if cursor is on the class or method name
                 const classStart = line.indexOf(className);
@@ -53,7 +57,7 @@ export class HoverProvider {
                 
                 if ((position.character >= classStart && position.character <= classEnd) ||
                     (position.character >= methodStart && position.character <= methodEnd)) {
-                    const declInfo = this.findMethodDeclarationInfo(className, methodName, document);
+                    const declInfo = this.findMethodDeclarationInfo(className, methodName, document, paramCount);
                     if (declInfo) {
                         return this.constructMethodImplementationHover(methodName, className, declInfo);
                     }
@@ -1032,8 +1036,9 @@ export class HoverProvider {
 
     /**
      * Finds method declaration info from CLASS (for hover on implementation)
+     * Uses parameter count to find the best matching overload
      */
-    private findMethodDeclarationInfo(className: string, methodName: string, document: TextDocument): { signature: string; file: string; line: number } | null {
+    private findMethodDeclarationInfo(className: string, methodName: string, document: TextDocument, paramCount?: number): { signature: string; file: string; line: number } | null {
         // Search in current file first
         const tokens = this.tokenCache.getTokens(document);
         const classTokens = tokens.filter(token =>
@@ -1041,6 +1046,8 @@ export class HoverProvider {
             token.value.toUpperCase() === 'CLASS' &&
             token.line > 0
         );
+        
+        let bestMatch: { signature: string; file: string; line: number; distance: number } | null = null;
         
         for (const classToken of classTokens) {
             const labelToken = tokens.find(t =>
@@ -1066,23 +1073,49 @@ export class HoverProvider {
                         const content = document.getText();
                         const lines = content.split('\n');
                         const signature = lines[i].trim();
-                        return { signature, file: document.uri, line: i };
+                        
+                        // If no parameter count provided, return first match
+                        if (paramCount === undefined) {
+                            return { signature, file: document.uri, line: i };
+                        }
+                        
+                        // Count parameters in the declaration
+                        const declParamCount = this.memberResolver.countParametersInDeclaration(signature);
+                        const distance = Math.abs(declParamCount - paramCount);
+                        
+                        // Exact match - return immediately
+                        if (distance === 0) {
+                            return { signature, file: document.uri, line: i };
+                        }
+                        
+                        // Track best match
+                        if (bestMatch === null || distance < bestMatch.distance) {
+                            bestMatch = { signature, file: document.uri, line: i, distance };
+                        }
                     }
                 }
             }
         }
         
+        // If we found a close match, return it
+        if (bestMatch) {
+            return { signature: bestMatch.signature, file: bestMatch.file, line: bestMatch.line };
+        }
+        
         // Search in INCLUDE files
-        return this.findMethodDeclarationInIncludes(className, methodName, document);
+        return this.findMethodDeclarationInIncludes(className, methodName, document, paramCount);
     }
 
     /**
      * Searches INCLUDE files for method declaration
+     * Uses parameter count to find the best matching overload
      */
-    private findMethodDeclarationInIncludes(className: string, methodName: string, document: TextDocument): { signature: string; file: string; line: number } | null {
+    private findMethodDeclarationInIncludes(className: string, methodName: string, document: TextDocument, paramCount?: number): { signature: string; file: string; line: number } | null {
         const filePath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
         const content = document.getText();
         const lines = content.split('\n');
+        
+        let bestMatch: { signature: string; file: string; line: number; distance: number } | null = null;
         
         // Find INCLUDE statements
         for (let i = 0; i < lines.length; i++) {
@@ -1137,12 +1170,35 @@ export class HoverProvider {
                             const methodMatch = methodLine.match(new RegExp(`^\\s*(${methodName})\\s+PROCEDURE`, 'i'));
                             if (methodMatch) {
                                 const signature = methodLine.trim();
-                                return { signature, file: resolvedPath, line: k };
+                                
+                                // If no parameter count provided, return first match
+                                if (paramCount === undefined) {
+                                    return { signature, file: resolvedPath, line: k };
+                                }
+                                
+                                // Count parameters in the declaration
+                                const declParamCount = this.memberResolver.countParametersInDeclaration(signature);
+                                const distance = Math.abs(declParamCount - paramCount);
+                                
+                                // Exact match - return immediately
+                                if (distance === 0) {
+                                    return { signature, file: resolvedPath, line: k };
+                                }
+                                
+                                // Track best match
+                                if (bestMatch === null || distance < bestMatch.distance) {
+                                    bestMatch = { signature, file: resolvedPath, line: k, distance };
+                                }
                             }
                         }
                     }
                 }
             }
+        }
+        
+        // Return best match if found
+        if (bestMatch) {
+            return { signature: bestMatch.signature, file: bestMatch.file, line: bestMatch.line };
         }
         
         return null;

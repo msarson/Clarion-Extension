@@ -31,6 +31,11 @@ This file tracks all outstanding tasks, bugs, and improvements for the Clarion L
   - Fields `triplet1`, `triplet2`, `triplet3` now correctly appear as children of the GROUP
   - Fixed symbol builder to properly handle unlabeled groups and their END terminators
   - Group fields no longer appear as siblings of the GROUP
+- ✅ **FIXED: Method implementation hover now shows correct overload**
+  - Hovering over `StringTheory.Instring Procedure(...)` now uses parameter count to find matching declaration
+  - Uses same overload resolution logic as method call hover (e.g., `self.Instring(...)`)
+  - Searches both current file and INCLUDE files for best matching overload
+  - Returns exact match when parameter counts match, or closest match otherwise
 
 #### Remaining Issues - In Progress
 None currently identified. All major issues from Dec 2-3 sessions have been resolved.
