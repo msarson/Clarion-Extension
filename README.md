@@ -64,6 +64,11 @@ For a comprehensive list of all features and their locations within the extensio
 - **Complete Language Support**: Syntax highlighting, bracket matching, and auto-closing pairs for all Clarion file types (.clw, .inc, .txa, etc.)
 - **Solution Explorer View**: Navigate Clarion projects directly inside VS Code.
 - **Automatic Solution Parsing**: Detects all projects and redirection files in your solution.
+- **ClarionCl.exe Integration**: **NEW!** Generate Clarion applications directly from the solution tree
+  - Right-click on Applications node to generate all APPs in solution
+  - Right-click on individual APP to generate single application
+  - Live output streaming to "Clarion Generator" channel
+  - Success/error notifications on completion
 - **Enhanced "Go To Definition"**: Supports `INCLUDE` and `MODULE` statements, with redirection-aware searches. Full support for GROUP PREFIX declarations (e.g., `LOC:MyVar`, `MyGroup.MyVar`). **NEW: Method overload support** - correctly navigates to the right overload based on parameters.
 - **Method Overload Support**: Smart detection of method overloads with parameter counting for accurate navigation and hover information.
 - **Code Folding**: Tokenizer-based folding provider for improved code readability.

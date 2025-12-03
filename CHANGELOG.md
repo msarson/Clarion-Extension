@@ -58,6 +58,33 @@ All notable changes to the "clarion-extension" extension will be documented in t
 
 ## [Unreleased]
 
+### Added - 2024-12-03
+
+#### ClarionCl.exe Integration (APP Generation)
+- **Generate Applications**: Right-click context menu commands to generate Clarion applications
+  - **Generate All Applications**: Right-click on Applications node to generate all APPs in solution
+  - **Generate Application**: Right-click on individual app to generate single APP
+  - Uses `ClarionCl.exe /win /ag` command with proper working directory
+  - Streams output to dedicated "Clarion Generator" output channel
+  - Shows success/error notifications on completion
+  - Automatically resolves ClarionCl.exe path from solution's Clarion BIN directory
+
+#### Solution Tree Improvements
+- **Binary File Prevention**: Clicking on .APP files in tree no longer attempts to open them as text
+  - APP nodes now use `TreeItemCollapsibleState.None` without resourceUri
+  - Prevents VS Code from loading binary files in editor tabs
+  - Cleaner user experience when navigating solution structure
+
+#### Enhanced Solution Manager
+- **Clarion Directory Detection**: Solution manager now provides Clarion BIN path
+  - Extracts Clarion directory from .sln file configuration
+  - Makes path available to all extension features
+  - Enables reliable ClarionCl.exe execution
+
+---
+
+## [Unreleased]
+
 ### Added - 2025-11-30
 
 #### Clarion Language Knowledge Base
