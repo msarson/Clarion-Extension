@@ -84,6 +84,95 @@ export class ClarionDocumentSymbolProvider {
     // 🚀 PERFORMANCE: Store tokensByLine as instance variable to avoid passing it everywhere
     private tokensByLine: Map<number, Token[]> = new Map();
     
+    /**
+     * 🌳 DEBUG: Dump symbol tree in human-readable format
+     * Prefix: [TREE-DUMP] for easy filtering in logs
+     */
+    private dumpSymbolTree(symbols: ClarionDocumentSymbol[], depth = 0): void {
+        const indent = "  ".repeat(depth);
+        
+        for (const symbol of symbols) {
+            // Build symbol info
+            const kindName = this.getSymbolKindName(symbol.kind);
+            const line = symbol.range.start.line + 1; // Convert to 1-based
+            const flags: string[] = [];
+            
+            // Add relevant flags
+            if (symbol._isMethodImplementation) flags.push("METHOD-IMPL");
+            if (symbol._isMethodDeclaration) flags.push("METHOD-DECL");
+            if (symbol._isGlobalProcedure) flags.push("GLOBAL-PROC");
+            if (symbol._isMapProcedure) flags.push("MAP-PROC");
+            if (symbol._isSpecialRoutine) flags.push("SPECIAL-ROUTINE");
+            if (symbol._clarionType) flags.push(`type:${symbol._clarionType}`);
+            
+            const flagStr = flags.length > 0 ? ` [${flags.join(", ")}]` : "";
+            
+            console.log(`[TREE-DUMP] ${indent}├─ ${symbol.name}`);
+            console.log(`[TREE-DUMP] ${indent}│  kind=${kindName}, detail="${symbol.detail}", line=${line}${flagStr}`);
+            
+            // Recurse into children
+            if (symbol.children && symbol.children.length > 0) {
+                this.dumpSymbolTree(symbol.children, depth + 1);
+            }
+        }
+    }
+    
+    /**
+     * 🌳 DEBUG: Dump symbol tree in compact format (single line per symbol)
+     * Prefix: [TREE-COMPACT] for easy filtering in logs
+     */
+    private dumpSymbolTreeCompact(symbols: ClarionDocumentSymbol[], depth = 0): void {
+        const indent = "│ ".repeat(depth);
+        
+        for (const symbol of symbols) {
+            const line = symbol.range.start.line + 1;
+            const childCount = symbol.children?.length || 0;
+            const detail = symbol.detail ? ` "${symbol.detail}"` : "";
+            const kindName = this.getSymbolKindName(symbol.kind);
+            
+            console.log(`[TREE-COMPACT] ${indent}├─ ${symbol.name}${detail} @L${line} [${kindName}] (${childCount} children)`);
+            
+            if (symbol.children && symbol.children.length > 0) {
+                this.dumpSymbolTreeCompact(symbol.children, depth + 1);
+            }
+        }
+    }
+    
+    /**
+     * Helper to convert SymbolKind enum value to readable string
+     */
+    private getSymbolKindName(kind: SymbolKind): string {
+        const kindNames: { [key: number]: string } = {
+            [SymbolKind.File]: "File",
+            [SymbolKind.Module]: "Module",
+            [SymbolKind.Namespace]: "Namespace",
+            [SymbolKind.Package]: "Package",
+            [SymbolKind.Class]: "Class",
+            [SymbolKind.Method]: "Method",
+            [SymbolKind.Property]: "Property",
+            [SymbolKind.Field]: "Field",
+            [SymbolKind.Constructor]: "Constructor",
+            [SymbolKind.Enum]: "Enum",
+            [SymbolKind.Interface]: "Interface",
+            [SymbolKind.Function]: "Function",
+            [SymbolKind.Variable]: "Variable",
+            [SymbolKind.Constant]: "Constant",
+            [SymbolKind.String]: "String",
+            [SymbolKind.Number]: "Number",
+            [SymbolKind.Boolean]: "Boolean",
+            [SymbolKind.Array]: "Array",
+            [SymbolKind.Object]: "Object",
+            [SymbolKind.Key]: "Key",
+            [SymbolKind.Null]: "Null",
+            [SymbolKind.EnumMember]: "EnumMember",
+            [SymbolKind.Struct]: "Struct",
+            [SymbolKind.Event]: "Event",
+            [SymbolKind.Operator]: "Operator",
+            [SymbolKind.TypeParameter]: "TypeParameter"
+        };
+        return kindNames[kind] || `Unknown(${kind})`;
+    }
+    
     public extractStringContents(rawString: string): string {
         const match = rawString.match(/'([^']+)'/);
         return match ? match[1] : rawString;
@@ -582,8 +671,22 @@ export class ClarionDocumentSymbolProvider {
 
         // No need for final sorting here since we're sorting as symbols are added
         // This ensures symbols are already in the correct order when VS Code renders the outline
-        logger.info("🧠 Full symbol tree:");
-        logger.info(JSON.stringify(symbols, null, 2));
+        
+        // 🌳 DEBUG: Output tree in multiple formats for analysis
+        console.log("[TREE-DUMP] ========================================");
+        console.log("[TREE-DUMP] Symbol Tree - Detailed View");
+        console.log("[TREE-DUMP] ========================================");
+        this.dumpSymbolTree(symbols);
+        
+        console.log("\n[TREE-COMPACT] ========================================");
+        console.log("[TREE-COMPACT] Symbol Tree - Compact View");
+        console.log("[TREE-COMPACT] ========================================");
+        this.dumpSymbolTreeCompact(symbols);
+        
+        console.log("\n[TREE-JSON] ========================================");
+        console.log("[TREE-JSON] Symbol Tree - JSON (for programmatic analysis)");
+        console.log("[TREE-JSON] ========================================");
+        console.log("[TREE-JSON]", JSON.stringify(symbols, null, 2));
 
         return symbols;
     }
