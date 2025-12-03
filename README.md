@@ -118,9 +118,9 @@ This is necessary because older versions had a dependency on fushnisoft.clarion 
 ## Marketplace Information
 
 - **Identifier**: `msarson.clarion-extensions`
-- **Version**: `0.5.8`
+- **Version**: `0.7.1`
 - **Published**: 2018-08-19
-- **Last Release**: 2025-11-17
+- **Last Release**: 2024-12-03
 
 [View on Marketplace](https://marketplace.visualstudio.com/items?itemName=msarson.clarion-extensions)
 

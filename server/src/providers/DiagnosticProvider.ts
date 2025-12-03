@@ -549,8 +549,8 @@ export class DiagnosticProvider {
     }
     
     /**
-     * Validate CASE structures have required OF clause
-     * KB Rule: CASE must have at least one OF, OROF must follow OF
+     * Validate CASE structures - OROF must follow OF
+     * KB Rule: OROF must follow OF (CASE without OF is valid but uncommon)
      * @param tokens - Tokenized document
      * @param document - Original TextDocument for position mapping
      * @returns Array of Diagnostic objects for invalid CASE structures
@@ -565,7 +565,6 @@ export class DiagnosticProvider {
             if (token.type === TokenType.Structure && token.value.toUpperCase() === 'CASE') {
                 let hasOf = false;
                 let lastOfIndex = -1;
-                let caseEndIndex = -1;
                 
                 // Look ahead to find OF, OROF, and END
                 for (let j = i + 1; j < tokens.length; j++) {
@@ -598,30 +597,13 @@ export class DiagnosticProvider {
                     
                     // Stop at END
                     if (upperValue === 'END' && nextToken.type === TokenType.EndStatement) {
-                        caseEndIndex = j;
                         break;
                     }
                     
                     // Stop if we hit another structure
                     if (nextToken.type === TokenType.Structure && nextToken.line > token.line) {
-                        caseEndIndex = j - 1;
                         break;
                     }
-                }
-                
-                // Report missing OF
-                if (!hasOf) {
-                    const range = {
-                        start: { line: token.line, character: token.start },
-                        end: { line: token.line, character: token.start + token.value.length }
-                    };
-                    
-                    diagnostics.push({
-                        severity: DiagnosticSeverity.Error,
-                        range: range,
-                        message: `CASE structure must have at least one OF clause`,
-                        source: 'clarion'
-                    });
                 }
             }
         }
