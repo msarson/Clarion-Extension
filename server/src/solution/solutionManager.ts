@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { ClarionSolutionServer } from './clarionSolutionServer';
+import { ClarionSolutionServer, ClarionApp } from './clarionSolutionServer';
 import LoggerManager from '../logger';
 import { ClarionProjectServer } from './clarionProjectServer';
 import { Connection } from 'vscode-languageserver';
@@ -212,7 +212,11 @@ export class SolutionManager {
                     logger.info(`✅ Added project ${project.name} with ${project.sourceFiles.length} source files`);
                 }
 
-                logger.info(`📂 Finished parsing solution file. Found ${solution.projects.length} projects.`);
+                // Parse Clarion .APP files from Solution Items section
+                logger.info(`🔍 Searching for Solution Items with APP files`);
+                this.parseApplicationFiles(content, solution);
+
+                logger.info(`📂 Finished parsing solution file. Found ${solution.projects.length} projects and ${solution.applications.length} applications.`);
                 
                 // Save the parsed solution to cache
                 this.solution = solution;
@@ -229,6 +233,69 @@ export class SolutionManager {
         } catch (error) {
             logger.error(`❌ Unexpected error in parseSolution: ${error instanceof Error ? error.message : String(error)}`);
             return new ClarionSolutionServer();
+        }
+    }
+
+    /**
+     * Parses .APP files from the Solution Items section of a .sln file
+     * @param content The content of the .sln file
+     * @param solution The solution object to add APP files to
+     */
+    private parseApplicationFiles(content: string, solution: ClarionSolutionServer): void {
+        try {
+            logger.info(`🔍 Parsing Clarion .APP files from Solution Items`);
+            
+            // Find the "Solution Items" project section
+            const solutionItemsRegex = /Project\("\{2150E333-8FDC-42A3-9474-1A3956D46DE8\}"\)\s*=\s*"Solution Items"[^]*?ProjectSection\(SolutionItems\)\s*=\s*postProject([\s\S]*?)EndProjectSection/i;
+            const solutionItemsMatch = solutionItemsRegex.exec(content);
+            
+            if (!solutionItemsMatch) {
+                logger.info(`ℹ️ No Solution Items section found in .sln file`);
+                return;
+            }
+            
+            const solutionItemsContent = solutionItemsMatch[1];
+            logger.info(`✅ Found Solution Items section`);
+            
+            // Extract APP file entries (format: "filename.app = filename.app")
+            const appRegex = /^\s*(.+?\.app)\s*=\s*(.+?\.app)\s*$/gim;
+            let appMatch;
+            const solutionDir = path.dirname(this.solutionFilePath);
+            
+            while ((appMatch = appRegex.exec(solutionItemsContent)) !== null) {
+                try {
+                    const appFileName = appMatch[1].trim();
+                    logger.info(`📱 Found APP file: ${appFileName}`);
+                    
+                    // Resolve the absolute path
+                    let absolutePath: string;
+                    if (path.isAbsolute(appFileName)) {
+                        absolutePath = path.normalize(appFileName);
+                    } else {
+                        absolutePath = path.normalize(path.join(solutionDir, appFileName));
+                    }
+                    
+                    // Check if file exists (but still add it even if it doesn't)
+                    const exists = fs.existsSync(absolutePath);
+                    if (!exists) {
+                        logger.warn(`⚠️ APP file does not exist: ${absolutePath}`);
+                    } else {
+                        logger.info(`✅ Verified APP file exists: ${absolutePath}`);
+                    }
+                    
+                    solution.applications.push({
+                        name: path.basename(appFileName),
+                        relativePath: appFileName,
+                        absolutePath: absolutePath
+                    });
+                } catch (appError) {
+                    logger.error(`❌ Error processing APP file: ${appError instanceof Error ? appError.message : String(appError)}`);
+                }
+            }
+            
+            logger.info(`📱 Found ${solution.applications.length} APP file(s)`);
+        } catch (error) {
+            logger.error(`❌ Error parsing APP files: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
 

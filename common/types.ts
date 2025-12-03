@@ -14,6 +14,12 @@ export interface ClarionSourcerFileInfo {
     };
 }
 
+export interface ClarionAppInfo {
+    name: string;
+    relativePath: string;
+    absolutePath: string;
+}
+
 export interface ClarionSolutionTreeNode {
     name: string;
     path: string;
@@ -38,4 +44,5 @@ export interface ClarionSolutionInfo {
     name: string;
     path: string;
     projects: ClarionProjectInfo[];
+    applications?: ClarionAppInfo[];
 }
