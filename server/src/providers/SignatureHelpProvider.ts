@@ -6,9 +6,12 @@ import { TokenCache } from '../TokenCache';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { TokenHelper } from '../utils/TokenHelper';
+import { SolutionManager } from '../solution/solutionManager';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const logger = LoggerManager.getLogger("SignatureHelpProvider");
-logger.setLevel("error");
+logger.setLevel("info"); // DEBUG: Enable for signature help debugging
 
 /**
  * Provides signature help (parameter hints) for method calls
@@ -174,9 +177,33 @@ export class SignatureHelpProvider {
 
         if (prefix.toLowerCase() === 'self') {
             // Find current class context
-            const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, currentLine);
-            if (currentScope && currentScope.value.includes('.')) {
-                className = currentScope.value.split('.')[0];
+            let currentScope = TokenHelper.getInnermostScopeAtLine(tokens, currentLine);
+            
+            // If we're in a routine, get the parent scope
+            if (currentScope && currentScope.subType === TokenType.Routine) {
+                logger.info(`Current scope is a routine, looking for parent scope`);
+                const parentScope = TokenHelper.getParentScopeOfRoutine(tokens, currentScope);
+                if (parentScope) {
+                    currentScope = parentScope;
+                    logger.info(`Using parent scope: ${currentScope.value}`);
+                }
+            }
+            
+            if (currentScope) {
+                // Extract class name from method
+                if (currentScope.value.includes('.')) {
+                    className = currentScope.value.split('.')[0];
+                } else {
+                    // Parse from the actual line text
+                    const content = document.getText();
+                    const lines = content.split('\n');
+                    const scopeLine = lines[currentScope.line];
+                    const classMethodMatch = scopeLine.match(/^(\w+)\.(\w+)\s+PROCEDURE/i);
+                    if (classMethodMatch) {
+                        className = classMethodMatch[1];
+                        logger.info(`Extracted class name from line: ${className}`);
+                    }
+                }
             }
         } else {
             // Try to find the variable type
@@ -260,7 +287,106 @@ export class SignatureHelpProvider {
             }
         }
 
-        // TODO: Also search INCLUDE files if needed
+        // If no methods found in current file, search INCLUDE files
+        if (declarations.length === 0) {
+            logger.info(`No methods found in current file, searching INCLUDE files`);
+            const includeDeclarations = await this.findMethodDeclarationsInIncludes(className, methodName, document);
+            declarations.push(...includeDeclarations);
+        }
+
+        return declarations;
+    }
+
+    /**
+     * Searches for method declarations in INCLUDE files
+     */
+    private async findMethodDeclarationsInIncludes(
+        className: string,
+        methodName: string,
+        document: TextDocument
+    ): Promise<{ signature: string; paramCount: number }[]> {
+        const declarations: { signature: string; paramCount: number }[] = [];
+        const content = document.getText();
+        const lines = content.split('\n');
+        
+        // Find INCLUDE statements
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const includeMatch = line.match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
+            if (!includeMatch) continue;
+            
+            const includeFileName = includeMatch[1];
+            logger.info(`Found INCLUDE: ${includeFileName}`);
+            
+            // Resolve file path
+            const filePath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
+            let resolvedPath: string | null = null;
+            
+            // Try solution-wide redirection
+            const solutionManager = SolutionManager.getInstance();
+            if (solutionManager && solutionManager.solution) {
+                for (const project of solutionManager.solution.projects) {
+                    const redirectionParser = project.getRedirectionParser();
+                    const resolved = redirectionParser.findFile(includeFileName);
+                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
+                        resolvedPath = resolved.path;
+                        logger.info(`Resolved via solution: ${resolvedPath}`);
+                        break;
+                    }
+                }
+            }
+            
+            // Fallback to relative path
+            if (!resolvedPath) {
+                const currentDir = path.dirname(filePath);
+                const relativePath = path.join(currentDir, includeFileName);
+                if (fs.existsSync(relativePath)) {
+                    resolvedPath = relativePath;
+                    logger.info(`Resolved via relative path: ${resolvedPath}`);
+                }
+            }
+            
+            if (resolvedPath) {
+                const includeContent = fs.readFileSync(resolvedPath, 'utf8');
+                const includeLines = includeContent.split('\n');
+                
+                // Find the class
+                for (let j = 0; j < includeLines.length; j++) {
+                    const includeLine = includeLines[j];
+                    const classMatch = includeLine.match(new RegExp(`^${className}\\s+CLASS`, 'i'));
+                    if (classMatch) {
+                        logger.info(`Found class ${className} in INCLUDE at line ${j}`);
+                        
+                        // Find all methods with this name
+                        for (let k = j + 1; k < includeLines.length; k++) {
+                            const methodLine = includeLines[k];
+                            if (methodLine.match(/^END\s*$/i)) {
+                                logger.info(`Reached END of class at line ${k}`);
+                                break;
+                            }
+                            
+                            // Check if line starts with the method name (label at column 0)
+                            const methodMatch = methodLine.match(new RegExp(`^${methodName}\\s+PROCEDURE`, 'i'));
+                            if (methodMatch) {
+                                const signature = methodLine.trim();
+                                const declParamCount = this.overloadResolver.countParametersInDeclaration(signature);
+                                
+                                declarations.push({
+                                    signature,
+                                    paramCount: declParamCount
+                                });
+                                
+                                logger.info(`Found method in INCLUDE at line ${k} with ${declParamCount} parameters: ${signature.substring(0, 60)}`);
+                            }
+                        }
+                        break; // Found the class, no need to search further in this file
+                    }
+                }
+            } else {
+                logger.info(`Could not resolve INCLUDE file: ${includeFileName}`);
+            }
+        }
+        
         return declarations;
     }
 
