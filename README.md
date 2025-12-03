@@ -145,9 +145,9 @@ This is necessary because older versions had a dependency on fushnisoft.clarion 
   - .APP files no longer open as text when clicked
   - Cleaner user experience in solution explorer
 
-### 🎯 Knowledge Base & Language Intelligence
+### 🎯 Enhanced Diagnostics & Validation
 
-**Comprehensive Clarion language documentation and enhanced validation:**
+**Real-time error detection with improved validation:**
 
 - **Enhanced Diagnostics**: Real-time error detection (5 validators)
   - **Structure Termination**: Unterminated IF/LOOP/CLASS structures
@@ -229,7 +229,7 @@ See [Performance Session](https://github.com/msarson/Clarion-Extension/blob/vers
   - 16 DefinitionProvider tests
   - 31 Clarion legacy syntax tests
   - 140+ DiagnosticProvider tests (TDD approach)
-  - 9 KB validation tests
+  - 9 validation tests
   - TokenHelper and FoldingProvider tests
 
 - **Testing Framework**
@@ -371,35 +371,9 @@ This release significantly improves performance through systematic optimization.
 Large Clarion files (14k+ lines) now have significantly improved response times.
 
 ---
-## Upcoming Release (In Development)
+## Release History
 
-### New Features (2025-11-30)
-
-#### Clarion Language Knowledge Base
-- **Comprehensive Documentation**: New knowledge base documenting Clarion syntax rules and conventions
-- **Reference for Development**: Serves as authoritative source for extension features and AI assistance
-
-#### Structure Termination Diagnostics
-- **Real-time Validation**: Extension now validates that IF, LOOP, and CLASS structures are properly terminated
-- **Smart Detection**: Understands inline dot terminators (e.g., `IF x THEN y.`)
-- **Context-Aware**: Knows MODULE termination rules differ between MAP and CLASS contexts
-- **Helpful Messages**: Clear diagnostic messages when structures aren't terminated correctly
-
-#### Enhanced Code Folding
-- **Fixed Dot Terminators**: Folding now correctly handles single-line structures with dot terminators
-- **Prevents Corruption**: Fixed issue where invalid fold ranges would break subsequent folds
-
-#### Structure View Enhancement
-- **Cursor Synchronization**: Structure view now automatically highlights the symbol containing the cursor
-- **Improved Navigation**: Matches behavior of VS Code's built-in Outline view
-
-### Testing
-- **Test-Driven Development**: All new features developed using TDD approach
-- **Compiler Validated**: Test files compile successfully with Clarion compiler
-- **Comprehensive Coverage**: 13 unit tests covering all structure termination scenarios
-
----
-## Current Release (v0.5.9)
+### Previous Releases (v0.7.0 and Earlier)
 ### Enhancements
 - **Improved Method Hover Display**: Method hovers now show up to 15 lines of actual implementation code after the CODE statement
 - **Interactive Navigation in Hover**: Click the line number link in hovers to jump directly to method implementation
