@@ -263,6 +263,14 @@
                 "title": "Clear Filter",
                 "icon": "$(clear-all)",
                 "when": "clarion.solutionOpen"
+            },
+            {
+                "command": "clarion.generateAllApps",
+                "title": "Generate All Applications"
+            },
+            {
+                "command": "clarion.generateApp",
+                "title": "Generate Application"
             }
         ],
         "menus": {
@@ -306,6 +314,16 @@
                     "command": "clarion.removeSourceFile",
                     "when": "view == solutionView && viewItem == clarionFile",
                     "group": "1_modification"
+                },
+                {
+                    "command": "clarion.generateAllApps",
+                    "when": "view == solutionView && viewItem == clarionApplicationsGroup",
+                    "group": "generate"
+                },
+                {
+                    "command": "clarion.generateApp",
+                    "when": "view == solutionView && viewItem == clarionApp",
+                    "group": "generate"
                 }
             ],
             "commandPalette": [

@@ -18,6 +18,7 @@ import { StatusViewProvider } from './StatusViewProvider';
 import { TreeNode } from './TreeNode';
 import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile, setGlobalClarionSelection, ClarionSolutionSettings } from './globals';
 import * as buildTasks from './buildTasks';
+import * as clarionClHelper from './clarionClHelper';
 import LoggerManager from './logger';
 import { SolutionCache } from './SolutionCache';
 import { LanguageClientManager, isClientReady, getClientReadyPromise, setLanguageClient } from './LanguageClientManager';
@@ -773,6 +774,19 @@ export async function activate(context: ExtensionContext): Promise<void> {
                 }
             } else {
                 window.showErrorMessage("Cannot determine which project to build.");
+            }
+        }),
+
+        // Add ClarionCl generator commands
+        commands.registerCommand('clarion.generateAllApps', async (node) => {
+            await clarionClHelper.generateAllApps();
+        }),
+
+        commands.registerCommand('clarion.generateApp', async (node) => {
+            if (node && node.data && node.data.absolutePath) {
+                await clarionClHelper.generateApp(node.data.absolutePath);
+            } else {
+                window.showErrorMessage("Cannot determine which application to generate.");
             }
         }),
 

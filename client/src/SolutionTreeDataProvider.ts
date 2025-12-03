@@ -524,11 +524,7 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             if (exists) {
                 treeItem.iconPath = new ThemeIcon('symbol-class'); // Application icon
                 treeItem.tooltip = appData.absolutePath;
-                treeItem.command = {
-                    title: 'Open APP File',
-                    command: 'vscode.open',
-                    arguments: [Uri.file(appData.absolutePath)]
-                };
+                // Don't set a command - APP files are binary and shouldn't open in editor
             } else {
                 treeItem.iconPath = new ThemeIcon('warning');
                 treeItem.tooltip = `APP file not found: ${appData.absolutePath}`;

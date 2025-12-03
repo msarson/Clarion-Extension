@@ -439,7 +439,7 @@ export class SolutionManager {
                 
                 logger.info("📂 Received request for solution tree");
                 const tree = this.getSolutionTree();
-                logger.info(`📂 Returning solution tree with ${tree.projects.length} projects`);
+                logger.info(`📂 Returning solution tree with ${tree.projects.length} projects and ${tree.applications?.length || 0} applications`);
                 return tree;
             } finally {
                 // Reset the solution operation flag when done
@@ -723,7 +723,8 @@ export class SolutionManager {
             return {
                 name: "No Solution",
                 path: "",
-                projects: []
+                projects: [],
+                applications: []
             };
         }
         
@@ -732,7 +733,8 @@ export class SolutionManager {
             return {
                 name: this.solution.name || "Invalid Solution",
                 path: this.solutionFilePath || "",
-                projects: []
+                projects: [],
+                applications: []
             };
         }
         
@@ -741,7 +743,8 @@ export class SolutionManager {
             return {
                 name: this.solution.name || "Invalid Solution",
                 path: this.solutionFilePath || "",
-                projects: []
+                projects: [],
+                applications: []
             };
         }
         
@@ -789,11 +792,13 @@ export class SolutionManager {
                         noneFiles: [],
                         sourceFiles: []
                     };
-                })
+                }),
+                applications: this.solution.applications || []
             };
             
             const endTime = performance.now();
             logger.info(`🕒 getSolutionTree completed in ${(endTime - startTime).toFixed(2)}ms`);
+            logger.info(`📂 Returning solution tree with ${result.projects.length} projects and ${result.applications.length} applications`);
             
             return result;
         } catch (error) {
@@ -801,7 +806,8 @@ export class SolutionManager {
             return {
                 name: "Error",
                 path: this.solutionFilePath || "",
-                projects: []
+                projects: [],
+                applications: []
             };
         }
     }
