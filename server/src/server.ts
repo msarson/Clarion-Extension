@@ -63,7 +63,7 @@ import { URI } from 'vscode-languageserver';
 import { setServerInitialized, serverInitialized } from './serverState';
 
 const logger = LoggerManager.getLogger("Server");
-logger.setLevel("info");
+logger.setLevel("error");
 
 // Track if a solution operation is in progress
 export let solutionOperationInProgress = false;

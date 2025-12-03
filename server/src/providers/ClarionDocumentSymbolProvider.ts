@@ -2,7 +2,7 @@ import { DocumentSymbol, Range, SymbolKind } from 'vscode-languageserver-types';
 
 import LoggerManager from '../logger';
 const logger = LoggerManager.getLogger("ClarionDocumentSymbolProvider");
-logger.setLevel("info"); // DEBUG: Enable info logging for MAP procedure debugging
+logger.setLevel("error"); // DEBUG: Enable info logging for MAP procedure debugging
 import { serverInitialized } from '../serverState';
 import { Token, TokenType } from '../ClarionTokenizer.js';
 import { HierarchyManager, ParentStackEntry } from './utils/HierarchyManager';
