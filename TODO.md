@@ -38,7 +38,12 @@ This file tracks all outstanding tasks, bugs, and improvements for the Clarion L
   - Returns exact match when parameter counts match, or closest match otherwise
 
 #### Remaining Issues - In Progress
-None currently identified. All major issues from Dec 2-3 sessions have been resolved.
+- [ ] **F12 (Go to Definition) needs same overload resolution as hover**
+  - Currently, pressing F12 on a method implementation (e.g., `StringTheory.Instring Procedure(...)`) finds the first declaration
+  - Should use parameter matching to find the correct overload, same as hover provider does
+  - Implementation location: Check both client and server definition providers
+  - Should handle omittable parameters `<Long SomeVar>` and default values `Long SomeVar=1`
+  - Reference: Hover provider in `ClarionHoverProvider.ts` has working overload resolution
 
 **Test files created:**
 - `server/src/test/MethodImplementation.test.ts` - TDD tests for method structure
