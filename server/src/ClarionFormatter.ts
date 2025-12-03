@@ -19,6 +19,7 @@ class ClarionFormatter {
     private executionRanges: { startsAt: number; finishesAt: number }[] = [];
     private statementIndentation: Map<number, number> = new Map();
     private insideExecutionCode: boolean = false;
+    private localDataSections: Map<number, { startLine: number; endLine: number; maxLabelLength: number }> = new Map();
 
     constructor(tokens: Token[], text: string, options?: { indentSize?: number, formattingOptions?: FormattingOptions }) {
         this.tokens = tokens;
@@ -40,6 +41,7 @@ class ClarionFormatter {
         this.identifyExecutionRanges();
         this.identifyLabelLines();
         this.detectMisplacedLabels(); // 🚀 NEW FUNCTION HERE
+        this.identifyLocalDataSections(); // 🚀 NEW: Detect local data sections
         // this.calculateIndentation();
     }
 
@@ -126,6 +128,39 @@ class ClarionFormatter {
                 // ✅ Add the line to be adjusted
                 this.labelLines.delete(token.line); // ❌ Remove as label
                 this.statementIndentation.set(token.line, this.indentSize); // ✅ Treat it as a statement instead
+            }
+        }
+    }
+
+    private identifyLocalDataSections(): void {
+        logger.info("🔍 Identifying local data sections...");
+
+        for (const token of this.tokens) {
+            if (token.subType === TokenType.Procedure || token.subType === TokenType.Routine) {
+                if (token.executionMarker) {
+                    const startLine = token.line + 1;
+                    const endLine = token.executionMarker.line - 1;
+                    
+                    if (endLine >= startLine) {
+                        // Find longest label in this section
+                        let maxLabelLength = 0;
+                        const tokensInSection = this.tokens.filter(t => 
+                            t.line >= startLine && t.line <= endLine && 
+                            (t.type === TokenType.Label || t.type === TokenType.Variable)
+                        );
+
+                        for (const t of tokensInSection) {
+                            if (t.start === 0 || (t.type === TokenType.Label && t.parent?.line === token.line)) {
+                                maxLabelLength = Math.max(maxLabelLength, t.value.length);
+                            }
+                        }
+
+                        if (maxLabelLength > 0) {
+                            this.localDataSections.set(token.line, { startLine, endLine, maxLabelLength });
+                            logger.info(`📋 Local data section for '${token.value}': lines ${startLine}-${endLine}, max label length: ${maxLabelLength}`);
+                        }
+                    }
+                }
             }
         }
     }
@@ -231,6 +266,17 @@ class ClarionFormatter {
                 continue;
             }
             
+            // Check if we're in a local data section
+            let inLocalDataSection = false;
+            let localDataMaxLabel = 0;
+            for (const [procLine, section] of this.localDataSections) {
+                if (index >= section.startLine && index <= section.endLine) {
+                    inLocalDataSection = true;
+                    localDataMaxLabel = section.maxLabelLength;
+                    break;
+                }
+            }
+            
             // For logging purposes, also track the left-trimmed version to maintain token positions
             const leftTrimmedLine = originalLine.trimLeft();
 
@@ -246,6 +292,22 @@ class ClarionFormatter {
             const secondToken = tokensOnLine.length > 1 ? tokensOnLine[1] : null;
 
             let lineIndent = finalIndent;
+            
+            // ✅ Handle local data section alignment
+            if (inLocalDataSection && (firstToken.type === TokenType.Label || firstToken.type === TokenType.Variable)) {
+                logger.info(`📋 Formatting local data variable '${firstToken.value}' at line ${index}`);
+                
+                const labelEnd0 = firstToken.value.length;
+                const alignCol0 = snap0(localDataMaxLabel + 1); // Align to next tab stop after longest label
+                const spacesToAdd = Math.max(1, alignCol0 - labelEnd0); // At least 1 space
+                
+                const restOfLine = originalLine.substring(firstToken.start + firstToken.value.length).trimLeft();
+                const formattedLine = firstToken.value + " ".repeat(spacesToAdd) + restOfLine;
+                
+                logger.info(`  Label: '${firstToken.value}' (${labelEnd0} chars), align to col ${alignCol0}, spaces: ${spacesToAdd}`);
+                formattedLines.push(formattedLine);
+                continue;
+            }
 
             if (firstToken.type === TokenType.Label) {
               logger.info(`📌 Keeping label '${firstToken.value}' at column 0 on Line ${index}`);

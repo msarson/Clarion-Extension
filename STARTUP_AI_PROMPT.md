@@ -8,6 +8,14 @@
 
 You are an AI assistant working on the Clarion-Extension VS Code extension. This extension provides language support for the Clarion programming language, including syntax highlighting, IntelliSense, go-to-definition, and other language features.
 
+## Critical Documentation Requirements
+
+**⚠️ ALWAYS DOCUMENT NEW FEATURES AND CHANGES:**
+- When implementing new features, update `CHANGELOG.md` immediately
+- When fixing bugs, document the fix in `CHANGELOG.md`
+- Keep `README.md` in sync with new capabilities
+- Update `TODO.md` when completing or discovering tasks
+
 ## Critical Knowledge Base
 
 **ALWAYS refer to these files and please read them after reading this file:**
@@ -144,14 +152,30 @@ npm test
 
 ## Common Tasks
 
+### Adding a New Feature or Improvement
+
+**CRITICAL:** Document ALL new features and improvements immediately!
+
+1. **Research** - Verify requirements with user
+2. **Update KB** - If Clarion language rule, add to `docs/clarion-knowledge-base.md`
+3. **Implement** - Make code changes
+4. **Add Tests** - Create unit tests validating the feature
+5. **Test** - Run `npm test` and verify behavior
+6. **Document Immediately**:
+   - Update `CHANGELOG.md` with feature description
+   - Update `README.md` if user-facing
+   - Update any affected documentation
+7. **Commit** - Include documentation in the commit
+8. **Wait** - Do not push unless user requests
+
 ### Adding a New Clarion Syntax Rule
 
 1. **Research** - Verify rule with user or Clarion documentation
-2. **Update KB** - Add rule to `docs/CLARION_LANGUAGE_REFERENCE.md`
+2. **Update KB** - Add rule to `docs/clarion-knowledge-base.md`
 3. **Update Code** - Modify tokenizer/parser as needed
 4. **Add Tests** - Create unit tests validating the rule
 5. **Test** - Run `npm test` and verify with test programs
-6. **Document** - Update any affected documentation
+6. **Document** - Update CHANGELOG.md and any affected documentation
 7. **Commit** - Commit changes with descriptive message
 8. **Wait** - Do not push unless user requests
 
@@ -176,11 +200,12 @@ npm test
 ## Important Reminders
 
 ### DO
-✅ Consult `docs/CLARION_LANGUAGE_REFERENCE.md` for Clarion syntax
+✅ Consult `docs/clarion-knowledge-base.md` for Clarion syntax
 ✅ Make minimal, targeted changes
 ✅ Commit often with clear messages
 ✅ Run tests before committing
-✅ Update documentation when needed
+✅ **Document ALL new features in CHANGELOG.md immediately**
+✅ Update README.md for user-facing changes
 ✅ Ask for clarification when uncertain
 ✅ Wait for user instruction to push
 
