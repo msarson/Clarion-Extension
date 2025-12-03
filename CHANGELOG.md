@@ -3,7 +3,33 @@ All notable changes to the "clarion-extension" extension will be documented in t
 
 ---
 
-## [0.7.1] - 2024-12-02
+## [0.7.1] - 2025-12-03
+
+### 🔧 ClarionCl.exe Integration (APP Generation)
+- **Generate Applications**: Right-click context menu commands to generate Clarion applications
+  - **Generate All Applications**: Right-click on Applications node to generate all APPs in solution
+  - **Generate Application**: Right-click on individual app to generate single APP
+  - Uses `ClarionCl.exe /win /ag` command with proper working directory
+  - Streams output to dedicated "Clarion Generator" output channel
+  - Shows success/error notifications on completion
+  - Automatically resolves ClarionCl.exe path from solution's Clarion BIN directory
+
+### 🌳 Solution Tree Improvements
+- **Binary File Prevention**: Clicking on .APP files in tree no longer attempts to open them as text
+  - APP nodes now use `TreeItemCollapsibleState.None` without resourceUri
+  - Prevents VS Code from loading binary files in editor tabs
+  - Cleaner user experience when navigating solution structure
+
+### 🔍 Enhanced Solution Manager
+- **Clarion Directory Detection**: Solution manager now provides Clarion BIN path
+  - Extracts Clarion directory from .sln file configuration
+  - Makes path available to all extension features
+  - Enables reliable ClarionCl.exe execution
+
+### 🐛 Bug Fixes
+- **CASE Statement Validation**: Fixed validation to allow CASE statements with zero OF clauses
+  - Previously incorrectly flagged valid empty CASE statements as errors
+  - Now properly validates: `CASE TRUE` followed by `END` is valid Clarion syntax
 
 ### 🎯 Knowledge Base & Language Intelligence
 
@@ -20,9 +46,9 @@ All notable changes to the "clarion-extension" extension will be documented in t
 
 #### Enhanced Diagnostics (3 new validators)
 - **FILE Structure Validation**: Errors for missing DRIVER or RECORD
-- **CASE Structure Validation**: Errors for missing OF or misplaced OROF
+- **CASE Structure Validation**: Errors for misplaced OROF (CASE can have zero or more OF clauses)
 - **EXECUTE Expression Validation**: Warnings for non-numeric expressions
-- **Test Coverage**: 9 new tests, all passing (185 total tests)
+- **Test Coverage**: 185 total tests, all passing
 
 #### Improved Structure View
 - **FILE Hierarchy**: Shows KEY/INDEX as children, RECORD as container, MEMO/BLOB distinguished
@@ -53,33 +79,6 @@ All notable changes to the "clarion-extension" extension will be documented in t
 - ❌ IntelliSense enhancements - deferred (requires completion provider)
 
 **See [CHANGELOG-0.7.1.md](./CHANGELOG-0.7.1.md) for comprehensive details.**
-
----
-
-## [Unreleased]
-
-### Added - 2024-12-03
-
-#### ClarionCl.exe Integration (APP Generation)
-- **Generate Applications**: Right-click context menu commands to generate Clarion applications
-  - **Generate All Applications**: Right-click on Applications node to generate all APPs in solution
-  - **Generate Application**: Right-click on individual app to generate single APP
-  - Uses `ClarionCl.exe /win /ag` command with proper working directory
-  - Streams output to dedicated "Clarion Generator" output channel
-  - Shows success/error notifications on completion
-  - Automatically resolves ClarionCl.exe path from solution's Clarion BIN directory
-
-#### Solution Tree Improvements
-- **Binary File Prevention**: Clicking on .APP files in tree no longer attempts to open them as text
-  - APP nodes now use `TreeItemCollapsibleState.None` without resourceUri
-  - Prevents VS Code from loading binary files in editor tabs
-  - Cleaner user experience when navigating solution structure
-
-#### Enhanced Solution Manager
-- **Clarion Directory Detection**: Solution manager now provides Clarion BIN path
-  - Extracts Clarion directory from .sln file configuration
-  - Makes path available to all extension features
-  - Enables reliable ClarionCl.exe execution
 
 ---
 

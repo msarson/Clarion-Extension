@@ -120,28 +120,39 @@ This is necessary because older versions had a dependency on fushnisoft.clarion 
 - **Identifier**: `msarson.clarion-extensions`
 - **Version**: `0.7.1`
 - **Published**: 2018-08-19
-- **Last Release**: 2024-12-03
+- **Last Release**: 2025-12-03
 
 [View on Marketplace](https://marketplace.visualstudio.com/items?itemName=msarson.clarion-extensions)
 
 ---
 ## Changelog (What's New in v0.7.1)
 
-### 🎯 Knowledge Base & Language Intelligence (NEW!)
+### 🔧 ClarionCl.exe Integration (NEW!)
+
+**Generate Clarion applications directly from VS Code:**
+
+- **Right-Click Generation**: Generate applications from the solution tree
+  - Right-click on Applications node to generate all APPs in solution
+  - Right-click on individual APP to generate single application
+  - Live output streaming to "Clarion Generator" channel
+  - Success/error notifications on completion
+
+- **Smart Path Resolution**: Automatically detects ClarionCl.exe location
+  - Uses Clarion BIN directory from solution configuration
+  - No manual configuration required
+
+- **Binary File Handling**: Improved tree navigation
+  - .APP files no longer open as text when clicked
+  - Cleaner user experience in solution explorer
+
+### 🎯 Knowledge Base & Language Intelligence
 
 **Comprehensive Clarion language documentation and enhanced validation:**
-
-- **Knowledge Base**: Complete documentation for 10+ Clarion structures
-  - CASE, CHOOSE, EXECUTE structures
-  - GET/SET statements (all syntax forms)
-  - FILE, QUEUE, GROUP, VIEW declarations
-  - CLASS and INTERFACE (OOP features)
-  - All examples validated for proper Clarion syntax
 
 - **Enhanced Diagnostics**: Real-time error detection (5 validators)
   - **Structure Termination**: Unterminated IF/LOOP/CLASS structures
   - **FILE Validation**: Must have DRIVER and RECORD (error)
-  - **CASE Validation**: Must have at least one OF clause (error)
+  - **CASE Validation**: CASE statements can have zero or more OF clauses
   - **OROF Placement**: Must follow OF in CASE (error)
   - **EXECUTE Validation**: Expression should be numeric (warning)
   - **OMIT/COMPILE**: Validates directive block pairing
@@ -153,10 +164,6 @@ This is necessary because older versions had a dependency on fushnisoft.clarion 
   - **Follow Cursor**: Auto-selects symbol at cursor position (toggle in view)
 
 - **New Keywords**: CHOOSE function now properly recognized
-
-**Testing**: 185 tests passing with comprehensive coverage of new features.
-
-See [KB Implementation Summary](https://github.com/msarson/Clarion-Extension/blob/version-0.7.1/SESSION_2024-12-02_KB_IMPROVEMENTS.md) for detailed changes.
 
 ---
 
@@ -264,13 +271,9 @@ See [Performance Session](https://github.com/msarson/Clarion-Extension/blob/vers
 
 ### 📊 Statistics (v0.7.1)
 
-- **104 commits** in this release
-- **30,466 lines added** (code + documentation + tests)
-- **868 lines removed**
-- **93 files modified**
-- **185 tests passing** (zero regressions)
+- **185 tests passing** (comprehensive test coverage)
 - **5 diagnostic validators** (structure, FILE, CASE, EXECUTE, OMIT/COMPILE)
-- **80% feature completion** (8/10 planned KB items)
+- **Real-time validation** for better code quality
 
 ---
 
@@ -366,8 +369,6 @@ This release significantly improves performance through systematic optimization.
 - Comprehensive performance logging (search `📊 PERF:`)
 
 Large Clarion files (14k+ lines) now have significantly improved response times.
-
-For full details, see [CHANGELOG.md](CHANGELOG.md)
 
 ---
 ## Upcoming Release (In Development)
