@@ -54,6 +54,7 @@ import { RedirectionFileParserServer } from './solution/redirectionFileParserSer
 import { DefinitionProvider } from './providers/DefinitionProvider';
 import { HoverProvider } from './providers/HoverProvider';
 import { DiagnosticProvider } from './providers/DiagnosticProvider';
+import { SignatureHelpProvider } from './providers/SignatureHelpProvider';
 import path = require('path');
 import { ClarionSolutionInfo } from 'common/types';
 
@@ -75,6 +76,7 @@ export let solutionOperationInProgress = false;
 const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider();
 const definitionProvider = new DefinitionProvider();
 const hoverProvider = new HoverProvider();
+const signatureHelpProvider = new SignatureHelpProvider();
 
 // ✅ Create Connection and Documents Manager
 const connection = createConnection(ProposedFeatures.all);
@@ -133,7 +135,11 @@ connection.onInitialize((params) => {
                 colorProvider: true,
                 definitionProvider: true,
                 // Note: implementationProvider is handled client-side in extension.ts
-                hoverProvider: true
+                hoverProvider: true,
+                signatureHelpProvider: {
+                    triggerCharacters: ['(', ','],
+                    retriggerCharacters: [')']
+                }
             }
         };
     } catch (error) {
@@ -1186,6 +1192,35 @@ connection.onHover(async (params) => {
         return hover;
     } catch (error) {
         logger.error(`❌ Error providing hover: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+    }
+});
+
+// Handle signature help requests
+connection.onSignatureHelp(async (params) => {
+    logger.info(`📂 Received signature help request for: ${params.textDocument.uri} at position ${params.position.line}:${params.position.character}`);
+    
+    if (!serverInitialized) {
+        logger.info(`⚠️ [DELAY] Server not initialized yet, delaying signature help request`);
+        return null;
+    }
+    
+    const document = documents.get(params.textDocument.uri);
+    if (!document) {
+        logger.info(`⚠️ Document not found: ${params.textDocument.uri}`);
+        return null;
+    }
+    
+    try {
+        const signatureHelp = await signatureHelpProvider.provideSignatureHelp(document, params.position);
+        if (signatureHelp) {
+            logger.info(`✅ Found ${signatureHelp.signatures.length} signature(s) for ${params.textDocument.uri}`);
+        } else {
+            logger.info(`⚠️ No signature help found for ${params.textDocument.uri}`);
+        }
+        return signatureHelp;
+    } catch (error) {
+        logger.error(`❌ Error providing signature help: ${error instanceof Error ? error.message : String(error)}`);
         return null;
     }
 });
