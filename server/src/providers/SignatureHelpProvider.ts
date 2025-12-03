@@ -65,8 +65,14 @@ export class SignatureHelpProvider {
                 return null;
             }
 
+            logger.info(`Found ${signatures.length} signature(s):`);
+            signatures.forEach((sig, idx) => {
+                logger.info(`  [${idx}] ${sig.label}`);
+            });
+
             // Select the best signature based on current parameter count
             const activeSignature = this.selectActiveSignature(signatures, parameterIndex);
+            logger.info(`Selected signature ${activeSignature} as active`);
 
             return {
                 signatures,
