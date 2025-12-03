@@ -9,6 +9,7 @@ import { TokenCache } from '../TokenCache';
 import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { TokenHelper } from '../utils/TokenHelper';
+import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
 logger.setLevel("error"); // PERF: Only log errors to reduce overhead
@@ -20,6 +21,7 @@ export class DefinitionProvider {
     private tokenCache = TokenCache.getInstance();
     private symbolProvider = new ClarionDocumentSymbolProvider();
     private memberResolver = new ClassMemberResolver();
+    private overloadResolver = new MethodOverloadResolver();
     /**
      * Provides definition locations for a given position in a document
      * @param document The text document
@@ -90,7 +92,7 @@ export class DefinitionProvider {
 
             // Check if this is a method implementation line (e.g., "StringTheory.Construct PROCEDURE")
             // and navigate to the declaration in the CLASS
-            const methodImplMatch = line.match(/^(\w+)\.(\w+)\s+PROCEDURE/i);
+            const methodImplMatch = line.match(/^(\w+)\.(\w+)\s+PROCEDURE\s*\((.*?)\)/i);
             if (methodImplMatch) {
                 const className = methodImplMatch[1];
                 const methodName = methodImplMatch[2];
@@ -104,9 +106,19 @@ export class DefinitionProvider {
                 if ((position.character >= classStart && position.character <= classEnd) ||
                     (position.character >= methodStart && position.character <= methodEnd)) {
                     logger.info(`F12 on method implementation: ${className}.${methodName}`);
-                    const declLocation = await this.findMethodDeclaration(className, methodName, document);
-                    if (declLocation) {
-                        return declLocation;
+                    
+                    // Count parameters from the implementation signature
+                    const paramCount = this.overloadResolver.countParametersInDeclaration(line);
+                    logger.info(`Method implementation has ${paramCount} parameters`);
+                    
+                    const tokens = this.tokenCache.getTokens(document);
+                    const declInfo = this.overloadResolver.findMethodDeclaration(className, methodName, document, tokens, paramCount);
+                    if (declInfo) {
+                        logger.info(`✅ Found method declaration at ${declInfo.file}:${declInfo.line} with ${declInfo.paramCount} parameters`);
+                        return Location.create(declInfo.file, {
+                            start: { line: declInfo.line, character: 0 },
+                            end: { line: declInfo.line, character: 0 }
+                        });
                     }
                 }
             }
@@ -1935,135 +1947,6 @@ export class DefinitionProvider {
             }
         }
 
-        return null;
-    }
-
-    /**
-     * Finds method declaration in CLASS definition (for F12 on implementation)
-     */
-    private async findMethodDeclaration(className: string, methodName: string, document: TextDocument): Promise<Location | null> {
-        logger.info(`Looking for method declaration: ${className}.${methodName}`);
-        
-        // Search in current file first
-        const tokens = this.tokenCache.getTokens(document);
-        const classTokens = tokens.filter(token =>
-            token.type === TokenType.Structure &&
-            token.value.toUpperCase() === 'CLASS' &&
-            token.line > 0
-        );
-        
-        for (const classToken of classTokens) {
-            const labelToken = tokens.find(t =>
-                t.type === TokenType.Label &&
-                t.line === classToken.line &&
-                t.value.toLowerCase() === className.toLowerCase()
-            );
-            
-            if (labelToken) {
-                logger.info(`Found class ${className} at line ${labelToken.line}`);
-                
-                // Search for method in class
-                for (let i = labelToken.line + 1; i < tokens.length; i++) {
-                    const lineTokens = tokens.filter(t => t.line === i);
-                    const endToken = lineTokens.find(t => t.value.toUpperCase() === 'END' && t.start === 0);
-                    if (endToken) break;
-                    
-                    const methodToken = lineTokens.find(t =>
-                        t.value.toLowerCase() === methodName.toLowerCase() &&
-                        t.start === 0
-                    );
-                    
-                    if (methodToken) {
-                        logger.info(`Found method declaration at line ${i}`);
-                        return Location.create(document.uri, {
-                            start: { line: i, character: 0 },
-                            end: { line: i, character: methodToken.value.length }
-                        });
-                    }
-                }
-            }
-        }
-        
-        // If not found in current file, search INCLUDE files
-        logger.info(`Method declaration not found in current file, searching INCLUDEs`);
-        return this.findMethodDeclarationInIncludes(className, methodName, document.uri);
-    }
-
-    /**
-     * Searches for method declaration in INCLUDE files
-     */
-    private findMethodDeclarationInIncludes(className: string, methodName: string, documentUri: string): Location | null {
-        const filePath = decodeURIComponent(documentUri.replace('file:///', '')).replace(/\//g, '\\');
-        const content = fs.readFileSync(filePath, 'utf8');
-        const lines = content.split('\n');
-        
-        // Find INCLUDE statements
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const includeMatch = line.match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
-            if (!includeMatch) continue;
-            
-            const includeFileName = includeMatch[1];
-            logger.info(`Found INCLUDE: ${includeFileName}`);
-            
-            let resolvedPath: string | null = null;
-            
-            // Try solution-wide redirection
-            const solutionManager = SolutionManager.getInstance();
-            if (solutionManager && solutionManager.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const redirectionParser = project.getRedirectionParser();
-                    const resolved = redirectionParser.findFile(includeFileName);
-                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        break;
-                    }
-                }
-            }
-            
-            // Fallback to relative path
-            if (!resolvedPath) {
-                const currentDir = path.dirname(filePath);
-                const relativePath = path.join(currentDir, includeFileName);
-                if (fs.existsSync(relativePath)) {
-                    resolvedPath = relativePath;
-                }
-            }
-            
-            if (resolvedPath) {
-                logger.info(`Resolved to: ${resolvedPath}`);
-                const includeContent = fs.readFileSync(resolvedPath, 'utf8');
-                const includeLines = includeContent.split('\n');
-                
-                // Find the class
-                for (let j = 0; j < includeLines.length; j++) {
-                    const includeLine = includeLines[j];
-                    const classMatch = includeLine.match(new RegExp(`^${className}\\s+CLASS`, 'i'));
-                    if (classMatch) {
-                        logger.info(`Found class ${className} in INCLUDE at line ${j}`);
-                        
-                        // Find the method
-                        for (let k = j + 1; k < includeLines.length; k++) {
-                            const methodLine = includeLines[k];
-                            if (methodLine.match(/^\s*END\s*$/i) || methodLine.match(/^END\s*$/i)) {
-                                break;
-                            }
-                            
-                            const methodMatch = methodLine.match(new RegExp(`^\\s*(${methodName})\\s+PROCEDURE`, 'i'));
-                            if (methodMatch) {
-                                logger.info(`Found method ${methodName} at line ${k}`);
-                                const fileUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
-                                return Location.create(fileUri, {
-                                    start: { line: k, character: methodLine.indexOf(methodMatch[1]) },
-                                    end: { line: k, character: methodLine.indexOf(methodMatch[1]) + methodName.length }
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
         return null;
     }
 
