@@ -31,23 +31,7 @@ All notable changes to the "clarion-extension" extension will be documented in t
   - Previously incorrectly flagged valid empty CASE statements as errors
   - Now properly validates: `CASE TRUE` followed by `END` is valid Clarion syntax
 
-### 🎯 Knowledge Base & Language Intelligence
 
-#### Comprehensive Documentation
-- **Complete Clarion Language Reference**: Added 2,000+ lines of documentation
-  - CASE, CHOOSE, EXECUTE control structures
-  - GET/SET file operations (all syntax forms)
-  - FILE declaration with KEY, INDEX, MEMO, BLOB
-  - QUEUE dynamic arrays with compression details
-  - GROUP compound structures with OVER and DIM
-  - VIEW virtual files with JOIN and PROJECT
-  - CLASS and INTERFACE object-oriented features
-  - All examples validated for column 0 compliance
-
-#### Enhanced Diagnostics (3 new validators)
-- **FILE Structure Validation**: Errors for missing DRIVER or RECORD
-- **CASE Structure Validation**: Errors for misplaced OROF (CASE can have zero or more OF clauses)
-- **EXECUTE Expression Validation**: Warnings for non-numeric expressions
 - **Test Coverage**: 185 total tests, all passing
 
 #### Improved Structure View

@@ -152,7 +152,7 @@ This is necessary because older versions had a dependency on fushnisoft.clarion 
 - **Enhanced Diagnostics**: Real-time error detection (5 validators)
   - **Structure Termination**: Unterminated IF/LOOP/CLASS structures
   - **FILE Validation**: Must have DRIVER and RECORD (error)
-  - **CASE Validation**: CASE statements can have zero or more OF clauses
+  - **CASE Validation**: CASE statements can have zero or more OF clauses (fixed in 0.7.1)
   - **OROF Placement**: Must follow OF in CASE (error)
   - **EXECUTE Validation**: Expression should be numeric (warning)
   - **OMIT/COMPILE**: Validates directive block pairing
