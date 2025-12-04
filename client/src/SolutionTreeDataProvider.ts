@@ -9,6 +9,8 @@ import * as fs from 'fs';
 import { ProjectIndex } from './ProjectIndex';
 import { PathUtils } from './PathUtils';
 import { getLanguageClient } from './LanguageClientManager';
+import { SolutionScanner, DetectedSolution } from './utils/SolutionScanner';
+import { ClarionInstallationDetector } from './utils/ClarionInstallationDetector';
 
 const logger = LoggerManager.getLogger("SolutionTreeDataProvider");
 logger.setLevel("error");
@@ -160,6 +162,71 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             this.refreshInProgress = false;
         }
     }
+    
+    /**
+     * Creates tree nodes for detected solutions when no solution is currently open
+     */
+    private async getDetectedSolutionsNodes(): Promise<TreeNode[]> {
+        const nodes: TreeNode[] = [];
+        
+        try {
+            // Scan for solutions
+            const detectedSolutions = await SolutionScanner.scanWorkspaceFolders();
+            
+            // Check Clarion installations
+            const installations = await ClarionInstallationDetector.detectInstallations();
+            
+            logger.info(`🔍 Found ${detectedSolutions.length} solution(s) and ${installations.length} Clarion installation(s)`);
+            
+            if (detectedSolutions.length === 0) {
+                // No solutions found - return empty to show welcome view
+                return [];
+            }
+            
+            if (installations.length === 0) {
+                // Solutions found but no Clarion - show warning
+                const warningNode = new TreeNode(
+                    "⚠️ No Clarion Installation Detected",
+                    TreeItemCollapsibleState.None,
+                    { type: 'warning', tooltip: "Clarion IDE not found. Install Clarion or manually configure settings." }
+                );
+                nodes.push(warningNode);
+            }
+            
+            // Add detected solution nodes
+            for (const solution of detectedSolutions) {
+                const solutionNode = new TreeNode(
+                    solution.solutionName,
+                    TreeItemCollapsibleState.None,
+                    { 
+                        type: 'detectedSolution', 
+                        solutionPath: solution.solutionPath,
+                        tooltip: `Click to open: ${solution.solutionPath}`
+                    },
+                    undefined,
+                    path.dirname(solution.solutionPath)
+                );
+                
+                nodes.push(solutionNode);
+            }
+            
+            // Add browse option
+            const browseNode = new TreeNode(
+                "Browse for Solution...",
+                TreeItemCollapsibleState.None,
+                { type: 'browseSolution', tooltip: "Open a Clarion solution file from anywhere" }
+            );
+            nodes.push(browseNode);
+            
+        } catch (error) {
+            logger.error('❌ Error getting detected solutions:', error);
+            // Return empty to show welcome view on error
+            return [];
+        }
+        
+        return nodes;
+    }
+
     async getChildren(element?: TreeNode): Promise<TreeNode[]> {
         // If we have a filter and this is a request for children of a specific element
         if (element) {
@@ -394,10 +461,10 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             return element.children;
         }
     
-        // ✅ If no solution is loaded, return empty list (shows welcome screen)
+        // ✅ If no solution is loaded, show detected solutions
         if (!globalSolutionFile) {
-            logger.info(`🔍 No solution file, returning empty children list`);
-            return [];
+            logger.info(`🔍 No solution file, checking for detected solutions...`);
+            return await this.getDetectedSolutionsNodes();
         }
     
         // ✅ Otherwise load your normal root tree (project/solution items)
@@ -456,6 +523,37 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         logger.info(`🏗 Processing item with label: ${label}`);
         // Reduce logging to improve performance
         logger.info(`🏗 Item data type: ${data?.type || (data?.guid ? 'project' : (data?.relativePath ? 'file' : 'other'))}`);
+
+        // Handle detected solution nodes
+        if ((data as any)?.type === 'detectedSolution') {
+            treeItem.iconPath = new ThemeIcon('file-text');
+            treeItem.tooltip = (data as any).tooltip || `Click to open: ${(data as any).solutionPath}`;
+            treeItem.command = {
+                title: 'Open Detected Solution',
+                command: 'clarion.openDetectedSolution',
+                arguments: [(data as any).solutionPath]
+            };
+            return treeItem;
+        }
+
+        // Handle browse solution node
+        if ((data as any)?.type === 'browseSolution') {
+            treeItem.iconPath = new ThemeIcon('folder-opened');
+            treeItem.tooltip = (data as any).tooltip || "Open a Clarion solution file from anywhere";
+            treeItem.command = {
+                title: 'Browse for Solution',
+                command: 'clarion.openSolution',
+                arguments: []
+            };
+            return treeItem;
+        }
+
+        // Handle warning node
+        if ((data as any)?.type === 'warning') {
+            treeItem.iconPath = new ThemeIcon('warning');
+            treeItem.tooltip = (data as any).tooltip;
+            return treeItem;
+        }
 
         if ((data as any)?.type === 'noSolution') {
             treeItem.iconPath = new ThemeIcon('folder-opened');
