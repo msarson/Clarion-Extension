@@ -489,23 +489,25 @@ export async function activate(context: ExtensionContext): Promise<void> {
     // Register the commands programmatically to avoid conflicts with other extensions
     context.subscriptions.push(
         commands.registerCommand('clarion.openDetectedSolution', async (solutionPath: string) => {
+            console.log(`🔄🔄🔄 COMMAND clarion.openDetectedSolution TRIGGERED for ${solutionPath}`);
             logger.info(`🔄 Executing clarion.openDetectedSolution command for ${solutionPath}`);
             
             try {
                 const success = await SmartSolutionOpener.openDetectedSolution(solutionPath);
                 
+                console.log(`🎯🎯🎯 SmartSolutionOpener returned: ${success}`);
+                
                 if (success) {
-                    // Reload global settings from workspace after saving
-                    logger.info("🔄 Reloading global settings from workspace...");
-                    await globalSettings.initializeFromWorkspace();
-                    
-                    logger.info(`✅ Global settings reloaded:
+                    // Global variables are already set by SmartSolutionOpener, no need to reload
+                    console.log(`✅✅✅ Solution opened successfully. Current globals:
                         - globalSolutionFile: ${globalSolutionFile || 'not set'}
                         - globalClarionPropertiesFile: ${globalClarionPropertiesFile || 'not set'}
                         - globalClarionVersion: ${globalClarionVersion || 'not set'}`);
                     
                     // Initialize the solution
+                    console.log("🚀🚀🚀 About to call initializeSolution");
                     await initializeSolution(context, true);
+                    console.log("✅✅✅ initializeSolution completed");
                     
                     // Explicitly refresh the tree view to show projects/apps
                     if (solutionTreeDataProvider) {
@@ -1071,9 +1073,17 @@ async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: D
 
 async function initializeSolution(context: ExtensionContext, refreshDocs: boolean = false): Promise<void> {
     logger.info("🔄 Initializing Clarion Solution...");
+    
+    logger.info(`🔍 BEFORE CHECK - Global variables state:
+        - globalSolutionFile: ${globalSolutionFile || 'NOT SET'}
+        - globalClarionPropertiesFile: ${globalClarionPropertiesFile || 'NOT SET'}
+        - globalClarionVersion: ${globalClarionVersion || 'NOT SET'}`);
 
     if (!globalSolutionFile || !globalClarionPropertiesFile || !globalClarionVersion) {
         logger.warn("⚠️ Missing required settings (solution file, properties file, or version). Initialization aborted.");
+        logger.warn(`    - globalSolutionFile: ${globalSolutionFile || 'MISSING'}`);
+        logger.warn(`    - globalClarionPropertiesFile: ${globalClarionPropertiesFile || 'MISSING'}`);
+        logger.warn(`    - globalClarionVersion: ${globalClarionVersion || 'MISSING'}`);
         return;
     }
 

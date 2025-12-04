@@ -3,7 +3,7 @@ import * as path from 'path';
 import { parseString } from 'xml2js';
 import LoggerManager from '../logger';
 
-const logger = LoggerManager.getLogger("ClarionInstallationDetector");
+const logger = LoggerManager.getLogger("ClarionInstallationDetector", "info");
 
 export interface ClarionInstallation {
     ideVersion: string; // e.g., "12.0", "11.0"
@@ -26,10 +26,15 @@ export class ClarionInstallationDetector {
      * Detects all Clarion IDE installations by scanning the standard AppData directory
      */
     static async detectInstallations(): Promise<ClarionInstallation[]> {
+        logger.info("🚀 detectInstallations() CALLED");
+        
         // Return cached results if available
         if (this.cachedInstallations) {
+            logger.info(`📦 Returning cached installations (${this.cachedInstallations.length} found)`);
             return this.cachedInstallations;
         }
+        
+        logger.info("🔍 Starting fresh Clarion installation detection...");
 
         const installations: ClarionInstallation[] = [];
         
@@ -67,9 +72,13 @@ export class ClarionInstallationDetector {
                     logger.warn(`⚠️ ClarionProperties.xml not found for version ${version}`);
                     continue;
                 }
+                
+                logger.info(`✅ Found ClarionProperties.xml for version ${version}`);
 
                 try {
                     const compilerVersions = await this.parseCompilerVersions(propertiesPath);
+                    
+                    logger.info(`✅ Parsed ${compilerVersions.length} compiler version(s) for ${version}: ${compilerVersions.join(', ')}`);
                     
                     if (compilerVersions.length > 0) {
                         installations.push({
@@ -79,11 +88,18 @@ export class ClarionInstallationDetector {
                         });
                         
                         logger.info(`✅ Detected Clarion ${version} with ${compilerVersions.length} compiler(s)`);
+                    } else {
+                        logger.warn(`⚠️ No compilers found in ClarionProperties.xml for version ${version}`);
                     }
                 } catch (error) {
                     logger.error(`❌ Error parsing ClarionProperties.xml for version ${version}:`, error);
                 }
             }
+            
+            logger.info(`🎯 Total installations detected: ${installations.length}`);
+            installations.forEach(inst => {
+                logger.info(`   - Version ${inst.ideVersion}: ${inst.compilerVersions.join(', ')}`);
+            });
 
             // Cache the results
             this.cachedInstallations = installations;

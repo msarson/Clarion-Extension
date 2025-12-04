@@ -28,13 +28,15 @@ export async function setGlobalClarionSelection(
     solutionFile: string,
     clarionPropertiesFile: string,
     clarionVersion: string,
-    clarionConfiguration: string
+    clarionConfiguration: string,
+    skipSave: boolean = false
 ) {
     logger.info("🔄 Updating global settings:", {
         solutionFile,
         clarionPropertiesFile,
         clarionVersion,
-        clarionConfiguration
+        clarionConfiguration,
+        skipSave
     });
 
     // ✅ Update global variables
@@ -50,7 +52,12 @@ export async function setGlobalClarionSelection(
         - globalClarionVersion: ${globalClarionVersion || 'not set'}
         - _globalClarionConfiguration: ${_globalClarionConfiguration || 'not set'}`);
 
-    // ✅ Only save to storage if all required values are set
+    // ✅ Only save to storage if all required values are set and skipSave is false
+    if (skipSave) {
+        logger.info("⏭️  Skipping save to storage (skipSave = true)");
+        return;
+    }
+    
     if (solutionFile && clarionPropertiesFile && clarionVersion) {
         logger.info("✅ All required settings are set. Saving using smart storage manager...");
         

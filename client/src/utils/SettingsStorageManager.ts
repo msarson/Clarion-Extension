@@ -60,10 +60,21 @@ export class SettingsStorageManager {
             const configScope = workspaceFolder ? workspaceFolder.uri : undefined;
             const config = workspace.getConfiguration('clarion', configScope);
             
-            // Always try to save to WorkspaceFolder first if we have folders
-            const target = (workspace.workspaceFolders && workspace.workspaceFolders.length > 0)
-                ? ConfigurationTarget.WorkspaceFolder
-                : ConfigurationTarget.Workspace;
+            // Determine target based on workspace setup
+            let target: ConfigurationTarget;
+            if (workspace.workspaceFile) {
+                // We have a .code-workspace file - save to Workspace level
+                target = ConfigurationTarget.Workspace;
+                logger.info(`💾 Detected workspace file, using Workspace target`);
+            } else if (workspace.workspaceFolders && workspace.workspaceFolders.length > 0) {
+                // We only have folders - save to WorkspaceFolder level
+                target = ConfigurationTarget.WorkspaceFolder;
+                logger.info(`💾 Detected folder setup, using WorkspaceFolder target`);
+            } else {
+                // Fallback
+                target = ConfigurationTarget.Workspace;
+                logger.warn(`⚠️ No workspace file or folders, defaulting to Workspace target`);
+            }
 
             logger.info(`💾 Saving settings to ${target === ConfigurationTarget.WorkspaceFolder ? 'WorkspaceFolder' : 'Workspace'}`);
             logger.info(`   Scope: ${configScope?.fsPath || 'none'}`);

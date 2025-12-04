@@ -7,7 +7,7 @@ import LoggerManager from '../logger';
 import * as path from 'path';
 import * as fs from 'fs';
 
-const logger = LoggerManager.getLogger("SmartSolutionOpener");
+const logger = LoggerManager.getLogger("SmartSolutionOpener", "info");
 
 export class SmartSolutionOpener {
     /**
@@ -21,9 +21,15 @@ export class SmartSolutionOpener {
             const installations = await ClarionInstallationDetector.detectInstallations();
 
             if (installations.length === 0) {
-                window.showErrorMessage(
-                    "No Clarion installations detected. Please install Clarion or manually configure ClarionProperties.xml."
+                const action = await window.showErrorMessage(
+                    "No Clarion installations detected. ClarionProperties.xml not found in standard locations.",
+                    "Browse for Solution (Manual Setup)",
+                    "Cancel"
                 );
+                
+                if (action === "Browse for Solution (Manual Setup)") {
+                    commands.executeCommand('clarion.openSolution');
+                }
                 return false;
             }
 
@@ -75,13 +81,22 @@ export class SmartSolutionOpener {
                 return false;
             }
 
-            // Step 5: Update global variables
+            // Step 5: Update global variables (skip saving since we already saved above)
+            logger.info(`📝 Updating global variables with:
+                - solutionPath: ${solutionPath}
+                - propertiesPath: ${selectedInstallation.propertiesPath}
+                - compiler: ${selectedCompiler}
+                - config: ${selectedConfig}`);
+                
             await setGlobalClarionSelection(
                 solutionPath,
                 selectedInstallation.propertiesPath,
                 selectedCompiler,
-                selectedConfig
+                selectedConfig,
+                true // skipSave = true, we already saved above
             );
+            
+            logger.info("✅ Global variables updated");
 
             // Step 6: Set environment variable for server
             process.env.CLARION_SOLUTION_FILE = solutionPath;
