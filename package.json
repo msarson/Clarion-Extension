@@ -547,26 +547,31 @@
                 "clarion.solutionFile": {
                     "type": "string",
                     "default": "",
+                    "scope": "resource",
                     "description": "Path to the Clarion solution (.sln) file."
                 },
                 "clarion.propertiesFile": {
                     "type": "string",
                     "default": "",
+                    "scope": "resource",
                     "description": "Path to the ClarionProperties.xml file."
                 },
                 "clarion.version": {
                     "type": "string",
                     "default": "",
+                    "scope": "resource",
                     "description": "Selected Clarion version."
                 },
                 "clarion.configuration": {
                     "type": "string",
                     "default": "",
+                    "scope": "resource",
                     "description": "Selected Clarion configuration."
                 },
                 "clarion.currentSolution": {
                     "type": "string",
                     "default": "",
+                    "scope": "resource",
                     "description": "Path to the currently selected Clarion solution file."
                 },
                 "clarion.telemetry.enabled": {
