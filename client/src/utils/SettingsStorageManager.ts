@@ -55,7 +55,10 @@ export class SettingsStorageManager {
                 }
             }
 
-            const config = workspace.getConfiguration();
+            // Get the workspace folder URI for the configuration scope
+            const workspaceFolder = workspace.workspaceFolders?.[0];
+            const configScope = workspaceFolder ? workspaceFolder.uri : undefined;
+            const config = workspace.getConfiguration('clarion', configScope);
             
             // Always try to save to WorkspaceFolder first if we have folders
             const target = (workspace.workspaceFolders && workspace.workspaceFolders.length > 0)
@@ -63,13 +66,14 @@ export class SettingsStorageManager {
                 : ConfigurationTarget.Workspace;
 
             logger.info(`💾 Saving settings to ${target === ConfigurationTarget.WorkspaceFolder ? 'WorkspaceFolder' : 'Workspace'}`);
+            logger.info(`   Scope: ${configScope?.fsPath || 'none'}`);
 
-            // Save individual settings
-            await config.update('clarion.solutionFile', solutionFile, target);
-            await config.update('clarion.propertiesFile', propertiesFile, target);
-            await config.update('clarion.version', version, target);
-            await config.update('clarion.configuration', configuration, target);
-            await config.update('clarion.currentSolution', solutionFile, target);
+            // Save individual settings with proper scope
+            await config.update('solutionFile', solutionFile, target);
+            await config.update('propertiesFile', propertiesFile, target);
+            await config.update('version', version, target);
+            await config.update('configuration', configuration, target);
+            await config.update('currentSolution', solutionFile, target);
 
             // Update solutions array
             await this.updateSolutionsArray(solutionFile, propertiesFile, version, configuration);

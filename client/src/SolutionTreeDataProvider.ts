@@ -1,4 +1,4 @@
-import { TreeDataProvider, TreeItem, Event, EventEmitter, TreeItemCollapsibleState, ThemeIcon, Command, extensions, Uri } from 'vscode';
+import { TreeDataProvider, TreeItem, Event, EventEmitter, TreeItemCollapsibleState, ThemeIcon, Command, extensions, Uri, workspace } from 'vscode';
 import { TreeNode } from './TreeNode';
 import { ClarionSolutionInfo, ClarionProjectInfo, ClarionSourcerFileInfo } from 'common/types';
 import LoggerManager from './logger';
@@ -183,6 +183,71 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 return [];
             }
             
+            // Check if workspace is saved
+            const hasWorkspaceFile = workspace.workspaceFile !== undefined;
+            const hasWorkspaceFolders = workspace.workspaceFolders && workspace.workspaceFolders.length > 0;
+            
+            if (!hasWorkspaceFile && hasWorkspaceFolders) {
+                // User opened a folder but no workspace is saved
+                // Show guidance to save workspace first
+                const infoNode = new TreeNode(
+                    "📁 Solutions Detected!",
+                    TreeItemCollapsibleState.Expanded,
+                    { type: 'solutionInfo' }
+                );
+                
+                const countNode = new TreeNode(
+                    `Found ${detectedSolutions.length} solution(s) in this folder`,
+                    TreeItemCollapsibleState.None,
+                    { type: 'info' }
+                );
+                
+                // List the solutions (non-clickable, just for info)
+                const solutionListNodes = detectedSolutions.slice(0, 5).map(sol => 
+                    new TreeNode(
+                        `• ${sol.solutionName}`,
+                        TreeItemCollapsibleState.None,
+                        { type: 'info' }
+                    )
+                );
+                
+                if (detectedSolutions.length > 5) {
+                    solutionListNodes.push(new TreeNode(
+                        `... and ${detectedSolutions.length - 5} more`,
+                        TreeItemCollapsibleState.None,
+                        { type: 'info' }
+                    ));
+                }
+                
+                const warningNode = new TreeNode(
+                    "⚠️ Save workspace to continue",
+                    TreeItemCollapsibleState.None,
+                    { type: 'warning', tooltip: "The Clarion extension requires a saved workspace to store solution settings" }
+                );
+                
+                const saveWorkspaceNode = new TreeNode(
+                    "💾 Save Workspace As...",
+                    TreeItemCollapsibleState.None,
+                    { type: 'saveWorkspace', tooltip: "Save a workspace file to enable solution features" }
+                );
+                
+                const browseNode = new TreeNode(
+                    "Or Browse for Solution (old way)",
+                    TreeItemCollapsibleState.None,
+                    { type: 'browseSolution', tooltip: "Use the traditional solution opening method" }
+                );
+                
+                nodes.push(infoNode);
+                nodes.push(countNode);
+                nodes.push(...solutionListNodes);
+                nodes.push(warningNode);
+                nodes.push(saveWorkspaceNode);
+                nodes.push(browseNode);
+                
+                return nodes;
+            }
+            
+            // Workspace is saved, show normal solution list
             if (installations.length === 0) {
                 // Solutions found but no Clarion - show warning
                 const warningNode = new TreeNode(
@@ -193,7 +258,7 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 nodes.push(warningNode);
             }
             
-            // Add detected solution nodes
+            // Add detected solution nodes (clickable)
             for (const solution of detectedSolutions) {
                 const solutionNode = new TreeNode(
                     solution.solutionName,
@@ -545,6 +610,30 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 command: 'clarion.openSolution',
                 arguments: []
             };
+            return treeItem;
+        }
+
+        // Handle save workspace node
+        if ((data as any)?.type === 'saveWorkspace') {
+            treeItem.iconPath = new ThemeIcon('save');
+            treeItem.tooltip = (data as any).tooltip;
+            treeItem.command = {
+                title: 'Save Workspace As',
+                command: 'workbench.action.saveWorkspaceAs',
+                arguments: []
+            };
+            return treeItem;
+        }
+
+        // Handle info nodes (non-clickable)
+        if ((data as any)?.type === 'info') {
+            treeItem.iconPath = new ThemeIcon('info');
+            return treeItem;
+        }
+
+        // Handle solution info header
+        if ((data as any)?.type === 'solutionInfo') {
+            treeItem.iconPath = new ThemeIcon('folder');
             return treeItem;
         }
 
