@@ -26,6 +26,7 @@ import { redirectionService } from './paths/RedirectionService';
 
 import { ClarionProjectInfo } from 'common/types';
 import { initializeTelemetry, trackEvent, trackPerformance } from './telemetry';
+import { SmartSolutionOpener } from './utils/SmartSolutionOpener';
 
 const logger = LoggerManager.getLogger("Extension");
 logger.setLevel("error"); // PERF: Only log errors to reduce overhead
@@ -487,6 +488,22 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
     // Register the commands programmatically to avoid conflicts with other extensions
     context.subscriptions.push(
+        commands.registerCommand('clarion.openDetectedSolution', async (solutionPath: string) => {
+            logger.info(`🔄 Executing clarion.openDetectedSolution command for ${solutionPath}`);
+            
+            try {
+                const success = await SmartSolutionOpener.openDetectedSolution(solutionPath);
+                
+                if (success) {
+                    // Initialize the solution
+                    await initializeSolution(context, true);
+                }
+            } catch (error) {
+                logger.error(`❌ Error in clarion.openDetectedSolution command: ${error instanceof Error ? error.message : String(error)}`);
+                window.showErrorMessage(`Error opening solution: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }),
+        
         commands.registerCommand('clarion.addSourceFile', async (node) => {
             logger.info(`🔄 Executing clarion.addSourceFile command`);
             

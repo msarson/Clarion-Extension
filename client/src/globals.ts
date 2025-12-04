@@ -4,6 +4,7 @@ import { parseStringPromise } from 'xml2js';
 import { ClarionExtensionCommands } from './ClarionExtensionCommands';
 import LoggerManager from './logger';
 import * as path from 'path';
+import { SettingsStorageManager } from './utils/SettingsStorageManager';
 const logger = LoggerManager.getLogger("Globals");
 
 // Interface for solution settings
@@ -49,44 +50,51 @@ export async function setGlobalClarionSelection(
         - globalClarionVersion: ${globalClarionVersion || 'not set'}
         - _globalClarionConfiguration: ${_globalClarionConfiguration || 'not set'}`);
 
-    // ✅ Only save to workspace if all required values are set
+    // ✅ Only save to storage if all required values are set
     if (solutionFile && clarionPropertiesFile && clarionVersion) {
-        logger.info("✅ All required settings are set. Saving to workspace settings...");
+        logger.info("✅ All required settings are set. Saving using smart storage manager...");
         
-        // Update the current solution settings
-        await workspace.getConfiguration().update('clarion.solutionFile', solutionFile, ConfigurationTarget.Workspace);
-        await workspace.getConfiguration().update('clarion.propertiesFile', clarionPropertiesFile, ConfigurationTarget.Workspace);
-        await workspace.getConfiguration().update('clarion.version', clarionVersion, ConfigurationTarget.Workspace);
-        await workspace.getConfiguration().update('clarion.configuration', clarionConfiguration, ConfigurationTarget.Workspace);
-        
-        // Update the current solution in the solutions array
-        await updateSolutionsArray(solutionFile, clarionPropertiesFile, clarionVersion, clarionConfiguration);
-        
-        // Set the current solution
-        await workspace.getConfiguration().update('clarion.currentSolution', solutionFile, ConfigurationTarget.Workspace);
+        // Use the smart storage manager (handles workspace vs folder storage)
+        await SettingsStorageManager.saveSolutionSettings(
+            solutionFile,
+            clarionPropertiesFile,
+            clarionVersion,
+            clarionConfiguration
+        );
 
-        // ✅ Ensure lookup extensions are written ONLY when a valid solution exists
+        // ✅ Ensure lookup extensions are written
         const config = workspace.getConfiguration("clarion");
+        const storageTarget = SettingsStorageManager.determineStorageLocation();
+        const target = storageTarget === 'Workspace' ? ConfigurationTarget.Workspace : ConfigurationTarget.WorkspaceFolder;
 
-        const fileSearchExtensions = config.inspect<string[]>("fileSearchExtensions")?.workspaceValue;
-        const defaultLookupExtensions = config.inspect<string[]>("defaultLookupExtensions")?.workspaceValue;
+        const fileSearchExtensions = config.inspect<string[]>("fileSearchExtensions");
+        const defaultLookupExtensions = config.inspect<string[]>("defaultLookupExtensions");
 
         const updatePromises: Thenable<void>[] = [];
 
-        if (!fileSearchExtensions) {
-            updatePromises.push(config.update("fileSearchExtensions", DEFAULT_EXTENSIONS, ConfigurationTarget.Workspace));
+        // Check if not set at the appropriate level
+        const hasFileSearch = storageTarget === 'Workspace' 
+            ? fileSearchExtensions?.workspaceValue 
+            : fileSearchExtensions?.workspaceFolderValue;
+            
+        const hasDefaultLookup = storageTarget === 'Workspace'
+            ? defaultLookupExtensions?.workspaceValue
+            : defaultLookupExtensions?.workspaceFolderValue;
+
+        if (!hasFileSearch) {
+            updatePromises.push(config.update("fileSearchExtensions", DEFAULT_EXTENSIONS, target));
         }
 
-        if (!defaultLookupExtensions) {
-            updatePromises.push(config.update("defaultLookupExtensions", DEFAULT_EXTENSIONS, ConfigurationTarget.Workspace));
+        if (!hasDefaultLookup) {
+            updatePromises.push(config.update("defaultLookupExtensions", DEFAULT_EXTENSIONS, target));
         }
 
         if (updatePromises.length > 0) {
             await Promise.all(updatePromises);
-            logger.info("✅ Default lookup settings applied to workspace.json.");
+            logger.info("✅ Default lookup settings applied.");
         }
     } else {
-        logger.warn("⚠️ Not saving to workspace settings: One or more required values are missing.");
+        logger.warn("⚠️ Not saving to storage: One or more required values are missing.");
     }
 }
 

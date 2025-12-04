@@ -180,6 +180,10 @@
                 "icon": "$(folder-opened)"
             },
             {
+                "command": "clarion.openDetectedSolution",
+                "title": "Open Detected Solution"
+            },
+            {
                 "command": "clarion.openSolutionFromList",
                 "title": "Open Solution List",
                 "icon": "$(list-selection)"
@@ -447,7 +451,7 @@
         "viewsWelcome": [
             {
                 "view": "solutionView",
-                "contents": "No solution is currently open.\n[Open Solution](command:clarion.openSolution)\n[Open Solution from List](command:clarion.openSolutionFromList)\n[Getting Started](https://github.com/msarson/Clarion-Extension/blob/master/GettingStarted.md) | [Report an Issue](https://github.com/msarson/Clarion-Extension/issues)",
+                "contents": "No Clarion solution is currently open.\n\n**Quick Start:**\n\nIf you have a .sln file in this folder, the extension will detect it automatically.\n\n[Open Solution](command:clarion.openSolution)\n[Open Solution from List](command:clarion.openSolutionFromList)\n\n**Need Help?**\n\n[Getting Started Guide](https://github.com/msarson/Clarion-Extension/blob/master/GettingStarted.md) | [Report an Issue](https://github.com/msarson/Clarion-Extension/issues)",
                 "when": "!clarion.solutionOpen"
             }
         ],
