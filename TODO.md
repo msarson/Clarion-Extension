@@ -169,13 +169,21 @@ Follow cursor functionality has been implemented with:
 **Status:** Not Started
 
 **Task:**
-Remove the old/original welcome screen from the Solution View, as it's been replaced by the new folder-based workflow with global solution history.
+Replace the old welcome screen with a simple "Extension Loading..." message, as the new folder-based workflow automatically takes over once loaded.
 
-**Files to Clean Up:**
-- `client/src/WelcomeViewProvider.ts` - Original welcome view provider (may be unused now)
-- Check `package.json` for any view registrations that reference old welcome view
-- Check `extension.ts` for any welcome view initialization code
-- Clean up any related unused imports/dependencies
+**Current Behavior:**
+- Old welcome screen shows buttons and options that are no longer needed
+- Once extension loads, the new global solution history and folder detection automatically populate the view
+
+**Desired Behavior:**
+- Show simple "Extension Loading..." or "Initializing Clarion Extension..." message while extension activates
+- After activation, existing functionality (global solution history, folder detection) takes over
+- No buttons or interactive elements needed during load
+
+**Files to Modify:**
+- `client/src/WelcomeViewProvider.ts` - Replace with simple loading message provider
+- `client/src/SolutionTreeDataProvider.ts` - May already handle post-load view
+- Check view initialization in extension activation
 
 **Context:**
 Version 0.7.3 introduced a new folder-based workflow with:
@@ -183,13 +191,13 @@ Version 0.7.3 introduced a new folder-based workflow with:
 - Global solution history showing recent solutions
 - No workspace file requirement
 
-The original welcome screen is likely obsolete and can be removed to simplify the codebase.
+The old welcome screen with interactive buttons is obsolete since the new workflow automatically populates the view after extension loads.
 
-**Investigation Needed:**
-1. Verify WelcomeViewProvider is not currently used
-2. Find all references to the old welcome view
-3. Ensure removal doesn't break any functionality
-4. Update package.json view contributions if needed
+**Implementation:**
+1. Simplify WelcomeViewProvider to show only loading text
+2. Ensure smooth transition to SolutionTreeDataProvider once loaded
+3. Remove unnecessary buttons and interactions
+4. Test that view properly updates after extension activation
 
 ---
 
