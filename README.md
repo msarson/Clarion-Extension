@@ -7,7 +7,7 @@
 - [Features](#features)
 - [Installation](#installation)
 - [Marketplace](#marketplace-information)
-- [Changelog](#changelog-whats-new-in-v070)
+- [Changelog](#changelog-whats-new-in-v073)
 - [Getting Started](#getting-started)
 - [Troubleshooting](#troubleshooting)
 - [Contributing and Feedback](#contributing-and-feedback)
@@ -125,6 +125,27 @@ This is necessary because older versions had a dependency on fushnisoft.clarion 
 [View on Marketplace](https://marketplace.visualstudio.com/items?itemName=msarson.clarion-extensions)
 
 ---
+## Changelog (What's New in v0.7.3)
+
+### 🚀 Major: Folder-Based Workflow
+
+**No more workspace files needed!** The extension now works seamlessly with simple folder opening:
+
+- **Just Open Folder** - No "Save Workspace As" prompts or .code-workspace files
+- **Settings with Solution** - All settings stored in `.vscode/settings.json` within your solution folder
+- **Team Friendly** - Commit settings with your solution for shared team configuration
+- **Recent Solutions** - Global history remembers your last 20 solutions across all folders
+- **One-Click Access** - Click recent solution in Solution View to instantly reopen it
+- **Smart Reuse** - Previously configured solutions open without prompts
+- **Auto-Validation** - Automatically cleans up invalid references to moved/deleted solutions
+
+#### Using Recent Solutions:
+1. Open VS Code with no folder - Solution View shows your recent solutions
+2. Click any recent solution - Its folder opens and solution loads automatically  
+3. Settings are remembered - No need to reconfigure Clarion version/properties each time
+
+---
+
 ## Changelog (What's New in v0.7.1)
 
 ### 🔧 ClarionCl.exe Integration (NEW!)

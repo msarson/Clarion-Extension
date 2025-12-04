@@ -11,9 +11,10 @@ import { PathUtils } from './PathUtils';
 import { getLanguageClient } from './LanguageClientManager';
 import { SolutionScanner, DetectedSolution } from './utils/SolutionScanner';
 import { ClarionInstallationDetector } from './utils/ClarionInstallationDetector';
+import { GlobalSolutionHistory } from './utils/GlobalSolutionHistory';
 
 const logger = LoggerManager.getLogger("SolutionTreeDataProvider");
-logger.setLevel("error");
+logger.setLevel("info");
 
 // Create a specialized debug logger for file resolution issues
 const fileResolutionLogger = LoggerManager.getLogger("FileResolution");
@@ -46,6 +47,18 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     private _filterDebounceTimeout: NodeJS.Timeout | null = null;
     private _filteredNodesCache: Map<string, TreeNode[]> = new Map();
     private _debounceDelay: number = 300; // 300ms debounce delay
+    
+    // Cache for detected solutions nodes to prevent rapid refreshes
+    private _detectedSolutionsCache: TreeNode[] | null = null;
+    private _lastFolderCheckTime: number = 0;
+    private _folderCheckCacheDuration: number = 5000; // 5 seconds
+    
+    // Prevent concurrent getDetectedSolutionsNodes calls
+    private _isLoadingDetectedSolutions: boolean = false;
+    private _pendingDetectedSolutionsPromise: Promise<TreeNode[]> | null = null;
+    
+    // Track refresh state
+    private refreshInProgress = false;
 
     constructor() {
         this.solutionCache = SolutionCache.getInstance();
@@ -87,9 +100,11 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     getFilterText(): string {
         return this._filterText;
     }
-    private refreshInProgress = false;
     async refresh(): Promise<void> {
-        if (this.refreshInProgress) return;
+        if (this.refreshInProgress) {
+            logger.info("⏭️ Refresh already in progress, skipping...");
+            return;
+        }
         this.refreshInProgress = true;
         const startTime = performance.now();
         logger.info("🔄 Refreshing solution tree...");
@@ -97,6 +112,10 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         try {
             // Clear the filter cache when refreshing
             this.refreshFilterCache();
+            
+            // Clear detected solutions cache to allow fresh detection
+            this._detectedSolutionsCache = null;
+            
             if (!globalSolutionFile) {
                 logger.info("ℹ️ No solution file set. Clearing tree.");
                 this._root = []; // This will trigger the welcome screen if `clarion.solutionOpen` is false
@@ -165,12 +184,118 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     
     /**
      * Creates tree nodes for detected solutions when no solution is currently open
+     * Uses caching to prevent rapid refreshes
      */
     private async getDetectedSolutionsNodes(): Promise<TreeNode[]> {
+        // If already loading, return the pending promise to avoid concurrent calls
+        if (this._isLoadingDetectedSolutions && this._pendingDetectedSolutionsPromise) {
+            logger.info(`⏳ Already loading detected solutions, returning pending promise...`);
+            return this._pendingDetectedSolutionsPromise;
+        }
+        
+        // Check if we can use cached results
+        const now = Date.now();
+        if (this._detectedSolutionsCache && 
+            (now - this._lastFolderCheckTime) < this._folderCheckCacheDuration) {
+            logger.info(`ℹ️ Using cached detected solutions nodes (${this._detectedSolutionsCache.length} nodes)`);
+            return this._detectedSolutionsCache;
+        }
+        
+        // Mark as loading and create the promise
+        this._isLoadingDetectedSolutions = true;
+        this._pendingDetectedSolutionsPromise = this._loadDetectedSolutionsNodes();
+        
+        try {
+            const result = await this._pendingDetectedSolutionsPromise;
+            return result;
+        } finally {
+            this._isLoadingDetectedSolutions = false;
+            this._pendingDetectedSolutionsPromise = null;
+        }
+    }
+    
+    /**
+     * Internal method that actually loads detected solutions
+     */
+    private async _loadDetectedSolutionsNodes(): Promise<TreeNode[]> {
+        logger.info(`🔍 Building detected solutions nodes (cache expired or empty)...`);
         const nodes: TreeNode[] = [];
         
         try {
-            // Scan for solutions
+            // Check if we have any folder open
+            const hasFolder = workspace.workspaceFolders && workspace.workspaceFolders.length > 0;
+            
+            if (!hasFolder) {
+                logger.info(`ℹ️ No folder open - checking recent solutions...`);
+                
+                // Get recent solutions from global history
+                const recentSolutions = await GlobalSolutionHistory.getValidReferences();
+                
+                if (recentSolutions.length > 0) {
+                    // Show recent solutions header
+                    const headerNode = new TreeNode(
+                        `📜 Recent Solutions (${recentSolutions.length})`,
+                        TreeItemCollapsibleState.None,
+                        { type: 'info' }
+                    );
+                    nodes.push(headerNode);
+                    
+                    // Add recent solution nodes
+                    for (const ref of recentSolutions) {
+                        const solutionName = path.basename(ref.solutionFile, '.sln');
+                        const folderName = path.basename(ref.folderPath);
+                        const recentNode = new TreeNode(
+                            `▶ ${solutionName}`,
+                            TreeItemCollapsibleState.None,
+                            {
+                                type: 'recentSolution',
+                                solutionPath: ref.solutionFile,
+                                folderPath: ref.folderPath,
+                                tooltip: `${ref.solutionFile}\nLast opened: ${ref.lastOpened.toLocaleString()}`
+                            },
+                            undefined,
+                            ref.folderPath
+                        );
+                        recentNode.description = folderName;
+                        nodes.push(recentNode);
+                    }
+                    
+                    // Add separator
+                    const separatorNode = new TreeNode(
+                        "─────────────",
+                        TreeItemCollapsibleState.None,
+                        { type: 'separator' }
+                    );
+                    nodes.push(separatorNode);
+                }
+                
+                // No folder open - offer to open one
+                const openFolderNode = new TreeNode(
+                    "📁 Open Folder...",
+                    TreeItemCollapsibleState.None,
+                    { 
+                        type: 'openFolder', 
+                        tooltip: "Open a folder containing Clarion solutions" 
+                    }
+                );
+                nodes.push(openFolderNode);
+                
+                const browseNode = new TreeNode(
+                    "📂 Browse for Solution...",
+                    TreeItemCollapsibleState.None,
+                    { type: 'browseSolution', tooltip: "Open a Clarion solution file from anywhere" }
+                );
+                nodes.push(browseNode);
+                
+                // Cache immediately to prevent rapid re-calls
+                this._detectedSolutionsCache = nodes;
+                this._lastFolderCheckTime = Date.now();
+                logger.info(`✅ Cached ${nodes.length} nodes (no folder, ${recentSolutions.length} recent)`);
+                
+                return nodes;
+            }
+            
+            // Scan for solutions in the opened folder
             const detectedSolutions = await SolutionScanner.scanWorkspaceFolders();
             
             // Check Clarion installations
@@ -179,77 +304,26 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             logger.info(`🔍 Found ${detectedSolutions.length} solution(s) and ${installations.length} Clarion installation(s)`);
             
             if (detectedSolutions.length === 0) {
-                // No solutions found - return empty to show welcome view
-                return [];
-            }
-            
-            // Check if workspace is saved
-            const hasWorkspaceFile = workspace.workspaceFile !== undefined;
-            const hasWorkspaceFolders = workspace.workspaceFolders && workspace.workspaceFolders.length > 0;
-            
-            if (!hasWorkspaceFile && hasWorkspaceFolders) {
-                // User opened a folder but no workspace is saved
-                // Show guidance to save workspace first
-                const infoNode = new TreeNode(
-                    "📁 Solutions Detected!",
-                    TreeItemCollapsibleState.Expanded,
-                    { type: 'solutionInfo' }
-                );
-                
-                const countNode = new TreeNode(
-                    `Found ${detectedSolutions.length} solution(s) in this folder`,
+                // No solutions found - offer to browse
+                const noSolutionsNode = new TreeNode(
+                    "No Solutions Detected",
                     TreeItemCollapsibleState.None,
-                    { type: 'info' }
-                );
-                
-                // List the solutions (non-clickable, just for info)
-                const solutionListNodes = detectedSolutions.slice(0, 5).map(sol => 
-                    new TreeNode(
-                        `• ${sol.solutionName}`,
-                        TreeItemCollapsibleState.None,
-                        { type: 'info' }
-                    )
-                );
-                
-                if (detectedSolutions.length > 5) {
-                    solutionListNodes.push(new TreeNode(
-                        `... and ${detectedSolutions.length - 5} more`,
-                        TreeItemCollapsibleState.None,
-                        { type: 'info' }
-                    ));
-                }
-                
-                const warningNode = new TreeNode(
-                    "⚠️ Save workspace to continue",
-                    TreeItemCollapsibleState.None,
-                    { type: 'warning', tooltip: "The Clarion extension requires a saved workspace to store solution settings" }
-                );
-                
-                const saveWorkspaceNode = new TreeNode(
-                    "💾 Save Workspace As...",
-                    TreeItemCollapsibleState.None,
-                    { type: 'saveWorkspace', tooltip: "Save a workspace file to enable solution features" }
+                    { type: 'info', tooltip: "No .sln files found in this folder" }
                 );
                 
                 const browseNode = new TreeNode(
-                    "Or Browse for Solution (old way)",
+                    "📂 Browse for Solution...",
                     TreeItemCollapsibleState.None,
-                    { type: 'browseSolution', tooltip: "Use the traditional solution opening method" }
+                    { type: 'browseSolution', tooltip: "Open a Clarion solution file from anywhere" }
                 );
                 
-                nodes.push(infoNode);
-                nodes.push(countNode);
-                nodes.push(...solutionListNodes);
-                nodes.push(warningNode);
-                nodes.push(saveWorkspaceNode);
+                nodes.push(noSolutionsNode);
                 nodes.push(browseNode);
-                
                 return nodes;
             }
             
-            // Workspace is saved, show normal solution list
+            // Show warning if no Clarion installation detected
             if (installations.length === 0) {
-                // Solutions found but no Clarion - show warning
                 const warningNode = new TreeNode(
                     "⚠️ No Clarion Installation Detected",
                     TreeItemCollapsibleState.None,
@@ -258,10 +332,18 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 nodes.push(warningNode);
             }
             
+            // Add header
+            const headerNode = new TreeNode(
+                `📁 ${detectedSolutions.length} Solution(s) Found`,
+                TreeItemCollapsibleState.None,
+                { type: 'info' }
+            );
+            nodes.push(headerNode);
+            
             // Add detected solution nodes (clickable)
             for (const solution of detectedSolutions) {
                 const solutionNode = new TreeNode(
-                    solution.solutionName,
+                    `▶ ${solution.solutionName}`,
                     TreeItemCollapsibleState.None,
                     { 
                         type: 'detectedSolution', 
@@ -277,7 +359,7 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             
             // Add browse option
             const browseNode = new TreeNode(
-                "Browse for Solution...",
+                "📂 Browse for Solution...",
                 TreeItemCollapsibleState.None,
                 { type: 'browseSolution', tooltip: "Open a Clarion solution file from anywhere" }
             );
@@ -285,9 +367,19 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             
         } catch (error) {
             logger.error('❌ Error getting detected solutions:', error);
-            // Return empty to show welcome view on error
-            return [];
+            // Return browse option on error
+            const browseNode = new TreeNode(
+                "📂 Browse for Solution...",
+                TreeItemCollapsibleState.None,
+                { type: 'browseSolution', tooltip: "Open a Clarion solution file" }
+            );
+            nodes.push(browseNode);
         }
+        
+        // Cache the results
+        this._detectedSolutionsCache = nodes;
+        this._lastFolderCheckTime = Date.now();
+        logger.info(`✅ Cached ${nodes.length} detected solution nodes`);
         
         return nodes;
     }
@@ -601,6 +693,25 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             return treeItem;
         }
 
+        // Handle recent solution nodes
+        if ((data as any)?.type === 'recentSolution') {
+            treeItem.iconPath = new ThemeIcon('history');
+            treeItem.tooltip = (data as any).tooltip || `Click to open: ${(data as any).solutionPath}`;
+            treeItem.command = {
+                title: 'Open Recent Solution',
+                command: 'clarion.openRecentSolution',
+                arguments: [(data as any).folderPath, (data as any).solutionPath]
+            };
+            return treeItem;
+        }
+
+        // Handle separator nodes (non-clickable)
+        if ((data as any)?.type === 'separator') {
+            treeItem.iconPath = undefined;
+            treeItem.collapsibleState = TreeItemCollapsibleState.None;
+            return treeItem;
+        }
+
         // Handle browse solution node
         if ((data as any)?.type === 'browseSolution') {
             treeItem.iconPath = new ThemeIcon('folder-opened');
@@ -613,13 +724,13 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             return treeItem;
         }
 
-        // Handle save workspace node
-        if ((data as any)?.type === 'saveWorkspace') {
-            treeItem.iconPath = new ThemeIcon('save');
-            treeItem.tooltip = (data as any).tooltip;
+        // Handle open folder node
+        if ((data as any)?.type === 'openFolder') {
+            treeItem.iconPath = new ThemeIcon('folder-opened');
+            treeItem.tooltip = (data as any).tooltip || "Open a folder containing Clarion solutions";
             treeItem.command = {
-                title: 'Save Workspace As',
-                command: 'workbench.action.saveWorkspaceAs',
+                title: 'Open Folder',
+                command: 'vscode.openFolder',
                 arguments: []
             };
             return treeItem;
