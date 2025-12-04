@@ -495,6 +495,15 @@ export async function activate(context: ExtensionContext): Promise<void> {
                 const success = await SmartSolutionOpener.openDetectedSolution(solutionPath);
                 
                 if (success) {
+                    // Reload global settings from workspace after saving
+                    logger.info("🔄 Reloading global settings from workspace...");
+                    await globalSettings.initializeFromWorkspace();
+                    
+                    logger.info(`✅ Global settings reloaded:
+                        - globalSolutionFile: ${globalSolutionFile || 'not set'}
+                        - globalClarionPropertiesFile: ${globalClarionPropertiesFile || 'not set'}
+                        - globalClarionVersion: ${globalClarionVersion || 'not set'}`);
+                    
                     // Initialize the solution
                     await initializeSolution(context, true);
                     
