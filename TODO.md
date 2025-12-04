@@ -164,6 +164,35 @@ Follow cursor functionality has been implemented with:
 
 ## 📋 Enhancements
 
+### Remove Original Solution View Welcome Screen
+**Priority:** MEDIUM  
+**Status:** Not Started
+
+**Task:**
+Remove the old/original welcome screen from the Solution View, as it's been replaced by the new folder-based workflow with global solution history.
+
+**Files to Clean Up:**
+- `client/src/WelcomeViewProvider.ts` - Original welcome view provider (may be unused now)
+- Check `package.json` for any view registrations that reference old welcome view
+- Check `extension.ts` for any welcome view initialization code
+- Clean up any related unused imports/dependencies
+
+**Context:**
+Version 0.7.3 introduced a new folder-based workflow with:
+- Automatic solution detection in open folders
+- Global solution history showing recent solutions
+- No workspace file requirement
+
+The original welcome screen is likely obsolete and can be removed to simplify the codebase.
+
+**Investigation Needed:**
+1. Verify WelcomeViewProvider is not currently used
+2. Find all references to the old welcome view
+3. Ensure removal doesn't break any functionality
+4. Update package.json view contributions if needed
+
+---
+
 ### ~~Diagnostics - Unterminated Structure Detection~~ ✅ COMPLETE (Dec 2024)
 **Priority:** ~~MEDIUM~~ **COMPLETE**  
 **Status:** Complete ✅
