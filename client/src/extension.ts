@@ -2081,6 +2081,13 @@ export async function openClarionSolution(context: ExtensionContext) {
                     selectedItem.solution.configuration
                 );
                 
+                // Add to global solution history
+                if (workspace.workspaceFolders && workspace.workspaceFolders.length > 0) {
+                    const folderPath = workspace.workspaceFolders[0].uri.fsPath;
+                    await GlobalSolutionHistory.addSolution(selectedItem.solution.solutionFile, folderPath);
+                    logger.info("✅ Added to global solution history");
+                }
+                
                 // Set environment variable for the server to use
                 process.env.CLARION_SOLUTION_FILE = selectedItem.solution.solutionFile;
                 logger.info(`✅ Set CLARION_SOLUTION_FILE environment variable: ${selectedItem.solution.solutionFile}`);
@@ -2164,6 +2171,13 @@ export async function openClarionSolution(context: ExtensionContext) {
         // ✅ Step 4: Save final selections to workspace settings
         await setGlobalClarionSelection(solutionFilePath, globalClarionPropertiesFile, globalClarionVersion, globalSettings.configuration);
         logger.info(`⚙️ Selected configuration: ${globalSettings.configuration}`);
+        
+        // ✅ Add to global solution history
+        if (workspace.workspaceFolders && workspace.workspaceFolders.length > 0) {
+            const folderPath = workspace.workspaceFolders[0].uri.fsPath;
+            await GlobalSolutionHistory.addSolution(solutionFilePath, folderPath);
+            logger.info("✅ Added to global solution history");
+        }
         
         // ✅ Set environment variable for the server to use
         process.env.CLARION_SOLUTION_FILE = solutionFilePath;
