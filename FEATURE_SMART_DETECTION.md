@@ -76,7 +76,7 @@ Extension: Creates workspace if Yes, migrates settings
 
 1. **Install the VSIX**
    ```
-   code --install-extension clarion-extensions-0.7.2.vsix
+   code --install-extension clarion-extensions-0.7.3.vsix
    ```
 
 2. **Test Case 1: Fresh Folder with Solution**
