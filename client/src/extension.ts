@@ -497,6 +497,16 @@ export async function activate(context: ExtensionContext): Promise<void> {
                 if (success) {
                     // Initialize the solution
                     await initializeSolution(context, true);
+                    
+                    // Explicitly refresh the tree view to show projects/apps
+                    if (solutionTreeDataProvider) {
+                        await solutionTreeDataProvider.refresh();
+                    }
+                    
+                    // Refresh status view
+                    if (statusViewProvider) {
+                        statusViewProvider.refresh();
+                    }
                 }
             } catch (error) {
                 logger.error(`❌ Error in clarion.openDetectedSolution command: ${error instanceof Error ? error.message : String(error)}`);
