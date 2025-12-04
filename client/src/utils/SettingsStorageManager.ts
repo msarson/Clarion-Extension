@@ -41,13 +41,28 @@ export class SettingsStorageManager {
         version: string,
         configuration: string
     ): Promise<boolean> {
-        const storageLocation = this.determineStorageLocation();
-        const target = storageLocation === StorageLocation.Workspace 
-            ? ConfigurationTarget.Workspace 
-            : ConfigurationTarget.WorkspaceFolder;
-
         try {
+            // For folders (not workspaces), we need to ensure .vscode directory exists
+            if (workspace.workspaceFolders && workspace.workspaceFolders.length > 0 && !workspace.workspaceFile) {
+                const workspaceFolder = workspace.workspaceFolders[0].uri.fsPath;
+                const vscodeDir = path.join(workspaceFolder, '.vscode');
+                const fs = require('fs');
+                
+                // Create .vscode directory if it doesn't exist
+                if (!fs.existsSync(vscodeDir)) {
+                    fs.mkdirSync(vscodeDir, { recursive: true });
+                    logger.info(`✅ Created .vscode directory: ${vscodeDir}`);
+                }
+            }
+
             const config = workspace.getConfiguration();
+            
+            // Always try to save to WorkspaceFolder first if we have folders
+            const target = (workspace.workspaceFolders && workspace.workspaceFolders.length > 0)
+                ? ConfigurationTarget.WorkspaceFolder
+                : ConfigurationTarget.Workspace;
+
+            logger.info(`💾 Saving settings to ${target === ConfigurationTarget.WorkspaceFolder ? 'WorkspaceFolder' : 'Workspace'}`);
 
             // Save individual settings
             await config.update('clarion.solutionFile', solutionFile, target);
@@ -56,10 +71,10 @@ export class SettingsStorageManager {
             await config.update('clarion.configuration', configuration, target);
             await config.update('clarion.currentSolution', solutionFile, target);
 
-            // Update solutions array (only in workspace level)
+            // Update solutions array
             await this.updateSolutionsArray(solutionFile, propertiesFile, version, configuration);
 
-            logger.info(`✅ Saved settings to ${storageLocation}:
+            logger.info(`✅ Saved settings successfully:
                 - solutionFile: ${solutionFile}
                 - propertiesFile: ${propertiesFile}
                 - version: ${version}
@@ -68,6 +83,8 @@ export class SettingsStorageManager {
             return true;
         } catch (error) {
             logger.error("❌ Error saving solution settings:", error);
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            window.showErrorMessage(`Failed to save solution settings: ${errorMsg}`);
             return false;
         }
     }
