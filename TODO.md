@@ -6,6 +6,58 @@ This file tracks all outstanding tasks, bugs, and improvements for the Clarion L
 
 ## 🐛 Critical Bugs
 
+### Build Error Diagnostics Not Showing Correct File Location (Dec 2024)
+**Priority:** HIGH  
+**Status:** Not Started
+
+#### Problem
+When building a Clarion solution/project with compile errors, the errors appear in the Problems pane but point to the wrong file location.
+
+**Expected Behavior:**
+- Errors should link to the actual source file where the error occurred
+- Clicking the error should navigate to the correct file and line number
+- Error should be clickable and actionable
+
+**Current Behavior:**
+- Error points to temporary build output log: `C:/Users/msars/AppData/Local/Programs/Microsoft VS Code/BuildOutput.log`
+- Error location shows line 1, column 1 (incorrect)
+- Error message shows project file path in brackets: `[f:\\Playground\\ArrayInteger\\ArrayInteger.cwproj]`
+
+**Example Problem Output:**
+```json
+{
+  "resource": "/C:/Users/msars/AppData/Local/Programs/Microsoft VS Code/BuildOutput.log",
+  "owner": "clarion0",
+  "severity": 8,
+  "message": "Clarion error: Unknown procedure label [f:\\Playground\\ArrayInteger\\ArrayInteger.cwproj]",
+  "source": "Clarion",
+  "startLineNumber": 1,
+  "startColumn": 1,
+  "endLineNumber": 1,
+  "endColumn": 51,
+  "origin": "extHost1"
+}
+```
+
+#### Analysis Needed
+1. Locate build output parser code
+2. Identify how Clarion compiler reports errors (format, file paths, line numbers)
+3. Parse compiler output to extract:
+   - Actual source file path
+   - Line number where error occurred
+   - Column number (if available)
+   - Error message
+4. Create diagnostic with correct file URI and location
+5. Test with various error types and project structures
+
+#### Files to Investigate
+- Build task provider
+- Compiler output parser
+- Diagnostic collection logic
+- Problem matcher configuration
+
+---
+
 ### Structure View - Method Implementation Issues (Dec 2024)
 **Priority:** HIGH  
 **Status:** Partially Fixed - Needs More Work
