@@ -6,55 +6,47 @@ This file tracks all outstanding tasks, bugs, and improvements for the Clarion L
 
 ## 🐛 Critical Bugs
 
-### Build Error Diagnostics Not Showing Correct File Location (Dec 2024)
-**Priority:** HIGH  
-**Status:** Not Started
+### ~~Build Error Diagnostics Not Showing Correct File Location (Dec 2024)~~ ✅ FIXED
+**Priority:** ~~HIGH~~ **COMPLETE**  
+**Status:** ~~Not Started~~ **RESOLVED (Dec 4, 2024)**
 
 #### Problem
-When building a Clarion solution/project with compile errors, the errors appear in the Problems pane but point to the wrong file location.
+When building a Clarion solution/project with compile errors, the errors appeared in the Problems pane but pointed to the wrong file location.
 
 **Expected Behavior:**
 - Errors should link to the actual source file where the error occurred
 - Clicking the error should navigate to the correct file and line number
 - Error should be clickable and actionable
 
-**Current Behavior:**
-- Error points to temporary build output log: `C:/Users/msars/AppData/Local/Programs/Microsoft VS Code/BuildOutput.log`
-- Error location shows line 1, column 1 (incorrect)
-- Error message shows project file path in brackets: `[f:\\Playground\\ArrayInteger\\ArrayInteger.cwproj]`
+**Previous Behavior:**
+- Error pointed to temporary build output log: `C:/Users/msars/AppData/Local/Programs/Microsoft VS Code/BuildOutput.log`
+- Error location showed line 1, column 1 (incorrect)
+- Error message showed project file path in brackets: `[f:\\Playground\\ArrayInteger\\ArrayInteger.cwproj]`
 
-**Example Problem Output:**
-```json
-{
-  "resource": "/C:/Users/msars/AppData/Local/Programs/Microsoft VS Code/BuildOutput.log",
-  "owner": "clarion0",
-  "severity": 8,
-  "message": "Clarion error: Unknown procedure label [f:\\Playground\\ArrayInteger\\ArrayInteger.cwproj]",
-  "source": "Clarion",
-  "startLineNumber": 1,
-  "startColumn": 1,
-  "endLineNumber": 1,
-  "endColumn": 51,
-  "origin": "extHost1"
-}
-```
+#### Root Cause
+The issue was caused by MSBuild parameters that suppressed detailed output:
+1. `/consoleloggerparameters:ErrorsOnly` - Limited console output to errors only
+2. Shell redirection (`> log 2>&1`) - Captured output but lost formatting
+3. The combination prevented proper file location extraction from compiler messages
 
-#### Analysis Needed
-1. Locate build output parser code
-2. Identify how Clarion compiler reports errors (format, file paths, line numbers)
-3. Parse compiler output to extract:
-   - Actual source file path
-   - Line number where error occurred
-   - Column number (if available)
-   - Error message
-4. Create diagnostic with correct file URI and location
-5. Test with various error types and project structures
+#### Solution Implemented
+**Fixed MSBuild logging configuration:**
+- Removed `/consoleloggerparameters:ErrorsOnly`
+- Removed shell redirection in favor of MSBuild's native `/fileLogger`
+- Added `/fileLoggerParameters` with detailed verbosity
+- Updated regex patterns to handle both prefixed (`3> file.clw`) and non-prefixed (`file.clw`) formats
 
-#### Files to Investigate
-- Build task provider
-- Compiler output parser
-- Diagnostic collection logic
-- Problem matcher configuration
+**Changes:**
+- `buildTasks.ts`: Updated MSBuild arguments to use `/fileLogger` with proper parameters
+- `processBuildErrors.ts`: Made task prefix (`3>`) optional in error regex patterns
+
+**Result:**
+- Build log now contains properly formatted errors with full file paths
+- Diagnostics correctly point to source files
+- Errors are clickable and navigate to the correct line/column
+- Problems panel now functional for build errors
+
+**Related Issue:** https://github.com/msarson/Clarion-Extension/issues/20
 
 ---
 

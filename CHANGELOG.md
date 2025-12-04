@@ -33,6 +33,7 @@ All notable changes to the "clarion-extension" extension will be documented in t
 - **Multiple options** - Open Folder, Browse for Solution, or pick from recent
 
 ### 🐛 Bug Fixes
+- **Fixed build error diagnostics** - Errors now properly link to source files with correct line/column numbers instead of pointing to BuildOutput.log (fixes #20)
 - **Fixed infinite scrollbar** - Solution/Structure views no longer show constant progress indicator when no folder open
 - **Fixed activation blocking** - Removed popup dialog that blocked extension activation
 - **Concurrency control** - Prevented multiple simultaneous solution detection calls
