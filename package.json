@@ -581,6 +581,7 @@
                 },
                 "clarion.solutions": {
                     "type": "array",
+                    "scope": "resource",
                     "items": {
                         "type": "object",
                         "properties": {

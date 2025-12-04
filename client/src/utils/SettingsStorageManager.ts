@@ -57,27 +57,31 @@ export class SettingsStorageManager {
 
             // Get the workspace folder URI for the configuration scope
             const workspaceFolder = workspace.workspaceFolders?.[0];
-            const configScope = workspaceFolder ? workspaceFolder.uri : undefined;
-            const config = workspace.getConfiguration('clarion', configScope);
             
             // Determine target based on workspace setup
             let target: ConfigurationTarget;
+            let config: any;
+            
             if (workspace.workspaceFile) {
                 // We have a .code-workspace file - save to Workspace level
                 target = ConfigurationTarget.Workspace;
+                config = workspace.getConfiguration('clarion');
                 logger.info(`💾 Detected workspace file, using Workspace target`);
-            } else if (workspace.workspaceFolders && workspace.workspaceFolders.length > 0) {
+            } else if (workspaceFolder) {
                 // We only have folders - save to WorkspaceFolder level
                 target = ConfigurationTarget.WorkspaceFolder;
+                // IMPORTANT: When using WorkspaceFolder, we need to get config with the folder URI
+                config = workspace.getConfiguration('clarion', workspaceFolder.uri);
                 logger.info(`💾 Detected folder setup, using WorkspaceFolder target`);
+                logger.info(`   Folder: ${workspaceFolder.uri.fsPath}`);
             } else {
-                // Fallback
+                // Fallback - no workspace at all
                 target = ConfigurationTarget.Workspace;
+                config = workspace.getConfiguration('clarion');
                 logger.warn(`⚠️ No workspace file or folders, defaulting to Workspace target`);
             }
 
             logger.info(`💾 Saving settings to ${target === ConfigurationTarget.WorkspaceFolder ? 'WorkspaceFolder' : 'Workspace'}`);
-            logger.info(`   Scope: ${configScope?.fsPath || 'none'}`);
 
             // Save individual settings with proper scope
             await config.update('solutionFile', solutionFile, target);
@@ -115,7 +119,12 @@ export class SettingsStorageManager {
     ): Promise<void> {
         if (!solutionFile) return;
 
-        const config = workspace.getConfiguration("clarion");
+        // Get config with proper scope
+        const workspaceFolder = workspace.workspaceFolders?.[0];
+        const config = workspaceFolder 
+            ? workspace.getConfiguration("clarion", workspaceFolder.uri)
+            : workspace.getConfiguration("clarion");
+            
         const solutions = config.get<ClarionSolutionSettings[]>("solutions", []);
 
         const solutionIndex = solutions.findIndex(s => s.solutionFile === solutionFile);
@@ -138,10 +147,10 @@ export class SettingsStorageManager {
             });
         }
 
-        // Always save solutions array to workspace level (if workspace exists)
+        // Determine target based on workspace setup
         const target = workspace.workspaceFile 
             ? ConfigurationTarget.Workspace 
-            : ConfigurationTarget.WorkspaceFolder;
+            : (workspaceFolder ? ConfigurationTarget.WorkspaceFolder : ConfigurationTarget.Workspace);
 
         await config.update("solutions", solutions, target);
         logger.info(`✅ Updated solutions array (${solutions.length} solutions)`);
