@@ -48,6 +48,7 @@ All notable changes to the "clarion-extension" extension will be documented in t
 ### 📝 Code Quality
 - **New utility class** - `GlobalSolutionHistory` manages cross-folder solution references
 - **Cleaned up** - Removed ~85 lines of workspace file creation code
+- **Removed dead code** - Deleted unused `WelcomeViewProvider.ts` (~157 lines) that was obsoleted by new folder-based workflow
 - **Type safety** - `SolutionReference` interface for strongly-typed history entries
 - **Error handling** - Graceful handling of missing files/folders in history
 
