@@ -2,7 +2,7 @@
     "name": "clarion-extensions",
     "displayName": "Clarion Extensions",
     "description": "Extension for Clarion Language",
-    "version": "0.7.2",
+    "version": "0.7.3",
     "publisher": "msarson",
     "repository": {
         "type": "git",
@@ -178,6 +178,10 @@
                 "command": "clarion.openSolution",
                 "title": "Open Solution",
                 "icon": "$(folder-opened)"
+            },
+            {
+                "command": "clarion.openDetectedSolution",
+                "title": "Open Detected Solution"
             },
             {
                 "command": "clarion.openSolutionFromList",
@@ -447,7 +451,7 @@
         "viewsWelcome": [
             {
                 "view": "solutionView",
-                "contents": "No solution is currently open.\n[Open Solution](command:clarion.openSolution)\n[Open Solution from List](command:clarion.openSolutionFromList)\n[Getting Started](https://github.com/msarson/Clarion-Extension/blob/master/GettingStarted.md) | [Report an Issue](https://github.com/msarson/Clarion-Extension/issues)",
+                "contents": "No Clarion solution is currently open.\n\n**Quick Start:**\n\nIf you have a .sln file in this folder, the extension will detect it automatically.\n\n[Open Solution](command:clarion.openSolution)\n[Open Solution from List](command:clarion.openSolutionFromList)\n\n**Need Help?**\n\n[Getting Started Guide](https://github.com/msarson/Clarion-Extension/blob/master/GettingStarted.md) | [Report an Issue](https://github.com/msarson/Clarion-Extension/issues)",
                 "when": "!clarion.solutionOpen"
             }
         ],
@@ -543,26 +547,31 @@
                 "clarion.solutionFile": {
                     "type": "string",
                     "default": "",
+                    "scope": "resource",
                     "description": "Path to the Clarion solution (.sln) file."
                 },
                 "clarion.propertiesFile": {
                     "type": "string",
                     "default": "",
+                    "scope": "resource",
                     "description": "Path to the ClarionProperties.xml file."
                 },
                 "clarion.version": {
                     "type": "string",
                     "default": "",
+                    "scope": "resource",
                     "description": "Selected Clarion version."
                 },
                 "clarion.configuration": {
                     "type": "string",
                     "default": "",
+                    "scope": "resource",
                     "description": "Selected Clarion configuration."
                 },
                 "clarion.currentSolution": {
                     "type": "string",
                     "default": "",
+                    "scope": "resource",
                     "description": "Path to the currently selected Clarion solution file."
                 },
                 "clarion.telemetry.enabled": {
@@ -572,6 +581,7 @@
                 },
                 "clarion.solutions": {
                     "type": "array",
+                    "scope": "resource",
                     "items": {
                         "type": "object",
                         "properties": {

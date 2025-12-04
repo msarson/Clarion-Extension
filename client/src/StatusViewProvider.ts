@@ -61,7 +61,7 @@ export class StatusViewProvider implements vscode.TreeDataProvider<StatusItem> {
         let errors = 0;
         let warnings = 0;
         
-        const hasWorkspace = !!vscode.workspace.workspaceFolders;
+        const hasFolder = !!(vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0);
         const isTrusted = vscode.workspace.isTrusted;
         const hasSolution = !!globalSolutionFile;
         const serverActive = isClientReady();
@@ -69,10 +69,10 @@ export class StatusViewProvider implements vscode.TreeDataProvider<StatusItem> {
         // Count errors (❌)
         if (!serverActive) errors++;
         if (!isTrusted) errors++;
-        if (!hasWorkspace) errors++;
+        if (!hasFolder) errors++;
         
         // Count warnings (⚠️)
-        if (!hasSolution && hasWorkspace && isTrusted) warnings++;
+        if (!hasSolution && hasFolder && isTrusted) warnings++;
         if (!serverActive) warnings += 2; // Document symbols and folding
         
         return { errors, warnings };
@@ -92,7 +92,7 @@ export class StatusViewProvider implements vscode.TreeDataProvider<StatusItem> {
 
     private getStatusItems(): StatusItem[] {
         const items: StatusItem[] = [];
-        const hasWorkspace = !!vscode.workspace.workspaceFolders;
+        const hasFolder = !!(vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0);
         const isTrusted = vscode.workspace.isTrusted;
         const hasSolution = !!globalSolutionFile;
 
@@ -136,7 +136,7 @@ export class StatusViewProvider implements vscode.TreeDataProvider<StatusItem> {
         ));
 
         // Workspace Status
-        if (!hasWorkspace) {
+        if (!hasFolder) {
             items.push(new StatusItem(
                 "⚠️ Workspace: Not Saved",
                 "Solution management and advanced features require a workspace",
@@ -167,7 +167,7 @@ export class StatusViewProvider implements vscode.TreeDataProvider<StatusItem> {
         }
 
         // Solution Status
-        if (!hasWorkspace) {
+        if (!hasFolder) {
             items.push(new StatusItem(
                 "❌ Solution Management: Disabled",
                 "Workspace required",
@@ -198,7 +198,7 @@ export class StatusViewProvider implements vscode.TreeDataProvider<StatusItem> {
         }
 
         // Cross-file Navigation
-        if (!hasWorkspace || !isTrusted) {
+        if (!hasFolder || !isTrusted) {
             items.push(new StatusItem(
                 "⚠️ Cross-file Navigation: Limited",
                 "Current folder only (workspace required for full navigation)",
@@ -219,7 +219,7 @@ export class StatusViewProvider implements vscode.TreeDataProvider<StatusItem> {
         }
 
         // Build Tasks
-        if (!hasWorkspace || !isTrusted || !hasSolution) {
+        if (!hasFolder || !isTrusted || !hasSolution) {
             items.push(new StatusItem(
                 "❌ Build Tasks: Disabled",
                 "Requires workspace and solution",
@@ -237,7 +237,7 @@ export class StatusViewProvider implements vscode.TreeDataProvider<StatusItem> {
         const tips: StatusItem[] = [];
         
         // Show contextual tips based on current issues
-        if (!hasWorkspace) {
+        if (!hasFolder) {
             tips.push(new StatusItem("    💡 Save a workspace to unlock:", "", undefined));
             tips.push(new StatusItem("       • Solution management", "", undefined));
             tips.push(new StatusItem("       • Cross-file navigation", "", undefined));

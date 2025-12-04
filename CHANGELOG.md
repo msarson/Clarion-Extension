@@ -3,7 +3,59 @@ All notable changes to the "clarion-extension" extension will be documented in t
 
 ---
 
+## [0.7.3] - 2024-12-04
+
+### 🚀 Major: Folder-Based Workflow (No Workspace Files Required)
+
+#### Simplified Solution Management
+- **Removed workspace file requirement** - Extension now works with simple folder opening
+- **Folder-level settings** - All settings stored in `.vscode/settings.json` within solution folder
+- **No more "Save Workspace As" prompts** - Just open folder containing solution
+- **Team-friendly** - Settings can be committed to version control with solution
+
+#### Global Solution History
+- **Recent Solutions tracking** - Automatically remembers last 20 solutions opened across all folders
+- **Quick access** - Solution View shows recent solutions when no folder is open
+- **One-click reopening** - Click recent solution to open its folder and load it automatically
+- **Smart validation** - Automatically cleans up references to deleted/moved solutions
+- **Persistent across sessions** - History maintained in VS Code's global storage
+
+#### Smart Solution Opening
+- **Settings reuse** - Previously configured solutions open instantly without prompts
+- **Automatic validation** - Detects when settings are stale (files moved/deleted)
+- **Graceful fallback** - Auto-detection kicks in if settings invalid
+- **No duplicate data** - Recent solutions reference existing folder settings, no duplication
+
+#### Enhanced Solution View
+- **Recent Solutions section** - Shows when no folder open with last opened timestamp
+- **Folder context** - Each solution shows which folder it belongs to
+- **Clean UI** - Separator between recent solutions and action buttons
+- **Multiple options** - Open Folder, Browse for Solution, or pick from recent
+
+### 🐛 Bug Fixes
+- **Fixed infinite scrollbar** - Solution/Structure views no longer show constant progress indicator when no folder open
+- **Fixed activation blocking** - Removed popup dialog that blocked extension activation
+- **Concurrency control** - Prevented multiple simultaneous solution detection calls
+- **Cache management** - 5-second cache with early returns for "no folder" state
+
+### 🔧 Technical Improvements
+- **Terminology consistency** - Changed all "workspace" references to "folder" throughout
+- **Configuration target** - `getClarionConfigTarget()` helper ensures proper settings scope
+- **Non-blocking activation** - Extension continues loading even when showing dialogs
+- **Proper logging** - Added comprehensive logging for global solution history operations
+
+### 📝 Code Quality
+- **New utility class** - `GlobalSolutionHistory` manages cross-folder solution references
+- **Cleaned up** - Removed ~85 lines of workspace file creation code
+- **Type safety** - `SolutionReference` interface for strongly-typed history entries
+- **Error handling** - Graceful handling of missing files/folders in history
+
+---
+
 ## [0.7.1] - 2025-12-03
+
+### ⚠️ Documentation Update
+**Note**: Version 0.7.1 was initially released with incomplete documentation. This update corrects the changelog to reflect all changes that were actually included in the 0.7.1 release.
 
 ### 🔧 ClarionCl.exe Integration (APP Generation)
 - **Generate Applications**: Right-click context menu commands to generate Clarion applications
@@ -31,24 +83,10 @@ All notable changes to the "clarion-extension" extension will be documented in t
   - Previously incorrectly flagged valid empty CASE statements as errors
   - Now properly validates: `CASE TRUE` followed by `END` is valid Clarion syntax
 
-### 🎯 Knowledge Base & Language Intelligence
+### 📈 Performance & Quality (from November 2024)
+The following improvements were included in 0.7.1 but not documented in the initial release:
 
-#### Comprehensive Documentation
-- **Complete Clarion Language Reference**: Added 2,000+ lines of documentation
-  - CASE, CHOOSE, EXECUTE control structures
-  - GET/SET file operations (all syntax forms)
-  - FILE declaration with KEY, INDEX, MEMO, BLOB
-  - QUEUE dynamic arrays with compression details
-  - GROUP compound structures with OVER and DIM
-  - VIEW virtual files with JOIN and PROJECT
-  - CLASS and INTERFACE object-oriented features
-  - All examples validated for column 0 compliance
-
-#### Enhanced Diagnostics (3 new validators)
-- **FILE Structure Validation**: Errors for missing DRIVER or RECORD
-- **CASE Structure Validation**: Errors for misplaced OROF (CASE can have zero or more OF clauses)
-- **EXECUTE Expression Validation**: Warnings for non-numeric expressions
-- **Test Coverage**: 185 total tests, all passing
+- **Test Coverage**: 185 total tests, all passing (zero regressions)
 
 #### Improved Structure View
 - **FILE Hierarchy**: Shows KEY/INDEX as children, RECORD as container, MEMO/BLOB distinguished

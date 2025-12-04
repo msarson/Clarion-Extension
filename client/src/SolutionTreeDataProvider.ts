@@ -1,4 +1,4 @@
-import { TreeDataProvider, TreeItem, Event, EventEmitter, TreeItemCollapsibleState, ThemeIcon, Command, extensions, Uri } from 'vscode';
+import { TreeDataProvider, TreeItem, Event, EventEmitter, TreeItemCollapsibleState, ThemeIcon, Command, extensions, Uri, workspace } from 'vscode';
 import { TreeNode } from './TreeNode';
 import { ClarionSolutionInfo, ClarionProjectInfo, ClarionSourcerFileInfo } from 'common/types';
 import LoggerManager from './logger';
@@ -9,9 +9,12 @@ import * as fs from 'fs';
 import { ProjectIndex } from './ProjectIndex';
 import { PathUtils } from './PathUtils';
 import { getLanguageClient } from './LanguageClientManager';
+import { SolutionScanner, DetectedSolution } from './utils/SolutionScanner';
+import { ClarionInstallationDetector } from './utils/ClarionInstallationDetector';
+import { GlobalSolutionHistory } from './utils/GlobalSolutionHistory';
 
 const logger = LoggerManager.getLogger("SolutionTreeDataProvider");
-logger.setLevel("error");
+logger.setLevel("info");
 
 // Create a specialized debug logger for file resolution issues
 const fileResolutionLogger = LoggerManager.getLogger("FileResolution");
@@ -44,6 +47,18 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     private _filterDebounceTimeout: NodeJS.Timeout | null = null;
     private _filteredNodesCache: Map<string, TreeNode[]> = new Map();
     private _debounceDelay: number = 300; // 300ms debounce delay
+    
+    // Cache for detected solutions nodes to prevent rapid refreshes
+    private _detectedSolutionsCache: TreeNode[] | null = null;
+    private _lastFolderCheckTime: number = 0;
+    private _folderCheckCacheDuration: number = 5000; // 5 seconds
+    
+    // Prevent concurrent getDetectedSolutionsNodes calls
+    private _isLoadingDetectedSolutions: boolean = false;
+    private _pendingDetectedSolutionsPromise: Promise<TreeNode[]> | null = null;
+    
+    // Track refresh state
+    private refreshInProgress = false;
 
     constructor() {
         this.solutionCache = SolutionCache.getInstance();
@@ -85,9 +100,11 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     getFilterText(): string {
         return this._filterText;
     }
-    private refreshInProgress = false;
     async refresh(): Promise<void> {
-        if (this.refreshInProgress) return;
+        if (this.refreshInProgress) {
+            logger.info("⏭️ Refresh already in progress, skipping...");
+            return;
+        }
         this.refreshInProgress = true;
         const startTime = performance.now();
         logger.info("🔄 Refreshing solution tree...");
@@ -95,6 +112,10 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         try {
             // Clear the filter cache when refreshing
             this.refreshFilterCache();
+            
+            // Clear detected solutions cache to allow fresh detection
+            this._detectedSolutionsCache = null;
+            
             if (!globalSolutionFile) {
                 logger.info("ℹ️ No solution file set. Clearing tree.");
                 this._root = []; // This will trigger the welcome screen if `clarion.solutionOpen` is false
@@ -160,6 +181,209 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             this.refreshInProgress = false;
         }
     }
+    
+    /**
+     * Creates tree nodes for detected solutions when no solution is currently open
+     * Uses caching to prevent rapid refreshes
+     */
+    private async getDetectedSolutionsNodes(): Promise<TreeNode[]> {
+        // If already loading, return the pending promise to avoid concurrent calls
+        if (this._isLoadingDetectedSolutions && this._pendingDetectedSolutionsPromise) {
+            logger.info(`⏳ Already loading detected solutions, returning pending promise...`);
+            return this._pendingDetectedSolutionsPromise;
+        }
+        
+        // Check if we can use cached results
+        const now = Date.now();
+        if (this._detectedSolutionsCache && 
+            (now - this._lastFolderCheckTime) < this._folderCheckCacheDuration) {
+            logger.info(`ℹ️ Using cached detected solutions nodes (${this._detectedSolutionsCache.length} nodes)`);
+            return this._detectedSolutionsCache;
+        }
+        
+        // Mark as loading and create the promise
+        this._isLoadingDetectedSolutions = true;
+        this._pendingDetectedSolutionsPromise = this._loadDetectedSolutionsNodes();
+        
+        try {
+            const result = await this._pendingDetectedSolutionsPromise;
+            return result;
+        } finally {
+            this._isLoadingDetectedSolutions = false;
+            this._pendingDetectedSolutionsPromise = null;
+        }
+    }
+    
+    /**
+     * Internal method that actually loads detected solutions
+     */
+    private async _loadDetectedSolutionsNodes(): Promise<TreeNode[]> {
+        logger.info(`🔍 Building detected solutions nodes (cache expired or empty)...`);
+        const nodes: TreeNode[] = [];
+        
+        try {
+            // Check if we have any folder open
+            const hasFolder = workspace.workspaceFolders && workspace.workspaceFolders.length > 0;
+            
+            if (!hasFolder) {
+                logger.info(`ℹ️ No folder open - checking recent solutions...`);
+                
+                // Get recent solutions from global history
+                const recentSolutions = await GlobalSolutionHistory.getValidReferences();
+                
+                if (recentSolutions.length > 0) {
+                    // Show recent solutions header
+                    const headerNode = new TreeNode(
+                        `📜 Recent Solutions (${recentSolutions.length})`,
+                        TreeItemCollapsibleState.None,
+                        { type: 'info' }
+                    );
+                    nodes.push(headerNode);
+                    
+                    // Add recent solution nodes
+                    for (const ref of recentSolutions) {
+                        const solutionName = path.basename(ref.solutionFile, '.sln');
+                        const folderName = path.basename(ref.folderPath);
+                        const recentNode = new TreeNode(
+                            `▶ ${solutionName}`,
+                            TreeItemCollapsibleState.None,
+                            {
+                                type: 'recentSolution',
+                                solutionPath: ref.solutionFile,
+                                folderPath: ref.folderPath,
+                                tooltip: `${ref.solutionFile}\nLast opened: ${ref.lastOpened.toLocaleString()}`
+                            },
+                            undefined,
+                            ref.folderPath
+                        );
+                        recentNode.description = folderName;
+                        nodes.push(recentNode);
+                    }
+                    
+                    // Add separator
+                    const separatorNode = new TreeNode(
+                        "─────────────",
+                        TreeItemCollapsibleState.None,
+                        { type: 'separator' }
+                    );
+                    nodes.push(separatorNode);
+                }
+                
+                // No folder open - offer to open one
+                const openFolderNode = new TreeNode(
+                    "📁 Open Folder...",
+                    TreeItemCollapsibleState.None,
+                    { 
+                        type: 'openFolder', 
+                        tooltip: "Open a folder containing Clarion solutions" 
+                    }
+                );
+                nodes.push(openFolderNode);
+                
+                const browseNode = new TreeNode(
+                    "📂 Browse for Solution...",
+                    TreeItemCollapsibleState.None,
+                    { type: 'browseSolution', tooltip: "Open a Clarion solution file from anywhere" }
+                );
+                nodes.push(browseNode);
+                
+                // Cache immediately to prevent rapid re-calls
+                this._detectedSolutionsCache = nodes;
+                this._lastFolderCheckTime = Date.now();
+                logger.info(`✅ Cached ${nodes.length} nodes (no folder, ${recentSolutions.length} recent)`);
+                
+                return nodes;
+            }
+            
+            // Scan for solutions in the opened folder
+            const detectedSolutions = await SolutionScanner.scanWorkspaceFolders();
+            
+            // Check Clarion installations
+            const installations = await ClarionInstallationDetector.detectInstallations();
+            
+            logger.info(`🔍 Found ${detectedSolutions.length} solution(s) and ${installations.length} Clarion installation(s)`);
+            
+            if (detectedSolutions.length === 0) {
+                // No solutions found - offer to browse
+                const noSolutionsNode = new TreeNode(
+                    "No Solutions Detected",
+                    TreeItemCollapsibleState.None,
+                    { type: 'info', tooltip: "No .sln files found in this folder" }
+                );
+                
+                const browseNode = new TreeNode(
+                    "📂 Browse for Solution...",
+                    TreeItemCollapsibleState.None,
+                    { type: 'browseSolution', tooltip: "Open a Clarion solution file from anywhere" }
+                );
+                
+                nodes.push(noSolutionsNode);
+                nodes.push(browseNode);
+                return nodes;
+            }
+            
+            // Show warning if no Clarion installation detected
+            if (installations.length === 0) {
+                const warningNode = new TreeNode(
+                    "⚠️ No Clarion Installation Detected",
+                    TreeItemCollapsibleState.None,
+                    { type: 'warning', tooltip: "Clarion IDE not found. Install Clarion or manually configure settings." }
+                );
+                nodes.push(warningNode);
+            }
+            
+            // Add header
+            const headerNode = new TreeNode(
+                `📁 ${detectedSolutions.length} Solution(s) Found`,
+                TreeItemCollapsibleState.None,
+                { type: 'info' }
+            );
+            nodes.push(headerNode);
+            
+            // Add detected solution nodes (clickable)
+            for (const solution of detectedSolutions) {
+                const solutionNode = new TreeNode(
+                    `▶ ${solution.solutionName}`,
+                    TreeItemCollapsibleState.None,
+                    { 
+                        type: 'detectedSolution', 
+                        solutionPath: solution.solutionPath,
+                        tooltip: `Click to open: ${solution.solutionPath}`
+                    },
+                    undefined,
+                    path.dirname(solution.solutionPath)
+                );
+                
+                nodes.push(solutionNode);
+            }
+            
+            // Add browse option
+            const browseNode = new TreeNode(
+                "📂 Browse for Solution...",
+                TreeItemCollapsibleState.None,
+                { type: 'browseSolution', tooltip: "Open a Clarion solution file from anywhere" }
+            );
+            nodes.push(browseNode);
+            
+        } catch (error) {
+            logger.error('❌ Error getting detected solutions:', error);
+            // Return browse option on error
+            const browseNode = new TreeNode(
+                "📂 Browse for Solution...",
+                TreeItemCollapsibleState.None,
+                { type: 'browseSolution', tooltip: "Open a Clarion solution file" }
+            );
+            nodes.push(browseNode);
+        }
+        
+        // Cache the results
+        this._detectedSolutionsCache = nodes;
+        this._lastFolderCheckTime = Date.now();
+        logger.info(`✅ Cached ${nodes.length} detected solution nodes`);
+        
+        return nodes;
+    }
+
     async getChildren(element?: TreeNode): Promise<TreeNode[]> {
         // If we have a filter and this is a request for children of a specific element
         if (element) {
@@ -394,10 +618,10 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             return element.children;
         }
     
-        // ✅ If no solution is loaded, return empty list (shows welcome screen)
+        // ✅ If no solution is loaded, show detected solutions
         if (!globalSolutionFile) {
-            logger.info(`🔍 No solution file, returning empty children list`);
-            return [];
+            logger.info(`🔍 No solution file, checking for detected solutions...`);
+            return await this.getDetectedSolutionsNodes();
         }
     
         // ✅ Otherwise load your normal root tree (project/solution items)
@@ -456,6 +680,80 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         logger.info(`🏗 Processing item with label: ${label}`);
         // Reduce logging to improve performance
         logger.info(`🏗 Item data type: ${data?.type || (data?.guid ? 'project' : (data?.relativePath ? 'file' : 'other'))}`);
+
+        // Handle detected solution nodes
+        if ((data as any)?.type === 'detectedSolution') {
+            treeItem.iconPath = new ThemeIcon('file-text');
+            treeItem.tooltip = (data as any).tooltip || `Click to open: ${(data as any).solutionPath}`;
+            treeItem.command = {
+                title: 'Open Detected Solution',
+                command: 'clarion.openDetectedSolution',
+                arguments: [(data as any).solutionPath]
+            };
+            return treeItem;
+        }
+
+        // Handle recent solution nodes
+        if ((data as any)?.type === 'recentSolution') {
+            treeItem.iconPath = new ThemeIcon('history');
+            treeItem.tooltip = (data as any).tooltip || `Click to open: ${(data as any).solutionPath}`;
+            treeItem.command = {
+                title: 'Open Recent Solution',
+                command: 'clarion.openRecentSolution',
+                arguments: [(data as any).folderPath, (data as any).solutionPath]
+            };
+            return treeItem;
+        }
+
+        // Handle separator nodes (non-clickable)
+        if ((data as any)?.type === 'separator') {
+            treeItem.iconPath = undefined;
+            treeItem.collapsibleState = TreeItemCollapsibleState.None;
+            return treeItem;
+        }
+
+        // Handle browse solution node
+        if ((data as any)?.type === 'browseSolution') {
+            treeItem.iconPath = new ThemeIcon('folder-opened');
+            treeItem.tooltip = (data as any).tooltip || "Open a Clarion solution file from anywhere";
+            treeItem.command = {
+                title: 'Browse for Solution',
+                command: 'clarion.openSolution',
+                arguments: []
+            };
+            return treeItem;
+        }
+
+        // Handle open folder node
+        if ((data as any)?.type === 'openFolder') {
+            treeItem.iconPath = new ThemeIcon('folder-opened');
+            treeItem.tooltip = (data as any).tooltip || "Open a folder containing Clarion solutions";
+            treeItem.command = {
+                title: 'Open Folder',
+                command: 'vscode.openFolder',
+                arguments: []
+            };
+            return treeItem;
+        }
+
+        // Handle info nodes (non-clickable)
+        if ((data as any)?.type === 'info') {
+            treeItem.iconPath = new ThemeIcon('info');
+            return treeItem;
+        }
+
+        // Handle solution info header
+        if ((data as any)?.type === 'solutionInfo') {
+            treeItem.iconPath = new ThemeIcon('folder');
+            return treeItem;
+        }
+
+        // Handle warning node
+        if ((data as any)?.type === 'warning') {
+            treeItem.iconPath = new ThemeIcon('warning');
+            treeItem.tooltip = (data as any).tooltip;
+            return treeItem;
+        }
 
         if ((data as any)?.type === 'noSolution') {
             treeItem.iconPath = new ThemeIcon('folder-opened');

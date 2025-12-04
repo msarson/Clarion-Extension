@@ -7,7 +7,7 @@
 - [Features](#features)
 - [Installation](#installation)
 - [Marketplace](#marketplace-information)
-- [Changelog](#changelog-whats-new-in-v070)
+- [Changelog](#changelog-whats-new-in-v073)
 - [Getting Started](#getting-started)
 - [Troubleshooting](#troubleshooting)
 - [Contributing and Feedback](#contributing-and-feedback)
@@ -125,6 +125,27 @@ This is necessary because older versions had a dependency on fushnisoft.clarion 
 [View on Marketplace](https://marketplace.visualstudio.com/items?itemName=msarson.clarion-extensions)
 
 ---
+## Changelog (What's New in v0.7.3)
+
+### 🚀 Major: Folder-Based Workflow
+
+**No more workspace files needed!** The extension now works seamlessly with simple folder opening:
+
+- **Just Open Folder** - No "Save Workspace As" prompts or .code-workspace files
+- **Settings with Solution** - All settings stored in `.vscode/settings.json` within your solution folder
+- **Team Friendly** - Commit settings with your solution for shared team configuration
+- **Recent Solutions** - Global history remembers your last 20 solutions across all folders
+- **One-Click Access** - Click recent solution in Solution View to instantly reopen it
+- **Smart Reuse** - Previously configured solutions open without prompts
+- **Auto-Validation** - Automatically cleans up invalid references to moved/deleted solutions
+
+#### Using Recent Solutions:
+1. Open VS Code with no folder - Solution View shows your recent solutions
+2. Click any recent solution - Its folder opens and solution loads automatically  
+3. Settings are remembered - No need to reconfigure Clarion version/properties each time
+
+---
+
 ## Changelog (What's New in v0.7.1)
 
 ### 🔧 ClarionCl.exe Integration (NEW!)
@@ -147,17 +168,17 @@ This is necessary because older versions had a dependency on fushnisoft.clarion 
 
 ### 🎯 Enhanced Diagnostics & Validation
 
-**Real-time error detection and improved validation:**
+**Real-time error detection with improved validation:**
 
-- **Enhanced Diagnostics**: Real-time error detection (6 validators)
+- **Enhanced Diagnostics**: Real-time error detection (5 validators)
   - **Structure Termination**: Unterminated IF/LOOP/CLASS structures
   - **FILE Validation**: Must have DRIVER and RECORD (error)
-  - **CASE Validation**: CASE statements can have zero or more OF clauses
+  - **CASE Validation**: CASE statements can have zero or more OF clauses (fixed in 0.7.1)
   - **OROF Placement**: Must follow OF in CASE (error)
   - **EXECUTE Validation**: Expression should be numeric (warning)
   - **OMIT/COMPILE**: Validates directive block pairing
 
-- **Improved Structure View**: Better visualization of code structure including FILE/VIEW hierarchy
+- **Improved Structure View**: Better visualization of code structure
   - **FILE**: Shows KEY/INDEX/RECORD/MEMO/BLOB hierarchy
   - **VIEW**: Displays JOIN nesting and PROJECT fields
   - **GROUP**: Shows OVER (memory overlay) and DIM (arrays) attributes
@@ -229,7 +250,7 @@ See [Performance Session](https://github.com/msarson/Clarion-Extension/blob/vers
   - 16 DefinitionProvider tests
   - 31 Clarion legacy syntax tests
   - 140+ DiagnosticProvider tests (TDD approach)
-  - 9 KB validation tests
+  - 9 validation tests
   - TokenHelper and FoldingProvider tests
 
 - **Testing Framework**
@@ -371,31 +392,9 @@ This release significantly improves performance through systematic optimization.
 Large Clarion files (14k+ lines) now have significantly improved response times.
 
 ---
-## Upcoming Release (In Development)
+## Release History
 
-### New Features (2025-11-30)
-
-#### Structure Termination Diagnostics
-- **Real-time Validation**: Extension now validates that IF, LOOP, and CLASS structures are properly terminated
-- **Smart Detection**: Understands inline dot terminators (e.g., `IF x THEN y.`)
-- **Context-Aware**: Knows MODULE termination rules differ between MAP and CLASS contexts
-- **Helpful Messages**: Clear diagnostic messages when structures aren't terminated correctly
-
-#### Enhanced Code Folding
-- **Fixed Dot Terminators**: Folding now correctly handles single-line structures with dot terminators
-- **Prevents Corruption**: Fixed issue where invalid fold ranges would break subsequent folds
-
-#### Structure View Enhancement
-- **Cursor Synchronization**: Structure view now automatically highlights the symbol containing the cursor
-- **Improved Navigation**: Matches behavior of VS Code's built-in Outline view
-
-### Testing
-- **Test-Driven Development**: All new features developed using TDD approach
-- **Compiler Validated**: Test files compile successfully with Clarion compiler
-- **Comprehensive Coverage**: 13 unit tests covering all structure termination scenarios
-
----
-## Current Release (v0.5.9)
+### Previous Releases (v0.7.0 and Earlier)
 ### Enhancements
 - **Improved Method Hover Display**: Method hovers now show up to 15 lines of actual implementation code after the CODE statement
 - **Interactive Navigation in Hover**: Click the line number link in hovers to jump directly to method implementation
