@@ -833,13 +833,16 @@ export class DiagnosticProvider {
                                 parenDepth--;
                                 if (parenDepth === 0) {
                                     // Look for return type in attributes after closing paren
-                                    const returnType = extractReturnType(tokens, k + 1, true);
-                                    if (returnType) {
-                                        declarationsWithReturnTypes.push({
-                                            name: procNameToken.value,  // Just procedure name, no class prefix
-                                            returnType: returnType,
-                                            line: procNameToken.line
-                                        });
+                                    // IMPORTANT: Only look on the SAME line as the PROCEDURE declaration
+                                    if (k + 1 < tokens.length && tokens[k + 1].line === tokens[j].line) {
+                                        const returnType = extractReturnType(tokens, k + 1, true);
+                                        if (returnType) {
+                                            declarationsWithReturnTypes.push({
+                                                name: procNameToken.value,  // Just procedure name, no class prefix
+                                                returnType: returnType,
+                                                line: procNameToken.line
+                                            });
+                                        }
                                     }
                                     break;
                                 }
@@ -889,13 +892,16 @@ export class DiagnosticProvider {
                                 parenDepth--;
                                 if (parenDepth === 0) {
                                     // Look for return type in attributes after closing paren
-                                    const returnType = extractReturnType(tokens, k + 1, true);
-                                    if (returnType) {
-                                        declarationsWithReturnTypes.push({
-                                            name: className + '.' + methodNameToken.value,
-                                            returnType: returnType,
-                                            line: methodNameToken.line
-                                        });
+                                    // IMPORTANT: Only look on the SAME line as the PROCEDURE declaration
+                                    if (k + 1 < tokens.length && tokens[k + 1].line === tokens[j].line) {
+                                        const returnType = extractReturnType(tokens, k + 1, true);
+                                        if (returnType) {
+                                            declarationsWithReturnTypes.push({
+                                                name: className + '.' + methodNameToken.value,
+                                                returnType: returnType,
+                                                line: methodNameToken.line
+                                            });
+                                        }
                                     }
                                     break;
                                 }
