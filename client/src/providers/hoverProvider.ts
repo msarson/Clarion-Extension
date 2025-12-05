@@ -304,11 +304,15 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
                     
                     // Check for nested method/routine implementations and stop before them
                     for (let i = codeLineIndex + 1; i < endLine; i++) {
-                        const trimmedLine = fileLines[i].trim().toUpperCase();
-                        // Stop if we encounter another METHOD, ROUTINE, or PROCEDURE definition
-                        if (trimmedLine.match(/^[A-Z_][A-Z0-9_]*\s+(PROCEDURE|ROUTINE|METHOD)/)) {
+                        const line = fileLines[i];
+                        const trimmedLine = line.trim().toUpperCase();
+                        
+                        // Stop if we encounter another PROCEDURE/ROUTINE implementation
+                        // These start at column 0 or with minimal indentation (not inside the current procedure)
+                        // Match: "MyProc PROCEDURE" or "Class.Method PROCEDURE" or "Label ROUTINE"
+                        if (line.match(/^[A-Za-z_][A-Za-z0-9_.:]*\s+(PROCEDURE|ROUTINE)\b/i)) {
                             endLine = i;
-                            logger.info(`Found nested method/routine at line ${i}, stopping before it`);
+                            logger.info(`Found another procedure/routine implementation at line ${i}, stopping before it`);
                             break;
                         }
                     }
