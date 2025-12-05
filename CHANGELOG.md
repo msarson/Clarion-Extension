@@ -9,6 +9,16 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 ## [Unreleased]
 
 ### ✨ Features
+
+### 🐛 Bug Fixes
+
+### 💡 Technical Details
+
+---
+
+## [0.7.3] - 2024-12-05
+
+### ✨ Features
 - **Centralized logging configuration with release mode** - Clean, minimal console output for production releases
   - Single environment variable (`VSCODE_RELEASE_MODE=true`) controls all logging
   - Development builds: error-level logging (minimal output)
