@@ -4,7 +4,7 @@ import LoggerManager from '../logger';
 import { isInsideMapBlock } from '../../../common/clarionUtils';
 
 const logger = LoggerManager.getLogger("ImplementationProvider");
-logger.setLevel("info");
+logger.setLevel("error");
 
 /**
  * Provides "Go to Implementation" functionality for Clarion method declarations.

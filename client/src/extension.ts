@@ -1,4 +1,4 @@
-﻿﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, TextEditor, window as vscodeWindow, Diagnostic, DiagnosticSeverity, Range, StatusBarItem, StatusBarAlignment, extensions, DiagnosticCollection, Location, Position } from 'vscode';
+﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, TextEditor, window as vscodeWindow, Diagnostic, DiagnosticSeverity, Range, StatusBarItem, StatusBarAlignment, extensions, DiagnosticCollection, Location, Position } from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, ErrorAction, CloseAction } from 'vscode-languageclient/node';
 
 import * as path from 'path';
@@ -30,7 +30,7 @@ import { SmartSolutionOpener } from './utils/SmartSolutionOpener';
 import { GlobalSolutionHistory } from './utils/GlobalSolutionHistory';
 
 const logger = LoggerManager.getLogger("Extension");
-logger.setLevel("info"); // PERF: Only log errors to reduce overhead
+logger.setLevel("error"); // PERF: Only log errors to reduce overhead
 let client: LanguageClient | undefined;
 // clientReady is now managed by LanguageClientManager
 let treeView: TreeView<TreeNode> | undefined;

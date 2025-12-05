@@ -14,7 +14,7 @@ import { ClarionInstallationDetector } from './utils/ClarionInstallationDetector
 import { GlobalSolutionHistory } from './utils/GlobalSolutionHistory';
 
 const logger = LoggerManager.getLogger("SolutionTreeDataProvider");
-logger.setLevel("info");
+logger.setLevel("error");
 
 // Create a specialized debug logger for file resolution issues
 const fileResolutionLogger = LoggerManager.getLogger("FileResolution");

@@ -22,7 +22,7 @@ import LoggerManager from './logger';
 import { SolutionCache } from './SolutionCache';
 import { isInsideMapBlock } from '../../common/clarionUtils';
 const logger = LoggerManager.getLogger("DocumentManager");
-logger.setLevel("info"); // Temporarily set to info for debugging MAP procedure parsing
+logger.setLevel("error"); // Temporarily set to info for debugging MAP procedure parsing
 
 /**
  * Interface representing document information including statement locations

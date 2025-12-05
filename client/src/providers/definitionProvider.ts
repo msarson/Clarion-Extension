@@ -3,7 +3,7 @@ import { DocumentManager } from '../documentManager';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
-logger.setLevel("info");
+logger.setLevel("error");
 
 /**
  * Provides "Go to Definition" functionality for Clarion class methods and MAP procedures.
