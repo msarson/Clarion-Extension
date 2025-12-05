@@ -6,12 +6,13 @@ All notable changes to the "clarion-extension" extension will be documented in t
 ## [Unreleased]
 
 ### ✨ Features
-- **Missing RETURN statement validation** - Warns when procedures with return types lack proper RETURN statements
-  - Phase 1: Basic validation catches common mistakes
+- **Missing RETURN statement validation** - Validates procedures/methods with return types have proper RETURN statements
+  - Correctly handles Clarion's declaration/implementation split
+  - Return types only in declarations (CLASS/MAP/MODULE), never in implementations
   - Flags procedures that have no RETURN statement
   - Flags procedures where all RETURN statements are empty
-  - Example: `MyProc PROCEDURE(), LONG` with no `RETURN value` shows error
-  - Helps prevent runtime errors and undefined behavior
+  - Example: `MyClass.MyProc` declared with `, LONG` but no `RETURN value` shows error
+  - Prevents runtime errors and undefined behavior
 
 - **SECTION-aware INCLUDE links** - Document links now navigate to specific SECTION blocks
   - Syntax: `INCLUDE('file.clw','SECTION NAME')` links directly to `SECTION('SECTION NAME')`
