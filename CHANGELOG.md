@@ -11,6 +11,19 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 ### ✨ Features
 
 ### 🐛 Bug Fixes
+- **Fixed false positive IF statement validation errors** ([#24](https://github.com/msarson/Clarion-Extension/issues/24))
+  - Single-line `IF...THEN` statements no longer incorrectly flagged as missing `END`
+  - Example: `IF condition THEN statement` is now correctly recognized as valid
+  - Prevents spurious "IF Statement is not terminated with END" errors on valid code
+  
+- **Fixed false positive FILE validation errors** ([#23](https://github.com/msarson/Clarion-Extension/issues/23))
+  - FILE declarations inside `COMPILE()` / `OMIT()` conditional blocks are now properly excluded from validation
+  - Prevents "FILE statement missing DRIVER/RECORD" errors on conditionally compiled FILE declarations
+  - Validator now understands only one of the conditional FILE definitions will be active
+
+- **Fixed MSBuild logging parameters syntax**
+  - Corrected `fileLoggerParameters` configuration for proper MSBuild logging output
+  - Diagnostic messages now display correctly in build output
 
 ### 💡 Technical Details
 
