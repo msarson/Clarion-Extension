@@ -516,10 +516,48 @@ export class DocumentManager implements Disposable {
         }
 
         // Ensure we have the necessary metadata
-        if (!location.className || !location.methodName || !location.moduleFile) {
-            logger.error(`Missing metadata for method implementation resolution: class=${location.className}, method=${location.methodName}, module=${location.moduleFile}`);
+        if (!location.className || !location.methodName) {
+            logger.error(`Missing metadata for method implementation resolution: class=${location.className}, method=${location.methodName}`);
             location.implementationResolved = true; // Mark as resolved to avoid repeated attempts
             return location;
+        }
+        
+        // If no MODULE file, implementation must be in the same file
+        if (!location.moduleFile) {
+            logger.info(`No MODULE file specified for ${location.className}.${location.methodName}, searching in same file`);
+            
+            try {
+                // Try to find implementation in the current document
+                const currentDocument = workspace.textDocuments.find(doc =>
+                    doc.uri.toString() === Uri.file(location.fullFileName).toString()
+                );
+                
+                if (currentDocument) {
+                    const currentContent = currentDocument.getText();
+                    const implLine = this.findMethodImplementationLine(
+                        currentContent,
+                        location.className,
+                        location.methodName,
+                        location.parameterSignature
+                    );
+                    
+                    if (implLine !== null) {
+                        logger.info(`✅ Found method implementation for ${location.className}.${location.methodName} in same file at line ${implLine}`);
+                        location.sectionLineLocation = new Position(implLine, 0);
+                    } else {
+                        logger.info(`❌ Could not find implementation for ${location.className}.${location.methodName} in same file`);
+                    }
+                } else {
+                    logger.info(`❌ Could not find open document for ${location.fullFileName}`);
+                }
+                
+                location.implementationResolved = true;
+                return location;
+            } catch (error) {
+                logger.error(`Error resolving implementation in same file: ${error instanceof Error ? error.message : String(error)}`);
+                location.implementationResolved = true;
+                return location;
+            }
         }
 
         try {
@@ -1037,27 +1075,35 @@ export class DocumentManager implements Disposable {
                 const classEndPos = classMatch.index + endInTail.index;
                 logger.info(`Class ${originalClassName} ends at position ${classEndPos}`);
                 const fullClassText = lowerText.substring(classMatch.index, classEndPos);
-                if (!fullClassText.includes('module')) {
-                    logger.info(`No MODULE keyword found for class ${originalClassName}, skipping.`);
-                    continue;
-                }
-                moduleRegex.lastIndex = 0;
-                const moduleMatch = moduleRegex.exec(fullClassText);
-                if (!moduleMatch) {
-                    logger.info(`No MODULE pattern matched for class ${originalClassName}, skipping.`);
-                    continue;
-                }
-                const moduleFile = moduleMatch[1];
-                linkRegex.lastIndex = 0;
-                const linkMatch = linkRegex.exec(fullClassText);
-                const linkFile = linkMatch ? linkMatch[1] : null;
-                logger.info(`Found class ${originalClassName} with MODULE ${moduleFile}${linkFile ? ` and LINK ${linkFile}` : ''}`);
                 
-                // Resolve the module file path (but don't read its content yet)
-                const moduleFilePath = await this.locationProvider.getFullPath(moduleFile, document.uri.fsPath, filePathCache);
-                if (!moduleFilePath) {
-                    logger.info(`❌ Could not resolve MODULE path: ${moduleFile} for class ${originalClassName}`);
-                    // Continue anyway to record the method declarations
+                // Check if CLASS has MODULE declaration
+                let moduleFile: string | null = null;
+                let linkFile: string | null = null;
+                let moduleFilePath: string | null = null;
+                
+                if (fullClassText.includes('module')) {
+                    moduleRegex.lastIndex = 0;
+                    const moduleMatch = moduleRegex.exec(fullClassText);
+                    if (moduleMatch) {
+                        moduleFile = moduleMatch[1];
+                        linkRegex.lastIndex = 0;
+                        const linkMatch = linkRegex.exec(fullClassText);
+                        linkFile = linkMatch ? linkMatch[1] : null;
+                        logger.info(`Found class ${originalClassName} with MODULE ${moduleFile}${linkFile ? ` and LINK ${linkFile}` : ''}`);
+                        
+                        // Resolve the module file path (but don't read its content yet)
+                        moduleFilePath = await this.locationProvider.getFullPath(moduleFile, document.uri.fsPath, filePathCache);
+                        if (!moduleFilePath) {
+                            logger.info(`❌ Could not resolve MODULE path: ${moduleFile} for class ${originalClassName}`);
+                            // Continue anyway to record the method declarations
+                        }
+                    } else {
+                        logger.info(`MODULE keyword found but no pattern matched for class ${originalClassName}`);
+                    }
+                } else {
+                    logger.info(`No MODULE keyword found for class ${originalClassName}, assuming implementation in same file`);
+                    // For classes without MODULE, use the current document as the implementation file
+                    moduleFilePath = document.uri.fsPath;
                 }
                 
                 const lowerClassContent = fullClassText;
@@ -1091,7 +1137,7 @@ export class DocumentManager implements Disposable {
                         // Store metadata for lazy implementation resolution
                         className: originalClassName,
                         methodName: originalMethodName,
-                        moduleFile: moduleFile,
+                        moduleFile: moduleFile || undefined, // Convert null to undefined for type compatibility
                         implementationResolved: false,
                         // Store parameter signature for matching overloaded methods
                         parameterSignature: parameterSignature
