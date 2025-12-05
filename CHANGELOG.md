@@ -8,7 +8,8 @@ All notable changes to the "clarion-extension" extension will be documented in t
 ### ✨ Features
 - **SECTION-aware INCLUDE links** - Document links now navigate to specific SECTION blocks
   - Syntax: `INCLUDE('file.clw','SECTION NAME')` links directly to `SECTION('SECTION NAME')`
-  - Hover preview shows from the SECTION start
+  - **Cursor positioning**: Opens file with cursor at the SECTION line (not at top)
+  - **Smart hover preview**: Shows only the specified section, stops at next SECTION
   - Falls back to file start if section not found
   - Section names support spaces and special characters
   - Updated Knowledge Base with SECTION documentation
