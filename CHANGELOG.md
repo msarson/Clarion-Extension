@@ -10,6 +10,10 @@ All notable changes to the "clarion-extension" extension will be documented in t
   - Correctly handles Clarion's declaration/implementation split
   - Return types only in declarations (CLASS/MAP/MODULE), never in implementations
   - Supports both CLASS methods and MAP procedures
+  - **Properly extracts return types from any position in attribute list**
+    - `PROCEDURE(),LONG,NAME('Start')` ✅
+    - `PROCEDURE(),NAME('Start'),LONG` ✅
+    - `PROCEDURE(),PROC,LONG,NAME('Test')` ✅
   - Flags procedures that have no RETURN statement
   - Flags procedures where all RETURN statements are empty
   - Examples:
@@ -26,6 +30,13 @@ All notable changes to the "clarion-extension" extension will be documented in t
   - Updated Knowledge Base with SECTION documentation
 
 ### 🐛 Bug Fixes
+- **Fixed return type extraction in procedure declarations** - Return types now correctly detected regardless of attribute position
+  - Previously only checked immediately after `PROCEDURE(),` 
+  - Now scans entire attribute list for data type keywords
+  - Added `extractReturnType()` utility function
+  - Removed `NAME` from Type token pattern (it's an attribute, not a data type)
+  - Fixed 3 failing RETURN validation tests
+
 - **Fixed COMPILE/OMIT same-line terminator validation** - No longer shows false positive for terminators on same line
   - Example: `COMPILE('!** End **',expr) ; code !** End **` now validates correctly
   - Searches for terminator only AFTER the directive's closing paren

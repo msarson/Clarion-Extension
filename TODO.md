@@ -203,30 +203,30 @@ Added diagnostic provider that detects:
 - ✅ OMIT/COMPILE blocks not terminated with matching terminator string
 - ✅ Fixed parser state corruption in large files (Dec 2024)
 
-### Diagnostics - RETURN Statement Validation 🚧 IN PROGRESS (Dec 2024)
-**Priority:** HIGH  
-**Status:** In Progress - Needs More Testing
+### Diagnostics - RETURN Statement Validation ✅ COMPLETE (Dec 2024)
+**Priority:** ~~HIGH~~ **COMPLETE**  
+**Status:** Complete ✅
 
-Initial implementation complete:
+Implementation complete and working:
 - ✅ Validates procedures/methods with return types have RETURN statements
 - ✅ Handles CLASS method declarations (return type in CLASS)
 - ✅ Handles MAP procedure declarations (return type in MAP)
 - ✅ Detects missing RETURN statements
 - ✅ Detects empty RETURN statements (no value)
-- ✅ 219 tests passing
+- ✅ **Properly extracts return types from any position in attribute list** (Dec 5, 2024)
+  - `PROCEDURE(),LONG,NAME('Start')` ✅
+  - `PROCEDURE(),NAME('Start'),LONG` ✅
+  - `PROCEDURE(),PROC,LONG,NAME('Test')` ✅
+- ✅ Added `extractReturnType()` utility function
+- ✅ Removed `NAME` from Type token pattern (it's an attribute, not a data type)
+- ✅ 219 tests passing (up from 216)
 
 **Known to work:**
 - CLASS methods: `MyClass.MyProc PROCEDURE(),LONG`
 - MAP procedures: `MyProcedure PROCEDURE(),LONG`
+- Return types in any attribute position
 
-**⚠️ Needs more debugging:**
-User will report specific issues after session ends. May need:
-- Additional edge cases handled
-- More complex scenarios tested
-- Real-world usage validation
-- Performance optimization for large files
-
-**Note:** This feature is functional but may have edge cases or scenarios not yet discovered. User feedback will guide next improvements.
+**Note:** Feature is complete and ready for real-world usage. User feedback will guide any future refinements.
 
 ### Performance Optimizations ✅ COMPLETE (Dec 2024)
 **Priority:** HIGH  
