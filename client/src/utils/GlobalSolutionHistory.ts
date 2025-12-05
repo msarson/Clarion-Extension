@@ -4,6 +4,7 @@ import * as path from 'path';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("GlobalSolutionHistory");
+logger.setLevel("info");
 
 export interface SolutionReference {
     folderPath: string;           // e.g., "F:\\MyProject"
