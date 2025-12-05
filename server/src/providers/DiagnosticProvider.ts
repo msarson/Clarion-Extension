@@ -1,6 +1,7 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
 import { ClarionTokenizer, Token, TokenType } from '../ClarionTokenizer';
+import { extractReturnType } from '../utils/AttributeKeywords';
 
 /**
  * Diagnostic Provider for Clarion Language
@@ -824,25 +825,21 @@ export class DiagnosticProvider {
                         
                         if (!procNameToken) continue;
                         
-                        // Check for return type: ProcName PROCEDURE(...), ReturnType
+                        // Check for return type: ProcName PROCEDURE(...), <attributes with return type>
                         let parenDepth = 0;
                         for (let k = j + 1; k < tokens.length && tokens[k].line === tokens[j].line; k++) {
                             if (tokens[k].value === '(') parenDepth++;
                             else if (tokens[k].value === ')') {
                                 parenDepth--;
                                 if (parenDepth === 0) {
-                                    // Check for comma and return type
-                                    if (k + 1 < tokens.length && tokens[k + 1].value === ',') {
-                                        if (k + 2 < tokens.length) {
-                                            const returnTypeToken = tokens[k + 2];
-                                            if (returnTypeToken.type === TokenType.Type || returnTypeToken.type === TokenType.Label) {
-                                                declarationsWithReturnTypes.push({
-                                                    name: procNameToken.value,  // Just procedure name, no class prefix
-                                                    returnType: returnTypeToken.value,
-                                                    line: procNameToken.line
-                                                });
-                                            }
-                                        }
+                                    // Look for return type in attributes after closing paren
+                                    const returnType = extractReturnType(tokens, k + 1, true);
+                                    if (returnType) {
+                                        declarationsWithReturnTypes.push({
+                                            name: procNameToken.value,  // Just procedure name, no class prefix
+                                            returnType: returnType,
+                                            line: procNameToken.line
+                                        });
                                     }
                                     break;
                                 }
@@ -884,25 +881,21 @@ export class DiagnosticProvider {
                         
                         if (!methodNameToken) continue;
                         
-                        // Check for return type: METHOD PROCEDURE(...), ReturnType
+                        // Check for return type: METHOD PROCEDURE(...), <attributes with return type>
                         let parenDepth = 0;
                         for (let k = j + 1; k < tokens.length && tokens[k].line === tokens[j].line; k++) {
                             if (tokens[k].value === '(') parenDepth++;
                             else if (tokens[k].value === ')') {
                                 parenDepth--;
                                 if (parenDepth === 0) {
-                                    // Check for comma and return type
-                                    if (k + 1 < tokens.length && tokens[k + 1].value === ',') {
-                                        if (k + 2 < tokens.length) {
-                                            const returnTypeToken = tokens[k + 2];
-                                            if (returnTypeToken.type === TokenType.Type || returnTypeToken.type === TokenType.Label) {
-                                                declarationsWithReturnTypes.push({
-                                                    name: className + '.' + methodNameToken.value,
-                                                    returnType: returnTypeToken.value,
-                                                    line: methodNameToken.line
-                                                });
-                                            }
-                                        }
+                                    // Look for return type in attributes after closing paren
+                                    const returnType = extractReturnType(tokens, k + 1, true);
+                                    if (returnType) {
+                                        declarationsWithReturnTypes.push({
+                                            name: className + '.' + methodNameToken.value,
+                                            returnType: returnType,
+                                            line: methodNameToken.line
+                                        });
                                     }
                                     break;
                                 }
