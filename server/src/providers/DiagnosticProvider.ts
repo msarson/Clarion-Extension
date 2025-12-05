@@ -82,8 +82,23 @@ export class DiagnosticProvider {
             if (this.isStructureOpen(token)) {
                 const structureType = this.getStructureType(token);
                 
+                // Special handling for IF - check if it's a single-line IF...THEN statement
+                if (structureType === 'IF') {
+                    // Look ahead to see if THEN appears on the same line with code after it
+                    const isSingleLineIf = this.isSingleLineIfThen(tokens, i);
+                    
+                    // Only push to stack if it's NOT a single-line IF...THEN
+                    if (!isSingleLineIf && this.requiresTerminator(structureType)) {
+                        structureStack.push({
+                            token,
+                            structureType,
+                            line: token.line,
+                            column: token.start
+                        });
+                    }
+                }
                 // Special handling for MODULE - depends on parent context
-                if (structureType === 'MODULE') {
+                else if (structureType === 'MODULE') {
                     const parentContext = this.getParentContext(structureStack);
                     const needsTerminator = this.moduleNeedsTerminator(parentContext);
                     
@@ -292,6 +307,49 @@ export class DiagnosticProvider {
         }
         
         // Default: no terminator needed
+        return false;
+    }
+    
+    /**
+     * Check if this is a single-line IF...THEN statement that doesn't need END
+     * Format: IF condition THEN statement
+     * Returns true if THEN is found on same line with code after it
+     */
+    private static isSingleLineIfThen(tokens: Token[], ifTokenIndex: number): boolean {
+        const ifToken = tokens[ifTokenIndex];
+        const ifLine = ifToken.line;
+        
+        // Look ahead for THEN keyword on the same line
+        for (let i = ifTokenIndex + 1; i < tokens.length; i++) {
+            const token = tokens[i];
+            
+            // Stop if we hit a different line
+            if (token.line !== ifLine) {
+                break;
+            }
+            
+            // Check if this is THEN keyword
+            if (token.type === TokenType.Keyword && token.value.toUpperCase() === 'THEN') {
+                // Check if there's code after THEN on the same line
+                for (let j = i + 1; j < tokens.length; j++) {
+                    const nextToken = tokens[j];
+                    
+                    // Stop if we hit a different line
+                    if (nextToken.line !== ifLine) {
+                        break;
+                    }
+                    
+                    // If we find any meaningful token (not just whitespace/comments), it's a single-line IF
+                    if (nextToken.type !== TokenType.Comment) {
+                        return true;
+                    }
+                }
+                // THEN found but no code after it on same line - this is multi-line IF
+                return false;
+            }
+        }
+        
+        // No THEN found - this is multi-line IF
         return false;
     }
     
