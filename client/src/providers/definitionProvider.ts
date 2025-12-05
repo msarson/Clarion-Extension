@@ -144,17 +144,21 @@ export class ClarionDefinitionProvider implements DefinitionProvider {
                 for (let j = i + 1; j < lines.length; j++) {
                     const mapLine = lines[j].trim();
                     
-                    // End of MAP block
-                    if (mapLine.toUpperCase() === 'END') {
+                    // End of MAP block (with or without comment)
+                    if (mapLine.toUpperCase().startsWith('END')) {
                         logger.info(`End of MAP block at line ${j}`);
                         break;
                     }
                     
-                    // Match procedure declaration: ProcName(...)
-                    const declMatch = mapLine.match(/^([A-Za-z_][A-Za-z0-9_\.]*)\s*\(/i);
+                    // Match procedure declaration: ProcName(...) or ProcName PROCEDURE(...) or ProcName,PROCEDURE(...)
+                    // Allow optional whitespace and PROCEDURE keyword before opening parenthesis
+                    // Note: Parameter names don't need to match between declaration and implementation (only types)
+                    const declMatch = mapLine.match(/^([A-Za-z_][A-Za-z0-9_\.]*)\s+(?:,?\s*PROCEDURE\s*\(|PROCEDURE\s*\(|\()/i);
                     if (declMatch) {
                         const declName = declMatch[1];
                         const simpleDeclName = declName.includes('.') ? declName.split('.').pop()! : declName;
+                        
+                        logger.info(`Checking MAP declaration: ${declName} against ${procName}`);
                         
                         if (simpleDeclName.toUpperCase() === procName.toUpperCase()) {
                             logger.info(`Found matching MAP declaration: ${declName} at line ${j}`);

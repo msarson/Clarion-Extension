@@ -1,4 +1,4 @@
-﻿﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, TextEditor, window as vscodeWindow, Diagnostic, DiagnosticSeverity, Range, StatusBarItem, StatusBarAlignment, extensions, DiagnosticCollection } from 'vscode';
+﻿﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, TextEditor, window as vscodeWindow, Diagnostic, DiagnosticSeverity, Range, StatusBarItem, StatusBarAlignment, extensions, DiagnosticCollection, Location, Position } from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, ErrorAction, CloseAction } from 'vscode-languageclient/node';
 
 import * as path from 'path';
@@ -1545,20 +1545,23 @@ function registerLanguageFeatures(context: ExtensionContext) {
     logger.info(`📄 Registered Implementation Provider for extensions: ${lookupExtensions.join(', ')}`);
     
     // ✅ DISABLED: Client-side Definition Provider blocks server-side providers
-    // All definition requests now handled by server-side DefinitionProvider
+    // All definition requests now handled by:
+    // 1. Middleware for reverse MAP navigation (implementation → declaration)
+    // 2. Server-side DefinitionProvider for everything else
     // This includes: variables, parameters, methods, structures, etc.
     if (definitionProviderDisposable) {
         definitionProviderDisposable.dispose();
     }
     
-    logger.info("🔍 Registering Definition Provider for class methods...");
-    definitionProviderDisposable = languages.registerDefinitionProvider(
-        documentSelectors,
-        new ClarionDefinitionProvider(documentManager)
-    );
-    context.subscriptions.push(definitionProviderDisposable);
-    
-    logger.info(`📄 Registered Definition Provider for extensions: ${lookupExtensions.join(', ')}`);
+    // REMOVED: Client-side Definition Provider
+    // logger.info("🔍 Registering Definition Provider for class methods...");
+    // definitionProviderDisposable = languages.registerDefinitionProvider(
+    //     documentSelectors,
+    //     new ClarionDefinitionProvider(documentManager)
+    // );
+    // context.subscriptions.push(definitionProviderDisposable);
+    // 
+    // logger.info(`📄 Registered Definition Provider for extensions: ${lookupExtensions.join(', ')}`);
     
     // ✅ Register Prefix Decorator for variable highlighting
     if (semanticTokensProviderDisposable) {
@@ -2636,8 +2639,56 @@ async function startClientServer(context: ExtensionContext, hasOpenXmlFiles: boo
             ],
         },
         middleware: {
-            provideDefinition: (document, position, token, next) => {
+            provideDefinition: async (document, position, token, next) => {
                 logger.info(`🔥 CLIENT MIDDLEWARE: Definition request for ${document.uri.toString()} at ${position.line}:${position.character}`);
+                
+                // First check if we're on a PROCEDURE implementation - if so, find MAP declaration
+                // This handles reverse navigation: implementation → declaration
+                if (documentManager) {
+                    const line = document.lineAt(position.line);
+                    const lineText = line.text;
+                    
+                    // Match: ProcName PROCEDURE(...) or Class.MethodName PROCEDURE(...)
+                    const procMatch = lineText.match(/^\s*([A-Za-z_][A-Za-z0-9_\.]*)\s+PROCEDURE/i);
+                    if (procMatch) {
+                        const fullName = procMatch[1];
+                        const simpleName = fullName.includes('.') ? fullName.split('.').pop()! : fullName;
+                        
+                        logger.info(`Detected PROCEDURE implementation: ${fullName} (simple: ${simpleName})`);
+                        
+                        // Search for MAP declaration
+                        const content = document.getText();
+                        const lines = content.split('\n');
+                        
+                        for (let i = 0; i < lines.length; i++) {
+                            const mapLine = lines[i].trim().toUpperCase();
+                            
+                            if (mapLine === 'MAP') {
+                                logger.info(`Found MAP block at line ${i}`);
+                                logger.info(`End of MAP block searching for: ${simpleName}`);
+                                
+                                for (let j = i + 1; j < lines.length; j++) {
+                                    const declLine = lines[j].trim();
+                                    logger.info(`Checking MAP declaration: ${declLine} against ${simpleName}`);
+                                    
+                                    if (declLine.toUpperCase().startsWith('END')) {
+                                        break;
+                                    }
+                                    
+                                    // Match procedure name at start of line, possibly followed by whitespace and PROCEDURE keyword
+                                    const declMatch = declLine.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s+(PROCEDURE|FUNCTION|CLASS)/i);
+                                    if (declMatch && declMatch[1].toUpperCase() === simpleName.toUpperCase()) {
+                                        logger.info(`Found MAP declaration for ${simpleName} at line ${j} - returning location`);
+                                        return [new Location(document.uri, new Position(j, 0))];
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                // Not a PROCEDURE implementation, let server handle it
                 return next(document, position, token);
             }
         },
