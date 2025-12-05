@@ -366,6 +366,48 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             );
             nodes.push(browseNode);
             
+            // ✅ Also show recent solutions from global history (even when folder is open)
+            const recentSolutions = await GlobalSolutionHistory.getValidReferences();
+            logger.info(`📜 Found ${recentSolutions.length} recent solutions in global history`);
+            
+            if (recentSolutions.length > 0) {
+                // Add separator
+                const separatorNode = new TreeNode(
+                    "─────────────",
+                    TreeItemCollapsibleState.None,
+                    { type: 'separator' }
+                );
+                nodes.push(separatorNode);
+                
+                // Show recent solutions header
+                const recentHeaderNode = new TreeNode(
+                    `📜 Recent Solutions (${recentSolutions.length})`,
+                    TreeItemCollapsibleState.None,
+                    { type: 'info' }
+                );
+                nodes.push(recentHeaderNode);
+                
+                // Add recent solution nodes
+                for (const ref of recentSolutions) {
+                    const solutionName = path.basename(ref.solutionFile, '.sln');
+                    const folderName = path.basename(ref.folderPath);
+                    const recentNode = new TreeNode(
+                        `▶ ${solutionName}`,
+                        TreeItemCollapsibleState.None,
+                        {
+                            type: 'recentSolution',
+                            solutionPath: ref.solutionFile,
+                            folderPath: ref.folderPath,
+                            tooltip: `${ref.solutionFile}\nLast opened: ${ref.lastOpened.toLocaleString()}`
+                        },
+                        undefined,
+                        ref.folderPath
+                    );
+                    recentNode.description = folderName;
+                    nodes.push(recentNode);
+                }
+            }
+            
         } catch (error) {
             logger.error('❌ Error getting detected solutions:', error);
             // Return browse option on error
