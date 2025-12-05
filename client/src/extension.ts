@@ -415,6 +415,17 @@ export async function activate(context: ExtensionContext): Promise<void> {
     // Register commands (some work without folder, some need folder)
     const commandsAlwaysAvailable = [
         { id: "clarion.openSolution", handler: openClarionSolution.bind(null, context) }, // Works without folder - opens folder
+        { id: "clarion.debugSolutionHistory", handler: async () => {
+            const refs = await GlobalSolutionHistory.getReferences();
+            const valid = await GlobalSolutionHistory.getValidReferences();
+            logger.info(`📊 Debug Solution History:
+                Total: ${refs.length}
+                Valid: ${valid.length}`);
+            refs.forEach((ref, idx) => {
+                logger.info(`  ${idx + 1}. ${ref.solutionFile} (${ref.folderPath})`);
+            });
+            window.showInformationMessage(`Solution History: ${refs.length} total, ${valid.length} valid. Check output log for details.`);
+        }},
     ];
     
     const commandsRequiringFolder = [

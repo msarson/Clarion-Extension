@@ -219,6 +219,10 @@
                 "when": "clarion.solutionOpen"
             },
             {
+                "command": "clarion.debugSolutionHistory",
+                "title": "Clarion: Debug Solution History"
+            },
+            {
                 "command": "clarion.navigateToProject",
                 "title": "Navigate to Project",
                 "when": "clarion.solutionOpen"
