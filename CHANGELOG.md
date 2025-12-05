@@ -21,6 +21,12 @@ All notable changes to the "clarion-extension" extension will be documented in t
     - MAP: `MyProcedure PROCEDURE(),LONG` in MAP but no `RETURN value`
   - Prevents runtime errors and undefined behavior
 
+- **Go to Implementation for single-file classes** - Navigate from CLASS method declarations to implementations
+  - Now supports classes without MODULE('file') declarations
+  - Works when CLASS and implementations are in the same file
+  - Handles parameter matching with spaces (e.g., `PROCEDURE( ? param)` matches `PROCEDURE(? param)`)
+  - Resolves "no implementation found" errors for single-file programs
+
 - **SECTION-aware INCLUDE links** - Document links now navigate to specific SECTION blocks
   - Syntax: `INCLUDE('file.clw','SECTION NAME')` links directly to `SECTION('SECTION NAME')`
   - **Cursor positioning**: Opens file with cursor at the SECTION line (not at top)
@@ -30,6 +36,12 @@ All notable changes to the "clarion-extension" extension will be documented in t
   - Updated Knowledge Base with SECTION documentation
 
 ### 🐛 Bug Fixes
+- **Fixed Go to Implementation for classes without MODULE** - Classes in same file as implementation now work
+  - Previously required MODULE('file') declaration, causing "no implementation found" errors
+  - Now handles single-file programs where CLASS and implementations are together
+  - Parameter matching works correctly with spaces: `PROCEDURE( ? param)` matches `PROCEDURE(? param)`
+  - Fixed moduleFile type handling (null vs undefined)
+
 - **Fixed return type extraction in procedure declarations** - Return types now correctly detected regardless of attribute position
   - Previously only checked immediately after `PROCEDURE(),` 
   - Now scans entire attribute list for data type keywords
