@@ -525,9 +525,7 @@ export class DocumentManager implements Disposable {
         
         // If no MODULE file, implementation must be in the same file
         if (!location.moduleFile) {
-            logger.info(`🔥 No MODULE file specified for ${location.className}.${location.methodName}, searching in same file`);
-            console.log(`🔥 No MODULE file specified for ${location.className}.${location.methodName}, searching in same file`);
-            console.log(`🔥 location.fullFileName = ${location.fullFileName}`);
+            logger.info(`No MODULE file specified for ${location.className}.${location.methodName}, searching in same file`);
             
             try {
                 // Try to find implementation in the current document
@@ -1133,11 +1131,9 @@ export class DocumentManager implements Disposable {
                         logger.info(`MODULE keyword found but no pattern matched for class ${originalClassName}`);
                     }
                 } else {
-                    logger.info(`🔥 No MODULE keyword found for class ${originalClassName}, assuming implementation in same file`);
-                    console.log(`🔥 No MODULE keyword found for class ${originalClassName}, assuming implementation in same file`);
+                    logger.info(`No MODULE keyword found for class ${originalClassName}, assuming implementation in same file`);
                     // For classes without MODULE, use the current document as the implementation file
                     moduleFilePath = document.uri.fsPath;
-                    console.log(`🔥 Set moduleFilePath to: ${moduleFilePath}`);
                 }
                 
                 const lowerClassContent = fullClassText;

@@ -144,8 +144,7 @@ export class ClarionImplementationProvider implements ImplementationProvider {
         position: Position,
         token: CancellationToken
     ): ProviderResult<Definition | LocationLink[]> {
-        console.log('🔥🔥🔥 ClarionImplementationProvider.provideImplementation CALLED 🔥🔥🔥');
-        logger.info('🔥🔥🔥 ClarionImplementationProvider.provideImplementation CALLED 🔥🔥🔥');
+        logger.info('ClarionImplementationProvider.provideImplementation called');
         return this._provideImplementation(document, position, token);
     }
 

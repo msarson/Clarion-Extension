@@ -1479,17 +1479,13 @@ let definitionProviderDisposable: Disposable | null = null;
 let semanticTokensProviderDisposable: Disposable | null = null;
 
 function registerLanguageFeatures(context: ExtensionContext) {
-    console.log("🔥🔥🔥 registerLanguageFeatures CALLED 🔥🔥🔥");
-    logger.info("🔥🔥🔥 registerLanguageFeatures CALLED 🔥🔥🔥");
+    logger.info("registerLanguageFeatures called");
     
     if (!documentManager) {
         logger.warn("⚠️ Cannot register language features: documentManager is undefined!");
-        console.log("🔥🔥🔥 documentManager is UNDEFINED 🔥🔥🔥");
         return;
     }
     
-    console.log("🔥🔥🔥 documentManager EXISTS 🔥🔥🔥");
-
     // ✅ Fix: Ensure only one Document Link Provider is registered
     if (documentLinkProviderDisposable) {
         documentLinkProviderDisposable.dispose(); // Remove old provider if it exists
@@ -1535,7 +1531,6 @@ function registerLanguageFeatures(context: ExtensionContext) {
     }
     
     logger.info("🔍 Registering Implementation Provider...");
-    console.log("🔥🔥🔥 REGISTERING ClarionImplementationProvider 🔥🔥🔥");
     implementationProviderDisposable = languages.registerImplementationProvider(
         documentSelectors,
         new ClarionImplementationProvider(documentManager)
