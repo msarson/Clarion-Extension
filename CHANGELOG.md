@@ -9,9 +9,12 @@ All notable changes to the "clarion-extension" extension will be documented in t
 - **Missing RETURN statement validation** - Validates procedures/methods with return types have proper RETURN statements
   - Correctly handles Clarion's declaration/implementation split
   - Return types only in declarations (CLASS/MAP/MODULE), never in implementations
+  - Supports both CLASS methods and MAP procedures
   - Flags procedures that have no RETURN statement
   - Flags procedures where all RETURN statements are empty
-  - Example: `MyClass.MyProc` declared with `, LONG` but no `RETURN value` shows error
+  - Examples:
+    - CLASS: `MyClass.MyProc` declared with `, LONG` but no `RETURN value`
+    - MAP: `MyProcedure PROCEDURE(),LONG` in MAP but no `RETURN value`
   - Prevents runtime errors and undefined behavior
 
 - **SECTION-aware INCLUDE links** - Document links now navigate to specific SECTION blocks
