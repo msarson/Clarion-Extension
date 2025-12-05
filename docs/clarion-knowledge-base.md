@@ -1917,3 +1917,74 @@ Clarion source files use **ANSI/ASCII encoding only**. They do NOT support:
 
 ---
 
+## SECTION - Code Organization Directive
+
+### SECTION Directive
+
+**Syntax:** `SECTION(string)`
+
+The SECTION directive identifies the beginning of a block of executable source code or data declarations which may be INCLUDEd in source code in another file.
+
+**Key Rules:**
+- `string` - A string constant which names the SECTION
+- Identifies a block of source code or data declarations
+- Used with INCLUDE to selectively include specific blocks
+- A SECTION is terminated by:
+  - The next SECTION directive, OR
+  - The end of the file
+
+**Purpose:**
+Allows organizing code into named blocks that can be selectively included in other files, rather than including entire files.
+
+**Usage with INCLUDE:**
+```clarion
+! In file MyData.clw:
+SECTION('GLOBAL DATA')
+GlobalVar    LONG
+GlobalString STRING(100)
+
+SECTION('LOCAL DATA')
+LocalVar     LONG
+LocalString  STRING(50)
+
+! In another file:
+INCLUDE('MyData.clw', 'GLOBAL DATA')  ! Only includes GLOBAL DATA section
+```
+
+**Examples:**
+```clarion
+! Common pattern in all-source programs
+SECTION('GLOBAL DATA')
+! Global variables and file structures
+Customer FILE,DRIVER('TOPSPEED')
+        KEY(CUS:ID),PRIMARY
+        RECORD
+CUS:ID    LONG
+CUS:Name  STRING(50)
+        END
+       END
+
+SECTION('AtSortReport Procedure DATA')
+! Procedure-specific data
+LocalQ   QUEUE
+Item      STRING(100)
+        END
+
+SECTION('Code')
+! Executable code for procedures
+AtSortReport PROCEDURE
+CODE
+  ! Procedure implementation
+```
+
+**Important Notes:**
+- SECTION names are case-sensitive
+- Commonly used in "all-source" program structure where data and code are in separate sections
+- When INCLUDE specifies a section name, only that section is included
+- If no section name specified in INCLUDE, the entire file is included
+
+**Diagnostic Rules:**
+- SECTION must have a string parameter
+- Section names should be unique within a file (not enforced by compiler but good practice)
+
+---
