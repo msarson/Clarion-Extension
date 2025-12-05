@@ -5,6 +5,14 @@ All notable changes to the "clarion-extension" extension will be documented in t
 
 ## [Unreleased]
 
+### ✨ Features
+- **SECTION-aware INCLUDE links** - Document links now navigate to specific SECTION blocks
+  - Syntax: `INCLUDE('file.clw','SECTION NAME')` links directly to `SECTION('SECTION NAME')`
+  - Hover preview shows from the SECTION start
+  - Falls back to file start if section not found
+  - Section names support spaces and special characters
+  - Updated Knowledge Base with SECTION documentation
+
 ### 🐛 Bug Fixes
 - **Fixed Clarion Tools sidebar auto-reveal** - Follow Cursor now only works when Structure View is visible
   - Root cause: `treeView.reveal()` called by Follow Cursor was bringing sidebar into focus
