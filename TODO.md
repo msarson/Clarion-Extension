@@ -305,6 +305,54 @@ Needs coverage:
 
 ## 🔧 Technical Debt
 
+### Code Refactoring - Large TypeScript Files
+**Priority:** HIGH  
+**Status:** Not Started  
+**Date Added:** Dec 5, 2024
+
+#### Problem
+Several TypeScript files have grown too large and complex:
+- `client/src/extension.ts` - **3000+ lines** - Main extension entry point
+- `client/src/documentManager.ts` - Large and complex
+- Other large files may need similar treatment
+
+#### Impact
+- Difficult to navigate and understand
+- Hard to locate specific functionality
+- Increased risk of bugs during modifications
+- Harder for new contributors
+- Slower IDE performance with large files
+
+#### Proposed Solution
+**Break down `extension.ts` into focused modules:**
+- `extensionActivation.ts` - Activation logic and phases
+- `commandRegistration.ts` - Command registration
+- `solutionManagement.ts` - Solution initialization and management
+- `providerRegistration.ts` - Language feature providers
+- `watcherManagement.ts` - File system watchers
+- Keep `extension.ts` as thin orchestrator/entry point
+
+**Similar refactoring for `documentManager.ts`:**
+- `documentCache.ts` - Document caching logic
+- `statementParser.ts` - INCLUDE/MODULE/MEMBER parsing
+- `methodTracker.ts` - MAP procedure and CLASS method tracking
+- Keep `documentManager.ts` as coordinator
+
+#### Benefits
+- ✅ Easier to understand and maintain
+- ✅ Better separation of concerns
+- ✅ Easier to test individual components
+- ✅ Faster IDE performance
+- ✅ Easier onboarding for contributors
+- ✅ Reduced merge conflicts
+
+#### Related Files
+- `client/src/extension.ts` (3000+ lines)
+- `client/src/documentManager.ts` (large/complex)
+- Consider similar refactoring for other large files
+
+---
+
 ### Architecture - Navigation Provider Duplication
 **Priority:** MEDIUM  
 **Status:** Not Started  
@@ -409,6 +457,99 @@ Reorganized documentation with clear separation:
 - ✅ Created `docs/clarion-knowledge-base.md` for language reference
 - ✅ Consolidated documentation in `docs/` directory
 - ✅ Separated user and developer documentation (Dec 2024)
+
+---
+
+## 📋 Documentation Cleanup
+**Priority:** HIGH  
+**Status:** Not Started  
+**Date Added:** Dec 5, 2024
+
+#### Problem
+The repository root has accumulated too many documentation files that make it hard to find important information:
+- Multiple README files (README.md, README-old.md)
+- Multiple CHANGELOG files (CHANGELOG.md, CHANGELOG-old.md, CHANGELOG-0.7.1.md)
+- Session documentation files at root level
+- Various performance tracking documents
+- Multiple .vsix release files cluttering the root
+- **README.md has become too large** due to extensive feature documentation across many versions
+- **CHANGELOG.md has become too large** with complete history of all versions
+
+#### Impact
+- Hard for developers to find relevant documentation
+- Cluttered repository makes navigation difficult
+- Historical documents mix with current documentation
+- README.md and CHANGELOG.md are difficult to navigate due to size
+- New users overwhelmed by amount of information in README
+- README scrolling is tedious - takes long time to find specific features
+
+#### Proposed Solution
+
+**1. Archive Old Documentation:**
+- Create `docs/archive/` directory for historical docs:
+  - Move `README-old.md` → `docs/archive/`
+  - Move `CHANGELOG-old.md`, `CHANGELOG-0.7.1.md` → `docs/archive/`
+  - Move `AUDIT_2024-12-02.md` → `docs/archive/`
+  - Move session/performance docs → `docs/archive/`
+  - Move `REPOSITORY_REORGANIZATION.md` → `docs/archive/`
+
+**2. Move Session Documents:**
+- Session*.md files should be in `docs/dev/sessions/` (not root)
+- Move performance tracking docs to `docs/dev/performance/`
+
+**3. Archive Release Files:**
+- Create `releases/` directory for old .vsix files
+- Move all old .vsix files to `releases/`
+- Keep only latest .vsix in root (or move all to releases/)
+
+**4. Consolidate Large Files:**
+
+**README.md - Split into Multiple Files:**
+- **Main README.md** (keep brief):
+  - Quick overview (2-3 paragraphs)
+  - Installation instructions (keep simple)
+  - Link to docs/FEATURES.md
+  - Link to docs/GETTING_STARTED.md
+  - Basic "Quick Start" section
+- **docs/FEATURES.md** (detailed feature documentation):
+  - Move all feature descriptions from README
+  - Organize by category
+  - Include screenshots/examples
+- **docs/GETTING_STARTED.md**:
+  - Detailed setup guide
+  - Configuration options
+  - Tutorial/walkthrough
+- **docs/FAQ.md**:
+  - Common questions
+  - Troubleshooting
+  - Tips and tricks
+
+**CHANGELOG.md - Split by Time Period:**
+- **CHANGELOG.md** (keep current):
+  - Only recent releases (last 6-12 months)
+  - Keep versions 0.7.x and newer
+  - Clear and concise
+- **docs/archive/CHANGELOG-2024.md**:
+  - Move older 2024 releases
+- **docs/archive/CHANGELOG-HISTORICAL.md**:
+  - All pre-2024 releases
+  - Complete version history preserved
+
+**5. Prioritize Information for Different Audiences:**
+- **Users** need: Quick start, features, installation
+- **Contributors** need: Architecture, dev setup, coding standards
+- **Maintainers** need: Release process, versioning, testing
+- Organize documentation accordingly
+
+#### Benefits
+- ✅ Cleaner repository root
+- ✅ Easier to find current documentation
+- ✅ Historical information preserved but organized
+- ✅ Better separation of user vs developer documentation
+- ✅ Easier for new contributors to navigate
+- ✅ README.md more digestible for new users
+- ✅ CHANGELOG.md easier to browse for recent changes
+- ✅ Documentation better organized by audience (users/contributors/maintainers)
 
 ---
 
