@@ -96,6 +96,42 @@ Clarion-Extension/
 
 ### 2. Git Workflow
 
+#### Branching Strategy
+
+**Version Branches:**
+- `main` - Production releases only (stable)
+- `version-X.Y.Z` - Current development version (e.g., `version-0.7.3`)
+
+**Feature/Bug Fix Branches:**
+- **ALWAYS create disposable branches** for new features or bug fixes
+- Branch from current version branch (e.g., from `version-0.7.3`)
+- Naming: `feature/description` or `fix/description`
+- Example: `feature/add-hover-support` or `fix/column-zero-bug`
+
+**Workflow:**
+1. User requests new feature or bug fix
+2. Create disposable branch: `git checkout -b feature/description`
+3. Implement changes, commit regularly
+4. When complete, merge back to version branch: `git checkout version-X.Y.Z && git merge feature/description`
+5. **Delete the disposable branch**: `git branch -d feature/description`
+6. Push version branch: `git push origin version-X.Y.Z`
+
+**Example Flow:**
+```bash
+# Starting new feature
+git checkout version-0.7.3
+git checkout -b feature/add-new-syntax
+# ... make changes, commit ...
+git add .
+git commit -m "feat: add new syntax support"
+
+# Feature complete - merge back
+git checkout version-0.7.3
+git merge feature/add-new-syntax
+git branch -d feature/add-new-syntax  # Delete temp branch
+git push origin version-0.7.3
+```
+
 #### Committing Changes
 - **Commit often** - After completing logical units of work
 - Use descriptive commit messages
@@ -118,20 +154,52 @@ git commit -m "feat: add support for X"
 - Location: `package.json` version field
 - Format: `MAJOR.MINOR.PATCH` (e.g., `0.7.1`)
 
+#### Pre-Publishing Checklist
+
+**⚠️ CRITICAL - Before ANY publish request:**
+
+1. **Verify all logger levels are at ERROR:**
+   ```bash
+   # Search for any non-error log levels
+   grep -r "logger.setLevel\(\"info\"\)" client/src server/src
+   grep -r "logger.setLevel\(\"warn\"\)" client/src server/src
+   grep -r "logger.setLevel\(\"debug\"\)" client/src server/src
+   ```
+   - If ANY results found: **STOP and fix before publishing**
+   - All should be: `logger.setLevel("error")`
+
+2. **Run tests:**
+   ```bash
+   npm test
+   ```
+
+3. **Verify CHANGELOG.md is up to date**
+
 #### Version Change Process
 
 **NEVER change version automatically. Only when user requests merge to main:**
 
-1. **User says:** "Merge to main" or "Ready to release"
+1. **User says:** "Merge to main" or "Ready to release" or "Ready to publish"
+
 2. **You respond:** "Ready to merge. This will require:
+   - ⚠️ **FIRST: Verify all log levels are ERROR** (critical!)
    - Version bump (current: X.Y.Z)
-   - Build in release mode (important for logging)
+   - Build in release mode
    - Package extension (.vsix)
    - Publish to marketplace
    
    What should the new version be?"
-3. **User provides:** Next version number (e.g., `0.8.0`)
-4. **You execute:**
+
+3. **Before proceeding, CHECK LOG LEVELS:**
+   ```bash
+   # If any non-error levels found, STOP and ask user to confirm fix
+   grep -r "setLevel(\"info\")" client/src server/src
+   grep -r "setLevel(\"warn\")" client/src server/src
+   ```
+
+4. **User provides:** Next version number (e.g., `0.8.0`)
+
+5. **You execute:**
    ```bash
    # Update version
    npm version [new version] --no-git-tag-version
@@ -153,17 +221,23 @@ git commit -m "feat: add support for X"
    
    # User will manually publish to marketplace
    ```
-5. **After merge to main:**
+
+6. **After merge to main:**
    - Ask user for next version number
-   - Create new branch: `git checkout -b v[next-version]`
+   - Create new version branch: `git checkout -b version-[next-version]`
+   - Push new branch: `git push -u origin version-[next-version]`
    - Confirm branch creation with user
 
 #### ⚠️ CRITICAL: Release Mode Logging
 
-**Always use release mode when building for marketplace publish:**
+**All loggers MUST be at error level:**
+- Current standard: All `logger.setLevel("error")` throughout codebase
+- **Before publishing**: ALWAYS verify no info/warn/debug levels exist
+- This ensures clean console output for end users
 
-- **Development builds**: `npm run compile` (warn-level logging)
-- **Release builds**: `npm run compile:release` (error-level only)
+**Build Commands:**
+- **Development builds**: `npm run compile` (standard)
+- **Release builds**: `npm run compile:release` (with VSCODE_RELEASE_MODE=true)
 - **Package for release**: `npm run package:release`
 
 **What Release Mode Does:**
@@ -172,12 +246,14 @@ git commit -m "feat: add support for X"
 - Reduces console output for end users
 - Makes extension logs cleaner in production
 
-**Never publish without release mode** - this will flood user consoles with debug logs!
+**Never publish without:**
+1. ✅ Verifying all log levels are ERROR
+2. ✅ Using `npm run package:release`
 
 #### Version Branching Strategy
 - `main` - Production releases only
-- `v0.8.0` - Development branch for version 0.8.0
-- Feature branches - Created as needed from version branch
+- `version-0.8.0` - Development branch for version 0.8.0
+- `feature/*` or `fix/*` - Disposable branches for features/fixes (merged then deleted)
 
 ### 4. Testing
 
