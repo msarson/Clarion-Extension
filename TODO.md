@@ -203,6 +203,31 @@ Added diagnostic provider that detects:
 - ✅ OMIT/COMPILE blocks not terminated with matching terminator string
 - ✅ Fixed parser state corruption in large files (Dec 2024)
 
+### Diagnostics - RETURN Statement Validation 🚧 IN PROGRESS (Dec 2024)
+**Priority:** HIGH  
+**Status:** In Progress - Needs More Testing
+
+Initial implementation complete:
+- ✅ Validates procedures/methods with return types have RETURN statements
+- ✅ Handles CLASS method declarations (return type in CLASS)
+- ✅ Handles MAP procedure declarations (return type in MAP)
+- ✅ Detects missing RETURN statements
+- ✅ Detects empty RETURN statements (no value)
+- ✅ 219 tests passing
+
+**Known to work:**
+- CLASS methods: `MyClass.MyProc PROCEDURE(),LONG`
+- MAP procedures: `MyProcedure PROCEDURE(),LONG`
+
+**⚠️ Needs more debugging:**
+User will report specific issues after session ends. May need:
+- Additional edge cases handled
+- More complex scenarios tested
+- Real-world usage validation
+- Performance optimization for large files
+
+**Note:** This feature is functional but may have edge cases or scenarios not yet discovered. User feedback will guide next improvements.
+
 ### Performance Optimizations ✅ COMPLETE (Dec 2024)
 **Priority:** HIGH  
 **Status:** Complete ✅
