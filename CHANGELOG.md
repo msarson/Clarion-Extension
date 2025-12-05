@@ -9,6 +9,13 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 ## [Unreleased]
 
 ### ✨ Features
+- **Centralized logging configuration with release mode** - Clean, minimal console output for production releases
+  - Single environment variable (`VSCODE_RELEASE_MODE=true`) controls all logging
+  - Development builds: error-level logging (minimal output)
+  - Release builds: Use `npm run compile:release` or `npm run package:release`
+  - All loggers standardized to error level for clean production output
+  - Simplifies publishing workflow - no manual log level changes needed
+
 - **Missing RETURN statement validation** - Validates procedures/methods with return types have proper RETURN statements
   - Correctly handles Clarion's declaration/implementation split
   - Return types only in declarations (CLASS/MAP/MODULE), never in implementations
