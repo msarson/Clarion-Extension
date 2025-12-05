@@ -60,8 +60,10 @@ export class LoggingConfig {
      * Useful for logging/debugging
      */
     static getModeDescription(): string {
-        return this.IS_RELEASE_MODE 
+        const mode = this.IS_RELEASE_MODE 
             ? `Release Mode (log level: ${this.RELEASE_LOG_LEVEL})`
             : `Development Mode (log level: ${this.DEV_LOG_LEVEL})`;
+        const envValue = process.env.VSCODE_RELEASE_MODE;
+        return `${mode} [env: ${envValue || 'not set'}]`;
     }
 }
