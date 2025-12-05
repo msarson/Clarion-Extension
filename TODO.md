@@ -151,6 +151,54 @@ Fixed in 3 commits (a63e88a, ea780ba, 69416e7):
 
 ## 🚀 Features
 
+### Centralized Logging Configuration with Release Mode
+**Priority:** HIGH  
+**Status:** Not Started  
+**Date Added:** Dec 5, 2024
+
+#### Problem
+Currently, logging levels are scattered throughout the codebase on both client and server sides. Before publishing a release, we need to manually find and update log levels across many files to reduce verbosity for production users. This is error-prone and time-consuming.
+
+#### Current State
+- Logger instances created throughout client and server code
+- Log levels set individually in each file/module
+- No central control over logging verbosity
+- Development logging creates excessive output for end users
+- Need to manually search and change log levels before each release
+
+#### Proposed Solution
+Create a centralized logging configuration system with a simple "release mode" switch.
+
+**Key Requirements:**
+1. **Single configuration point** - One place to control all logging
+2. **Client and server support** - Works on both sides of the LSP
+3. **Release mode toggle** - Simple boolean flag to switch between dev/release
+4. **Environment-aware** - Can detect if running in development or production
+5. **Easy to use** - Simple API for creating loggers throughout codebase
+
+**Proposed Implementation:**
+- Create `common/LoggingConfig.ts` with centralized configuration
+- Add `isReleaseMode` boolean flag (default: false for development)
+- Export logger factory function that respects release mode
+- Update all existing logger creation to use factory
+- Add npm script to build with release mode enabled
+- Update PUBLISHING_GUIDE.md with release mode instructions
+
+**Benefits:**
+- ✅ One-line change to switch between dev and release logging
+- ✅ Consistent logging behavior across entire extension
+- ✅ Less verbose output for end users
+- ✅ Easier to maintain and update logging strategy
+- ✅ Reduces risk of shipping with excessive logging
+- ✅ Can still enable verbose logging for debugging user issues
+
+**Related Files:**
+- Client: Various providers and managers creating Logger instances
+- Server: Providers, tokenizer, document structure modules
+- Common: Need new `LoggingConfig.ts` module
+
+---
+
 ### Structure View - Follow Cursor
 **Priority:** MEDIUM  
 **Status:** Complete ✅
