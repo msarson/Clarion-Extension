@@ -703,14 +703,27 @@ export class DocumentManager implements Disposable {
         // Find all potential implementations of this method
         const implementations: Array<{line: number, params: string[]}> = [];
         
-        // Regex to find all implementations of this method with parameter capture
-        const implRegex = new RegExp(
-            String.raw`(^|\r?\n)[ \t]*` + cls + String.raw`(?:\.|::)` + mth +
-            String.raw`\s+(?:procedure|function)\s*\(([^)]*)\)`,
-            'gi'
-        );
+        // Determine if this is a MAP procedure (no class) or CLASS method
+        const isMapProcedure = !cls || cls === '';
         
-        logger.info(`Searching for implementation of ${cls}.${mth} as PROCEDURE or FUNCTION with parameter matching`);
+        let implRegex: RegExp;
+        if (isMapProcedure) {
+            // For MAP procedures: just "ProcedureName PROCEDURE(...)"
+            implRegex = new RegExp(
+                String.raw`(^|\r?\n)[ \t]*` + mth +
+                String.raw`\s+(?:procedure|function)\s*\(([^)]*)\)`,
+                'gi'
+            );
+            logger.info(`Searching for MAP procedure implementation: ${mth} as PROCEDURE or FUNCTION`);
+        } else {
+            // For CLASS methods: "ClassName.MethodName PROCEDURE(...)"
+            implRegex = new RegExp(
+                String.raw`(^|\r?\n)[ \t]*` + cls + String.raw`(?:\.|::)` + mth +
+                String.raw`\s+(?:procedure|function)\s*\(([^)]*)\)`,
+                'gi'
+            );
+            logger.info(`Searching for CLASS method implementation: ${cls}.${mth} as PROCEDURE or FUNCTION`);
+        }
         
         let match;
         while ((match = implRegex.exec(lowerContent)) !== null) {
@@ -731,11 +744,20 @@ export class DocumentManager implements Disposable {
         if (implementations.length === 0) {
             logger.info(`No implementations found with parameter capture, trying fallback regex`);
             
-            const fallbackRegex = new RegExp(
-                String.raw`(^|\r?\n)[ \t]*` + cls + String.raw`(?:\.|::)` + mth +
-                String.raw`\s+(?:procedure|function)\s*(?:\([^)]*\))?`,
-                'i'
-            );
+            let fallbackRegex: RegExp;
+            if (isMapProcedure) {
+                fallbackRegex = new RegExp(
+                    String.raw`(^|\r?\n)[ \t]*` + mth +
+                    String.raw`\s+(?:procedure|function)\s*(?:\([^)]*\))?`,
+                    'i'
+                );
+            } else {
+                fallbackRegex = new RegExp(
+                    String.raw`(^|\r?\n)[ \t]*` + cls + String.raw`(?:\.|::)` + mth +
+                    String.raw`\s+(?:procedure|function)\s*(?:\([^)]*\))?`,
+                    'i'
+                );
+            }
             
             const m = fallbackRegex.exec(lowerContent);
             if (m) {
@@ -1151,7 +1173,64 @@ export class DocumentManager implements Disposable {
                 }
             }
             
-            logger.info(`Found ${methodLocations.length} method declarations (implementations will be resolved on demand)`);
+            logger.info(`Found ${methodLocations.length} CLASS method declarations`);
+            
+            // Process MAP procedure declarations
+            const mapRegex = /\bmap\b/gis;
+            const mapMatch = mapRegex.exec(lowerText);
+            
+            if (mapMatch) {
+                logger.info(`Found MAP at position ${mapMatch.index}`);
+                
+                // Find the END of the MAP
+                const mapStart = mapMatch.index;
+                const mapTail = lowerText.slice(mapStart);
+                const mapEndMatch = /^\s*end\b/mi.exec(mapTail);
+                
+                if (mapEndMatch) {
+                    const mapEnd = mapStart + mapEndMatch.index;
+                    const mapText = lowerText.substring(mapStart, mapEnd);
+                    const originalMapText = originalText.substring(mapStart, mapEnd);
+                    
+                    logger.info(`MAP ends at position ${mapEnd}`);
+                    
+                    // Look for PROCEDURE declarations in MAP
+                    const procRegex = /^[ \t]*([a-z0-9_]+)\s+procedure\s*\(([^)]*)\)/gim;
+                    let procMatch;
+                    
+                    while ((procMatch = procRegex.exec(mapText)) !== null) {
+                        const procName = procMatch[1];
+                        const params = procMatch[2];
+                        const procPos = mapStart + procMatch.index;
+                        const procLine = document.positionAt(procPos).line;
+                        const procChar = document.positionAt(procPos).character;
+                        const procEndChar = procChar + procName.length;
+                        
+                        // Parse parameter signature
+                        const parameterSignature = this.parseDeclarationParameters(params);
+                        
+                        logger.info(`Found MAP procedure: ${procName}(${params}) at line ${procLine}`);
+                        logger.info(`Parsed parameter signature: [${parameterSignature.join(', ')}]`);
+                        
+                        // Store procedure metadata
+                        methodLocations.push({
+                            fullFileName: document.uri.fsPath, // MAP procedures are in same file
+                            linePosition: new Position(procLine, procChar),
+                            linePositionEnd: new Position(procLine, procEndChar),
+                            statementType: "METHOD", // Reuse METHOD type for consistency
+                            className: "", // No class for MAP procedures
+                            methodName: procName,
+                            moduleFile: undefined, // No MODULE for MAP procedures
+                            implementationResolved: false,
+                            parameterSignature: parameterSignature
+                        });
+                        
+                        logger.info(`Stored metadata for MAP procedure ${procName}`);
+                    }
+                }
+            }
+            
+            logger.info(`Found ${methodLocations.length} total declarations (CLASS methods + MAP procedures)`);
         } catch (error) {
             logger.error(`Error processing method declarations: ${error instanceof Error ? error.message : String(error)}`);
         }
