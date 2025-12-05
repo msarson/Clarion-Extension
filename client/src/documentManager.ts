@@ -1238,9 +1238,9 @@ export class DocumentManager implements Disposable {
                             fullFileName: document.uri.fsPath, // MAP procedures are in same file
                             linePosition: new Position(procLine, procChar),
                             linePositionEnd: new Position(procLine, procEndChar),
-                            statementType: "METHOD", // Reuse METHOD type for consistency
+                            statementType: "MAPPROCEDURE", // MAP procedures are not class methods
                             className: "", // No class for MAP procedures
-                            methodName: originalProcName, // Use original case
+                            methodName: originalProcName, // Use original case (store procedure name in methodName for compatibility)
                             moduleFile: undefined, // No MODULE for MAP procedures
                             implementationResolved: false,
                             parameterSignature: parameterSignature
