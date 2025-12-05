@@ -378,9 +378,34 @@ export class DiagnosticProvider {
                     for (let b = blockStack.length - 1; b >= 0; b--) {
                         const block = blockStack[b];
                         
-                        // Don't check the same line as the OMIT/COMPILE directive
-                        // (the terminator string appears in the directive itself!)
+                        // Don't check before the OMIT/COMPILE directive on the same line
+                        // But DO check AFTER it (terminator can be on same line after semicolon)
                         if (token.line === block.line) {
+                            // Get the full line text
+                            const fullLineText = document.getText({ 
+                                start: { line: block.line, character: 0 }, 
+                                end: { line: block.line, character: 1000 }
+                            });
+                            
+                            // Find where the directive starts
+                            const directiveStart = block.column;
+                            // Estimate where directive ends (COMPILE('terminator',expr) or OMIT('terminator'))
+                            // Look for closing paren after the directive
+                            const directiveSubstring = fullLineText.substring(directiveStart);
+                            const parenClose = directiveSubstring.indexOf(')');
+                            
+                            if (parenClose !== -1) {
+                                const searchStart = directiveStart + parenClose + 1;
+                                const lineAfterDirective = fullLineText.substring(searchStart);
+                                
+                                // Check if terminator appears after the directive
+                                if (lineAfterDirective.includes(block.terminator)) {
+                                    // Terminator is on same line but AFTER the directive
+                                    blockStack.splice(b, 1);
+                                    break;
+                                }
+                            }
+                            // Otherwise skip - terminator not found after directive
                             continue;
                         }
                         
@@ -410,9 +435,40 @@ export class DiagnosticProvider {
                 for (let b = blockStack.length - 1; b >= 0; b--) {
                     const block = blockStack[b];
                     
-                    // Don't check lines before or on the OMIT/COMPILE line
-                    if (lineNum <= block.line) {
+                    // Don't check before the OMIT/COMPILE line, but DO check on the same line
+                    // if terminator appears after the directive
+                    if (lineNum < block.line) {
                         continue;
+                    }
+                    
+                    // If same line as directive, check if terminator is AFTER the directive
+                    if (lineNum === block.line) {
+                        // Get the full line text
+                        const fullLineText = document.getText({ 
+                            start: { line: block.line, character: 0 }, 
+                            end: { line: block.line, character: 1000 }
+                        });
+                        
+                        // Find where the directive starts
+                        const directiveStart = block.column;
+                        // Look for closing paren after the directive
+                        const directiveSubstring = fullLineText.substring(directiveStart);
+                        const parenClose = directiveSubstring.indexOf(')');
+                        
+                        if (parenClose !== -1) {
+                            const searchStart = directiveStart + parenClose + 1;
+                            const lineAfterDirective = fullLineText.substring(searchStart);
+                            
+                            // Check if terminator appears after the directive
+                            if (!lineAfterDirective.includes(block.terminator)) {
+                                // Terminator not found after directive
+                                continue;
+                            }
+                            // Fall through - terminator is on same line after directive
+                        } else {
+                            // Can't find directive end, skip this line
+                            continue;
+                        }
                     }
                     
                     // The terminator must appear on the line as-is (case-sensitive)

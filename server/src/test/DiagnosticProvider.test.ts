@@ -886,6 +886,30 @@ COMPILE('**32bit**',_width32_)
             assert.strictEqual(diagnostics.length, 0, 'Nested OMIT/COMPILE should validate correctly');
         });
 
+        test('Should handle COMPILE with terminator on same line', () => {
+            const code = `  PROGRAM
+COMPILE('!** EndWndPrv **',_CbWndPreview_) ; WndPrvCls.Init()  !** EndWndPrv **
+  CODE
+  RETURN`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            assert.strictEqual(diagnostics.length, 0, 'COMPILE with same-line terminator should validate correctly');
+        });
+
+        test('Should handle OMIT with terminator on same line', () => {
+            const code = `  PROGRAM
+OMIT('***') x = 1 ***
+  CODE
+  RETURN`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            assert.strictEqual(diagnostics.length, 0, 'OMIT with same-line terminator should validate correctly');
+        });
+
         test('Should detect multiple unterminated OMIT blocks', () => {
             const code = `  PROGRAM
 OMIT('**END1**')
