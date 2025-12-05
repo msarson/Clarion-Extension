@@ -460,100 +460,100 @@ Reorganized documentation with clear separation:
 
 ---
 
-## 📋 Documentation Cleanup
-**Priority:** HIGH  
-**Status:** Not Started  
+## 📋 Documentation Cleanup ✅ COMPLETE
+**Priority:** ~~HIGH~~ **COMPLETE**  
+**Status:** ~~Not Started~~ **COMPLETE (Dec 5, 2024)**  
 **Date Added:** Dec 5, 2024
 
-#### Problem
-The repository root has accumulated too many documentation files that make it hard to find important information:
+#### Problem (RESOLVED)
+The repository root had accumulated too many documentation files that made it hard to find important information:
 - Multiple README files (README.md, README-old.md)
 - Multiple CHANGELOG files (CHANGELOG.md, CHANGELOG-old.md, CHANGELOG-0.7.1.md)
 - Session documentation files at root level
 - Various performance tracking documents
 - Multiple .vsix release files cluttering the root
-- **README.md has become too large** due to extensive feature documentation across many versions
-- **CHANGELOG.md has become too large** with complete history of all versions
+- **README.md was too large** (472 lines) due to extensive feature documentation
+- **CHANGELOG.md was too large** (785 lines) with complete history of all versions
 
-#### Impact
-- Hard for developers to find relevant documentation
-- Cluttered repository makes navigation difficult
-- Historical documents mix with current documentation
-- README.md and CHANGELOG.md are difficult to navigate due to size
-- New users overwhelmed by amount of information in README
-- README scrolling is tedious - takes long time to find specific features
+#### Solution Implemented
 
-#### Proposed Solution
+**1. ✅ Archived Old Documentation:**
+- Created `docs/archive/` directory
+- Moved `README-old.md` → `docs/archive/`
+- Moved `CHANGELOG-old.md`, `CHANGELOG-0.7.1.md` → `docs/archive/`
+- Moved `AUDIT_2024-12-02.md` → `docs/archive/`
+- Moved `REPOSITORY_REORGANIZATION.md` → `docs/archive/`
+- Moved performance tracking docs → `docs/archive/`
+  - `PERFORMANCE_IMPROVEMENTS_2025-12-01.md`
+  - `PERFORMANCE_METRICS.md`
+  - `PERFORMANCE_SESSION_2024-12-01.md`
+- Backed up full README → `docs/archive/README-full-v0.7.3.md`
 
-**1. Archive Old Documentation:**
-- Create `docs/archive/` directory for historical docs:
-  - Move `README-old.md` → `docs/archive/`
-  - Move `CHANGELOG-old.md`, `CHANGELOG-0.7.1.md` → `docs/archive/`
-  - Move `AUDIT_2024-12-02.md` → `docs/archive/`
-  - Move session/performance docs → `docs/archive/`
-  - Move `REPOSITORY_REORGANIZATION.md` → `docs/archive/`
+**2. ✅ Archived Release Files:**
+- Created `releases/` directory
+- Moved 14 old .vsix files to `releases/`
+- Only current version (0.7.3) remains in root
 
-**2. Move Session Documents:**
-- Session*.md files should be in `docs/dev/sessions/` (not root)
-- Move performance tracking docs to `docs/dev/performance/`
+**3. ✅ Split Large Files:**
 
-**3. Archive Release Files:**
-- Create `releases/` directory for old .vsix files
-- Move all old .vsix files to `releases/`
-- Keep only latest .vsix in root (or move all to releases/)
+**README.md** - Reduced from 472 to 112 lines (76% reduction):
+- Brief overview and quick start
+- Key features summary
+- What's new highlights
+- Links to detailed documentation
+- Preserved dedication to Brahn Partridge
+- Preserved contributing section
 
-**4. Consolidate Large Files:**
+**CHANGELOG.md** - Reduced from 785 to 380 lines (52% reduction):
+- Contains only versions 0.7.0 and newer
+- Older versions moved to `docs/archive/CHANGELOG-HISTORICAL.md`
+- Added reference link to historical changelog
 
-**README.md - Split into Multiple Files:**
-- **Main README.md** (keep brief):
-  - Quick overview (2-3 paragraphs)
-  - Installation instructions (keep simple)
-  - Link to docs/FEATURES.md
-  - Link to docs/GETTING_STARTED.md
-  - Basic "Quick Start" section
-- **docs/FEATURES.md** (detailed feature documentation):
-  - Move all feature descriptions from README
-  - Organize by category
-  - Include screenshots/examples
-- **docs/GETTING_STARTED.md**:
-  - Detailed setup guide
-  - Configuration options
-  - Tutorial/walkthrough
-- **docs/FAQ.md**:
-  - Common questions
-  - Troubleshooting
-  - Tips and tricks
+**New Documentation Files Created:**
+- **`docs/FEATURES.md`** - Complete feature documentation organized by category
+- **`docs/GETTING_STARTED.md`** - Detailed setup guide with configuration and troubleshooting
 
-**CHANGELOG.md - Split by Time Period:**
-- **CHANGELOG.md** (keep current):
-  - Only recent releases (last 6-12 months)
-  - Keep versions 0.7.x and newer
-  - Clear and concise
-- **docs/archive/CHANGELOG-2024.md**:
-  - Move older 2024 releases
-- **docs/archive/CHANGELOG-HISTORICAL.md**:
-  - All pre-2024 releases
-  - Complete version history preserved
+**4. ✅ Moved Development Files:**
+- Created `test-programs/dev-tests/` directory
+- Moved 9 test files from root:
+  - `test-group-structure.js`
+  - `test-local-alignment.clw`
+  - `test-local-data-alignment.clw`
+  - `test-method-tokens.js`
+  - `test-solution-history.js`
+  - `test-structure-view.clw`
+  - `test-tokenizer-unlabeled.js`
+  - `test-unlabeled-group.clw`
+  - `test-variable-types.clw`
+- Moved `GettingStarted.md` → `docs/archive/GettingStarted-old.md`
+- Moved `FEATURE_SMART_DETECTION.md` → `docs/dev/`
+- Moved `tree-output.txt` → `docs/archive/`
 
-**5. Prioritize Information for Different Audiences:**
-- **Users** need: Quick start, features, installation
-- **Contributors** need: Architecture, dev setup, coding standards
-- **Maintainers** need: Release process, versioning, testing
-- Organize documentation accordingly
+#### Results
 
-#### Benefits
-- ✅ Cleaner repository root
-- ✅ Easier to find current documentation
-- ✅ Historical information preserved but organized
-- ✅ Better separation of user vs developer documentation
-- ✅ Easier for new contributors to navigate
-- ✅ README.md more digestible for new users
-- ✅ CHANGELOG.md easier to browse for recent changes
-- ✅ Documentation better organized by audience (users/contributors/maintainers)
+**Root Directory:**
+- ✅ Cleaner, easier to navigate
+- ✅ Only essential files remain
+- ✅ README.md is concise and scannable
+- ✅ CHANGELOG.md focuses on current releases
+
+**Documentation:**
+- ✅ Well-organized in `docs/` directory
+- ✅ Separated by audience (users vs developers)
+- ✅ Historical information preserved in `docs/archive/`
+- ✅ Easy to find relevant documentation
+
+**Files Organized:**
+- 10 old docs archived
+- 14 .vsix files archived
+- 9 test files moved
+- 2 new documentation files created
+- README: 472 → 112 lines
+- CHANGELOG: 785 → 380 lines
 
 ---
 
-## Notes
+## 🔧 Technical Debt
 - Always run tests before committing
 - Update CHANGELOG.md with user-facing changes
 - Only increment version after merge to main and marketplace publish
