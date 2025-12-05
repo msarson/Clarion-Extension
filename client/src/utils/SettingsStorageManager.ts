@@ -37,13 +37,24 @@ export class SettingsStorageManager {
             const config = workspace.getConfiguration('clarion', workspace.workspaceFolders[0].uri);
             
             logger.info(`💾 Saving settings to .vscode/settings.json in ${workspaceFolder}`);
+            logger.info(`   Target: WorkspaceFolder (${ConfigurationTarget.WorkspaceFolder})`);
+            logger.info(`   Settings to save:
+                - solutionFile: ${solutionFile}
+                - propertiesFile: ${propertiesFile}
+                - version: ${version}
+                - configuration: ${configuration}`);
 
             // Save individual settings
             await config.update('solutionFile', solutionFile, target);
+            logger.info(`✅ Saved solutionFile`);
             await config.update('propertiesFile', propertiesFile, target);
+            logger.info(`✅ Saved propertiesFile`);
             await config.update('version', version, target);
+            logger.info(`✅ Saved version`);
             await config.update('configuration', configuration, target);
+            logger.info(`✅ Saved configuration`);
             await config.update('currentSolution', solutionFile, target);
+            logger.info(`✅ Saved currentSolution`);
 
             // Update solutions array
             await this.updateSolutionsArray(solutionFile, propertiesFile, version, configuration);
