@@ -915,8 +915,33 @@ export class DiagnosticProvider {
         // Step 2: Find implementations and validate
         for (const decl of declarationsWithReturnTypes) {
             // Find the implementation
+            let inMapOrClass = false;
+            let mapClassDepth = 0;
+            
             for (let i = 0; i < tokens.length; i++) {
                 const token = tokens[i];
+                
+                // Track when we're inside MAP or CLASS blocks
+                if (token.type === TokenType.Structure && 
+                    (token.value.toUpperCase() === 'MAP' || token.value.toUpperCase() === 'CLASS')) {
+                    inMapOrClass = true;
+                    mapClassDepth++;
+                }
+                
+                // Track END statements to know when we exit MAP/CLASS
+                if (token.value.toUpperCase() === 'END' && token.start === 0) {
+                    if (mapClassDepth > 0) {
+                        mapClassDepth--;
+                        if (mapClassDepth === 0) {
+                            inMapOrClass = false;
+                        }
+                    }
+                }
+                
+                // Skip procedure declarations inside MAP/CLASS - we only want implementations
+                if (inMapOrClass) {
+                    continue;
+                }
                 
                 if ((token.type === TokenType.Procedure || token.type === TokenType.Routine) &&
                     (token.value.toUpperCase() === 'PROCEDURE' || token.value.toUpperCase() === 'FUNCTION')) {
