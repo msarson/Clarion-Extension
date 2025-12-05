@@ -259,7 +259,7 @@ export function prepareBuildParameters(buildConfig: {
         "/verbosity:normal",
         "/nologo",
         `/fileLogger`,
-        `/fileLoggerParameters:LogFile="${buildLogPath}";verbosity=detailed;encoding=utf-8`
+        `/fileLoggerParameters:"LogFile=${buildLogPath};verbosity=detailed;encoding=utf-8"`
     ];
 
     // Log the build configuration

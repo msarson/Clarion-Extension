@@ -72,11 +72,18 @@ export class DiagnosticProvider {
     public static validateStructureTerminators(tokens: Token[], document: TextDocument): Diagnostic[] {
         const diagnostics: Diagnostic[] = [];
         const structureStack: StructureStackItem[] = [];
+        const conditionalRanges = this.getConditionalBlockRanges(tokens, document);
         
         for (let i = 0; i < tokens.length; i++) {
             const token = tokens[i];
             const prevToken = i > 0 ? tokens[i - 1] : null;
             const nextToken = i < tokens.length - 1 ? tokens[i + 1] : null;
+            
+            // Skip structures within conditional compilation blocks (OMIT/COMPILE)
+            // We can't validate these at edit-time since we don't know which will compile
+            if (this.isInConditionalBlock(token.line, conditionalRanges)) {
+                continue;
+            }
             
             // Check if this token opens a structure that needs termination
             if (this.isStructureOpen(token)) {
