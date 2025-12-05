@@ -5,6 +5,7 @@ import { ClarionLocation } from './LocationProvider'; // Make sure this import i
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("HoverProvider");
+logger.setLevel("info");
 
 /**
  * Provides hover information for Clarion code elements.
@@ -61,9 +62,10 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
 
         logger.info(`Found location at position: ${location.statementType} to ${location.fullFileName}`);
         
-        // For method declarations, lazily resolve the implementation when needed
-        if (location.statementType === "METHOD" && !location.implementationResolved) {
-            logger.info(`Lazily resolving method implementation for hover: ${location.className}.${location.methodName}`);
+        // For method and MAP procedure declarations, lazily resolve the implementation when needed
+        if ((location.statementType === "METHOD" || location.statementType === "MAPPROCEDURE") && !location.implementationResolved) {
+            const displayName = location.className ? `${location.className}.${location.methodName}` : location.methodName;
+            logger.info(`Lazily resolving implementation for hover: ${displayName}`);
             location = await this.documentManager.resolveMethodImplementation(location);
         }
         
@@ -245,12 +247,13 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
             const statementType = location.statementType.toUpperCase();
             logger.info(`Statement type: ${statementType}`);
             
-            if (statementType === "METHOD") {
-                logger.info(`Showing method implementation from: ${location.fullFileName}`);
+            if (statementType === "METHOD" || statementType === "MAPPROCEDURE") {
+                const typeLabel = statementType === "MAPPROCEDURE" ? "Procedure" : "Method";
+                logger.info(`Showing ${typeLabel.toLowerCase()} implementation from: ${location.fullFileName}`);
                 
                 // Show signature first if available
                 if (declarationInfo) {
-                    hoverMessage.appendMarkdown(`**Method Signature:**\n\n`);
+                    hoverMessage.appendMarkdown(`**${typeLabel} Signature:**\n\n`);
                     hoverMessage.appendCodeblock(declarationInfo.signature, 'clarion');
                     hoverMessage.appendMarkdown(`\n---\n\n`);
                 }
@@ -269,7 +272,7 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
             if (location.sectionLineLocation) {
                 // Case-insensitive comparison for statement types
                 const statementType = (location.statementType || "").toUpperCase();
-                if (statementType === "METHOD") {
+                if (statementType === "METHOD" || statementType === "MAPPROCEDURE") {
                     const lineNumber = location.sectionLineLocation.line + 1;
                     const commandUri = vscode.Uri.parse(`command:clarion.goToMethodImplementation?${encodeURIComponent(JSON.stringify([location.fullFileName, location.sectionLineLocation.line, 0]))}`);
                     hoverMessage.appendMarkdown(` - Implementation Line: [${lineNumber}](${commandUri} "Go to Implementation (Ctrl+F12)") *(Click or press Ctrl+F12 to navigate)*\n\n`);
@@ -279,9 +282,9 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
                 startLine = location.sectionLineLocation.line;
             }
 
-            // For method implementations, show signature and first 3 lines of implementation
+            // For method and procedure implementations, show signature and first 3 lines of implementation
             // Case-insensitive comparison
-            if ((location.statementType || "").toUpperCase() === "METHOD") {
+            if ((location.statementType || "").toUpperCase() === "METHOD" || (location.statementType || "").toUpperCase() === "MAPPROCEDURE") {
                 const maxLinesToShow = 3;  // Reduced to 3 to show both client and server hover info
                 let codeLineIndex = -1;
                 let endLine = startLine + maxLinesToShow;

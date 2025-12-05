@@ -1,6 +1,7 @@
 import { ImplementationProvider, TextDocument, Position, CancellationToken, ProviderResult, Location, Uri, Definition, LocationLink } from 'vscode';
 import { DocumentManager } from '../documentManager';
 import LoggerManager from '../logger';
+import { isInsideMapBlock } from '../../../common/clarionUtils';
 
 const logger = LoggerManager.getLogger("ImplementationProvider");
 logger.setLevel("info");
@@ -271,6 +272,7 @@ export class ClarionImplementationProvider implements ImplementationProvider {
     /**
      * Finds a MAP procedure implementation in the document
      * MAP procedures are implemented at column 0 with PROCEDURE keyword
+     * Skips MAP...END blocks which contain forward declarations, not implementations
      */
     private findMapProcedureImplementation(document: TextDocument, procName: string): Location | null {
         const content = document.getText();
@@ -278,32 +280,50 @@ export class ClarionImplementationProvider implements ImplementationProvider {
         
         logger.info(`Searching for MAP procedure implementation: ${procName}`);
         
-        // Search for procedure implementation at column 0
+        // Strip class prefix if present (e.g., "WindowPreview.TextLineCount" -> "TextLineCount")
+        // MAP declarations may include class prefix, but implementations do not
+        const simpleProcName = procName.includes('.') ? procName.split('.').pop()! : procName;
+        logger.info(`Searching for implementation (simple name): ${simpleProcName}`);
+        
+        // Search for procedure implementation
+        // Implementations can have leading whitespace
+        let currentPosition = 0;
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             
             // Skip empty lines
-            if (line.trim().length === 0) continue;
+            if (line.trim().length === 0) {
+                currentPosition += line.length + 1; // +1 for newline
+                continue;
+            }
             
-            // Check if line starts at column 0 (no leading whitespace)
-            if (line[0] !== ' ' && line[0] !== '\t') {
-                // Match: ProcName PROCEDURE or ProcName.MethodName PROCEDURE  
-                // Looking for standalone procedure, not inside MAP/CLASS
-                const match = line.match(/^([A-Za-z_][A-Za-z0-9_\.]*)\s+PROCEDURE/i);
-                if (match) {
-                    const foundName = match[1];
-                    logger.info(`Found PROCEDURE at line ${i}: ${foundName}`);
-                    
-                    // Case-insensitive comparison
-                    if (foundName.toUpperCase() === procName.toUpperCase()) {
-                        logger.info(`✅ Match found for ${procName} at line ${i}`);
-                        return new Location(
-                            document.uri,
-                            new Position(i, 0)
-                        );
-                    }
+            // Match: ProcName PROCEDURE or ProcName.MethodName PROCEDURE
+            // Allow leading whitespace for indented implementations
+            const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_\.]*)\s+PROCEDURE/i);
+            if (match) {
+                const foundName = match[1];
+                const simpleFoundName = foundName.includes('.') ? foundName.split('.').pop()! : foundName;
+                
+                // Check if this is inside a MAP block (forward declaration)
+                if (isInsideMapBlock(content, currentPosition)) {
+                    logger.info(`Found PROCEDURE at line ${i}: ${foundName} (simple: ${simpleFoundName}) - SKIPPING (inside MAP block)`);
+                    currentPosition += line.length + 1;
+                    continue;
+                }
+                
+                logger.info(`Found PROCEDURE at line ${i}: ${foundName} (simple: ${simpleFoundName})`);
+                
+                // Case-insensitive comparison using simple names (without class prefix)
+                if (simpleFoundName.toUpperCase() === simpleProcName.toUpperCase()) {
+                    logger.info(`✅ Match found for ${procName} at line ${i}`);
+                    return new Location(
+                        document.uri,
+                        new Position(i, 0)
+                    );
                 }
             }
+            
+            currentPosition += line.length + 1; // +1 for newline
         }
         
         logger.info(`❌ No implementation found for MAP procedure ${procName}`);

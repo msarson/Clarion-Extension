@@ -20,8 +20,9 @@ import * as fs from 'fs';
 import { globalSettings } from './globals';
 import LoggerManager from './logger';
 import { SolutionCache } from './SolutionCache';
+import { isInsideMapBlock } from '../../common/clarionUtils';
 const logger = LoggerManager.getLogger("DocumentManager");
-logger.setLevel("error");
+logger.setLevel("info"); // Temporarily set to info for debugging MAP procedure parsing
 
 /**
  * Interface representing document information including statement locations
@@ -502,8 +503,8 @@ export class DocumentManager implements Disposable {
      * @returns The updated location with implementation details, or the original location if implementation not found
      */
     async resolveMethodImplementation(location: ClarionLocation): Promise<ClarionLocation> {
-        // If implementation is already resolved or this is not a method, return as is
-        if (location.implementationResolved || location.statementType !== "METHOD") {
+        // If implementation is already resolved or this is not a method/MAP procedure, return as is
+        if (location.implementationResolved || (location.statementType !== "METHOD" && location.statementType !== "MAPPROCEDURE")) {
             return location;
         }
 
@@ -733,17 +734,9 @@ export class DocumentManager implements Disposable {
             const params = this.parseImplementationParameters(paramString);
             
             // For MAP procedures, skip if this line is inside a MAP block (declaration, not implementation)
-            if (isMapProcedure) {
-                // Check if this line is inside a MAP...END block
-                const beforeMatch = lowerContent.substring(0, match.index);
-                const lastMapIndex = beforeMatch.lastIndexOf('map');
-                const lastMapEndIndex = beforeMatch.lastIndexOf('end');
-                
-                // If there's a MAP keyword before this match and no END after it, skip (it's a declaration)
-                if (lastMapIndex !== -1 && (lastMapEndIndex === -1 || lastMapEndIndex < lastMapIndex)) {
-                    logger.info(`Skipping line ${lineNumber} - inside MAP block (declaration, not implementation)`);
-                    continue;
-                }
+            if (isMapProcedure && isInsideMapBlock(lowerContent, match.index)) {
+                logger.info(`Skipping line ${lineNumber} - inside MAP block (declaration, not implementation)`);
+                continue;
             }
             
             logger.info(`Found potential implementation at line ${lineNumber} with parameters: [${params.join(', ')}]`);
@@ -1094,7 +1087,8 @@ export class DocumentManager implements Disposable {
             const originalText = document.getText();
             const lowerText = originalText.toLowerCase();
 
-            const classRegex = /([a-z0-9_]+)\s+class\b/gis;
+            // Match CLASS definitions: ClassName CLASS,TYPE or ClassName CLASS
+            const classRegex = /^\s*([a-z_][a-z0-9_]*)\s+CLASS\b/gim;
             const moduleRegex = /module\s*\(\s*'([^']+)'\s*(?:[^)]*)\)/gis;
             const linkRegex = /link\s*\(\s*'([^']+)'(?:[^)]*)*\)/gis;
             logger.info(`Searching for class definitions with improved regex pattern`);
