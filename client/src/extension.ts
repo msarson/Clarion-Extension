@@ -1780,6 +1780,11 @@ async function createStructureView(context: ExtensionContext) {
         structureView.onDidChangeVisibility(async e => {
             await commands.executeCommand('setContext', 'clarionStructureViewVisible', e.visible);
             
+            // Update the provider's visibility state so Follow Cursor only works when view is visible
+            if (structureViewProvider) {
+                structureViewProvider.setViewVisible(e.visible);
+            }
+            
             // If the view becomes visible, ensure the follow cursor context is set correctly
             if (e.visible && structureViewProvider) {
                 const isEnabled = structureViewProvider.isFollowCursorEnabled();
