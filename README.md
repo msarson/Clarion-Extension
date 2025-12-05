@@ -89,6 +89,15 @@ Settings are saved in `.vscode/settings.json` within the folder - commit them wi
 - **Recent solutions** - Global history with one-click reopening
 - **Team friendly** - Commit settings with your solution
 
+#### ⚠️ Breaking Changes
+**If upgrading from v0.7.2 or earlier:**
+- **Workspace files no longer required** - The extension now uses a folder-based workflow
+- **Settings migration** - Settings automatically migrate from `.code-workspace` to `.vscode/settings.json` when you open a folder
+- **No action needed** - Just use File → Open Folder instead of opening workspace files
+- **Old workspace files still work** - But the new folder-based approach is simpler
+
+**Recommendation**: Switch to folder-based workflow by opening the solution folder directly rather than using workspace files.
+
 #### 🐛 Bug Fixes
 - Fixed build error diagnostics now properly link to source files
 - Fixed global solution history tracking

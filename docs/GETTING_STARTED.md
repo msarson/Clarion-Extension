@@ -38,6 +38,21 @@ Complete setup guide for the Clarion Extension for Visual Studio Code.
 
 This is necessary because older versions had a dependency on fushnisoft.clarion that prevents individual uninstallation.
 
+### Upgrading from v0.7.2 or Earlier (Workspace File Changes)
+
+**Important**: If you are upgrading from v0.7.2 or earlier:
+
+**What Changed in v0.7.3:**
+- Extension now uses **folder-based workflow** instead of workspace files
+- Settings stored in `.vscode/settings.json` (within solution folder) instead of `.code-workspace` files
+- Opening solutions is simpler: File → Open Folder (no workspace files needed)
+
+**Migration:**
+- Your old `.code-workspace` files still work
+- But you can now simply open the folder containing your solution (much simpler!)
+- Settings automatically migrate to `.vscode/settings.json` when you open a folder
+- **Recommendation**: Switch to folder-based workflow for cleaner, more maintainable setup
+
 ---
 
 ## First Time Setup
