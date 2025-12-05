@@ -732,6 +732,20 @@ export class DocumentManager implements Disposable {
             const paramString = match[2];
             const params = this.parseImplementationParameters(paramString);
             
+            // For MAP procedures, skip if this line is inside a MAP block (declaration, not implementation)
+            if (isMapProcedure) {
+                // Check if this line is inside a MAP...END block
+                const beforeMatch = lowerContent.substring(0, match.index);
+                const lastMapIndex = beforeMatch.lastIndexOf('map');
+                const lastMapEndIndex = beforeMatch.lastIndexOf('end');
+                
+                // If there's a MAP keyword before this match and no END after it, skip (it's a declaration)
+                if (lastMapIndex !== -1 && (lastMapEndIndex === -1 || lastMapEndIndex < lastMapIndex)) {
+                    logger.info(`Skipping line ${lineNumber} - inside MAP block (declaration, not implementation)`);
+                    continue;
+                }
+            }
+            
             logger.info(`Found potential implementation at line ${lineNumber} with parameters: [${params.join(', ')}]`);
             
             implementations.push({
