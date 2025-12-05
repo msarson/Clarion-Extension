@@ -536,22 +536,27 @@ export async function activate(context: ExtensionContext): Promise<void> {
             logger.info(`🔄 Opening recent solution: ${solutionPath} in folder: ${folderPath}`);
             
             try {
-                // Check if we're already in the right folder
+                // Always use the solution's actual folder, not what's stored (might be stale)
+                const actualSolutionFolder = path.dirname(solutionPath);
                 const currentFolder = workspace.workspaceFolders?.[0]?.uri.fsPath;
                 
-                if (currentFolder && currentFolder.toLowerCase() === folderPath.toLowerCase()) {
+                logger.info(`   - Current folder: ${currentFolder}`);
+                logger.info(`   - Solution's actual folder: ${actualSolutionFolder}`);
+                logger.info(`   - Stored folder: ${folderPath}`);
+                
+                if (currentFolder && currentFolder.toLowerCase() === actualSolutionFolder.toLowerCase()) {
                     // Already in the correct folder - just open the solution
                     logger.info(`✅ Already in correct folder, opening solution directly`);
                     await SmartSolutionOpener.openDetectedSolution(solutionPath);
                 } else {
                     // Different folder - need to switch folders
-                    // First, add the solution to global history so it's remembered after reload
-                    await GlobalSolutionHistory.addSolution(solutionPath, folderPath);
-                    logger.info(`✅ Added solution to global history before folder switch`);
+                    // First, add the solution to global history with CORRECT folder path
+                    await GlobalSolutionHistory.addSolution(solutionPath, actualSolutionFolder);
+                    logger.info(`✅ Added solution to global history with correct folder path`);
                     
                     // Open the folder - VS Code will reload
-                    await commands.executeCommand('vscode.openFolder', Uri.file(folderPath), false);
-                    logger.info(`✅ Folder opened: ${folderPath}`);
+                    await commands.executeCommand('vscode.openFolder', Uri.file(actualSolutionFolder), false);
+                    logger.info(`✅ Folder opened: ${actualSolutionFolder}`);
                     // After reload, the solution should be in that folder's settings.json
                 }
             } catch (error) {
