@@ -244,7 +244,6 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                     // Add recent solution nodes
                     for (const ref of recentSolutions) {
                         const solutionName = path.basename(ref.solutionFile, '.sln');
-                        const folderName = path.basename(ref.folderPath);
                         const recentNode = new TreeNode(
                             `▶ ${solutionName}`,
                             TreeItemCollapsibleState.None,
@@ -257,7 +256,7 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                             undefined,
                             ref.folderPath
                         );
-                        recentNode.description = folderName;
+                        recentNode.description = ref.folderPath; // Show full path, not just folder name
                         nodes.push(recentNode);
                     }
                     
@@ -390,7 +389,6 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 // Add recent solution nodes
                 for (const ref of recentSolutions) {
                     const solutionName = path.basename(ref.solutionFile, '.sln');
-                    const folderName = path.basename(ref.folderPath);
                     const recentNode = new TreeNode(
                         `▶ ${solutionName}`,
                         TreeItemCollapsibleState.None,
@@ -403,7 +401,7 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                         undefined,
                         ref.folderPath
                     );
-                    recentNode.description = folderName;
+                    recentNode.description = ref.folderPath; // Show full path, not just folder name
                     nodes.push(recentNode);
                 }
             }
