@@ -1547,7 +1547,6 @@ function registerLanguageFeatures(context: ExtensionContext) {
     // ✅ DISABLED: Client-side Definition Provider blocks server-side providers
     // All definition requests now handled by server-side DefinitionProvider
     // This includes: variables, parameters, methods, structures, etc.
-    /*
     if (definitionProviderDisposable) {
         definitionProviderDisposable.dispose();
     }
@@ -1560,7 +1559,7 @@ function registerLanguageFeatures(context: ExtensionContext) {
     context.subscriptions.push(definitionProviderDisposable);
     
     logger.info(`📄 Registered Definition Provider for extensions: ${lookupExtensions.join(', ')}`);
-    */
+    
     // ✅ Register Prefix Decorator for variable highlighting
     if (semanticTokensProviderDisposable) {
         semanticTokensProviderDisposable.dispose(); // Remove old provider if it exists
