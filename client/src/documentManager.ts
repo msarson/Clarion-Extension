@@ -516,8 +516,8 @@ export class DocumentManager implements Disposable {
         }
 
         // Ensure we have the necessary metadata
-        if (!location.className || !location.methodName) {
-            logger.error(`Missing metadata for method implementation resolution: class=${location.className}, method=${location.methodName}`);
+        if (!location.methodName) {
+            logger.error(`Missing metadata for method implementation resolution: method=${location.methodName}`);
             location.implementationResolved = true; // Mark as resolved to avoid repeated attempts
             return location;
         }
@@ -538,7 +538,7 @@ export class DocumentManager implements Disposable {
                     const currentContent = currentDocument.getText();
                     const implLine = this.findMethodImplementationLine(
                         currentContent,
-                        location.className,
+                        location.className || "", // Empty string for MAP procedures
                         location.methodName,
                         location.parameterSignature
                     );
@@ -581,7 +581,7 @@ export class DocumentManager implements Disposable {
             // Search for the implementation with parameter matching
             const implLineNumber = this.findMethodImplementationLine(
                 moduleContent,
-                location.className,
+                location.className || "", // Empty string for MAP procedures
                 location.methodName,
                 location.parameterSignature
             );
@@ -602,7 +602,7 @@ export class DocumentManager implements Disposable {
                     const currentContent = currentDocument.getText();
                     const currentImplLine = this.findMethodImplementationLine(
                         currentContent,
-                        location.className,
+                        location.className || "", // Empty string for MAP procedures
                         location.methodName,
                         location.parameterSignature
                     );
@@ -1199,17 +1199,24 @@ export class DocumentManager implements Disposable {
                     let procMatch;
                     
                     while ((procMatch = procRegex.exec(mapText)) !== null) {
-                        const procName = procMatch[1];
+                        // Extract original case from originalMapText
+                        const matchStart = procMatch.index;
+                        const matchEnd = matchStart + procMatch[0].length;
+                        const originalMatch = originalMapText.substring(matchStart, matchEnd);
+                        const nameMatch = originalMatch.match(/^[ \t]*([a-z0-9_]+)/i);
+                        if (!nameMatch) continue; // Skip if no match
+                        const originalProcName = nameMatch[1];
+                        
                         const params = procMatch[2];
                         const procPos = mapStart + procMatch.index;
                         const procLine = document.positionAt(procPos).line;
                         const procChar = document.positionAt(procPos).character;
-                        const procEndChar = procChar + procName.length;
+                        const procEndChar = procChar + originalProcName.length;
                         
                         // Parse parameter signature
                         const parameterSignature = this.parseDeclarationParameters(params);
                         
-                        logger.info(`Found MAP procedure: ${procName}(${params}) at line ${procLine}`);
+                        logger.info(`Found MAP procedure: ${originalProcName}(${params}) at line ${procLine}`);
                         logger.info(`Parsed parameter signature: [${parameterSignature.join(', ')}]`);
                         
                         // Store procedure metadata
@@ -1219,13 +1226,13 @@ export class DocumentManager implements Disposable {
                             linePositionEnd: new Position(procLine, procEndChar),
                             statementType: "METHOD", // Reuse METHOD type for consistency
                             className: "", // No class for MAP procedures
-                            methodName: procName,
+                            methodName: originalProcName, // Use original case
                             moduleFile: undefined, // No MODULE for MAP procedures
                             implementationResolved: false,
                             parameterSignature: parameterSignature
                         });
                         
-                        logger.info(`Stored metadata for MAP procedure ${procName}`);
+                        logger.info(`Stored metadata for MAP procedure ${originalProcName}`);
                     }
                 }
             }

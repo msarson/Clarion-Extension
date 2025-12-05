@@ -2,11 +2,38 @@
 
 **Repository:** Clarion-Extension  
 **Purpose:** VS Code extension for Clarion language support  
-**Last Updated:** 2025-11-30
+**Last Updated:** 2025-12-05
 
 ## Your Role
 
 You are an AI assistant working on the Clarion-Extension VS Code extension. This extension provides language support for the Clarion programming language, including syntax highlighting, IntelliSense, go-to-definition, and other language features.
+
+## ⚠️ CRITICAL: Clarion Language is Case-Insensitive
+
+**This is fundamental to all code involving Clarion identifiers:**
+
+- **All Clarion keywords, identifiers, and symbols are case-insensitive**
+- `MyProcedure`, `MYPROCEDURE`, and `myprocedure` are THE SAME identifier
+- When comparing Clarion names: **ALWAYS use `.toLowerCase()` or case-insensitive regex**
+- When storing Clarion names: **Preserve original case** for display, but compare case-insensitively
+- When searching for definitions/implementations: **Use case-insensitive matching**
+
+**Examples:**
+```typescript
+// ✅ CORRECT - Case-insensitive comparison
+if (methodName.toLowerCase() === 'myprocedure'.toLowerCase()) { ... }
+
+// ✅ CORRECT - Case-insensitive regex
+const regex = /\bmyprocedure\b/i;  // Note the 'i' flag
+
+// ❌ WRONG - Case-sensitive comparison
+if (methodName === 'MyProcedure') { ... }  // Will fail if user wrote "MYPROCEDURE"
+```
+
+**When extracting names from text:**
+- Use lowercase for pattern matching
+- Extract from original text to preserve case for display
+- Store both if needed, but always compare using lowercase
 
 ## Critical Documentation Requirements
 
@@ -21,6 +48,7 @@ You are an AI assistant working on the Clarion-Extension VS Code extension. This
 **ALWAYS refer to these files and please read them after reading this file:**
 
 1. **`docs/clarion-knowledge-base.md`** - Clarion language syntax rules
+   - **Case-insensitivity** (ALL identifiers and keywords)
    - Character encoding (ANSI/ASCII only - NO Unicode)
    - Source file structure (PROGRAM/MEMBER requirements)
    - Column 0 rules (labels at column 0, keywords indented)
