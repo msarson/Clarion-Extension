@@ -846,6 +846,116 @@ END
 
 ---
 
+## Procedure Implementations and RETURN Statements
+
+### MAP Declaration vs Implementation
+
+**Critical Rule:** Procedure implementations MUST NOT include the return type in the PROCEDURE statement, even if the MAP declaration specifies one.
+
+**MAP Declaration (with return type):**
+```clarion
+MAP
+  TextLineCount PROCEDURE(LONG TextFEQ),LONG  ! Declaration includes return type
+  DB            PROCEDURE(STRING Info)         ! No return type
+END
+```
+
+**Implementation (WITHOUT return type):**
+```clarion
+TextLineCount PROCEDURE(LONG TextFEQ)         ! Return type OMITTED
+LastLineNo LONG,AUTO
+  CODE
+  LOOP LastLineNo=TextFEQ{PROP:LineCount} TO 1 BY -1
+  WHILE ~TextFEQ{PROP:Line,LastLineNo}
+  RETURN LastLineNo                           ! Returns a value
+  
+DB PROCEDURE(STRING xMessage)                 ! No return type
+sz CSTRING(256)
+  CODE
+  sz = 'Debug: ' & CLIP(xMessage)
+  OutputDebugString(sz)
+  RETURN                                      ! Returns nothing (void)
+```
+
+### Why Implementation Cannot Have Return Type
+
+**Compiler Requirement:** If you add the return type to the implementation, the code will NOT compile. The return type is ONLY specified in the MAP declaration (prototype), never in the implementation.
+
+### Common Documentation Pattern
+
+Many developers add a comment to show the return type at the implementation for readability:
+
+```clarion
+TextLineCount PROCEDURE(LONG TextFEQ)!,LONG   ! Comment shows return type
+  CODE
+  ! ... implementation ...
+  RETURN LastLineNo
+```
+
+This is purely for documentation - the `!,LONG` is commented out and has no effect on compilation.
+
+### RETURN Statement Rules
+
+**For procedures WITH return type (declared in MAP):**
+```clarion
+MAP
+  GetCount PROCEDURE(),LONG                   ! Returns LONG
+END
+
+GetCount PROCEDURE()                          ! Implementation - no return type
+Count LONG
+  CODE
+  Count = 42
+  RETURN Count                                ! MUST return a value
+```
+
+**For procedures WITHOUT return type (void procedures):**
+```clarion
+MAP
+  LogMessage PROCEDURE(STRING Msg)            ! No return type (void)
+END
+
+LogMessage PROCEDURE(STRING Msg)              ! Implementation - no return type
+  CODE
+  MESSAGE(Msg)
+  RETURN                                      ! Empty RETURN is correct
+```
+
+**Mixed RETURN Statements:**
+A void procedure can have:
+- `RETURN` with no value (returns control to caller)
+- No explicit RETURN (implicit RETURN at end of procedure)
+- Multiple RETURN statements for early exit
+
+```clarion
+MAP
+  ProcessData PROCEDURE(LONG Value)           ! No return type
+END
+
+ProcessData PROCEDURE(LONG Value)
+  CODE
+  IF Value < 0
+    RETURN                                    ! Early exit - valid
+  END
+  ! ... process data ...
+  ! Implicit RETURN at end
+```
+
+### Validation Rules
+
+**Valid:**
+- MAP declares return type, implementation RETURNS a value
+- MAP has no return type, implementation has empty RETURN
+- MAP has no return type, implementation has no explicit RETURN
+- MAP has no return type, implementation has multiple empty RETURNs for flow control
+
+**Invalid:**
+- Adding return type to implementation (won't compile)
+- MAP declares return type, but implementation always returns empty
+- MAP has no return type, but implementation tries to return a value
+
+---
+
 ## File Declarations
 
 ### FILE Structure
