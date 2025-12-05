@@ -528,6 +528,76 @@ export class DiagnosticProvider {
     }
     
     /**
+     * Build a map of conditional compilation block ranges (COMPILE/OMIT)
+     * @param tokens - Tokenized document
+     * @param document - Original TextDocument for text access
+     * @returns Array of line ranges that are within conditional blocks
+     */
+    private static getConditionalBlockRanges(tokens: Token[], document: TextDocument): Array<{start: number, end: number}> {
+        const ranges: Array<{start: number, end: number}> = [];
+        const blockStack: Array<{line: number, terminator: string}> = [];
+        
+        for (let i = 0; i < tokens.length; i++) {
+            const token = tokens[i];
+            
+            // Check if this is an OMIT or COMPILE directive
+            if (token.type === TokenType.Directive) {
+                const directiveType = token.value.toUpperCase();
+                
+                if (directiveType === 'OMIT' || directiveType === 'COMPILE') {
+                    // Look for the terminator string
+                    let terminatorString: string | null = null;
+                    
+                    for (let j = i + 1; j < Math.min(i + 5, tokens.length); j++) {
+                        if (tokens[j].type === TokenType.String) {
+                            terminatorString = tokens[j].value.replace(/^'(.*)'$/, '$1');
+                            break;
+                        }
+                    }
+                    
+                    if (terminatorString) {
+                        blockStack.push({
+                            line: token.line,
+                            terminator: terminatorString
+                        });
+                    }
+                }
+            }
+        }
+        
+        // Now scan all lines to find terminators
+        const lineCount = document.lineCount;
+        for (const block of blockStack) {
+            for (let lineNum = block.line + 1; lineNum < lineCount; lineNum++) {
+                const lineText = document.getText({ 
+                    start: { line: lineNum, character: 0 }, 
+                    end: { line: lineNum, character: 1000 }
+                }).trim();
+                
+                if (lineText.includes(block.terminator)) {
+                    ranges.push({
+                        start: block.line,
+                        end: lineNum
+                    });
+                    break;
+                }
+            }
+        }
+        
+        return ranges;
+    }
+    
+    /**
+     * Check if a line is within a conditional compilation block
+     * @param line - Line number to check
+     * @param ranges - Conditional block ranges
+     * @returns True if line is within a conditional block
+     */
+    private static isInConditionalBlock(line: number, ranges: Array<{start: number, end: number}>): boolean {
+        return ranges.some(range => line > range.start && line <= range.end);
+    }
+    
+    /**
      * Validate FILE structures have required attributes
      * KB Rule: FILE must have DRIVER and RECORD
      * @param tokens - Tokenized document
@@ -536,9 +606,15 @@ export class DiagnosticProvider {
      */
     private static validateFileStructures(tokens: Token[], document: TextDocument): Diagnostic[] {
         const diagnostics: Diagnostic[] = [];
+        const conditionalRanges = this.getConditionalBlockRanges(tokens, document);
         
         for (let i = 0; i < tokens.length; i++) {
             const token = tokens[i];
+            
+            // Skip FILE declarations within conditional compilation blocks
+            if (this.isInConditionalBlock(token.line, conditionalRanges)) {
+                continue;
+            }
             
             // Check if this is a FILE declaration
             if (token.type === TokenType.Structure && token.value.toUpperCase() === 'FILE') {
