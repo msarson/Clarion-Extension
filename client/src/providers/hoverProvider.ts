@@ -321,8 +321,27 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
                 logger.info(`Showing method content (${endLine - startLine} lines)`);
                 hoverMessage.appendCodeblock(methodContent, 'clarion');
             } else {
-                // For other types, just show the standard number of lines
-                const sectionContent = fileLines.slice(startLine, startLine + linesToShow).join('\n');
+                // For other types (INCLUDE with SECTION, etc.), show lines until next SECTION
+                let endLine = startLine + linesToShow;
+                
+                // Check if this is an INCLUDE with a section - if so, stop at the next SECTION
+                const statementTypeUpper = (location.statementType || "").toUpperCase();
+                if (statementTypeUpper === "INCLUDE" && location.sectionLineLocation) {
+                    // We're showing an INCLUDE'd section, find where it ends
+                    for (let i = startLine + 1; i < Math.min(fileLines.length, startLine + 100); i++) {
+                        const trimmedLine = fileLines[i].trim().toUpperCase();
+                        // Stop at next SECTION directive
+                        if (trimmedLine.startsWith('SECTION(')) {
+                            endLine = i;
+                            logger.info(`Found next SECTION at line ${i}, stopping before it`);
+                            break;
+                        }
+                    }
+                    // Don't go beyond 30 lines even if no SECTION found
+                    endLine = Math.min(endLine, startLine + 30);
+                }
+                
+                const sectionContent = fileLines.slice(startLine, endLine).join('\n');
                 hoverMessage.appendCodeblock(sectionContent, 'clarion');
             }
         } catch (error: unknown) {

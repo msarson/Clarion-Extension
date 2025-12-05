@@ -448,12 +448,14 @@ export class DocumentManager implements Disposable {
 
             let targetUri = Uri.file(location.fullFileName);
 
-            // Case-insensitive check for section type
-            if ((location.statementType?.toUpperCase() === "SECTION" || location.statementType?.toUpperCase() === "METHOD") &&
-                location.sectionLineLocation) {
+            // For INCLUDE with section, SECTION, or METHOD types, add line fragment for cursor positioning
+            if (location.sectionLineLocation &&
+                (location.statementType?.toUpperCase() === "SECTION" || 
+                 location.statementType?.toUpperCase() === "METHOD" ||
+                 location.statementType?.toUpperCase() === "INCLUDE")) {
                 const lineQueryParam = `${location.sectionLineLocation.line + 1}:1`;
                 targetUri = targetUri.with({ fragment: lineQueryParam });
-                logger.info(`Created link with fragment: ${targetUri.toString()}`);
+                logger.info(`Created link with fragment for ${location.statementType}: ${targetUri.toString()}`);
             }
 
             const link = new DocumentLink(
