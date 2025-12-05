@@ -39,8 +39,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     private activeEditor: TextEditor | undefined;
     public treeView: TreeView<DocumentSymbol> | undefined;
     
-    // Follow cursor functionality
-    private followCursor: boolean = true;
+    // Follow cursor functionality - DISABLED BY DEFAULT to prevent sidebar auto-reveal
+    private followCursor: boolean = false;
     private selectionChangeDebounceTimeout: NodeJS.Timeout | null = null;
     private currentHighlightedSymbol: DocumentSymbol | undefined;
     
