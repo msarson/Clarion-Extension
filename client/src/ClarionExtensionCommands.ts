@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { parseString } from 'xml2js';
 import { DocumentManager } from './documentManager';
-import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, setGlobalClarionSelection, globalSettings, } from './globals';
+import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, setGlobalClarionSelection, globalSettings, getClarionConfigTarget } from './globals';
 import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("ExtensionCommands");
 
@@ -289,7 +289,11 @@ export class ClarionExtensionCommands {
       }
 
       const solutionFilePath = solutionFile[0].fsPath;
-      await workspace.getConfiguration().update('clarion.solutionFile', solutionFilePath, ConfigurationTarget.Workspace);
+      const target = getClarionConfigTarget();
+      if (target && workspace.workspaceFolders) {
+        const config = workspace.getConfiguration('clarion', workspace.workspaceFolders[0].uri);
+        await config.update('solutionFile', solutionFilePath, target);
+      }
 
       window.showInformationMessage(`Solution file selected: ${solutionFilePath}`);
     } catch (error) {
@@ -336,15 +340,23 @@ export class ClarionExtensionCommands {
 
       // ✅ Ensure the new version is added to the list
       versions.push(manualVersion);
-      await config.update('clarion.versions', versions, ConfigurationTarget.Workspace);
-      await config.update('clarion.version', manualVersion, ConfigurationTarget.Workspace);
+      const target = getClarionConfigTarget();
+      if (target && workspace.workspaceFolders) {
+        const folderConfig = workspace.getConfiguration('clarion', workspace.workspaceFolders[0].uri);
+        await folderConfig.update('versions', versions, target);
+        await folderConfig.update('version', manualVersion, target);
+      }
 
       window.showInformationMessage(`Added and selected Clarion version: ${manualVersion}`);
       return; // ✅ Ensure we EXIT after setting the version
     }
 
     // ✅ If user selects an existing version, just set it and exit
-    await config.update('clarion.version', selectedVersion, ConfigurationTarget.Workspace);
+    const target = getClarionConfigTarget();
+    if (target && workspace.workspaceFolders) {
+      const folderConfig = workspace.getConfiguration('clarion', workspace.workspaceFolders[0].uri);
+      await folderConfig.update('version', selectedVersion, target);
+    }
     window.showInformationMessage(`Selected Clarion version: ${selectedVersion}`);
   }
 

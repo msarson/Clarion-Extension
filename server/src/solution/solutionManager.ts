@@ -9,7 +9,7 @@ import { TokenCache } from '../TokenCache';
 import { solutionOperationInProgress } from '../server';
 
 const logger = LoggerManager.getLogger("SolutionManager");
-logger.setLevel("info");
+logger.setLevel("error");
 
 export class SolutionManager {
     public solution: ClarionSolutionServer;

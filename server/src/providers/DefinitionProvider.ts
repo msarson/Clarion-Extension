@@ -379,7 +379,6 @@ export class DefinitionProvider {
      * Enhanced to support both structure labels and prefixes in usage
      */
     private async findStructureFieldDefinition(word: string, document: TextDocument, position: Position): Promise<Definition | null> {
-        console.error(`🔥🔥🔥 findStructureFieldDefinition called for word: ${word}`);
         logger.info(`Looking for structure field definition: ${word}`);
 
         // Get tokens from cache

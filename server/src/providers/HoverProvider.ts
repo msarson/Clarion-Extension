@@ -66,6 +66,27 @@ export class HoverProvider {
                 }
             }
 
+            // Check if this is a MAP procedure implementation and show declaration hover
+            const mapProcMatch = line.match(/^(\w+)\s+PROCEDURE\s*\(/i);
+            if (mapProcMatch) {
+                const procName = mapProcMatch[1];
+                const procNameEnd = mapProcMatch.index! + procName.length;
+                
+                // Check if cursor is on the procedure name
+                if (position.character >= mapProcMatch.index! && position.character <= procNameEnd) {
+                    // Find the MAP declaration for this procedure
+                    const mapDeclaration = this.findMapDeclaration(document, procName);
+                    if (mapDeclaration) {
+                        return {
+                            contents: {
+                                kind: 'markdown',
+                                value: `**MAP Declaration**\n\n\`\`\`clarion\n${mapDeclaration}\n\`\`\``
+                            }
+                        };
+                    }
+                }
+            }
+
             // Check if this is a structure/group name followed by a dot (e.g., hovering over "MyGroup" in "MyGroup.MyVar")
             // Search for a dot starting from the word's position in the line
             const wordStartInLine = line.indexOf(word, Math.max(0, position.character - word.length));
@@ -1131,5 +1152,39 @@ export class HoverProvider {
         }
         
         return commaCount + 1;
+    }
+
+    /**
+     * Find MAP declaration for a procedure
+     */
+    private findMapDeclaration(document: TextDocument, procName: string): string | null {
+        const text = document.getText();
+        const lines = text.split(/\r?\n/);
+        
+        // Find MAP block
+        let inMap = false;
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+            
+            if (/^\s*MAP\s*$/i.test(trimmed)) {
+                inMap = true;
+                continue;
+            }
+            
+            if (inMap && /^\s*END\s*$/i.test(trimmed)) {
+                break; // End of MAP, procedure not found
+            }
+            
+            if (inMap) {
+                // Check if this line declares our procedure
+                const declMatch = trimmed.match(/^(\w+)\s+PROCEDURE/i);
+                if (declMatch && declMatch[1].toLowerCase() === procName.toLowerCase()) {
+                    return trimmed;
+                }
+            }
+        }
+        
+        return null;
     }
 }

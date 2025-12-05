@@ -2,7 +2,7 @@
     "name": "clarion-extensions",
     "displayName": "Clarion Extensions",
     "description": "Extension for Clarion Language",
-    "version": "0.7.2",
+    "version": "0.7.3",
     "publisher": "msarson",
     "repository": {
         "type": "git",
@@ -180,6 +180,10 @@
                 "icon": "$(folder-opened)"
             },
             {
+                "command": "clarion.openDetectedSolution",
+                "title": "Open Detected Solution"
+            },
+            {
                 "command": "clarion.openSolutionFromList",
                 "title": "Open Solution List",
                 "icon": "$(list-selection)"
@@ -213,6 +217,10 @@
                 "command": "clarion.reinitializeSolution",
                 "title": "Clarion: Reinitialize Solution",
                 "when": "clarion.solutionOpen"
+            },
+            {
+                "command": "clarion.debugSolutionHistory",
+                "title": "Clarion: Debug Solution History"
             },
             {
                 "command": "clarion.navigateToProject",
@@ -447,7 +455,7 @@
         "viewsWelcome": [
             {
                 "view": "solutionView",
-                "contents": "No solution is currently open.\n[Open Solution](command:clarion.openSolution)\n[Open Solution from List](command:clarion.openSolutionFromList)\n[Getting Started](https://github.com/msarson/Clarion-Extension/blob/master/GettingStarted.md) | [Report an Issue](https://github.com/msarson/Clarion-Extension/issues)",
+                "contents": "Initializing Clarion Extension...\n\nPlease wait while the extension loads.",
                 "when": "!clarion.solutionOpen"
             }
         ],
@@ -495,7 +503,11 @@
             "properties": {
                 "clarion.build.revealOutput": {
                     "type": "string",
-                    "enum": ["never", "always", "onError"],
+                    "enum": [
+                        "never",
+                        "always",
+                        "onError"
+                    ],
                     "default": "never",
                     "description": "Controls when to show the build output terminal. 'never': never show, 'always': always show, 'onError': only show when build fails."
                 },
@@ -525,6 +537,7 @@
                         ".equ",
                         ".eq"
                     ],
+                    "scope": "resource",
                     "description": "Defines the file extensions used for searching files in Quick Open (Ctrl+P)."
                 },
                 "clarion.defaultLookupExtensions": {
@@ -538,31 +551,37 @@
                         ".equ",
                         ".eq"
                     ],
+                    "scope": "resource",
                     "description": "Defines the file extensions used for document linking and hover previews when a file is not part of a project."
                 },
                 "clarion.solutionFile": {
                     "type": "string",
                     "default": "",
+                    "scope": "resource",
                     "description": "Path to the Clarion solution (.sln) file."
                 },
                 "clarion.propertiesFile": {
                     "type": "string",
                     "default": "",
+                    "scope": "resource",
                     "description": "Path to the ClarionProperties.xml file."
                 },
                 "clarion.version": {
                     "type": "string",
                     "default": "",
+                    "scope": "resource",
                     "description": "Selected Clarion version."
                 },
                 "clarion.configuration": {
                     "type": "string",
                     "default": "",
+                    "scope": "resource",
                     "description": "Selected Clarion configuration."
                 },
                 "clarion.currentSolution": {
                     "type": "string",
                     "default": "",
+                    "scope": "resource",
                     "description": "Path to the currently selected Clarion solution file."
                 },
                 "clarion.telemetry.enabled": {
@@ -572,6 +591,7 @@
                 },
                 "clarion.solutions": {
                     "type": "array",
+                    "scope": "resource",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -847,6 +867,9 @@
     "scripts": {
         "vscode:prepublish": "npm run compile",
         "compile": "tsc -b",
+        "compile:release": "cross-env VSCODE_RELEASE_MODE=true npm run compile",
+        "package": "vsce package",
+        "package:release": "cross-env VSCODE_RELEASE_MODE=true vsce package",
         "watch": "tsc -b -w",
         "test": "npm run compile && mocha out/server/src/test/**/*.test.js"
     },
@@ -857,6 +880,7 @@
         "@types/xml2js": "^0.4.14",
         "@typescript-eslint/parser": "^8.25.0",
         "@vscode/test-electron": "^2.4.1",
+        "cross-env": "^10.1.0",
         "eslint": "^9.21.0",
         "mocha": "^11.0.0",
         "rimraf": "^6.0.1",

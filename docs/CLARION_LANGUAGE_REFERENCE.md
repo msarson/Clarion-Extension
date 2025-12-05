@@ -437,12 +437,28 @@ Field2 STRING(20)
   
 ### PROCEDURE Syntax
 ```clarion
-ProcedureName PROCEDURE([parameters])[,return-type]
+ProcedureName PROCEDURE([parameters])[,attributes]
 [local data declarations]
   CODE
   [statements]
   [ROUTINE definitions]
 ! Next procedure or ROUTINE or EOF implicitly ends this procedure
+```
+
+**Procedure Attributes:**
+Procedures can have multiple attributes specified after the parameter list, separated by commas:
+- **Return type:** Data type keyword (BYTE, SHORT, LONG, STRING, etc.)
+- **NAME('exported_name'):** Specifies exported DLL function name
+- **PROC:** Indicates procedure attribute
+- **Other attributes:** PRIVATE, EXTERNAL, VIRTUAL, etc.
+
+**Attribute Order:**
+The return type can appear **anywhere** in the attribute list:
+```clarion
+! All of these are valid:
+MyProc PROCEDURE(),LONG,NAME('MyProc')           ! Return type first
+MyProc PROCEDURE(),NAME('MyProc'),LONG           ! Return type last  
+MyProc PROCEDURE(),PROC,LONG,NAME('MyProc')     ! Return type middle
 ```
 
 **IMPORTANT:**

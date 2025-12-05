@@ -2,17 +2,53 @@
 
 **Repository:** Clarion-Extension  
 **Purpose:** VS Code extension for Clarion language support  
-**Last Updated:** 2025-11-30
+**Last Updated:** 2025-12-05
 
 ## Your Role
 
 You are an AI assistant working on the Clarion-Extension VS Code extension. This extension provides language support for the Clarion programming language, including syntax highlighting, IntelliSense, go-to-definition, and other language features.
+
+## ⚠️ CRITICAL: Clarion Language is Case-Insensitive
+
+**This is fundamental to all code involving Clarion identifiers:**
+
+- **All Clarion keywords, identifiers, and symbols are case-insensitive**
+- `MyProcedure`, `MYPROCEDURE`, and `myprocedure` are THE SAME identifier
+- When comparing Clarion names: **ALWAYS use `.toLowerCase()` or case-insensitive regex**
+- When storing Clarion names: **Preserve original case** for display, but compare case-insensitively
+- When searching for definitions/implementations: **Use case-insensitive matching**
+
+**Examples:**
+```typescript
+// ✅ CORRECT - Case-insensitive comparison
+if (methodName.toLowerCase() === 'myprocedure'.toLowerCase()) { ... }
+
+// ✅ CORRECT - Case-insensitive regex
+const regex = /\bmyprocedure\b/i;  // Note the 'i' flag
+
+// ❌ WRONG - Case-sensitive comparison
+if (methodName === 'MyProcedure') { ... }  // Will fail if user wrote "MYPROCEDURE"
+```
+
+**When extracting names from text:**
+- Use lowercase for pattern matching
+- Extract from original text to preserve case for display
+- Store both if needed, but always compare using lowercase
+
+## Critical Documentation Requirements
+
+**⚠️ ALWAYS DOCUMENT NEW FEATURES AND CHANGES:**
+- When implementing new features, update `CHANGELOG.md` immediately
+- When fixing bugs, document the fix in `CHANGELOG.md`
+- Keep `README.md` in sync with new capabilities
+- Update `TODO.md` when completing or discovering tasks
 
 ## Critical Knowledge Base
 
 **ALWAYS refer to these files and please read them after reading this file:**
 
 1. **`docs/clarion-knowledge-base.md`** - Clarion language syntax rules
+   - **Case-insensitivity** (ALL identifiers and keywords)
    - Character encoding (ANSI/ASCII only - NO Unicode)
    - Source file structure (PROGRAM/MEMBER requirements)
    - Column 0 rules (labels at column 0, keywords indented)
@@ -60,6 +96,42 @@ Clarion-Extension/
 
 ### 2. Git Workflow
 
+#### Branching Strategy
+
+**Version Branches:**
+- `main` - Production releases only (stable)
+- `version-X.Y.Z` - Current development version (e.g., `version-0.7.3`)
+
+**Feature/Bug Fix Branches:**
+- **ALWAYS create disposable branches** for new features or bug fixes
+- Branch from current version branch (e.g., from `version-0.7.3`)
+- Naming: `feature/description` or `fix/description`
+- Example: `feature/add-hover-support` or `fix/column-zero-bug`
+
+**Workflow:**
+1. User requests new feature or bug fix
+2. Create disposable branch: `git checkout -b feature/description`
+3. Implement changes, commit regularly
+4. When complete, merge back to version branch: `git checkout version-X.Y.Z && git merge feature/description`
+5. **Delete the disposable branch**: `git branch -d feature/description`
+6. Push version branch: `git push origin version-X.Y.Z`
+
+**Example Flow:**
+```bash
+# Starting new feature
+git checkout version-0.7.3
+git checkout -b feature/add-new-syntax
+# ... make changes, commit ...
+git add .
+git commit -m "feat: add new syntax support"
+
+# Feature complete - merge back
+git checkout version-0.7.3
+git merge feature/add-new-syntax
+git branch -d feature/add-new-syntax  # Delete temp branch
+git push origin version-0.7.3
+```
+
 #### Committing Changes
 - **Commit often** - After completing logical units of work
 - Use descriptive commit messages
@@ -74,7 +146,7 @@ git commit -m "feat: add support for X"
 # Stop here - wait for user to request push
 ```
 
-### 3. Version Management
+### 3. Version Management & Publishing
 
 **IMPORTANT:** Version changes happen ONLY during release process.
 
@@ -82,19 +154,52 @@ git commit -m "feat: add support for X"
 - Location: `package.json` version field
 - Format: `MAJOR.MINOR.PATCH` (e.g., `0.7.1`)
 
+#### Pre-Publishing Checklist
+
+**⚠️ CRITICAL - Before ANY publish request:**
+
+1. **Verify all logger levels are at ERROR:**
+   ```bash
+   # Search for any non-error log levels
+   grep -r "logger.setLevel\(\"info\"\)" client/src server/src
+   grep -r "logger.setLevel\(\"warn\"\)" client/src server/src
+   grep -r "logger.setLevel\(\"debug\"\)" client/src server/src
+   ```
+   - If ANY results found: **STOP and fix before publishing**
+   - All should be: `logger.setLevel("error")`
+
+2. **Run tests:**
+   ```bash
+   npm test
+   ```
+
+3. **Verify CHANGELOG.md is up to date**
+
 #### Version Change Process
 
 **NEVER change version automatically. Only when user requests merge to main:**
 
-1. **User says:** "Merge to main" or "Ready to release"
+1. **User says:** "Merge to main" or "Ready to release" or "Ready to publish"
+
 2. **You respond:** "Ready to merge. This will require:
+   - ⚠️ **FIRST: Verify all log levels are ERROR** (critical!)
    - Version bump (current: X.Y.Z)
+   - Build in release mode
    - Package extension (.vsix)
    - Publish to marketplace
    
    What should the new version be?"
-3. **User provides:** Next version number (e.g., `0.8.0`)
-4. **You execute:**
+
+3. **Before proceeding, CHECK LOG LEVELS:**
+   ```bash
+   # If any non-error levels found, STOP and ask user to confirm fix
+   grep -r "setLevel(\"info\")" client/src server/src
+   grep -r "setLevel(\"warn\")" client/src server/src
+   ```
+
+4. **User provides:** Next version number (e.g., `0.8.0`)
+
+5. **You execute:**
    ```bash
    # Update version
    npm version [new version] --no-git-tag-version
@@ -108,20 +213,47 @@ git commit -m "feat: add support for X"
    git merge [current-branch]
    git push origin main
    
-   # Package extension
-   vsce package
+   # Build in RELEASE MODE (important!)
+   npm run compile:release
+   
+   # Package extension IN RELEASE MODE
+   npm run package:release
    
    # User will manually publish to marketplace
    ```
-5. **After merge to main:**
+
+6. **After merge to main:**
    - Ask user for next version number
-   - Create new branch: `git checkout -b v[next-version]`
+   - Create new version branch: `git checkout -b version-[next-version]`
+   - Push new branch: `git push -u origin version-[next-version]`
    - Confirm branch creation with user
+
+#### ⚠️ CRITICAL: Release Mode Logging
+
+**All loggers MUST be at error level:**
+- Current standard: All `logger.setLevel("error")` throughout codebase
+- **Before publishing**: ALWAYS verify no info/warn/debug levels exist
+- This ensures clean console output for end users
+
+**Build Commands:**
+- **Development builds**: `npm run compile` (standard)
+- **Release builds**: `npm run compile:release` (with VSCODE_RELEASE_MODE=true)
+- **Package for release**: `npm run package:release`
+
+**What Release Mode Does:**
+- Sets `VSCODE_RELEASE_MODE=true` environment variable
+- Activates minimal logging via `common/LoggingConfig.ts`
+- Reduces console output for end users
+- Makes extension logs cleaner in production
+
+**Never publish without:**
+1. ✅ Verifying all log levels are ERROR
+2. ✅ Using `npm run package:release`
 
 #### Version Branching Strategy
 - `main` - Production releases only
-- `v0.8.0` - Development branch for version 0.8.0
-- Feature branches - Created as needed from version branch
+- `version-0.8.0` - Development branch for version 0.8.0
+- `feature/*` or `fix/*` - Disposable branches for features/fixes (merged then deleted)
 
 ### 4. Testing
 
@@ -144,14 +276,30 @@ npm test
 
 ## Common Tasks
 
+### Adding a New Feature or Improvement
+
+**CRITICAL:** Document ALL new features and improvements immediately!
+
+1. **Research** - Verify requirements with user
+2. **Update KB** - If Clarion language rule, add to `docs/clarion-knowledge-base.md`
+3. **Implement** - Make code changes
+4. **Add Tests** - Create unit tests validating the feature
+5. **Test** - Run `npm test` and verify behavior
+6. **Document Immediately**:
+   - Update `CHANGELOG.md` with feature description
+   - Update `README.md` if user-facing
+   - Update any affected documentation
+7. **Commit** - Include documentation in the commit
+8. **Wait** - Do not push unless user requests
+
 ### Adding a New Clarion Syntax Rule
 
 1. **Research** - Verify rule with user or Clarion documentation
-2. **Update KB** - Add rule to `docs/CLARION_LANGUAGE_REFERENCE.md`
+2. **Update KB** - Add rule to `docs/clarion-knowledge-base.md`
 3. **Update Code** - Modify tokenizer/parser as needed
 4. **Add Tests** - Create unit tests validating the rule
 5. **Test** - Run `npm test` and verify with test programs
-6. **Document** - Update any affected documentation
+6. **Document** - Update CHANGELOG.md and any affected documentation
 7. **Commit** - Commit changes with descriptive message
 8. **Wait** - Do not push unless user requests
 
@@ -176,11 +324,12 @@ npm test
 ## Important Reminders
 
 ### DO
-✅ Consult `docs/CLARION_LANGUAGE_REFERENCE.md` for Clarion syntax
+✅ Consult `docs/clarion-knowledge-base.md` for Clarion syntax
 ✅ Make minimal, targeted changes
 ✅ Commit often with clear messages
 ✅ Run tests before committing
-✅ Update documentation when needed
+✅ **Document ALL new features in CHANGELOG.md immediately**
+✅ Update README.md for user-facing changes
 ✅ Ask for clarification when uncertain
 ✅ Wait for user instruction to push
 

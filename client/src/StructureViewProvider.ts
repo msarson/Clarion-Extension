@@ -17,11 +17,11 @@ import {
 import { DocumentSymbol, SymbolKind as LSPSymbolKind } from 'vscode-languageserver-types';
 import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("StructureViewProvider");
-logger.setLevel("info"); // PERF: Only log errors to reduce overhead
+logger.setLevel("error"); // PERF: Only log errors to reduce overhead
 
 // 📊 PERFORMANCE: Create perf logger that always logs
 const perfLogger = LoggerManager.getLogger("StructureViewPerf");
-perfLogger.setLevel("warn"); // Reduce perf logging noise
+perfLogger.setLevel("error"); // Reduce perf logging noise
 
 // No thresholds needed - solution view priority is handled on the server side
 
@@ -39,8 +39,9 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     private activeEditor: TextEditor | undefined;
     public treeView: TreeView<DocumentSymbol> | undefined;
     
-    // Follow cursor functionality
+    // Follow cursor functionality - enabled by default, but only works when Structure View is visible
     private followCursor: boolean = true;
+    private isViewVisible: boolean = false; // Track if the Structure View is currently visible
     private selectionChangeDebounceTimeout: NodeJS.Timeout | null = null;
     private currentHighlightedSymbol: DocumentSymbol | undefined;
     
@@ -92,9 +93,10 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         // Listen for selection changes to implement "Follow Cursor" functionality
         window.onDidChangeTextEditorSelection(event => {
             logger.debug(`📍 Selection changed in editor: ${event.textEditor.document.fileName}`);
-            logger.debug(`   followCursor=${this.followCursor}, activeEditor=${!!this.activeEditor}, match=${event.textEditor === this.activeEditor}`);
+            logger.debug(`   followCursor=${this.followCursor}, isViewVisible=${this.isViewVisible}, activeEditor=${!!this.activeEditor}, match=${event.textEditor === this.activeEditor}`);
             
-            if (this.followCursor && this.activeEditor && event.textEditor === this.activeEditor) {
+            // Only follow cursor if BOTH the feature is enabled AND the view is visible
+            if (this.followCursor && this.isViewVisible && this.activeEditor && event.textEditor === this.activeEditor) {
                 logger.debug(`   Triggering debounced reveal after 100ms`);
                 // Debounce the selection change to avoid excessive updates
                 if (this.selectionChangeDebounceTimeout) {
@@ -106,6 +108,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                     this.revealActiveSelection();
                     this.selectionChangeDebounceTimeout = null;
                 }, 100); // 100ms debounce delay for cursor movements
+            } else {
+                logger.debug(`   Skipping reveal: followCursor=${this.followCursor}, isViewVisible=${this.isViewVisible}`);
             }
         });
 
@@ -138,16 +142,35 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     setFollowCursor(enabled: boolean): void {
         this.followCursor = enabled;
         logger.debug(`🔄 Follow cursor set to ${this.followCursor ? 'enabled' : 'disabled'}`);
-        logger.debug(`   Current state: followCursor=${this.followCursor}, activeEditor=${!!this.activeEditor}, treeView=${!!this.treeView}`);
+        logger.debug(`   Current state: followCursor=${this.followCursor}, isViewVisible=${this.isViewVisible}, activeEditor=${!!this.activeEditor}, treeView=${!!this.treeView}`);
         
-        // If we just enabled follow cursor, immediately reveal the current selection
-        if (this.followCursor) {
+        // Only reveal if BOTH enabled AND view is visible
+        if (this.followCursor && this.isViewVisible) {
             logger.debug(`   Revealing active selection after enabling follow cursor`);
             this.revealActiveSelection();
         } else {
             // Clear the current highlighted symbol when disabling
             this.currentHighlightedSymbol = undefined;
             this._onDidChangeTreeData.fire();
+            if (!this.isViewVisible) {
+                logger.debug(`   View not visible, skipping reveal`);
+            }
+        }
+    }
+    
+    /**
+     * Updates the visibility state of the Structure View
+     * Called by extension.ts when the view visibility changes
+     * @param visible Whether the view is currently visible
+     */
+    setViewVisible(visible: boolean): void {
+        this.isViewVisible = visible;
+        logger.debug(`🔄 Structure View visibility changed to: ${visible}`);
+        
+        // If view just became visible and follow cursor is enabled, reveal current selection
+        if (visible && this.followCursor) {
+            logger.debug(`   View became visible with follow cursor enabled, revealing selection`);
+            this.revealActiveSelection();
         }
     }
     

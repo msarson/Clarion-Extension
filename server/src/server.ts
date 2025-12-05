@@ -541,12 +541,6 @@ connection.onDocumentSymbol((params: DocumentSymbolParams) => {
             return [];
         }
 
-        // Check if a solution operation is in progress - if so, prioritize solution view
-        if (solutionOperationInProgress || (global as any).solutionOperationInProgress) {
-            logger.info(`⚠️ [DEBUG] Solution operation in progress, deferring document symbol request for: ${uri}`);
-            return [];
-        }
-
         logger.info(`📂 [DEBUG] Computing document symbols for: ${uri}, language: ${document.languageId}`);
         
         const tokenStart = performance.now();

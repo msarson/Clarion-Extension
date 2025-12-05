@@ -252,13 +252,14 @@ export function prepareBuildParameters(buildConfig: {
     const buildArgs = [
         "/property:GenerateFullPaths=true",
         "/t:build",
-        "/consoleloggerparameters:ErrorsOnly",
         `/property:Configuration=${selectedConfig}`,
         `/property:clarion_Sections=${selectedConfig}`,
         `/property:ClarionBinPath="${clarionBinPath}"`,
         "/property:NoDependency=true",
-        "/property:Verbosity=detailed",
-        "/property:WarningLevel=5"
+        "/verbosity:normal",
+        "/nologo",
+        `/fileLogger`,
+        `/fileLoggerParameters:LogFile="${buildLogPath}";Verbosity=detailed;Encoding=UTF-8`
     ];
 
     // Log the build configuration
@@ -315,9 +316,9 @@ export async function executeBuildTask(params: {
     logger.info(`🔹 MSBuild path: ${msBuildPath}`);
     logger.info(`🔹 Build log path: ${buildLogPath}`);
 
-    // Create the shell execution - restore log file redirection
+    // Create the shell execution - MSBuild will handle logging via /fileLogger
     const execution = new ShellExecution(
-        `${msBuildPath} ${buildArgs.join(" ")} > "${buildLogPath}" 2>&1`,
+        `${msBuildPath} ${buildArgs.join(" ")}`,
         { cwd: solutionDir }
     );
 

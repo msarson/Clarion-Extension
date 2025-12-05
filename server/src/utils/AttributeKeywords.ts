@@ -70,6 +70,43 @@ export function isDataType(value: string): boolean {
 }
 
 /**
+ * Extract return type from procedure/method declaration tokens
+ * Scans through attributes after PROCEDURE() to find the return type
+ * 
+ * @param tokens - Token array
+ * @param startIndex - Index to start scanning (typically after closing paren of PROCEDURE())
+ * @param sameLine - If true, only scan tokens on the same line
+ * @returns Return type string or null if not found
+ * 
+ * Examples:
+ *   Start PROCEDURE(),LONG,NAME('Start') -> 'LONG'
+ *   Start PROCEDURE(),NAME('Start'),LONG -> 'LONG'
+ *   Start PROCEDURE(),PROC,LONG,NAME('Start') -> 'LONG'
+ */
+export function extractReturnType(tokens: any[], startIndex: number, sameLine: boolean = true): string | null {
+    const startLine = tokens[startIndex]?.line;
+    
+    for (let i = startIndex; i < tokens.length; i++) {
+        const token = tokens[i];
+        
+        // Stop if we've moved to a different line (when sameLine is true)
+        if (sameLine && token.line !== startLine) {
+            break;
+        }
+        
+        // Check if this token is a data type
+        // TokenType.Type = 12, TokenType.Label = 25
+        if (token.type === TokenType.Type || token.type === TokenType.Label) {
+            if (isDataType(token.value)) {
+                return token.value;
+            }
+        }
+    }
+    
+    return null;
+}
+
+/**
  * Notes on special keywords:
  * 
  * SIZE - This is a function but can be used in data declarations like:
@@ -85,5 +122,5 @@ export function isDataType(value: string): boolean {
  *   TestProc1 PROCEDURE(),PROC,LONG,NAME('TestProc1')
  *   TestProc2 PROCEDURE(),NAME('TestProc2'),PROC,LONG
  *   TestProc3 PROCEDURE(),LONG,NAME('TestProc3')
- * Use isDataType() to identify return types among the attributes.
+ * Use extractReturnType() to identify return types among the attributes.
  */

@@ -886,6 +886,30 @@ COMPILE('**32bit**',_width32_)
             assert.strictEqual(diagnostics.length, 0, 'Nested OMIT/COMPILE should validate correctly');
         });
 
+        test('Should handle COMPILE with terminator on same line', () => {
+            const code = `  PROGRAM
+COMPILE('!** EndWndPrv **',_CbWndPreview_) ; WndPrvCls.Init()  !** EndWndPrv **
+  CODE
+  RETURN`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            assert.strictEqual(diagnostics.length, 0, 'COMPILE with same-line terminator should validate correctly');
+        });
+
+        test('Should handle OMIT with terminator on same line', () => {
+            const code = `  PROGRAM
+OMIT('***') x = 1 ***
+  CODE
+  RETURN`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            assert.strictEqual(diagnostics.length, 0, 'OMIT with same-line terminator should validate correctly');
+        });
+
         test('Should detect multiple unterminated OMIT blocks', () => {
             const code = `  PROGRAM
 OMIT('**END1**')
@@ -899,6 +923,117 @@ OMIT('**END2**')
             const diagnostics = DiagnosticProvider.validateDocument(document);
 
             assert.strictEqual(diagnostics.length, 2, 'Should have 2 diagnostics for 2 unterminated blocks');
+        });
+    });
+
+    suite('RETURN Statement Validation', () => {
+        test('Should flag method with return type but no RETURN statement', () => {
+            const code = `  PROGRAM
+MyClass CLASS
+MyProc  PROCEDURE(STRING param), LONG
+        END
+
+MyClass.MyProc PROCEDURE(STRING param)
+CODE
+  x = 1
+  ! Missing RETURN
+  RETURN`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            const returnDiagnostics = diagnostics.filter(d => d.message.includes('RETURN'));
+            assert.strictEqual(returnDiagnostics.length, 1, 'Should have 1 diagnostic for missing RETURN value');
+            assert.ok(returnDiagnostics[0].message.includes('MyClass.MyProc'), 'Diagnostic should mention method name');
+        });
+
+        test('Should flag method with return type but only empty RETURN', () => {
+            const code = `  PROGRAM
+MyClass CLASS
+GetValue PROCEDURE(), LONG
+         END
+
+MyClass.GetValue PROCEDURE()
+CODE
+  x = 1
+  RETURN
+  RETURN`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            const returnDiagnostics = diagnostics.filter(d => d.message.includes('all RETURN statements are empty'));
+            assert.strictEqual(returnDiagnostics.length, 1, 'Should have 1 diagnostic for empty RETURN');
+        });
+
+        test('Should NOT flag method with return type and RETURN with value', () => {
+            const code = `  PROGRAM
+MyClass CLASS
+GetValue PROCEDURE(), LONG
+         END
+
+MyClass.GetValue PROCEDURE()
+CODE
+  x = 1
+  RETURN x`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            const returnDiagnostics = diagnostics.filter(d => d.message.includes('RETURN'));
+            assert.strictEqual(returnDiagnostics.length, 0, 'Should have no diagnostics for valid RETURN');
+        });
+
+        test('Should NOT flag method without return type', () => {
+            const code = `  PROGRAM
+MyClass CLASS
+DoStuff PROCEDURE(STRING param)
+        END
+
+MyClass.DoStuff PROCEDURE(STRING param)
+CODE
+  x = 1
+  RETURN`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            const returnDiagnostics = diagnostics.filter(d => d.message.includes('RETURN'));
+            assert.strictEqual(returnDiagnostics.length, 0, 'Should not flag procedure without return type');
+        });
+
+        test('Should handle RETURN with expression', () => {
+            const code = `  PROGRAM
+MyClass CLASS
+Calculate PROCEDURE(LONG a, LONG b), LONG
+          END
+
+MyClass.Calculate PROCEDURE(LONG a, LONG b)
+CODE
+  RETURN a + b`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            const returnDiagnostics = diagnostics.filter(d => d.message.includes('RETURN'));
+            assert.strictEqual(returnDiagnostics.length, 0, 'Should not flag RETURN with expression');
+        });
+
+        test('Should validate MAP procedures with return types', () => {
+            const code = `  PROGRAM
+                    MAP
+MyProcedure PROCEDURE(),LONG                    
+                    END
+
+MyProcedure  PROCEDURE()
+    CODE`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            const returnDiagnostics = diagnostics.filter(d => d.message.includes('RETURN'));
+            assert.strictEqual(returnDiagnostics.length, 1, 'Should flag MAP procedure missing RETURN');
+            assert.ok(returnDiagnostics[0].message.includes('MyProcedure'), 'Should mention procedure name');
         });
     });
 });

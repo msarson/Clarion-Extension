@@ -846,6 +846,116 @@ END
 
 ---
 
+## Procedure Implementations and RETURN Statements
+
+### MAP Declaration vs Implementation
+
+**Critical Rule:** Procedure implementations MUST NOT include the return type in the PROCEDURE statement, even if the MAP declaration specifies one.
+
+**MAP Declaration (with return type):**
+```clarion
+MAP
+  TextLineCount PROCEDURE(LONG TextFEQ),LONG  ! Declaration includes return type
+  DB            PROCEDURE(STRING Info)         ! No return type
+END
+```
+
+**Implementation (WITHOUT return type):**
+```clarion
+TextLineCount PROCEDURE(LONG TextFEQ)         ! Return type OMITTED
+LastLineNo LONG,AUTO
+  CODE
+  LOOP LastLineNo=TextFEQ{PROP:LineCount} TO 1 BY -1
+  WHILE ~TextFEQ{PROP:Line,LastLineNo}
+  RETURN LastLineNo                           ! Returns a value
+  
+DB PROCEDURE(STRING xMessage)                 ! No return type
+sz CSTRING(256)
+  CODE
+  sz = 'Debug: ' & CLIP(xMessage)
+  OutputDebugString(sz)
+  RETURN                                      ! Returns nothing (void)
+```
+
+### Why Implementation Cannot Have Return Type
+
+**Compiler Requirement:** If you add the return type to the implementation, the code will NOT compile. The return type is ONLY specified in the MAP declaration (prototype), never in the implementation.
+
+### Common Documentation Pattern
+
+Many developers add a comment to show the return type at the implementation for readability:
+
+```clarion
+TextLineCount PROCEDURE(LONG TextFEQ)!,LONG   ! Comment shows return type
+  CODE
+  ! ... implementation ...
+  RETURN LastLineNo
+```
+
+This is purely for documentation - the `!,LONG` is commented out and has no effect on compilation.
+
+### RETURN Statement Rules
+
+**For procedures WITH return type (declared in MAP):**
+```clarion
+MAP
+  GetCount PROCEDURE(),LONG                   ! Returns LONG
+END
+
+GetCount PROCEDURE()                          ! Implementation - no return type
+Count LONG
+  CODE
+  Count = 42
+  RETURN Count                                ! MUST return a value
+```
+
+**For procedures WITHOUT return type (void procedures):**
+```clarion
+MAP
+  LogMessage PROCEDURE(STRING Msg)            ! No return type (void)
+END
+
+LogMessage PROCEDURE(STRING Msg)              ! Implementation - no return type
+  CODE
+  MESSAGE(Msg)
+  RETURN                                      ! Empty RETURN is correct
+```
+
+**Mixed RETURN Statements:**
+A void procedure can have:
+- `RETURN` with no value (returns control to caller)
+- No explicit RETURN (implicit RETURN at end of procedure)
+- Multiple RETURN statements for early exit
+
+```clarion
+MAP
+  ProcessData PROCEDURE(LONG Value)           ! No return type
+END
+
+ProcessData PROCEDURE(LONG Value)
+  CODE
+  IF Value < 0
+    RETURN                                    ! Early exit - valid
+  END
+  ! ... process data ...
+  ! Implicit RETURN at end
+```
+
+### Validation Rules
+
+**Valid:**
+- MAP declares return type, implementation RETURNS a value
+- MAP has no return type, implementation has empty RETURN
+- MAP has no return type, implementation has no explicit RETURN
+- MAP has no return type, implementation has multiple empty RETURNs for flow control
+
+**Invalid:**
+- Adding return type to implementation (won't compile)
+- MAP declares return type, but implementation always returns empty
+- MAP has no return type, but implementation tries to return a value
+
+---
+
 ## File Declarations
 
 ### FILE Structure
@@ -1917,3 +2027,74 @@ Clarion source files use **ANSI/ASCII encoding only**. They do NOT support:
 
 ---
 
+## SECTION - Code Organization Directive
+
+### SECTION Directive
+
+**Syntax:** `SECTION(string)`
+
+The SECTION directive identifies the beginning of a block of executable source code or data declarations which may be INCLUDEd in source code in another file.
+
+**Key Rules:**
+- `string` - A string constant which names the SECTION
+- Identifies a block of source code or data declarations
+- Used with INCLUDE to selectively include specific blocks
+- A SECTION is terminated by:
+  - The next SECTION directive, OR
+  - The end of the file
+
+**Purpose:**
+Allows organizing code into named blocks that can be selectively included in other files, rather than including entire files.
+
+**Usage with INCLUDE:**
+```clarion
+! In file MyData.clw:
+SECTION('GLOBAL DATA')
+GlobalVar    LONG
+GlobalString STRING(100)
+
+SECTION('LOCAL DATA')
+LocalVar     LONG
+LocalString  STRING(50)
+
+! In another file:
+INCLUDE('MyData.clw', 'GLOBAL DATA')  ! Only includes GLOBAL DATA section
+```
+
+**Examples:**
+```clarion
+! Common pattern in all-source programs
+SECTION('GLOBAL DATA')
+! Global variables and file structures
+Customer FILE,DRIVER('TOPSPEED')
+        KEY(CUS:ID),PRIMARY
+        RECORD
+CUS:ID    LONG
+CUS:Name  STRING(50)
+        END
+       END
+
+SECTION('AtSortReport Procedure DATA')
+! Procedure-specific data
+LocalQ   QUEUE
+Item      STRING(100)
+        END
+
+SECTION('Code')
+! Executable code for procedures
+AtSortReport PROCEDURE
+CODE
+  ! Procedure implementation
+```
+
+**Important Notes:**
+- SECTION names are case-sensitive
+- Commonly used in "all-source" program structure where data and code are in separate sections
+- When INCLUDE specifies a section name, only that section is included
+- If no section name specified in INCLUDE, the entire file is included
+
+**Diagnostic Rules:**
+- SECTION must have a string parameter
+- Section names should be unique within a file (not enforced by compiler but good practice)
+
+---

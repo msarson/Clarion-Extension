@@ -1,4 +1,4 @@
-﻿﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, TextEditor, window as vscodeWindow, Diagnostic, DiagnosticSeverity, Range, StatusBarItem, StatusBarAlignment, extensions, DiagnosticCollection } from 'vscode';
+﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, TextEditor, window as vscodeWindow, Diagnostic, DiagnosticSeverity, Range, StatusBarItem, StatusBarAlignment, extensions, DiagnosticCollection, Location, Position } from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, ErrorAction, CloseAction } from 'vscode-languageclient/node';
 
 import * as path from 'path';
@@ -16,7 +16,7 @@ import { SolutionTreeDataProvider } from './SolutionTreeDataProvider';
 import { StructureViewProvider } from './StructureViewProvider';
 import { StatusViewProvider } from './StatusViewProvider';
 import { TreeNode } from './TreeNode';
-import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile, setGlobalClarionSelection, ClarionSolutionSettings } from './globals';
+import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile, setGlobalClarionSelection, ClarionSolutionSettings, getClarionConfigTarget } from './globals';
 import * as buildTasks from './buildTasks';
 import * as clarionClHelper from './clarionClHelper';
 import LoggerManager from './logger';
@@ -26,6 +26,8 @@ import { redirectionService } from './paths/RedirectionService';
 
 import { ClarionProjectInfo } from 'common/types';
 import { initializeTelemetry, trackEvent, trackPerformance } from './telemetry';
+import { SmartSolutionOpener } from './utils/SmartSolutionOpener';
+import { GlobalSolutionHistory } from './utils/GlobalSolutionHistory';
 
 const logger = LoggerManager.getLogger("Extension");
 logger.setLevel("error"); // PERF: Only log errors to reduce overhead
@@ -56,8 +58,12 @@ export async function updateConfigurationStatusBar(configuration: string) {
     const currentConfig = workspace.getConfiguration().get<string>("clarion.configuration");
 
     if (currentConfig !== configuration) {
-        logger.info(`🔄 Updating workspace configuration: clarion.configuration = ${configuration}`);
-        await workspace.getConfiguration().update("clarion.configuration", configuration, ConfigurationTarget.Workspace);
+        logger.info(`🔄 Updating folder configuration: clarion.configuration = ${configuration}`);
+        const target = getClarionConfigTarget();
+        if (target && workspace.workspaceFolders) {
+            const config = workspace.getConfiguration("clarion", workspace.workspaceFolders[0].uri);
+            await config.update("configuration", configuration, target);
+        }
     }
 }
 
@@ -245,15 +251,23 @@ export async function activate(context: ExtensionContext): Promise<void> {
     const isRefreshingRef = { value: false };
     const diagnosticCollection = languages.createDiagnosticCollection("clarion");
     context.subscriptions.push(diagnosticCollection);
-    logger.info("🔄 Activating Clarion extension...");
+    logger.info("🚀 ========== ACTIVATION START ==========");
+    logger.info("🔄 Phase 1: Extension activation begin...");
+    
+    // Initialize global solution history
+    GlobalSolutionHistory.initialize(context);
+    logger.info("✅ Global solution history initialized");
     
     // Initialize telemetry (track initialization time separately)
+    logger.info("🔄 Phase 2: Initializing telemetry...");
     const telemetryInitStart = Date.now();
     await initializeTelemetry(context);
     const telemetryInitDuration = Date.now() - telemetryInitStart;
     trackPerformance('TelemetryInitialization', telemetryInitDuration);
+    logger.info(`✅ Phase 2 complete: Telemetry initialized in ${telemetryInitDuration}ms`);
     
     // Check if fushnisoft.clarion extension is installed
+    logger.info("🔄 Phase 3: Checking for conflicting extensions...");
     const fushinsoftExtension = extensions.getExtension('fushnisoft.clarion');
     if (fushinsoftExtension) {
         const hasShownFushinsoftMessage = context.globalState.get<boolean>('clarion.hasShownFushinsoftMessage', false);
@@ -283,14 +297,18 @@ export async function activate(context: ExtensionContext): Promise<void> {
             await context.globalState.update('clarion.hasShownFushinsoftMessage', true);
         }
     }
+    logger.info("✅ Phase 3 complete: Conflict check done");
     
+    logger.info("🔄 Phase 4: Setting up event listeners...");
     // Add event listener for active editor changes to update the build status bar
     context.subscriptions.push(
         window.onDidChangeActiveTextEditor(() => {
             updateBuildProjectStatusBar();
         })
     );
+    logger.info("✅ Phase 4 complete: Event listeners registered");
 
+    logger.info("🔄 Phase 5: Checking for open XML files...");
     // Check for open XML files to avoid conflicts with redhat.vscode-xml extension
     const openXmlFiles = workspace.textDocuments.filter(doc =>
         doc.languageId === 'xml' || doc.fileName.toLowerCase().endsWith('.xml')
@@ -301,7 +319,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
         logger.warn("⚠️ Consider closing XML files before using Clarion features to avoid conflicts.");
         // We'll still continue activation, but with a longer delay to allow XML extension to initialize
     }
+    logger.info("✅ Phase 5 complete: XML check done");
 
+    logger.info("🔄 Phase 6: Starting language server...");
     // Icons are already in the images directory
     logger.info("✅ Using SVG icons from images directory");
 
@@ -311,101 +331,126 @@ export async function activate(context: ExtensionContext): Promise<void> {
         // Use a longer delay if XML files are open
         await startClientServer(context, openXmlFiles.length > 0);
     }
+    logger.info("✅ Phase 6 complete: Language server started");
 
-    // ✅ Check workspace and trust status
-    const hasWorkspace = !!workspace.workspaceFolders;
+    logger.info("🔄 Phase 7: Checking folder status...");
+    // ✅ Check folder status - we just need an open folder, not a workspace file
+    const hasFolder = !!(workspace.workspaceFolders && workspace.workspaceFolders.length > 0);
     const isTrusted = workspace.isTrusted;
+    logger.info(`   - Has folder open: ${hasFolder}`);
+    logger.info(`   - Is trusted: ${isTrusted}`);
+    if (workspace.workspaceFolders) {
+        logger.info(`   - Folders: ${workspace.workspaceFolders.map(f => f.uri.fsPath).join(', ')}`);
+    }
 
-    // ✅ Show one-time notification if no workspace (use context.globalState to track)
-    if (!hasWorkspace) {
-        const hasShownNoWorkspaceMessage = context.globalState.get<boolean>('clarion.hasShownNoWorkspaceMessage', false);
-        
-        if (!hasShownNoWorkspaceMessage) {
-            logger.info("ℹ️ No workspace detected. Basic features enabled (symbols, folding, hover). Full features require a saved workspace.");
-            
-            const action = await window.showInformationMessage(
-                "Clarion: Basic features enabled. Save a workspace for solution management and enhanced navigation.",
-                "Save Workspace",
-                "Don't Show Again"
-            );
-            
-            if (action === "Save Workspace") {
-                await commands.executeCommand('workbench.action.files.saveWorkspaceAs');
-            } else if (action === "Don't Show Again") {
-                await context.globalState.update('clarion.hasShownNoWorkspaceMessage', true);
-            }
+    logger.info("🔄 Phase 8: Handling no-folder scenario...");
+    // ✅ No popup needed - Solution View shows recent solutions when no folder is open
+    if (!hasFolder) {
+        logger.info("ℹ️ No folder open. Solution View will show recent solutions.");
+        // Continue with limited activation - don't return here
+        logger.info("📝 Operating in no-folder mode: basic language features available");
+    }
+    logger.info("✅ Phase 8 complete");
+
+    logger.info("🔄 Phase 9: Checking folder trust...");
+    // ✅ Early exit only if folder exists but isn't trusted
+    if (hasFolder && !isTrusted) {
+        logger.warn("⚠️ Folder is not trusted. Clarion features will remain disabled until trust is granted.");
+        window.showWarningMessage("Clarion extension requires folder trust to enable features.");
+        return; // ⛔ Exit early only for untrusted folder
+    }
+    logger.info("✅ Phase 9 complete");
+
+    logger.info("🔄 Phase 10: Loading folder settings...");
+    // ✅ Load folder settings if we have a folder open
+    if (hasFolder) {
+        logger.info("   - Calling globalSettings.initializeFromWorkspace()...");
+        try {
+            await globalSettings.initializeFromWorkspace();
+            logger.info("   - initializeFromWorkspace() completed successfully");
+        } catch (error) {
+            logger.error("   - ❌ Error in initializeFromWorkspace():", error);
+            throw error; // Re-throw to see full stack trace
         }
         
-        // Continue with limited activation - don't return here
-        logger.info("📝 Operating in no-workspace mode: basic language features available");
-    }
-
-    // ✅ Early exit only if workspace exists but isn't trusted
-    if (hasWorkspace && !isTrusted) {
-        logger.warn("⚠️ Workspace is not trusted. Clarion features will remain disabled until trust is granted.");
-        window.showWarningMessage("Clarion extension requires workspace trust to enable features.");
-        return; // ⛔ Exit early only for untrusted workspace
-    }
-
-    // ✅ Load workspace settings if we have a workspace
-    if (hasWorkspace) {
-        await globalSettings.initializeFromWorkspace();
-        
-        // Log the current state of global variables after loading workspace settings
-        logger.info(`🔍 Global settings state after loading workspace settings:
+        // Log the current state of global variables after loading folder settings
+        logger.info(`🔍 Global settings state after loading folder settings:
             - globalSolutionFile: ${globalSolutionFile || 'not set'}
             - globalClarionPropertiesFile: ${globalClarionPropertiesFile || 'not set'}
             - globalClarionVersion: ${globalClarionVersion || 'not set'}`);
     } else {
-        logger.info("ℹ️ Skipping workspace settings - no workspace available");
+        logger.info("ℹ️ Skipping folder settings - no folder open");
     }
+    logger.info("✅ Phase 10 complete");
 
-    // ✅ Register basic commands that work without workspace
+    logger.info("🔄 Phase 11: Registering commands...");
     registerOpenCommand(context);
 
     context.subscriptions.push(commands.registerCommand("clarion.quickOpen", async () => {
-        if (!hasWorkspace) {
-            window.showInformationMessage("This feature requires a saved workspace. Use File → Save Workspace As...");
+        if (!hasFolder) {
+            window.showInformationMessage("This feature requires an open folder. Use File → Open Folder...");
             return;
         }
         if (!isTrusted) {
-            window.showWarningMessage("Clarion features require a trusted workspace.");
+            window.showWarningMessage("Clarion features require a trusted folder.");
             return;
         }
 
         await showClarionQuickOpen();
     }));
 
-    // Helper function to check workspace and trust before executing commands
-    const withWorkspaceAndTrust = (callback: () => Promise<void>) => async () => {
-        if (!hasWorkspace) {
-            window.showInformationMessage("This feature requires a saved workspace. Use File → Save Workspace As...");
+    // Helper function to check folder and trust before executing commands
+    const withFolderAndTrust = (callback: () => Promise<void>) => async () => {
+        if (!hasFolder) {
+            window.showInformationMessage("This feature requires an open folder. Use File → Open Folder...");
             return;
         }
         if (!isTrusted) {
-            window.showWarningMessage("Clarion features require a trusted workspace.");
+            window.showWarningMessage("Clarion features require a trusted folder.");
             return;
         }
         await callback();
     };
 
-    // Register workspace-dependent commands
-    const commandsRequiringWorkspace = [
-        { id: "clarion.openSolution", handler: openClarionSolution.bind(null, context) },
+    // Register commands (some work without folder, some need folder)
+    const commandsAlwaysAvailable = [
+        { id: "clarion.openSolution", handler: openClarionSolution.bind(null, context) }, // Works without folder - opens folder
+        { id: "clarion.debugSolutionHistory", handler: async () => {
+            const refs = await GlobalSolutionHistory.getReferences();
+            const valid = await GlobalSolutionHistory.getValidReferences();
+            logger.info(`📊 Debug Solution History:
+                Total: ${refs.length}
+                Valid: ${valid.length}`);
+            refs.forEach((ref, idx) => {
+                logger.info(`  ${idx + 1}. ${ref.solutionFile} (${ref.folderPath})`);
+            });
+            window.showInformationMessage(`Solution History: ${refs.length} total, ${valid.length} valid. Check output log for details.`);
+        }},
+    ];
+    
+    const commandsRequiringFolder = [
         { id: "clarion.openSolutionFromList", handler: openSolutionFromList.bind(null, context) },
         { id: "clarion.closeSolution", handler: closeClarionSolution.bind(null, context) },
         { id: "clarion.setConfiguration", handler: setConfiguration },
         { id: "clarion.openSolutionMenu", handler: async () => Promise.resolve() } // Empty handler for the submenu
     ];
 
-    commandsRequiringWorkspace.forEach(command => {
+    // Register commands that work without folder
+    commandsAlwaysAvailable.forEach(command => {
         context.subscriptions.push(
-            commands.registerCommand(command.id, withWorkspaceAndTrust(command.handler))
+            commands.registerCommand(command.id, command.handler)
         );
     });
 
-    // ✅ Only setup workspace-dependent features if we have a workspace
-    if (hasWorkspace && isTrusted) {
+    // Register commands that require folder
+    commandsRequiringFolder.forEach(command => {
+        context.subscriptions.push(
+            commands.registerCommand(command.id, withFolderAndTrust(command.handler))
+        );
+    });
+
+    // ✅ Only setup folder-dependent features if we have a folder open
+    if (hasFolder && isTrusted) {
         // ✅ Watch for changes in Clarion configuration settings
         context.subscriptions.push(
             workspace.onDidChangeConfiguration(async (event) => {
@@ -432,13 +477,13 @@ export async function activate(context: ExtensionContext): Promise<void> {
             })
         );
 
-        // ✅ Ensure all restored tabs are properly indexed (workspace with trust)
+        // ✅ Ensure all restored tabs are properly indexed (folder with trust)
         if (!isRefreshingRef.value) {
             await refreshOpenDocuments();
 
-            // Check if we have a solution file loaded from workspace settings
+            // Check if we have a solution file loaded from folder settings
             if (globalSolutionFile) {
-                logger.info(`✅ Solution file found in workspace settings: ${globalSolutionFile}`);
+                logger.info(`✅ Solution file found in folder settings: ${globalSolutionFile}`);
                 
                 // Wait for the language client to be ready before initializing the solution
                 if (client) {
@@ -462,17 +507,17 @@ export async function activate(context: ExtensionContext): Promise<void> {
                     vscodeWindow.showErrorMessage("Error initializing Clarion solution: Language client is not available.");
                 }
             } else {
-                logger.warn("⚠️ No solution file found in workspace settings.");
+                logger.warn("⚠️ No solution file found in folder settings.");
             }
         }
     } else {
-        // No workspace - log that advanced features are disabled
-        logger.info("ℹ️ Advanced features disabled: no workspace or workspace not trusted");
+        // No folder - log that advanced features are disabled
+        logger.info("ℹ️ Advanced features disabled: no folder open or folder not trusted");
     }
 
-    // ✅ ALWAYS create the views (they work without workspace)
+    // ✅ ALWAYS create the views (they work without folder)
     // Initialize the solution open context variable
-    await commands.executeCommand("setContext", "clarion.solutionOpen", hasWorkspace && !!globalSolutionFile);
+    await commands.executeCommand("setContext", "clarion.solutionOpen", hasFolder && !!globalSolutionFile);
     
     // Always create the solution tree view (shows "Open Solution" button when no solution)
     await createSolutionTreeView(context);
@@ -487,6 +532,76 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
     // Register the commands programmatically to avoid conflicts with other extensions
     context.subscriptions.push(
+        commands.registerCommand('clarion.openRecentSolution', async (folderPath: string, solutionPath: string) => {
+            logger.info(`🔄 Opening recent solution: ${solutionPath} in folder: ${folderPath}`);
+            
+            try {
+                // Always use the solution's actual folder, not what's stored (might be stale)
+                const actualSolutionFolder = path.dirname(solutionPath);
+                const currentFolder = workspace.workspaceFolders?.[0]?.uri.fsPath;
+                
+                logger.info(`   - Current folder: ${currentFolder}`);
+                logger.info(`   - Solution's actual folder: ${actualSolutionFolder}`);
+                logger.info(`   - Stored folder: ${folderPath}`);
+                
+                if (currentFolder && currentFolder.toLowerCase() === actualSolutionFolder.toLowerCase()) {
+                    // Already in the correct folder - just open the solution
+                    logger.info(`✅ Already in correct folder, opening solution directly`);
+                    await SmartSolutionOpener.openDetectedSolution(solutionPath);
+                } else {
+                    // Different folder - need to switch folders
+                    // First, add the solution to global history with CORRECT folder path
+                    await GlobalSolutionHistory.addSolution(solutionPath, actualSolutionFolder);
+                    logger.info(`✅ Added solution to global history with correct folder path`);
+                    
+                    // Open the folder - VS Code will reload
+                    await commands.executeCommand('vscode.openFolder', Uri.file(actualSolutionFolder), false);
+                    logger.info(`✅ Folder opened: ${actualSolutionFolder}`);
+                    // After reload, the solution should be in that folder's settings.json
+                }
+            } catch (error) {
+                logger.error(`❌ Error opening recent solution:`, error);
+                window.showErrorMessage(`Failed to open solution: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }),
+        
+        commands.registerCommand('clarion.openDetectedSolution', async (solutionPath: string) => {
+            console.log(`🔄🔄🔄 COMMAND clarion.openDetectedSolution TRIGGERED for ${solutionPath}`);
+            logger.info(`🔄 Executing clarion.openDetectedSolution command for ${solutionPath}`);
+            
+            try {
+                const success = await SmartSolutionOpener.openDetectedSolution(solutionPath);
+                
+                console.log(`🎯🎯🎯 SmartSolutionOpener returned: ${success}`);
+                
+                if (success) {
+                    // Global variables are already set by SmartSolutionOpener, no need to reload
+                    console.log(`✅✅✅ Solution opened successfully. Current globals:
+                        - globalSolutionFile: ${globalSolutionFile || 'not set'}
+                        - globalClarionPropertiesFile: ${globalClarionPropertiesFile || 'not set'}
+                        - globalClarionVersion: ${globalClarionVersion || 'not set'}`);
+                    
+                    // Initialize the solution
+                    console.log("🚀🚀🚀 About to call initializeSolution");
+                    await initializeSolution(context, true);
+                    console.log("✅✅✅ initializeSolution completed");
+                    
+                    // Explicitly refresh the tree view to show projects/apps
+                    if (solutionTreeDataProvider) {
+                        await solutionTreeDataProvider.refresh();
+                    }
+                    
+                    // Refresh status view
+                    if (statusViewProvider) {
+                        statusViewProvider.refresh();
+                    }
+                }
+            } catch (error) {
+                logger.error(`❌ Error in clarion.openDetectedSolution command: ${error instanceof Error ? error.message : String(error)}`);
+                window.showErrorMessage(`Error opening solution: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }),
+        
         commands.registerCommand('clarion.addSourceFile', async (node) => {
             logger.info(`🔄 Executing clarion.addSourceFile command`);
             
@@ -985,7 +1100,11 @@ async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: D
                 const defaultPropertiesPath = path.join(process.env.APPDATA || '', 'SoftVelocity', 'Clarion', 'ClarionProperties.xml');
                 if (fs.existsSync(defaultPropertiesPath)) {
                     logger.info(`✅ Using default properties file: ${defaultPropertiesPath}`);
-                    await workspace.getConfiguration().update('clarion.propertiesFile', defaultPropertiesPath, ConfigurationTarget.Workspace);
+                    const target = getClarionConfigTarget();
+                    if (target && workspace.workspaceFolders) {
+                        const config = workspace.getConfiguration("clarion", workspace.workspaceFolders[0].uri);
+                        await config.update('propertiesFile', defaultPropertiesPath, target);
+                    }
                     
                     // Use the setGlobalClarionSelection function to update the global variables
                     await setGlobalClarionSelection(
@@ -1001,7 +1120,11 @@ async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: D
             if (!globalClarionVersion) {
                 const defaultVersion = "Clarion11";
                 logger.info(`✅ Using default Clarion version: ${defaultVersion}`);
-                await workspace.getConfiguration().update('clarion.version', defaultVersion, ConfigurationTarget.Workspace);
+                const target = getClarionConfigTarget();
+                if (target && workspace.workspaceFolders) {
+                    const config = workspace.getConfiguration("clarion", workspace.workspaceFolders[0].uri);
+                    await config.update('version', defaultVersion, target);
+                }
                 
                 // Use the setGlobalClarionSelection function to update the global variables
                 await setGlobalClarionSelection(
@@ -1035,9 +1158,17 @@ async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: D
 
 async function initializeSolution(context: ExtensionContext, refreshDocs: boolean = false): Promise<void> {
     logger.info("🔄 Initializing Clarion Solution...");
+    
+    logger.info(`🔍 BEFORE CHECK - Global variables state:
+        - globalSolutionFile: ${globalSolutionFile || 'NOT SET'}
+        - globalClarionPropertiesFile: ${globalClarionPropertiesFile || 'NOT SET'}
+        - globalClarionVersion: ${globalClarionVersion || 'NOT SET'}`);
 
     if (!globalSolutionFile || !globalClarionPropertiesFile || !globalClarionVersion) {
         logger.warn("⚠️ Missing required settings (solution file, properties file, or version). Initialization aborted.");
+        logger.warn(`    - globalSolutionFile: ${globalSolutionFile || 'MISSING'}`);
+        logger.warn(`    - globalClarionPropertiesFile: ${globalClarionPropertiesFile || 'MISSING'}`);
+        logger.warn(`    - globalClarionVersion: ${globalClarionVersion || 'MISSING'}`);
         return;
     }
 
@@ -1062,8 +1193,12 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
         }
 
         // ✅ Save the new selection
-        await workspace.getConfiguration().update("clarion.configuration", globalSettings.configuration, ConfigurationTarget.Workspace);
-        logger.info(`✅ Updated configuration: ${globalSettings.configuration}`);
+        const target = getClarionConfigTarget();
+        if (target && workspace.workspaceFolders) {
+            const config = workspace.getConfiguration("clarion", workspace.workspaceFolders[0].uri);
+            await config.update("configuration", globalSettings.configuration, target);
+            logger.info(`✅ Updated configuration: ${globalSettings.configuration}`);
+        }
     }
     // ✅ Wait for the language client to be ready before proceeding
     if (client) {
@@ -1344,17 +1479,13 @@ let definitionProviderDisposable: Disposable | null = null;
 let semanticTokensProviderDisposable: Disposable | null = null;
 
 function registerLanguageFeatures(context: ExtensionContext) {
-    console.log("🔥🔥🔥 registerLanguageFeatures CALLED 🔥🔥🔥");
-    logger.info("🔥🔥🔥 registerLanguageFeatures CALLED 🔥🔥🔥");
+    logger.info("registerLanguageFeatures called");
     
     if (!documentManager) {
         logger.warn("⚠️ Cannot register language features: documentManager is undefined!");
-        console.log("🔥🔥🔥 documentManager is UNDEFINED 🔥🔥🔥");
         return;
     }
     
-    console.log("🔥🔥🔥 documentManager EXISTS 🔥🔥🔥");
-
     // ✅ Fix: Ensure only one Document Link Provider is registered
     if (documentLinkProviderDisposable) {
         documentLinkProviderDisposable.dispose(); // Remove old provider if it exists
@@ -1400,7 +1531,6 @@ function registerLanguageFeatures(context: ExtensionContext) {
     }
     
     logger.info("🔍 Registering Implementation Provider...");
-    console.log("🔥🔥🔥 REGISTERING ClarionImplementationProvider 🔥🔥🔥");
     implementationProviderDisposable = languages.registerImplementationProvider(
         documentSelectors,
         new ClarionImplementationProvider(documentManager)
@@ -1410,22 +1540,24 @@ function registerLanguageFeatures(context: ExtensionContext) {
     logger.info(`📄 Registered Implementation Provider for extensions: ${lookupExtensions.join(', ')}`);
     
     // ✅ DISABLED: Client-side Definition Provider blocks server-side providers
-    // All definition requests now handled by server-side DefinitionProvider
+    // All definition requests now handled by:
+    // 1. Middleware for reverse MAP navigation (implementation → declaration)
+    // 2. Server-side DefinitionProvider for everything else
     // This includes: variables, parameters, methods, structures, etc.
-    /*
     if (definitionProviderDisposable) {
         definitionProviderDisposable.dispose();
     }
     
-    logger.info("🔍 Registering Definition Provider for class methods...");
-    definitionProviderDisposable = languages.registerDefinitionProvider(
-        documentSelectors,
-        new ClarionDefinitionProvider(documentManager)
-    );
-    context.subscriptions.push(definitionProviderDisposable);
+    // REMOVED: Client-side Definition Provider
+    // logger.info("🔍 Registering Definition Provider for class methods...");
+    // definitionProviderDisposable = languages.registerDefinitionProvider(
+    //     documentSelectors,
+    //     new ClarionDefinitionProvider(documentManager)
+    // );
+    // context.subscriptions.push(definitionProviderDisposable);
+    // 
+    // logger.info(`📄 Registered Definition Provider for extensions: ${lookupExtensions.join(', ')}`);
     
-    logger.info(`📄 Registered Definition Provider for extensions: ${lookupExtensions.join(', ')}`);
-    */
     // ✅ Register Prefix Decorator for variable highlighting
     if (semanticTokensProviderDisposable) {
         semanticTokensProviderDisposable.dispose(); // Remove old provider if it exists
@@ -1674,6 +1806,11 @@ async function createStructureView(context: ExtensionContext) {
         structureView.onDidChangeVisibility(async e => {
             await commands.executeCommand('setContext', 'clarionStructureViewVisible', e.visible);
             
+            // Update the provider's visibility state so Follow Cursor only works when view is visible
+            if (structureViewProvider) {
+                structureViewProvider.setViewVisible(e.visible);
+            }
+            
             // If the view becomes visible, ensure the follow cursor context is set correctly
             if (e.visible && structureViewProvider) {
                 const isEnabled = structureViewProvider.isFollowCursorEnabled();
@@ -1733,12 +1870,17 @@ export async function closeClarionSolution(context: ExtensionContext) {
     try {
         logger.info("🔄 Closing Clarion solution...");
         
-        // Clear solution-related settings from workspace
-        await workspace.getConfiguration().update("clarion.solutionFile", "", ConfigurationTarget.Workspace);
-        
-        // Clear the current solution setting
-        await workspace.getConfiguration().update("clarion.currentSolution", "", ConfigurationTarget.Workspace);
-        logger.info("✅ Cleared current solution setting");
+        const target = getClarionConfigTarget();
+        if (target && workspace.workspaceFolders) {
+            const config = workspace.getConfiguration("clarion", workspace.workspaceFolders[0].uri);
+            
+            // Clear solution-related settings from folder settings
+            await config.update("solutionFile", "", target);
+            
+            // Clear the current solution setting
+            await config.update("currentSolution", "", target);
+            logger.info("✅ Cleared current solution setting");
+        }
         
         // Reset global variables
         await setGlobalClarionSelection("", globalClarionPropertiesFile, globalClarionVersion, "");
@@ -1892,20 +2034,8 @@ export async function openSolutionFromList(context: ExtensionContext) {
 
 export async function openClarionSolution(context: ExtensionContext) {
     try {
-        // ✅ Check if workspace exists - offer to create one if not
+        // ✅ If no folder is open, let user pick solution and we'll open its folder
         if (!workspace.workspaceFolders) {
-            const choice = await window.showInformationMessage(
-                "Solutions require a workspace. Would you like to create one?",
-                { modal: true },
-                "Create Workspace & Open Solution",
-                "Cancel"
-            );
-            
-            if (choice !== "Create Workspace & Open Solution") {
-                return;
-            }
-            
-            // Let user pick solution file first
             const solutionUris = await window.showOpenDialog({
                 canSelectFiles: true,
                 canSelectFolders: false,
@@ -1921,61 +2051,18 @@ export async function openClarionSolution(context: ExtensionContext) {
             
             const solutionPath = solutionUris[0].fsPath;
             const solutionFolder = path.dirname(solutionPath);
-            const solutionName = path.basename(solutionPath, '.sln');
-            const defaultWorkspacePath = path.join(solutionFolder, `${solutionName}.code-workspace`);
             
-            // Ask where to save workspace
-            const workspaceChoice = await window.showInformationMessage(
-                `Create workspace in solution folder?\n${solutionFolder}`,
-                { modal: true },
-                "Create Here",
-                "Choose Different Location",
-                "Cancel"
-            );
+            // ✅ Add to global history BEFORE opening folder so it's remembered after reload
+            await GlobalSolutionHistory.addSolution(solutionPath, solutionFolder);
+            logger.info(`✅ Added solution to global history before opening folder`);
             
-            if (workspaceChoice === "Cancel" || !workspaceChoice) {
-                window.showInformationMessage("Workspace creation canceled.");
-                return;
-            }
+            // Open the folder containing the solution
+            logger.info(`📂 Opening folder: ${solutionFolder}`);
+            await commands.executeCommand('vscode.openFolder', Uri.file(solutionFolder), false);
             
-            let finalWorkspacePath = defaultWorkspacePath;
-            
-            if (workspaceChoice === "Choose Different Location") {
-                const saveUri = await window.showSaveDialog({
-                    defaultUri: Uri.file(defaultWorkspacePath),
-                    filters: { 'Workspace': ['code-workspace'] },
-                    title: 'Save Workspace As'
-                });
-                
-                if (!saveUri) {
-                    window.showInformationMessage("Workspace creation canceled.");
-                    return;
-                }
-                finalWorkspacePath = saveUri.fsPath;
-            }
-            
-            // Create workspace file
-            const workspaceContent = {
-                folders: [{ path: solutionFolder }],
-                settings: {
-                    "clarion.solutionFile": solutionPath
-                }
-            };
-            
-            try {
-                fs.writeFileSync(finalWorkspacePath, JSON.stringify(workspaceContent, null, 2));
-                logger.info(`✅ Created workspace file: ${finalWorkspacePath}`);
-                
-                // Open the workspace (VS Code will reload)
-                window.showInformationMessage(`Workspace created. Opening ${solutionName}...`);
-                await commands.executeCommand('vscode.openFolder', Uri.file(finalWorkspacePath));
-                
-                return;
-            } catch (error) {
-                logger.error(`❌ Error creating workspace: ${error instanceof Error ? error.message : String(error)}`);
-                window.showErrorMessage(`Failed to create workspace: ${error instanceof Error ? error.message : String(error)}`);
-                return;
-            }
+            // VS Code will reload with the folder open, and the extension will activate
+            // The solution will be detected and shown in the solution view
+            return;
         }
 
         // ✅ Store current values in case user cancels
@@ -2028,6 +2115,13 @@ export async function openClarionSolution(context: ExtensionContext) {
                     selectedItem.solution.version,
                     selectedItem.solution.configuration
                 );
+                
+                // Add to global solution history
+                if (workspace.workspaceFolders && workspace.workspaceFolders.length > 0) {
+                    const folderPath = path.dirname(selectedItem.solution.solutionFile);
+                    await GlobalSolutionHistory.addSolution(selectedItem.solution.solutionFile, folderPath);
+                    logger.info("✅ Added to global solution history");
+                }
                 
                 // Set environment variable for the server to use
                 process.env.CLARION_SOLUTION_FILE = selectedItem.solution.solutionFile;
@@ -2112,6 +2206,11 @@ export async function openClarionSolution(context: ExtensionContext) {
         // ✅ Step 4: Save final selections to workspace settings
         await setGlobalClarionSelection(solutionFilePath, globalClarionPropertiesFile, globalClarionVersion, globalSettings.configuration);
         logger.info(`⚙️ Selected configuration: ${globalSettings.configuration}`);
+        
+        // ✅ Add to global solution history
+        const folderPath = path.dirname(solutionFilePath);
+        await GlobalSolutionHistory.addSolution(solutionFilePath, folderPath);
+        logger.info("✅ Added to global solution history");
         
         // ✅ Set environment variable for the server to use
         process.env.CLARION_SOLUTION_FILE = solutionFilePath;
@@ -2387,7 +2486,11 @@ async function setConfiguration() {
 
     if (selectedConfig) {
         globalSettings.configuration = selectedConfig;
-        await workspace.getConfiguration().update("clarion.configuration", selectedConfig, ConfigurationTarget.Workspace);
+        const target = getClarionConfigTarget();
+        if (target && workspace.workspaceFolders) {
+            const config = workspace.getConfiguration("clarion", workspace.workspaceFolders[0].uri);
+            await config.update("configuration", selectedConfig, target);
+        }
         updateConfigurationStatusBar(selectedConfig);
         vscodeWindow.showInformationMessage(`Configuration set to: ${selectedConfig}`);
     }
@@ -2531,8 +2634,56 @@ async function startClientServer(context: ExtensionContext, hasOpenXmlFiles: boo
             ],
         },
         middleware: {
-            provideDefinition: (document, position, token, next) => {
+            provideDefinition: async (document, position, token, next) => {
                 logger.info(`🔥 CLIENT MIDDLEWARE: Definition request for ${document.uri.toString()} at ${position.line}:${position.character}`);
+                
+                // First check if we're on a PROCEDURE implementation - if so, find MAP declaration
+                // This handles reverse navigation: implementation → declaration
+                if (documentManager) {
+                    const line = document.lineAt(position.line);
+                    const lineText = line.text;
+                    
+                    // Match: ProcName PROCEDURE(...) or Class.MethodName PROCEDURE(...)
+                    const procMatch = lineText.match(/^\s*([A-Za-z_][A-Za-z0-9_\.]*)\s+PROCEDURE/i);
+                    if (procMatch) {
+                        const fullName = procMatch[1];
+                        const simpleName = fullName.includes('.') ? fullName.split('.').pop()! : fullName;
+                        
+                        logger.info(`Detected PROCEDURE implementation: ${fullName} (simple: ${simpleName})`);
+                        
+                        // Search for MAP declaration
+                        const content = document.getText();
+                        const lines = content.split('\n');
+                        
+                        for (let i = 0; i < lines.length; i++) {
+                            const mapLine = lines[i].trim().toUpperCase();
+                            
+                            if (mapLine === 'MAP') {
+                                logger.info(`Found MAP block at line ${i}`);
+                                logger.info(`End of MAP block searching for: ${simpleName}`);
+                                
+                                for (let j = i + 1; j < lines.length; j++) {
+                                    const declLine = lines[j].trim();
+                                    logger.info(`Checking MAP declaration: ${declLine} against ${simpleName}`);
+                                    
+                                    if (declLine.toUpperCase().startsWith('END')) {
+                                        break;
+                                    }
+                                    
+                                    // Match procedure name at start of line, possibly followed by whitespace and PROCEDURE keyword
+                                    const declMatch = declLine.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s+(PROCEDURE|FUNCTION|CLASS)/i);
+                                    if (declMatch && declMatch[1].toUpperCase() === simpleName.toUpperCase()) {
+                                        logger.info(`Found MAP declaration for ${simpleName} at line ${j} - returning location`);
+                                        return [new Location(document.uri, new Position(j, 0))];
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                // Not a PROCEDURE implementation, let server handle it
                 return next(document, position, token);
             }
         },
