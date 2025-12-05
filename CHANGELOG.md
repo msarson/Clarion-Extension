@@ -15,6 +15,11 @@ All notable changes to the "clarion-extension" extension will be documented in t
   - Updated Knowledge Base with SECTION documentation
 
 ### 🐛 Bug Fixes
+- **Fixed COMPILE/OMIT same-line terminator validation** - No longer shows false positive for terminators on same line
+  - Example: `COMPILE('!** End **',expr) ; code !** End **` now validates correctly
+  - Searches for terminator only AFTER the directive's closing paren
+  - Handles both COMPILE and OMIT directives
+
 - **Fixed Clarion Tools sidebar auto-reveal** - Follow Cursor now only works when Structure View is visible
   - Root cause: `treeView.reveal()` called by Follow Cursor was bringing sidebar into focus
   - Solution: Follow Cursor enabled by default BUT only works when Structure View pane is visible
