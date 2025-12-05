@@ -1018,5 +1018,22 @@ CODE
             const returnDiagnostics = diagnostics.filter(d => d.message.includes('RETURN'));
             assert.strictEqual(returnDiagnostics.length, 0, 'Should not flag RETURN with expression');
         });
+
+        test('Should validate MAP procedures with return types', () => {
+            const code = `  PROGRAM
+                    MAP
+MyProcedure PROCEDURE(),LONG                    
+                    END
+
+MyProcedure  PROCEDURE()
+    CODE`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            const returnDiagnostics = diagnostics.filter(d => d.message.includes('RETURN'));
+            assert.strictEqual(returnDiagnostics.length, 1, 'Should flag MAP procedure missing RETURN');
+            assert.ok(returnDiagnostics[0].message.includes('MyProcedure'), 'Should mention procedure name');
+        });
     });
 });

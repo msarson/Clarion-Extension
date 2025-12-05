@@ -797,9 +797,60 @@ export class DiagnosticProvider {
             line: number;          // Declaration line
         }> = [];
         
-        // Find declarations in CLASS blocks
+        // Find declarations in CLASS blocks and MAP blocks
         for (let i = 0; i < tokens.length; i++) {
             const token = tokens[i];
+            
+            // Look for MAP declarations
+            if (token.type === TokenType.Structure && token.value.toUpperCase() === 'MAP') {
+                // Find END of MAP
+                let mapEndLine = -1;
+                for (let j = i + 1; j < tokens.length; j++) {
+                    if (tokens[j].value.toUpperCase() === 'END' && tokens[j].start === 0) {
+                        mapEndLine = tokens[j].line;
+                        break;
+                    }
+                }
+                
+                // Scan procedures in MAP
+                for (let j = i + 1; j < tokens.length && (mapEndLine === -1 || tokens[j].line < mapEndLine); j++) {
+                    if ((tokens[j].type === TokenType.Procedure || tokens[j].type === TokenType.Routine) &&
+                        (tokens[j].value.toUpperCase() === 'PROCEDURE' || tokens[j].value.toUpperCase() === 'FUNCTION')) {
+                        
+                        // Find procedure name (should be at start of line)
+                        const procNameToken = tokens.find(t =>
+                            t.line === tokens[j].line && t.start === 0 && t.type === TokenType.Label
+                        );
+                        
+                        if (!procNameToken) continue;
+                        
+                        // Check for return type: ProcName PROCEDURE(...), ReturnType
+                        let parenDepth = 0;
+                        for (let k = j + 1; k < tokens.length && tokens[k].line === tokens[j].line; k++) {
+                            if (tokens[k].value === '(') parenDepth++;
+                            else if (tokens[k].value === ')') {
+                                parenDepth--;
+                                if (parenDepth === 0) {
+                                    // Check for comma and return type
+                                    if (k + 1 < tokens.length && tokens[k + 1].value === ',') {
+                                        if (k + 2 < tokens.length) {
+                                            const returnTypeToken = tokens[k + 2];
+                                            if (returnTypeToken.type === TokenType.Type || returnTypeToken.type === TokenType.Label) {
+                                                declarationsWithReturnTypes.push({
+                                                    name: procNameToken.value,  // Just procedure name, no class prefix
+                                                    returnType: returnTypeToken.value,
+                                                    line: procNameToken.line
+                                                });
+                                            }
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             
             // Look for CLASS declarations
             if (token.type === TokenType.Structure && token.value.toUpperCase() === 'CLASS') {
