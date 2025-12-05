@@ -182,11 +182,12 @@ export class ClarionImplementationProvider implements ImplementationProvider {
             return null;
         }
 
-        logger.info(`Found location at position: ${location.statementType} to ${location.fullFileName}`);
+        logger.info(`Found location at position: ${location.statementType} - className="${location.className || 'none'}", methodName="${location.methodName || 'none'}"`);
+        logger.info(`  File: ${location.fullFileName}`);
         
         // Only handle METHOD type locations
         if (location.statementType !== "METHOD") {
-            logger.info(`Location is not a method declaration (type: ${location.statementType})`);
+            logger.info(`Location is not a method declaration (type: ${location.statementType}), returning null`);
             return null;
         }
         
