@@ -503,7 +503,11 @@
             "properties": {
                 "clarion.build.revealOutput": {
                     "type": "string",
-                    "enum": ["never", "always", "onError"],
+                    "enum": [
+                        "never",
+                        "always",
+                        "onError"
+                    ],
                     "default": "never",
                     "description": "Controls when to show the build output terminal. 'never': never show, 'always': always show, 'onError': only show when build fails."
                 },
@@ -863,6 +867,9 @@
     "scripts": {
         "vscode:prepublish": "npm run compile",
         "compile": "tsc -b",
+        "compile:release": "cross-env VSCODE_RELEASE_MODE=true npm run compile",
+        "package": "vsce package",
+        "package:release": "cross-env VSCODE_RELEASE_MODE=true vsce package",
         "watch": "tsc -b -w",
         "test": "npm run compile && mocha out/server/src/test/**/*.test.js"
     },
@@ -873,6 +880,7 @@
         "@types/xml2js": "^0.4.14",
         "@typescript-eslint/parser": "^8.25.0",
         "@vscode/test-electron": "^2.4.1",
+        "cross-env": "^10.1.0",
         "eslint": "^9.21.0",
         "mocha": "^11.0.0",
         "rimraf": "^6.0.1",

@@ -110,7 +110,7 @@ git commit -m "feat: add support for X"
 # Stop here - wait for user to request push
 ```
 
-### 3. Version Management
+### 3. Version Management & Publishing
 
 **IMPORTANT:** Version changes happen ONLY during release process.
 
@@ -125,6 +125,7 @@ git commit -m "feat: add support for X"
 1. **User says:** "Merge to main" or "Ready to release"
 2. **You respond:** "Ready to merge. This will require:
    - Version bump (current: X.Y.Z)
+   - Build in release mode (important for logging)
    - Package extension (.vsix)
    - Publish to marketplace
    
@@ -144,8 +145,11 @@ git commit -m "feat: add support for X"
    git merge [current-branch]
    git push origin main
    
-   # Package extension
-   vsce package
+   # Build in RELEASE MODE (important!)
+   npm run compile:release
+   
+   # Package extension IN RELEASE MODE
+   npm run package:release
    
    # User will manually publish to marketplace
    ```
@@ -153,6 +157,22 @@ git commit -m "feat: add support for X"
    - Ask user for next version number
    - Create new branch: `git checkout -b v[next-version]`
    - Confirm branch creation with user
+
+#### ⚠️ CRITICAL: Release Mode Logging
+
+**Always use release mode when building for marketplace publish:**
+
+- **Development builds**: `npm run compile` (warn-level logging)
+- **Release builds**: `npm run compile:release` (error-level only)
+- **Package for release**: `npm run package:release`
+
+**What Release Mode Does:**
+- Sets `VSCODE_RELEASE_MODE=true` environment variable
+- Activates minimal logging via `common/LoggingConfig.ts`
+- Reduces console output for end users
+- Makes extension logs cleaner in production
+
+**Never publish without release mode** - this will flood user consoles with debug logs!
 
 #### Version Branching Strategy
 - `main` - Production releases only

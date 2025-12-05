@@ -1,3 +1,5 @@
+import { LoggingConfig } from '../../common/LoggingConfig';
+
 class Logger {
     private level: "debug" | "info" | "warn" | "error";
     private name: string;
@@ -52,9 +54,17 @@ class Logger {
 class LoggerManager {
     private static loggers: Map<string, Logger> = new Map();
 
-    static getLogger(name: string, level: "debug" | "info" | "warn" | "error" = "warn"): Logger {
+    /**
+     * Get or create a logger instance
+     * @param name Logger name (usually module/class name)
+     * @param level Optional log level override. If not provided, uses environment-appropriate default
+     */
+    static getLogger(name: string, level?: "debug" | "info" | "warn" | "error"): Logger {
+        // Use provided level, or get default based on release/dev mode
+        const logLevel = level ?? LoggingConfig.getDefaultLogLevel();
+        
         if (!LoggerManager.loggers.has(name)) {
-            LoggerManager.loggers.set(name, new Logger(name, level));
+            LoggerManager.loggers.set(name, new Logger(name, logLevel));
         }
         return LoggerManager.loggers.get(name)!;
     }
