@@ -3,6 +3,18 @@ All notable changes to the "clarion-extension" extension will be documented in t
 
 ---
 
+## [Unreleased]
+
+### 🐛 Bug Fixes
+- **Fixed Clarion Tools sidebar auto-reveal** - Disabled "Follow Cursor" feature by default in Structure View
+  - Root cause: `treeView.reveal()` called by Follow Cursor was bringing sidebar into focus
+  - This explains file-specific behavior: files with more structure (e.g., WINDOW controls) triggered reveals more often
+  - Solution: Set `followCursor = false` by default
+  - Users can still enable "Follow Cursor" via right-click menu in Structure View
+  - Fixes: Clicking into or opening .clw files no longer auto-reveals Clarion Tools when another sidebar is active
+
+---
+
 ## [0.7.3] - 2024-12-04
 
 ### 🚀 Major: Folder-Based Workflow (No Workspace Files Required)
