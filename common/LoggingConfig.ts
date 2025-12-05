@@ -19,9 +19,13 @@ export class LoggingConfig {
      * - VSCODE_RELEASE_MODE environment variable is set to 'true'
      * 
      * This should be set ONLY when packaging for marketplace publish.
+     * 
+     * Note: This is a getter function so it checks the environment variable
+     * at runtime (not compile time), allowing testing with F5 debugging.
      */
-    private static readonly IS_RELEASE_MODE = 
-        process.env.VSCODE_RELEASE_MODE === 'true';
+    private static get IS_RELEASE_MODE(): boolean {
+        return process.env.VSCODE_RELEASE_MODE === 'true';
+    }
     
     /**
      * Log level for release builds (marketplace)
