@@ -319,13 +319,18 @@ export class DiagnosticProvider {
         const ifToken = tokens[ifTokenIndex];
         const ifLine = ifToken.line;
         
-        // Look ahead for THEN keyword on the same line
+        // Look ahead for THEN keyword or semicolon on the same line
         for (let i = ifTokenIndex + 1; i < tokens.length; i++) {
             const token = tokens[i];
             
             // Stop if we hit a different line
             if (token.line !== ifLine) {
                 break;
+            }
+            
+            // Check if this is a semicolon (statement separator) - this makes it a single-line IF
+            if (token.type === TokenType.Operator && token.value === ';') {
+                return true;
             }
             
             // Check if this is THEN keyword
@@ -337,6 +342,11 @@ export class DiagnosticProvider {
                     // Stop if we hit a different line
                     if (nextToken.line !== ifLine) {
                         break;
+                    }
+                    
+                    // Check for semicolon - this makes it a single-line IF
+                    if (nextToken.type === TokenType.Operator && nextToken.value === ';') {
+                        return true;
                     }
                     
                     // If we find any meaningful token (not just whitespace/comments), it's a single-line IF
