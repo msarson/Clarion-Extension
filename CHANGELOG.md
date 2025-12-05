@@ -6,12 +6,15 @@ All notable changes to the "clarion-extension" extension will be documented in t
 ## [Unreleased]
 
 ### 🐛 Bug Fixes
-- **Fixed Clarion Tools sidebar auto-reveal** - Disabled "Follow Cursor" feature by default in Structure View
+- **Fixed Clarion Tools sidebar auto-reveal** - Follow Cursor now only works when Structure View is visible
   - Root cause: `treeView.reveal()` called by Follow Cursor was bringing sidebar into focus
-  - This explains file-specific behavior: files with more structure (e.g., WINDOW controls) triggered reveals more often
-  - Solution: Set `followCursor = false` by default
-  - Users can still enable "Follow Cursor" via right-click menu in Structure View
-  - Fixes: Clicking into or opening .clw files no longer auto-reveals Clarion Tools when another sidebar is active
+  - Solution: Follow Cursor enabled by default BUT only works when Structure View pane is visible
+  - Prevents sidebar from stealing focus when working in other views (Explorer, Source Control, etc.)
+  - Preserves useful Follow Cursor functionality when Structure View is actually open
+  - Users get best of both worlds: feature works when needed, doesn't interfere when not
+
+### 💡 Technical Details
+The file-specific behavior (ATSort_Window.clw vs ATSort_DATA.clw) was due to files with more structure (WINDOW controls) triggering more reveal() calls. Now reveal() only happens when the Structure View is visible.
 
 ---
 
