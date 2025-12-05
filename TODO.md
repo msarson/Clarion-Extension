@@ -305,6 +305,56 @@ Needs coverage:
 
 ## 🔧 Technical Debt
 
+### Architecture - Navigation Provider Duplication
+**Priority:** MEDIUM  
+**Status:** Not Started  
+**Date Added:** Dec 5, 2024
+
+#### Problem
+MAP procedure and CLASS method navigation is split between client and server with significant duplication:
+
+**Current State:**
+- **SERVER SIDE:** Has tokens, document structure, symbols for ALL declarations (including PROCEDURE)
+- **CLIENT SIDE:** Re-parses documents to extract MAP procedures and CLASS methods for navigation
+- **Result:** Duplicate parsing, inconsistent data, confusing architecture
+
+**Why It's Currently Client-Side:**
+- DocumentManager was built for INCLUDE/MODULE file links (needs file system access)
+- MAP/CLASS navigation was added to existing DocumentManager
+- Client-side made sense at the time for file system access
+
+#### Proposed Solution
+**Option 1: Move Navigation to Server** (Recommended)
+- Server already has DocumentSymbols with all declarations
+- Add MAP block tracking to server-side tokenizer/symbol provider
+- Move Definition/Implementation providers to server
+- Keep only INCLUDE/MODULE/MEMBER on client (file system needs)
+
+**Option 2: Consolidate Without Moving**
+- Server sends MAP/CLASS metadata to client via custom LSP notification
+- Client uses that data for navigation (no duplicate parsing)
+
+#### Benefits
+- ✅ Eliminate duplicate parsing
+- ✅ Single source of truth for declarations
+- ✅ Consistent behavior across features
+- ✅ Easier to maintain
+- ✅ Better performance
+
+#### Impact
+- Requires refactoring Definition, Implementation, and Hover providers
+- Need to handle cross-file navigation in server context
+- May need custom LSP protocol extensions
+
+#### Related Files
+- `client/src/documentManager.ts` - Client-side declaration tracking
+- `client/src/providers/definitionProvider.ts` - Client-side navigation
+- `client/src/providers/implementationProvider.ts` - Client-side navigation
+- `server/src/providers/ClarionDocumentSymbolProvider.ts` - Server-side symbols
+- `server/src/ClarionTokenizer.ts` - Server-side tokenization
+
+---
+
 ### Code Organization
 - ✅ **COMPLETE:** Separated tokenizer logic into smaller, focused modules
   - Created `server/src/tokenizer/` directory with modular structure:
