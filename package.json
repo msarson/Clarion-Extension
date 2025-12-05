@@ -533,6 +533,7 @@
                         ".equ",
                         ".eq"
                     ],
+                    "scope": "resource",
                     "description": "Defines the file extensions used for searching files in Quick Open (Ctrl+P)."
                 },
                 "clarion.defaultLookupExtensions": {
@@ -546,6 +547,7 @@
                         ".equ",
                         ".eq"
                     ],
+                    "scope": "resource",
                     "description": "Defines the file extensions used for document linking and hover previews when a file is not part of a project."
                 },
                 "clarion.solutionFile": {
