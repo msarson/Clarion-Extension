@@ -52,6 +52,10 @@ export class DiagnosticProvider {
         const classInterfaceDiagnostics = this.validateClassInterfaceImplementation(tokens, document);
         diagnostics.push(...classInterfaceDiagnostics);
         
+        // Validate procedures/methods with return types have RETURN statements
+        const returnDiagnostics = this.validateReturnStatements(tokens, document);
+        diagnostics.push(...returnDiagnostics);
+        
         const perfTime = performance.now() - perfStart;
         console.log(`[DiagnosticProvider] 📊 PERF: Validation complete | time_ms=${perfTime.toFixed(2)}, tokens=${tokens.length}, diagnostics=${diagnostics.length}`);
         
@@ -765,6 +769,218 @@ export class DiagnosticProvider {
                     // This is informational - actual validation would be much more complex
                     // and would require building a complete symbol table
                     // For now, we just note that interface validation is limited
+                }
+            }
+        }
+        
+        return diagnostics;
+    }
+    
+    /**
+     * Validate that procedures/methods with return types have RETURN statements with values
+     * Phase 1: Basic validation - checks that at least one RETURN with value exists
+     * 
+     * IMPORTANT: Return types only appear in declarations (CLASS/MAP/MODULE), NEVER in implementations
+     * Strategy: Find declarations with return types, then find their implementations and validate
+     * 
+     * @param tokens - Tokenized document
+     * @param document - Original TextDocument for position mapping
+     * @returns Array of Diagnostic objects for missing RETURN statements
+     */
+    public static validateReturnStatements(tokens: Token[], document: TextDocument): Diagnostic[] {
+        const diagnostics: Diagnostic[] = [];
+        
+        // Step 1: Find all procedure/method declarations with return types
+        const declarationsWithReturnTypes: Array<{
+            name: string;           // Method name or full ClassName.MethodName
+            returnType: string;     // Return type (LONG, STRING, etc.)
+            line: number;          // Declaration line
+        }> = [];
+        
+        // Find declarations in CLASS blocks
+        for (let i = 0; i < tokens.length; i++) {
+            const token = tokens[i];
+            
+            // Look for CLASS declarations
+            if (token.type === TokenType.Structure && token.value.toUpperCase() === 'CLASS') {
+                // Find class name
+                const classNameToken = tokens.find(t => 
+                    t.type === TokenType.Label && t.line === token.line
+                );
+                
+                if (!classNameToken) continue;
+                
+                const className = classNameToken.value;
+                
+                // Find END of CLASS
+                let classEndLine = -1;
+                for (let j = i + 1; j < tokens.length; j++) {
+                    if (tokens[j].value.toUpperCase() === 'END' && tokens[j].start === 0) {
+                        classEndLine = tokens[j].line;
+                        break;
+                    }
+                }
+                
+                // Scan methods in CLASS
+                for (let j = i + 1; j < tokens.length && (classEndLine === -1 || tokens[j].line < classEndLine); j++) {
+                    if ((tokens[j].type === TokenType.Procedure || tokens[j].type === TokenType.Routine) &&
+                        (tokens[j].value.toUpperCase() === 'PROCEDURE' || tokens[j].value.toUpperCase() === 'FUNCTION')) {
+                        
+                        // Find method name (should be at start of line)
+                        const methodNameToken = tokens.find(t =>
+                            t.line === tokens[j].line && t.start === 0 && t.type === TokenType.Label
+                        );
+                        
+                        if (!methodNameToken) continue;
+                        
+                        // Check for return type: METHOD PROCEDURE(...), ReturnType
+                        let parenDepth = 0;
+                        for (let k = j + 1; k < tokens.length && tokens[k].line === tokens[j].line; k++) {
+                            if (tokens[k].value === '(') parenDepth++;
+                            else if (tokens[k].value === ')') {
+                                parenDepth--;
+                                if (parenDepth === 0) {
+                                    // Check for comma and return type
+                                    if (k + 1 < tokens.length && tokens[k + 1].value === ',') {
+                                        if (k + 2 < tokens.length) {
+                                            const returnTypeToken = tokens[k + 2];
+                                            if (returnTypeToken.type === TokenType.Type || returnTypeToken.type === TokenType.Label) {
+                                                declarationsWithReturnTypes.push({
+                                                    name: className + '.' + methodNameToken.value,
+                                                    returnType: returnTypeToken.value,
+                                                    line: methodNameToken.line
+                                                });
+                                            }
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Step 2: Find implementations and validate
+        for (const decl of declarationsWithReturnTypes) {
+            // Find the implementation
+            for (let i = 0; i < tokens.length; i++) {
+                const token = tokens[i];
+                
+                if ((token.type === TokenType.Procedure || token.type === TokenType.Routine) &&
+                    (token.value.toUpperCase() === 'PROCEDURE' || token.value.toUpperCase() === 'FUNCTION')) {
+                    
+                    // Reconstruct full name from tokens
+                    let fullName = '';
+                    if (i > 0 && (tokens[i - 1].type === TokenType.Label || tokens[i - 1].type === TokenType.Variable)) {
+                        fullName = tokens[i - 1].value;
+                        
+                        // Check for ClassName.MethodName pattern
+                        if (i > 2 && tokens[i - 2].value === '.' && tokens[i - 3].type === TokenType.Label) {
+                            fullName = tokens[i - 3].value + '.' + fullName;
+                        } else if (i > 1 && tokens[i - 2].type === TokenType.Label) {
+                            // Check source for dot
+                            const content = document.getText();
+                            const lines = content.split('\n');
+                            const line = lines[token.line];
+                            const className = tokens[i - 2].value;
+                            const methodName = tokens[i - 1].value;
+                            if (line.includes(className + '.' + methodName)) {
+                                fullName = className + '.' + methodName;
+                            }
+                        }
+                    }
+                    
+                    // Check if this matches our declaration
+                    if (fullName === decl.name) {
+                        // Find CODE and validate RETURN statements
+                        let codeLineStart = -1;
+                        
+                        for (let j = i + 1; j < tokens.length; j++) {
+                            if ((tokens[j].type === TokenType.Keyword || 
+                                 tokens[j].type === TokenType.Label ||
+                                 tokens[j].type === TokenType.ExecutionMarker) && 
+                                tokens[j].value.toUpperCase() === 'CODE') {
+                                codeLineStart = tokens[j].line;
+                                break;
+                            }
+                            if ((tokens[j].type === TokenType.Procedure || tokens[j].type === TokenType.Routine) &&
+                                (tokens[j].value.toUpperCase() === 'PROCEDURE' || tokens[j].value.toUpperCase() === 'FUNCTION')) {
+                                break;
+                            }
+                        }
+                        
+                        if (codeLineStart === -1) continue;
+                        
+                        // Find end of procedure
+                        let procedureEndLine = tokens[tokens.length - 1].line;
+                        for (let j = i + 1; j < tokens.length; j++) {
+                            if (j !== i && tokens[j].type === TokenType.Label) {
+                                if (j + 1 < tokens.length && 
+                                    (tokens[j + 1].type === TokenType.Procedure || tokens[j + 1].type === TokenType.Routine) &&
+                                    (tokens[j + 1].value.toUpperCase() === 'PROCEDURE' || tokens[j + 1].value.toUpperCase() === 'FUNCTION')) {
+                                    procedureEndLine = tokens[j].line - 1;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // Look for RETURN statements
+                        const returnStatements: { line: number; hasValue: boolean }[] = [];
+                        
+                        for (let j = i + 1; j < tokens.length; j++) {
+                            if (tokens[j].line > procedureEndLine) break;
+                            if (tokens[j].line < codeLineStart) continue;
+                            
+                            if (tokens[j].type === TokenType.Keyword && tokens[j].value.toUpperCase() === 'RETURN') {
+                                let hasValue = false;
+                                for (let k = j + 1; k < tokens.length && tokens[k].line === tokens[j].line; k++) {
+                                    if (tokens[k].type !== TokenType.Operator && 
+                                        tokens[k].value !== '(' && 
+                                        tokens[k].value !== ')' &&
+                                        tokens[k].value !== ',' &&
+                                        tokens[k].value !== '.' &&
+                                        tokens[k].type !== TokenType.Comment) {
+                                        hasValue = true;
+                                        break;
+                                    }
+                                }
+                                
+                                returnStatements.push({
+                                    line: tokens[j].line,
+                                    hasValue: hasValue
+                                });
+                            }
+                        }
+                        
+                        // Validate
+                        const implToken = i > 0 ? tokens[i - 1] : token;
+                        
+                        if (returnStatements.length === 0) {
+                            diagnostics.push({
+                                severity: DiagnosticSeverity.Error,
+                                range: {
+                                    start: { line: implToken.line, character: implToken.start },
+                                    end: { line: implToken.line, character: implToken.start + implToken.value.length }
+                                },
+                                message: `Procedure '${decl.name}' returns ${decl.returnType} but has no RETURN statement`,
+                                source: 'clarion'
+                            });
+                        } else if (returnStatements.every(r => !r.hasValue)) {
+                            diagnostics.push({
+                                severity: DiagnosticSeverity.Error,
+                                range: {
+                                    start: { line: implToken.line, character: implToken.start },
+                                    end: { line: implToken.line, character: implToken.start + implToken.value.length }
+                                },
+                                message: `Procedure '${decl.name}' returns ${decl.returnType} but all RETURN statements are empty`,
+                                source: 'clarion'
+                            });
+                        }
+                        
+                        break; // Found implementation, move to next declaration
+                    }
                 }
             }
         }
