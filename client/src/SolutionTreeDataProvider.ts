@@ -230,6 +230,7 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 
                 // Get recent solutions from global history
                 const recentSolutions = await GlobalSolutionHistory.getValidReferences();
+                logger.info(`📜 Found ${recentSolutions.length} recent solutions to display`);
                 
                 if (recentSolutions.length > 0) {
                     // Show recent solutions header

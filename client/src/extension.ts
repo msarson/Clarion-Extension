@@ -2026,6 +2026,10 @@ export async function openClarionSolution(context: ExtensionContext) {
             const solutionPath = solutionUris[0].fsPath;
             const solutionFolder = path.dirname(solutionPath);
             
+            // ✅ Add to global history BEFORE opening folder so it's remembered after reload
+            await GlobalSolutionHistory.addSolution(solutionPath, solutionFolder);
+            logger.info(`✅ Added solution to global history before opening folder`);
+            
             // Open the folder containing the solution
             logger.info(`📂 Opening folder: ${solutionFolder}`);
             await commands.executeCommand('vscode.openFolder', Uri.file(solutionFolder), false);

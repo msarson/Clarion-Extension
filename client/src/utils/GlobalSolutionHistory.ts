@@ -61,6 +61,7 @@ export class GlobalSolutionHistory {
         await this.context.globalState.update(GLOBAL_STATE_KEY, limited);
         
         logger.info(`✅ Added solution to global history: ${solutionFile}`);
+        logger.info(`📊 Total solutions in history: ${limited.length}`);
     }
 
     /**
@@ -73,6 +74,7 @@ export class GlobalSolutionHistory {
         }
 
         const references = this.context.globalState.get<SolutionReference[]>(GLOBAL_STATE_KEY, []);
+        logger.info(`📊 Retrieved ${references.length} references from global state`);
         
         // Convert date strings back to Date objects (they get serialized as strings)
         return references.map(ref => ({
@@ -86,6 +88,7 @@ export class GlobalSolutionHistory {
      */
     static async getValidReferences(): Promise<SolutionReference[]> {
         const references = await this.getReferences();
+        logger.info(`🔍 Validating ${references.length} references...`);
         const valid: SolutionReference[] = [];
 
         for (const ref of references) {
@@ -116,6 +119,7 @@ export class GlobalSolutionHistory {
             logger.info(`🧹 Cleaned up ${references.length - valid.length} invalid references`);
         }
 
+        logger.info(`✅ Returning ${valid.length} valid references`);
         return valid;
     }
 
