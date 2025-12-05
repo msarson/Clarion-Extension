@@ -536,11 +536,24 @@ export async function activate(context: ExtensionContext): Promise<void> {
             logger.info(`🔄 Opening recent solution: ${solutionPath} in folder: ${folderPath}`);
             
             try {
-                // Open the folder - VS Code will reload
-                await commands.executeCommand('vscode.openFolder', Uri.file(folderPath), false);
+                // Check if we're already in the right folder
+                const currentFolder = workspace.workspaceFolders?.[0]?.uri.fsPath;
                 
-                logger.info(`✅ Folder opened: ${folderPath}`);
-                // The extension will reactivate and load the solution from that folder's settings
+                if (currentFolder && currentFolder.toLowerCase() === folderPath.toLowerCase()) {
+                    // Already in the correct folder - just open the solution
+                    logger.info(`✅ Already in correct folder, opening solution directly`);
+                    await SmartSolutionOpener.openDetectedSolution(solutionPath);
+                } else {
+                    // Different folder - need to switch folders
+                    // First, add the solution to global history so it's remembered after reload
+                    await GlobalSolutionHistory.addSolution(solutionPath, folderPath);
+                    logger.info(`✅ Added solution to global history before folder switch`);
+                    
+                    // Open the folder - VS Code will reload
+                    await commands.executeCommand('vscode.openFolder', Uri.file(folderPath), false);
+                    logger.info(`✅ Folder opened: ${folderPath}`);
+                    // After reload, the solution should be in that folder's settings.json
+                }
             } catch (error) {
                 logger.error(`❌ Error opening recent solution:`, error);
                 window.showErrorMessage(`Failed to open solution: ${error instanceof Error ? error.message : String(error)}`);
