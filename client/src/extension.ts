@@ -32,7 +32,7 @@ import { escapeRegExp, getAllOpenDocuments, extractConfigurationsFromSolution } 
 import { updateConfigurationStatusBar, updateBuildProjectStatusBar, hideConfigurationStatusBar, hideBuildProjectStatusBar } from './statusbar/StatusBarManager';
 import { registerNavigationCommands } from './commands/NavigationCommands';
 import { registerBuildCommands } from './commands/BuildCommands';
-import { registerSolutionManagementCommands } from './commands/SolutionCommands';
+import { registerSolutionManagementCommands, registerSolutionOpeningCommands } from './commands/SolutionCommands';
 import { registerSolutionViewCommands, registerStructureViewCommands } from './commands/ViewCommands';
 import { registerProjectFileCommands } from './commands/ProjectFileCommands';
 
@@ -460,77 +460,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
     // Register the commands programmatically to avoid conflicts with other extensions
     context.subscriptions.push(
         ...registerProjectFileCommands(solutionTreeDataProvider),
-        
-        commands.registerCommand('clarion.openRecentSolution', async (folderPath: string, solutionPath: string) => {
-            logger.info(`🔄 Opening recent solution: ${solutionPath} in folder: ${folderPath}`);
-            
-            try {
-                // Always use the solution's actual folder, not what's stored (might be stale)
-                const actualSolutionFolder = path.dirname(solutionPath);
-                const currentFolder = workspace.workspaceFolders?.[0]?.uri.fsPath;
-                
-                logger.info(`   - Current folder: ${currentFolder}`);
-                logger.info(`   - Solution's actual folder: ${actualSolutionFolder}`);
-                logger.info(`   - Stored folder: ${folderPath}`);
-                
-                if (currentFolder && currentFolder.toLowerCase() === actualSolutionFolder.toLowerCase()) {
-                    // Already in the correct folder - just open the solution
-                    logger.info(`✅ Already in correct folder, opening solution directly`);
-                    await SmartSolutionOpener.openDetectedSolution(solutionPath);
-                } else {
-                    // Different folder - need to switch folders
-                    // First, add the solution to global history with CORRECT folder path
-                    await GlobalSolutionHistory.addSolution(solutionPath, actualSolutionFolder);
-                    logger.info(`✅ Added solution to global history with correct folder path`);
-                    
-                    // Open the folder - VS Code will reload
-                    await commands.executeCommand('vscode.openFolder', Uri.file(actualSolutionFolder), false);
-                    logger.info(`✅ Folder opened: ${actualSolutionFolder}`);
-                    // After reload, the solution should be in that folder's settings.json
-                }
-            } catch (error) {
-                logger.error(`❌ Error opening recent solution:`, error);
-                window.showErrorMessage(`Failed to open solution: ${error instanceof Error ? error.message : String(error)}`);
-            }
-        }),
-        
-        commands.registerCommand('clarion.openDetectedSolution', async (solutionPath: string) => {
-            console.log(`🔄🔄🔄 COMMAND clarion.openDetectedSolution TRIGGERED for ${solutionPath}`);
-            logger.info(`🔄 Executing clarion.openDetectedSolution command for ${solutionPath}`);
-            
-            try {
-                const success = await SmartSolutionOpener.openDetectedSolution(solutionPath);
-                
-                console.log(`🎯🎯🎯 SmartSolutionOpener returned: ${success}`);
-                
-                if (success) {
-                    // Global variables are already set by SmartSolutionOpener, no need to reload
-                    console.log(`✅✅✅ Solution opened successfully. Current globals:
-                        - globalSolutionFile: ${globalSolutionFile || 'not set'}
-                        - globalClarionPropertiesFile: ${globalClarionPropertiesFile || 'not set'}
-                        - globalClarionVersion: ${globalClarionVersion || 'not set'}`);
-                    
-                    // Initialize the solution
-                    console.log("🚀🚀🚀 About to call initializeSolution");
-                    await initializeSolution(context, true);
-                    console.log("✅✅✅ initializeSolution completed");
-                    
-                    // Explicitly refresh the tree view to show projects/apps
-                    if (solutionTreeDataProvider) {
-                        await solutionTreeDataProvider.refresh();
-                    }
-                    
-                    // Refresh status view
-                    if (statusViewProvider) {
-                        statusViewProvider.refresh();
-                    }
-                }
-            } catch (error) {
-                logger.error(`❌ Error in clarion.openDetectedSolution command: ${error instanceof Error ? error.message : String(error)}`);
-                window.showErrorMessage(`Error opening solution: ${error instanceof Error ? error.message : String(error)}`);
-            }
-        }),
-        
+        ...registerSolutionOpeningCommands(context, initializeSolution, solutionTreeDataProvider, statusViewProvider)
     );
 
 
