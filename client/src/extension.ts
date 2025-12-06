@@ -33,7 +33,6 @@ import { updateConfigurationStatusBar, updateBuildProjectStatusBar, hideConfigur
 import { registerNavigationCommands } from './commands/NavigationCommands';
 import { registerBuildCommands } from './commands/BuildCommands';
 import { registerSolutionManagementCommands, registerSolutionOpeningCommands, registerMiscSolutionCommands } from './commands/SolutionCommands';
-import { registerSolutionViewCommands, registerStructureViewCommands } from './commands/ViewCommands';
 import { registerProjectFileCommands } from './commands/ProjectFileCommands';
 import { createSolutionTreeView, createStructureView, createStatusView } from './views/ViewManager';
 import { registerLanguageFeatures, disposeLanguageFeatures } from './providers/LanguageFeatureManager';
@@ -445,7 +444,9 @@ export { showClarionQuickOpen } from './navigation/QuickOpenProvider';
 async function setConfiguration() {
     if (!globalSolutionFile) {
         // Refresh the solution tree view to show the "Open Solution" button
-        await createSolutionTreeView();
+        if (solutionTreeDataProvider) {
+            await solutionTreeDataProvider.refresh();
+        }
         vscodeWindow.showInformationMessage("No solution is currently open. Use the 'Open Solution' button in the Solution View.");
         return;
     }
@@ -512,7 +513,9 @@ async function buildSolutionOrProject(
     const solutionInfo = solutionCache.getSolutionInfo();
 
     if (!solutionInfo) {
-        await createSolutionTreeView();
+        if (solutionTreeDataProvider) {
+            await solutionTreeDataProvider.refresh();
+        }
         vscodeWindow.showInformationMessage(
             "No solution is currently open. Use the 'Open Solution' button in the Solution View."
         );
