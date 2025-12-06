@@ -32,6 +32,7 @@ import { escapeRegExp, getAllOpenDocuments, extractConfigurationsFromSolution } 
 import { updateConfigurationStatusBar, updateBuildProjectStatusBar, hideConfigurationStatusBar, hideBuildProjectStatusBar } from './statusbar/StatusBarManager';
 import { registerNavigationCommands } from './commands/NavigationCommands';
 import { registerBuildCommands } from './commands/BuildCommands';
+import { registerSolutionManagementCommands } from './commands/SolutionCommands';
 
 const logger = LoggerManager.getLogger("Extension");
 logger.setLevel("error"); // PERF: Only log errors to reduce overhead
@@ -722,37 +723,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
     context.subscriptions.push(
         ...registerNavigationCommands(treeView, solutionTreeDataProvider),
         ...registerBuildCommands(diagnosticCollection, buildSolutionOrProject, solutionTreeDataProvider),
-
-        // Add reinitialize solution command
-        commands.registerCommand('clarion.reinitializeSolution', async () => {
-            logger.info("🔄 Manually reinitializing solution...");
-            if (globalSolutionFile) {
-                // Wait for the language client to be ready before initializing the solution
-                if (client) {
-                    logger.info("⏳ Waiting for language client to be ready before reinitializing solution...");
-                    
-                    try {
-                        if (!isClientReady()) {
-                            await getClientReadyPromise();
-                            logger.info("✅ Language client is now ready for reinitialization.");
-                        }
-                        
-                        await initializeSolution(context, true);
-                        vscodeWindow.showInformationMessage("Solution reinitialized successfully.");
-                    } catch (error) {
-                        logger.error(`❌ Error waiting for language client: ${error instanceof Error ? error.message : String(error)}`);
-                        vscodeWindow.showErrorMessage("Error reinitializing Clarion solution: Language client failed to start.");
-                    }
-                } else {
-                    logger.error("❌ Language client is not available for reinitialization.");
-                    vscodeWindow.showErrorMessage("Error reinitializing Clarion solution: Language client is not available.");
-                }
-            } else {
-                // Refresh the solution tree view to show the "Open Solution" button
-                await createSolutionTreeView(context);
-                vscodeWindow.showInformationMessage("No solution is currently open. Use the 'Open Solution' button in the Solution View.");
-            }
-        }),
+        ...registerSolutionManagementCommands(context, client, initializeSolution, createSolutionTreeView),
         
         // Commands for adding/removing source files are already registered above
     );
