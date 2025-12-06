@@ -924,6 +924,41 @@ OMIT('**END2**')
 
             assert.strictEqual(diagnostics.length, 2, 'Should have 2 diagnostics for 2 unterminated blocks');
         });
+
+        test('Should handle FILE declaration with OMIT/COMPILE blocks', () => {
+            const code = `  PROGRAM
+MAP
+END
+
+            COMPILE('***',UseIPDrv)
+PrEquip                 FILE,PRE(PRE),BINDABLE,THREAD   ,DRIVER('IPDRV'),OWNER(IPDRV::OWNER)
+            !***
+            OMIT('***',UseIPDrv)
+PrEquip                 FILE,PRE(PRE),BINDABLE,THREAD   ,DRIVER('TOPSPEED','/TCF=.\\Topspeed.TCF')
+            !***
+KPrEquip_ID              KEY(PRE:Project_ID,PRE:Equip_ID),NOCASE
+Record                   RECORD,PRE()
+Equip_ID                    STRING(15)
+Project_ID                  LONG
+Descr                       STRING(40)
+Daily_Rate                  REAL
+PC_Code                     STRING(10)
+Flag                        BYTE
+CreateDate                  DATE
+CreateTime                  TIME
+UpdateDate                  DATE
+UpdateTime                  TIME
+                         END
+                       END
+
+  CODE
+  RETURN`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            assert.strictEqual(diagnostics.length, 0, 'FILE with OMIT/COMPILE should validate correctly');
+        });
     });
 
     suite('RETURN Statement Validation', () => {
