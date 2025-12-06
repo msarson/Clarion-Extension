@@ -35,6 +35,7 @@ import { registerBuildCommands } from './commands/BuildCommands';
 import { registerSolutionManagementCommands, registerSolutionOpeningCommands, registerMiscSolutionCommands } from './commands/SolutionCommands';
 import { registerSolutionViewCommands, registerStructureViewCommands } from './commands/ViewCommands';
 import { registerProjectFileCommands } from './commands/ProjectFileCommands';
+import { createSolutionTreeView, createStructureView, createStatusView } from './views/ViewManager';
 
 const logger = LoggerManager.getLogger("Extension");
 logger.setLevel("error"); // PERF: Only log errors to reduce overhead
@@ -397,13 +398,19 @@ export async function activate(context: ExtensionContext): Promise<void> {
     await commands.executeCommand("setContext", "clarion.solutionOpen", hasFolder && !!globalSolutionFile);
     
     // Always create the solution tree view (shows "Open Solution" button when no solution)
-    await createSolutionTreeView(context);
+    const solutionTreeResult = await createSolutionTreeView(context, treeView, solutionTreeDataProvider);
+    treeView = solutionTreeResult.treeView;
+    solutionTreeDataProvider = solutionTreeResult.provider;
     
     // Always create the structure view (shows document outline, works without workspace)
-    await createStructureView(context);
+    const structureViewResult = await createStructureView(context, structureView, structureViewProvider);
+    structureView = structureViewResult.structureView;
+    structureViewProvider = structureViewResult.provider;
     
     // Always create the status view (shows extension status and diagnostics)
-    await createStatusView(context);
+    const statusViewResult = await createStatusView(context);
+    statusView = statusViewResult.statusView;
+    statusViewProvider = statusViewResult.provider;
 
     context.subscriptions.push(...disposables);
 
@@ -964,131 +971,6 @@ async function registerOpenCommand(context: ExtensionContext) {
 
     if (!existingCommands.includes('clarion.openFile')) {
     }
-}
-async function createSolutionTreeView(context?: ExtensionContext) {
-    // ✅ If the tree view already exists, just refresh its data
-    if (treeView && solutionTreeDataProvider) {
-        logger.info("🔄 Refreshing existing solution tree...");
-        await solutionTreeDataProvider.refresh();
-        return;
-    }
-
-    // ✅ Create the solution tree provider
-    solutionTreeDataProvider = new SolutionTreeDataProvider();
-
-    try {
-        // ✅ Create the tree view only if it doesn't exist
-        treeView = vscodeWindow.createTreeView('solutionView', {
-            treeDataProvider: solutionTreeDataProvider,
-            showCollapseAll: true
-        });
-
-        // Register solution view commands
-        registerSolutionViewCommands(context, solutionTreeDataProvider);
-
-        // Initial refresh to load data
-        await solutionTreeDataProvider.refresh();
-
-        logger.info("✅ Solution tree view successfully registered and populated.");
-    } catch (error) {
-        logger.error("❌ Error registering solution tree view:", error);
-    }
-}
-
-async function createStructureView(context: ExtensionContext) {
-    // If the structure view already exists, just refresh its data
-    if (structureView && structureViewProvider) {
-        logger.info("🔄 Refreshing existing structure view...");
-        structureViewProvider.refresh();
-        return;
-    }
-
-    // Create the structure view provider
-    structureViewProvider = new StructureViewProvider();
-
-    try {
-        // Create the tree view
-        structureView = vscodeWindow.createTreeView('clarionStructureView', {
-            treeDataProvider: structureViewProvider,
-            showCollapseAll: true
-        });
-
-        // 🔥 Inject the TreeView back into the provider!
-        structureViewProvider.setTreeView(structureView);
-
-        // Initialize the follow cursor context
-        await commands.executeCommand('setContext', 'clarion.followCursorEnabled', structureViewProvider.isFollowCursorEnabled());
-        logger.info(`Initialized clarion.followCursorEnabled context to ${structureViewProvider.isFollowCursorEnabled()}`);
-
-        // Register structure view commands
-        registerStructureViewCommands(context, structureViewProvider);
-        
-        
-
-        structureView.title = "Structure";
-        structureView.message = "Current document structure";
-        structureView.description = "Clarion";
-
-        structureView.onDidChangeVisibility(async e => {
-            await commands.executeCommand('setContext', 'clarionStructureViewVisible', e.visible);
-            
-            // Update the provider's visibility state so Follow Cursor only works when view is visible
-            if (structureViewProvider) {
-                structureViewProvider.setViewVisible(e.visible);
-            }
-            
-            // If the view becomes visible, ensure the follow cursor context is set correctly
-            if (e.visible && structureViewProvider) {
-                const isEnabled = structureViewProvider.isFollowCursorEnabled();
-                await commands.executeCommand('setContext', 'clarion.followCursorEnabled', isEnabled);
-                logger.info(`Refreshed clarion.followCursorEnabled context to ${isEnabled}`);
-            }
-        });
-        
-        // Set the initial visibility context
-        await commands.executeCommand('setContext', 'clarionStructureViewVisible', true);
-
-        logger.info("✅ Structure view successfully registered.");
-    } catch (error) {
-        logger.error("❌ Error registering structure view:", error);
-    }
-}
-
-async function createStatusView(context: ExtensionContext) {
-    // Always create a fresh provider
-    statusViewProvider = new StatusViewProvider();
-    statusView = window.createTreeView('clarionStatusView', {
-        treeDataProvider: statusViewProvider
-    });
-    
-    // Inject the treeView reference so provider can update title
-    statusViewProvider.setTreeView(statusView);
-    
-    // Set initial title
-    statusViewProvider.refresh();
-    
-    context.subscriptions.push(statusView);
-    logger.info("✅ Status view created");
-    
-    // Refresh status view when workspace changes
-    context.subscriptions.push(
-        workspace.onDidChangeWorkspaceFolders(() => {
-            statusViewProvider?.refresh();
-        })
-    );
-    
-    // Refresh status view when workspace trust changes
-    context.subscriptions.push(
-        workspace.onDidGrantWorkspaceTrust(() => {
-            statusViewProvider?.refresh();
-            logger.info("🔒 Workspace trust granted - refreshing status view");
-        })
-    );
-    
-    // Export refresh function for use elsewhere
-    (global as any).refreshStatusView = () => {
-        statusViewProvider?.refresh();
-    };
 }
 
 
