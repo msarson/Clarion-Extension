@@ -145,6 +145,24 @@ result LONG
             
             assert.strictEqual(diagnostics.length, 1, 'Should have 1 diagnostic for IF');
         });
+
+        test('Should NOT flag IF-ELSE with single-line ELSE statements', () => {
+            const code = `TestProc PROCEDURE()
+  CODE
+  if GlobalResponse=RequestCancelled
+                                     nts:record      = hold:nts:record
+                                     nts:notes       = hold:nts:notes
+                                else hold:nts:record = nts:record
+                                     hold:nts:notes  = nts:notes
+                                     lcl:Preset_NTS  = TRUE
+                                     lcl:Empty_Notes = CHOOSE( LEN(CLIP(NTS:Notes)) = 0 )
+                                end`;
+            
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            assert.strictEqual(diagnostics.length, 0, 'Should have no diagnostics - ELSE can have single-line statement');
+        });
     });
 
     suite('Unterminated LOOP Statements', () => {
@@ -924,6 +942,41 @@ OMIT('**END2**')
 
             assert.strictEqual(diagnostics.length, 2, 'Should have 2 diagnostics for 2 unterminated blocks');
         });
+
+        test('Should handle FILE declaration with OMIT/COMPILE blocks', () => {
+            const code = `  PROGRAM
+MAP
+END
+
+            COMPILE('***',UseIPDrv)
+PrEquip                 FILE,PRE(PRE),BINDABLE,THREAD   ,DRIVER('IPDRV'),OWNER(IPDRV::OWNER)
+            !***
+            OMIT('***',UseIPDrv)
+PrEquip                 FILE,PRE(PRE),BINDABLE,THREAD   ,DRIVER('TOPSPEED','/TCF=.\\Topspeed.TCF')
+            !***
+KPrEquip_ID              KEY(PRE:Project_ID,PRE:Equip_ID),NOCASE
+Record                   RECORD,PRE()
+Equip_ID                    STRING(15)
+Project_ID                  LONG
+Descr                       STRING(40)
+Daily_Rate                  REAL
+PC_Code                     STRING(10)
+Flag                        BYTE
+CreateDate                  DATE
+CreateTime                  TIME
+UpdateDate                  DATE
+UpdateTime                  TIME
+                         END
+                       END
+
+  CODE
+  RETURN`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            assert.strictEqual(diagnostics.length, 0, 'FILE with OMIT/COMPILE should validate correctly');
+        });
     });
 
     suite('RETURN Statement Validation', () => {
@@ -1022,7 +1075,7 @@ CODE
         test('Should validate MAP procedures with return types', () => {
             const code = `  PROGRAM
                     MAP
-MyProcedure PROCEDURE(),LONG                    
+MyProcedure PROCEDURE(),LONG
                     END
 
 MyProcedure  PROCEDURE()
@@ -1034,6 +1087,104 @@ MyProcedure  PROCEDURE()
             const returnDiagnostics = diagnostics.filter(d => d.message.includes('RETURN'));
             assert.strictEqual(returnDiagnostics.length, 1, 'Should flag MAP procedure missing RETURN');
             assert.ok(returnDiagnostics[0].message.includes('MyProcedure'), 'Should mention procedure name');
+        });
+    });
+
+    suite('IF-ELSE with Multiple Statements', () => {
+        
+        test('Should detect ELSE with multiple statements without proper structure', () => {
+            const code = `TestProc PROCEDURE()
+nts:record LONG
+hold:nts:record LONG
+nts:notes STRING(100)
+hold:nts:notes STRING(100)
+lcl:Preset_NTS BYTE
+lcl:Empty_Notes BYTE
+GlobalResponse LONG
+RequestCancelled EQUATE(2)
+  CODE
+  if GlobalResponse=RequestCancelled
+    nts:record      = hold:nts:record
+    nts:notes       = hold:nts:notes
+  else hold:nts:record = nts:record
+    hold:nts:notes  = nts:notes
+    lcl:Preset_NTS  = TRUE
+    lcl:Empty_Notes = 1
+  end
+  RETURN`;
+            
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            // This should detect that the ELSE clause has multiple statements
+            // but they're not properly structured (missing . terminators or proper block structure)
+            assert.ok(diagnostics.length > 0, 'Should detect issues with ELSE clause having multiple statements');
+        });
+
+        test('Should NOT flag ELSE with single statement', () => {
+            const code = `TestProc PROCEDURE()
+x LONG
+y LONG
+  CODE
+  if x > 0
+    y = 1
+  else y = 2
+  end
+  RETURN`;
+            
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            assert.strictEqual(diagnostics.length, 0, 'Should have no diagnostics for single statement ELSE');
+        });
+
+        test('Should NOT flag ELSE with multiple statements using dot terminators', () => {
+            const code = `TestProc PROCEDURE()
+x LONG
+y LONG
+z LONG
+  CODE
+  if x > 0
+    y = 1
+  else y = 2. z = 3.
+  end
+  RETURN`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            assert.strictEqual(diagnostics.length, 0, 'Should have no diagnostics when dot terminators are used');
+        });
+    });
+
+    suite('RECORD Keyword as Field Name', () => {
+        
+        test('Should NOT flag RECORD keyword when used as field name with prefix', () => {
+            const code = `TestProc PROCEDURE()
+nts:record      LONG
+hold:nts:record LONG
+nts:notes       STRING(100)
+hold:nts:notes  STRING(100)
+lcl:Preset_NTS  BYTE
+lcl:Empty_Notes BYTE
+  CODE
+  if GlobalResponse=RequestCancelled
+    nts:record      = hold:nts:record
+    nts:notes       = hold:nts:notes
+  else hold:nts:record = nts:record
+    hold:nts:notes  = nts:notes
+    lcl:Preset_NTS  = TRUE
+    lcl:Empty_Notes = CHOOSE( LEN(CLIP(NTS:Notes)) = 0 )
+  end
+  RETURN`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            // Should NOT flag 'record' as a keyword when it's a field name with prefix
+            const recordErrors = diagnostics.filter(d => d.message.toLowerCase().includes('record') && 
+                                                         d.message.toLowerCase().includes('not terminated'));
+            assert.strictEqual(recordErrors.length, 0, 'Should not flag RECORD keyword when used as prefixed field name');
         });
     });
 });

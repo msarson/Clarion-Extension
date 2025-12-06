@@ -175,6 +175,15 @@ export class ClarionTokenizer {
                             // Check if this is likely a variable reference rather than a structure declaration
                             const upperValue = match[0].trim().toUpperCase();
                             
+                            // Special check for RECORD - if preceded by : or word character, it's part of a field name
+                            if (upperValue === 'RECORD' && position > 0) {
+                                const prevChar = line[position - 1];
+                                if (prevChar === ':' || /\w/.test(prevChar)) {
+                                    newTokenType = TokenType.Variable;
+                                    logger.info(`🔄 Reclassified 'RECORD' from Structure to Variable (part of field name) at line ${lineNumber}`);
+                                }
+                            }
+                            
                             // Check if inside parentheses (function call)
                             let parenDepth = 0;
                             for (let i = 0; i < position; i++) {

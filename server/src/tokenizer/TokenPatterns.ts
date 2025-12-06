@@ -22,7 +22,9 @@ export const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     QUEUE: /\s+\bQUEUE\b(?!:)/i,
 
     // RECORD: /^\s*(\w+)\s+(RECORD)\b/i,
-    RECORD: /\bRECORD\b/i,
+    // ✅ RECORD should not match when it's part of a field name (preceded by : or alphanumeric)
+    // Use negative lookbehind to ensure RECORD is standalone
+    RECORD: /(?<![:\w])\bRECORD\b/i,
     REPORT: /\bREPORT\b/i,
     SECTION: /\bSECTION\b/i,
     SHEET: /\bSHEET\b/i,
