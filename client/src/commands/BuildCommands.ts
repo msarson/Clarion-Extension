@@ -10,23 +10,14 @@ import { trackPerformance } from '../telemetry';
 
 const logger = LoggerManager.getLogger("BuildCommands");
 
-// Type for buildSolutionOrProject function
-type BuildSolutionOrProjectFn = (
-    buildTarget: "Solution" | "Project",
-    project: ClarionProjectInfo | undefined,
-    diagnosticCollection: DiagnosticCollection
-) => Promise<void>;
-
 /**
  * Registers all build-related commands
  * @param diagnosticCollection - VS Code diagnostic collection
- * @param buildSolutionOrProject - Function to build solution or project
  * @param solutionTreeDataProvider - Solution tree data provider (may be undefined)
  * @returns Array of disposables for the registered commands
  */
 export function registerBuildCommands(
     diagnosticCollection: DiagnosticCollection,
-    buildSolutionOrProject: BuildSolutionOrProjectFn,
     solutionTreeDataProvider: SolutionTreeDataProvider | undefined
 ): Disposable[] {
     return [
@@ -42,10 +33,10 @@ export function registerBuildCommands(
                 // If this is a file node, get the parent project node
                 if (node.data.relativePath && node.parent && node.parent.data && node.parent.data.path) {
                     // This is a file node, use its parent project
-                    await buildSolutionOrProject("Project", node.parent.data, diagnosticCollection);
+                    await buildTasks.buildSolutionOrProject("Project", node.parent.data, diagnosticCollection, solutionTreeDataProvider);
                 } else if (node.data.path) {
                     // This is a project node
-                    await buildSolutionOrProject("Project", node.data, diagnosticCollection);
+                    await buildTasks.buildSolutionOrProject("Project", node.data, diagnosticCollection, solutionTreeDataProvider);
                 } else {
                     window.showErrorMessage("Cannot determine which project to build.");
                 }
@@ -89,7 +80,7 @@ export function registerBuildCommands(
             
             if (projects.length === 1) {
                 // If exactly one project contains the file, build that project
-                await buildSolutionOrProject("Project", projects[0], diagnosticCollection);
+                await buildTasks.buildSolutionOrProject("Project", projects[0], diagnosticCollection, solutionTreeDataProvider);
             } else if (projects.length > 1) {
                 // If multiple projects contain the file, show a quick pick to select which one to build
                 const buildOptions = [
@@ -107,21 +98,21 @@ export function registerBuildCommands(
                 }
                 
                 if (selectedOption === "Build Full Solution") {
-                    await buildSolutionOrProject("Solution", undefined, diagnosticCollection);
+                    await buildTasks.buildSolutionOrProject("Solution", undefined, diagnosticCollection, solutionTreeDataProvider);
                 } else {
                     // Extract project name from the selected option
                     const projectName = selectedOption.replace("Build Project: ", "");
                     const selectedProject = projects.find(p => p.name === projectName);
                     
                     if (selectedProject) {
-                        await buildSolutionOrProject("Project", selectedProject, diagnosticCollection);
+                        await buildTasks.buildSolutionOrProject("Project", selectedProject, diagnosticCollection, solutionTreeDataProvider);
                     } else {
                         vscodeWindow.showErrorMessage(`Project ${projectName} not found.`);
                     }
                 }
             } else {
                 // Build the entire solution if no project is found
-                await buildSolutionOrProject("Solution", undefined, diagnosticCollection);
+                await buildTasks.buildSolutionOrProject("Solution", undefined, diagnosticCollection, solutionTreeDataProvider);
             }
         }),
 
