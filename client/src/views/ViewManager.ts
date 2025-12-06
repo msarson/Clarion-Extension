@@ -115,6 +115,11 @@ export async function createStructureView(
         // 🔥 Inject the TreeView back into the provider!
         provider.setTreeView(view);
 
+        // Register the provider's event listeners
+        provider.getDisposables().forEach(disposable => {
+            context.subscriptions.push(disposable);
+        });
+
         // Initialize the follow cursor context
         await commands.executeCommand('setContext', 'clarion.followCursorEnabled', provider.isFollowCursorEnabled());
         logger.info(`Initialized clarion.followCursorEnabled context to ${provider.isFollowCursorEnabled()}`);

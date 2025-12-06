@@ -12,12 +12,13 @@ import {
     commands,
     Range,
     TreeView,
-    TreeViewExpansionEvent
+    TreeViewExpansionEvent,
+    Disposable
 } from 'vscode';
 import { DocumentSymbol, SymbolKind as LSPSymbolKind } from 'vscode-languageserver-types';
 import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("StructureViewProvider");
-logger.setLevel("error"); // PERF: Only log errors to reduce overhead
+logger.setLevel("debug"); // Enable debug logging to troubleshoot follow cursor
 
 // 📊 PERFORMANCE: Create perf logger that always logs
 const perfLogger = LoggerManager.getLogger("StructureViewPerf");
@@ -57,6 +58,9 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     
     // Parent tracking for tree navigation
     private parentMap: Map<string, DocumentSymbol | null> = new Map();
+    
+    // Store disposables for proper cleanup
+    private disposables: Disposable[] = [];
 
     constructor(treeView?: TreeView<DocumentSymbol>) {
         this.treeView = treeView;
@@ -64,7 +68,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         // Note: The follow cursor context is initialized in extension.ts after tree view creation
         
         // Listen for active editor changes
-        window.onDidChangeActiveTextEditor(editor => {
+        this.disposables.push(window.onDidChangeActiveTextEditor(editor => {
             perfLogger.info(`📊 PERF: Active editor changed to: ${editor?.document.fileName || 'none'}`);
             const perfStart = performance.now();
             
@@ -81,17 +85,17 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             
             const perfTime = performance.now() - perfStart;
             perfLogger.info(`📊 PERF: Structure view updated for editor change: ${perfTime.toFixed(2)}ms`);
-        });
+        }));
 
         // Listen for document changes
-        workspace.onDidChangeTextDocument(event => {
+        this.disposables.push(workspace.onDidChangeTextDocument(event => {
             if (this.activeEditor && event.document === this.activeEditor.document) {
                 this._onDidChangeTreeData.fire();
             }
-        });
+        }));
         
         // Listen for selection changes to implement "Follow Cursor" functionality
-        window.onDidChangeTextEditorSelection(event => {
+        this.disposables.push(window.onDidChangeTextEditorSelection(event => {
             logger.debug(`📍 Selection changed in editor: ${event.textEditor.document.fileName}`);
             logger.debug(`   followCursor=${this.followCursor}, isViewVisible=${this.isViewVisible}, activeEditor=${!!this.activeEditor}, match=${event.textEditor === this.activeEditor}`);
             
@@ -111,7 +115,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             } else {
                 logger.debug(`   Skipping reveal: followCursor=${this.followCursor}, isViewVisible=${this.isViewVisible}`);
             }
-        });
+        }));
 
         // Initialize with the current active editor
         this.activeEditor = window.activeTextEditor;
@@ -895,5 +899,20 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             const key = this.getElementKey(symbol);
             return this.visibilityMap.get(key) === true;
         });
+    }
+    
+    /**
+     * Returns the disposables for registration with extension context
+     */
+    getDisposables(): Disposable[] {
+        return this.disposables;
+    }
+    
+    /**
+     * Disposes of all event listeners
+     */
+    dispose(): void {
+        this.disposables.forEach(d => d.dispose());
+        this.disposables = [];
     }
 }
