@@ -520,6 +520,50 @@ function processTaskCompletion(
 
 
 /**
+ * Builds the solution or a specific project
+ * @param buildTarget - Whether to build the solution or a project
+ * @param project - The project to build (if buildTarget is "Project")
+ * @param diagnosticCollection - The diagnostic collection to use for error reporting
+ * @param solutionTreeDataProvider - Optional solution tree provider to refresh if no solution is open
+ */
+export async function buildSolutionOrProject(
+    buildTarget: "Solution" | "Project",
+    project: ClarionProjectInfo | undefined,
+    diagnosticCollection: DiagnosticCollection,
+    solutionTreeDataProvider?: any
+): Promise<void> {
+    const buildConfig = {
+        buildTarget,
+        selectedProjectPath: project?.path ?? "",
+        projectObject: project
+    };
+
+    if (!validateBuildEnvironment()) {
+        return;
+    }
+
+    const solutionCache = SolutionCache.getInstance();
+    const solutionInfo = solutionCache.getSolutionInfo();
+
+    if (!solutionInfo) {
+        if (solutionTreeDataProvider) {
+            await solutionTreeDataProvider.refresh();
+        }
+        window.showInformationMessage(
+            "No solution is currently open. Use the 'Open Solution' button in the Solution View."
+        );
+        return;
+    }
+
+    const buildParams = {
+        ...prepareBuildParameters(buildConfig),
+        diagnosticCollection
+    };
+
+    await executeBuildTask(buildParams);
+}
+
+/**
  * Process general MSBuild errors that don't match the standard Clarion error format
  * @param output The build output to process
  * @returns boolean indicating whether any MSBuild errors were found

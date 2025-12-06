@@ -10,6 +10,7 @@ import { registerLanguageFeatures } from '../providers/LanguageFeatureManager';
 import { createSolutionFileWatchers } from '../providers/FileWatcherManager';
 import { isClientReady, getClientReadyPromise } from '../LanguageClientManager';
 import { trackPerformance } from '../telemetry';
+import { refreshOpenDocuments } from '../document/DocumentRefreshManager';
 import LoggerManager from '../logger';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -135,7 +136,6 @@ export async function workspaceHasBeenTrusted(
  * @param reinitializeEnvironment - Function to reinitialize environment
  * @param documentManager - Document manager instance
  * @param statusViewProvider - Status view provider
- * @param refreshOpenDocuments - Function to refresh open documents
  */
 export async function initializeSolution(
     context: ExtensionContext,
@@ -143,8 +143,7 @@ export async function initializeSolution(
     client: LanguageClient | undefined,
     reinitializeEnvironment: (refreshDocs: boolean) => Promise<DocumentManager>,
     documentManager: DocumentManager | undefined,
-    statusViewProvider: any,
-    refreshOpenDocuments: () => Promise<void>
+    statusViewProvider: any
 ): Promise<void> {
     logger.info("🔄 Initializing Clarion Solution...");
     
@@ -254,7 +253,7 @@ export async function initializeSolution(
     logger.info("✅ File watchers created");
     
     // Force refresh all open documents to ensure links are generated
-    await refreshOpenDocuments();
+    await refreshOpenDocuments(documentManager);
     logger.info("✅ Open documents refreshed");
     
     const endTime = performance.now();
@@ -269,14 +268,12 @@ export async function initializeSolution(
  * @param refreshDocs - Whether to refresh open documents
  * @param client - Language client instance
  * @param documentManager - Current document manager instance
- * @param refreshOpenDocuments - Function to refresh open documents
  * @returns New document manager instance
  */
 export async function reinitializeEnvironment(
     refreshDocs: boolean = false,
     client: LanguageClient | undefined,
-    documentManager: DocumentManager | undefined,
-    refreshOpenDocuments: () => Promise<void>
+    documentManager: DocumentManager | undefined
 ): Promise<DocumentManager> {
     const startTime = performance.now();
     logger.info("🔄 Initializing SolutionCache and DocumentManager...");
@@ -333,7 +330,7 @@ export async function reinitializeEnvironment(
 
     if (refreshDocs) {
         logger.info("🔄 Refreshing open documents...");
-        await refreshOpenDocuments();
+        await refreshOpenDocuments(documentManager);
     }
 
     const endTime = performance.now();

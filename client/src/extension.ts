@@ -41,6 +41,8 @@ import * as SolutionOpener from './solution/SolutionOpener';
 import { showClarionQuickOpen } from './navigation/QuickOpenProvider';
 import * as SolutionInitializer from './solution/SolutionInitializer';
 import { startLanguageServer } from './server/LanguageServerManager';
+import { setConfiguration } from './config/ConfigurationManager';
+import { refreshOpenDocuments } from './document/DocumentRefreshManager';
 
 const logger = LoggerManager.getLogger("Extension");
 logger.setLevel("error"); // PERF: Only log errors to reduce overhead
@@ -206,7 +208,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
             openClarionSolution,
             openSolutionFromList,
             closeClarionSolution,
-            setConfiguration,
+            () => setConfiguration(solutionTreeDataProvider),
             showClarionQuickOpen
         )
     );
@@ -241,7 +243,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
         // ✅ Ensure all restored tabs are properly indexed (folder with trust)
         if (!isRefreshingRef.value) {
-            await refreshOpenDocuments();
+            await refreshOpenDocuments(documentManager);
 
             // Check if we have a solution file loaded from folder settings
             if (globalSolutionFile) {
@@ -311,7 +313,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
     context.subscriptions.push(
         ...registerNavigationCommands(treeView, solutionTreeDataProvider),
-        ...registerBuildCommands(diagnosticCollection, buildSolutionOrProject, solutionTreeDataProvider),
+        ...registerBuildCommands(diagnosticCollection, solutionTreeDataProvider),
         ...registerSolutionManagementCommands(context, client, initializeSolution, createSolutionTreeView),
         
         // Commands for adding/removing source files are already registered above
@@ -346,11 +348,11 @@ async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: D
 }
 
 async function initializeSolution(context: ExtensionContext, refreshDocs: boolean = false): Promise<void> {
-    await SolutionInitializer.initializeSolution(context, refreshDocs, client, reinitializeEnvironment, documentManager, statusViewProvider, refreshOpenDocuments);
+    await SolutionInitializer.initializeSolution(context, refreshDocs, client, reinitializeEnvironment, documentManager, statusViewProvider);
 }
 
 async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<DocumentManager> {
-    return await SolutionInitializer.reinitializeEnvironment(refreshDocs, client, documentManager, refreshOpenDocuments);
+    return await SolutionInitializer.reinitializeEnvironment(refreshDocs, client, documentManager);
 }
 
 
@@ -372,50 +374,6 @@ export async function openClarionSolution(context: ExtensionContext) {
 
 export async function closeClarionSolution(context: ExtensionContext) {
     await SolutionOpener.closeClarionSolution(context, reinitializeEnvironment, documentManager, statusViewProvider);
-}
-
-async function refreshOpenDocuments() {
-    const startTime = performance.now();
-    logger.info("🔄 Refreshing all open documents...");
-
-    try {
-        const defaultLookupExtensions = globalSettings.defaultLookupExtensions;
-        logger.info(`🔍 Loaded defaultLookupExtensions: ${JSON.stringify(defaultLookupExtensions)}`);
-
-        // ✅ Fetch ALL open documents using the updated method
-        const docsStartTime = performance.now();
-        const openDocuments = await getAllOpenDocuments(); // <-- Await the function here
-        const docsEndTime = performance.now();
-        logger.info(`✅ Retrieved ${openDocuments.length} open documents in ${(docsEndTime - docsStartTime).toFixed(2)}ms`);
-
-        if (openDocuments.length === 0) {
-            logger.warn("⚠️ No open documents found.");
-            return;
-        }
-
-        // Process documents in parallel for better performance
-        const updatePromises = openDocuments.map(async (document) => {
-            try {
-                const docStartTime = performance.now();
-                // ✅ Ensure the document manager updates the links
-                if (documentManager) {
-                    await documentManager.updateDocumentInfo(document);
-                }
-                const docEndTime = performance.now();
-                logger.debug(`✅ Updated document ${document.uri.fsPath} in ${(docEndTime - docStartTime).toFixed(2)}ms`);
-            } catch (docError) {
-                logger.error(`❌ Error updating document ${document.uri.fsPath}: ${docError instanceof Error ? docError.message : String(docError)}`);
-            }
-        });
-
-        // Wait for all document updates to complete
-        await Promise.all(updatePromises);
-
-        const endTime = performance.now();
-        logger.info(`✅ Successfully refreshed ${openDocuments.length} open documents in ${(endTime - startTime).toFixed(2)}ms`);
-    } catch (error) {
-        logger.error(`❌ Error in refreshOpenDocuments: ${error instanceof Error ? error.message : String(error)}`);
-    }
 }
 
 async function registerOpenCommand(context: ExtensionContext) {
@@ -441,47 +399,6 @@ export { showClarionQuickOpen } from './navigation/QuickOpenProvider';
 
 
 
-async function setConfiguration() {
-    if (!globalSolutionFile) {
-        // Refresh the solution tree view to show the "Open Solution" button
-        if (solutionTreeDataProvider) {
-            await solutionTreeDataProvider.refresh();
-        }
-        vscodeWindow.showInformationMessage("No solution is currently open. Use the 'Open Solution' button in the Solution View.");
-        return;
-    }
-
-    const solutionCache = SolutionCache.getInstance();
-    
-    // Check if the solution file path is set in the SolutionCache
-    const currentSolutionPath = solutionCache.getSolutionFilePath();
-    if (!currentSolutionPath && globalSolutionFile) {
-        // Initialize the SolutionCache with the global solution file
-        await solutionCache.initialize(globalSolutionFile);
-    }
-    
-    const availableConfigs = solutionCache.getAvailableConfigurations();
-
-    if (availableConfigs.length === 0) {
-        vscodeWindow.showWarningMessage("No configurations found in the solution file.");
-        return;
-    }
-
-    const selectedConfig = await vscodeWindow.showQuickPick(availableConfigs, {
-        placeHolder: "Select a configuration",
-    });
-
-    if (selectedConfig) {
-        globalSettings.configuration = selectedConfig;
-        const target = getClarionConfigTarget();
-        if (target && workspace.workspaceFolders) {
-            const config = workspace.getConfiguration("clarion", workspace.workspaceFolders[0].uri);
-            await config.update("configuration", selectedConfig, target);
-        }
-        updateConfigurationStatusBar(selectedConfig);
-        vscodeWindow.showInformationMessage(`Configuration set to: ${selectedConfig}`);
-    }
-}
 
 export function deactivate(): Thenable<void> | undefined {
     if (!client) {
@@ -490,44 +407,8 @@ export function deactivate(): Thenable<void> | undefined {
     return client.stop();
 }
 
-// Error handling for build output
 async function startClientServer(context: ExtensionContext, hasOpenXmlFiles: boolean = false): Promise<void> {
     client = await startLanguageServer(context, documentManager, structureViewProvider);
-}
-async function buildSolutionOrProject(
-    buildTarget: "Solution" | "Project",
-    project: ClarionProjectInfo | undefined,
-    diagnosticCollection: DiagnosticCollection   // 🔹 required
-) {
-    const buildConfig = {
-        buildTarget,
-        selectedProjectPath: project?.path ?? "",
-        projectObject: project
-    };
-
-    if (!buildTasks.validateBuildEnvironment()) {
-        return;
-    }
-
-    const solutionCache = SolutionCache.getInstance();
-    const solutionInfo = solutionCache.getSolutionInfo();
-
-    if (!solutionInfo) {
-        if (solutionTreeDataProvider) {
-            await solutionTreeDataProvider.refresh();
-        }
-        vscodeWindow.showInformationMessage(
-            "No solution is currently open. Use the 'Open Solution' button in the Solution View."
-        );
-        return;
-    }
-
-    const buildParams = {
-        ...buildTasks.prepareBuildParameters(buildConfig),
-        diagnosticCollection
-    };
-
-    await buildTasks.executeBuildTask(buildParams);
 }
 
 
