@@ -6,6 +6,112 @@ This file tracks all outstanding tasks, bugs, and improvements for the Clarion L
 
 ## 🐛 Critical Bugs
 
+### Clarion Keywords Used as Field Names (Dec 2024)
+**Priority:** HIGH  
+**Status:** Identified - Needs Investigation  
+**Date Added:** Dec 6, 2024
+
+#### Problem
+When Clarion keywords are used as field names (e.g., `nts:record`, `nts:case`, `file:loop`), the parser can misidentify them as keyword tokens instead of field references, leading to false positive validation errors.
+
+**Example Code:**
+```clarion
+TestProc PROCEDURE()
+nts:record      LONG
+nts:case        LONG
+file:loop       LONG
+  CODE
+  nts:record = 100
+  nts:case = 200
+  file:loop = 300
+  RETURN
+```
+
+**Current Status:**
+- ✅ Fixed for `RECORD` keyword in STRUCTURE_PATTERNS via negative lookbehind: `/(?<![:\w])\bRECORD\b/i`
+- ⚠️ **Not fixed for other keywords** like `CASE`, `LOOP`, `IF`, `END`, etc.
+
+#### Root Cause Analysis (Updated Dec 6, 2024)
+**TWO separate issues identified:**
+
+1. **Substring Tokenization Issue:**
+   - Tokenizer processes line from position N (after prefix like `nts:`)
+   - Substring matching can't see preceding `:` character
+   - Pattern `/\bCASE\b/i` matches `case = 200` → False CASE keyword token
+
+2. **Pattern Definition Issue (PRIMARY CAUSE):**
+   - Most patterns use simple word boundary: `/\bCASE\b/i`
+   - Word boundary `\b` treats `:` as non-word character
+   - So `nts:case` has word boundary before `case` → false match!
+   - Only RECORD has proper fix: `/(?<![:\w])\bRECORD\b/i` (negative lookbehind)
+
+**Example:**
+- Line: `nts:case = 200`
+- Pattern `/\bCASE\b/i` matches because there's a word boundary after `:`
+- Should be: `/(?<![:\w.])\bCASE\b/i` to prevent match after `:`, `.`, or word chars
+
+#### Current Workarounds
+1. RECORD in STRUCTURE_PATTERNS has negative lookbehind (correct fix)
+2. Some runtime reclassification logic exists but incomplete
+
+#### Proposed Solutions
+
+**Option 1: Fix All Pattern Definitions (RECOMMENDED)**
+- Add negative lookbehind `/(?<![:\w.])\b` to ALL keyword/structure patterns
+- Prevents matching after `:`, `.`, or word characters
+- RECORD already has this fix - extend to all others
+- **Pros:** Fixes root cause, minimal code changes, best performance
+- **Cons:** Need to update ~50+ patterns
+- **Implementation:**
+  ```typescript
+  // Current (WRONG):
+  CASE: /\bCASE\b/i,
+  IF: /\bIF\b/i,
+  
+  // Fixed (CORRECT):
+  CASE: /(?<![:\w.])\bCASE\b/i,
+  IF: /(?<![:\w.])\bIF\b/i,
+  ```
+
+**Option 2: Universal Runtime Reclassification**
+- Extend RECORD reclassification logic to all structural keywords
+- Check preceding character for `:`, `.`, or word character
+- Reclassify as Variable token if preceded by field prefix
+- **Pros:** Minimal pattern changes
+- **Cons:** Reactive approach, performance overhead, complex maintenance
+
+**Option 3: Tokenize from Full Line Context**
+- Change tokenizer to always work with full line, track positions
+- More accurate initial tokenization
+- **Pros:** Cleaner architecture
+- **Cons:** Large refactor, unknown performance impact
+
+#### Impact
+- **Severity:** HIGH - Common pattern in Clarion code, causes confusing errors
+- **Affected Keywords:** Any structural keyword that could be used as field name
+  - `CASE`, `LOOP`, `IF`, `END`, `MAP`, `MODULE`, `CLASS`, `RECORD`, `GROUP`, `FILE`, `QUEUE`, `WINDOW`, etc.
+- **User Experience:** False positive "unterminated structure" errors on valid code
+
+#### Next Steps (Updated Dec 6, 2024)
+1. ✅ Identified root cause: Missing negative lookbehind in pattern definitions
+2. ✅ Confirmed RECORD already has correct pattern
+3. 📋 Create comprehensive test suite covering all keywords as field names
+4. 🔧 Implement Option 1: Add `/(?<![:\w.])` to all affected patterns in `TokenPatterns.ts`:
+   - STRUCTURE_PATTERNS (CASE, IF, LOOP, MAP, FILE, QUEUE, etc.)
+   - tokenPatterns[TokenType.Keyword] (RETURN, THEN, UNTIL, etc.)
+   - tokenPatterns[TokenType.ConditionalContinuation] (ELSE, ELSIF, OF)
+   - tokenPatterns[TokenType.WindowElement]
+   - tokenPatterns[TokenType.Attribute]
+5. ✅ Run full test suite
+6. ✅ Verify with real-world code examples (friend's build log issues)
+
+#### Related Files
+- `server/src/ClarionTokenizer.ts` - Main tokenization logic
+- `server/src/tokenizer/TokenPatterns.ts` - Keyword pattern definitions
+- `server/src/providers/DiagnosticProvider.ts` - Validation that reports errors
+
+---
+
 ### ~~Build Error Diagnostics Not Showing Correct File Location (Dec 2024)~~ ✅ FIXED
 **Priority:** ~~HIGH~~ **COMPLETE**  
 **Status:** ~~Not Started~~ **RESOLVED (Dec 4, 2024)**
