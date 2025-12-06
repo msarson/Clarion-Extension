@@ -11,6 +11,21 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 ### ✨ Features
 
 ### 🐛 Bug Fixes
+
+### 💡 Technical Details
+
+---
+
+## [0.7.4] - 2024-12-06
+
+### ✨ Features
+- **Major codebase refactoring** - Improved maintainability and code organization
+  - Reduced extension.ts from 975 lines to 175 lines (82% reduction!)
+  - Extracted 15+ focused modules for better separation of concerns
+  - Improved testability and future enhancement capabilities
+  - All features tested and validated - no breaking changes
+
+### 🐛 Bug Fixes
 - **Fixed false positive IF statement validation errors** ([#24](https://github.com/msarson/Clarion-Extension/issues/24))
   - Single-line `IF...THEN` statements no longer incorrectly flagged as missing `END`
   - Complete `IF...THEN...END` structures on one line now correctly recognized
@@ -28,7 +43,38 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
   - Corrected `fileLoggerParameters` configuration for proper MSBuild logging output
   - Diagnostic messages now display correctly in build output
 
+- **Fixed build error reporting**
+  - No longer shows "Build Failed" message when build succeeds with warnings
+  - Only reports failures when actual compilation errors occur
+
+- **Fixed ROUTINE parsing**
+  - ROUTINE keyword now correctly recognized in all contexts
+  - Improved structure validation for ROUTINE sections
+
+- **Fixed Structure View initialization**
+  - Structure view now correctly follows cursor on startup
+  - Resolved timing issue when Clarion Tools view is visible at launch
+
+- **Fixed GROUP nesting tests**
+  - Corrected test expectations for unlabeled GROUP symbols
+  - Improved test coverage for nested GROUP structures
+
+- **Fixed CASE validation**
+  - CASE without OF clauses now correctly recognized as valid Clarion syntax
+  - OROF without preceding OF correctly flagged as error
+
 ### 💡 Technical Details
+- **Modular architecture** - Extension split into focused managers:
+  - ActivationManager - Extension activation and initialization
+  - ConfigurationManager - Settings and configuration
+  - DocumentRefreshManager - Document state management
+  - LanguageServerManager - Language server lifecycle
+  - StatusBarManager - Status bar updates
+  - SolutionOpener - Solution/project opening
+  - QuickOpenManager - Quick open functionality
+  - 15+ command modules for specific features
+- **Improved testing** - Better test organization and coverage
+- **Code quality** - Eliminated duplicate registrations and race conditions
 
 ---
 

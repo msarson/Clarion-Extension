@@ -81,6 +81,20 @@ Settings are saved in `.vscode/settings.json` within the folder - commit them wi
 
 ## What's New
 
+### Version 0.7.4 (Dec 2024)
+
+#### 🔧 Improved Stability & Performance
+- **Major codebase refactoring** - 82% reduction in main extension file (975→175 lines)
+- **Enhanced reliability** - Fixed multiple validation edge cases
+- **Better organization** - Modular architecture for easier maintenance
+
+#### 🐛 Key Bug Fixes
+- **IF statement validation** - Single-line IF...THEN no longer triggers false errors ([#24](https://github.com/msarson/Clarion-Extension/issues/24))
+- **FILE validation** - Correctly handles COMPILE/OMIT conditional blocks ([#23](https://github.com/msarson/Clarion-Extension/issues/23))
+- **Build reporting** - Fixed false "Build Failed" messages on successful builds
+- **Structure view** - Now follows cursor correctly on startup
+- **ROUTINE parsing** - Improved recognition in all contexts
+
 ### Version 0.7.3 (Dec 2024)
 
 #### 🚀 Folder-Based Workflow
