@@ -1,4 +1,4 @@
-﻿import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, TextEditor, window as vscodeWindow, Diagnostic, DiagnosticSeverity, Range, StatusBarItem, StatusBarAlignment, extensions, DiagnosticCollection, Location, Position } from 'vscode';
+import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, TextEditor, window as vscodeWindow, Diagnostic, DiagnosticSeverity, Range, StatusBarItem, StatusBarAlignment, extensions, DiagnosticCollection, Location, Position } from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, ErrorAction, CloseAction } from 'vscode-languageclient/node';
 
 import * as path from 'path';
@@ -36,6 +36,7 @@ import { registerSolutionManagementCommands, registerSolutionOpeningCommands, re
 import { registerSolutionViewCommands, registerStructureViewCommands } from './commands/ViewCommands';
 import { registerProjectFileCommands } from './commands/ProjectFileCommands';
 import { createSolutionTreeView, createStructureView, createStatusView } from './views/ViewManager';
+import { registerLanguageFeatures, disposeLanguageFeatures } from './providers/LanguageFeatureManager';
 
 const logger = LoggerManager.getLogger("Extension");
 logger.setLevel("error"); // PERF: Only log errors to reduce overhead
@@ -440,7 +441,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
             
             // ✅ Register language features now that documentManager exists
             logger.info("🔍 Registering language features...");
-            registerLanguageFeatures(context);
+            registerLanguageFeatures(context, documentManager);
         } catch (error) {
             logger.error(`❌ Error creating DocumentManager: ${error instanceof Error ? error.message : String(error)}`);
         }
@@ -537,7 +538,7 @@ async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: D
             await initializeSolution(context);
             
             // ✅ Register language features NOW
-            registerLanguageFeatures(context);
+            registerLanguageFeatures(context, documentManager);
         } catch (error) {
             logger.error(`❌ Error initializing solution: ${error instanceof Error ? error.message : String(error)}`);
             vscodeWindow.showErrorMessage(`Error initializing Clarion solution. Try using the "Reinitialize Solution" command.`);
@@ -647,7 +648,7 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
     await createSolutionTreeView(context);
     logger.info("✅ Solution tree view created");
     
-    registerLanguageFeatures(context);
+    registerLanguageFeatures(context, documentManager);
     logger.info("✅ Language features registered");
     
     await commands.executeCommand("setContext", "clarion.solutionOpen", true);
@@ -757,7 +758,7 @@ async function handleRedirectionFileChange(context: ExtensionContext) {
     await createSolutionTreeView(context);
 
     // Re-register language features
-    registerLanguageFeatures(context);
+    registerLanguageFeatures(context, documentManager);
 
     vscodeWindow.showInformationMessage("Redirection file updated. Solution cache refreshed.");
 }
@@ -778,7 +779,7 @@ async function handleSolutionFileChange(context: ExtensionContext) {
         await createSolutionTreeView(context);
 
         // Re-register language features
-        registerLanguageFeatures(context);
+        registerLanguageFeatures(context, documentManager);
 
         vscodeWindow.showInformationMessage("Solution file updated. Solution cache refreshed.");
     }
@@ -798,7 +799,7 @@ async function handleProjectFileChange(context: ExtensionContext, uri: Uri) {
     await createSolutionTreeView(context);
 
     // Re-register language features
-    registerLanguageFeatures(context);
+    registerLanguageFeatures(context, documentManager);
 
     vscodeWindow.showInformationMessage("Project file updated. Solution cache refreshed.");
 }
@@ -816,110 +817,9 @@ async function handleSettingsChange(context: ExtensionContext) {
     await createSolutionTreeView(context);
 
     // Re-register language features (ensuring links update properly)
-    registerLanguageFeatures(context);
+    registerLanguageFeatures(context, documentManager);
 
     vscodeWindow.showInformationMessage("Clarion configuration updated. Solution cache refreshed.");
-}
-
-let hoverProviderDisposable: Disposable | null = null;
-let documentLinkProviderDisposable: Disposable | null = null;
-let implementationProviderDisposable: Disposable | null = null;
-let definitionProviderDisposable: Disposable | null = null;
-let semanticTokensProviderDisposable: Disposable | null = null;
-
-function registerLanguageFeatures(context: ExtensionContext) {
-    logger.info("registerLanguageFeatures called");
-    
-    if (!documentManager) {
-        logger.warn("⚠️ Cannot register language features: documentManager is undefined!");
-        return;
-    }
-    
-    // ✅ Fix: Ensure only one Document Link Provider is registered
-    if (documentLinkProviderDisposable) {
-        documentLinkProviderDisposable.dispose(); // Remove old provider if it exists
-    }
-
-    logger.info("🔗 Registering Document Link Provider...");
-
-    // Get the default lookup extensions from settings
-    const lookupExtensions = globalSettings.defaultLookupExtensions || [".clw", ".inc", ".equ", ".eq", ".int"];
-
-    // Create document selectors for all Clarion file extensions
-    const documentSelectors = [
-        { scheme: "file", language: "clarion" },
-        ...lookupExtensions.map(ext => ({ scheme: "file", pattern: `**/*${ext}` }))
-    ];
-
-    // Register the document link provider for all selectors
-    documentLinkProviderDisposable = languages.registerDocumentLinkProvider(
-        documentSelectors,
-        new ClarionDocumentLinkProvider(documentManager)
-    );
-    context.subscriptions.push(documentLinkProviderDisposable);
-
-    logger.info(`📄 Registered Document Link Provider for extensions: ${lookupExtensions.join(', ')}`);
-
-    // ✅ Fix: Ensure only one Hover Provider is registered
-    if (hoverProviderDisposable) {
-        hoverProviderDisposable.dispose(); // Remove old provider if it exists
-    }
-
-    logger.info("📝 Registering Hover Provider...");
-    hoverProviderDisposable = languages.registerHoverProvider(
-        documentSelectors,
-        new ClarionHoverProvider(documentManager)
-    );
-    context.subscriptions.push(hoverProviderDisposable);
-
-    logger.info(`📄 Registered Hover Provider for extensions: ${lookupExtensions.join(', ')}`);
-    
-    // ✅ Register Implementation Provider for "Go to Implementation" functionality
-    if (implementationProviderDisposable) {
-        implementationProviderDisposable.dispose(); // Remove old provider if it exists
-    }
-    
-    logger.info("🔍 Registering Implementation Provider...");
-    implementationProviderDisposable = languages.registerImplementationProvider(
-        documentSelectors,
-        new ClarionImplementationProvider(documentManager)
-    );
-    context.subscriptions.push(implementationProviderDisposable);
-    
-    logger.info(`📄 Registered Implementation Provider for extensions: ${lookupExtensions.join(', ')}`);
-    
-    // ✅ DISABLED: Client-side Definition Provider blocks server-side providers
-    // All definition requests now handled by:
-    // 1. Middleware for reverse MAP navigation (implementation → declaration)
-    // 2. Server-side DefinitionProvider for everything else
-    // This includes: variables, parameters, methods, structures, etc.
-    if (definitionProviderDisposable) {
-        definitionProviderDisposable.dispose();
-    }
-    
-    // REMOVED: Client-side Definition Provider
-    // logger.info("🔍 Registering Definition Provider for class methods...");
-    // definitionProviderDisposable = languages.registerDefinitionProvider(
-    //     documentSelectors,
-    //     new ClarionDefinitionProvider(documentManager)
-    // );
-    // context.subscriptions.push(definitionProviderDisposable);
-    // 
-    // logger.info(`📄 Registered Definition Provider for extensions: ${lookupExtensions.join(', ')}`);
-    
-    // ✅ Register Prefix Decorator for variable highlighting
-    if (semanticTokensProviderDisposable) {
-        semanticTokensProviderDisposable.dispose(); // Remove old provider if it exists
-    }
-    
-    logger.info("🎨 Registering Clarion Decorator for variable and comment highlighting...");
-    const clarionDecorator = new ClarionDecorator();
-    semanticTokensProviderDisposable = {
-        dispose: () => clarionDecorator.dispose()
-    };
-    context.subscriptions.push(semanticTokensProviderDisposable);
-    
-    logger.info(`🎨 Registered Clarion Decorator for variable and comment highlighting`);
 }
 
 async function refreshOpenDocuments() {
@@ -1010,40 +910,9 @@ export async function closeClarionSolution(context: ExtensionContext) {
         await commands.executeCommand("setContext", "clarion.solutionOpen", false);
         statusViewProvider?.refresh(); // Refresh status view when solution closes
         
-        // Clear document link provider
-        if (documentLinkProviderDisposable) {
-            documentLinkProviderDisposable.dispose();
-            documentLinkProviderDisposable = null;
-            logger.info("✅ Cleared document link provider");
-        }
-        
-        // Clear hover provider
-        if (hoverProviderDisposable) {
-            hoverProviderDisposable.dispose();
-            hoverProviderDisposable = null;
-            logger.info("✅ Cleared hover provider");
-        }
-        
-        // Clear implementation provider
-        if (implementationProviderDisposable) {
-            implementationProviderDisposable.dispose();
-            implementationProviderDisposable = null;
-            logger.info("✅ Cleared implementation provider");
-        }
-        
-        // Clear definition provider
-        if (definitionProviderDisposable) {
-            definitionProviderDisposable.dispose();
-            definitionProviderDisposable = null;
-            logger.info("✅ Cleared definition provider");
-        }
-        
-        // Clear semantic token provider
-        if (semanticTokensProviderDisposable) {
-            semanticTokensProviderDisposable.dispose();
-            semanticTokensProviderDisposable = null;
-            logger.info("✅ Cleared semantic token provider");
-        }
+        // Clear all language feature providers
+        disposeLanguageFeatures();
+        logger.info("✅ Cleared all language feature providers");
         
         // Refresh the solution tree view to show the "Open Solution" button
         await createSolutionTreeView(context);
@@ -1803,6 +1672,7 @@ async function buildSolutionOrProject(
 
     await buildTasks.executeBuildTask(buildParams);
 }
+
 
 
 
