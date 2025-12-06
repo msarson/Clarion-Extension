@@ -71,7 +71,9 @@ CUS:Name  STRING(50)
 
 suite('CASE Structure Validation', () => {
     
-    test('should error when CASE missing OF clause', () => {
+    // NOTE: CASE without OF clauses is valid in Clarion (though uncommon)
+    // It will compile - nothing will execute except possibly an ELSE clause
+    test('should allow CASE without OF clause', () => {
         const code = `
 CODE
   CASE Choice
@@ -83,12 +85,12 @@ CODE
         const document = TextDocument.create('test://test.clw', 'clarion', 1, code);
         const diagnostics = DiagnosticProvider.validateDocument(document);
         
-        const ofError = diagnostics.find(d => 
-            d.message.includes('must have at least one OF')
+        // Should NOT have errors - CASE without OF is valid
+        const caseErrors = diagnostics.filter(d => 
+            d.message.includes('CASE') || d.message.includes('OF')
         );
         
-        assert.ok(ofError, 'Should have OF error');
-        assert.strictEqual(ofError?.severity, DiagnosticSeverity.Error);
+        assert.strictEqual(caseErrors.length, 0, 'CASE without OF should be valid');
     });
     
     test('should error when OROF without preceding OF', () => {

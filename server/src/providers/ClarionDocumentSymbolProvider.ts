@@ -375,11 +375,14 @@ export class ClarionDocumentSymbolProvider {
             // CRITICAL: After CODE, only process ROUTINE tokens and new PROCEDURE declarations
             // Skip everything else (function calls, assignments, control structures, etc.)
             if (pastCodeStatement) {
-                // Allow ROUTINE declarations
+                // Allow ROUTINE declarations (both the label and the ROUTINE keyword)
                 if (type === TokenType.Label && i + 1 < tokens.length && 
                     tokens[i + 1].value.toUpperCase() === "ROUTINE") {
                     // Let it fall through to ROUTINE handling below
                 } 
+                else if (type === TokenType.Keyword && value.toUpperCase() === "ROUTINE") {
+                    // Let it fall through to ROUTINE handling below
+                }
                 // Allow new PROCEDURE/METHOD implementations with CODE marker (new procedure starting)
                 else if ((subType === TokenType.Procedure || subType === TokenType.GlobalProcedure || 
                           subType === TokenType.MethodImplementation) &&

@@ -100,36 +100,55 @@ Clarion-Extension/
 
 **Version Branches:**
 - `main` - Production releases only (stable)
-- `version-X.Y.Z` - Current development version (e.g., `version-0.7.3`)
+- `version-X.Y.Z` - Current development version (e.g., `version-0.7.4`)
 
-**Feature/Bug Fix Branches:**
-- **ALWAYS create disposable branches** for new features or bug fixes
-- Branch from current version branch (e.g., from `version-0.7.3`)
-- Naming: `feature/description` or `fix/description`
-- Example: `feature/add-hover-support` or `fix/column-zero-bug`
+**Temporary Work Branches:**
+- **ALWAYS create temporary branches** for new features, bug fixes, or refactoring work
+- Branch from current version branch (e.g., from `version-0.7.4`)
+- Naming conventions:
+  - `feature/description` - New features
+  - `fix/description` - Bug fixes
+  - `refactor/description` - Code refactoring
+  - `phase-N/description` - Multi-phase refactoring work
+- Example: `feature/add-hover-support`, `fix/column-zero-bug`, `refactor/extract-utilities`
 
-**Workflow:**
-1. User requests new feature or bug fix
-2. Create disposable branch: `git checkout -b feature/description`
+**Workflow (User's Preferred Method):**
+1. User requests new feature, bug fix, or refactoring work
+2. Create temporary branch: `git checkout -b [type]/[description]`
 3. Implement changes, commit regularly
-4. When complete, merge back to version branch: `git checkout version-X.Y.Z && git merge feature/description`
-5. **Delete the disposable branch**: `git branch -d feature/description`
-6. Push version branch: `git push origin version-X.Y.Z`
+4. **User tests the changes thoroughly**
+5. When user confirms testing is complete and successful:
+   - Merge back to version branch: `git checkout version-X.Y.Z && git merge [branch-name]`
+   - **Delete the temporary branch**: `git branch -d [branch-name]`
+   - Push version branch: `git push origin version-X.Y.Z`
+6. For multi-phase work, repeat cycle for each phase
+
+**Important Notes:**
+- User **always** tests before merging
+- Temporary branches are **deleted immediately after merge**
+- Never push temporary branches to remote
+- For large refactoring, break into phases (Phase 1, Phase 2, etc.)
+- Each phase: branch → work → test → merge → delete → next phase
 
 **Example Flow:**
 ```bash
-# Starting new feature
-git checkout version-0.7.3
-git checkout -b feature/add-new-syntax
+# Starting Phase 1 of refactoring
+git checkout version-0.7.4
+git checkout -b refactor/phase-1-extract-utilities
 # ... make changes, commit ...
 git add .
-git commit -m "feat: add new syntax support"
+git commit -m "refactor: extract utility functions (Phase 1)"
 
-# Feature complete - merge back
-git checkout version-0.7.3
-git merge feature/add-new-syntax
-git branch -d feature/add-new-syntax  # Delete temp branch
-git push origin version-0.7.3
+# User tests and confirms working
+# Phase complete - merge back
+git checkout version-0.7.4
+git merge refactor/phase-1-extract-utilities
+git branch -d refactor/phase-1-extract-utilities  # Delete temp branch
+git push origin version-0.7.4
+
+# Start Phase 2
+git checkout -b refactor/phase-2-extract-commands
+# ... continue with Phase 2 ...
 ```
 
 #### Committing Changes

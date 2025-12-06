@@ -72,18 +72,40 @@ export class DiagnosticProvider {
     public static validateStructureTerminators(tokens: Token[], document: TextDocument): Diagnostic[] {
         const diagnostics: Diagnostic[] = [];
         const structureStack: StructureStackItem[] = [];
+        const conditionalRanges = this.getConditionalBlockRanges(tokens, document);
         
         for (let i = 0; i < tokens.length; i++) {
             const token = tokens[i];
             const prevToken = i > 0 ? tokens[i - 1] : null;
             const nextToken = i < tokens.length - 1 ? tokens[i + 1] : null;
             
+            // Skip structures within conditional compilation blocks (OMIT/COMPILE)
+            // We can't validate these at edit-time since we don't know which will compile
+            if (this.isInConditionalBlock(token.line, conditionalRanges)) {
+                continue;
+            }
+            
             // Check if this token opens a structure that needs termination
             if (this.isStructureOpen(token)) {
                 const structureType = this.getStructureType(token);
                 
+                // Special handling for IF - check if it's a single-line IF...THEN statement
+                if (structureType === 'IF') {
+                    // Look ahead to see if THEN appears on the same line with code after it
+                    const isSingleLineIf = this.isSingleLineIfThen(tokens, i);
+                    
+                    // Only push to stack if it's NOT a single-line IF...THEN
+                    if (!isSingleLineIf && this.requiresTerminator(structureType)) {
+                        structureStack.push({
+                            token,
+                            structureType,
+                            line: token.line,
+                            column: token.start
+                        });
+                    }
+                }
                 // Special handling for MODULE - depends on parent context
-                if (structureType === 'MODULE') {
+                else if (structureType === 'MODULE') {
                     const parentContext = this.getParentContext(structureStack);
                     const needsTerminator = this.moduleNeedsTerminator(parentContext);
                     
@@ -292,6 +314,65 @@ export class DiagnosticProvider {
         }
         
         // Default: no terminator needed
+        return false;
+    }
+    
+    /**
+     * Check if this is a single-line IF...THEN statement that doesn't need END
+     * Format: IF condition THEN statement
+     * Returns true if THEN is found on same line with code after it
+     */
+    private static isSingleLineIfThen(tokens: Token[], ifTokenIndex: number): boolean {
+        const ifToken = tokens[ifTokenIndex];
+        const ifLine = ifToken.line;
+        
+        // Look ahead for THEN keyword or semicolon on the same line
+        for (let i = ifTokenIndex + 1; i < tokens.length; i++) {
+            const token = tokens[i];
+            
+            // Stop if we hit a different line
+            if (token.line !== ifLine) {
+                break;
+            }
+            
+            // Check if this is a semicolon (statement separator) - this makes it a single-line IF
+            if (token.type === TokenType.Operator && token.value === ';') {
+                return true;
+            }
+            
+            // Check if this is THEN keyword
+            if (token.type === TokenType.Keyword && token.value.toUpperCase() === 'THEN') {
+                // Check if there's code after THEN on the same line
+                for (let j = i + 1; j < tokens.length; j++) {
+                    const nextToken = tokens[j];
+                    
+                    // Stop if we hit a different line
+                    if (nextToken.line !== ifLine) {
+                        break;
+                    }
+                    
+                    // Check for END keyword - if present, this is a complete IF...THEN...END on one line
+                    // Don't treat it as single-line (it needs its END terminator validated)
+                    if (nextToken.type === TokenType.EndStatement && nextToken.value.toUpperCase() === 'END') {
+                        return false; // Has explicit END terminator, treat as regular multi-line IF
+                    }
+                    
+                    // Check for semicolon - this makes it a single-line IF
+                    if (nextToken.type === TokenType.Operator && nextToken.value === ';') {
+                        return true;
+                    }
+                    
+                    // If we find any meaningful token (not just whitespace/comments), it's a single-line IF
+                    if (nextToken.type !== TokenType.Comment) {
+                        return true;
+                    }
+                }
+                // THEN found but no code after it on same line - this is multi-line IF
+                return false;
+            }
+        }
+        
+        // No THEN found - this is multi-line IF
         return false;
     }
     
@@ -528,6 +609,76 @@ export class DiagnosticProvider {
     }
     
     /**
+     * Build a map of conditional compilation block ranges (COMPILE/OMIT)
+     * @param tokens - Tokenized document
+     * @param document - Original TextDocument for text access
+     * @returns Array of line ranges that are within conditional blocks
+     */
+    private static getConditionalBlockRanges(tokens: Token[], document: TextDocument): Array<{start: number, end: number}> {
+        const ranges: Array<{start: number, end: number}> = [];
+        const blockStack: Array<{line: number, terminator: string}> = [];
+        
+        for (let i = 0; i < tokens.length; i++) {
+            const token = tokens[i];
+            
+            // Check if this is an OMIT or COMPILE directive
+            if (token.type === TokenType.Directive) {
+                const directiveType = token.value.toUpperCase();
+                
+                if (directiveType === 'OMIT' || directiveType === 'COMPILE') {
+                    // Look for the terminator string
+                    let terminatorString: string | null = null;
+                    
+                    for (let j = i + 1; j < Math.min(i + 5, tokens.length); j++) {
+                        if (tokens[j].type === TokenType.String) {
+                            terminatorString = tokens[j].value.replace(/^'(.*)'$/, '$1');
+                            break;
+                        }
+                    }
+                    
+                    if (terminatorString) {
+                        blockStack.push({
+                            line: token.line,
+                            terminator: terminatorString
+                        });
+                    }
+                }
+            }
+        }
+        
+        // Now scan all lines to find terminators
+        const lineCount = document.lineCount;
+        for (const block of blockStack) {
+            for (let lineNum = block.line + 1; lineNum < lineCount; lineNum++) {
+                const lineText = document.getText({ 
+                    start: { line: lineNum, character: 0 }, 
+                    end: { line: lineNum, character: 1000 }
+                }).trim();
+                
+                if (lineText.includes(block.terminator)) {
+                    ranges.push({
+                        start: block.line,
+                        end: lineNum
+                    });
+                    break;
+                }
+            }
+        }
+        
+        return ranges;
+    }
+    
+    /**
+     * Check if a line is within a conditional compilation block
+     * @param line - Line number to check
+     * @param ranges - Conditional block ranges
+     * @returns True if line is within a conditional block
+     */
+    private static isInConditionalBlock(line: number, ranges: Array<{start: number, end: number}>): boolean {
+        return ranges.some(range => line > range.start && line <= range.end);
+    }
+    
+    /**
      * Validate FILE structures have required attributes
      * KB Rule: FILE must have DRIVER and RECORD
      * @param tokens - Tokenized document
@@ -536,9 +687,15 @@ export class DiagnosticProvider {
      */
     private static validateFileStructures(tokens: Token[], document: TextDocument): Diagnostic[] {
         const diagnostics: Diagnostic[] = [];
+        const conditionalRanges = this.getConditionalBlockRanges(tokens, document);
         
         for (let i = 0; i < tokens.length; i++) {
             const token = tokens[i];
+            
+            // Skip FILE declarations within conditional compilation blocks
+            if (this.isInConditionalBlock(token.line, conditionalRanges)) {
+                continue;
+            }
             
             // Check if this is a FILE declaration
             if (token.type === TokenType.Structure && token.value.toUpperCase() === 'FILE') {

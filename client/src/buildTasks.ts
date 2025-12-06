@@ -259,7 +259,7 @@ export function prepareBuildParameters(buildConfig: {
         "/verbosity:normal",
         "/nologo",
         `/fileLogger`,
-        `/fileLoggerParameters:LogFile="${buildLogPath}";Verbosity=detailed;Encoding=UTF-8`
+        `/fileLoggerParameters:"LogFile=${buildLogPath};verbosity=detailed;encoding=utf-8"`
     ];
 
     // Log the build configuration
@@ -445,7 +445,7 @@ function processTaskCompletion(
             }
 
             if (event.exitCode !== 0) {
-                // ❌ Failed build: parse diagnostics
+                // ❌ Non-zero exit code: parse diagnostics to check for actual errors
                 const { errorCount, warningCount, diagnostics } = processBuildErrors(data);
                 const msbuildErrors = processGeneralMSBuildErrors(data);
 
@@ -461,21 +461,33 @@ function processTaskCompletion(
                         ? `Solution: ${targetName}`
                         : `Project: ${targetName}`;
 
-                let message = `❌ Build Failed (${targetInfo}): `;
+                // Only show error message if we actually found errors or warnings
+                if (totalErrors > 0 || warningCount > 0) {
+                    let message = `❌ Build Failed (${targetInfo}): `;
 
-                if (totalErrors > 0) {
-                    message += `${totalErrors} error${totalErrors !== 1 ? "s" : ""}`;
-                    if (warningCount > 0) {
-                        message += ` and ${warningCount} warning${warningCount !== 1 ? "s" : ""}`;
+                    if (totalErrors > 0) {
+                        message += `${totalErrors} error${totalErrors !== 1 ? "s" : ""}`;
+                        if (warningCount > 0) {
+                            message += ` and ${warningCount} warning${warningCount !== 1 ? "s" : ""}`;
+                        }
+                        message += ` found. Check the Problems Panel!`;
+                    } else if (warningCount > 0) {
+                        message += `${warningCount} warning${warningCount !== 1 ? "s" : ""} found. Check the Problems Panel!`;
                     }
-                    message += ` found. Check the Problems Panel!`;
-                } else if (warningCount > 0) {
-                    message += `${warningCount} warning${warningCount !== 1 ? "s" : ""} found. Check the Problems Panel!`;
-                } else {
-                    message += `Check the Problems Panel for details.`;
-                }
 
-                window.showErrorMessage(message);
+                    window.showErrorMessage(message);
+                } else {
+                    // Exit code was non-zero but no errors/warnings found
+                    // This can happen with some MSBuild configurations - treat as success
+                    logger.info("⚠️ Build returned non-zero exit code but no errors were found. Treating as successful build.");
+                    diagnosticCollection.clear();
+                    
+                    const successMessage =
+                        buildTarget === "Solution"
+                            ? `✅ Building Clarion Solution Complete: ${targetName}`
+                            : `✅ Building Clarion Project Complete: ${targetName}`;
+                    window.showInformationMessage(successMessage);
+                }
             } else {
                 // ✅ Success: clear old diagnostics
                 diagnosticCollection.clear();
@@ -506,6 +518,50 @@ function processTaskCompletion(
     });
 }
 
+
+/**
+ * Builds the solution or a specific project
+ * @param buildTarget - Whether to build the solution or a project
+ * @param project - The project to build (if buildTarget is "Project")
+ * @param diagnosticCollection - The diagnostic collection to use for error reporting
+ * @param solutionTreeDataProvider - Optional solution tree provider to refresh if no solution is open
+ */
+export async function buildSolutionOrProject(
+    buildTarget: "Solution" | "Project",
+    project: ClarionProjectInfo | undefined,
+    diagnosticCollection: DiagnosticCollection,
+    solutionTreeDataProvider?: any
+): Promise<void> {
+    const buildConfig = {
+        buildTarget,
+        selectedProjectPath: project?.path ?? "",
+        projectObject: project
+    };
+
+    if (!validateBuildEnvironment()) {
+        return;
+    }
+
+    const solutionCache = SolutionCache.getInstance();
+    const solutionInfo = solutionCache.getSolutionInfo();
+
+    if (!solutionInfo) {
+        if (solutionTreeDataProvider) {
+            await solutionTreeDataProvider.refresh();
+        }
+        window.showInformationMessage(
+            "No solution is currently open. Use the 'Open Solution' button in the Solution View."
+        );
+        return;
+    }
+
+    const buildParams = {
+        ...prepareBuildParameters(buildConfig),
+        diagnosticCollection
+    };
+
+    await executeBuildTask(buildParams);
+}
 
 /**
  * Process general MSBuild errors that don't match the standard Clarion error format
