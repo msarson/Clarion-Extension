@@ -32,7 +32,7 @@ import { escapeRegExp, getAllOpenDocuments, extractConfigurationsFromSolution } 
 import { updateConfigurationStatusBar, updateBuildProjectStatusBar, hideConfigurationStatusBar, hideBuildProjectStatusBar } from './statusbar/StatusBarManager';
 import { registerNavigationCommands } from './commands/NavigationCommands';
 import { registerBuildCommands } from './commands/BuildCommands';
-import { registerSolutionManagementCommands, registerSolutionOpeningCommands } from './commands/SolutionCommands';
+import { registerSolutionManagementCommands, registerSolutionOpeningCommands, registerMiscSolutionCommands } from './commands/SolutionCommands';
 import { registerSolutionViewCommands, registerStructureViewCommands } from './commands/ViewCommands';
 import { registerProjectFileCommands } from './commands/ProjectFileCommands';
 
@@ -313,68 +313,18 @@ export async function activate(context: ExtensionContext): Promise<void> {
     logger.info("🔄 Phase 11: Registering commands...");
     registerOpenCommand(context);
 
-    context.subscriptions.push(commands.registerCommand("clarion.quickOpen", async () => {
-        if (!hasFolder) {
-            window.showInformationMessage("This feature requires an open folder. Use File → Open Folder...");
-            return;
-        }
-        if (!isTrusted) {
-            window.showWarningMessage("Clarion features require a trusted folder.");
-            return;
-        }
-
-        await showClarionQuickOpen();
-    }));
-
-    // Helper function to check folder and trust before executing commands
-    const withFolderAndTrust = (callback: () => Promise<void>) => async () => {
-        if (!hasFolder) {
-            window.showInformationMessage("This feature requires an open folder. Use File → Open Folder...");
-            return;
-        }
-        if (!isTrusted) {
-            window.showWarningMessage("Clarion features require a trusted folder.");
-            return;
-        }
-        await callback();
-    };
-
-    // Register commands (some work without folder, some need folder)
-    const commandsAlwaysAvailable = [
-        { id: "clarion.openSolution", handler: openClarionSolution.bind(null, context) }, // Works without folder - opens folder
-        { id: "clarion.debugSolutionHistory", handler: async () => {
-            const refs = await GlobalSolutionHistory.getReferences();
-            const valid = await GlobalSolutionHistory.getValidReferences();
-            logger.info(`📊 Debug Solution History:
-                Total: ${refs.length}
-                Valid: ${valid.length}`);
-            refs.forEach((ref, idx) => {
-                logger.info(`  ${idx + 1}. ${ref.solutionFile} (${ref.folderPath})`);
-            });
-            window.showInformationMessage(`Solution History: ${refs.length} total, ${valid.length} valid. Check output log for details.`);
-        }},
-    ];
-    
-    const commandsRequiringFolder = [
-        { id: "clarion.openSolutionFromList", handler: openSolutionFromList.bind(null, context) },
-        { id: "clarion.closeSolution", handler: closeClarionSolution.bind(null, context) },
-        { id: "clarion.setConfiguration", handler: setConfiguration },
-        { id: "clarion.openSolutionMenu", handler: async () => Promise.resolve() } // Empty handler for the submenu
-    ];
-
-    // Register commands that work without folder
-    commandsAlwaysAvailable.forEach(command => {
-        context.subscriptions.push(
-            commands.registerCommand(command.id, command.handler)
-        );
-    });
-
-    // Register commands that require folder
-    commandsRequiringFolder.forEach(command => {
-        context.subscriptions.push(
-            commands.registerCommand(command.id, withFolderAndTrust(command.handler))
-        );
-    });
+    context.subscriptions.push(
+        ...registerMiscSolutionCommands(
+            context,
+            hasFolder,
+            isTrusted,
+            openClarionSolution,
+            openSolutionFromList,
+            closeClarionSolution,
+            setConfiguration,
+            showClarionQuickOpen
+        )
+    );
 
     // ✅ Only setup folder-dependent features if we have a folder open
     if (hasFolder && isTrusted) {

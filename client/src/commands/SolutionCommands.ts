@@ -151,3 +151,95 @@ export function registerSolutionOpeningCommands(
         })
     ];
 }
+
+/**
+ * Registers miscellaneous solution commands (quickOpen, openSolution, closeSolution, etc.)
+ * @param context - Extension context
+ * @param hasFolder - Whether a folder is open
+ * @param isTrusted - Whether the workspace is trusted
+ * @param openClarionSolution - Function to open Clarion solution
+ * @param openSolutionFromList - Function to open solution from list
+ * @param closeClarionSolution - Function to close Clarion solution
+ * @param setConfiguration - Function to set configuration
+ * @param showClarionQuickOpen - Function to show quick open
+ * @returns Array of disposables for the registered commands
+ */
+export function registerMiscSolutionCommands(
+    context: ExtensionContext,
+    hasFolder: boolean,
+    isTrusted: boolean,
+    openClarionSolution: (context: ExtensionContext) => Promise<void>,
+    openSolutionFromList: (context: ExtensionContext) => Promise<void>,
+    closeClarionSolution: (context: ExtensionContext) => Promise<void>,
+    setConfiguration: () => Promise<void>,
+    showClarionQuickOpen: () => Promise<void>
+): Disposable[] {
+    const disposables: Disposable[] = [];
+
+    // Register quickOpen command with folder/trust checks
+    disposables.push(commands.registerCommand("clarion.quickOpen", async () => {
+        if (!hasFolder) {
+            vscodeWindow.showInformationMessage("This feature requires an open folder. Use File → Open Folder...");
+            return;
+        }
+        if (!isTrusted) {
+            vscodeWindow.showWarningMessage("Clarion features require a trusted folder.");
+            return;
+        }
+
+        await showClarionQuickOpen();
+    }));
+
+    // Helper function to check folder and trust before executing commands
+    const withFolderAndTrust = (callback: () => Promise<void>) => async () => {
+        if (!hasFolder) {
+            vscodeWindow.showInformationMessage("This feature requires an open folder. Use File → Open Folder...");
+            return;
+        }
+        if (!isTrusted) {
+            vscodeWindow.showWarningMessage("Clarion features require a trusted folder.");
+            return;
+        }
+        await callback();
+    };
+
+    // Register commands that work without folder
+    const commandsAlwaysAvailable = [
+        { id: "clarion.openSolution", handler: openClarionSolution.bind(null, context) },
+        { id: "clarion.debugSolutionHistory", handler: async () => {
+            const refs = await GlobalSolutionHistory.getReferences();
+            const valid = await GlobalSolutionHistory.getValidReferences();
+            logger.info(`📊 Debug Solution History:
+                Total: ${refs.length}
+                Valid: ${valid.length}`);
+            refs.forEach((ref, idx) => {
+                logger.info(`  ${idx + 1}. ${ref.solutionFile} (${ref.folderPath})`);
+            });
+            vscodeWindow.showInformationMessage(`Solution History: ${refs.length} total, ${valid.length} valid. Check output log for details.`);
+        }},
+    ];
+    
+    const commandsRequiringFolder = [
+        { id: "clarion.openSolutionFromList", handler: openSolutionFromList.bind(null, context) },
+        { id: "clarion.closeSolution", handler: closeClarionSolution.bind(null, context) },
+        { id: "clarion.setConfiguration", handler: setConfiguration },
+        { id: "clarion.openSolutionMenu", handler: async () => Promise.resolve() } // Empty handler for the submenu
+    ];
+
+    // Register commands that work without folder
+    commandsAlwaysAvailable.forEach(command => {
+        disposables.push(
+            commands.registerCommand(command.id, command.handler)
+        );
+    });
+
+    // Register commands that require folder
+    commandsRequiringFolder.forEach(command => {
+        disposables.push(
+            commands.registerCommand(command.id, withFolderAndTrust(command.handler))
+        );
+    });
+
+    return disposables;
+}
+
