@@ -351,6 +351,12 @@ export class DiagnosticProvider {
                         break;
                     }
                     
+                    // Check for END keyword - if present, this is a complete IF...THEN...END on one line
+                    // Don't treat it as single-line (it needs its END terminator validated)
+                    if (nextToken.type === TokenType.EndStatement && nextToken.value.toUpperCase() === 'END') {
+                        return false; // Has explicit END terminator, treat as regular multi-line IF
+                    }
+                    
                     // Check for semicolon - this makes it a single-line IF
                     if (nextToken.type === TokenType.Operator && nextToken.value === ';') {
                         return true;
