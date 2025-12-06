@@ -1,41 +1,24 @@
-import { commands, Uri, window, ExtensionContext, TreeView, workspace, Disposable, languages, ConfigurationTarget, TextDocument, TextEditor, window as vscodeWindow, Diagnostic, DiagnosticSeverity, Range, StatusBarItem, StatusBarAlignment, extensions, DiagnosticCollection } from 'vscode';
+import { commands, window, ExtensionContext, TreeView, workspace, Disposable, languages, extensions, DiagnosticCollection, window as vscodeWindow } from 'vscode';
 import { LanguageClient } from 'vscode-languageclient/node';
 
-import * as path from 'path';
-import * as fs from 'fs';
-
-import { ClarionExtensionCommands } from './ClarionExtensionCommands';
-import { ClarionHoverProvider } from './providers/hoverProvider';
-import { ClarionDocumentLinkProvider } from './providers/documentLinkProvier';
-import { ClarionImplementationProvider } from './providers/implementationProvider';
-import { ClarionDefinitionProvider } from './providers/definitionProvider';
 import { DocumentManager } from './documentManager';
-import { ClarionDecorator } from './ClarionDecorator';
-
 import { SolutionTreeDataProvider } from './SolutionTreeDataProvider';
 import { StructureViewProvider } from './StructureViewProvider';
 import { StatusViewProvider } from './StatusViewProvider';
 import { TreeNode } from './TreeNode';
-import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile, setGlobalClarionSelection, ClarionSolutionSettings, getClarionConfigTarget } from './globals';
-import * as buildTasks from './buildTasks';
-import * as clarionClHelper from './clarionClHelper';
+import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile } from './globals';
 import LoggerManager from './logger';
-import { SolutionCache } from './SolutionCache';
-import { LanguageClientManager, isClientReady, getClientReadyPromise, setLanguageClient } from './LanguageClientManager';
-import { redirectionService } from './paths/RedirectionService';
+import { isClientReady, getClientReadyPromise } from './LanguageClientManager';
 
-import { ClarionProjectInfo } from 'common/types';
-import { initializeTelemetry, trackEvent, trackPerformance } from './telemetry';
-import { SmartSolutionOpener } from './utils/SmartSolutionOpener';
+import { initializeTelemetry, trackPerformance } from './telemetry';
 import { GlobalSolutionHistory } from './utils/GlobalSolutionHistory';
-import { escapeRegExp, getAllOpenDocuments, extractConfigurationsFromSolution } from './utils/ExtensionHelpers';
-import { updateConfigurationStatusBar, updateBuildProjectStatusBar, hideConfigurationStatusBar, hideBuildProjectStatusBar } from './statusbar/StatusBarManager';
+import { updateBuildProjectStatusBar } from './statusbar/StatusBarManager';
 import { registerNavigationCommands } from './commands/NavigationCommands';
 import { registerBuildCommands } from './commands/BuildCommands';
 import { registerSolutionManagementCommands, registerSolutionOpeningCommands, registerMiscSolutionCommands } from './commands/SolutionCommands';
 import { registerProjectFileCommands } from './commands/ProjectFileCommands';
 import { createSolutionTreeView, createStructureView, createStatusView } from './views/ViewManager';
-import { registerLanguageFeatures, disposeLanguageFeatures } from './providers/LanguageFeatureManager';
+import { registerLanguageFeatures } from './providers/LanguageFeatureManager';
 import { createSolutionFileWatchers, handleSettingsChange } from './providers/FileWatcherManager';
 import * as SolutionOpener from './solution/SolutionOpener';
 import { showClarionQuickOpen } from './navigation/QuickOpenProvider';
