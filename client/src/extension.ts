@@ -2116,57 +2116,6 @@ export function deactivate(): Thenable<void> | undefined {
 }
 
 // Error handling for build output
-function showErrorMessages(errors: { file: string; line: number; message: string }[]) {
-    // Create diagnostics collection
-    const diagnosticCollection = languages.createDiagnosticCollection('clarion');
-
-    // Group errors by file
-    const errorsByFile = new Map<string, Diagnostic[]>();
-
-    for (const error of errors) {
-        const uri = Uri.file(error.file);
-        const diagnostic = new Diagnostic(
-            new Range(error.line - 1, 0, error.line - 1, 100),
-            error.message,
-            DiagnosticSeverity.Error
-        );
-
-        if (!errorsByFile.has(uri.toString())) {
-            errorsByFile.set(uri.toString(), []);
-        }
-
-        errorsByFile.get(uri.toString())!.push(diagnostic);
-    }
-
-    // Set diagnostics
-    diagnosticCollection.clear();
-    for (const [uriString, diagnostics] of errorsByFile.entries()) {
-        diagnosticCollection.set(Uri.parse(uriString), diagnostics);
-    }
-}
-
-// Parse build output for errors
-function parseBuildOutput(output: string) {
-    const errors: { file: string; line: number; message: string }[] = [];
-    const lines = output.split('\n');
-
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-
-        // Match Clarion error patterns
-        const errorMatch = line.match(/^Error\s+(\d+):\s+(.+?)\((\d+)\)\s*:\s*(.+)$/i);
-        if (errorMatch) {
-            const [, , file, lineNum, message] = errorMatch;
-            errors.push({
-                file,
-                line: parseInt(lineNum, 10),
-                message: message.trim()
-            });
-        }
-    }
-
-    return errors;
-}
 async function startClientServer(context: ExtensionContext, hasOpenXmlFiles: boolean = false): Promise<void> {
     try {
         logger.info("🔍 [DEBUG] Starting Clarion Language Server...");
