@@ -33,6 +33,7 @@ import { updateConfigurationStatusBar, updateBuildProjectStatusBar, hideConfigur
 import { registerNavigationCommands } from './commands/NavigationCommands';
 import { registerBuildCommands } from './commands/BuildCommands';
 import { registerSolutionManagementCommands } from './commands/SolutionCommands';
+import { registerSolutionViewCommands, registerStructureViewCommands } from './commands/ViewCommands';
 
 const logger = LoggerManager.getLogger("Extension");
 logger.setLevel("error"); // PERF: Only log errors to reduce overhead
@@ -1288,32 +1289,8 @@ async function createSolutionTreeView(context?: ExtensionContext) {
             showCollapseAll: true
         });
 
-        // Register filter commands
-        const filterCommand = commands.registerCommand('clarion.solutionView.filter', async () => {
-            const filterText = await vscodeWindow.showInputBox({
-                placeHolder: 'Filter solution tree...',
-                prompt: 'Enter text to filter the solution tree',
-                value: solutionTreeDataProvider?.getFilterText() || ''
-            });
-            
-            if (filterText !== undefined) { // User didn't cancel
-                if (solutionTreeDataProvider) {
-                    solutionTreeDataProvider.setFilterText(filterText);
-                }
-            }
-        });
-        if (context) {
-            context.subscriptions.push(filterCommand);
-        }
-
-        const clearFilterCommand = commands.registerCommand('clarion.solutionView.clearFilter', () => {
-            if (solutionTreeDataProvider) {
-                solutionTreeDataProvider.clearFilter();
-            }
-        });
-        if (context) {
-            context.subscriptions.push(clearFilterCommand);
-        }
+        // Register solution view commands
+        registerSolutionViewCommands(context, solutionTreeDataProvider);
 
         // Initial refresh to load data
         await solutionTreeDataProvider.refresh();
@@ -1349,65 +1326,8 @@ async function createStructureView(context: ExtensionContext) {
         await commands.executeCommand('setContext', 'clarion.followCursorEnabled', structureViewProvider.isFollowCursorEnabled());
         logger.info(`Initialized clarion.followCursorEnabled context to ${structureViewProvider.isFollowCursorEnabled()}`);
 
-        // Register the expand all command
-        context.subscriptions.push(
-            commands.registerCommand('clarion.structureView.expandAll', async () => {
-                if (structureViewProvider) {
-                    await structureViewProvider.expandAll();
-                }
-            })
-        );
-
-        // Register filter commands
-        const filterCommand = commands.registerCommand('clarion.structureView.filter', async () => {
-            const filterText = await vscodeWindow.showInputBox({
-                placeHolder: 'Filter structure view...',
-                prompt: 'Enter text to filter the structure view',
-                value: structureViewProvider?.getFilterText() || ''
-            });
-            
-            if (filterText !== undefined) { // User didn't cancel
-                if (structureViewProvider) {
-                    structureViewProvider.setFilterText(filterText);
-                }
-            }
-        });
-        context.subscriptions.push(filterCommand);
-
-        const clearFilterCommand = commands.registerCommand('clarion.structureView.clearFilter', () => {
-            if (structureViewProvider) {
-                structureViewProvider.clearFilter();
-            }
-        });
-        context.subscriptions.push(clearFilterCommand);
-        // Register the enable follow cursor command
-        const enableFollowCursorCommand = commands.registerCommand('clarion.structureView.enableFollowCursor', async () => {
-            logger.debug(`🎯 enableFollowCursor command invoked`);
-            if (structureViewProvider) {
-                structureViewProvider.setFollowCursor(true);
-                await commands.executeCommand('setContext', 'clarion.followCursorEnabled', true);
-                logger.debug(`   Enabled follow cursor`);
-            }
-        });
-        context.subscriptions.push(enableFollowCursorCommand);
-        
-        // Register the disable follow cursor command
-        const disableFollowCursorCommand = commands.registerCommand('clarion.structureView.disableFollowCursor', async () => {
-            logger.debug(`🎯 disableFollowCursor command invoked`);
-            if (structureViewProvider) {
-                structureViewProvider.setFollowCursor(false);
-                await commands.executeCommand('setContext', 'clarion.followCursorEnabled', false);
-                logger.debug(`   Disabled follow cursor`);
-            }
-        });
-        context.subscriptions.push(disableFollowCursorCommand);
-        
-        // Register the structure view menu command (empty handler for the submenu)
-        const structureViewMenuCommand = commands.registerCommand('clarion.structureView.menu', () => {
-            // This is just a placeholder for the submenu
-            logger.info('Structure view menu clicked');
-        });
-        context.subscriptions.push(structureViewMenuCommand);
+        // Register structure view commands
+        registerStructureViewCommands(context, structureViewProvider);
         
         
 
