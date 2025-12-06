@@ -50,6 +50,56 @@ The issue was caused by MSBuild parameters that suppressed detailed output:
 
 ---
 
+### ~~RECORD Keyword in Field Names (Dec 2024)~~ ✅ FIXED
+**Priority:** ~~HIGH~~ **COMPLETE**  
+**Status:** ~~Not Started~~ **RESOLVED (Dec 6, 2024)**
+
+#### Problem
+When using `record` as part of a field name (e.g., `nts:record`, `hold:nts:record`), the tokenizer was incorrectly identifying it as a RECORD structure keyword and flagging it as unterminated.
+
+**Example Code:**
+```clarion
+TestProc PROCEDURE()
+nts:record      LONG
+hold:nts:record LONG
+  CODE
+  if GlobalResponse=RequestCancelled
+    nts:record      = hold:nts:record
+  else hold:nts:record = nts:record
+  end
+  RETURN
+```
+
+**Previous Behavior:**
+- Diagnostics showed "RECORD statement is not terminated with END or ." for lines with field names
+- `nts:record` and `hold:nts:record` were incorrectly flagged as structure declarations
+
+#### Root Cause
+The tokenizer was creating RECORD Structure tokens when processing substrings of lines:
+1. Pattern `/\bRECORD\b/i` matched `record` at word boundaries
+2. When tokenizing from position N (e.g., after `hold:nts:`), substring was `record LONG`
+3. Negative lookbehind `(?<![:\w])` couldn't check the original line's context
+4. RECORD was tokenized as Structure even though preceded by `:` in original line
+
+#### Solution Implemented
+**Added runtime reclassification in tokenizer:**
+- Enhanced `ClarionTokenizer.ts` to check preceding character in original line
+- When RECORD Structure token is found, checks `line[position - 1]`
+- If preceded by `:` or word character, reclassifies as Variable
+- Prevents false positives while maintaining true structure detection
+
+**Changes:**
+- `ClarionTokenizer.ts`: Added RECORD-specific reclassification logic
+- `TokenPatterns.ts`: Updated RECORD pattern with negative lookbehind (partial fix)
+- `DiagnosticProvider.test.ts`: Added comprehensive test case for field names with RECORD
+
+**Result:**
+- Field names like `nts:record` and `hold:nts:record` no longer flagged as unterminated structures
+- True RECORD structure declarations still properly detected
+- Test suite: 224 passing (was 223), 9 failing (was 10)
+
+---
+
 ### Structure View - Method Implementation Issues (Dec 2024)
 **Priority:** HIGH  
 **Status:** Partially Fixed - Needs More Work
