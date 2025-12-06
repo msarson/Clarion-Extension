@@ -29,6 +29,7 @@ import { initializeTelemetry, trackEvent, trackPerformance } from './telemetry';
 import { SmartSolutionOpener } from './utils/SmartSolutionOpener';
 import { GlobalSolutionHistory } from './utils/GlobalSolutionHistory';
 import { escapeRegExp, getAllOpenDocuments, extractConfigurationsFromSolution } from './utils/ExtensionHelpers';
+import { updateConfigurationStatusBar, updateBuildProjectStatusBar, hideConfigurationStatusBar, hideBuildProjectStatusBar } from './statusbar/StatusBarManager';
 
 const logger = LoggerManager.getLogger("Extension");
 logger.setLevel("error"); // PERF: Only log errors to reduce overhead
@@ -41,83 +42,6 @@ let structureView: TreeView<any> | undefined;
 let statusViewProvider: StatusViewProvider | undefined;
 let statusView: TreeView<any> | undefined;
 let documentManager: DocumentManager | undefined;
-
-let configStatusBarItem: StatusBarItem;
-let buildProjectStatusBarItem: StatusBarItem;
-
-export async function updateConfigurationStatusBar(configuration: string) {
-    if (!configStatusBarItem) {
-        configStatusBarItem = window.createStatusBarItem(StatusBarAlignment.Left, 100);
-        configStatusBarItem.command = 'clarion.setConfiguration'; // ✅ Clicking will open the config picker
-    }
-
-    configStatusBarItem.text = `$(gear) Clarion: ${configuration}`;
-    configStatusBarItem.tooltip = "Click to change Clarion configuration";
-    configStatusBarItem.show();
-
-    // ✅ Ensure the setting is updated
-    const currentConfig = workspace.getConfiguration().get<string>("clarion.configuration");
-
-    if (currentConfig !== configuration) {
-        logger.info(`🔄 Updating folder configuration: clarion.configuration = ${configuration}`);
-        const target = getClarionConfigTarget();
-        if (target && workspace.workspaceFolders) {
-            const config = workspace.getConfiguration("clarion", workspace.workspaceFolders[0].uri);
-            await config.update("configuration", configuration, target);
-        }
-    }
-}
-
-export async function updateBuildProjectStatusBar() {
-    // Only proceed if we have a solution open
-    if (!globalSolutionFile) {
-        if (buildProjectStatusBarItem) {
-            buildProjectStatusBarItem.hide();
-        }
-        return;
-    }
-
-    // Check if there's an active editor
-    const activeEditor = window.activeTextEditor;
-    if (!activeEditor) {
-        if (buildProjectStatusBarItem) {
-            buildProjectStatusBarItem.hide();
-        }
-        return;
-    }
-
-    // Get the file path of the active editor
-    const filePath = activeEditor.document.uri.fsPath;
-    
-    // Get the SolutionCache instance
-    const solutionCache = SolutionCache.getInstance();
-    
-    // Find all projects the file belongs to
-    const projects = solutionCache.findProjectsForFile(filePath);
-    
-    // Create the status bar item if it doesn't exist
-    if (!buildProjectStatusBarItem) {
-        buildProjectStatusBarItem = window.createStatusBarItem(StatusBarAlignment.Left, 99); // Position it to the right of the configuration status bar
-        buildProjectStatusBarItem.command = 'clarion.buildCurrentProject';
-    }
-    
-    if (projects.length === 1) {
-        // If we found exactly one project, show "Build [project name]"
-        buildProjectStatusBarItem.text = `$(play) Build ${projects[0].name}`;
-        buildProjectStatusBarItem.tooltip = `Build project ${projects[0].name}`;
-        buildProjectStatusBarItem.show();
-    } else if (projects.length > 1) {
-        // If the file is in multiple projects, show "Build (Multiple Projects...)"
-        buildProjectStatusBarItem.text = `$(play) Build (Multiple Projects...)`;
-        buildProjectStatusBarItem.tooltip = `File is in multiple projects. Click to select which to build.`;
-        buildProjectStatusBarItem.show();
-    } else {
-        // If no project was found, show "Build Solution" instead
-        buildProjectStatusBarItem.text = `$(play) Build Solution`;
-        buildProjectStatusBarItem.tooltip = `Build the entire solution`;
-        buildProjectStatusBarItem.show();
-    }
-}
 
 
 // Helper function to escape special characters in file paths for RegExp
@@ -1847,13 +1771,8 @@ export async function closeClarionSolution(context: ExtensionContext) {
         logger.info("✅ Cleared solution cache");
         
         // Hide the status bar items
-        if (buildProjectStatusBarItem) {
-            buildProjectStatusBarItem.hide();
-        }
-        
-        if (configStatusBarItem) {
-            configStatusBarItem.hide();
-        }
+        hideConfigurationStatusBar();
+        hideBuildProjectStatusBar();
         
         // Mark solution as closed
         await commands.executeCommand("setContext", "clarion.solutionOpen", false);
@@ -1897,9 +1816,7 @@ export async function closeClarionSolution(context: ExtensionContext) {
         // Refresh the solution tree view to show the "Open Solution" button
         await createSolutionTreeView(context);
         // Hide the build project status bar if it exists
-        if (buildProjectStatusBarItem) {
-            buildProjectStatusBarItem.hide();
-        }
+        hideBuildProjectStatusBar();
         
         
         // Dispose of any file watchers
