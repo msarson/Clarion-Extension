@@ -28,6 +28,7 @@ import { ClarionProjectInfo } from 'common/types';
 import { initializeTelemetry, trackEvent, trackPerformance } from './telemetry';
 import { SmartSolutionOpener } from './utils/SmartSolutionOpener';
 import { GlobalSolutionHistory } from './utils/GlobalSolutionHistory';
+import { escapeRegExp, getAllOpenDocuments, extractConfigurationsFromSolution } from './utils/ExtensionHelpers';
 
 const logger = LoggerManager.getLogger("Extension");
 logger.setLevel("error"); // PERF: Only log errors to reduce overhead
@@ -120,9 +121,6 @@ export async function updateBuildProjectStatusBar() {
 
 
 // Helper function to escape special characters in file paths for RegExp
-function escapeRegExp(string: string): string {
-    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
 
 // Create file watchers for solution-specific files
 async function createSolutionFileWatchers(context: ExtensionContext) {
@@ -1344,52 +1342,6 @@ async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<Do
  * Retrieves all open documents across all tab groups.
  * If a document is not tracked in `workspace.textDocuments`, it forces VS Code to load it.
  */
-export async function getAllOpenDocuments(): Promise<TextDocument[]> {
-    const openDocuments: TextDocument[] = [];
-
-    if ("tabGroups" in window) {
-        logger.info("✅ Using `window.tabGroups.all` to fetch open tabs.");
-
-        const tabGroups = (window as any).tabGroups.all;
-
-        for (const group of tabGroups) {
-            for (const tab of group.tabs) {
-                if (tab.input && "uri" in tab.input) {
-                    const documentUri = (tab.input as any).uri as Uri;
-
-                    // Check if this is a file URI (not a settings or other special URI)
-                    if (documentUri.scheme === 'file') {
-                        let doc = workspace.textDocuments.find(d => d.uri.toString() === documentUri.toString());
-
-                        if (!doc) {
-                            try {
-                                doc = await workspace.openTextDocument(documentUri);
-                            } catch (error) {
-                                logger.error(`❌ Failed to open document: ${documentUri.fsPath}`, error);
-                            }
-                        }
-
-                        if (doc) {
-                            openDocuments.push(doc);
-                            logger.info(`📄 Added document to open list: ${documentUri.fsPath}`);
-                        }
-                    } else {
-                        logger.info(`⚠️ Skipping non-file URI: ${documentUri.toString()}`);
-                    }
-                } else {
-                    logger.warn("⚠️ Tab does not contain a valid document URI:", tab);
-                }
-            }
-        }
-    } else {
-        logger.warn("⚠️ `tabGroups` API not available, falling back to `visibleTextEditors`.");
-        return vscodeWindow.visibleTextEditors.map((editor: TextEditor) => editor.document);
-    }
-
-    logger.info(`🔍 Found ${openDocuments.length} open documents.`);
-    return openDocuments;
-}
-
 /**
  * Handles changes to redirection files (.red)
  * Refreshes the solution cache and updates the UI
@@ -2232,28 +2184,6 @@ export async function openClarionSolution(context: ExtensionContext) {
     }
 }
 
-function extractConfigurationsFromSolution(solutionContent: string): string[] {
-    // Extract the SolutionConfigurationPlatforms section
-    const sectionPattern = /GlobalSection\(SolutionConfigurationPlatforms\)\s*=\s*preSolution([\s\S]*?)EndGlobalSection/;
-    const match = sectionPattern.exec(solutionContent);
-
-    if (!match) {
-        logger.warn("⚠️ No configurations found in solution file. Defaulting to Debug/Release.");
-        return ["Debug", "Release"];
-    }
-
-    const sectionContent = match[1];
-    const configurations = sectionContent
-        .split('\n')
-        .map(line => line.trim())
-        .filter(line => line && !line.startsWith("GlobalSection")) // ✅ Remove section header
-        .map(line => line.split('=')[0].trim()) // ✅ Extract left-hand side (config name)
-        .map(config => config.split('|')[0].trim()) // ✅ Extract everything before the pipe
-        .filter(config => config.length > 0); // ✅ Ensure only valid names remain
-
-    logger.info(`📂 Extracted configurations from solution: ${JSON.stringify(configurations)}`);
-    return configurations.length > 0 ? configurations : ["Debug", "Release"];
-}
 
 export async function showClarionQuickOpen(): Promise<void> {
     if (!workspace.workspaceFolders) {
