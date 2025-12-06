@@ -7,6 +7,23 @@ import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ViewManager");
 
+// Global references to prevent re-creation
+let globalSolutionTreeView: TreeView<any> | undefined;
+let globalSolutionProvider: SolutionTreeDataProvider | undefined;
+let globalStructureView: TreeView<any> | undefined;
+let globalStructureProvider: StructureViewProvider | undefined;
+let globalStatusView: TreeView<any> | undefined;
+let globalStatusProvider: StatusViewProvider | undefined;
+
+/**
+ * Safely refreshes the solution tree view without re-creating it
+ */
+export async function refreshSolutionTreeView(): Promise<void> {
+    if (globalSolutionProvider) {
+        await globalSolutionProvider.refresh();
+    }
+}
+
 /**
  * Creates the solution tree view
  * @param context - Extension context (optional)
@@ -19,10 +36,19 @@ export async function createSolutionTreeView(
     existingTreeView?: TreeView<any>,
     existingProvider?: SolutionTreeDataProvider
 ): Promise<{ treeView: TreeView<any>; provider: SolutionTreeDataProvider }> {
+    // ✅ Use global references if available
+    if (globalSolutionTreeView && globalSolutionProvider) {
+        logger.info("🔄 Using existing solution tree view...");
+        await globalSolutionProvider.refresh();
+        return { treeView: globalSolutionTreeView, provider: globalSolutionProvider };
+    }
+
     // ✅ If the tree view already exists, just refresh its data
     if (existingTreeView && existingProvider) {
         logger.info("🔄 Refreshing existing solution tree...");
         await existingProvider.refresh();
+        globalSolutionTreeView = existingTreeView;
+        globalSolutionProvider = existingProvider;
         return { treeView: existingTreeView, provider: existingProvider };
     }
 
@@ -36,11 +62,17 @@ export async function createSolutionTreeView(
             showCollapseAll: true
         });
 
-        // Register solution view commands
-        registerSolutionViewCommands(context, provider);
+        // Register solution view commands ONLY ONCE
+        if (context) {
+            registerSolutionViewCommands(context, provider);
+        }
 
         // Initial refresh to load data
         await provider.refresh();
+
+        // Store global references
+        globalSolutionTreeView = view;
+        globalSolutionProvider = provider;
 
         logger.info("✅ Solution tree view successfully registered and populated.");
         

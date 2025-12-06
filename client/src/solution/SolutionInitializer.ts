@@ -5,7 +5,7 @@ import { SolutionCache } from '../SolutionCache';
 import { DocumentManager } from '../documentManager';
 import { extractConfigurationsFromSolution } from '../utils/ExtensionHelpers';
 import { updateConfigurationStatusBar, updateBuildProjectStatusBar } from '../statusbar/StatusBarManager';
-import { createSolutionTreeView } from '../views/ViewManager';
+import { refreshSolutionTreeView } from '../views/ViewManager';
 import { registerLanguageFeatures } from '../providers/LanguageFeatureManager';
 import { createSolutionFileWatchers } from '../providers/FileWatcherManager';
 import { isClientReady, getClientReadyPromise } from '../LanguageClientManager';
@@ -123,7 +123,7 @@ export async function workspaceHasBeenTrusted(
         // Don't show the information message as the solution view will now show an "Open Solution" button
         
         // Make sure the solution tree view is created
-        await createSolutionTreeView();
+        await refreshSolutionTreeView();
     }
 }
 
@@ -238,8 +238,8 @@ export async function initializeSolution(
     documentManager = await reinitializeEnvironment(refreshDocs);
     logger.info("✅ Environment initialized");
     
-    await createSolutionTreeView(context);
-    logger.info("✅ Solution tree view created");
+    await refreshSolutionTreeView();
+    logger.info("✅ Solution tree view refreshed");
     
     registerLanguageFeatures(context, documentManager);
     logger.info("✅ Language features registered");

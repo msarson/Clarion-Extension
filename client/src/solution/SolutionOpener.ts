@@ -6,7 +6,7 @@ import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
 import { SolutionCache } from '../SolutionCache';
 import { hideConfigurationStatusBar, hideBuildProjectStatusBar } from '../statusbar/StatusBarManager';
 import { disposeLanguageFeatures } from '../providers/LanguageFeatureManager';
-import { createSolutionTreeView } from '../views/ViewManager';
+import { refreshSolutionTreeView } from '../views/ViewManager';
 import { createSolutionFileWatchers } from '../providers/FileWatcherManager';
 import { DocumentManager } from '../documentManager';
 import LoggerManager from '../logger';
@@ -358,7 +358,7 @@ export async function closeClarionSolution(
         logger.info("✅ Cleared all language feature providers");
         
         // Refresh the solution tree view to show the "Open Solution" button
-        await createSolutionTreeView(context);
+        await refreshSolutionTreeView();
         // Hide the build project status bar if it exists
         hideBuildProjectStatusBar();
         

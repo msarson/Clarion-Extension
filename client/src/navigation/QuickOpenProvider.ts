@@ -1,6 +1,6 @@
 import { workspace, window as vscodeWindow, ExtensionContext } from 'vscode';
 import { SolutionCache } from '../SolutionCache';
-import { createSolutionTreeView } from '../views/ViewManager';
+import { refreshSolutionTreeView } from '../views/ViewManager';
 import { globalSettings } from '../globals';
 import LoggerManager from '../logger';
 import * as path from 'path';
@@ -23,7 +23,7 @@ export async function showClarionQuickOpen(): Promise<void> {
 
     if (!solutionInfo) {
         // Refresh the solution tree view to show the "Open Solution" button
-        await createSolutionTreeView();
+        await refreshSolutionTreeView();
         vscodeWindow.showInformationMessage("No solution is currently open. Use the 'Open Solution' button in the Solution View.");
         return;
     }

@@ -6,6 +6,7 @@ import { SmartSolutionOpener } from '../utils/SmartSolutionOpener';
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
 import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { StatusViewProvider } from '../StatusViewProvider';
+import { refreshSolutionTreeView } from '../views/ViewManager';
 import LoggerManager from '../logger';
 import * as path from 'path';
 
@@ -58,7 +59,7 @@ export function registerSolutionManagementCommands(
                 }
             } else {
                 // Refresh the solution tree view to show the "Open Solution" button
-                await createSolutionTreeView(context);
+                await refreshSolutionTreeView();
                 vscodeWindow.showInformationMessage("No solution is currently open. Use the 'Open Solution' button in the Solution View.");
             }
         })

@@ -4,7 +4,7 @@ import { globalSettings, globalSolutionFile } from '../globals';
 import { SolutionCache } from '../SolutionCache';
 import { redirectionService } from '../paths/RedirectionService';
 import { DocumentManager } from '../documentManager';
-import { createSolutionTreeView } from '../views/ViewManager';
+import { refreshSolutionTreeView } from '../views/ViewManager';
 import { registerLanguageFeatures } from './LanguageFeatureManager';
 import LoggerManager from '../logger';
 import * as path from 'path';
@@ -161,7 +161,7 @@ async function handleRedirectionFileChange(
     await reinitializeEnvironment(true);
 
     // Refresh the solution tree view
-    await createSolutionTreeView(context);
+    await refreshSolutionTreeView();
 
     // Re-register language features
     registerLanguageFeatures(context, documentManager);
@@ -186,7 +186,7 @@ async function handleSolutionFileChange(
         await reinitializeEnvironment(true);
 
         // Refresh the solution tree view
-        await createSolutionTreeView(context);
+        await refreshSolutionTreeView();
 
         // Re-register language features
         registerLanguageFeatures(context, documentManager);
@@ -211,7 +211,7 @@ async function handleProjectFileChange(
     await reinitializeEnvironment(true);
 
     // Refresh the solution tree view
-    await createSolutionTreeView(context);
+    await refreshSolutionTreeView();
 
     // Re-register language features
     registerLanguageFeatures(context, documentManager);
@@ -237,7 +237,7 @@ export async function handleSettingsChange(
     await reinitializeEnvironment(true);
 
     // Refresh the solution tree view
-    await createSolutionTreeView(context);
+    await refreshSolutionTreeView();
 
     // Re-register language features (ensuring links update properly)
     registerLanguageFeatures(context, documentManager);
