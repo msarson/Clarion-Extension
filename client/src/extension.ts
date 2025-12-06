@@ -286,16 +286,19 @@ export async function activate(context: ExtensionContext): Promise<void> {
     const solutionTreeResult = await createSolutionTreeView(context, treeView, solutionTreeDataProvider);
     treeView = solutionTreeResult.treeView;
     solutionTreeDataProvider = solutionTreeResult.provider;
+    context.subscriptions.push(treeView);
     
     // Always create the structure view (shows document outline, works without workspace)
     const structureViewResult = await createStructureView(context, structureView, structureViewProvider);
     structureView = structureViewResult.structureView;
     structureViewProvider = structureViewResult.provider;
+    context.subscriptions.push(structureView);
     
     // Always create the status view (shows extension status and diagnostics)
     const statusViewResult = await createStatusView(context);
     statusView = statusViewResult.statusView;
     statusViewProvider = statusViewResult.provider;
+    context.subscriptions.push(statusView);
 
     context.subscriptions.push(...disposables);
 
