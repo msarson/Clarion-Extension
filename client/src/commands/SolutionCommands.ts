@@ -15,7 +15,7 @@ const logger = LoggerManager.getLogger("SolutionCommands");
 type InitializeSolutionFn = (context: ExtensionContext, forceRefresh: boolean) => Promise<void>;
 
 // Type for createSolutionTreeView function  
-type CreateSolutionTreeViewFn = (context?: ExtensionContext) => Promise<void>;
+type CreateSolutionTreeViewFn = (context?: ExtensionContext) => Promise<{ treeView: any; provider: any }>;
 
 /**
  * Registers solution management commands
