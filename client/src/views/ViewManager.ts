@@ -147,8 +147,14 @@ export async function createStructureView(
             }
         });
         
-        // Set the initial visibility context
+        // Set the initial visibility context and trigger initial state if view is visible at startup
         await commands.executeCommand('setContext', 'clarionStructureViewVisible', true);
+        
+        // If view is visible at startup, explicitly set it as visible on the provider
+        if (view.visible && provider) {
+            provider.setViewVisible(true);
+            logger.info('View was visible at startup, enabled follow cursor tracking');
+        }
 
         logger.info("✅ Structure view successfully registered.");
         
