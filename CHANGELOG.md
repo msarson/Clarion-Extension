@@ -13,7 +13,10 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 ### 🐛 Bug Fixes
 - **Fixed false positive IF statement validation errors** ([#24](https://github.com/msarson/Clarion-Extension/issues/24))
   - Single-line `IF...THEN` statements no longer incorrectly flagged as missing `END`
+  - Complete `IF...THEN...END` structures on one line now correctly recognized
   - Example: `IF condition THEN statement` is now correctly recognized as valid
+  - Example: `of ?field ; IF condition THEN action END` no longer triggers false error
+  - Handles semicolon-separated multi-statement lines properly
   - Prevents spurious "IF Statement is not terminated with END" errors on valid code
   
 - **Fixed false positive FILE validation errors** ([#23](https://github.com/msarson/Clarion-Extension/issues/23))
