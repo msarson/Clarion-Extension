@@ -232,9 +232,14 @@ export function prepareBuildParameters(buildConfig: {
     
     // Get custom log file path or use default
     const customLogPath = workspace.getConfiguration("clarion.build").get<string>("logFilePath", "");
-    const buildLogPath = customLogPath ?
-        customLogPath :
-        path.join(solutionDir, "build_output.log");
+    let buildLogPath: string;
+    if (customLogPath) {
+        // If custom path is provided, resolve it relative to solution directory if not absolute
+        buildLogPath = path.isAbsolute(customLogPath) ? customLogPath : path.join(solutionDir, customLogPath);
+    } else {
+        // Default to solution directory
+        buildLogPath = path.join(solutionDir, "build_output.log");
+    }
 
     // Extract target name correctly
     let targetName = "";
