@@ -188,8 +188,8 @@ export class DiagnosticProvider {
         
         // Dot terminator - need to distinguish inline vs standalone
         if (token.type === TokenType.EndStatement && token.value === '.') {
-            // If there's a previous token and it's a number, this is likely a decimal point
-            if (prevToken && prevToken.type === TokenType.Number) {
+            // If there's a previous token and it's a number ON THE SAME LINE, this is likely a decimal point
+            if (prevToken && prevToken.type === TokenType.Number && prevToken.line === token.line) {
                 return false;
             }
             
