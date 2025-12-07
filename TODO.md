@@ -6,6 +6,103 @@ This file tracks all outstanding tasks, bugs, and improvements for the Clarion L
 
 ## 🐛 Critical Bugs
 
+### ~~Clarion Keywords Used as Field Names~~ ✅ FIXED (Dec 7, 2024)
+**Priority:** ~~HIGH~~ RESOLVED  
+**Status:** ✅ Fixed and Tested  
+**Date Added:** Dec 6, 2024  
+**Date Fixed:** Dec 7, 2024
+
+#### Problem
+When Clarion keywords are used as field names (e.g., `nts:record`, `nts:case`, `file:loop`), the parser misidentified them as keyword tokens instead of field references, leading to false positive validation errors.
+
+#### Solution
+- Added negative lookbehinds `(?<![:\w.])` to all structure keywords: CASE, IF, LOOP, RECORD
+- Added negative lookbehinds to ConditionalContinuation keywords: ELSE, ELSIF, OF
+- Added negative lookbehinds to regular keywords: RETURN, THEN, UNTIL, WHILE, etc.
+- Modified tokenizer to test STRUCTURE_PATTERNS individually (instead of combining with `|`) to preserve lookbehind functionality
+- Added comprehensive test suite covering:
+  - `nts:case`, `nts:record`, `hold:nts:case`
+  - `myObj:end`, `myObj:if`, `myObj:loop`, `myObj:case`
+  - `myObject.case`, `myObject.end`
+  - Verification that standalone keywords still work correctly
+
+**Test Results:** All 5 new tests passing ✅
+
+---
+
+2. **Pattern Definition Issue (PRIMARY CAUSE):**
+   - Most patterns use simple word boundary: `/\bCASE\b/i`
+   - Word boundary `\b` treats `:` as non-word character
+   - So `nts:case` has word boundary before `case` → false match!
+   - Only RECORD has proper fix: `/(?<![:\w])\bRECORD\b/i` (negative lookbehind)
+
+**Example:**
+- Line: `nts:case = 200`
+- Pattern `/\bCASE\b/i` matches because there's a word boundary after `:`
+- Should be: `/(?<![:\w.])\bCASE\b/i` to prevent match after `:`, `.`, or word chars
+
+#### Current Workarounds
+1. RECORD in STRUCTURE_PATTERNS has negative lookbehind (correct fix)
+2. Some runtime reclassification logic exists but incomplete
+
+#### Proposed Solutions
+
+**Option 1: Fix All Pattern Definitions (RECOMMENDED)**
+- Add negative lookbehind `/(?<![:\w.])\b` to ALL keyword/structure patterns
+- Prevents matching after `:`, `.`, or word characters
+- RECORD already has this fix - extend to all others
+- **Pros:** Fixes root cause, minimal code changes, best performance
+- **Cons:** Need to update ~50+ patterns
+- **Implementation:**
+  ```typescript
+  // Current (WRONG):
+  CASE: /\bCASE\b/i,
+  IF: /\bIF\b/i,
+  
+  // Fixed (CORRECT):
+  CASE: /(?<![:\w.])\bCASE\b/i,
+  IF: /(?<![:\w.])\bIF\b/i,
+  ```
+
+**Option 2: Universal Runtime Reclassification**
+- Extend RECORD reclassification logic to all structural keywords
+- Check preceding character for `:`, `.`, or word character
+- Reclassify as Variable token if preceded by field prefix
+- **Pros:** Minimal pattern changes
+- **Cons:** Reactive approach, performance overhead, complex maintenance
+
+**Option 3: Tokenize from Full Line Context**
+- Change tokenizer to always work with full line, track positions
+- More accurate initial tokenization
+- **Pros:** Cleaner architecture
+- **Cons:** Large refactor, unknown performance impact
+
+#### Impact
+- **Severity:** HIGH - Common pattern in Clarion code, causes confusing errors
+- **Affected Keywords:** Any structural keyword that could be used as field name
+  - `CASE`, `LOOP`, `IF`, `END`, `MAP`, `MODULE`, `CLASS`, `RECORD`, `GROUP`, `FILE`, `QUEUE`, `WINDOW`, etc.
+- **User Experience:** False positive "unterminated structure" errors on valid code
+
+#### Next Steps (Updated Dec 6, 2024)
+1. ✅ Identified root cause: Missing negative lookbehind in pattern definitions
+2. ✅ Confirmed RECORD already has correct pattern
+3. 📋 Create comprehensive test suite covering all keywords as field names
+4. 🔧 Implement Option 1: Add `/(?<![:\w.])` to all affected patterns in `TokenPatterns.ts`:
+   - STRUCTURE_PATTERNS (CASE, IF, LOOP, MAP, FILE, QUEUE, etc.)
+   - tokenPatterns[TokenType.Keyword] (RETURN, THEN, UNTIL, etc.)
+   - tokenPatterns[TokenType.ConditionalContinuation] (ELSE, ELSIF, OF)
+   - tokenPatterns[TokenType.WindowElement]
+   - tokenPatterns[TokenType.Attribute]
+5. ✅ Run full test suite
+6. ✅ Verify with real-world code examples (friend's build log issues)
+
+#### Related Files
+- `server/src/ClarionTokenizer.ts` - Main tokenization logic
+- `server/src/tokenizer/TokenPatterns.ts` - Keyword pattern definitions
+- `server/src/providers/DiagnosticProvider.ts` - Validation that reports errors
+
+---
+
 ### ~~Build Error Diagnostics Not Showing Correct File Location (Dec 2024)~~ ✅ FIXED
 **Priority:** ~~HIGH~~ **COMPLETE**  
 **Status:** ~~Not Started~~ **RESOLVED (Dec 4, 2024)**
@@ -47,6 +144,56 @@ The issue was caused by MSBuild parameters that suppressed detailed output:
 - Problems panel now functional for build errors
 
 **Related Issue:** https://github.com/msarson/Clarion-Extension/issues/20
+
+---
+
+### ~~RECORD Keyword in Field Names (Dec 2024)~~ ✅ FIXED
+**Priority:** ~~HIGH~~ **COMPLETE**  
+**Status:** ~~Not Started~~ **RESOLVED (Dec 6, 2024)**
+
+#### Problem
+When using `record` as part of a field name (e.g., `nts:record`, `hold:nts:record`), the tokenizer was incorrectly identifying it as a RECORD structure keyword and flagging it as unterminated.
+
+**Example Code:**
+```clarion
+TestProc PROCEDURE()
+nts:record      LONG
+hold:nts:record LONG
+  CODE
+  if GlobalResponse=RequestCancelled
+    nts:record      = hold:nts:record
+  else hold:nts:record = nts:record
+  end
+  RETURN
+```
+
+**Previous Behavior:**
+- Diagnostics showed "RECORD statement is not terminated with END or ." for lines with field names
+- `nts:record` and `hold:nts:record` were incorrectly flagged as structure declarations
+
+#### Root Cause
+The tokenizer was creating RECORD Structure tokens when processing substrings of lines:
+1. Pattern `/\bRECORD\b/i` matched `record` at word boundaries
+2. When tokenizing from position N (e.g., after `hold:nts:`), substring was `record LONG`
+3. Negative lookbehind `(?<![:\w])` couldn't check the original line's context
+4. RECORD was tokenized as Structure even though preceded by `:` in original line
+
+#### Solution Implemented
+**Added runtime reclassification in tokenizer:**
+- Enhanced `ClarionTokenizer.ts` to check preceding character in original line
+- When RECORD Structure token is found, checks `line[position - 1]`
+- If preceded by `:` or word character, reclassifies as Variable
+- Prevents false positives while maintaining true structure detection
+
+**Changes:**
+- `ClarionTokenizer.ts`: Added RECORD-specific reclassification logic
+- `TokenPatterns.ts`: Updated RECORD pattern with negative lookbehind (partial fix)
+- `DiagnosticProvider.test.ts`: Added comprehensive test case for field names with RECORD
+
+**Result:**
+- Field names like `nts:record` and `hold:nts:record` no longer flagged as unterminated structures
+- True RECORD structure declarations still properly detected
+- Test suite: 224 passing (was 223), 9 failing (was 10)
 
 ---
 
