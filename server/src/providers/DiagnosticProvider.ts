@@ -255,11 +255,11 @@ export class DiagnosticProvider {
             return keyword === 'CODE';
         }
         
-        // PROCEDURE and ROUTINE are scope boundaries when they follow a label
+        // PROCEDURE and ROUTINE are scope boundaries when they follow a label or variable
         // UNLESS we're currently inside a MAP or CLASS (where they're declarations, not implementations)
         if (token.type === TokenType.Procedure || token.type === TokenType.Routine) {
-            // Check if previous token was a label (column position doesn't matter for class methods)
-            if (prevToken && prevToken.type === TokenType.Label) {
+            // Check if previous token was a label or variable (MAP procedures can have indented identifiers)
+            if (prevToken && (prevToken.type === TokenType.Label || prevToken.type === TokenType.Variable)) {
                 // Check if we're inside a MAP or CLASS - if so, this is a declaration, not implementation
                 const insideMapOrClass = structureStack.some(item => 
                     item.structureType === 'MAP' || 
