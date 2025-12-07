@@ -165,6 +165,17 @@ export class ClarionTokenizer {
                             patternTests.set(tokenType, (patternTests.get(tokenType) || 0) + 1);
                             
                             if (match && match.index === 0) {
+                                // ✅ CRITICAL FIX: Check if structure keyword is preceded by : or . in original line
+                                // This prevents matching keywords that are part of qualified identifiers like nts:case or obj.case
+                                if (position > 0) {
+                                    const prevChar = line[position - 1];
+                                    if (prevChar === ':' || prevChar === '.') {
+                                        // Skip this match - it's part of a qualified identifier
+                                        logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at position ${position} - preceded by '${prevChar}'`);
+                                        continue; // Try next structure pattern
+                                    }
+                                }
+                                
                                 patternMatches.set(tokenType, (patternMatches.get(tokenType) || 0) + 1);
                                 
                                 // Create token for this structure
@@ -205,6 +216,17 @@ export class ClarionTokenizer {
                     patternTests.set(tokenType, patternTests.get(tokenType)! + 1);
                     
                     if (match && match.index === 0) {
+                        // ✅ CRITICAL FIX: For Keyword tokens, check if preceded by : or . in original line
+                        // This prevents matching keywords that are part of qualified identifiers like nts:case or obj.case
+                        if (tokenType === TokenType.Keyword && position > 0) {
+                            const prevChar = line[position - 1];
+                            if (prevChar === ':' || prevChar === '.') {
+                                // Skip this match - it's part of a qualified identifier
+                                logger.debug(`⏭️ Skipping keyword '${match[0]}' at position ${position} - preceded by '${prevChar}'`);
+                                continue;
+                            }
+                        }
+                        
                         patternMatches.set(tokenType, patternMatches.get(tokenType)! + 1);
                         
                         // ✅ Structure tokens are handled above in special block
