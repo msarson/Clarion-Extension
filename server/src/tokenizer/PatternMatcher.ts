@@ -3,7 +3,7 @@
  */
 
 import { TokenType } from './TokenTypes';
-import { tokenPatterns } from './TokenPatterns';
+import { tokenPatterns, STRUCTURE_PATTERNS } from './TokenPatterns';
 
 export class PatternMatcher {
     private static compiledPatterns: Map<TokenType, RegExp> | null = null;

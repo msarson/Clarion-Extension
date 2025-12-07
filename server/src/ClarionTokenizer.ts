@@ -3,6 +3,7 @@ import LoggerManager from './logger';
 import { TokenType, Token } from './tokenizer/TokenTypes';
 import { PatternMatcher } from './tokenizer/PatternMatcher';
 import { StructureProcessor } from './tokenizer/StructureProcessor';
+import { STRUCTURE_PATTERNS } from './tokenizer/TokenPatterns';
 
 const logger = LoggerManager.getLogger("Tokenizer");
 logger.setLevel("error"); // Only show errors and PERF (PERF logs directly to console)
@@ -152,6 +153,43 @@ export class ClarionTokenizer {
 
                 // Test only patterns relevant to this character class
                 for (const tokenType of relevantTypes) {
+                    // ✅ Special handling for Structure - test each pattern individually to preserve negative lookbehinds
+                    if (tokenType === TokenType.Structure) {
+                        // Test each structure pattern individually
+                        for (const [structName, structPattern] of Object.entries(STRUCTURE_PATTERNS)) {
+                            const testStart = performance.now();
+                            const match = structPattern.exec(substring);
+                            const testTime = performance.now() - testStart;
+                            
+                            patternTiming.set(tokenType, (patternTiming.get(tokenType) || 0) + testTime);
+                            patternTests.set(tokenType, (patternTests.get(tokenType) || 0) + 1);
+                            
+                            if (match && match.index === 0) {
+                                patternMatches.set(tokenType, (patternMatches.get(tokenType) || 0) + 1);
+                                
+                                // Create token for this structure
+                                const newToken: Token = {
+                                    type: TokenType.Structure,
+                                    value: match[0],
+                                    line: lineNumber,
+                                    start: column,
+                                    maxLabelLength: 0
+                                };
+                                
+                                this.tokens.push(newToken);
+                                position += match[0].length;
+                                column += match[0].length;
+                                matched = true;
+                                
+                                logger.info(`✅ Matched Structure '${structName}': ${match[0]} at line ${lineNumber}`);
+                                break; // Found a match, stop testing other structure patterns
+                            }
+                        }
+                        
+                        if (matched) break; // Already found a structure match, skip other token types
+                        continue; // No structure match found, but skip the normal pattern.get() logic below and try next token type
+                    }
+                    
                     const pattern = patterns.get(tokenType);
                     if (!pattern) continue;
 
@@ -169,37 +207,8 @@ export class ClarionTokenizer {
                     if (match && match.index === 0) {
                         patternMatches.set(tokenType, patternMatches.get(tokenType)! + 1);
                         
-                        // Special handling for Structure tokens to avoid misclassifying variables
+                        // ✅ Structure tokens are handled above in special block
                         let newTokenType = tokenType;
-                        if (tokenType === TokenType.Structure) {
-                            // Check if this is likely a variable reference rather than a structure declaration
-                            const upperValue = match[0].trim().toUpperCase();
-                            
-                            // Special check for RECORD - if preceded by : or word character, it's part of a field name
-                            if (upperValue === 'RECORD' && position > 0) {
-                                const prevChar = line[position - 1];
-                                if (prevChar === ':' || /\w/.test(prevChar)) {
-                                    newTokenType = TokenType.Variable;
-                                    logger.info(`🔄 Reclassified 'RECORD' from Structure to Variable (part of field name) at line ${lineNumber}`);
-                                }
-                            }
-                            
-                            // Check if inside parentheses (function call)
-                            let parenDepth = 0;
-                            for (let i = 0; i < position; i++) {
-                                if (line[i] === '(') parenDepth++;
-                                if (line[i] === ')') parenDepth--;
-                            }
-                            
-                            // If inside parentheses or after a dot (e.g., SELF.AddItem(Toolbar)),
-                            // treat as a variable instead of a structure
-                            if (parenDepth > 0 ||
-                                (position > 0 && line.substring(0, position).includes('.')) ||
-                                (position > 0 && line.substring(0, position).trim().endsWith('='))) {
-                                newTokenType = TokenType.Variable;
-                                logger.info(`🔄 Reclassified '${match[0].trim()}' from Structure to Variable at line ${lineNumber}`);
-                            }
-                        }
                         
                         let newToken: Token = {
                             type: newTokenType,

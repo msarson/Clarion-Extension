@@ -7,14 +7,15 @@ import { TokenType } from './TokenTypes';
 export const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     MODULE: /^\s*MODULE\b/i,  // MODULE should be the first word on the line
     APPLICATION: /\bAPPLICATION\b(?=\s*(\(|,))/i,
-    CASE: /\bCASE\b/i,
+    // ✅ CASE, IF, LOOP should not match after : or . (qualified identifiers like nts:case, obj.case)
+    CASE: /(?<![:\w.])\bCASE\b/i,
     CLASS: /\bCLASS\b/i,
     GROUP: /\bGROUP\b/i,
     FILE: /\sFILE\b/i,
     INTERFACE: /\bINTERFACE\b/i,
-    IF: /\bIF\b/i,  // ✅ Re-added "IF" as a structure
+    IF: /(?<![:\w.])\bIF\b/i,  // ✅ Prevent matching after : or . or word char
     JOIN: /\bJOIN\b/i,
-    LOOP: /\bLOOP\b/i,
+    LOOP: /(?<![:\w.])\bLOOP\b/i,  // ✅ Prevent matching after : or . or word char
     MAP: /\bMAP\b/i,
     MENU: /\bMENU\b(?=\s*(\(|,))/i,
     MENUBAR: /\bMENUBAR\b/i,
@@ -22,9 +23,9 @@ export const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     QUEUE: /\s+\bQUEUE\b(?!:)/i,
 
     // RECORD: /^\s*(\w+)\s+(RECORD)\b/i,
-    // ✅ RECORD should not match when it's part of a field name (preceded by : or alphanumeric)
+    // ✅ RECORD should not match when it's part of a field name (preceded by : or . or alphanumeric)
     // Use negative lookbehind to ensure RECORD is standalone
-    RECORD: /(?<![:\w])\bRECORD\b/i,
+    RECORD: /(?<![:\w.])\bRECORD\b/i,
     REPORT: /\bREPORT\b/i,
     SECTION: /\bSECTION\b/i,
     SHEET: /\bSHEET\b/i,
@@ -55,14 +56,16 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.PointerParameter]: /\*\s*\b[A-Za-z_][A-Za-z0-9_]*\b/i,
     [TokenType.FieldEquateLabel]: /\?[A-Za-z_][A-Za-z0-9_]*/i,
     [TokenType.ClarionDocument]: /\b(?:PROGRAM|MEMBER)\b/i,
-    [TokenType.ConditionalContinuation]: /\b(?:ELSE|ELSIF|OF)\b/i,  // ✅ New type for ELSE and ELSIF
-    [TokenType.Keyword]: /\b(?:RETURN|THEN|UNTIL|WHILE|EXIT|NEW|PROCEDURE|ROUTINE|PROC|BREAK|KEY)\b/i, // Added KEY to keywords
+    // ✅ ELSE, ELSIF, OF should not match after : or . (though unlikely, be safe)
+    [TokenType.ConditionalContinuation]: /(?<![:\w.])\b(?:ELSE|ELSIF|OF)\b/i,  // ✅ New type for ELSE and ELSIF
+    [TokenType.Keyword]: /(?<![:\w.])\b(?:RETURN|THEN|UNTIL|WHILE|EXIT|NEW|PROCEDURE|ROUTINE|PROC|BREAK|KEY)\b/i, // ✅ Added negative lookbehind
     [TokenType.PictureFormat]: /(@N[^\s,]*|@[Ee][^\s,]*|@S\d+|@D\d{1,2}[.\-_'`<>]?\d{0,2}B?|@T\d{1,2}[.\-_'`]?[B]?|@[Pp][^Pp\n]+[Pp]B?|@[Kk][^Kk\n]+[Kk]B?)/i,
     [TokenType.ExecutionMarker]: /\b(?:CODE|DATA)\b/i,
     [TokenType.Type]: /\b(?:BYTE|SHORT|USHORT|LONG|ULONG|REAL|SREAL|DECIMAL|PDECIMAL|STRING|CSTRING|PSTRING|DATE|TIME|ASTRING|ANY|BSTRING|MEMO|SIGNED|UNSIGNED)(?=\(|\s|,|$)/i,
     [TokenType.TypeAnnotation]: /:\s*(?:byte|short|ushort|long|ulong|real|sreal|decimal|pdecimal|string|cstring|pstring|date|time)\b/i,
     [TokenType.Directive]: /\b(?:COMPILE|OMIT|EMBED|SECTION|ENDSECTION)\b/i,
-    [TokenType.Structure]: new RegExp(Object.values(STRUCTURE_PATTERNS).map(p => p.source).join('|'), 'i'),
+    // ✅ Structure is handled specially in PatternMatcher - see STRUCTURE_PATTERNS
+    // DO NOT combine patterns here as it breaks negative lookbehinds!
     [TokenType.WindowElement]: /\b(?:BUTTON|ENTRY|TEXT|LIST|COMBO|CHECK|RADIO|OPTION|SHEET|TAB|IMAGE|LINE|BOX|ELLIPSE|PANEL|PROGRESS|REGION|PROMPT|SPIN|ITEM|GROUP)\b|STRING\s*\(@[^)]*\)/i,
     [TokenType.Attribute]: /\b(?:ALONE|AUTO|BINARY|BINDABLE|CENTERED|CREATE|CURSOR|DEFAULT|DLL|DOUBLE|DROP|DRIVER|DUP|EXTERNAL|FILL|FILTER|FIRST|FLAT|HLP|ICON|IMM|INS|MASK|MAX|MDI|MODAL|MSG|NAME|NOBAR|NOCASE|NOFRAME|NOMERGE|NOSHEET|OEM|OVER|OVR|OWNER|PAGE|PASCAL|PRE|PRIMARY|PRIVATE|PROTECTED|RAW|RECLAIM|REQ|RESIZE|RIGHT|SCROLL|STATUS|STATIC|STD|SYSTEM|THREAD|TIMER|TIP|TIMES|TRN|UPR|USE|VBX|VCR|WALLPAPER|REF)\b/i,
     [TokenType.Constant]: /\b(?:TRUE|FALSE|NULL|LEVEL:BENIGN|LEVEL:NOTIFY|LEVEL:FATAL|ICON:Asterisk|ICON:Exclamation|ICON:Hand|ICON:Question|BUTTON:YES|BUTTON:NO|BUTTON:OK|BUTTON:CANCEL|CENTER|LEFT|RIGHT)\b/i,
