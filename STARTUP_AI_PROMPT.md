@@ -8,6 +8,33 @@
 
 You are an AI assistant working on the Clarion-Extension VS Code extension. This extension provides language support for the Clarion programming language, including syntax highlighting, IntelliSense, go-to-definition, and other language features.
 
+## ⚠️ CRITICAL: Test-Driven Development (TDD)
+
+**Testing is the MOST IMPORTANT part of development:**
+
+- **ALWAYS run tests before and after making changes**
+- **NEVER commit code that breaks existing tests** (unless fixing the test itself)
+- **CREATE tests for new features BEFORE or DURING implementation**
+- **Test suite MUST pass**: All changes must maintain or improve test count
+- **Zero tolerance for regressions**: Fixing 1 test but breaking 3 others is unacceptable
+- **Use temporary branches**: Create throwaway branches for all work (see Git Workflow section)
+
+**Testing Workflow:**
+1. Run `npm test` to establish baseline (e.g., "233 passing, 9 failing")
+2. Create a temporary branch for your work
+3. Make changes incrementally
+4. Run `npm test` after EACH significant change
+5. If tests break, fix immediately or revert
+6. Only proceed when test count improves or stays same
+7. User tests thoroughly before merging
+8. Merge to version branch and delete temporary branch
+
+**Quality Standards:**
+- Fixing bugs should REDUCE failing test count
+- Adding features should INCREASE passing test count
+- Refactoring should maintain same test count
+- Never merge code with MORE failures than you started with
+
 ## ⚠️ CRITICAL: Clarion Language is Case-Insensitive
 
 **This is fundamental to all code involving Clarion identifiers:**
@@ -88,11 +115,14 @@ Clarion-Extension/
 ## Development Workflow
 
 ### 1. Working with Code
+- **Run tests FIRST**: Establish baseline with `npm test` before any changes
 - **Read the KB first** before making Clarion-related changes
+- **Create temporary branch**: Always branch for any work (see Git Workflow)
 - Make minimal, surgical changes
-- Test changes with existing test suite
+- **Run tests AFTER each change**: Validate with `npm test` frequently
+- **Never proceed if tests break**: Fix or revert immediately
 - Update documentation if changes affect behavior
-- Run `npm test` to validate changes
+- **Final test run**: Confirm all tests pass before committing
 
 ### 2. Git Workflow
 
@@ -113,20 +143,25 @@ Clarion-Extension/
 - Example: `feature/add-hover-support`, `fix/column-zero-bug`, `refactor/extract-utilities`
 
 **Workflow (User's Preferred Method):**
-1. User requests new feature, bug fix, or refactoring work
-2. Create temporary branch: `git checkout -b [type]/[description]`
-3. Implement changes, commit regularly
-4. **User tests the changes thoroughly**
-5. When user confirms testing is complete and successful:
+1. **Establish baseline**: Run `npm test` to know starting point (e.g., "233 passing, 9 failing")
+2. User requests new feature, bug fix, or refactoring work
+3. Create temporary branch: `git checkout -b [type]/[description]`
+4. Implement changes incrementally, commit regularly
+5. **Run `npm test` after each significant change** to catch regressions early
+6. **User tests the changes thoroughly**
+7. When user confirms testing is complete and successful:
+   - Final test run to verify no regressions
    - Merge back to version branch: `git checkout version-X.Y.Z && git merge [branch-name]`
    - **Delete the temporary branch**: `git branch -d [branch-name]`
    - Push version branch: `git push origin version-X.Y.Z`
-6. For multi-phase work, repeat cycle for each phase
+8. For multi-phase work, repeat cycle for each phase
 
 **Important Notes:**
+- **TDD is mandatory**: Run tests before, during, and after all changes
 - User **always** tests before merging
 - Temporary branches are **deleted immediately after merge**
 - Never push temporary branches to remote
+- **Test count must improve or stay same**: Never merge code with more failures
 - For large refactoring, break into phases (Phase 1, Phase 2, etc.)
 - Each phase: branch → work → test → merge → delete → next phase
 
