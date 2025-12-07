@@ -326,12 +326,12 @@ export class DiagnosticProvider {
             return false; // MODULE at top level doesn't need terminator
         }
         
-        // MODULE inside MAP requires END
+        // MODULE inside MAP REQUIRES END - must be explicitly terminated
         if (parentContext === 'MAP') {
             return true;
         }
         
-        // MODULE inside CLASS does NOT require END
+        // MODULE inside CLASS/INTERFACE is an attribute, not a structure - does NOT require END
         if (parentContext === 'CLASS' || parentContext === 'INTERFACE') {
             return false;
         }
