@@ -181,8 +181,50 @@ export class DiagnosticProvider {
      * @param structureStack - Current stack to check what we're closing
      */
     private static isStructureClose(token: Token, prevToken: Token | null, nextToken: Token | null, structureStack?: StructureStackItem[]): boolean {
-        // END keyword
-        if (token.type === TokenType.EndStatement) {
+        // END keyword - always closes structures
+        if (token.type === TokenType.EndStatement && token.value.toUpperCase() === 'END') {
+            return true;
+        }
+        
+        // Dot terminator - need to distinguish inline vs standalone
+        if (token.type === TokenType.EndStatement && token.value === '.') {
+            // If there's a previous token and it's a number, this is likely a decimal point
+            if (prevToken && prevToken.type === TokenType.Number) {
+                return false;
+            }
+            
+            // If next token exists and is on same line, probably not a terminator
+            // (member access or other use)
+            if (nextToken && nextToken.line === token.line && 
+                (nextToken.type === TokenType.Variable || nextToken.type === TokenType.Label)) {
+                return false;
+            }
+            
+            // Check if this dot is on the SAME LINE as the structure keyword it would close
+            // If yes AND there are other tokens between them, it's an inline terminator
+            // If yes AND the structure is the only other token, it could be inline syntax like "LOOP WHILE condition."
+            if (structureStack && structureStack.length > 0) {
+                const topStructure = structureStack[structureStack.length - 1];
+                if (topStructure.line === token.line) {
+                    // Dot on same line as structure keyword - inline terminator
+                    // Example: IF x > 5 THEN statement.  (dot is inline)
+                    // Example: LOOP WHILE condition.  (dot is inline)
+                    return false;
+                }
+                
+                // Dot on different line - but is it standalone or part of inline statement?
+                // Check if prevToken is on the same line as the dot
+                // If yes, the dot is part of a statement on that line (inline)
+                // If no, the dot is standalone (structure terminator)
+                if (prevToken && prevToken.line === token.line) {
+                    // There's a token before the dot on the same line
+                    // This means: "something." on a line
+                    // This is an inline dot (part of a statement), NOT a standalone structure terminator
+                    return false;
+                }
+            }
+            
+            // Standalone dot (on its own line OR no structure on stack) - closes structures
             return true;
         }
         
@@ -197,25 +239,6 @@ export class DiagnosticProvider {
                 }
                 return false;
             }
-        }
-        
-        // Dot terminator - check if it's a structure terminator
-        // (not a decimal point or member access)
-        if (token.type === TokenType.Delimiter && token.value === '.') {
-            // If there's a previous token and it's a number, this is likely a decimal point
-            if (prevToken && prevToken.type === TokenType.Number) {
-                return false;
-            }
-            
-            // If next token exists and is on same line, probably not a terminator
-            // (member access or other use)
-            if (nextToken && nextToken.line === token.line && 
-                (nextToken.type === TokenType.Variable || nextToken.type === TokenType.Label)) {
-                return false;
-            }
-            
-            // Otherwise, treat as structure terminator
-            return true;
         }
         
         return false;
