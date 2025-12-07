@@ -6,38 +6,29 @@ This file tracks all outstanding tasks, bugs, and improvements for the Clarion L
 
 ## 🐛 Critical Bugs
 
-### Clarion Keywords Used as Field Names (Dec 2024)
-**Priority:** HIGH  
-**Status:** Identified - Needs Investigation  
-**Date Added:** Dec 6, 2024
+### ~~Clarion Keywords Used as Field Names~~ ✅ FIXED (Dec 7, 2024)
+**Priority:** ~~HIGH~~ RESOLVED  
+**Status:** ✅ Fixed and Tested  
+**Date Added:** Dec 6, 2024  
+**Date Fixed:** Dec 7, 2024
 
 #### Problem
-When Clarion keywords are used as field names (e.g., `nts:record`, `nts:case`, `file:loop`), the parser can misidentify them as keyword tokens instead of field references, leading to false positive validation errors.
+When Clarion keywords are used as field names (e.g., `nts:record`, `nts:case`, `file:loop`), the parser misidentified them as keyword tokens instead of field references, leading to false positive validation errors.
 
-**Example Code:**
-```clarion
-TestProc PROCEDURE()
-nts:record      LONG
-nts:case        LONG
-file:loop       LONG
-  CODE
-  nts:record = 100
-  nts:case = 200
-  file:loop = 300
-  RETURN
-```
+#### Solution
+- Added negative lookbehinds `(?<![:\w.])` to all structure keywords: CASE, IF, LOOP, RECORD
+- Added negative lookbehinds to ConditionalContinuation keywords: ELSE, ELSIF, OF
+- Added negative lookbehinds to regular keywords: RETURN, THEN, UNTIL, WHILE, etc.
+- Modified tokenizer to test STRUCTURE_PATTERNS individually (instead of combining with `|`) to preserve lookbehind functionality
+- Added comprehensive test suite covering:
+  - `nts:case`, `nts:record`, `hold:nts:case`
+  - `myObj:end`, `myObj:if`, `myObj:loop`, `myObj:case`
+  - `myObject.case`, `myObject.end`
+  - Verification that standalone keywords still work correctly
 
-**Current Status:**
-- ✅ Fixed for `RECORD` keyword in STRUCTURE_PATTERNS via negative lookbehind: `/(?<![:\w])\bRECORD\b/i`
-- ⚠️ **Not fixed for other keywords** like `CASE`, `LOOP`, `IF`, `END`, etc.
+**Test Results:** All 5 new tests passing ✅
 
-#### Root Cause Analysis (Updated Dec 6, 2024)
-**TWO separate issues identified:**
-
-1. **Substring Tokenization Issue:**
-   - Tokenizer processes line from position N (after prefix like `nts:`)
-   - Substring matching can't see preceding `:` character
-   - Pattern `/\bCASE\b/i` matches `case = 200` → False CASE keyword token
+---
 
 2. **Pattern Definition Issue (PRIMARY CAUSE):**
    - Most patterns use simple word boundary: `/\bCASE\b/i`
