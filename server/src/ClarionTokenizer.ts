@@ -178,10 +178,13 @@ export class ClarionTokenizer {
                                 
                                 patternMatches.set(tokenType, (patternMatches.get(tokenType) || 0) + 1);
                                 
+                                // ✅ Trim leading whitespace from token value (some patterns like FILE, QUEUE, VIEW include \s)
+                                const tokenValue = match[0].trimStart();
+                                
                                 // Create token for this structure
                                 const newToken: Token = {
                                     type: TokenType.Structure,
-                                    value: match[0],
+                                    value: tokenValue,
                                     line: lineNumber,
                                     start: column,
                                     maxLabelLength: 0
@@ -192,7 +195,7 @@ export class ClarionTokenizer {
                                 column += match[0].length;
                                 matched = true;
                                 
-                                logger.info(`✅ Matched Structure '${structName}': ${match[0]} at line ${lineNumber}`);
+                                logger.info(`✅ Matched Structure '${structName}': ${tokenValue} at line ${lineNumber}`);
                                 break; // Found a match, stop testing other structure patterns
                             }
                         }
