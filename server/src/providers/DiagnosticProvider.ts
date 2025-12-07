@@ -188,8 +188,8 @@ export class DiagnosticProvider {
         
         // Dot terminator - need to distinguish inline vs standalone
         if (token.type === TokenType.EndStatement && token.value === '.') {
-            // If there's a previous token and it's a number, this is likely a decimal point
-            if (prevToken && prevToken.type === TokenType.Number) {
+            // If there's a previous token and it's a number ON THE SAME LINE, this is likely a decimal point
+            if (prevToken && prevToken.type === TokenType.Number && prevToken.line === token.line) {
                 return false;
             }
             
@@ -255,11 +255,11 @@ export class DiagnosticProvider {
             return keyword === 'CODE';
         }
         
-        // PROCEDURE and ROUTINE are scope boundaries when they follow a label
+        // PROCEDURE and ROUTINE are scope boundaries when they follow a label or variable
         // UNLESS we're currently inside a MAP or CLASS (where they're declarations, not implementations)
         if (token.type === TokenType.Procedure || token.type === TokenType.Routine) {
-            // Check if previous token was a label (column position doesn't matter for class methods)
-            if (prevToken && prevToken.type === TokenType.Label) {
+            // Check if previous token was a label or variable (MAP procedures can have indented identifiers)
+            if (prevToken && (prevToken.type === TokenType.Label || prevToken.type === TokenType.Variable)) {
                 // Check if we're inside a MAP or CLASS - if so, this is a declaration, not implementation
                 const insideMapOrClass = structureStack.some(item => 
                     item.structureType === 'MAP' || 
@@ -326,12 +326,12 @@ export class DiagnosticProvider {
             return false; // MODULE at top level doesn't need terminator
         }
         
-        // MODULE inside MAP requires END
+        // MODULE inside MAP REQUIRES END - must be explicitly terminated
         if (parentContext === 'MAP') {
             return true;
         }
         
-        // MODULE inside CLASS does NOT require END
+        // MODULE inside CLASS/INTERFACE is an attribute, not a structure - does NOT require END
         if (parentContext === 'CLASS' || parentContext === 'INTERFACE') {
             return false;
         }

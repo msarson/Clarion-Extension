@@ -1692,24 +1692,36 @@ CODE
 ```
 
 ### Module Termination Rules
-**Critical:** A MODULE section inside a MAP does NOT use END to terminate!
+
+**MODULE inside MAP structure:**
+
+MODULE sections inside MAP **MUST be terminated with END**:
 
 ```clarion
 MAP
-  MODULE('file')       ! Start of MODULE
-    PROCEDURE(params)  ! MODULE content
-  END                  ! Terminates the MAP, not the MODULE!
+  MODULE('KERNEL32')
+    GetTickCount PROCEDURE(),ULONG
+  END                  ! Terminates the MODULE
+  MODULE('USER32')
+    MessageBoxA PROCEDURE(),LONG
+  END                  ! Terminates the MODULE
+END                    ! Terminates the MAP
+```
+
+**MODULE inside CLASS/INTERFACE:**
+
+MODULE used as an attribute in CLASS or INTERFACE does NOT require END:
+
+```clarion
+MyClass CLASS,MODULE('MyClass.CLW')
+  Method1 PROCEDURE()
 END
 ```
 
-The MODULE is implicitly terminated when:
-- Another MODULE starts
-- The END keyword terminates the containing MAP
-
 **Diagnostic Rules:**
-- Do NOT flag "MODULE not terminated" inside MAP structures
-- MODULE can only appear inside MAP sections
-- END after MODULE actually terminates the MAP, not the MODULE
+- MODULE inside MAP: MUST have END terminator
+- MODULE as CLASS/INTERFACE attribute: Does NOT need END
+- MODULE can only appear inside MAP sections (as structure) or as CLASS/INTERFACE attribute
 
 ---
 
