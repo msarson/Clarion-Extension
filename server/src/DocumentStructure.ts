@@ -90,15 +90,22 @@ export class DocumentStructure {
                 this.handleStructureToken(token);
             } else if (token.type === TokenType.EndStatement) {
                 this.handleEndStatementForStructure(token);
-            } else if (token.type === TokenType.Label && token.start === 0 && this.structureStack.length > 0) {
+            } else if (token.type === TokenType.Label && token.start === 0) {
+                // Special case: CODE/DATA at column 0 should be execution markers, not field labels
+                const upperValue = token.value.toUpperCase();
+                if (upperValue === 'CODE' || upperValue === 'DATA') {
+                    this.handleExecutionMarker(token);
+                }
                 // Add label tokens as children of their parent structure (for GROUP/QUEUE/RECORD fields)
-                const parentStructure = this.structureStack[this.structureStack.length - 1];
-                const structureTypes = ["RECORD", "GROUP", "QUEUE", "FILE", "VIEW", "WINDOW", "REPORT"];
-                if (structureTypes.includes(parentStructure.value.toUpperCase())) {
-                    parentStructure.children = parentStructure.children || [];
-                    parentStructure.children.push(token);
-                    token.parent = parentStructure;
-                    logger.info(`📌 Added field '${token.value}' as child of structure '${parentStructure.value}'`);
+                else if (this.structureStack.length > 0) {
+                    const parentStructure = this.structureStack[this.structureStack.length - 1];
+                    const structureTypes = ["RECORD", "GROUP", "QUEUE", "FILE", "VIEW", "WINDOW", "REPORT"];
+                    if (structureTypes.includes(parentStructure.value.toUpperCase())) {
+                        parentStructure.children = parentStructure.children || [];
+                        parentStructure.children.push(token);
+                        token.parent = parentStructure;
+                        logger.info(`📌 Added field '${token.value}' as child of structure '${parentStructure.value}'`);
+                    }
                 }
             }
             

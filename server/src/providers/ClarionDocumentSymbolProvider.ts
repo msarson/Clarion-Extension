@@ -2098,16 +2098,17 @@ export class ClarionDocumentSymbolProvider {
             // Variables should be attached to the most immediate structure they're defined in
             let target: DocumentSymbol | null = null;
 
-            // BUGFIX: Check the parentStack directly for the most immediate GROUP structure
-            // This handles unlabeled GROUPs that might not be set in currentStructure
-            logger.info(`   🔍 Searching parentStack for immediate struct parent (stack depth: ${parentStack.length}, current line: ${line})`);
+            // BUGFIX: Check the parentStack directly for the most immediate parent (GROUP, ROUTINE, etc.)
+            // This handles unlabeled GROUPs and ROUTINEs that might not be set in currentStructure
+            logger.info(`   🔍 Searching parentStack for immediate parent (stack depth: ${parentStack.length}, current line: ${line})`);
             for (let stackIdx = parentStack.length - 1; stackIdx >= 0; stackIdx--) {
                 const stackEntry = parentStack[stackIdx];
                 const symbol = stackEntry.symbol;
                 
                 const isStruct = symbol.kind === SymbolKind.Struct;
+                const isRoutine = symbol.kind === ClarionSymbolKind.Routine;
                 const isActive = !stackEntry.finishesAt || stackEntry.finishesAt >= line;
-                logger.info(`     - Stack[${stackIdx}]: "${symbol.name}", kind=${symbol.kind}, finishesAt=${stackEntry.finishesAt}, isStruct=${isStruct}, isActive=${isActive}`);
+                logger.info(`     - Stack[${stackIdx}]: "${symbol.name}", kind=${symbol.kind}, finishesAt=${stackEntry.finishesAt}, isStruct=${isStruct}, isRoutine=${isRoutine}, isActive=${isActive}`);
                 
                 // Check if this is a GROUP, QUEUE, or other Struct that's still active
                 if (symbol.kind === SymbolKind.Struct && 
@@ -2115,6 +2116,15 @@ export class ClarionDocumentSymbolProvider {
                     // Found the most immediate struct parent
                     target = symbol;
                     logger.info(`   🎯 Found immediate struct parent in stack: "${symbol.name}"`);
+                    break;
+                }
+                
+                // Check if this is a ROUTINE that's still active
+                if (symbol.kind === ClarionSymbolKind.Routine && 
+                    (!stackEntry.finishesAt || stackEntry.finishesAt >= line)) {
+                    // Found the most immediate routine parent
+                    target = symbol;
+                    logger.info(`   🎯 Found immediate routine parent in stack: "${symbol.name}"`);
                     break;
                 }
             }
