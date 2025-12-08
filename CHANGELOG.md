@@ -24,6 +24,9 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
   - Fixed case-insensitive matching of procedure/method names
   - Now correctly validates procedures/methods with return types have RETURN statements with values
   - Fixes 3 failing tests for RETURN validation
+- **Removed invalid ELSE validation test**
+  - Removed test that incorrectly flagged valid ELSE with multiple statements
+  - ELSE clauses can have multiple statements and are terminated by ELSIF, ELSE, or END
 
 ### 💡 Technical Details
 
