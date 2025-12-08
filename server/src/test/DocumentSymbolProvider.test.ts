@@ -581,6 +581,41 @@ MyRoutine ROUTINE
             }
         });
 
+        test('Should NOT show code statements in outline', () => {
+            const code = `
+Myproc PROCEDURE()
+  CODE
+  do Call_ButtonProc
+!--------------------------------------------------------------------
+Call_ButtonProc             ROUTINE
+    data
+rou:JustCalledD17 byte
+rou:JustCalledPW  byte
+rou:JustCalledD4  Byte
+SaveWallID        BYTE  
+ CODE
+  RETURN
+`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionDocumentSymbolProvider();
+            const symbols = provider.provideDocumentSymbols(tokens, 'test://test.clw');
+            
+            console.log('\n=== Checking for code statements in outline ===');
+            console.log(formatSymbolTree(symbols));
+            
+            const proc = findSymbol(symbols, 'Myproc');
+            assert.ok(proc, 'Should find Myproc procedure');
+            
+            // Check that "do" statement is NOT in the symbols
+            const doStatement = findSymbol(symbols, 'do');
+            assert.ok(!doStatement, 'Should NOT find "do" statement in symbols (execution code should be filtered)');
+            
+            // The routine should still appear
+            const routine = findSymbol(symbols, 'Call_ButtonProc');
+            assert.ok(routine, 'Should find Call_ButtonProc routine');
+        });
+
         test('Should parse ROUTINE with DATA section', () => {
             const code = `
   PROGRAM

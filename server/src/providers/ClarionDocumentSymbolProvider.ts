@@ -345,6 +345,10 @@ export class ClarionDocumentSymbolProvider {
                 pastCodeStatement = true;
                 
                 // For method implementations, clear currentProcedure AND pop from parent stack
+                
+                // For method implementations, clear currentProcedure AND pop from parent stack
+                
+                // For method implementations, clear currentProcedure AND pop from parent stack
                 // This prevents variables/symbols after CODE from being attached
                 if (currentProcedure && currentProcedure._isMethodImplementation) {
                     currentProcedure = null;
@@ -540,6 +544,27 @@ export class ClarionDocumentSymbolProvider {
                     // Reset pastCodeStatement flag when entering new procedure/method
                     pastCodeStatement = false;
 
+                    // CRITICAL FIX: If the procedure has no local variables (CODE immediately follows),
+                    // set pastCodeStatement to true to prevent execution code from appearing in outline
+                    // Check if CODE is on the very next line with no variable declarations in between
+                    if (token.executionMarker) {
+                        const codeLineNum = token.executionMarker.line;
+                        // Check if there are any Type or Variable tokens between current line and CODE line
+                        let hasVariablesBetween = false;
+                        for (let j = i + 1; j < tokens.length && tokens[j].line < codeLineNum; j++) {
+                            const t = tokens[j];
+                            if (t.type === TokenType.Type || t.type === TokenType.Label || 
+                                (t.type === TokenType.Variable && t.line > line)) {
+                                hasVariablesBetween = true;
+                                break;
+                            }
+                        }
+                        // If CODE immediately follows with no variables, set flag to true
+                        if (!hasVariablesBetween) {
+                            pastCodeStatement = true;
+                        }
+                    }
+
                     insideDefinitionBlock = true;
                 } else {
                     const procedureDefSymbol = this.handleProcedureDefinitionToken(tokens, i, symbols, currentStructure);
@@ -673,6 +698,11 @@ export class ClarionDocumentSymbolProvider {
                 logger.info(`✅ SymbolProvider: Calling handleVariableToken for token index=${i}, type=${type}, value="${token.value}", line=${token.line}`);
                 this.handleVariableToken(tokens, i, symbols, currentStructure, currentProcedure, lastMethodImplementation, parentStack);
 
+                continue;
+            }
+
+            // CRITICAL: Skip Variable tokens after CODE (execution code)
+            if (pastCodeStatement && type === TokenType.Variable) {
                 continue;
             }
 
