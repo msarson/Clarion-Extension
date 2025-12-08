@@ -5,6 +5,7 @@ import { ClarionDocumentSymbol } from '../ClarionDocumentSymbolProvider';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("StructureProcessor");
+logger.setLevel("error"); // Production: Only log errors
 
 export class StructureProcessor {
     /**

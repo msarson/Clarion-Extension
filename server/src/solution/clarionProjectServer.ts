@@ -9,6 +9,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 
 
 const logger = LoggerManager.getLogger("ClarionProjectServer");
+logger.setLevel("error"); // Production: Only log errors
 
 export class ClarionProjectServer {
     sourceFiles: ClarionSourcerFileServer[] = [];

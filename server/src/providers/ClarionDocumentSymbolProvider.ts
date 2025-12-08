@@ -2154,7 +2154,7 @@ export class ClarionDocumentSymbolProvider {
                     (!stackEntry.finishesAt || stackEntry.finishesAt >= line)) {
                     // Found the most immediate routine parent
                     target = symbol;
-                    console.log(`🔧 [ROUTINE-DATA-FIX] Found ROUTINE parent for variable at line ${line}: "${symbol.name}"`);
+                    logger.debug(`🔧 [ROUTINE-DATA-FIX] Found ROUTINE parent for variable at line ${line}: "${symbol.name}"`);
                     logger.info(`🔧 [ROUTINE-DATA-FIX] Found immediate routine parent in stack: "${symbol.name}"`);
                     break;
                 }

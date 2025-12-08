@@ -1194,26 +1194,26 @@ connection.onHover(async (params) => {
 
 // Handle signature help requests
 connection.onSignatureHelp(async (params) => {
-    console.log(`🔔 [SIG-HELP] Received signature help request for: ${params.textDocument.uri} at position ${params.position.line}:${params.position.character}`);
+    logger.debug(`🔔 [SIG-HELP] Received signature help request for: ${params.textDocument.uri} at position ${params.position.line}:${params.position.character}`);
     
     if (!serverInitialized) {
-        console.log(`⚠️ [SIG-HELP] Server not initialized yet, delaying signature help request`);
+        logger.debug(`⚠️ [SIG-HELP] Server not initialized yet, delaying signature help request`);
         return null;
     }
     
     const document = documents.get(params.textDocument.uri);
     if (!document) {
-        console.log(`⚠️ [SIG-HELP] Document not found: ${params.textDocument.uri}`);
+        logger.debug(`⚠️ [SIG-HELP] Document not found: ${params.textDocument.uri}`);
         return null;
     }
     
     try {
         const signatureHelp = await signatureHelpProvider.provideSignatureHelp(document, params.position);
         if (signatureHelp) {
-            console.log(`✅ [SIG-HELP] Found ${signatureHelp.signatures.length} signature(s) for ${params.textDocument.uri}`);
-            console.log(`✅ [SIG-HELP] Active signature: ${signatureHelp.activeSignature}, Active parameter: ${signatureHelp.activeParameter}`);
+            logger.debug(`✅ [SIG-HELP] Found ${signatureHelp.signatures.length} signature(s) for ${params.textDocument.uri}`);
+            logger.debug(`✅ [SIG-HELP] Active signature: ${signatureHelp.activeSignature}, Active parameter: ${signatureHelp.activeParameter}`);
         } else {
-            console.log(`⚠️ [SIG-HELP] No signature help found for ${params.textDocument.uri}`);
+            logger.debug(`⚠️ [SIG-HELP] No signature help found for ${params.textDocument.uri}`);
         }
         return signatureHelp;
     } catch (error) {
