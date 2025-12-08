@@ -2,7 +2,7 @@ import { DocumentSymbol, Range, SymbolKind } from 'vscode-languageserver-types';
 
 import LoggerManager from '../logger';
 const logger = LoggerManager.getLogger("ClarionDocumentSymbolProvider");
-logger.setLevel("error"); // DEBUG: Enable info logging for MAP procedure debugging
+logger.setLevel("error"); // Production: Only log errors
 import { serverInitialized } from '../serverState';
 import { Token, TokenType } from '../ClarionTokenizer.js';
 import { HierarchyManager, ParentStackEntry } from './utils/HierarchyManager';
@@ -1456,6 +1456,23 @@ export class ClarionDocumentSymbolProvider {
             // For method implementations, add directly to the container
             if (container) {
                 container.children!.push(procedureSymbol);
+                
+                // CRITICAL FIX: Expand container range to include all child methods
+                // This ensures followCursor works for methods after the first one
+                if (container.name === "Methods") {
+                    logger.debug(`📏 Expanding Methods container range for ${procedureSymbol.name}: container was ${container.range.start.line}-${container.range.end.line}, method is ${procedureSymbol.range.start.line}-${procedureSymbol.range.end.line}`);
+                    
+                    if (procedureSymbol.range.start.line < container.range.start.line) {
+                        container.range.start.line = procedureSymbol.range.start.line;
+                        container.selectionRange.start.line = procedureSymbol.range.start.line;
+                    }
+                    if (procedureSymbol.range.end.line > container.range.end.line) {
+                        container.range.end.line = procedureSymbol.range.end.line;
+                        container.selectionRange.end.line = procedureSymbol.range.end.line;
+                    }
+                    
+                    logger.debug(`📏 Methods container range now: ${container.range.start.line}-${container.range.end.line}`);
+                }
             } else {
                 // FALLBACK: If no container was found, add to top level
                 // This shouldn't happen if findOrCreateClassImplementation worked correctly
@@ -2423,7 +2440,24 @@ export class ClarionDocumentSymbolProvider {
                 }
 
                 methodsContainer.children!.push(symbol);
+                
+                // CRITICAL FIX: Expand Methods container range to include all child methods
+                // This ensures followCursor works for methods after the first one
                 if (methodsContainer !== parent) {
+                    logger.debug(`📏 Expanding Methods container range for ${symbol.name}: container was ${methodsContainer.range.start.line}-${methodsContainer.range.end.line}, symbol is ${symbol.range.start.line}-${symbol.range.end.line}`);
+                    
+                    // Update container range to span all children
+                    if (symbol.range.start.line < methodsContainer.range.start.line) {
+                        methodsContainer.range.start.line = symbol.range.start.line;
+                        methodsContainer.selectionRange.start.line = symbol.range.start.line;
+                    }
+                    if (symbol.range.end.line > methodsContainer.range.end.line) {
+                        methodsContainer.range.end.line = symbol.range.end.line;
+                        methodsContainer.selectionRange.end.line = symbol.range.end.line;
+                    }
+                    
+                    logger.debug(`📏 Methods container range now: ${methodsContainer.range.start.line}-${methodsContainer.range.end.line}`);
+                    
                     this.sortContainerChildren(methodsContainer);
                 }
             }
