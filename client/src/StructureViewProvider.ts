@@ -18,7 +18,7 @@ import {
 import { DocumentSymbol, SymbolKind as LSPSymbolKind } from 'vscode-languageserver-types';
 import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("StructureViewProvider");
-logger.setLevel("debug"); // Enable debug logging to troubleshoot follow cursor
+logger.setLevel("info"); // Enable debug logging to troubleshoot follow cursor
 
 // 📊 PERFORMANCE: Create perf logger that always logs
 const perfLogger = LoggerManager.getLogger("StructureViewPerf");
@@ -266,8 +266,19 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             return undefined;
         }
         
-        // Find all symbols that contain the line
+        // Helper to check if a symbol is a container node (organizational only, not real code)
+        const isContainerNode = (symbol: DocumentSymbol): boolean => {
+            return symbol.name === "Methods" || 
+                   symbol.name === "Functions" ||
+                   symbol.name === "Properties" ||
+                   symbol.name === "Data" ||
+                   // Class implementation root nodes (e.g., "StringTheory (Implementation)")
+                   (symbol.kind === LSPSymbolKind.Class && symbol.detail?.includes("Implementation"));
+        };
+        
+        // Find all symbols that contain the line, excluding container nodes
         const containingSymbols = symbols.filter(symbol =>
+            !isContainerNode(symbol) &&
             line >= symbol.range.start.line && line <= symbol.range.end.line
         );
         
@@ -405,13 +416,22 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         // Set command to navigate to symbol when clicked
         // HOTFIX: Don't navigate for container nodes - they should only expand/collapse
         // Container nodes are organizational groupings with no real code position
+        
+        // Debug: Log ALL nodes to see what's happening
+        console.log(`🔍 getTreeItem called: name='${element.name}', kind=${element.kind}, detail='${element.detail}'`);
+        
         const isContainerNode = 
             element.name === "Methods" || 
             element.name === "Functions" ||
             element.name === "Properties" ||
             element.name === "Data" ||
             // Class implementation root nodes (e.g., "StringTheory (Implementation)")
-            (element.kind === LSPSymbolKind.Class && element.detail === "Implementation");
+            (element.kind === LSPSymbolKind.Class && element.detail?.includes("Implementation"));
+        
+        if (isContainerNode) {
+            console.log(`🚫 HOTFIX: Container node detected: ${element.name} (kind=${element.kind}, detail='${element.detail}'), skipping navigation command`);
+            logger.debug(`🚫 Container node detected: ${element.name}, skipping navigation command`);
+        }
         
         if (this.activeEditor && !isContainerNode) {
             const range = new Range(
@@ -421,6 +441,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 element.range.end.character
             );
 
+            console.log(`✅ HOTFIX: Navigation command attached to: ${element.name}`);
             treeItem.command = {
                 command: 'clarion.goToSymbol',
                 title: 'Go to Symbol',
@@ -429,6 +450,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                     range
                 ]
             };
+            logger.debug(`✅ Navigation command attached to: ${element.name}`);
         }
 
         return treeItem;
