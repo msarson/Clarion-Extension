@@ -580,6 +580,66 @@ MyRoutine ROUTINE
                 assert.ok(routineInProc, 'Routine should be child of procedure');
             }
         });
+
+        test('Should parse ROUTINE with DATA section', () => {
+            const code = `
+  PROGRAM
+  CODE
+  
+MyProc PROCEDURE()
+ProcVar LONG
+  CODE
+  ProcVar = 10
+  DO Call_ButtonProc
+  RETURN
+  
+Call_ButtonProc ROUTINE
+DATA
+rou:JustCalledD17 BYTE
+rou:JustCalledPW  BYTE
+rou:JustCalledD4  BYTE
+SaveWallID        BYTE
+  CODE
+  rou:JustCalledD17 = 1
+`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionDocumentSymbolProvider();
+            const symbols = provider.provideDocumentSymbols(tokens, 'test://test.clw');
+            
+            console.log('\n=== PROCEDURE with ROUTINE DATA ===');
+            console.log(formatSymbolTree(symbols));
+            
+            const proc = findSymbol(symbols, 'MyProc');
+            const routine = findSymbol(symbols, 'Call_ButtonProc');
+            
+            assert.ok(proc, 'Should find MyProc procedure');
+            assert.ok(routine, 'Should find Call_ButtonProc routine');
+            
+            // Routine should be child of procedure
+            assert.ok(proc?.children, 'Procedure should have children');
+            const routineInProc = proc.children.find(c => c.name.includes('Call_ButtonProc'));
+            assert.ok(routineInProc, 'Routine should be child of procedure');
+            
+            // Routine should have DATA variables as children
+            assert.ok(routine?.children, 'Routine should have children (DATA variables)');
+            assert.ok(routine.children.length > 0, 'Routine should have at least one DATA variable');
+            
+            const var1 = routine.children.find(c => c.name.includes('rou:JustCalledD17'));
+            const var2 = routine.children.find(c => c.name.includes('rou:JustCalledPW'));
+            const var3 = routine.children.find(c => c.name.includes('rou:JustCalledD4'));
+            const var4 = routine.children.find(c => c.name.includes('SaveWallID'));
+            
+            assert.ok(var1, 'Should find rou:JustCalledD17 variable under routine');
+            assert.ok(var2, 'Should find rou:JustCalledPW variable under routine');
+            assert.ok(var3, 'Should find rou:JustCalledD4 variable under routine');
+            assert.ok(var4, 'Should find SaveWallID variable under routine');
+            
+            console.log('\nROUTINE children:');
+            routine.children.forEach(child => {
+                console.log(`  - ${child.name}`);
+            });
+        });
     });
 
     suite('Real-world Example - StringTheory', () => {
