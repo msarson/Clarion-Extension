@@ -438,9 +438,10 @@ documents.onDidChangeContent(event => {
                 
                 // Caches already cleared immediately on change - no need to clear again
                 
-                // 🚀 PERF: Clear token cache to ensure fresh tokenization
-                // Incremental tokenization may have issues with structure changes
-                tokenCache.clearTokens(document.uri);
+                // 🚀 PERF: Let TokenCache handle incremental updates - don't clear!
+                // TokenCache has smart incremental tokenization that reuses unchanged parts
+                // Clearing here forces full re-tokenization on every change
+                // tokenCache.clearTokens(document.uri); // REMOVED: Let incremental updates work
                 const tokens = getTokens(document);
                 logger.info(`🔍 Successfully refreshed tokens after edit: ${uri}, got ${tokens.length} tokens`);
                 
