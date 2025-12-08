@@ -9,6 +9,11 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 ## [Unreleased]
 
 ### ✨ Features
+- **Added CLASS property validation diagnostic**
+  - QUEUE structures are not allowed as direct CLASS properties
+  - Only QUEUE references (&QUEUE) are permitted in CLASS
+  - New diagnostic error shows when QUEUE is used incorrectly
+  - GROUP structures remain valid as CLASS properties
 
 ### 🐛 Bug Fixes
 - **Fixed MODULE structure hierarchy in MAP blocks**

@@ -1133,4 +1133,75 @@ lcl:Empty_Notes BYTE
             assert.strictEqual(recordErrors.length, 0, 'Should not flag RECORD keyword when used as prefixed field name');
         });
     });
+
+    suite('CLASS Property Validation', () => {
+        
+        test('Should flag QUEUE structure as direct CLASS property', () => {
+            const code = `MyClass CLASS
+MyQueue QUEUE
+Field1  LONG
+        END
+        END`;
+            
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            const queueErrors = diagnostics.filter(d => 
+                d.message.toLowerCase().includes('queue') && 
+                d.message.toLowerCase().includes('class'));
+            assert.strictEqual(queueErrors.length, 1, 'Should have 1 diagnostic for QUEUE in CLASS');
+            assert.ok(queueErrors[0].message.toLowerCase().includes('reference'), 
+                     'Message should mention using a reference (&QUEUE)');
+        });
+
+        test('Should NOT flag QUEUE reference (&QUEUE) as CLASS property', () => {
+            const code = `MyClass CLASS
+MyQueueRef &QUEUE
+           END`;
+            
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            const queueErrors = diagnostics.filter(d => 
+                d.message.toLowerCase().includes('queue') && 
+                d.message.toLowerCase().includes('class'));
+            assert.strictEqual(queueErrors.length, 0, 'Should NOT flag QUEUE reference in CLASS');
+        });
+
+        test('Should NOT flag GROUP structure as CLASS property', () => {
+            const code = `MyClass CLASS
+MyGroup GROUP
+Field1  LONG
+Field2  LONG
+        END
+        END`;
+            
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            const groupErrors = diagnostics.filter(d => 
+                d.message.toLowerCase().includes('group') && 
+                d.message.toLowerCase().includes('class'));
+            assert.strictEqual(groupErrors.length, 0, 'GROUP is valid as CLASS property');
+        });
+
+        test('Should flag multiple QUEUE structures in CLASS', () => {
+            const code = `MyClass CLASS
+Queue1  QUEUE
+Field1  LONG
+        END
+Queue2  QUEUE
+Field2  STRING(20)
+        END
+        END`;
+            
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            const queueErrors = diagnostics.filter(d => 
+                d.message.toLowerCase().includes('queue') && 
+                d.message.toLowerCase().includes('class'));
+            assert.strictEqual(queueErrors.length, 2, 'Should flag both QUEUEs in CLASS');
+        });
+    });
 });
