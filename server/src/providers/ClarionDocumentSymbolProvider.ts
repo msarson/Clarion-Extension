@@ -740,8 +740,33 @@ export class ClarionDocumentSymbolProvider {
         // console.log("[TREE-JSON] ========================================");
         // console.log("[TREE-JSON]", JSON.stringify(symbols, null, 2));
 
+        // POST-PROCESSING: Move CODE markers to end of procedure/routine children
+        this.moveCODEMarkersToEnd(symbols);
+
         return symbols;
     }
+    /**
+     * POST-PROCESSING: Move CODE markers to the end of procedure/routine children
+     * This ensures CODE appears after all DATA variables in the outline
+     */
+    private moveCODEMarkersToEnd(symbols: ClarionDocumentSymbol[]): void {
+        for (const symbol of symbols) {
+            // Check if this symbol has children
+            if (symbol.children && symbol.children.length > 0) {
+                // Check if any child is a CODE marker
+                const codeMarkerIndex = symbol.children.findIndex(c => c.name === "CODE");
+                if (codeMarkerIndex >= 0 && codeMarkerIndex < symbol.children.length - 1) {
+                    // CODE marker exists and is NOT at the end - move it
+                    const codeMarker = symbol.children.splice(codeMarkerIndex, 1)[0];
+                    symbol.children.push(codeMarker);
+                }
+                
+                // Recursively process children
+                this.moveCODEMarkersToEnd(symbol.children);
+            }
+        }
+    }
+
     private handleProjectToken(
         tokens: Token[],
         index: number,
@@ -1217,7 +1242,7 @@ export class ClarionDocumentSymbolProvider {
                 this.getTokenRange(tokens, token.executionMarker.line, token.executionMarker.line),
                 []
             );
-            codeMarker.sortText = "9999"; // Sort CODE marker to bottom of routine
+            codeMarker.sortText = "zzzzz_CODE"; // Sort CODE marker to bottom (after all variables/data)
             structureSymbol.children!.push(codeMarker);
             logger.debug(`📍 CODE marker added, routine now has ${structureSymbol.children!.length} children`);
         }
@@ -1475,7 +1500,7 @@ export class ClarionDocumentSymbolProvider {
                 this.getTokenRange(tokens, token.executionMarker.line, token.executionMarker.line),
                 []
             );
-            codeMarker.sortText = "9999"; // Sort CODE marker to bottom of procedure
+            codeMarker.sortText = "zzzzz_CODE"; // Sort CODE marker to bottom (after all variables/data)
             procedureSymbol.children!.push(codeMarker);
             logger.debug(`📍 CODE marker added to ${procedureName}`);
         }
