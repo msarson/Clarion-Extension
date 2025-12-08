@@ -57,6 +57,10 @@ export class DiagnosticProvider {
         const returnDiagnostics = this.validateReturnStatements(tokens, document);
         diagnostics.push(...returnDiagnostics);
         
+        // Validate CLASS properties (QUEUE not allowed as direct property)
+        const classPropertyDiagnostics = this.validateClassProperties(tokens, document);
+        diagnostics.push(...classPropertyDiagnostics);
+        
         const perfTime = performance.now() - perfStart;
         console.log(`[DiagnosticProvider] 📊 PERF: Validation complete | time_ms=${perfTime.toFixed(2)}, tokens=${tokens.length}, diagnostics=${diagnostics.length}`);
         
@@ -1215,6 +1219,48 @@ export class DiagnosticProvider {
                         }
                         
                         break; // Found implementation, move to next declaration
+                    }
+                }
+            }
+        }
+        
+        return diagnostics;
+    }
+    
+    /**
+     * Validate CLASS properties - QUEUE structures are not allowed as direct CLASS properties
+     * Only QUEUE references (&QUEUE) are allowed
+     * @param tokens - Tokenized document
+     * @param document - Original TextDocument for position mapping
+     * @returns Array of Diagnostic objects for invalid CLASS properties
+     */
+    private static validateClassProperties(tokens: Token[], document: TextDocument): Diagnostic[] {
+        const diagnostics: Diagnostic[] = [];
+        
+        // Find all CLASS structures
+        for (let i = 0; i < tokens.length; i++) {
+            const token = tokens[i];
+            
+            if (token.type !== TokenType.Structure || token.value.toUpperCase() !== 'CLASS') {
+                continue;
+            }
+            
+            // Check all structures inside this CLASS
+            if (token.children) {
+                for (const child of token.children) {
+                    // Check if this is a QUEUE structure (not a reference)
+                    if (child.type === TokenType.Structure && child.value.toUpperCase() === 'QUEUE') {
+                        // This is a QUEUE structure inside CLASS - not allowed
+                        const diagnostic: Diagnostic = {
+                            severity: DiagnosticSeverity.Error,
+                            range: {
+                                start: { line: child.line, character: child.start },
+                                end: { line: child.line, character: child.start + child.value.length }
+                            },
+                            message: 'QUEUE structures are not allowed as direct CLASS properties. Use a QUEUE reference (&QUEUE) instead.',
+                            source: 'clarion'
+                        };
+                        diagnostics.push(diagnostic);
                     }
                 }
             }
