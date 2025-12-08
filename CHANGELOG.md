@@ -14,6 +14,11 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
   - Only QUEUE references (&QUEUE) are permitted in CLASS
   - New diagnostic error shows when QUEUE is used incorrectly
   - GROUP structures remain valid as CLASS properties
+- **Added QUEUE nesting validation diagnostic**
+  - QUEUE structures cannot be nested inside other QUEUE structures
+  - Only QUEUE references (&QUEUE) are permitted inside QUEUE
+  - New diagnostic error shows when nested QUEUE is used incorrectly
+  - GROUP structures remain valid inside QUEUE
 
 ### 🐛 Bug Fixes
 - **Fixed stale diagnostics after document changes**
