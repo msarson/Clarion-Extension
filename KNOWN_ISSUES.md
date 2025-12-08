@@ -1,5 +1,39 @@
 # Known Issues
 
+## ⚠️ FILE RECORD fields in procedures
+
+When a FILE with RECORD is declared inside a PROCEDURE, the RECORD fields appear as siblings of RECORD instead of children.
+
+### Example:
+```clarion
+MyProc PROCEDURE()
+MyFile FILE,DRIVER('DOS')
+  RECORD
+buffer  STRING(32768)
+  END
+END
+```
+
+**Current tree:**
+- MyProc
+  - FILE (MyFile)
+    - RECORD
+  - buffer STRING(32768)  ← Should be child of RECORD
+
+**Expected tree:**
+- MyProc
+  - FILE (MyFile)
+    - RECORD
+      - buffer STRING(32768)
+
+### Status
+Pre-existing issue, not introduced in 0.7.5. Fields are navigable, just not properly nested in tree view.
+
+### Workaround
+Fields are still accessible and navigable, just not visually nested under RECORD in outline.
+
+---
+
 ## ✅ FIXED in 0.7.5: Symbol Range for Method Implementations
 
 **Status**: FIXED in hotfix-methods-container-range branch
