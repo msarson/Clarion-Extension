@@ -6,7 +6,7 @@ const fs = require('fs');
 
 setServerInitialized(true);
 
-const code = fs.readFileSync('test-routine-data-variables.clw', 'utf8');
+const code = fs.readFileSync('test-routine-data-indented.clw', 'utf8');
 const document = TextDocument.create('file:///test.clw', 'clarion', 1, code);
 
 const tokenizer = new ClarionTokenizer(code);
