@@ -1,36 +1,19 @@
 # Known Issues
 
-## ⚠️ FILE RECORD fields in procedures
+## ✅ FIXED in 0.7.5: FILE RECORD field nesting
 
-When a FILE with RECORD is declared inside a PROCEDURE, the RECORD fields appear as siblings of RECORD instead of children.
+**Status**: FIXED in hotfix-file-record-field-nesting branch
 
-### Example:
-```clarion
-MyProc PROCEDURE()
-MyFile FILE,DRIVER('DOS')
-  RECORD
-buffer  STRING(32768)
-  END
-END
-```
+RECORD fields now properly appear as children of RECORD structure in FILE definitions.
 
-**Current tree:**
-- MyProc
-  - FILE (MyFile)
-    - RECORD
-  - buffer STRING(32768)  ← Should be child of RECORD
+### What was fixed:
+- RECORD added to clarionStructureKindMap with SymbolKind.Struct
+- Parent search logic now recognizes RECORD as structure container
+- Fields inside RECORD correctly nested as children
+- Works for FILE in procedures and at global level
 
-**Expected tree:**
-- MyProc
-  - FILE (MyFile)
-    - RECORD
-      - buffer STRING(32768)
-
-### Status
-Pre-existing issue, not introduced in 0.7.5. Fields are navigable, just not properly nested in tree view.
-
-### Workaround
-Fields are still accessible and navigable, just not visually nested under RECORD in outline.
+Date Fixed: 2025-12-08
+Version: 0.7.5
 
 ---
 
