@@ -66,6 +66,7 @@ const clarionStructureKindMap: Record<string, SymbolKind> = {
     TAB: SymbolKind.EnumMember,         // #
     GROUP: SymbolKind.Struct,           // 🏗️
     QUEUE: SymbolKind.Array,            // 📚
+    RECORD: SymbolKind.Struct,          // 🏗️ RECORD is like GROUP - a structure container
     REPORT: SymbolKind.File,            // 📄
     JOIN: SymbolKind.Event,             // 🟢
     APPLICATION: SymbolKind.Interface,  // same as WINDOW
