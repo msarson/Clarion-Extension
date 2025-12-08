@@ -25,6 +25,10 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
   - Force full re-tokenization on document changes to prevent stale token structures
   - Fixes issue where CLASS was incorrectly flagged as unterminated after adding QUEUE
   - Incremental tokenization cache could cause structure hierarchy issues
+- **Fixed ROUTINE DATA section variables hierarchy**
+  - Variables declared in ROUTINE DATA sections now appear as children of the ROUTINE in outline
+  - Fixed DATA keyword recognition when appearing as Label token (at column 0)
+  - Both DocumentStructure and ClarionDocumentSymbolProvider updated to handle ROUTINE variables correctly
 - **Fixed MODULE structure hierarchy in MAP blocks**
   - MODULE inside MAP now correctly becomes a child of MAP instead of the containing PROCEDURE
   - Improves navigation and structure understanding in document outline
