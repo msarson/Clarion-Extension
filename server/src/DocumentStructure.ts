@@ -2,7 +2,7 @@ import { Token, TokenType } from "./ClarionTokenizer";
 import LoggerManager from "./logger";
 
 const logger = LoggerManager.getLogger("DocumentStructure");
-logger.setLevel("info"); // TEMP: Enable for debugging ROUTINE DATA sections
+logger.setLevel("error"); // Production: Only log errors
 
 export class DocumentStructure {
     private structureStack: Token[] = [];
@@ -95,7 +95,7 @@ export class DocumentStructure {
                 const upperValue = token.value.toUpperCase();
                 if (upperValue === 'CODE' || upperValue === 'DATA') {
                     logger.info(`🔧 [ROUTINE-DATA-FIX] Handling CODE/DATA as execution marker: "${token.value}" at line ${token.line}`);
-                    console.log(`🔧 [ROUTINE-DATA-FIX] Handling CODE/DATA as execution marker: "${token.value}" at line ${token.line}`);
+                    logger.debug(`🔧 [ROUTINE-DATA-FIX] Handling CODE/DATA as execution marker: "${token.value}" at line ${token.line}`);
                     this.handleExecutionMarker(token);
                 }
                 // Add label tokens as children of their parent structure (for GROUP/QUEUE/RECORD fields)

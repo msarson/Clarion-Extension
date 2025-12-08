@@ -2,6 +2,10 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
 import { ClarionTokenizer, Token, TokenType } from '../ClarionTokenizer';
 import { extractReturnType } from '../utils/AttributeKeywords';
+import LoggerManager from '../logger';
+
+const logger = LoggerManager.getLogger("DiagnosticProvider");
+logger.setLevel("error"); // Production: Only log errors
 
 /**
  * Diagnostic Provider for Clarion Language
@@ -62,7 +66,11 @@ export class DiagnosticProvider {
         diagnostics.push(...classPropertyDiagnostics);
         
         const perfTime = performance.now() - perfStart;
-        console.log(`[DiagnosticProvider] 📊 PERF: Validation complete | time_ms=${perfTime.toFixed(2)}, tokens=${tokens.length}, diagnostics=${diagnostics.length}`);
+        logger.perf('Validation complete', {
+            'time_ms': perfTime.toFixed(2),
+            'tokens': tokens.length,
+            'diagnostics': diagnostics.length
+        });
         
         return diagnostics;
     }
