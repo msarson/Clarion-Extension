@@ -19,6 +19,11 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
   - Removed incorrect assumption that MODULE can appear inside CLASS/INTERFACE body
   - MODULE only appears as CLASS attribute or inside MAP blocks (per Clarion language spec)
   - Removed invalid test cases for MODULE inside CLASS body
+- **Fixed RETURN statement validation**
+  - Fixed END statement detection to work with indented END keywords (not just column 0)
+  - Fixed case-insensitive matching of procedure/method names
+  - Now correctly validates procedures/methods with return types have RETURN statements with values
+  - Fixes 3 failing tests for RETURN validation
 
 ### 💡 Technical Details
 

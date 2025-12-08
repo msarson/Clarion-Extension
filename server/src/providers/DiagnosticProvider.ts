@@ -1055,7 +1055,7 @@ export class DiagnosticProvider {
                                     if (k + 1 < tokens.length && tokens[k + 1].line === tokens[j].line) {
                                         const returnType = extractReturnType(tokens, k + 1, true);
                                         if (returnType) {
-                                            declarationsWithReturnTypes.push({
+                                             declarationsWithReturnTypes.push({
                                                 name: className + '.' + methodNameToken.value,
                                                 returnType: returnType,
                                                 line: methodNameToken.line
@@ -1088,7 +1088,7 @@ export class DiagnosticProvider {
                 }
                 
                 // Track END statements to know when we exit MAP/CLASS
-                if (token.value.toUpperCase() === 'END' && token.start === 0) {
+                if (token.value.toUpperCase() === 'END' && token.type === TokenType.EndStatement) {
                     if (mapClassDepth > 0) {
                         mapClassDepth--;
                         if (mapClassDepth === 0) {
@@ -1127,7 +1127,8 @@ export class DiagnosticProvider {
                     }
                     
                     // Check if this matches our declaration
-                    if (fullName === decl.name) {
+                    // Clarion is case-insensitive, so compare lowercase
+                    if (fullName.toLowerCase() === decl.name.toLowerCase()) {
                         // Find CODE and validate RETURN statements
                         let codeLineStart = -1;
                         
