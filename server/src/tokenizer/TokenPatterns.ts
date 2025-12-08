@@ -90,9 +90,11 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
 
 /** ✅ Ordered token types for pattern matching priority */
 export const orderedTokenTypes: TokenType[] = [
-    TokenType.Directive,TokenType.Comment, TokenType.ClarionDocument, TokenType.ExecutionMarker, TokenType.Label, TokenType.LineContinuation, TokenType.String, TokenType.ReferenceVariable,
+    TokenType.Directive,TokenType.Comment, TokenType.ClarionDocument, TokenType.ExecutionMarker, 
+    TokenType.Structure,  // ✅ MOVED BEFORE Label - structure keywords at column 0 are structures, not labels
+    TokenType.Label, TokenType.LineContinuation, TokenType.String, TokenType.ReferenceVariable,
     TokenType.Type, TokenType.PointerParameter, TokenType.FieldEquateLabel, TokenType.Property,
-    TokenType.PropertyFunction, TokenType.Keyword, TokenType.Structure,
+    TokenType.PropertyFunction, TokenType.Keyword,
     // ✅ Add StructurePrefix and StructureField before other variable types
     TokenType.StructurePrefix, TokenType.StructureField,
     // ✅ Add WindowElement after Structure elements but before other types

@@ -3,7 +3,7 @@
  */
 
 import { TokenType } from './TokenTypes';
-import { tokenPatterns, STRUCTURE_PATTERNS } from './TokenPatterns';
+import { tokenPatterns, STRUCTURE_PATTERNS, orderedTokenTypes } from './TokenPatterns';
 
 export class PatternMatcher {
     private static compiledPatterns: Map<TokenType, RegExp> | null = null;
@@ -21,70 +21,9 @@ export class PatternMatcher {
         PatternMatcher.compiledPatterns = new Map();
         PatternMatcher.patternsByCharClass = new Map();
         
-        // 🚀 PERFORMANCE: Optimized order balancing specificity and frequency
-        // Critical: More specific patterns MUST come before more general ones
-        // Also ordered by frequency within specificity groups
-        PatternMatcher.orderedTypes = [
-            // HIGH PRIORITY: Must match first due to specificity
-            TokenType.Comment,              // Very common, must be early to skip comment content
-            TokenType.LineContinuation,     // Must be early (can contain other tokens)
-            TokenType.String,               // Must be before Variable (strings can contain variable-like text)
-            
-            // DIRECTIVES: Must be before Label (OMIT/COMPILE at column 0)
-            TokenType.Directive,            // Specific keywords with special syntax (OMIT, COMPILE, etc.)
-            
-            // LABELS & SPECIAL: Must be before general identifiers
-            TokenType.Label,                // Must be before Variable (labels are identifiers at column 0)
-            TokenType.FieldEquateLabel,     // Must be before Variable (?FieldName)
-            TokenType.ReferenceVariable,    // Must be before Variable (&Variable)
-            
-            // SPECIFIC IDENTIFIERS: Before general Variable
-            TokenType.ClarionDocument,      // Rare but specific (PROGRAM/MEMBER)
-            TokenType.ExecutionMarker,      // Specific (CODE/DATA)
-            TokenType.EndStatement,         // Specific (END/.)
-            TokenType.ConditionalContinuation, // Specific (ELSE/ELSIF/OF)
-            TokenType.Keyword,              // Common, more specific than Variable
-            
-            // STRUCTURES: Before Variable but after keywords
-            TokenType.Structure,            // Must be before Variable
-            TokenType.WindowElement,        // Specific window controls
-            
-            // TYPES: Must be before Function to avoid STRING(50) being parsed as function call
-            TokenType.Type,                 // Common, specific type keywords
-            TokenType.DataTypeParameter,    // Must be after Type (captures (255) in STRING(255))
-            TokenType.TypeAnnotation,       // Specific type annotations
-            
-            // FUNCTIONS & PROPERTIES: Specific patterns
-            TokenType.Function,             // Must be before FunctionArgumentParameter
-            TokenType.FunctionArgumentParameter, // Must be before Variable
-            TokenType.PropertyFunction,     // Specific properties with parentheses
-            TokenType.Property,             // Specific property names
-            
-            // FIELD REFERENCES: Before Variable
-            TokenType.StructurePrefix,      // Must be before Variable (PREFIX:Field)
-            TokenType.StructureField,       // Must be before Variable (Structure.Field)
-            TokenType.Class,                // Must be before Variable (Class.Method)
-            
-            // COMPLEX PATTERNS: Before simple ones
-            TokenType.PointerParameter,     // *Variable before Variable
-            TokenType.PictureFormat,        // @... formats
-            
-            // SIMPLE TOKENS: Common, can be checked relatively early
-            TokenType.Number,               // Very common
-            TokenType.Operator,             // Very common
-            TokenType.Delimiter,            // Very common
-            
-            // ATTRIBUTES & CONSTANTS: After types
-            TokenType.Attribute,            // Specific attribute keywords
-            TokenType.Constant,             // Specific constants (TRUE/FALSE/NULL)
-            
-            // GENERAL: Last specific check before catchall
-            TokenType.ImplicitVariable,     // Variable with suffix ($/#/")
-            TokenType.Variable,             // General identifier - must be late
-            
-            // CATCHALL: Absolute last resort
-            TokenType.Unknown
-        ];
+        // 🚀 PERFORMANCE: Use the exported orderedTokenTypes from TokenPatterns
+        // This ensures consistency between pattern order definitions
+        PatternMatcher.orderedTypes = orderedTokenTypes;
         
         for (const type of PatternMatcher.orderedTypes) {
             const pattern = tokenPatterns[type];

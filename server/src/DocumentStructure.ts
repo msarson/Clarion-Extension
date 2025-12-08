@@ -132,7 +132,10 @@ export class DocumentStructure {
         for (const token of this.tokens) {
             const insideExecutionCode = this.procedureStack.length > 0;
 
-            if (!insideExecutionCode && token.start === 0 && token.type !== TokenType.Comment && token.type !== TokenType.Directive && token.value !== '?') {
+            if (!insideExecutionCode && token.start === 0 && 
+                token.type !== TokenType.Comment && 
+                token.type !== TokenType.Directive && 
+                token.value !== '?') {
                 token.type = TokenType.Label;
                 token.label = token.value;
                 maxLabelWidth = Math.max(maxLabelWidth, token.value.length);
@@ -342,25 +345,48 @@ export class DocumentStructure {
         if (endsOnSameLine) {
             return;
         }
+        
+        // ✅ Special handling: MODULE inside CLASS/INTERFACE doesn't get pushed to stack
+        // It doesn't need its own END - the CLASS/INTERFACE END terminates it
+        if (token.value.toUpperCase() === 'MODULE' && this.structureStack.length > 0) {
+            const parentStructure = this.structureStack[this.structureStack.length - 1];
+            const parentType = parentStructure.value.toUpperCase();
+            
+            if (parentType === 'CLASS' || parentType === 'INTERFACE') {
+                // MODULE inside CLASS/INTERFACE - don't push to stack, just set parent relationship
+                token.parent = parentStructure;
+                parentStructure.children = parentStructure.children || [];
+                parentStructure.children.push(token);
+                // Set finishesAt to the parent's finishesAt (will be set when parent closes)
+                // For now, we'll set it in handleEndStatementForStructure
+                logger.info(`📌 MODULE inside ${parentType} at Line ${token.line} - not pushing to stack`);
+                return;
+            }
+        }
 
         token.maxLabelLength = 0;
         this.structureStack.push(token);
 
         // Add parent-child relationship with current procedure or structure
-        if (this.procedureStack.length > 0) {
-            const parentProcedure = this.procedureStack[this.procedureStack.length - 1];
-            token.parent = parentProcedure;
-            parentProcedure.children = parentProcedure.children || [];
-            parentProcedure.children.push(token);
-            logger.info(`🔗 Structure ${token.value} at Line ${token.line} parented to procedure ${parentProcedure.value}`);
-        } else if (this.structureStack.length > 1) {
-            // Only set parent to another structure if we're not inside a procedure
-            // and there's at least one other structure on the stack (the current one is already pushed)
+        // Special case: MODULE inside MAP should be child of MAP, not the containing procedure
+        const isModuleInMap = token.value.toUpperCase() === 'MODULE' && 
+                              this.structureStack.length > 1 &&
+                              this.structureStack[this.structureStack.length - 2].value.toUpperCase() === 'MAP';
+        
+        if (isModuleInMap || this.structureStack.length > 1) {
+            // Prioritize structure stack (nested structures or MODULE in MAP)
             const parentStructure = this.structureStack[this.structureStack.length - 2];
             token.parent = parentStructure;
             parentStructure.children = parentStructure.children || [];
             parentStructure.children.push(token);
             logger.info(`🔗 Structure ${token.value} at Line ${token.line} parented to structure ${parentStructure.value}`);
+        } else if (this.procedureStack.length > 0) {
+            // Fall back to procedure parent only if no structure parent exists
+            const parentProcedure = this.procedureStack[this.procedureStack.length - 1];
+            token.parent = parentProcedure;
+            parentProcedure.children = parentProcedure.children || [];
+            parentProcedure.children.push(token);
+            logger.info(`🔗 Structure ${token.value} at Line ${token.line} parented to procedure ${parentProcedure.value}`);
         }
 
         // 🚀 PERFORMANCE: Use tokensByLine to find previous token
