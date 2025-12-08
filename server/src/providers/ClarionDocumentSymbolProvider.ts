@@ -2361,6 +2361,12 @@ export class ClarionDocumentSymbolProvider {
                 propsContainer.children!.push(symbol);
                 this.sortContainerChildren(propsContainer);
             }
+            // Handle structure properties (GROUP, QUEUE, etc.) inside CLASS
+            else if (symbol.kind === SymbolKind.Struct && parent.$clarionProps && !isMethodImplementation) {
+                const propsContainer = parent.$clarionProps;
+                propsContainer.children!.push(symbol);
+                this.sortContainerChildren(propsContainer);
+            }
 
             // Handle methods (in class or class implementation containers)
             else if ((isMethod || isMethodDeclaration) &&
