@@ -746,19 +746,28 @@ export class ClarionDocumentSymbolProvider {
         return symbols;
     }
     /**
-     * POST-PROCESSING: Move CODE markers to the end of procedure/routine children
-     * This ensures CODE appears after all DATA variables in the outline
+     * POST-PROCESSING: Move CODE markers to the end of routine children (after DATA)
+     * For procedures, CODE stays at the beginning (after local vars)
+     * For routines with DATA, CODE moves to the end (after DATA vars)
      */
     private moveCODEMarkersToEnd(symbols: ClarionDocumentSymbol[]): void {
         for (const symbol of symbols) {
             // Check if this symbol has children
             if (symbol.children && symbol.children.length > 0) {
-                // Check if any child is a CODE marker
-                const codeMarkerIndex = symbol.children.findIndex(c => c.name === "CODE");
-                if (codeMarkerIndex >= 0 && codeMarkerIndex < symbol.children.length - 1) {
-                    // CODE marker exists and is NOT at the end - move it
-                    const codeMarker = symbol.children.splice(codeMarkerIndex, 1)[0];
-                    symbol.children.push(codeMarker);
+                // Only move CODE for ROUTINES (identified by kind), not procedures
+                // Routines have kind = ClarionSymbolKind.Routine (6 = Method in SymbolKind)
+                // Only move CODE for ROUTINES (kind = 6 = SymbolKind.Method), not procedures
+                // Procedures have kind = 12 = SymbolKind.Function
+                const isRoutine = symbol.kind === 6; // SymbolKind.Method
+                
+                if (isRoutine) {
+                    // Check if any child is a CODE marker
+                    const codeMarkerIndex = symbol.children.findIndex(c => c.name === "CODE");
+                    if (codeMarkerIndex >= 0 && codeMarkerIndex < symbol.children.length - 1) {
+                        // CODE marker exists and is NOT at the end - move it
+                        const codeMarker = symbol.children.splice(codeMarkerIndex, 1)[0];
+                        symbol.children.push(codeMarker);
+                    }
                 }
                 
                 // Recursively process children
