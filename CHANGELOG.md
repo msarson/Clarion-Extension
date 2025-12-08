@@ -27,6 +27,10 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 - **Removed invalid ELSE validation test**
   - Removed test that incorrectly flagged valid ELSE with multiple statements
   - ELSE clauses can have multiple statements and are terminated by ELSIF, ELSE, or END
+- **Fixed GROUP/QUEUE/RECORD field display in outline view**
+  - Structure fields (like GROUP properties in CLASS) now properly show in outline/structure view
+  - Field labels are now added as children of their parent structure during processing
+  - Fixes issue where BoundBox GROUP inside CLASS didn't show its MaxX/MaxY properties
 
 ### 💡 Technical Details
 

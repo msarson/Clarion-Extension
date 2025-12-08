@@ -90,6 +90,16 @@ export class DocumentStructure {
                 this.handleStructureToken(token);
             } else if (token.type === TokenType.EndStatement) {
                 this.handleEndStatementForStructure(token);
+            } else if (token.type === TokenType.Label && token.start === 0 && this.structureStack.length > 0) {
+                // Add label tokens as children of their parent structure (for GROUP/QUEUE/RECORD fields)
+                const parentStructure = this.structureStack[this.structureStack.length - 1];
+                const structureTypes = ["RECORD", "GROUP", "QUEUE", "FILE", "VIEW", "WINDOW", "REPORT"];
+                if (structureTypes.includes(parentStructure.value.toUpperCase())) {
+                    parentStructure.children = parentStructure.children || [];
+                    parentStructure.children.push(token);
+                    token.parent = parentStructure;
+                    logger.info(`📌 Added field '${token.value}' as child of structure '${parentStructure.value}'`);
+                }
             }
             
         }
@@ -139,10 +149,11 @@ export class DocumentStructure {
                 token.type = TokenType.Label;
                 token.label = token.value;
                 maxLabelWidth = Math.max(maxLabelWidth, token.value.length);
-                // logger.info(`📌 Label '${token.value}' detected at Line ${token.line}, forced to column 0.`);
+                logger.info(`📌 Label '${token.value}' detected at Line ${token.line}, structureStack.length=${this.structureStack.length}`);
 
                 if (this.structureStack.length > 0) {
                     let parentStructure = this.structureStack[this.structureStack.length - 1];
+                    logger.info(`📌 Parent structure: '${parentStructure.value}' at line ${parentStructure.line}`);
                     parentStructure.maxLabelLength = Math.max(parentStructure.maxLabelLength || 0, token.value.length);
 
                     // ✅ If we're inside a structure that can have fields, mark this as a structure field
@@ -151,6 +162,11 @@ export class DocumentStructure {
                     if (structureTypes.includes(parentStructure.value.toUpperCase())) {
                         token.isStructureField = true;
                         token.structureParent = parentStructure;
+                        
+                        // ✅ Add field as child of the parent structure
+                        parentStructure.children = parentStructure.children || [];
+                        parentStructure.children.push(token);
+                        logger.info(`📌 Added field '${token.value}' as child of structure '${parentStructure.value}'`);
 
                         // Find the label of the parent structure (if any)
                         // 🚀 PERFORMANCE: Use tokensByLine index instead of indexOf
