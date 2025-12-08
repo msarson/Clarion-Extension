@@ -403,7 +403,17 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         }
 
         // Set command to navigate to symbol when clicked
-        if (this.activeEditor) {
+        // HOTFIX: Don't navigate for container nodes - they should only expand/collapse
+        // Container nodes are organizational groupings with no real code position
+        const isContainerNode = 
+            element.name === "Methods" || 
+            element.name === "Functions" ||
+            element.name === "Properties" ||
+            element.name === "Data" ||
+            // Class implementation root nodes (e.g., "StringTheory (Implementation)")
+            (element.kind === LSPSymbolKind.Class && element.detail === "Implementation");
+        
+        if (this.activeEditor && !isContainerNode) {
             const range = new Range(
                 element.range.start.line,
                 element.range.start.character,
