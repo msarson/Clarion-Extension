@@ -65,94 +65,73 @@ export class DiagnosticProvider {
     
     /**
      * Validate that all structures are properly terminated
+     * REFACTORED: Uses token hierarchy (finishesAt, parent, children) instead of manual stack tracking
      * @param tokens - Tokenized document
      * @param document - Original TextDocument for position mapping
      * @returns Array of Diagnostic objects for unterminated structures
      */
     public static validateStructureTerminators(tokens: Token[], document: TextDocument): Diagnostic[] {
         const diagnostics: Diagnostic[] = [];
-        const structureStack: StructureStackItem[] = [];
         const conditionalRanges = this.getConditionalBlockRanges(tokens, document);
         
-        for (let i = 0; i < tokens.length; i++) {
-            const token = tokens[i];
-            const prevToken = i > 0 ? tokens[i - 1] : null;
-            const nextToken = i < tokens.length - 1 ? tokens[i + 1] : null;
-            
+        // Iterate through all tokens and check structure tokens for proper termination
+        for (const token of tokens) {
             // Skip structures within conditional compilation blocks (OMIT/COMPILE)
-            // We can't validate these at edit-time since we don't know which will compile
             if (this.isInConditionalBlock(token.line, conditionalRanges)) {
                 continue;
             }
             
-            // Check if this token opens a structure that needs termination
-            if (this.isStructureOpen(token)) {
-                const structureType = this.getStructureType(token);
+            // Only check Structure tokens
+            if (token.type !== TokenType.Structure) {
+                continue;
+            }
+            
+            const structureType = token.value.toUpperCase();
+            
+            // Skip structures that don't require terminators
+            if (!this.requiresTerminator(structureType)) {
+                continue;
+            }
+            
+            // Special handling for IF - check if it's a single-line IF...THEN statement
+            if (structureType === 'IF') {
+                const tokenIndex = tokens.indexOf(token);
+                const isSingleLineIf = this.isSingleLineIfThen(tokens, tokenIndex);
+                if (isSingleLineIf) {
+                    continue; // Single-line IF doesn't need terminator
+                }
+            }
+            
+            // Special handling for MODULE
+            // MODULE can appear in 2 contexts:
+            // 1. As CLASS attribute: CLASS,MODULE on same line - doesn't need terminator, skip all validation
+            // 2. Inside MAP body: parent=MAP - NEEDS explicit terminator (END or dot)
+            if (structureType === 'MODULE') {
+                // Check if MODULE is part of CLASS attribute list (same line as CLASS)
+                const classOnSameLine = tokens.find(t => 
+                    t.line === token.line && 
+                    t.value.toUpperCase() === 'CLASS' && 
+                    t.type === TokenType.Structure
+                );
+                if (classOnSameLine) {
+                    continue; // MODULE as CLASS attribute - skip entirely
+                }
                 
-                // Special handling for IF - check if it's a single-line IF...THEN statement
-                if (structureType === 'IF') {
-                    // Look ahead to see if THEN appears on the same line with code after it
-                    const isSingleLineIf = this.isSingleLineIfThen(tokens, i);
-                    
-                    // Only push to stack if it's NOT a single-line IF...THEN
-                    if (!isSingleLineIf && this.requiresTerminator(structureType)) {
-                        structureStack.push({
-                            token,
-                            structureType,
-                            line: token.line,
-                            column: token.start
-                        });
-                    }
-                }
-                // Special handling for MODULE - depends on parent context
-                else if (structureType === 'MODULE') {
-                    const parentContext = this.getParentContext(structureStack);
-                    const needsTerminator = this.moduleNeedsTerminator(parentContext);
-                    
-                    if (needsTerminator) {
-                        structureStack.push({
-                            token,
-                            structureType,
-                            line: token.line,
-                            column: token.start
-                        });
-                    }
-                } else if (this.requiresTerminator(structureType)) {
-                    structureStack.push({
-                        token,
-                        structureType,
-                        line: token.line,
-                        column: token.start
-                    });
-                }
+                // MODULE inside MAP needs explicit terminator - check finishesAt below
+                // MODULE at column 0 outside MAP is likely invalid syntax - also check finishesAt
             }
             
-            // Check if this token closes a structure
-            else if (this.isStructureClose(token, prevToken, nextToken, structureStack)) {
-                if (structureStack.length > 0) {
-                    // Pop the most recent structure
-                    structureStack.pop();
-                }
+            // Check if structure has a finishesAt value
+            // If finishesAt is undefined or null, the structure is unterminated
+            if (token.finishesAt === undefined || token.finishesAt === null) {
+                const diagnostic = this.createUnterminatedStructureDiagnostic({
+                    token,
+                    structureType,
+                    line: token.line,
+                    column: token.start
+                }, document);
+                diagnostics.push(diagnostic);
             }
-            
-            // Check if we hit a scope boundary that should close structures
-            else if (this.isScopeBoundary(token, prevToken, structureStack)) {
-                // Check if there are unclosed structures
-                // Report them but DON'T stop checking the rest of the file
-                while (structureStack.length > 0) {
-                    const unclosed = structureStack.pop()!;
-                    const diagnostic = this.createUnterminatedStructureDiagnostic(unclosed, document);
-                    diagnostics.push(diagnostic);
-                }
-                // Stack is now empty, continue processing rest of file normally
-            }
-        }
-        
-        // Any remaining structures on stack are unterminated
-        while (structureStack.length > 0) {
-            const unclosed = structureStack.pop()!;
-            const diagnostic = this.createUnterminatedStructureDiagnostic(unclosed, document);
-            diagnostics.push(diagnostic);
         }
         
         return diagnostics;
@@ -296,11 +275,11 @@ export class DiagnosticProvider {
      */
     private static requiresTerminator(structureType: string): boolean {
         // Structures that require END or dot terminator
-        // Note: MODULE is handled separately based on context
+        // Note: MODULE requires terminator when inside MAP, but not inside CLASS (handled separately)
         const requiresTermination = [
             'IF', 'LOOP', 'CASE', 'EXECUTE', 'BEGIN',
             'GROUP', 'QUEUE', 'RECORD', 'FILE',
-            'CLASS', 'INTERFACE', 'MAP'
+            'CLASS', 'INTERFACE', 'MAP', 'MODULE'
         ];
         
         return requiresTermination.includes(structureType);

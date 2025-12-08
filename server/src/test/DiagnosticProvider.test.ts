@@ -680,31 +680,6 @@ str StringTheory
             assert.strictEqual(diagnostics.length, 0, 'MODULE with END inside MAP is valid');
         });
 
-        test('Should NOT flag MODULE without END inside CLASS', () => {
-            const code = `MyClass CLASS
-            MODULE('KERNEL32')
-                GetTickCount PROCEDURE(),ULONG
-        END`;
-            
-            const document = createDocument(code);
-            const diagnostics = DiagnosticProvider.validateDocument(document);
-            
-            assert.strictEqual(diagnostics.length, 0, 'MODULE without END inside CLASS is valid');
-        });
-
-        test('Should NOT flag MODULE with END inside CLASS', () => {
-            const code = `MyClass CLASS
-            MODULE('KERNEL32')
-                GetTickCount PROCEDURE(),ULONG
-            END
-        END`;
-            
-            const document = createDocument(code);
-            const diagnostics = DiagnosticProvider.validateDocument(document);
-            
-            assert.strictEqual(diagnostics.length, 0, 'MODULE with END inside CLASS is also valid');
-        });
-
         test('Should handle nested MAP with MODULE', () => {
             const code = `TestProc PROCEDURE()
         MAP

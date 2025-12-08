@@ -11,6 +11,14 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 ### ✨ Features
 
 ### 🐛 Bug Fixes
+- **Fixed MODULE structure hierarchy in MAP blocks**
+  - MODULE inside MAP now correctly becomes a child of MAP instead of the containing PROCEDURE
+  - Improves navigation and structure understanding in document outline
+  - Preserves MODULE as non-structure when used in CLASS attribute lists
+- **Corrected MODULE termination validation rules**
+  - Removed incorrect assumption that MODULE can appear inside CLASS/INTERFACE body
+  - MODULE only appears as CLASS attribute or inside MAP blocks (per Clarion language spec)
+  - Removed invalid test cases for MODULE inside CLASS body
 
 ### 💡 Technical Details
 
