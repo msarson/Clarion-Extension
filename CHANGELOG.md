@@ -16,6 +16,10 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
   - GROUP structures remain valid as CLASS properties
 
 ### 🐛 Bug Fixes
+- **Fixed stale diagnostics after document changes**
+  - Force full re-tokenization on document changes to prevent stale token structures
+  - Fixes issue where CLASS was incorrectly flagged as unterminated after adding QUEUE
+  - Incremental tokenization cache could cause structure hierarchy issues
 - **Fixed MODULE structure hierarchy in MAP blocks**
   - MODULE inside MAP now correctly becomes a child of MAP instead of the containing PROCEDURE
   - Improves navigation and structure understanding in document outline
