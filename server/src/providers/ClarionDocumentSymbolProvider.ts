@@ -478,7 +478,8 @@ export class ClarionDocumentSymbolProvider {
 
             if ((subType === TokenType.Procedure || subType === TokenType.Class ||
                 subType === TokenType.GlobalProcedure || subType === TokenType.MethodImplementation ||
-                subType === TokenType.InterfaceMethod || subType === TokenType.MapProcedure)) {
+                subType === TokenType.InterfaceMethod || subType === TokenType.MapProcedure ||
+                subType === TokenType.Routine)) {
 
                 logger.info(`Processing token type=${type}, subType=${subType}, value='${value}', line=${token.line}, label='${token.label}'`);
                 
@@ -1205,6 +1206,22 @@ export class ClarionDocumentSymbolProvider {
             structureSymbol.children!.push(functionsContainer);
         }
 
+        // FEATURE: Add CODE marker for ROUTINE if it has an execution marker
+        if (upperValue === "ROUTINE" && token.executionMarker !== undefined) {
+            logger.debug(`📍 Adding CODE marker for ROUTINE at line ${token.executionMarker.line}`);
+            const codeMarker = this.createSymbol(
+                "CODE",
+                "Execution starts here",
+                SymbolKind.Event,  // Event icon for entry point
+                this.getTokenRange(tokens, token.executionMarker.line, token.executionMarker.line),
+                this.getTokenRange(tokens, token.executionMarker.line, token.executionMarker.line),
+                []
+            );
+            codeMarker.sortText = "9999"; // Sort CODE marker to bottom of routine
+            structureSymbol.children!.push(codeMarker);
+            logger.debug(`📍 CODE marker added, routine now has ${structureSymbol.children!.length} children`);
+        }
+
         this.addSymbolToParent(structureSymbol, currentStructure, symbols);
         // Push to the parent stack with finishesAt information
         HierarchyManager.pushToStack(parentStack, structureSymbol, finishesAt);
@@ -1445,6 +1462,22 @@ export class ClarionDocumentSymbolProvider {
             // We need to add this to the parentStack in the main method
             // We'll return it and let the caller add it to the stack
             procedureSymbol._finishesAt = finishesAt;
+        }
+
+        // FEATURE: Add CODE marker as a child for easy navigation to code entry point
+        if (token.executionMarker !== undefined) {
+            logger.debug(`📍 Adding CODE marker for ${procedureName} at line ${token.executionMarker.line}, subType=${token.subType}`);
+            const codeMarker = this.createSymbol(
+                "CODE",
+                "Execution starts here",
+                SymbolKind.Event,  // Event icon for entry point
+                this.getTokenRange(tokens, token.executionMarker.line, token.executionMarker.line),
+                this.getTokenRange(tokens, token.executionMarker.line, token.executionMarker.line),
+                []
+            );
+            codeMarker.sortText = "9999"; // Sort CODE marker to bottom of procedure
+            procedureSymbol.children!.push(codeMarker);
+            logger.debug(`📍 CODE marker added to ${procedureName}`);
         }
 
         return { procedureSymbol, classImplementation, lastTokenIndex: j };

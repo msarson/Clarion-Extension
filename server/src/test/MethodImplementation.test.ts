@@ -55,20 +55,23 @@ result  BYTE
         // Check first method
         const method1 = methodsContainer.children![0];
         assert.ok(method1.name.includes('_GetNextBufferSize'), 'First method should be _GetNextBufferSize');
-        assert.strictEqual(method1.children?.length, 1, '_GetNextBufferSize should have 1 local variable');
-        assert.ok(method1.children![0].name.includes('LocalVar'), 'Should have LocalVar variable');
+        assert.strictEqual(method1.children?.length, 2, '_GetNextBufferSize should have 1 local variable + 1 CODE marker');
+        assert.ok(method1.children!.some(c => c.name.includes('LocalVar')), 'Should have LocalVar variable');
+        assert.ok(method1.children!.some(c => c.name === 'CODE'), 'Should have CODE marker');
 
         // Check second method
         const method2 = methodsContainer.children![1];
         assert.ok(method2.name.includes('_EqualsUnicode'), 'Second method should be _EqualsUnicode');
-        assert.strictEqual(method2.children?.length, 1, '_EqualsUnicode should have 1 local variable');
-        assert.ok(method2.children![0].name.includes('str2'), 'Should have str2 variable');
+        assert.strictEqual(method2.children?.length, 2, '_EqualsUnicode should have 1 local variable + 1 CODE marker');
+        assert.ok(method2.children!.some(c => c.name.includes('str2')), 'Should have str2 variable');
+        assert.ok(method2.children!.some(c => c.name === 'CODE'), 'Should have CODE marker');
 
         // Check third method
         const method3 = methodsContainer.children![2];
         assert.ok(method3.name.includes('_Equals'), 'Third method should be _Equals');
-        assert.strictEqual(method3.children?.length, 1, '_Equals should have 1 local variable');
-        assert.ok(method3.children![0].name.includes('result'), 'Should have result variable');
+        assert.strictEqual(method3.children?.length, 2, '_Equals should have 1 local variable + 1 CODE marker');
+        assert.ok(method3.children!.some(c => c.name.includes('result')), 'Should have result variable');
+        assert.ok(method3.children!.some(c => c.name === 'CODE'), 'Should have CODE marker');
     });
 
     it('Should NOT show items from CODE section in structure', () => {
@@ -112,9 +115,10 @@ LocalVar  LONG
 
         const method = methodsContainer.children![0];
         
-        // Should only have 1 child (LocalVar), not CLIP, len, etc.
-        assert.strictEqual(method.children?.length, 1, 'Method should only have LocalVar, not code execution items');
-        assert.ok(method.children![0].name.includes('LocalVar'), 'Should only have LocalVar');
+        // Should only have LocalVar + CODE marker, not CLIP, len, etc.
+        assert.strictEqual(method.children?.length, 2, 'Method should have LocalVar + CODE marker, not code execution items');
+        assert.ok(method.children!.some(c => c.name.includes('LocalVar')), 'Should have LocalVar');
+        assert.ok(method.children!.some(c => c.name === 'CODE'), 'Should have CODE marker');
     });
 
     it('Should handle multiple global procedures correctly', () => {
@@ -148,17 +152,19 @@ LocalVar2  LONG
         const procedures = symbols.filter(s => s.name.includes('MyProc'));
         assert.strictEqual(procedures.length, 2, 'Should have 2 procedures');
 
-        // First procedure should have its own local variable
+        // First procedure should have its own local variable + CODE marker
         const proc1 = procedures.find(p => p.name.includes('MyProc1'));
         assert.ok(proc1, 'Should have MyProc1');
-        assert.strictEqual(proc1.children?.length, 1, 'MyProc1 should have 1 local variable');
-        assert.ok(proc1.children![0].name.includes('LocalVar1'), 'MyProc1 should have LocalVar1');
+        assert.strictEqual(proc1.children?.length, 2, 'MyProc1 should have 1 local variable + 1 CODE marker');
+        assert.ok(proc1.children!.some(c => c.name.includes('LocalVar1')), 'MyProc1 should have LocalVar1');
+        assert.ok(proc1.children!.some(c => c.name === 'CODE'), 'MyProc1 should have CODE marker');
 
-        // Second procedure should have its own local variable (not inherit from first)
+        // Second procedure should have its own local variable (not inherit from first) + CODE marker
         const proc2 = procedures.find(p => p.name.includes('MyProc2'));
         assert.ok(proc2, 'Should have MyProc2');
-        assert.strictEqual(proc2.children?.length, 1, 'MyProc2 should have 1 local variable');
-        assert.ok(proc2.children![0].name.includes('LocalVar2'), 'MyProc2 should have LocalVar2');
+        assert.strictEqual(proc2.children?.length, 2, 'MyProc2 should have 1 local variable + 1 CODE marker');
+        assert.ok(proc2.children!.some(c => c.name.includes('LocalVar2')), 'MyProc2 should have LocalVar2');
+        assert.ok(proc2.children!.some(c => c.name === 'CODE'), 'MyProc2 should have CODE marker');
 
         // Verify LocalVar1 is NOT in MyProc2
         const hasLocalVar1InProc2 = proc2.children?.some(c => c.name.includes('LocalVar1'));
