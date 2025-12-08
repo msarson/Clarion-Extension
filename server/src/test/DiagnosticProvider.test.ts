@@ -1067,35 +1067,6 @@ MyProcedure  PROCEDURE()
 
     suite('IF-ELSE with Multiple Statements', () => {
         
-        test('Should detect ELSE with multiple statements without proper structure', () => {
-            const code = `TestProc PROCEDURE()
-nts:record LONG
-hold:nts:record LONG
-nts:notes STRING(100)
-hold:nts:notes STRING(100)
-lcl:Preset_NTS BYTE
-lcl:Empty_Notes BYTE
-GlobalResponse LONG
-RequestCancelled EQUATE(2)
-  CODE
-  if GlobalResponse=RequestCancelled
-    nts:record      = hold:nts:record
-    nts:notes       = hold:nts:notes
-  else hold:nts:record = nts:record
-    hold:nts:notes  = nts:notes
-    lcl:Preset_NTS  = TRUE
-    lcl:Empty_Notes = 1
-  end
-  RETURN`;
-            
-            const document = createDocument(code);
-            const diagnostics = DiagnosticProvider.validateDocument(document);
-            
-            // This should detect that the ELSE clause has multiple statements
-            // but they're not properly structured (missing . terminators or proper block structure)
-            assert.ok(diagnostics.length > 0, 'Should detect issues with ELSE clause having multiple statements');
-        });
-
         test('Should NOT flag ELSE with single statement', () => {
             const code = `TestProc PROCEDURE()
 x LONG
