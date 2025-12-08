@@ -1228,29 +1228,31 @@ export class DiagnosticProvider {
     }
     
     /**
-     * Validate CLASS properties - QUEUE structures are not allowed as direct CLASS properties
+     * Validate CLASS properties and QUEUE nesting
+     * - QUEUE structures are not allowed as direct CLASS properties
+     * - QUEUE structures are not allowed nested inside other QUEUEs
      * Only QUEUE references (&QUEUE) are allowed
      * @param tokens - Tokenized document
      * @param document - Original TextDocument for position mapping
-     * @returns Array of Diagnostic objects for invalid CLASS properties
+     * @returns Array of Diagnostic objects for invalid structures
      */
     private static validateClassProperties(tokens: Token[], document: TextDocument): Diagnostic[] {
         const diagnostics: Diagnostic[] = [];
         
-        // Find all CLASS structures
+        // Find all CLASS and QUEUE structures
         for (let i = 0; i < tokens.length; i++) {
             const token = tokens[i];
             
-            if (token.type !== TokenType.Structure || token.value.toUpperCase() !== 'CLASS') {
+            if (token.type !== TokenType.Structure) {
                 continue;
             }
             
-            // Check all structures inside this CLASS
-            if (token.children) {
+            const structureType = token.value.toUpperCase();
+            
+            // Check CLASS for QUEUE children
+            if (structureType === 'CLASS' && token.children) {
                 for (const child of token.children) {
-                    // Check if this is a QUEUE structure (not a reference)
                     if (child.type === TokenType.Structure && child.value.toUpperCase() === 'QUEUE') {
-                        // This is a QUEUE structure inside CLASS - not allowed
                         const diagnostic: Diagnostic = {
                             severity: DiagnosticSeverity.Error,
                             range: {
@@ -1258,6 +1260,24 @@ export class DiagnosticProvider {
                                 end: { line: child.line, character: child.start + child.value.length }
                             },
                             message: 'QUEUE structures are not allowed as direct CLASS properties. Use a QUEUE reference (&QUEUE) instead.',
+                            source: 'clarion'
+                        };
+                        diagnostics.push(diagnostic);
+                    }
+                }
+            }
+            
+            // Check QUEUE for nested QUEUE children
+            if (structureType === 'QUEUE' && token.children) {
+                for (const child of token.children) {
+                    if (child.type === TokenType.Structure && child.value.toUpperCase() === 'QUEUE') {
+                        const diagnostic: Diagnostic = {
+                            severity: DiagnosticSeverity.Error,
+                            range: {
+                                start: { line: child.line, character: child.start },
+                                end: { line: child.line, character: child.start + child.value.length }
+                            },
+                            message: 'QUEUE structures cannot be nested inside other QUEUE structures. Use a QUEUE reference (&QUEUE) instead.',
                             source: 'clarion'
                         };
                         diagnostics.push(diagnostic);

@@ -1204,4 +1204,75 @@ Field2  STRING(20)
             assert.strictEqual(queueErrors.length, 2, 'Should flag both QUEUEs in CLASS');
         });
     });
+
+    suite('QUEUE Structure Nesting Validation', () => {
+        
+        test('Should flag QUEUE structure nested inside QUEUE', () => {
+            const code = `MyQueue QUEUE
+InnerQueue  QUEUE
+Field1      LONG
+            END
+            END`;
+            
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            const nestedQueueErrors = diagnostics.filter(d => 
+                d.message.toLowerCase().includes('queue') && 
+                d.message.toLowerCase().includes('nested'));
+            assert.strictEqual(nestedQueueErrors.length, 1, 'Should have 1 diagnostic for nested QUEUE');
+            assert.ok(nestedQueueErrors[0].message.toLowerCase().includes('reference'), 
+                     'Message should mention using a reference (&QUEUE)');
+        });
+
+        test('Should NOT flag QUEUE reference (&QUEUE) inside QUEUE', () => {
+            const code = `MyQueue QUEUE
+InnerQueueRef &QUEUE
+              END`;
+            
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            const nestedQueueErrors = diagnostics.filter(d => 
+                d.message.toLowerCase().includes('queue') && 
+                d.message.toLowerCase().includes('nested'));
+            assert.strictEqual(nestedQueueErrors.length, 0, 'Should NOT flag QUEUE reference in QUEUE');
+        });
+
+        test('Should NOT flag GROUP structure inside QUEUE', () => {
+            const code = `MyQueue QUEUE
+MyGroup GROUP
+Field1  LONG
+Field2  LONG
+        END
+        END`;
+            
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            const groupErrors = diagnostics.filter(d => 
+                d.message.toLowerCase().includes('group') && 
+                d.message.toLowerCase().includes('queue'));
+            assert.strictEqual(groupErrors.length, 0, 'GROUP is valid inside QUEUE');
+        });
+
+        test('Should flag multiple nested QUEUEs', () => {
+            const code = `MyQueue QUEUE
+Queue1  QUEUE
+Field1  LONG
+        END
+Queue2  QUEUE
+Field2  STRING(20)
+        END
+        END`;
+            
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+            
+            const nestedQueueErrors = diagnostics.filter(d => 
+                d.message.toLowerCase().includes('queue') && 
+                d.message.toLowerCase().includes('nested'));
+            assert.strictEqual(nestedQueueErrors.length, 2, 'Should flag both nested QUEUEs');
+        });
+    });
 });
