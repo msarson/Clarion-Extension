@@ -1,47 +1,15 @@
-# Known Issue: Symbol Range for Method Implementations
+# Known Issues
 
-## Issue
-Method implementations (e.g., StringRefFactoryClass.Destruct) that follow other methods 
-are not being included in the parent Implementation container's range. This causes 
-followCursor functionality to fail for any code after the first method.
+## ✅ FIXED in 0.7.5: Symbol Range for Method Implementations
 
-## Example
-`
-StringRefFactoryClass.Construct PROCEDURE()  ! Line 24
- CODE
-    SELF.garbageStrs &= new StringRefQueue
-    
-StringRefFactoryClass.Destruct PROCEDURE()   ! Line 28
- CODE
-    SELF.DisposeIt()
-`
+**Status**: FIXED in hotfix-methods-container-range branch
 
-Current behavior:
-- StringRefFactoryClass (Implementation) range: 24-27 (only includes Construct)
-- Destruct method range: 28-31 (not within parent range!)
+The "Methods" container range is now properly expanded as methods are added, ensuring followCursor works correctly for all methods in a class implementation.
 
-Expected behavior:
-- StringRefFactoryClass (Implementation) range: 24-31 (includes both methods)
+### What was fixed:
+- Methods container range now spans from first method start to last method end
+- followCursor now works for all methods, not just the first one
+- Simple fix with no impact on folding or other features
 
-## Root Cause
-ROUTINEs within methods are children of the procedure/method, so the procedure's
-finishesAt should extend to include all its content (including code after ROUTINE).
-Currently the procedure's range stops too early.
-
-## Impact
-- followCursor doesn't work for methods after the first one
-- Structure view doesn't highlight correct item when cursor is in later methods
-- Could also affect folding if procedure ranges are used
-
-## Solution (DO NOT FIX NOW - TOO CLOSE TO RELEASE)
-Update symbol provider to:
-1. Calculate procedure/method finishesAt to include all child structures (routines, etc)
-2. Ensure Implementation container spans all methods it contains
-3. Test folding to ensure ranges are correct for all features
-
-## Workaround
-Users can still click on symbols in structure view to navigate - only auto-follow
-on cursor movement is affected.
-
-Date: 2025-12-08
-Version: 0.7.5 (pre-release)
+Date Fixed: 2025-12-08
+Version: 0.7.5
