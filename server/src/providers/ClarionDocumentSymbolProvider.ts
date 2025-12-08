@@ -1096,60 +1096,14 @@ export class ClarionDocumentSymbolProvider {
                     );
                     structureSymbol.children!.push(indexSymbol);
                 }
-                // Add RECORD as container
+                // Add RECORD as container - FIXED: Don't manually create
                 else if (childValue === "RECORD") {
-                    // Find the END of RECORD
-                    let recordEndLine = childToken.line;
-                    for (let k = j + 1; k < tokens.length; k++) {
-                        if (tokens[k].value.toUpperCase() === "END" && 
-                            tokens[k].type === TokenType.EndStatement) {
-                            recordEndLine = tokens[k].line;
-                            break;
-                        }
-                    }
-                    
-                    const recordSymbol = this.createSymbol(
-                        "RECORD",
-                        "",
-                        SymbolKind.Struct,
-                        this.getTokenRange(tokens, childToken.line, recordEndLine),
-                        this.getTokenRange(tokens, childToken.line, recordEndLine),
-                        []
-                    );
-                    
-                    // Look for MEMO/BLOB fields within RECORD
-                    for (let k = j + 1; k < tokens.length && tokens[k].line < recordEndLine; k++) {
-                        const fieldToken = tokens[k];
-                        const fieldValue = fieldToken.value.toUpperCase();
-                        
-                        if (fieldValue === "MEMO") {
-                            const memoContent = this.extractParenContent(tokens, k + 1);
-                            const fieldLabel = tokens[k - 1]?.value || "MEMO";
-                            const memoSymbol = this.createSymbol(
-                                `${fieldLabel} MEMO(${memoContent.content})`,
-                                "",
-                                SymbolKind.String,  // 📝 MEMO gets string icon
-                                this.getTokenRange(tokens, fieldToken.line, fieldToken.line),
-                                this.getTokenRange(tokens, fieldToken.line, fieldToken.line),
-                                []
-                            );
-                            recordSymbol.children!.push(memoSymbol);
-                        }
-                        else if (fieldValue === "BLOB") {
-                            const fieldLabel = tokens[k - 1]?.value || "BLOB";
-                            const blobSymbol = this.createSymbol(
-                                `${fieldLabel} BLOB`,
-                                "",
-                                SymbolKind.Object,  // 🧱 BLOB gets object icon
-                                this.getTokenRange(tokens, fieldToken.line, fieldToken.line),
-                                this.getTokenRange(tokens, fieldToken.line, fieldToken.line),
-                                []
-                            );
-                            recordSymbol.children!.push(blobSymbol);
-                        }
-                    }
-                    
-                    structureSymbol.children!.push(recordSymbol);
+                    // FIXED: Don't manually create RECORD symbol here
+                    // RECORD is a proper structure with END terminator
+                    // It will be automatically created by handleStructureToken
+                    // and will become a child of FILE since FILE is on parent stack
+                    // Just skip to avoid duplicate RECORD nodes
+                    continue;
                 }
             }
         }
