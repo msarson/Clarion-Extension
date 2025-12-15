@@ -2563,14 +2563,20 @@ export class ClarionDocumentSymbolProvider {
         const startToken = startLineTokens[0]; // First token on line
         const endToken = endLineTokens[endLineTokens.length - 1]; // Last token on line
 
-        // If either token is missing, fallback to line-wide range
-        if (!startToken || !endToken) {
-            return Range.create(startLine, 0, endLine, 999);  // use large column to include whole line
-        }
-
+        // STICKY SCROLL FIX: For sticky scroll and breadcrumbs to work correctly when scrolling,
+        // every line in the file must be covered by at least one symbol's range.
+        // We extend the range to a large column number to ensure full line coverage, including:
+        // - Blank lines at the end of procedures
+        // - Comment-only lines  
+        // - Execution code lines (after CODE) that don't create their own symbols
+        // This ensures sticky scroll displays the correct procedure/method name as you scroll.
+        const startCol = startToken ? startToken.start : 0;
+        
         return Range.create(
-            startToken.line, startToken.start,
-            endToken.line, endToken.start + endToken.value.length
+            startLine, 
+            startCol,
+            endLine, 
+            99999  // Large column number to ensure full line coverage for sticky scroll
         );
     }
     private mapSubTypeToSymbolKind(subType?: TokenType): SymbolKind {
