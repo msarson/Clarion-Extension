@@ -1314,58 +1314,15 @@ export class ClarionDocumentSymbolProvider {
         if (token.subType === TokenType.MethodImplementation || subType === TokenType.MethodImplementation) {
             logger.info(`🔍 Method implementation detected: ${procedureName}, classMatch: ${classMatch}`);
             
-            // Verify that classMatch is valid (tokenizer should have ensured procedure name contains a dot)
-            if (!classMatch) {
-                // Safety fallback: if no classMatch but tokenizer says it's a method implementation,
-                // treat it as a global procedure instead
-                logger.warn(`⚠️ Method implementation ${procedureName} has no classMatch - treating as global procedure`);
-                container = null;
-                (token as any)._isGlobalProcedure = true;
-            } else {
-                // First, try to find the class definition in the symbols
-                const classDefinition = this.findClassDefinition(symbols, classMatch);
+            // FLATTEN OUTLINE: Method implementations go to root level, not in class container
+            // This fixes Sticky Scroll showing class container instead of method names
+            container = null; // Add to root level
             
-                if (classDefinition) {
-                    // If we found the class definition, look for the method declaration
-                    const methodsContainer = classDefinition.children?.find(c => c.name === "Methods");
-                    
-                    if (methodsContainer) {
-                        // CRITICAL: Always use the Methods container as the parent for method implementations
-                        // This ensures overloads are siblings, not nested
-                        container = methodsContainer;
-                        
-                        // Mark this as a method implementation
-                        (token as any)._isMethodImplementation = true;
-                        
-                        // We don't need to create a class implementation container
-                        classImplementation = null;
-                    } else {
-                        // Methods container not found, fall back to the old behavior
-                        classImplementation = this.findOrCreateClassImplementation(
-                            symbols, classMatch, tokens, line, finishesAt ?? line
-                        );
-                        
-                        // Use the methods container as the parent
-                        const implMethodsContainer = classImplementation.$clarionMethods || classImplementation;
-                        container = implMethodsContainer;
-                        
-                        // Mark this as a method implementation
-                        (token as any)._isMethodImplementation = true;
-                    }
-                } else {
-                    // Class definition not found, fall back to the old behavior
-                    classImplementation = this.findOrCreateClassImplementation(
-                        symbols, classMatch, tokens, line, finishesAt ?? line
-                    );
-                    
-                    // Use the methods container as the parent
-                    const implMethodsContainer = classImplementation.$clarionMethods || classImplementation;
-                    container = implMethodsContainer;
-                    
-                    // Mark this as a method implementation
-                    (token as any)._isMethodImplementation = true;
-                }
-            }
+            // Mark this as a method implementation
+            (token as any)._isMethodImplementation = true;
+            
+            // Don't create or use class implementation container
+            classImplementation = null;
         } else {
             // For regular procedures (not class methods), use the current structure
             // CRITICAL FIX: Always promote GlobalProcedure to top-level
@@ -1416,8 +1373,16 @@ export class ClarionDocumentSymbolProvider {
             paramsOnly = "()";
         }
 
-        // Include just the parameters in the name for all procedures
-        const displayName = `${methodName} ${paramsOnly}`;
+        // FLATTEN OUTLINE: For method implementations, use full class-qualified name
+        // For regular procedures, use just the method name
+        let displayName: string;
+        if (token.subType === TokenType.MethodImplementation || subType === TokenType.MethodImplementation) {
+            // Use full name: ClassName.MethodName (params)
+            displayName = `${procedureName} ${paramsOnly}`;
+        } else {
+            // Use short name: MethodName (params)
+            displayName = `${methodName} ${paramsOnly}`;
+        }
 
         const procedureSymbol = this.createProcedureSymbol(
             tokens, displayName, classMatch, line, finishesAt ?? line, token.subType || subType
@@ -1441,32 +1406,9 @@ export class ClarionDocumentSymbolProvider {
 
         // Add the procedure to its container
         if (token.subType === TokenType.MethodImplementation || subType === TokenType.MethodImplementation) {
-            // For method implementations, add directly to the container
-            if (container) {
-                container.children!.push(procedureSymbol);
-                
-                // CRITICAL FIX: Expand container range to include all child methods
-                // This ensures followCursor works for methods after the first one
-                if (container.name === "Methods") {
-                    logger.debug(`📏 Expanding Methods container range for ${procedureSymbol.name}: container was ${container.range.start.line}-${container.range.end.line}, method is ${procedureSymbol.range.start.line}-${procedureSymbol.range.end.line}`);
-                    
-                    if (procedureSymbol.range.start.line < container.range.start.line) {
-                        container.range.start.line = procedureSymbol.range.start.line;
-                        container.selectionRange.start.line = procedureSymbol.range.start.line;
-                    }
-                    if (procedureSymbol.range.end.line > container.range.end.line) {
-                        container.range.end.line = procedureSymbol.range.end.line;
-                        container.selectionRange.end.line = procedureSymbol.range.end.line;
-                    }
-                    
-                    logger.debug(`📏 Methods container range now: ${container.range.start.line}-${container.range.end.line}`);
-                }
-            } else {
-                // FALLBACK: If no container was found, add to top level
-                // This shouldn't happen if findOrCreateClassImplementation worked correctly
-                logger.error(`❌ Method implementation ${procedureName} has no container! Adding to root.`);
-                symbols.push(procedureSymbol);
-            }
+            // FLATTEN OUTLINE: Method implementations go to root level
+            // They already have full class-qualified names
+            this.addSymbolToParent(procedureSymbol, null, symbols);
         } else {
             // For regular procedures, use addSymbolToParent
             this.addSymbolToParent(procedureSymbol, container, symbols);
