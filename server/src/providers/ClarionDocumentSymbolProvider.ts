@@ -636,47 +636,9 @@ export class ClarionDocumentSymbolProvider {
                     routineSymbol._isSpecialRoutine = true;
                 }
 
-                // CRITICAL FIX: Determine the correct parent for this ROUTINE
-                // Get the current parent from the stack (don't rely on currentProcedure which might be stale)
-                let routineParent: ClarionDocumentSymbol | null = HierarchyManager.getCurrentParent(parentStack);
-
-                // If we're not inside a procedure, check if we're inside a method implementation
-                if (!routineParent) {
-                    // Look for the most recent method implementation
-                    for (let j = i - 1; j >= 0; j--) {
-                        const t = tokens[j];
-                        if ((t.subType === TokenType.MethodImplementation ||
-                            (t.type === TokenType.Procedure && t.label?.includes('.'))) &&
-                            t.executionMarker?.value.toUpperCase() === "CODE") {
-
-                            // Find the method implementation symbol
-                            const methodName = t.label || "";
-                            const className = methodName.split('.')[0];
-
-                            // Find the class implementation container
-                            for (const symbol of symbols) {
-                                if (symbol.name === `${className} (Implementation)`) {
-                                    // Look for the method in the Methods container
-                                    const methodsContainer = symbol.children?.find(c => c.name === "Methods");
-                                    if (methodsContainer) {
-                                        routineParent = methodsContainer;
-                                        break;
-                                    }
-                                }
-                            }
-
-                            break;
-                        }
-                    }
-                }
-
-                // Add the routine to its parent
-                if (routineParent) {
-                    routineParent.children!.push(routineSymbol);
-                } else {
-                    // If we couldn't find a parent, add to top level
-                    symbols.push(routineSymbol);
-                }
+                // FLATTEN OUTLINE: Always add routines to root level for sticky scroll support
+                // The structure view (StructureViewProvider.ts) handles routine nesting separately
+                symbols.push(routineSymbol);
 
                 // CRITICAL FIX: Only add special routines to the parent stack
                 // This prevents variables from being incorrectly attached to empty routines
