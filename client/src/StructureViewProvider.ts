@@ -464,6 +464,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         const result: DocumentSymbol[] = [];
         const classMap = new Map<string, DocumentSymbol>(); // Track class containers
         
+        logger.info(`🔄 REGROUPING: Starting with ${symbols.length} flat symbols`);
+        
         for (const symbol of symbols) {
             // Check if this is a method implementation (has dot in name and marked as implementation)
             const isMethodImpl = (symbol as any)._isMethodImplementation && symbol.name.includes('.');
@@ -521,6 +523,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 methodsContainer.children = methodsContainer.children || [];
                 methodsContainer.children.push(methodSymbol);
                 
+                logger.info(`  ✅ Regrouped: ${symbol.name} -> ${className} > Methods > ${methodPart}`);
+                
                 // Expand class container range to include this method
                 if (symbol.range.start.line < classContainer.range.start.line) {
                     classContainer.range.start = symbol.range.start;
@@ -533,6 +537,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 result.push(symbol);
             }
         }
+        
+        logger.info(`🔄 REGROUPING: Finished. Created ${classMap.size} class containers. Result has ${result.length} root symbols`);
         
         return result;
     }
