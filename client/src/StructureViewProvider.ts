@@ -469,15 +469,17 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         for (const symbol of symbols) {
             // Check if this is a method implementation:
             // - Has dot in name (e.g., "SystemStringClass.Construct")
-            // - Is a Method/Function kind
-            // - NOT a global procedure marked with specific detail
+            // - Is a Method/Function kind  
+            // BUT exclude symbols where the dot is inside a string literal (e.g., STRING('ABC...'))
             const hasDot = symbol.name.includes('.');
             const isMethodKind = symbol.kind === LSPSymbolKind.Method || symbol.kind === LSPSymbolKind.Function;
-            const isGlobalProc = symbol.detail?.includes('Global');
             
-            const isMethodImpl = hasDot && isMethodKind && !isGlobalProc;
+            // Check if dot is inside a string literal by looking for STRING(' pattern before the dot
+            const dotInsideStringLiteral = /STRING\([^)]*\./.test(symbol.name);
             
-            logger.info(`  Symbol: ${symbol.name}, hasDot=${hasDot}, isMethodKind=${isMethodKind}, isGlobalProc=${isGlobalProc}, isMethodImpl=${isMethodImpl}`);
+            const isMethodImpl = hasDot && isMethodKind && !dotInsideStringLiteral;
+            
+            logger.info(`  Symbol: ${symbol.name}, hasDot=${hasDot}, isMethodKind=${isMethodKind}, dotInsideStringLiteral=${dotInsideStringLiteral}, isMethodImpl=${isMethodImpl}`);
             
             if (isMethodImpl) {
                 // Extract class name and method name
