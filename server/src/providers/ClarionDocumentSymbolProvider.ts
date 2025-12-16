@@ -743,7 +743,29 @@ export class ClarionDocumentSymbolProvider {
         // POST-PROCESSING: Move CODE markers to end of procedure/routine children
         this.moveCODEMarkersToEnd(symbols);
 
+        // CLEANUP: Remove internal routing properties before serialization
+        // These create circular references and shouldn't be sent to the client
+        this.cleanupInternalProperties(symbols);
+
         return symbols;
+    }
+    
+    /**
+     * Remove internal $clarion* properties that create circular references
+     * These are only used during symbol building for routing
+     */
+    private cleanupInternalProperties(symbols: ClarionDocumentSymbol[]): void {
+        for (const symbol of symbols) {
+            // Remove internal routing properties
+            delete symbol.$clarionProps;
+            delete symbol.$clarionMethods;
+            delete symbol.$clarionFunctions;
+            
+            // Recursively clean children
+            if (symbol.children && symbol.children.length > 0) {
+                this.cleanupInternalProperties(symbol.children);
+            }
+        }
     }
     /**
      * POST-PROCESSING: Move CODE markers to the end of routine children (after DATA)
