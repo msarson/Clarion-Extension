@@ -1222,21 +1222,21 @@ export class ClarionDocumentSymbolProvider {
             structureSymbol.$clarionFunctions = structureSymbol;
         }
 
-        // FEATURE: Add CODE marker for ROUTINE if it has an execution marker
-        if (upperValue === "ROUTINE" && token.executionMarker !== undefined) {
-            logger.debug(`📍 Adding CODE marker for ROUTINE at line ${token.executionMarker.line}`);
-            const codeMarker = this.createSymbol(
-                "CODE",
-                "Execution starts here",
-                SymbolKind.Event,  // Event icon for entry point
-                this.getTokenRange(tokens, token.executionMarker.line, token.executionMarker.line),
-                this.getTokenRange(tokens, token.executionMarker.line, token.executionMarker.line),
-                []
-            );
-            codeMarker.sortText = "zzzzz_CODE"; // Sort CODE marker to bottom (after all variables/data)
-            structureSymbol.children!.push(codeMarker);
-            logger.debug(`📍 CODE marker added, routine now has ${structureSymbol.children!.length} children`);
-        }
+        // REMOVED: CODE marker feature - too cluttered in outline
+        // if (upperValue === "ROUTINE" && token.executionMarker !== undefined) {
+        //     logger.debug(`📍 Adding CODE marker for ROUTINE at line ${token.executionMarker.line}`);
+        //     const codeMarker = this.createSymbol(
+        //         "CODE",
+        //         "Execution starts here",
+        //         SymbolKind.Event,  // Event icon for entry point
+        //         this.getTokenRange(tokens, token.executionMarker.line, token.executionMarker.line),
+        //         this.getTokenRange(tokens, token.executionMarker.line, token.executionMarker.line),
+        //         []
+        //     );
+        //     codeMarker.sortText = "zzzzz_CODE"; // Sort CODE marker to bottom (after all variables/data)
+        //     structureSymbol.children!.push(codeMarker);
+        //     logger.debug(`📍 CODE marker added, routine now has ${structureSymbol.children!.length} children`);
+        // }
 
         this.addSymbolToParent(structureSymbol, currentStructure, symbols);
         // Push to the parent stack with finishesAt information
@@ -1480,21 +1480,21 @@ export class ClarionDocumentSymbolProvider {
             procedureSymbol._finishesAt = finishesAt;
         }
 
-        // FEATURE: Add CODE marker as a child for easy navigation to code entry point
-        if (token.executionMarker !== undefined) {
-            logger.debug(`📍 Adding CODE marker for ${procedureName} at line ${token.executionMarker.line}, subType=${token.subType}`);
-            const codeMarker = this.createSymbol(
-                "CODE",
-                "Execution starts here",
-                SymbolKind.Event,  // Event icon for entry point
-                this.getTokenRange(tokens, token.executionMarker.line, token.executionMarker.line),
-                this.getTokenRange(tokens, token.executionMarker.line, token.executionMarker.line),
-                []
-            );
-            codeMarker.sortText = "zzzzz_CODE"; // Sort CODE marker to bottom (after all variables/data)
-            procedureSymbol.children!.push(codeMarker);
-            logger.debug(`📍 CODE marker added to ${procedureName}`);
-        }
+        // REMOVED: CODE marker feature - too cluttered in outline
+        // if (token.executionMarker !== undefined) {
+        //     logger.debug(`📍 Adding CODE marker for ${procedureName} at line ${token.executionMarker.line}, subType=${token.subType}`);
+        //     const codeMarker = this.createSymbol(
+        //         "CODE",
+        //         "Execution starts here",
+        //         SymbolKind.Event,  // Event icon for entry point
+        //         this.getTokenRange(tokens, token.executionMarker.line, token.executionMarker.line),
+        //         this.getTokenRange(tokens, token.executionMarker.line, token.executionMarker.line),
+        //         []
+        //     );
+        //     codeMarker.sortText = "zzzzz_CODE"; // Sort CODE marker to bottom (after all variables/data)
+        //     procedureSymbol.children!.push(codeMarker);
+        //     logger.debug(`📍 CODE marker added to ${procedureName}`);
+        // }
 
         return { procedureSymbol, classImplementation, lastTokenIndex: j };
     }
