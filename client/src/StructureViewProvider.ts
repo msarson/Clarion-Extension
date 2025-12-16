@@ -272,8 +272,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                    symbol.name === "Functions" ||
                    symbol.name === "Properties" ||
                    symbol.name === "Data" ||
-                   // Class implementation root nodes (e.g., "StringTheory (Implementation)")
-                   (symbol.kind === LSPSymbolKind.Class && symbol.detail?.includes("Implementation"));
+                   symbol.name === "CODE"; // CODE markers shouldn't auto-reveal
         };
         
         // Find all symbols that contain the line, excluding container nodes
@@ -424,9 +423,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             element.name === "Methods" || 
             element.name === "Functions" ||
             element.name === "Properties" ||
-            element.name === "Data" ||
-            // Class implementation root nodes (e.g., "StringTheory (Implementation)")
-            (element.kind === LSPSymbolKind.Class && element.detail?.includes("Implementation"));
+            element.name === "Data";
         
         if (isContainerNode) {
             console.log(`🚫 HOTFIX: Container node detected: ${element.name} (kind=${element.kind}, detail='${element.detail}'), skipping navigation command`);
