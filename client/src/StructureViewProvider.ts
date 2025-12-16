@@ -455,6 +455,88 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     private elementMap = new Map<string, DocumentSymbol>();
     private visibilityMap = new Map<string, boolean>();
 
+    /**
+     * Regroups flat symbols into hierarchical structure with class containers and Methods/Properties groups
+     * Takes flat list like: SystemStringClass.Construct(), SystemStringClass.Destruct()
+     * Returns: CLASS (SystemStringClass) > Methods > Construct(), Destruct()
+     */
+    private regroupFlatSymbols(symbols: DocumentSymbol[]): DocumentSymbol[] {
+        const result: DocumentSymbol[] = [];
+        const classMap = new Map<string, DocumentSymbol>(); // Track class containers
+        
+        for (const symbol of symbols) {
+            // Check if this is a method implementation (has dot in name and marked as implementation)
+            const isMethodImpl = (symbol as any)._isMethodImplementation && symbol.name.includes('.');
+            
+            if (isMethodImpl) {
+                // Extract class name and method name
+                const dotIndex = symbol.name.indexOf('.');
+                const className = symbol.name.substring(0, dotIndex);
+                const methodPart = symbol.name.substring(dotIndex + 1); // "MethodName (params)"
+                
+                // Find or create class container
+                let classContainer = classMap.get(className);
+                if (!classContainer) {
+                    // Create class container
+                    classContainer = {
+                        name: className,
+                        detail: 'Class',
+                        kind: LSPSymbolKind.Class,
+                        range: symbol.range,
+                        selectionRange: symbol.selectionRange,
+                        children: []
+                    };
+                    classMap.set(className, classContainer);
+                    result.push(classContainer);
+                }
+                
+                // Find or create Methods container within class
+                let methodsContainer = classContainer.children?.find(c => c.name === 'Methods');
+                if (!methodsContainer) {
+                    methodsContainer = {
+                        name: 'Methods',
+                        detail: '',
+                        kind: LSPSymbolKind.Method,
+                        range: symbol.range,
+                        selectionRange: symbol.selectionRange,
+                        children: []
+                    };
+                    classContainer.children = classContainer.children || [];
+                    classContainer.children.push(methodsContainer);
+                }
+                
+                // Create new symbol with short name (without class prefix)
+                const methodSymbol: DocumentSymbol = {
+                    name: methodPart,
+                    detail: symbol.detail || '',
+                    kind: symbol.kind,
+                    range: symbol.range,
+                    selectionRange: symbol.selectionRange,
+                    children: symbol.children || []
+                };
+                
+                // Copy over any custom properties
+                (methodSymbol as any)._isMethodImplementation = true;
+                
+                methodsContainer.children = methodsContainer.children || [];
+                methodsContainer.children.push(methodSymbol);
+                
+                // Expand class container range to include this method
+                if (symbol.range.start.line < classContainer.range.start.line) {
+                    classContainer.range.start = symbol.range.start;
+                }
+                if (symbol.range.end.line > classContainer.range.end.line) {
+                    classContainer.range.end = symbol.range.end;
+                }
+            } else {
+                // Not a method implementation - add as-is
+                result.push(symbol);
+            }
+        }
+        
+        return result;
+    }
+
     async getChildren(element?: DocumentSymbol): Promise<DocumentSymbol[]> {
         // 📊 PERFORMANCE: Track getChildren timing
         const perfStart = performance.now();
@@ -533,8 +615,13 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 }
             };
 
+            // REGROUP FLAT SYMBOLS: Convert flat method list back to hierarchical structure
+            // Methods like "SystemStringClass.Construct ()" become nested under SystemStringClass > Methods > Construct
+            let regroupedSymbols: DocumentSymbol[] = [];
+            
             if (symbols) {
-                trackSymbols(symbols);
+                regroupedSymbols = this.regroupFlatSymbols(symbols);
+                trackSymbols(regroupedSymbols);
                 
                 // If we have a filter active
                 if (this._filterText && this._filterText.trim() !== '') {
@@ -549,10 +636,10 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                     }
                     
                     // Apply filtering to mark symbols as visible or hidden
-                    this.filterSymbols(symbols, this._filterText);
+                    this.filterSymbols(regroupedSymbols, this._filterText);
                     
                     // Get only the visible symbols
-                    const visibleSymbols = symbols.filter(symbol => {
+                    const visibleSymbols = regroupedSymbols.filter(symbol => {
                         const symbolKey = this.getElementKey(symbol);
                         return this.visibilityMap.get(symbolKey) === true;
                     });
@@ -565,7 +652,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 }
             }
 
-            return symbols ?? [];
+            return regroupedSymbols;
         } catch (error) {
             logger.error(`Error getting document symbols: ${error}`);
             return [];
