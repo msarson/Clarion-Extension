@@ -1064,31 +1064,13 @@ export class ClarionDocumentSymbolProvider {
         if (upperValue === "CLASS" && labelName) {
             this.classSymbolMap.set(labelName.toUpperCase(), structureSymbol);
 
-            const propsContainer = this.createSymbol(
-                "Properties",
-                "",
-                SymbolKind.Property,
-                structureSymbol.range,
-                structureSymbol.range,
-                []
-            );
-            propsContainer.sortText = "0001";
-
-            const methodsContainer = this.createSymbol(
-                "Methods",
-                "",
-                SymbolKind.Method,
-                structureSymbol.range,
-                structureSymbol.range,
-                []
-            );
-            methodsContainer.sortText = "0002";
-
-            structureSymbol.$clarionProps = propsContainer;
-            structureSymbol.$clarionMethods = methodsContainer;
-
-            structureSymbol.children!.push(propsContainer);
-            structureSymbol.children!.push(methodsContainer);
+            // FLATTEN OUTLINE: Don't create Methods/Properties containers
+            // Add methods and properties directly to the CLASS
+            // Keep the $clarion references for routing but don't add containers as children
+            
+            // Store references pointing to the class itself for routing
+            structureSymbol.$clarionProps = structureSymbol;
+            structureSymbol.$clarionMethods = structureSymbol;
         }
         // INTERFACE support: no need for Properties/Methods containers
         else if (upperValue === "INTERFACE" && labelName) {
@@ -1207,37 +1189,15 @@ export class ClarionDocumentSymbolProvider {
                 }
             }
         }
-        // MAP support: add Functions container to organize MAP procedures
+        // MAP support: flatten - add procedures directly to MAP
         else if (upperValue === "MAP") {
-            const functionsContainer = this.createSymbol(
-                "Functions",
-                "",
-                SymbolKind.Function,
-                structureSymbol.range,
-                structureSymbol.range,
-                []
-            );
-            functionsContainer.sortText = "0001";
-
-            // Store the functions container for easy access
-            structureSymbol.$clarionFunctions = functionsContainer;
-            structureSymbol.children!.push(functionsContainer);
+            // FLATTEN OUTLINE: Route functions directly to MAP structure
+            structureSymbol.$clarionFunctions = structureSymbol;
         }
-        // MODULE support: add Functions container to organize MODULE procedures
+        // MODULE support: flatten - add procedures directly to MODULE
         else if (upperValue === "MODULE") {
-            const functionsContainer = this.createSymbol(
-                "Functions",
-                "",
-                SymbolKind.Function,
-                structureSymbol.range,
-                structureSymbol.range,
-                []
-            );
-            functionsContainer.sortText = "0001";
-
-            // Store the functions container for easy access
-            structureSymbol.$clarionFunctions = functionsContainer;
-            structureSymbol.children!.push(functionsContainer);
+            // FLATTEN OUTLINE: Route functions directly to MODULE structure
+            structureSymbol.$clarionFunctions = structureSymbol;
         }
 
         // FEATURE: Add CODE marker for ROUTINE if it has an execution marker
@@ -1536,22 +1496,9 @@ export class ClarionDocumentSymbolProvider {
         
         // If we found the class definition, use it instead of creating a separate implementation container
         if (classDefinition) {
-            // Make sure the class has a Methods container
-            let methodsContainer = classDefinition.children?.find(c => c.name === "Methods");
-            
-            if (!methodsContainer) {
-                // Create a Methods container if it doesn't exist
-                methodsContainer = this.createSymbol(
-                    "Methods",
-                    "",
-                    SymbolKind.Method,
-                    classDefinition.range,
-                    classDefinition.range,
-                    []
-                );
-                methodsContainer.sortText = "0002";
-                classDefinition.children!.push(methodsContainer);
-                classDefinition.$clarionMethods = methodsContainer;
+            // FLATTEN OUTLINE: Ensure methods route to class directly
+            if (!classDefinition.$clarionMethods) {
+                classDefinition.$clarionMethods = classDefinition;
             }
             
             // Update the range to encompass the implementation
@@ -1586,20 +1533,8 @@ export class ClarionDocumentSymbolProvider {
                 []
             );
 
-            // Add methods container for organization
-            const methodsContainer = this.createSymbol(
-                "Methods",
-                "",
-                SymbolKind.Method,
-                classImplementation.range,
-                classImplementation.range,
-                []
-            );
-            methodsContainer.sortText = "0001";
-
-            // Store the methods container for easy access
-            classImplementation.$clarionMethods = methodsContainer;
-            classImplementation.children!.push(methodsContainer);
+            // FLATTEN OUTLINE: Route methods directly to class implementation
+            classImplementation.$clarionMethods = classImplementation;
 
             // FIXED: Class implementation containers should ALWAYS be root-level
             // Never nest them under procedures
