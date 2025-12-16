@@ -1392,13 +1392,8 @@ export class ClarionDocumentSymbolProvider {
         if (token.subType === TokenType.MethodImplementation || subType === TokenType.MethodImplementation) {
             procedureSymbol._isMethodImplementation = true;
             
-            // If this is a method implementation and we found the declaration,
-            // set the detail to "Implementation" to distinguish it
-            if (container && container !== (classImplementation as any)?.$clarionMethods) {
-                procedureSymbol.detail = "Implementation";
-            } else {
-                procedureSymbol.detail = "";  // Empty detail since we're including it in the name
-            }
+            // Detail is already set in createProcedureSymbol to "Method Implementation"
+            // Don't override it here
         } else if (token.subType === TokenType.GlobalProcedure || subType === TokenType.GlobalProcedure) {
             // Mark global procedures
             procedureSymbol._isGlobalProcedure = true;
@@ -1528,14 +1523,14 @@ export class ClarionDocumentSymbolProvider {
         if (isClassMethod) {
             // Keep the full name with parameters for better visibility
             displayName = name;
-            detail = "";  // Empty detail since we're including it in the name
+            detail = "Method Implementation";
         } else {
-            // For global procedures, provide context in the detail
-            detail = this.describeSubType(subType);
-
-            // If it's a global procedure, add that context to the detail
+            // For global procedures, use "Global Procedure" directly
             if (subType === TokenType.GlobalProcedure) {
-                detail = detail ? `${detail} (Global)` : "Global Procedure";
+                detail = "Global Procedure";
+            } else {
+                // For other types, describe the subtype
+                detail = this.describeSubType(subType);
             }
         }
 

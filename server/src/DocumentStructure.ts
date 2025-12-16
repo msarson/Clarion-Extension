@@ -663,23 +663,50 @@ export class DocumentStructure {
         
         // Check for method implementation: Look for pattern like "ClassName.MethodName PROCEDURE"
         // This could be tokenized as: Label(ClassName) + Variable(MethodName) + Keyword(PROCEDURE)
+        // Or for interface methods: Label(ClassName) + Variable(InterfaceName) + Variable(MethodName) + Keyword(PROCEDURE)
         // Or in some cases: Label(ClassName.MethodName) + Keyword(PROCEDURE)
+        // Or interface: Label(ClassName.InterfaceName.MethodName) + Keyword(PROCEDURE)
         let isMethodImpl = false;
         let fullProcedureName = prevToken?.value ?? "AnonymousProcedure";
         
         // Check if prevToken is a label, variable, or attribute that might be part of a method name
         if (prevToken?.type === TokenType.Label || prevToken?.type === TokenType.Variable || prevToken?.type === TokenType.Attribute) {
-            // Look back one more token to see if there's a class name
-            const tokenBeforePrev = index >= 2 ? this.tokens[index - 2] : null;
-            if (tokenBeforePrev?.type === TokenType.Label && tokenBeforePrev.line === token.line) {
-                // We have: Label + (Label|Variable) + PROCEDURE on same line
-                // This is likely: ClassName.MethodName PROCEDURE
-                fullProcedureName = `${tokenBeforePrev.value}.${prevToken.value}`;
-                isMethodImpl = true;
-            } else if (prevToken.value.includes(".")) {
-                // The previous token itself contains a dot (entire name in one token)
+            // Check if the previous token contains dots (entire qualified name in one token)
+            if (prevToken.value.includes(".")) {
+                // The previous token itself contains dots (entire name in one token)
+                // This handles: ClassName.MethodName or ClassName.InterfaceName.MethodName
                 fullProcedureName = prevToken.value;
                 isMethodImpl = true;
+            } else {
+                // Build the full name by looking back at previous tokens on the same line
+                // Collect all tokens before PROCEDURE that are part of the qualified name
+                const nameParts: string[] = [prevToken.value];
+                let lookbackIndex = index - 2;
+                
+                // Look back to collect ClassName.InterfaceName.MethodName pattern
+                while (lookbackIndex >= 0) {
+                    const lookbackToken = this.tokens[lookbackIndex];
+                    
+                    // Stop if we're on a different line
+                    if (lookbackToken.line !== token.line) break;
+                    
+                    // Stop if we hit a non-name token
+                    if (lookbackToken.type !== TokenType.Label && 
+                        lookbackToken.type !== TokenType.Variable && 
+                        lookbackToken.type !== TokenType.Attribute) {
+                        break;
+                    }
+                    
+                    // Add this part to the beginning
+                    nameParts.unshift(lookbackToken.value);
+                    lookbackIndex--;
+                }
+                
+                // If we collected more than one part, it's a method implementation
+                if (nameParts.length > 1) {
+                    fullProcedureName = nameParts.join('.');
+                    isMethodImpl = true;
+                }
             }
         }
         

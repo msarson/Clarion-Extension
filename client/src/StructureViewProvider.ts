@@ -9,6 +9,7 @@ import {
     workspace,
     SymbolKind as VSCodeSymbolKind,
     TextEditor,
+    TextDocument,
     commands,
     Range,
     TreeView,
@@ -268,18 +269,48 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         
         // Helper to check if a symbol is a container node (organizational only, not real code)
         const isContainerNode = (symbol: DocumentSymbol): boolean => {
-            return symbol.name === "Methods" || 
-                   symbol.name === "Functions" ||
-                   symbol.name === "Properties" ||
-                   symbol.name === "Data" ||
-                   symbol.name === "CODE"; // CODE markers shouldn't auto-reveal
+            // Check if it's an organizational container
+            if (symbol.name === "Methods" || 
+                symbol.name === "Functions" ||
+                symbol.name === "Properties" ||
+                symbol.name === "Data" ||
+                symbol.name === "CODE") {
+                return true;
+            }
+            
+            // Check if it's a regrouped class container (has Methods child and is SymbolKind.Class)
+            if (symbol.kind === LSPSymbolKind.Class && 
+                symbol.children && 
+                symbol.children.some(c => c.name === "Methods")) {
+                return true;
+            }
+            
+            // Check if it's an interface implementation container (detail is 'Interface')
+            if (symbol.kind === LSPSymbolKind.Interface && 
+                symbol.detail === 'Interface') {
+                return true;
+            }
+            
+            return false;
         };
         
-        // Find all symbols that contain the line, excluding container nodes
-        const containingSymbols = symbols.filter(symbol =>
-            !isContainerNode(symbol) &&
-            line >= symbol.range.start.line && line <= symbol.range.end.line
-        );
+        // Process all symbols, searching inside containers but not selecting them
+        let containingSymbols: DocumentSymbol[] = [];
+        
+        for (const symbol of symbols) {
+            // If this is a container node, search its children instead
+            if (isContainerNode(symbol)) {
+                if (symbol.children && symbol.children.length > 0) {
+                    const childResult = this.findSymbolAtPosition(symbol.children, line);
+                    if (childResult) {
+                        containingSymbols.push(childResult);
+                    }
+                }
+            } else if (line >= symbol.range.start.line && line <= symbol.range.end.line) {
+                // This is a real symbol that contains the line
+                containingSymbols.push(symbol);
+            }
+        }
         
         if (containingSymbols.length === 0) {
             return undefined;
@@ -460,88 +491,192 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
      * Takes flat list like: SystemStringClass.Construct(), SystemStringClass.Destruct()
      * Returns: CLASS (SystemStringClass) > Methods > Construct(), Destruct()
      */
-    private regroupFlatSymbols(symbols: DocumentSymbol[]): DocumentSymbol[] {
+    private regroupFlatSymbols(symbols: DocumentSymbol[], document: TextDocument): DocumentSymbol[] {
         const result: DocumentSymbol[] = [];
         const classMap = new Map<string, DocumentSymbol>(); // Track class containers
         
         logger.info(`🔄 REGROUPING: Starting with ${symbols.length} flat symbols`);
         
         for (const symbol of symbols) {
+            // Read the actual source line to get the full qualified name
+            // because the language server might not provide it for interface implementations
+            const sourceLine = document.lineAt(symbol.range.start.line).text;
+            const fullName = sourceLine.trim().split(/\s+/)[0]; // Get first word (the full method name)
+            
             // Check if this is a method implementation:
             // - Has dot in name (e.g., "SystemStringClass.Construct")
-            // - Is a Method/Function kind  
+            // - Is a Method/Function/Interface kind (Clarion methods come through as Interface kind)
             // BUT exclude symbols where the dot is inside a string literal (e.g., STRING('ABC...'))
-            const hasDot = symbol.name.includes('.');
-            const isMethodKind = symbol.kind === LSPSymbolKind.Method || symbol.kind === LSPSymbolKind.Function;
+            const hasDot = fullName.includes('.');
+            const isMethodKind = symbol.kind === LSPSymbolKind.Method || 
+                               symbol.kind === LSPSymbolKind.Function ||
+                               symbol.kind === LSPSymbolKind.Interface;
             
-            // Check if dot is inside a string literal by looking for STRING(' pattern before the dot
-            const dotInsideStringLiteral = /STRING\([^)]*\./.test(symbol.name);
+            // Check if dot is inside a string literal by looking for STRING(' pattern with a quote
+            // Pattern: STRING('...') where ... contains a dot
+            const dotInsideStringLiteral = /STRING\('[^']*\./i.test(fullName);
             
             const isMethodImpl = hasDot && isMethodKind && !dotInsideStringLiteral;
             
-            logger.info(`  Symbol: ${symbol.name}, hasDot=${hasDot}, isMethodKind=${isMethodKind}, dotInsideStringLiteral=${dotInsideStringLiteral}, isMethodImpl=${isMethodImpl}`);
+            logger.info(`  Symbol: ${symbol.name}, fullName: ${fullName}, hasDot=${hasDot}, isMethodKind=${isMethodKind}, dotInsideStringLiteral=${dotInsideStringLiteral}, isMethodImpl=${isMethodImpl}`);
             
             if (isMethodImpl) {
-                // Extract class name and method name
-                const dotIndex = symbol.name.indexOf('.');
-                const className = symbol.name.substring(0, dotIndex);
-                const methodPart = symbol.name.substring(dotIndex + 1); // "MethodName (params)"
+                // Check if this is an interface implementation (has 2+ dots)
+                // e.g., "StandardBehavior.IListControl.GetSelectedItem"
+                const dotCount = (fullName.match(/\./g) || []).length;
+                const isInterfaceImpl = dotCount >= 2;
                 
-                // Find or create class container
-                let classContainer = classMap.get(className);
-                if (!classContainer) {
-                    // Create class container
-                    classContainer = {
-                        name: className,
-                        detail: 'Class',
-                        kind: LSPSymbolKind.Class,
+                if (isInterfaceImpl) {
+                    // Extract: ClassName.InterfaceName.MethodName
+                    const firstDotIndex = fullName.indexOf('.');
+                    const className = fullName.substring(0, firstDotIndex);
+                    const remainder = fullName.substring(firstDotIndex + 1);
+                    const secondDotIndex = remainder.indexOf('.');
+                    const interfaceName = remainder.substring(0, secondDotIndex);
+                    const methodPart = remainder.substring(secondDotIndex + 1);
+                    
+                    // Find or create class container
+                    let classContainer = classMap.get(className);
+                    if (!classContainer) {
+                        classContainer = {
+                            name: className,
+                            detail: 'Class',
+                            kind: LSPSymbolKind.Class,
+                            range: symbol.range,
+                            selectionRange: symbol.selectionRange,
+                            children: []
+                        };
+                        classMap.set(className, classContainer);
+                        result.push(classContainer);
+                    }
+                    
+                    // Find or create interface container within class
+                    let interfaceContainer = classContainer.children?.find(c => c.name === interfaceName);
+                    if (!interfaceContainer) {
+                        interfaceContainer = {
+                            name: interfaceName,
+                            detail: 'Interface',
+                            kind: LSPSymbolKind.Interface,
+                            range: symbol.range,
+                            selectionRange: symbol.selectionRange,
+                            children: []
+                        };
+                        classContainer.children = classContainer.children || [];
+                        classContainer.children.push(interfaceContainer);
+                    }
+                    
+                    // Create method symbol under interface
+                    const methodSymbol: DocumentSymbol = {
+                        name: methodPart,
+                        detail: symbol.detail || '',
+                        kind: symbol.kind,
                         range: symbol.range,
                         selectionRange: symbol.selectionRange,
-                        children: []
+                        children: symbol.children || []
                     };
-                    classMap.set(className, classContainer);
-                    result.push(classContainer);
-                }
-                
-                // Find or create Methods container within class
-                let methodsContainer = classContainer.children?.find(c => c.name === 'Methods');
-                if (!methodsContainer) {
-                    methodsContainer = {
-                        name: 'Methods',
-                        detail: '',
-                        kind: LSPSymbolKind.Method,
+                    
+                    (methodSymbol as any)._isMethodImplementation = true;
+                    interfaceContainer.children = interfaceContainer.children || [];
+                    interfaceContainer.children.push(methodSymbol);
+                    
+                    logger.info(`  ✅ Regrouped: ${fullName} -> ${className} > ${interfaceName} > ${methodPart}`);
+                    
+                    // Expand containers to include this method
+                    if (symbol.range.start.line < classContainer.range.start.line ||
+                        symbol.range.end.line > classContainer.range.end.line) {
+                        classContainer.range = {
+                            start: {
+                                line: Math.min(symbol.range.start.line, classContainer.range.start.line),
+                                character: Math.min(symbol.range.start.character, classContainer.range.start.character)
+                            },
+                            end: {
+                                line: Math.max(symbol.range.end.line, classContainer.range.end.line),
+                                character: Math.max(symbol.range.end.character, classContainer.range.end.character)
+                            }
+                        };
+                    }
+                    if (symbol.range.start.line < interfaceContainer.range.start.line ||
+                        symbol.range.end.line > interfaceContainer.range.end.line) {
+                        interfaceContainer.range = {
+                            start: {
+                                line: Math.min(symbol.range.start.line, interfaceContainer.range.start.line),
+                                character: Math.min(symbol.range.start.character, interfaceContainer.range.start.character)
+                            },
+                            end: {
+                                line: Math.max(symbol.range.end.line, interfaceContainer.range.end.line),
+                                character: Math.max(symbol.range.end.character, interfaceContainer.range.end.character)
+                            }
+                        };
+                    }
+                } else {
+                    // Regular method: ClassName.MethodName
+                    const dotIndex = fullName.indexOf('.');
+                    const className = fullName.substring(0, dotIndex);
+                    const methodPart = fullName.substring(dotIndex + 1);
+                    
+                    // Find or create class container
+                    let classContainer = classMap.get(className);
+                    if (!classContainer) {
+                        classContainer = {
+                            name: className,
+                            detail: 'Class',
+                            kind: LSPSymbolKind.Class,
+                            range: symbol.range,
+                            selectionRange: symbol.selectionRange,
+                            children: []
+                        };
+                        classMap.set(className, classContainer);
+                        result.push(classContainer);
+                    }
+                    
+                    // Find or create Methods container within class
+                    let methodsContainer = classContainer.children?.find(c => c.name === 'Methods');
+                    if (!methodsContainer) {
+                        methodsContainer = {
+                            name: 'Methods',
+                            detail: '',
+                            kind: LSPSymbolKind.Method,
+                            range: symbol.range,
+                            selectionRange: symbol.selectionRange,
+                            children: []
+                        };
+                        classContainer.children = classContainer.children || [];
+                        classContainer.children.push(methodsContainer);
+                    }
+                    
+                    // Create new symbol with short name (without class prefix)
+                    const methodSymbol: DocumentSymbol = {
+                        name: methodPart,
+                        detail: symbol.detail || '',
+                        kind: symbol.kind,
                         range: symbol.range,
                         selectionRange: symbol.selectionRange,
-                        children: []
+                        children: symbol.children || []
                     };
-                    classContainer.children = classContainer.children || [];
-                    classContainer.children.push(methodsContainer);
-                }
+                    
+                    // Copy over any custom properties
+                    (methodSymbol as any)._isMethodImplementation = true;
                 
-                // Create new symbol with short name (without class prefix)
-                const methodSymbol: DocumentSymbol = {
-                    name: methodPart,
-                    detail: symbol.detail || '',
-                    kind: symbol.kind,
-                    range: symbol.range,
-                    selectionRange: symbol.selectionRange,
-                    children: symbol.children || []
-                };
-                
-                // Copy over any custom properties
-                (methodSymbol as any)._isMethodImplementation = true;
-                
-                methodsContainer.children = methodsContainer.children || [];
-                methodsContainer.children.push(methodSymbol);
-                
-                logger.info(`  ✅ Regrouped: ${symbol.name} -> ${className} > Methods > ${methodPart}`);
-                
-                // Expand class container range to include this method
-                if (symbol.range.start.line < classContainer.range.start.line) {
-                    classContainer.range.start = symbol.range.start;
-                }
-                if (symbol.range.end.line > classContainer.range.end.line) {
-                    classContainer.range.end = symbol.range.end;
+                    methodsContainer.children = methodsContainer.children || [];
+                    methodsContainer.children.push(methodSymbol);
+                    
+                    logger.info(`  ✅ Regrouped: ${fullName} -> ${className} > Methods > ${methodPart}`);
+                    
+                    // Expand class container range to include this method
+                    // Create new range objects since range properties are read-only
+                    if (symbol.range.start.line < classContainer.range.start.line ||
+                        symbol.range.end.line > classContainer.range.end.line) {
+                        classContainer.range = {
+                            start: {
+                                line: Math.min(symbol.range.start.line, classContainer.range.start.line),
+                                character: Math.min(symbol.range.start.character, classContainer.range.start.character)
+                            },
+                            end: {
+                                line: Math.max(symbol.range.end.line, classContainer.range.end.line),
+                                character: Math.max(symbol.range.end.character, classContainer.range.end.character)
+                            }
+                        };
+                    }
                 }
             } else {
                 // Not a method implementation - add as-is
@@ -637,7 +772,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             let regroupedSymbols: DocumentSymbol[] = [];
             
             if (symbols) {
-                regroupedSymbols = this.regroupFlatSymbols(symbols);
+                regroupedSymbols = this.regroupFlatSymbols(symbols, this.activeEditor.document);
                 trackSymbols(regroupedSymbols);
                 
                 // If we have a filter active
