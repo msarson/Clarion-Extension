@@ -730,4 +730,79 @@ GetValue                Procedure (),String
             assert.ok(flush, 'Should find Flush method (not StringTheory variable)');
         });
     });
+
+    suite('Outline View - Method Implementation Details', () => {
+        test('Method implementations should show "Method Implementation" detail', () => {
+            const code = `
+StepClass.Init PROCEDURE(BYTE Controls)
+  CODE
+    SELF.Controls = Controls
+
+StepClass.Kill PROCEDURE
+  CODE
+    RETURN
+
+MyGlobalProc PROCEDURE()
+  CODE
+    RETURN
+            `.trim();
+
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionDocumentSymbolProvider();
+            const symbols = provider.provideDocumentSymbols(tokens, 'test://test.clw');
+
+            console.log('\n=== Method Implementation Details Test ===');
+            console.log(formatSymbolTree(symbols));
+
+            // Find StepClass.Init method implementation
+            const initMethod = findSymbol(symbols, 'StepClass.Init');
+            assert.ok(initMethod, 'Should find StepClass.Init method');
+            assert.strictEqual(initMethod.detail, 'Method Implementation', 
+                `StepClass.Init should have detail "Method Implementation", but got "${initMethod.detail}"`);
+            
+            // Find StepClass.Kill method implementation
+            const killMethod = findSymbol(symbols, 'StepClass.Kill');
+            assert.ok(killMethod, 'Should find StepClass.Kill method');
+            assert.strictEqual(killMethod.detail, 'Method Implementation',
+                `StepClass.Kill should have detail "Method Implementation", but got "${killMethod.detail}"`);
+
+            // Find global procedure
+            const globalProc = findSymbol(symbols, 'MyGlobalProc');
+            assert.ok(globalProc, 'Should find MyGlobalProc');
+            assert.strictEqual(globalProc.detail, 'Global Procedure',
+                `MyGlobalProc should have detail "Global Procedure", but got "${globalProc.detail}"`);
+        });
+
+        test('Interface method implementations should show "Method Implementation" detail', () => {
+            const code = `
+StandardBehavior.IListControl.GetSelectedItem PROCEDURE()
+  CODE
+    RETURN CHOICE(SELF.LC) - SELF.LC{PROP:YOrigin} + 1
+
+StandardBehavior.IListControl.Choice PROCEDURE()
+  CODE
+    RETURN CHOICE(SELF.LC)
+            `.trim();
+
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionDocumentSymbolProvider();
+            const symbols = provider.provideDocumentSymbols(tokens, 'test://test.clw');
+
+            console.log('\n=== Interface Method Implementation Details Test ===');
+            console.log(formatSymbolTree(symbols));
+
+            // Find interface method implementations
+            const getSelectedItem = findSymbol(symbols, 'GetSelectedItem');
+            assert.ok(getSelectedItem, 'Should find StandardBehavior.IListControl.GetSelectedItem method');
+            assert.strictEqual(getSelectedItem.detail, 'Method Implementation',
+                `GetSelectedItem should have detail "Method Implementation", but got "${getSelectedItem.detail}"`);
+            
+            const choice = findSymbol(symbols, 'Choice');
+            assert.ok(choice, 'Should find StandardBehavior.IListControl.Choice method');
+            assert.strictEqual(choice.detail, 'Method Implementation',
+                `Choice should have detail "Method Implementation", but got "${choice.detail}"`);
+        });
+    });
 });

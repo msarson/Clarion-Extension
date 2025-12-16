@@ -743,7 +743,29 @@ export class ClarionDocumentSymbolProvider {
         // POST-PROCESSING: Move CODE markers to end of procedure/routine children
         this.moveCODEMarkersToEnd(symbols);
 
+        // CLEANUP: Remove internal routing properties before serialization
+        // These create circular references and shouldn't be sent to the client
+        this.cleanupInternalProperties(symbols);
+
         return symbols;
+    }
+    
+    /**
+     * Remove internal $clarion* properties that create circular references
+     * These are only used during symbol building for routing
+     */
+    private cleanupInternalProperties(symbols: ClarionDocumentSymbol[]): void {
+        for (const symbol of symbols) {
+            // Remove internal routing properties
+            delete symbol.$clarionProps;
+            delete symbol.$clarionMethods;
+            delete symbol.$clarionFunctions;
+            
+            // Recursively clean children
+            if (symbol.children && symbol.children.length > 0) {
+                this.cleanupInternalProperties(symbol.children);
+            }
+        }
     }
     /**
      * POST-PROCESSING: Move CODE markers to the end of routine children (after DATA)
@@ -1064,31 +1086,13 @@ export class ClarionDocumentSymbolProvider {
         if (upperValue === "CLASS" && labelName) {
             this.classSymbolMap.set(labelName.toUpperCase(), structureSymbol);
 
-            const propsContainer = this.createSymbol(
-                "Properties",
-                "",
-                SymbolKind.Property,
-                structureSymbol.range,
-                structureSymbol.range,
-                []
-            );
-            propsContainer.sortText = "0001";
-
-            const methodsContainer = this.createSymbol(
-                "Methods",
-                "",
-                SymbolKind.Method,
-                structureSymbol.range,
-                structureSymbol.range,
-                []
-            );
-            methodsContainer.sortText = "0002";
-
-            structureSymbol.$clarionProps = propsContainer;
-            structureSymbol.$clarionMethods = methodsContainer;
-
-            structureSymbol.children!.push(propsContainer);
-            structureSymbol.children!.push(methodsContainer);
+            // FLATTEN OUTLINE: Don't create Methods/Properties containers
+            // Add methods and properties directly to the CLASS
+            // Keep the $clarion references for routing but don't add containers as children
+            
+            // Store references pointing to the class itself for routing
+            structureSymbol.$clarionProps = structureSymbol;
+            structureSymbol.$clarionMethods = structureSymbol;
         }
         // INTERFACE support: no need for Properties/Methods containers
         else if (upperValue === "INTERFACE" && labelName) {
@@ -1207,54 +1211,32 @@ export class ClarionDocumentSymbolProvider {
                 }
             }
         }
-        // MAP support: add Functions container to organize MAP procedures
+        // MAP support: flatten - add procedures directly to MAP
         else if (upperValue === "MAP") {
-            const functionsContainer = this.createSymbol(
-                "Functions",
-                "",
-                SymbolKind.Function,
-                structureSymbol.range,
-                structureSymbol.range,
-                []
-            );
-            functionsContainer.sortText = "0001";
-
-            // Store the functions container for easy access
-            structureSymbol.$clarionFunctions = functionsContainer;
-            structureSymbol.children!.push(functionsContainer);
+            // FLATTEN OUTLINE: Route functions directly to MAP structure
+            structureSymbol.$clarionFunctions = structureSymbol;
         }
-        // MODULE support: add Functions container to organize MODULE procedures
+        // MODULE support: flatten - add procedures directly to MODULE
         else if (upperValue === "MODULE") {
-            const functionsContainer = this.createSymbol(
-                "Functions",
-                "",
-                SymbolKind.Function,
-                structureSymbol.range,
-                structureSymbol.range,
-                []
-            );
-            functionsContainer.sortText = "0001";
-
-            // Store the functions container for easy access
-            structureSymbol.$clarionFunctions = functionsContainer;
-            structureSymbol.children!.push(functionsContainer);
+            // FLATTEN OUTLINE: Route functions directly to MODULE structure
+            structureSymbol.$clarionFunctions = structureSymbol;
         }
 
-        // FEATURE: Add CODE marker for ROUTINE if it has an execution marker
-        if (upperValue === "ROUTINE" && token.executionMarker !== undefined) {
-            logger.debug(`📍 Adding CODE marker for ROUTINE at line ${token.executionMarker.line}`);
-            const codeMarker = this.createSymbol(
-                "CODE",
-                "Execution starts here",
-                SymbolKind.Event,  // Event icon for entry point
-                this.getTokenRange(tokens, token.executionMarker.line, token.executionMarker.line),
-                this.getTokenRange(tokens, token.executionMarker.line, token.executionMarker.line),
-                []
-            );
-            codeMarker.sortText = "zzzzz_CODE"; // Sort CODE marker to bottom (after all variables/data)
-            structureSymbol.children!.push(codeMarker);
-            logger.debug(`📍 CODE marker added, routine now has ${structureSymbol.children!.length} children`);
-        }
+        // REMOVED: CODE marker feature - too cluttered in outline
+        // if (upperValue === "ROUTINE" && token.executionMarker !== undefined) {
+        //     logger.debug(`📍 Adding CODE marker for ROUTINE at line ${token.executionMarker.line}`);
+        //     const codeMarker = this.createSymbol(
+        //         "CODE",
+        //         "Execution starts here",
+        //         SymbolKind.Event,  // Event icon for entry point
+        //         this.getTokenRange(tokens, token.executionMarker.line, token.executionMarker.line),
+        //         this.getTokenRange(tokens, token.executionMarker.line, token.executionMarker.line),
+        //         []
+        //     );
+        //     codeMarker.sortText = "zzzzz_CODE"; // Sort CODE marker to bottom (after all variables/data)
+        //     structureSymbol.children!.push(codeMarker);
+        //     logger.debug(`📍 CODE marker added, routine now has ${structureSymbol.children!.length} children`);
+        // }
 
         this.addSymbolToParent(structureSymbol, currentStructure, symbols);
         // Push to the parent stack with finishesAt information
@@ -1332,58 +1314,15 @@ export class ClarionDocumentSymbolProvider {
         if (token.subType === TokenType.MethodImplementation || subType === TokenType.MethodImplementation) {
             logger.info(`🔍 Method implementation detected: ${procedureName}, classMatch: ${classMatch}`);
             
-            // Verify that classMatch is valid (tokenizer should have ensured procedure name contains a dot)
-            if (!classMatch) {
-                // Safety fallback: if no classMatch but tokenizer says it's a method implementation,
-                // treat it as a global procedure instead
-                logger.warn(`⚠️ Method implementation ${procedureName} has no classMatch - treating as global procedure`);
-                container = null;
-                (token as any)._isGlobalProcedure = true;
-            } else {
-                // First, try to find the class definition in the symbols
-                const classDefinition = this.findClassDefinition(symbols, classMatch);
+            // FLATTEN OUTLINE: Method implementations go to root level, not in class container
+            // This fixes Sticky Scroll showing class container instead of method names
+            container = null; // Add to root level
             
-                if (classDefinition) {
-                    // If we found the class definition, look for the method declaration
-                    const methodsContainer = classDefinition.children?.find(c => c.name === "Methods");
-                    
-                    if (methodsContainer) {
-                        // CRITICAL: Always use the Methods container as the parent for method implementations
-                        // This ensures overloads are siblings, not nested
-                        container = methodsContainer;
-                        
-                        // Mark this as a method implementation
-                        (token as any)._isMethodImplementation = true;
-                        
-                        // We don't need to create a class implementation container
-                        classImplementation = null;
-                    } else {
-                        // Methods container not found, fall back to the old behavior
-                        classImplementation = this.findOrCreateClassImplementation(
-                            symbols, classMatch, tokens, line, finishesAt ?? line
-                        );
-                        
-                        // Use the methods container as the parent
-                        const implMethodsContainer = classImplementation.$clarionMethods || classImplementation;
-                        container = implMethodsContainer;
-                        
-                        // Mark this as a method implementation
-                        (token as any)._isMethodImplementation = true;
-                    }
-                } else {
-                    // Class definition not found, fall back to the old behavior
-                    classImplementation = this.findOrCreateClassImplementation(
-                        symbols, classMatch, tokens, line, finishesAt ?? line
-                    );
-                    
-                    // Use the methods container as the parent
-                    const implMethodsContainer = classImplementation.$clarionMethods || classImplementation;
-                    container = implMethodsContainer;
-                    
-                    // Mark this as a method implementation
-                    (token as any)._isMethodImplementation = true;
-                }
-            }
+            // Mark this as a method implementation
+            (token as any)._isMethodImplementation = true;
+            
+            // Don't create or use class implementation container
+            classImplementation = null;
         } else {
             // For regular procedures (not class methods), use the current structure
             // CRITICAL FIX: Always promote GlobalProcedure to top-level
@@ -1434,8 +1373,16 @@ export class ClarionDocumentSymbolProvider {
             paramsOnly = "()";
         }
 
-        // Include just the parameters in the name for all procedures
-        const displayName = `${methodName} ${paramsOnly}`;
+        // FLATTEN OUTLINE: For method implementations, use full class-qualified name
+        // For regular procedures, use just the method name
+        let displayName: string;
+        if (token.subType === TokenType.MethodImplementation || subType === TokenType.MethodImplementation) {
+            // Use full name: ClassName.MethodName (params)
+            displayName = `${procedureName} ${paramsOnly}`;
+        } else {
+            // Use short name: MethodName (params)
+            displayName = `${methodName} ${paramsOnly}`;
+        }
 
         const procedureSymbol = this.createProcedureSymbol(
             tokens, displayName, classMatch, line, finishesAt ?? line, token.subType || subType
@@ -1445,13 +1392,8 @@ export class ClarionDocumentSymbolProvider {
         if (token.subType === TokenType.MethodImplementation || subType === TokenType.MethodImplementation) {
             procedureSymbol._isMethodImplementation = true;
             
-            // If this is a method implementation and we found the declaration,
-            // set the detail to "Implementation" to distinguish it
-            if (container && container !== (classImplementation as any)?.$clarionMethods) {
-                procedureSymbol.detail = "Implementation";
-            } else {
-                procedureSymbol.detail = "";  // Empty detail since we're including it in the name
-            }
+            // Detail is already set in createProcedureSymbol to "Method Implementation"
+            // Don't override it here
         } else if (token.subType === TokenType.GlobalProcedure || subType === TokenType.GlobalProcedure) {
             // Mark global procedures
             procedureSymbol._isGlobalProcedure = true;
@@ -1459,32 +1401,9 @@ export class ClarionDocumentSymbolProvider {
 
         // Add the procedure to its container
         if (token.subType === TokenType.MethodImplementation || subType === TokenType.MethodImplementation) {
-            // For method implementations, add directly to the container
-            if (container) {
-                container.children!.push(procedureSymbol);
-                
-                // CRITICAL FIX: Expand container range to include all child methods
-                // This ensures followCursor works for methods after the first one
-                if (container.name === "Methods") {
-                    logger.debug(`📏 Expanding Methods container range for ${procedureSymbol.name}: container was ${container.range.start.line}-${container.range.end.line}, method is ${procedureSymbol.range.start.line}-${procedureSymbol.range.end.line}`);
-                    
-                    if (procedureSymbol.range.start.line < container.range.start.line) {
-                        container.range.start.line = procedureSymbol.range.start.line;
-                        container.selectionRange.start.line = procedureSymbol.range.start.line;
-                    }
-                    if (procedureSymbol.range.end.line > container.range.end.line) {
-                        container.range.end.line = procedureSymbol.range.end.line;
-                        container.selectionRange.end.line = procedureSymbol.range.end.line;
-                    }
-                    
-                    logger.debug(`📏 Methods container range now: ${container.range.start.line}-${container.range.end.line}`);
-                }
-            } else {
-                // FALLBACK: If no container was found, add to top level
-                // This shouldn't happen if findOrCreateClassImplementation worked correctly
-                logger.error(`❌ Method implementation ${procedureName} has no container! Adding to root.`);
-                symbols.push(procedureSymbol);
-            }
+            // FLATTEN OUTLINE: Method implementations go to root level
+            // They already have full class-qualified names
+            this.addSymbolToParent(procedureSymbol, null, symbols);
         } else {
             // For regular procedures, use addSymbolToParent
             this.addSymbolToParent(procedureSymbol, container, symbols);
@@ -1498,21 +1417,21 @@ export class ClarionDocumentSymbolProvider {
             procedureSymbol._finishesAt = finishesAt;
         }
 
-        // FEATURE: Add CODE marker as a child for easy navigation to code entry point
-        if (token.executionMarker !== undefined) {
-            logger.debug(`📍 Adding CODE marker for ${procedureName} at line ${token.executionMarker.line}, subType=${token.subType}`);
-            const codeMarker = this.createSymbol(
-                "CODE",
-                "Execution starts here",
-                SymbolKind.Event,  // Event icon for entry point
-                this.getTokenRange(tokens, token.executionMarker.line, token.executionMarker.line),
-                this.getTokenRange(tokens, token.executionMarker.line, token.executionMarker.line),
-                []
-            );
-            codeMarker.sortText = "zzzzz_CODE"; // Sort CODE marker to bottom (after all variables/data)
-            procedureSymbol.children!.push(codeMarker);
-            logger.debug(`📍 CODE marker added to ${procedureName}`);
-        }
+        // REMOVED: CODE marker feature - too cluttered in outline
+        // if (token.executionMarker !== undefined) {
+        //     logger.debug(`📍 Adding CODE marker for ${procedureName} at line ${token.executionMarker.line}, subType=${token.subType}`);
+        //     const codeMarker = this.createSymbol(
+        //         "CODE",
+        //         "Execution starts here",
+        //         SymbolKind.Event,  // Event icon for entry point
+        //         this.getTokenRange(tokens, token.executionMarker.line, token.executionMarker.line),
+        //         this.getTokenRange(tokens, token.executionMarker.line, token.executionMarker.line),
+        //         []
+        //     );
+        //     codeMarker.sortText = "zzzzz_CODE"; // Sort CODE marker to bottom (after all variables/data)
+        //     procedureSymbol.children!.push(codeMarker);
+        //     logger.debug(`📍 CODE marker added to ${procedureName}`);
+        // }
 
         return { procedureSymbol, classImplementation, lastTokenIndex: j };
     }
@@ -1536,22 +1455,9 @@ export class ClarionDocumentSymbolProvider {
         
         // If we found the class definition, use it instead of creating a separate implementation container
         if (classDefinition) {
-            // Make sure the class has a Methods container
-            let methodsContainer = classDefinition.children?.find(c => c.name === "Methods");
-            
-            if (!methodsContainer) {
-                // Create a Methods container if it doesn't exist
-                methodsContainer = this.createSymbol(
-                    "Methods",
-                    "",
-                    SymbolKind.Method,
-                    classDefinition.range,
-                    classDefinition.range,
-                    []
-                );
-                methodsContainer.sortText = "0002";
-                classDefinition.children!.push(methodsContainer);
-                classDefinition.$clarionMethods = methodsContainer;
+            // FLATTEN OUTLINE: Ensure methods route to class directly
+            if (!classDefinition.$clarionMethods) {
+                classDefinition.$clarionMethods = classDefinition;
             }
             
             // Update the range to encompass the implementation
@@ -1586,20 +1492,8 @@ export class ClarionDocumentSymbolProvider {
                 []
             );
 
-            // Add methods container for organization
-            const methodsContainer = this.createSymbol(
-                "Methods",
-                "",
-                SymbolKind.Method,
-                classImplementation.range,
-                classImplementation.range,
-                []
-            );
-            methodsContainer.sortText = "0001";
-
-            // Store the methods container for easy access
-            classImplementation.$clarionMethods = methodsContainer;
-            classImplementation.children!.push(methodsContainer);
+            // FLATTEN OUTLINE: Route methods directly to class implementation
+            classImplementation.$clarionMethods = classImplementation;
 
             // FIXED: Class implementation containers should ALWAYS be root-level
             // Never nest them under procedures
@@ -1629,14 +1523,14 @@ export class ClarionDocumentSymbolProvider {
         if (isClassMethod) {
             // Keep the full name with parameters for better visibility
             displayName = name;
-            detail = "";  // Empty detail since we're including it in the name
+            detail = "Method Implementation";
         } else {
-            // For global procedures, provide context in the detail
-            detail = this.describeSubType(subType);
-
-            // If it's a global procedure, add that context to the detail
+            // For global procedures, use "Global Procedure" directly
             if (subType === TokenType.GlobalProcedure) {
-                detail = detail ? `${detail} (Global)` : "Global Procedure";
+                detail = "Global Procedure";
+            } else {
+                // For other types, describe the subtype
+                detail = this.describeSubType(subType);
             }
         }
 
