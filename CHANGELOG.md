@@ -9,6 +9,20 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 ## [Unreleased]
 
 ### ✨ Features
+- **Improved Outline View - Flattened Structure**
+  - All symbols now appear at root level for easier navigation
+  - Class method implementations show with fully-qualified names (e.g., `MyClass.MyMethod`)
+  - Interface method implementations show with full path (e.g., `MyClass.IInterface.Method`)
+  - Methods labeled as "Method Implementation" instead of "Global Procedure"
+  - Container nodes (Classes, Methods, Properties, etc.) removed for cleaner view
+  - CODE markers no longer displayed in outline
+- **Enhanced Structure View - Hierarchical Grouping**
+  - Class method implementations now grouped under class containers
+  - Methods grouped in "Methods" folder within each class
+  - Interface method implementations grouped under interface folders within classes
+  - Maintains hierarchical class structure for better organization
+  - Clicking items navigates correctly without bounce issues
+  - Follow cursor highlights the correct method when editing
 - **Added CLASS property validation diagnostic**
   - QUEUE structures are not allowed as direct CLASS properties
   - Only QUEUE references (&QUEUE) are permitted in CLASS
