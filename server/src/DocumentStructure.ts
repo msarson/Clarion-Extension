@@ -667,8 +667,8 @@ export class DocumentStructure {
         let isMethodImpl = false;
         let fullProcedureName = prevToken?.value ?? "AnonymousProcedure";
         
-        // Check if prevToken is a label or variable that might be part of a method name
-        if (prevToken?.type === TokenType.Label || prevToken?.type === TokenType.Variable) {
+        // Check if prevToken is a label, variable, or attribute that might be part of a method name
+        if (prevToken?.type === TokenType.Label || prevToken?.type === TokenType.Variable || prevToken?.type === TokenType.Attribute) {
             // Look back one more token to see if there's a class name
             const tokenBeforePrev = index >= 2 ? this.tokens[index - 2] : null;
             if (tokenBeforePrev?.type === TokenType.Label && tokenBeforePrev.line === token.line) {
