@@ -203,6 +203,14 @@ Complete feature documentation for the Clarion Extension for Visual Studio Code.
 
 ## Workspace Features
 
+### Extension Status
+- **Status Command** - Check extension health on-demand
+  - Press `Ctrl+Shift+P` → "Clarion: Show Extension Status"
+  - View language server status, workspace configuration, solution status
+  - See navigation capabilities and build task availability
+  - Get contextual tips for resolving configuration issues
+  - Displays in Output panel with clean formatting
+
 ### View Filtering
 - **Solution View filtering** - Find files quickly in large projects
 - **Structure View filtering** - Navigate to specific symbols

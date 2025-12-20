@@ -62,6 +62,7 @@ Settings are saved in `.vscode/settings.json` within the folder - commit them wi
 - **Method overload support** - Correctly resolves overloaded methods based on parameters
 - **Hover tooltips** - Preview file contents, method signatures
 - **Structure view** - Complete code outline with follow cursor
+- **Extension status** - `Ctrl+Shift+P` → "Clarion: Show Extension Status" for health check
 
 ### Diagnostics & Validation
 - **Real-time error detection** - Unterminated structures, missing RETURN statements

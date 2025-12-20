@@ -9,6 +9,12 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 ## [Unreleased]
 
 ### ✨ Features
+- **Extension Status Command**
+  - New command: "Clarion: Show Extension Status" (accessible via Ctrl+Shift+P)
+  - Displays comprehensive extension status in Output panel
+  - Shows language server status, workspace info, solution status, and more
+  - On-demand checking replaces old passive status view
+  - Better formatted output with clear sections and status indicators
 - **Improved Outline View - Flattened Structure**
   - All symbols now appear at root level for easier navigation
   - Class method implementations show with fully-qualified names (e.g., `MyClass.MyMethod`)
@@ -34,7 +40,13 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
   - New diagnostic error shows when nested QUEUE is used incorrectly
   - GROUP structures remain valid inside QUEUE
 
-### 🐛 Bug Fixes
+### � Improvements
+- **Removed Extension Status View from sidebar**
+  - Status view replaced with on-demand command for cleaner UI
+  - Reduces sidebar clutter
+  - Status checking now only when needed, improving performance
+
+### �🐛 Bug Fixes
 - **Fixed stale diagnostics after document changes**
   - Force full re-tokenization on document changes to prevent stale token structures
   - Fixes issue where CLASS was incorrectly flagged as unterminated after adding QUEUE
