@@ -164,11 +164,6 @@
                 "icon": "$(sync)"
             },
             {
-                "command": "clarion.followLink",
-                "title": "Clarion: Follow Link",
-                "when": "clarion.solutionOpen"
-            },
-            {
                 "command": "clarion.openSolution",
                 "title": "Open Solution",
                 "icon": "$(folder-opened)"
