@@ -6,16 +6,23 @@ import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("StatusCommands");
 
+// Create a persistent output channel for status
+let statusOutputChannel: vscode.OutputChannel | undefined;
+
+function getStatusOutputChannel(): vscode.OutputChannel {
+    if (!statusOutputChannel) {
+        statusOutputChannel = vscode.window.createOutputChannel('Clarion Extension Status');
+    }
+    return statusOutputChannel;
+}
+
 /**
- * Shows extension status information in the terminal
+ * Shows extension status information in the Output panel
  */
 export async function showExtensionStatus(): Promise<void> {
-    const terminal = vscode.window.createTerminal({
-        name: 'Clarion Extension Status',
-        hideFromUser: false
-    });
-    
-    terminal.show();
+    const outputChannel = getStatusOutputChannel();
+    outputChannel.clear();
+    outputChannel.show(true); // Show but don't steal focus
     
     // Get status information
     const hasFolder = !!(vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0);
@@ -146,15 +153,10 @@ export async function showExtensionStatus(): Promise<void> {
     lines.push('═══════════════════════════════════════════════════════════');
     lines.push('');
     
-    // Send all lines to terminal
-    for (const line of lines) {
-        terminal.sendText(line, false);
-    }
+    // Output all lines to channel
+    lines.forEach(line => outputChannel.appendLine(line));
     
-    // Send final newline to render
-    terminal.sendText('', true);
-    
-    logger.info('Extension status displayed in terminal');
+    logger.info('Extension status displayed in Output panel');
 }
 
 function countIssues(
