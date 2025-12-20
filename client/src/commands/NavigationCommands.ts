@@ -5,7 +5,7 @@ import { SolutionCache } from '../SolutionCache';
 import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { TreeNode } from '../TreeNode';
 import { ClarionProjectInfo } from 'common/types';
-import LoggerManager from '../LoggerManager';
+import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("NavigationCommands");
 

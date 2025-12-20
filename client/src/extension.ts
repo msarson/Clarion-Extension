@@ -7,7 +7,7 @@ import { StructureViewProvider } from './StructureViewProvider';
 import { StatusViewProvider } from './StatusViewProvider';
 import { TreeNode } from './TreeNode';
 import { globalSolutionFile } from './globals';
-import LoggerManager from './LoggerManager';
+import LoggerManager from './utils/LoggerManager';
 
 import { trackPerformance } from './telemetry';
 import { registerNavigationCommands } from './commands/NavigationCommands';

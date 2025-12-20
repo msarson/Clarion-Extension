@@ -1,4 +1,4 @@
-import { LoggingConfig } from '../../common/LoggingConfig';
+import { LoggingConfig } from '../../../common/LoggingConfig';
 
 class Logger {
     private level: "debug" | "info" | "warn" | "error";

@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { LanguageClient } from 'vscode-languageclient/node';
 import { ClarionSolutionTreeNode, ClarionSolutionInfo, ClarionProjectInfo, ClarionSourcerFileInfo } from '../../common/types';
-import LoggerManager from './LoggerManager';
+import LoggerManager from './utils/LoggerManager';
 import { globalSettings } from './globals';
 import { LanguageClientManager, isClientReady, getClientReadyPromise } from './LanguageClientManager';
 import { SolutionParser } from './SolutionParser';

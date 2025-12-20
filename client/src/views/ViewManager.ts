@@ -3,7 +3,7 @@ import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { StructureViewProvider } from '../StructureViewProvider';
 import { StatusViewProvider } from '../StatusViewProvider';
 import { registerSolutionViewCommands, registerStructureViewCommands } from '../commands/ViewCommands';
-import LoggerManager from '../LoggerManager';
+import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("ViewManager");
 

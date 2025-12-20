@@ -5,7 +5,7 @@ import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { ClarionProjectInfo } from 'common/types';
 import * as buildTasks from '../buildTasks';
 import * as clarionClHelper from '../clarionClHelper';
-import LoggerManager from '../LoggerManager';
+import LoggerManager from '../utils/LoggerManager';
 import { trackPerformance } from '../telemetry';
 
 const logger = LoggerManager.getLogger("BuildCommands");

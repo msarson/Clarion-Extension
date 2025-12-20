@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { workspace } from 'vscode';
-import LoggerManager from '../LoggerManager';
+import LoggerManager from './LoggerManager';
 
 const logger = LoggerManager.getLogger("SolutionScanner");
 

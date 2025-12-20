@@ -9,7 +9,7 @@ import { disposeLanguageFeatures } from '../providers/LanguageFeatureManager';
 import { refreshSolutionTreeView } from '../views/ViewManager';
 import { createSolutionFileWatchers } from '../providers/FileWatcherManager';
 import { DocumentManager } from '../documentManager';
-import LoggerManager from '../LoggerManager';
+import LoggerManager from '../utils/LoggerManager';
 import * as path from 'path';
 import * as fs from 'fs';
 

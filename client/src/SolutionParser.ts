@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { ClarionSolutionInfo, ClarionProjectInfo } from 'common/types';
-import LoggerManager from './LoggerManager';
+import LoggerManager from './utils/LoggerManager';
 import { CwprojParser } from './project/CwprojParser';
 
 const logger = LoggerManager.getLogger("SolutionParser");

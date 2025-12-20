@@ -1,7 +1,7 @@
 import { ExtensionContext } from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import LoggerManager from '../LoggerManager';
+import LoggerManager from './LoggerManager';
 
 const logger = LoggerManager.getLogger("GlobalSolutionHistory");
 logger.setLevel("error");

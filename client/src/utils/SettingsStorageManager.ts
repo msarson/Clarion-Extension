@@ -1,5 +1,5 @@
 import { workspace, ConfigurationTarget, window, WorkspaceFolder } from 'vscode';
-import LoggerManager from '../LoggerManager';
+import LoggerManager from './LoggerManager';
 import { ClarionSolutionSettings } from '../globals';
 import * as path from 'path';
 

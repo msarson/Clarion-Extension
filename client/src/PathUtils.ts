@@ -1,6 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
-import LoggerManager from './LoggerManager';
+import LoggerManager from './utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("PathUtils");
 const fileResolutionLogger = LoggerManager.getLogger("FileResolution");

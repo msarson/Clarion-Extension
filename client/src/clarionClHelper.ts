@@ -2,7 +2,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { window, OutputChannel } from 'vscode';
 import { globalSettings, globalSolutionFile } from './globals';
-import LoggerManager from './LoggerManager';
+import LoggerManager from './utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("ClarionCl");
 

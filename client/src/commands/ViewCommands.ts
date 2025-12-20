@@ -1,7 +1,7 @@
 import { commands, window as vscodeWindow, Disposable, ExtensionContext } from 'vscode';
 import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { StructureViewProvider } from '../StructureViewProvider';
-import LoggerManager from '../LoggerManager';
+import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("ViewCommands");
 

@@ -82,7 +82,7 @@ export class ClarionProjectClass {
     }
 }
 
-import LoggerManager from '../LoggerManager';
+import LoggerManager from '../utils/LoggerManager';
 const logger = LoggerManager.getLogger("SolutionTreeProvider");
 import path = require('path');
 

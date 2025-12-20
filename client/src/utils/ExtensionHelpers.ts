@@ -1,5 +1,5 @@
 import { window as vscodeWindow, workspace, TextDocument, TextEditor, Uri } from 'vscode';
-import LoggerManager from '../LoggerManager';
+import LoggerManager from './LoggerManager';
 
 const logger = LoggerManager.getLogger("ExtensionHelpers");
 

@@ -2,7 +2,7 @@ import { commands, window, workspace, Uri, Disposable } from 'vscode';
 import { SolutionCache } from '../SolutionCache';
 import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { ClarionProjectInfo } from 'common/types';
-import LoggerManager from '../LoggerManager';
+import LoggerManager from '../utils/LoggerManager';
 import * as path from 'path';
 import * as fs from 'fs';
 

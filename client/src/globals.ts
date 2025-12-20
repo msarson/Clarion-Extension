@@ -2,7 +2,7 @@ import { workspace, ConfigurationTarget, window, Uri, WorkspaceConfiguration } f
 import * as fs from 'fs';
 import { parseStringPromise } from 'xml2js';
 import { ClarionExtensionCommands } from './ClarionExtensionCommands';
-import LoggerManager from './LoggerManager';
+import LoggerManager from './utils/LoggerManager';
 import * as path from 'path';
 import { SettingsStorageManager } from './utils/SettingsStorageManager';
 const logger = LoggerManager.getLogger("Globals");

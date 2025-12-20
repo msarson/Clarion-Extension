@@ -1,7 +1,7 @@
 import { window, workspace, StatusBarItem, StatusBarAlignment } from 'vscode';
 import { globalSolutionFile, getClarionConfigTarget } from '../globals';
 import { SolutionCache } from '../SolutionCache';
-import LoggerManager from '../LoggerManager';
+import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("StatusBarManager");
 

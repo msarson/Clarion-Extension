@@ -1,7 +1,7 @@
 import { globalSettings } from '../globals';
 import { DocumentManager } from '../documentManager';
 import { getAllOpenDocuments } from '../utils/ExtensionHelpers';
-import LoggerManager from '../LoggerManager';
+import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("DocumentRefreshManager");
 

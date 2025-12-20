@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import LoggerManager from './LoggerManager';
+import LoggerManager from './utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("ClarionDecorator");
 

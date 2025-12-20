@@ -1,5 +1,5 @@
 import { LanguageClient } from 'vscode-languageclient/node';
-import LoggerManager from './LoggerManager';
+import LoggerManager from './utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("LanguageClientManager");
 logger.setLevel("error");
