@@ -631,6 +631,11 @@ export class ClarionDocumentSymbolProvider {
                     []
                 );
 
+                // Store finishesAt for later use
+                if (token.finishesAt) {
+                    routineSymbol._finishesAt = token.finishesAt;
+                }
+
                 // Mark special routines
                 if (isSpecialRoutine) {
                     routineSymbol._isSpecialRoutine = true;
@@ -639,12 +644,12 @@ export class ClarionDocumentSymbolProvider {
                 // FLATTEN OUTLINE: Always add routines to root level for sticky scroll support
                 // The structure view (StructureViewProvider.ts) handles routine nesting separately
                 symbols.push(routineSymbol);
+                logger.info(`✅ ROUTINE added to root symbols: "${routineName}" at line ${token.line}`);
 
-                // CRITICAL FIX: Only add special routines to the parent stack
-                // This prevents variables from being incorrectly attached to empty routines
-                if (isSpecialRoutine || token.finishesAt) {
-                    HierarchyManager.pushToStack(parentStack, routineSymbol, token.finishesAt);
-                }
+                // ALWAYS push routines to parent stack so structure view can nest them
+                HierarchyManager.pushToStack(parentStack, routineSymbol, token.finishesAt);
+                logger.info(`📚 ROUTINE pushed to parentStack for structure nesting: "${routineName}"`);
+
 
                 // Reset pastCodeStatement if this routine has local data (DATA section)
                 // Variables are allowed between DATA and CODE in routines
