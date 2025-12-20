@@ -6,7 +6,7 @@ import { redirectionService } from '../paths/RedirectionService';
 import { DocumentManager } from '../documentManager';
 import { refreshSolutionTreeView } from '../views/ViewManager';
 import { registerLanguageFeatures } from './LanguageFeatureManager';
-import LoggerManager from '../logger';
+import LoggerManager from '../LoggerManager';
 import * as path from 'path';
 import * as fs from 'fs';
 

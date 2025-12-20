@@ -7,7 +7,7 @@ import { StructureViewProvider } from '../StructureViewProvider';
 import { StatusViewProvider } from '../StatusViewProvider';
 import { TreeNode } from '../TreeNode';
 import { globalClarionPropertiesFile, globalClarionVersion, globalSolutionFile } from '../globals';
-import LoggerManager from '../logger';
+import LoggerManager from '../LoggerManager';
 import { isClientReady, getClientReadyPromise } from '../LanguageClientManager';
 
 import { initializeTelemetry, trackPerformance } from '../telemetry';

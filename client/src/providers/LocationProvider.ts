@@ -2,7 +2,7 @@ import { commands, TextDocument, window, Position, workspace, ViewColumn } from 
 import * as fs from 'fs';
 import * as path from 'path';
 import { SolutionCache } from '../SolutionCache';
-import LoggerManager from '../logger';
+import LoggerManager from '../LoggerManager';
 
 const logger = LoggerManager.getLogger("LocationProvider");
 logger.setLevel("error");

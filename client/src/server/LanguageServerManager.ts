@@ -4,7 +4,7 @@ import { globalSettings } from '../globals';
 import { setLanguageClient, getClientReadyPromise } from '../LanguageClientManager';
 import { DocumentManager } from '../documentManager';
 import { StructureViewProvider } from '../StructureViewProvider';
-import LoggerManager from '../logger';
+import LoggerManager from '../LoggerManager';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("LanguageServerManager");

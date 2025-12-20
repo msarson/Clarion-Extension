@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { DocumentManager } from '../documentManager'; // Adjust the import path based on your project structure
 import { ClarionLocation } from './LocationProvider'; // Make sure this import is correct
-import LoggerManager from '../logger';
+import LoggerManager from '../LoggerManager';
 
 const logger = LoggerManager.getLogger("HoverProvider");
 logger.setLevel("error");

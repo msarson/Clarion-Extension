@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { parseString } from 'xml2js';
-import LoggerManager from '../logger';
+import LoggerManager from '../LoggerManager';
 
 const logger = LoggerManager.getLogger("ClarionInstallationDetector", "info");
 

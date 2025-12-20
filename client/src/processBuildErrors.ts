@@ -1,6 +1,6 @@
 import path = require("path");
 import { DiagnosticCollection, languages, Diagnostic, Uri, Position, Range, DiagnosticSeverity, window } from "vscode";
-import LoggerManager from './logger';
+import LoggerManager from './LoggerManager';
 const logger = LoggerManager.getLogger("ProcessBuildErrors");
 
 const diagnosticCollection: DiagnosticCollection = languages.createDiagnosticCollection("clarion");

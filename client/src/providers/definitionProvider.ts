@@ -1,6 +1,6 @@
 import { DefinitionProvider, TextDocument, Position, CancellationToken, ProviderResult, Location, Uri, Definition, LocationLink } from 'vscode';
 import { DocumentManager } from '../documentManager';
-import LoggerManager from '../logger';
+import LoggerManager from '../LoggerManager';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
 logger.setLevel("error");

@@ -11,7 +11,7 @@ import { globalSolutionFile, globalSettings } from "./globals";
 import * as path from "path";
 import * as fs from "fs";
 import processBuildErrors from "./processBuildErrors";
-import LoggerManager from './logger';
+import LoggerManager from './LoggerManager';
 import { PlatformUtils } from "./platformUtils";
 import { SolutionCache } from "./SolutionCache";
 import { ClarionProjectInfo } from "../../common/types";

@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import { parseString } from 'xml2js';
 import { DocumentManager } from './documentManager';
 import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, setGlobalClarionSelection, globalSettings, getClarionConfigTarget } from './globals';
-import LoggerManager from './logger';
+import LoggerManager from './LoggerManager';
 const logger = LoggerManager.getLogger("ExtensionCommands");
 
 

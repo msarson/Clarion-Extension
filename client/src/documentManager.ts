@@ -18,7 +18,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 import { globalSettings } from './globals';
-import LoggerManager from './logger';
+import LoggerManager from './LoggerManager';
 import { SolutionCache } from './SolutionCache';
 import { isInsideMapBlock } from '../../common/clarionUtils';
 const logger = LoggerManager.getLogger("DocumentManager");

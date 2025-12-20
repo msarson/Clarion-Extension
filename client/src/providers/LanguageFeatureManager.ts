@@ -5,7 +5,7 @@ import { ClarionHoverProvider } from './hoverProvider';
 import { ClarionImplementationProvider } from './implementationProvider';
 import { ClarionDecorator } from '../ClarionDecorator';
 import { globalSettings } from '../globals';
-import LoggerManager from '../logger';
+import LoggerManager from '../LoggerManager';
 
 const logger = LoggerManager.getLogger("LanguageFeatureManager");
 

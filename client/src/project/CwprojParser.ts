@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { glob } from 'glob';
-import LoggerManager from '../logger';
+import LoggerManager from '../LoggerManager';
 
 const logger = LoggerManager.getLogger("CwprojParser");
 

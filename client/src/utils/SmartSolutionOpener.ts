@@ -4,7 +4,7 @@ import { SolutionScanner, DetectedSolution } from '../utils/SolutionScanner';
 import { SettingsStorageManager } from '../utils/SettingsStorageManager';
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
 import { setGlobalClarionSelection } from '../globals';
-import LoggerManager from '../logger';
+import LoggerManager from '../LoggerManager';
 import * as path from 'path';
 import * as fs from 'fs';
 

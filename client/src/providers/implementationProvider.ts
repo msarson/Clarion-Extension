@@ -1,6 +1,6 @@
 import { ImplementationProvider, TextDocument, Position, CancellationToken, ProviderResult, Location, Uri, Definition, LocationLink } from 'vscode';
 import { DocumentManager } from '../documentManager';
-import LoggerManager from '../logger';
+import LoggerManager from '../LoggerManager';
 import { isInsideMapBlock } from '../../../common/clarionUtils';
 
 const logger = LoggerManager.getLogger("ImplementationProvider");

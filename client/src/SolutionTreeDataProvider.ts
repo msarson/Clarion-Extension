@@ -1,7 +1,7 @@
 import { TreeDataProvider, TreeItem, Event, EventEmitter, TreeItemCollapsibleState, ThemeIcon, Command, extensions, Uri, workspace } from 'vscode';
 import { TreeNode } from './TreeNode';
 import { ClarionSolutionInfo, ClarionProjectInfo, ClarionSourcerFileInfo } from 'common/types';
-import LoggerManager from './logger';
+import LoggerManager from './LoggerManager';
 import * as path from 'path';
 import { SolutionCache } from './SolutionCache';
 import { globalSolutionFile } from './globals';

@@ -11,7 +11,7 @@ import { createSolutionFileWatchers } from '../providers/FileWatcherManager';
 import { isClientReady, getClientReadyPromise } from '../LanguageClientManager';
 import { trackPerformance } from '../telemetry';
 import { refreshOpenDocuments } from '../document/DocumentRefreshManager';
-import LoggerManager from '../logger';
+import LoggerManager from '../LoggerManager';
 import * as path from 'path';
 import * as fs from 'fs';
 

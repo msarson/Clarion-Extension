@@ -1,5 +1,5 @@
 import { workspace, ConfigurationTarget } from 'vscode';
-import LoggerManager from './logger';
+import LoggerManager from './LoggerManager';
 import { getClarionConfigTarget } from './globals';
 
 const logger = LoggerManager.getLogger("SettingsManager");

@@ -1,5 +1,5 @@
 import * as path from 'path';
-import LoggerManager from './logger';
+import LoggerManager from './LoggerManager';
 
 const logger = LoggerManager.getLogger("ProjectIndex");
 

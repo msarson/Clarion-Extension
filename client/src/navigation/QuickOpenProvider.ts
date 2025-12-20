@@ -2,7 +2,7 @@ import { workspace, window as vscodeWindow, ExtensionContext } from 'vscode';
 import { SolutionCache } from '../SolutionCache';
 import { refreshSolutionTreeView } from '../views/ViewManager';
 import { globalSettings } from '../globals';
-import LoggerManager from '../logger';
+import LoggerManager from '../LoggerManager';
 import * as path from 'path';
 import * as fs from 'fs';
 

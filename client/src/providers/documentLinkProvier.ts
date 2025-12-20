@@ -1,7 +1,7 @@
 import { DocumentLinkProvider, TextDocument, CancellationToken, ProviderResult, DocumentLink, workspace } from 'vscode';
 import { DocumentManager } from '../documentManager';
 import * as path from 'path';
-import LoggerManager from '../logger';
+import LoggerManager from '../LoggerManager';
 import { globalSettings } from '../globals';
 
 const logger = LoggerManager.getLogger("DocumentLinkProvider");

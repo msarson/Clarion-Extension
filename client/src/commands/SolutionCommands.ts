@@ -7,7 +7,7 @@ import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
 import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { StatusViewProvider } from '../StatusViewProvider';
 import { refreshSolutionTreeView } from '../views/ViewManager';
-import LoggerManager from '../logger';
+import LoggerManager from '../LoggerManager';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("SolutionCommands");
