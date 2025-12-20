@@ -3,7 +3,7 @@ import { LanguageClient } from 'vscode-languageclient/node';
 
 import { DocumentManager } from '../documentManager';
 import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
-import { StructureViewProvider } from '../StructureViewProvider';
+import { StructureViewProvider } from '../views/StructureViewProvider';
 import { StatusViewProvider } from '../StatusViewProvider';
 import { TreeNode } from '../TreeNode';
 import { globalClarionPropertiesFile, globalClarionVersion, globalSolutionFile } from '../globals';

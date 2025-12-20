@@ -3,7 +3,7 @@ import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, Er
 import { globalSettings } from '../globals';
 import { setLanguageClient, getClientReadyPromise } from '../LanguageClientManager';
 import { DocumentManager } from '../documentManager';
-import { StructureViewProvider } from '../StructureViewProvider';
+import { StructureViewProvider } from '../views/StructureViewProvider';
 import LoggerManager from '../utils/LoggerManager';
 import * as path from 'path';
 

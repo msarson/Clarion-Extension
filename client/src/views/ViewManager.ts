@@ -1,6 +1,6 @@
 import { commands, window, window as vscodeWindow, workspace, ExtensionContext, TreeView } from 'vscode';
 import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
-import { StructureViewProvider } from '../StructureViewProvider';
+import { StructureViewProvider } from './StructureViewProvider';
 import { StatusViewProvider } from '../StatusViewProvider';
 import { registerSolutionViewCommands, registerStructureViewCommands } from '../commands/ViewCommands';
 import LoggerManager from '../utils/LoggerManager';

@@ -17,7 +17,7 @@ import {
     Disposable
 } from 'vscode';
 import { DocumentSymbol, SymbolKind as LSPSymbolKind } from 'vscode-languageserver-types';
-import LoggerManager from './utils/LoggerManager';
+import LoggerManager from '../utils/LoggerManager';
 const logger = LoggerManager.getLogger("StructureViewProvider");
 logger.setLevel("info"); // Enable debug logging to troubleshoot follow cursor
 
