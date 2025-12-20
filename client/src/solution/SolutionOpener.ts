@@ -20,13 +20,11 @@ const logger = LoggerManager.getLogger("SolutionOpener");
  * @param context - Extension context
  * @param initializeSolution - Function to initialize the solution
  * @param closeClarionSolution - Function to close current solution
- * @param statusViewProvider - Status view provider for refresh
  */
 export async function openSolutionFromList(
     context: ExtensionContext,
     initializeSolution: (context: ExtensionContext, refreshDocs: boolean) => Promise<void>,
-    closeClarionSolution: (context: ExtensionContext) => Promise<void>,
-    statusViewProvider: any
+    closeClarionSolution: (context: ExtensionContext) => Promise<void>
 ) {
     try {
         // Get the list of solutions from workspace settings
@@ -40,7 +38,7 @@ export async function openSolutionFromList(
         if (otherSolutions.length === 0) {
             // No other solutions found, redirect to regular open solution dialog
             vscodeWindow.showInformationMessage("No other solutions found. Opening solution selection dialog.");
-            await openClarionSolution(context, initializeSolution, statusViewProvider);
+            await openClarionSolution(context, initializeSolution);
             return;
         }
         
@@ -86,7 +84,6 @@ export async function openSolutionFromList(
         
         // Mark solution as open
         await commands.executeCommand("setContext", "clarion.solutionOpen", true);
-        statusViewProvider?.refresh(); // Refresh status view when solution opens
         vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(selectedItem.solution.solutionFile)}`);
     } catch (error) {
         const errMessage = error instanceof Error ? error.message : String(error);
@@ -99,12 +96,10 @@ export async function openSolutionFromList(
  * Opens a Clarion solution with full configuration
  * @param context - Extension context
  * @param initializeSolution - Function to initialize the solution
- * @param statusViewProvider - Status view provider for refresh
  */
 export async function openClarionSolution(
     context: ExtensionContext,
-    initializeSolution: (context: ExtensionContext, refreshDocs: boolean) => Promise<void>,
-    statusViewProvider: any
+    initializeSolution: (context: ExtensionContext, refreshDocs: boolean) => Promise<void>
 ) {
     try {
         // ✅ If no folder is open, let user pick solution and we'll open its folder
@@ -205,7 +200,6 @@ export async function openClarionSolution(
                 
                 // Mark solution as open
                 await commands.executeCommand("setContext", "clarion.solutionOpen", true);
-                statusViewProvider?.refresh(); // Refresh status view when solution opens
                 
                 vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(selectedItem.solution.solutionFile)}`);
                 
@@ -294,7 +288,6 @@ export async function openClarionSolution(
 
         // ✅ Step 6: Mark solution as open
         await commands.executeCommand("setContext", "clarion.solutionOpen", true);
-        statusViewProvider?.refresh(); // Refresh status view when solution opens
         
         vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(globalSolutionFile)}`);
 
@@ -310,13 +303,11 @@ export async function openClarionSolution(
  * @param context - Extension context
  * @param reinitializeEnvironment - Function to reinitialize environment
  * @param documentManager - Document manager instance
- * @param statusViewProvider - Status view provider for refresh
  */
 export async function closeClarionSolution(
     context: ExtensionContext,
     reinitializeEnvironment: (refreshDocs: boolean) => Promise<DocumentManager>,
-    documentManager: DocumentManager | undefined,
-    statusViewProvider: any
+    documentManager: DocumentManager | undefined
 ) {
     try {
         logger.info("🔄 Closing Clarion solution...");
@@ -351,7 +342,6 @@ export async function closeClarionSolution(
         
         // Mark solution as closed
         await commands.executeCommand("setContext", "clarion.solutionOpen", false);
-        statusViewProvider?.refresh(); // Refresh status view when solution closes
         
         // Clear all language feature providers
         disposeLanguageFeatures();

@@ -135,15 +135,13 @@ export async function workspaceHasBeenTrusted(
  * @param client - Language client instance
  * @param reinitializeEnvironment - Function to reinitialize environment
  * @param documentManager - Document manager instance
- * @param statusViewProvider - Status view provider
  */
 export async function initializeSolution(
     context: ExtensionContext,
     refreshDocs: boolean = false,
     client: LanguageClient | undefined,
     reinitializeEnvironment: (refreshDocs: boolean) => Promise<DocumentManager>,
-    documentManager: DocumentManager | undefined,
-    statusViewProvider: any
+    documentManager: DocumentManager | undefined
 ): Promise<void> {
     logger.info("🔄 Initializing Clarion Solution...");
     
@@ -244,7 +242,6 @@ export async function initializeSolution(
     logger.info("✅ Language features registered");
     
     await commands.executeCommand("setContext", "clarion.solutionOpen", true);
-    statusViewProvider?.refresh(); // Refresh status view when solution opens
     updateConfigurationStatusBar(globalSettings.configuration);
     updateBuildProjectStatusBar(); // Update the build project status bar
     

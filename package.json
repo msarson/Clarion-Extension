@@ -142,12 +142,6 @@
                     "id": "clarionStructureView",
                     "name": "Structure",
                     "icon": "symbol-structure"
-                },
-                {
-                    "id": "clarionStatusView",
-                    "name": "Extension Status",
-                    "icon": "info",
-                    "visibility": "collapsed"
                 }
             ]
         },
@@ -221,6 +215,10 @@
             {
                 "command": "clarion.debugSolutionHistory",
                 "title": "Clarion: Debug Solution History"
+            },
+            {
+                "command": "clarion.showExtensionStatus",
+                "title": "Clarion: Show Extension Status"
             },
             {
                 "command": "clarion.navigateToProject",

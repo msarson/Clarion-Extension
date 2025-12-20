@@ -2,6 +2,7 @@ import { commands, window as vscodeWindow, Disposable, ExtensionContext } from '
 import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { StructureViewProvider } from '../views/StructureViewProvider';
 import LoggerManager from '../utils/LoggerManager';
+import { showExtensionStatus } from './StatusCommands';
 
 const logger = LoggerManager.getLogger("ViewCommands");
 
@@ -130,6 +131,26 @@ export function registerStructureViewCommands(
     });
     context.subscriptions.push(structureViewMenuCommand);
     disposables.push(structureViewMenuCommand);
+
+    return disposables;
+}
+
+/**
+ * Registers status command to show extension status in terminal
+ * @param context - Extension context
+ * @returns Array of disposables for the registered command
+ */
+export function registerStatusCommands(
+    context: ExtensionContext
+): Disposable[] {
+    const disposables: Disposable[] = [];
+
+    const statusCommand = commands.registerCommand('clarion.showExtensionStatus', async () => {
+        logger.info('Showing extension status in terminal');
+        await showExtensionStatus();
+    });
+    context.subscriptions.push(statusCommand);
+    disposables.push(statusCommand);
 
     return disposables;
 }

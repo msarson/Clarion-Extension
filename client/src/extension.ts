@@ -4,7 +4,6 @@ import { LanguageClient } from 'vscode-languageclient/node';
 import { DocumentManager } from './documentManager';
 import { SolutionTreeDataProvider } from './SolutionTreeDataProvider';
 import { StructureViewProvider } from './views/StructureViewProvider';
-import { StatusViewProvider } from './StatusViewProvider';
 import { TreeNode } from './TreeNode';
 import { globalSolutionFile } from './globals';
 import LoggerManager from './utils/LoggerManager';
@@ -14,7 +13,8 @@ import { registerNavigationCommands } from './commands/NavigationCommands';
 import { registerBuildCommands } from './commands/BuildCommands';
 import { registerSolutionManagementCommands, registerSolutionOpeningCommands, registerMiscSolutionCommands } from './commands/SolutionCommands';
 import { registerProjectFileCommands } from './commands/ProjectFileCommands';
-import { createSolutionTreeView, createStructureView, createStatusView } from './views/ViewManager';
+import { registerStatusCommands } from './commands/ViewCommands';
+import { createSolutionTreeView, createStructureView } from './views/ViewManager';
 import { registerLanguageFeatures } from './providers/LanguageFeatureManager';
 import * as SolutionOpener from './solution/SolutionOpener';
 import { showClarionQuickOpen } from './navigation/QuickOpenProvider';
@@ -30,8 +30,6 @@ let treeView: TreeView<TreeNode> | undefined;
 let solutionTreeDataProvider: SolutionTreeDataProvider | undefined;
 let structureViewProvider: StructureViewProvider | undefined;
 let structureView: TreeView<any> | undefined;
-let statusViewProvider: StatusViewProvider | undefined;
-let statusView: TreeView<any> | undefined;
 let documentManager: DocumentManager | undefined;
 
 
@@ -50,8 +48,6 @@ export async function activate(context: ExtensionContext): Promise<void> {
         solutionTreeDataProvider,
         structureViewProvider,
         structureView,
-        statusViewProvider,
-        statusView,
         documentManager,
         diagnosticCollection
     };
@@ -121,17 +117,15 @@ export async function activate(context: ExtensionContext): Promise<void> {
     structureViewProvider = structureViewResult.provider;
     context.subscriptions.push(structureView);
     
-    const statusViewResult = await createStatusView(context);
-    statusView = statusViewResult.statusView;
-    statusViewProvider = statusViewResult.provider;
-    context.subscriptions.push(statusView);
+    // Register status command (replaces old status view)
+    context.subscriptions.push(...registerStatusCommands(context));
     
     context.subscriptions.push(...disposables);
     
     // Register remaining commands
     context.subscriptions.push(
         ...registerProjectFileCommands(solutionTreeDataProvider),
-        ...registerSolutionOpeningCommands(context, initializeSolution, solutionTreeDataProvider, statusViewProvider)
+        ...registerSolutionOpeningCommands(context, initializeSolution, solutionTreeDataProvider)
     );
     
     context.subscriptions.push(
@@ -166,7 +160,7 @@ async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: D
 }
 
 async function initializeSolution(context: ExtensionContext, refreshDocs: boolean = false): Promise<void> {
-    await SolutionInitializer.initializeSolution(context, refreshDocs, client, reinitializeEnvironment, documentManager, statusViewProvider);
+    await SolutionInitializer.initializeSolution(context, refreshDocs, client, reinitializeEnvironment, documentManager);
 }
 
 async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<DocumentManager> {
@@ -183,15 +177,15 @@ async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<Do
 
 // Export wrappers for solution opening/closing that inject dependencies
 export async function openSolutionFromList(context: ExtensionContext) {
-    await SolutionOpener.openSolutionFromList(context, initializeSolution, closeClarionSolution, statusViewProvider);
+    await SolutionOpener.openSolutionFromList(context, initializeSolution, closeClarionSolution);
 }
 
 export async function openClarionSolution(context: ExtensionContext) {
-    await SolutionOpener.openClarionSolution(context, initializeSolution, statusViewProvider);
+    await SolutionOpener.openClarionSolution(context, initializeSolution);
 }
 
 export async function closeClarionSolution(context: ExtensionContext) {
-    await SolutionOpener.closeClarionSolution(context, reinitializeEnvironment, documentManager, statusViewProvider);
+    await SolutionOpener.closeClarionSolution(context, reinitializeEnvironment, documentManager);
 }
 
 async function registerOpenCommand(context: ExtensionContext) {

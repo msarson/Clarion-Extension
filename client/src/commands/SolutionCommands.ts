@@ -5,7 +5,6 @@ import { LanguageClient } from 'vscode-languageclient/node';
 import { SmartSolutionOpener } from '../utils/SmartSolutionOpener';
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
 import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
-import { StatusViewProvider } from '../StatusViewProvider';
 import { refreshSolutionTreeView } from '../views/ViewManager';
 import LoggerManager from '../utils/LoggerManager';
 import * as path from 'path';
@@ -71,14 +70,12 @@ export function registerSolutionManagementCommands(
  * @param context - Extension context
  * @param initializeSolution - Function to initialize solution
  * @param solutionTreeDataProvider - Solution tree data provider (may be undefined)
- * @param statusViewProvider - Status view provider (may be undefined)
  * @returns Array of disposables for the registered commands
  */
 export function registerSolutionOpeningCommands(
     context: ExtensionContext,
     initializeSolution: InitializeSolutionFn,
-    solutionTreeDataProvider: SolutionTreeDataProvider | undefined,
-    statusViewProvider: StatusViewProvider | undefined
+    solutionTreeDataProvider: SolutionTreeDataProvider | undefined
 ): Disposable[] {
     return [
         commands.registerCommand('clarion.openRecentSolution', async (folderPath: string, solutionPath: string) => {
@@ -138,11 +135,6 @@ export function registerSolutionOpeningCommands(
                     // Explicitly refresh the tree view to show projects/apps
                     if (solutionTreeDataProvider) {
                         await solutionTreeDataProvider.refresh();
-                    }
-                    
-                    // Refresh status view
-                    if (statusViewProvider) {
-                        statusViewProvider.refresh();
                     }
                 }
             } catch (error) {

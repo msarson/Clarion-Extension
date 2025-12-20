@@ -25,8 +25,6 @@ export interface ActivationState {
     solutionTreeDataProvider?: SolutionTreeDataProvider;
     structureViewProvider?: StructureViewProvider;
     structureView?: TreeView<any>;
-    statusViewProvider?: StatusViewProvider;
-    statusView?: TreeView<any>;
     documentManager?: DocumentManager;
     diagnosticCollection: any;
 }
