@@ -1,5 +1,8 @@
 {
   "ui": "tdd",
   "timeout": 5000,
-  "spec": "out/server/src/test/**/*.test.js"
+  "spec": [
+    "out/server/src/test/**/*.test.js",
+    "out/client/src/test/**/*.test.js"
+  ]
 }

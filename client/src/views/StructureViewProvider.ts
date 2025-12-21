@@ -18,6 +18,7 @@ import {
 } from 'vscode';
 import { DocumentSymbol, SymbolKind as LSPSymbolKind } from 'vscode-languageserver-types';
 import LoggerManager from '../utils/LoggerManager';
+import { SymbolElementRegistry } from '../utils/SymbolElementRegistry';
 const logger = LoggerManager.getLogger("StructureViewProvider");
 logger.setLevel("info"); // Enable debug logging to troubleshoot follow cursor
 
@@ -57,8 +58,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     private documentChangeDebounceTimeout: NodeJS.Timeout | null = null;
     private documentChangeDebounceDelay: number = 500; // 500ms debounce for document changes
     
-    // Parent tracking for tree navigation
-    private parentMap: Map<string, DocumentSymbol | null> = new Map();
+    // Centralized element tracking registry
+    private registry = new SymbolElementRegistry();
     
     // Store disposables for proper cleanup
     private disposables: Disposable[] = [];
@@ -130,10 +131,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         this.expandAllFlag = false;
         // Clear the filter cache when refreshing
         this._filteredNodesCache.clear();
-        // Clear the visibility map
-        this.visibilityMap.clear();
-        // Clear the parent map
-        this.parentMap.clear();
+        // Clear the registry
+        this.registry.clear();
         this._onDidChangeTreeData.fire();
         
         const perfTime = performance.now() - perfStart;
@@ -229,11 +228,11 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 
                 logger.debug(`   Revealing symbol: ${symbol.name} at range [${symbol.range.start.line}, ${symbol.range.end.line}]`);
                 
-                // Get the tracked instance from elementMap
-                const key = this.getElementKey(symbol);
-                const trackedSymbol = this.elementMap.get(key);
+                // Get the tracked instance from registry
+                const key = this.registry.getElementKey(symbol);
+                const trackedSymbol = this.registry.getTrackedSymbol(key);
                 logger.debug(`   Looking up tracked symbol with key: ${key}`);
-                logger.debug(`   Found in elementMap: ${!!trackedSymbol}`);
+                logger.debug(`   Found in registry: ${!!trackedSymbol}`);
                 
                 if (trackedSymbol) {
                     // Reveal using the tracked instance that VS Code knows about
@@ -364,7 +363,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         if (this._filterText !== '') {
             this._filterText = '';
             this._filteredNodesCache.clear();
-            this.visibilityMap.clear();
+            this.registry.getAllKeys().forEach(key => this.registry.setVisible(key, false));
             this._onDidChangeTreeData.fire();
         }
     }
@@ -379,7 +378,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         this.currentElement = element;
         
         // Generate a unique key for this element
-        const elementKey = this.getElementKey(element);
+        const elementKey = this.registry.getElementKey(element);
 
         // Determine collapsible state based on expanded state map or default to expanded
         let collapsibleState = TreeItemCollapsibleState.None;
@@ -430,7 +429,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         treeItem.tooltip = element.detail ? `${element.name} (${element.detail})` : element.name;
         
         // Apply highlighting if this is the currently highlighted symbol
-        if (this.currentHighlightedSymbol && this.getElementKey(element) === this.getElementKey(this.currentHighlightedSymbol)) {
+        if (this.currentHighlightedSymbol && this.registry.getElementKey(element) === this.registry.getElementKey(this.currentHighlightedSymbol)) {
             // Make the item stand out more with a description
             // If we already have a detail description, append the current position marker
             if (element.detail) {
@@ -483,8 +482,6 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
 
         return treeItem;
     }
-    private elementMap = new Map<string, DocumentSymbol>();
-    private visibilityMap = new Map<string, boolean>();
 
     /**
      * Regroups flat symbols into hierarchical structure with class containers and Methods/Properties groups
@@ -697,21 +694,19 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         if (!this.activeEditor) return [];
 
         if (element) {
-            const key = this.getElementKey(element);
-            this.elementMap.set(key, element); // track the real instance
+            this.registry.trackSymbol(element);
 
             if (element.children) {
                 for (const child of element.children) {
-                    const childKey = this.getElementKey(child);
-                    this.elementMap.set(childKey, child);
-                    this.parentMap.set(childKey, element); // Track parent relationship
+                    this.registry.trackSymbol(child, element);
                 }
             }
             
             // Check if we have a filter active
             if (this._filterText && this._filterText.trim() !== '') {
                 // Create a cache key based on the element's key
-                const cacheKey = `${key}_${this._filterText}`;
+                const elementKey = this.registry.getElementKey(element);
+                const cacheKey = `${elementKey}_${this._filterText}`;
                 
                 // Check if we have cached results for this element
                 if (this._filteredNodesCache.has(cacheKey)) {
@@ -724,8 +719,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 
                 // When a filter is active, only return visible children
                 const visibleChildren = (element.children ?? []).filter(child => {
-                    const childKey = this.getElementKey(child);
-                    return this.visibilityMap.get(childKey) === true;
+                    const childKey = this.registry.getElementKey(child);
+                    return this.registry.isVisible(childKey) === true;
                 });
                 
                 // Cache the results
@@ -754,26 +749,15 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             const symbolsTime = performance.now() - symbolsStart;
             perfLogger.info(`📊 PERF: executeDocumentSymbolProvider: ${symbolsTime.toFixed(2)}ms, returned ${symbols?.length || 0} symbols`);
             
-            this.elementMap.clear();
-
-            const trackSymbols = (symbolList: DocumentSymbol[], parent: DocumentSymbol | null = null) => {
-                for (const symbol of symbolList) {
-                    const key = this.getElementKey(symbol);
-                    this.elementMap.set(key, symbol);
-                    this.parentMap.set(key, parent);
-                    if (symbol.children?.length) {
-                        trackSymbols(symbol.children, symbol);
-                    }
-                }
-            };
-
             // REGROUP FLAT SYMBOLS: Convert flat method list back to hierarchical structure
             // Methods like "SystemStringClass.Construct ()" become nested under SystemStringClass > Methods > Construct
             let regroupedSymbols: DocumentSymbol[] = [];
             
             if (symbols) {
                 regroupedSymbols = this.regroupFlatSymbols(symbols, this.activeEditor.document);
-                trackSymbols(regroupedSymbols);
+                
+                // Track symbols with registry
+                this.registry.trackHierarchy(regroupedSymbols, null);
                 
                 // If we have a filter active
                 if (this._filterText && this._filterText.trim() !== '') {
@@ -792,8 +776,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                     
                     // Get only the visible symbols
                     const visibleSymbols = regroupedSymbols.filter(symbol => {
-                        const symbolKey = this.getElementKey(symbol);
-                        return this.visibilityMap.get(symbolKey) === true;
+                        const symbolKey = this.registry.getElementKey(symbol);
+                        return this.registry.isVisible(symbolKey) === true;
                     });
                     
                     // Cache the results
@@ -811,18 +795,6 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         }
     }
     
-
-    private storeInElementMap(symbols: DocumentSymbol[]): void {
-        for (const symbol of symbols) {
-            const key = this.getElementKey(symbol);
-            this.elementMap.set(key, symbol);
-
-            if (symbol.children && symbol.children.length > 0) {
-                this.storeInElementMap(symbol.children);
-            }
-        }
-    }
-
 
     private getIconForSymbolKind(kind: LSPSymbolKind): ThemeIcon {
         switch (kind) {
@@ -908,23 +880,15 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         this._onDidChangeTreeData.fire();
     }
 
-    /**
-     * Generates a unique key for a document symbol
-     * @param element The document symbol
-     * @returns A string key
-     */
-    private getElementKey(element: DocumentSymbol): string {
-        return `${element.name}_${element.range.start.line}_${element.range.start.character}_${element.kind}`;
-    }
     public setTreeView(treeView: TreeView<DocumentSymbol>): void {
         this.treeView = treeView;
 
         this.treeView.onDidExpandElement((e: TreeViewExpansionEvent<DocumentSymbol>) => {
-            this.expandedState.set(this.getElementKey(e.element), true);
+            this.expandedState.set(this.registry.getElementKey(e.element), true);
         });
 
         this.treeView.onDidCollapseElement((e: TreeViewExpansionEvent<DocumentSymbol>) => {
-            this.expandedState.set(this.getElementKey(e.element), false);
+            this.expandedState.set(this.registry.getElementKey(e.element), false);
         });
 
     }
@@ -957,10 +921,10 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
      */
     private async expandTopLevelOnly(symbol: DocumentSymbol): Promise<void> {
         try {
-            const key = this.getElementKey(symbol);
-            const tracked = this.elementMap.get(key);
+            const key = this.registry.getElementKey(symbol);
+            const tracked = this.registry.getTrackedSymbol(key);
             if (!tracked) {
-                logger.error(`❌ Missing elementMap entry for key: ${key} (${symbol.name})`);
+                logger.error(`❌ Missing registry entry for key: ${key} (${symbol.name})`);
                 return;
             }
             
@@ -976,11 +940,11 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
      */
     private async expandSymbolRecursively(symbol: DocumentSymbol): Promise<void> {
         try {
-            const key = this.getElementKey(symbol);
-            const tracked = this.elementMap.get(key);
+            const key = this.registry.getElementKey(symbol);
+            const tracked = this.registry.getTrackedSymbol(key);
             if (!tracked) {
                 logger.error(`❌ Missing elementMap entry for key: ${key} (${symbol.name})`);
-                logger.debug('Current keys:', Array.from(this.elementMap.keys()));
+                logger.debug('Current keys:', this.registry.getAllKeys());
                 return;
             }
     
@@ -1002,7 +966,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     private setAllExpanded(symbols: DocumentSymbol[]): void {
         for (const symbol of symbols) {
             if (symbol.children && symbol.children.length > 0) {
-                const key = this.getElementKey(symbol);
+                const key = this.registry.getElementKey(symbol);
                 this.expandedState.set(key, true);
                 this.setAllExpanded(symbol.children);
             }
@@ -1015,8 +979,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
      * @returns The parent element, or null if the element is a root element
      */
     getParent(element: DocumentSymbol): Promise<DocumentSymbol | null> {
-        const key = this.getElementKey(element);
-        const parent = this.parentMap.get(key) || null;
+        const key = this.registry.getElementKey(element);
+        const parent = this.registry.getParent(key) || null;
         logger.debug(`getParent called for ${element.name}, returning: ${parent ? parent.name : 'null'}`);
         return Promise.resolve(parent);
     }
@@ -1032,8 +996,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         const markVisibility = (nodeList: DocumentSymbol[]) => {
             // First, mark all nodes as not visible
             for (const node of nodeList) {
-                const key = this.getElementKey(node);
-                this.visibilityMap.set(key, false);
+                const key = this.registry.getElementKey(node);
+                this.registry.setVisible(key, false);
                 
                 if (node.children && node.children.length > 0) {
                     markVisibility(node.children);
@@ -1043,7 +1007,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         
         // Mark nodes that match the filter or have matching descendants as visible
         const markMatchingVisible = (node: DocumentSymbol): boolean => {
-            const key = this.getElementKey(node);
+            const key = this.registry.getElementKey(node);
             
             // Check if this node matches
             const nodeMatches = this.symbolOrDescendantsMatch(node, normalizedFilter);
@@ -1060,7 +1024,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             
             // Mark this node as visible if it matches or has matching children
             const isVisible = nodeMatches || hasMatchingChildren;
-            this.visibilityMap.set(key, isVisible);
+            this.registry.setVisible(key, isVisible);
             
             return isVisible;
         };
@@ -1073,8 +1037,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         
         // Return only the visible nodes
         return nodes.filter(node => {
-            const key = this.getElementKey(node);
-            return this.visibilityMap.get(key) === true;
+            const key = this.registry.getElementKey(node);
+            return this.registry.isVisible(key) === true;
         });
     }
 
@@ -1116,15 +1080,15 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         
         const normalizedFilter = filterText.toLowerCase();
         
-        // Clear the visibility map when starting a new filter operation
-        this.visibilityMap.clear();
+        // Clear visibility state when starting a new filter operation
+        this.registry.getAllKeys().forEach(key => this.registry.setVisible(key, false));
         
         // Mark all symbols as visible or hidden based on the filter
         const markVisibility = (symbolList: DocumentSymbol[]) => {
             // First, mark all symbols as not visible
             for (const symbol of symbolList) {
-                const key = this.getElementKey(symbol);
-                this.visibilityMap.set(key, false);
+                const key = this.registry.getElementKey(symbol);
+                this.registry.setVisible(key, false);
                 
                 if (symbol.children && symbol.children.length > 0) {
                     markVisibility(symbol.children);
@@ -1134,7 +1098,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         
         // Mark symbols that match the filter or have matching descendants as visible
         const markMatchingVisible = (symbol: DocumentSymbol): boolean => {
-            const key = this.getElementKey(symbol);
+            const key = this.registry.getElementKey(symbol);
             
             // Check if this symbol matches
             const symbolMatches = this.symbolOrDescendantsMatch(symbol, normalizedFilter);
@@ -1151,7 +1115,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             
             // Mark this symbol as visible if it matches or has matching children
             const isVisible = symbolMatches || hasMatchingChildren;
-            this.visibilityMap.set(key, isVisible);
+            this.registry.setVisible(key, isVisible);
             
             return isVisible;
         };
@@ -1164,8 +1128,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         
         // Return only the visible symbols
         return symbols.filter(symbol => {
-            const key = this.getElementKey(symbol);
-            return this.visibilityMap.get(key) === true;
+            const key = this.registry.getElementKey(symbol);
+            return this.registry.isVisible(key) === true;
         });
     }
     
