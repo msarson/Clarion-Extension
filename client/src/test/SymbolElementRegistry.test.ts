@@ -1,6 +1,6 @@
 import { describe, it } from 'mocha';
 import * as assert from 'assert';
-import { SymbolElementRegistry } from '../helpers/SymbolElementRegistry';
+import { SymbolElementRegistry } from '../utils/SymbolElementRegistry';
 import { DocumentSymbol, SymbolKind, Range, Position } from 'vscode-languageserver-protocol';
 
 describe('SymbolElementRegistry', () => {

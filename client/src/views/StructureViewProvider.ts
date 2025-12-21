@@ -18,8 +18,7 @@ import {
 } from 'vscode';
 import { DocumentSymbol, SymbolKind as LSPSymbolKind } from 'vscode-languageserver-types';
 import LoggerManager from '../utils/LoggerManager';
-// Helper class for element tracking - to be integrated in next refactor step
-import { SymbolElementRegistry } from '../../../server/src/helpers/SymbolElementRegistry';
+import { SymbolElementRegistry } from '../utils/SymbolElementRegistry';
 const logger = LoggerManager.getLogger("StructureViewProvider");
 logger.setLevel("info"); // Enable debug logging to troubleshoot follow cursor
 
