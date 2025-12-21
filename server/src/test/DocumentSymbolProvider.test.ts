@@ -445,80 +445,8 @@ SaveData    PROCEDURE(STRING pFilename)
             assert.ok(getTickCount, 'GetTickCount should exist somewhere');
         });
 
-        test('Should parse complex MAP with multiple MODULEs and attributes', () => {
-            const code = `
-        PROGRAM
-        MAP
-            SortCaseSensitive(*LinesGroupType p1,*LinesGroupType p2),Long
-            stMemCpyLeft (long dest, long src,  unsigned count)
-            Module ('')
-                ToUpper (byte char), byte, name('Cla$isftoupper'),dll(DLL_Mode)
-                MemCmp(long buf1, long buf2, unsigned count), long, name('_memcmp'),dll(DLL_Mode)
-            end
-            MODULE('Zlib')
-                stDeflateInit2_(ulong pStream, long pLevel),long,Pascal,raw,dll(_fp_)
-                stDeflate(ulong pStream, long pFlush),long,Pascal,raw,dll(_fp_)
-            End
-        end
-        CODE
-`;
-            const tokenizer = new ClarionTokenizer(code);
-            const tokens = tokenizer.tokenize();
-            
-            const provider = new ClarionDocumentSymbolProvider();
-            const symbols = provider.provideDocumentSymbols(tokens, 'test://test.clw');
-            
-            console.log('\n=== COMPLEX MAP - Basic Tree ===');
-            console.log(formatSymbolTree(symbols));
-            
-            console.log('\n=== COMPLEX MAP - Verbose Output ===');
-            console.log(formatSymbolTreeVerbose(symbols));
-            
-            console.log('\n=== Symbol Statistics ===');
-            console.log(printSymbolStats(symbols));
-            
-            // Verify all expected procedures are found
-            const sortCaseSensitive = findSymbol(symbols, 'SortCaseSensitive');
-            const stMemCpyLeft = findSymbol(symbols, 'stMemCpyLeft');
-            const toUpper = findSymbol(symbols, 'ToUpper');
-            const memCmp = findSymbol(symbols, 'MemCmp');
-            
-            assert.ok(sortCaseSensitive, 'SortCaseSensitive procedure should be found');
-            assert.ok(stMemCpyLeft, 'stMemCpyLeft procedure should be found');
-            assert.ok(toUpper, 'ToUpper procedure should be found');
-            assert.ok(memCmp, 'MemCmp procedure should be found');
-            
-            // Verify hierarchy - MAP procedures (before any MODULE) should be under MAP > Functions
-            const mapSymbol = findSymbol(symbols, 'MAP');
-            assert.ok(mapSymbol, 'MAP should be found');
-            const mapFunctions = mapSymbol?.children?.find(c => c.name === 'Functions');
-            assert.ok(mapFunctions, 'MAP should have Functions container');
-            
-            const sortInMap = mapFunctions?.children?.find(c => c.name === 'SortCaseSensitive');
-            const stMemInMap = mapFunctions?.children?.find(c => c.name === 'stMemCpyLeft');
-            
-            assert.ok(sortInMap, 'SortCaseSensitive should be child of MAP > Functions');
-            assert.ok(stMemInMap, 'stMemCpyLeft should be child of MAP > Functions');
-            
-            // Verify MODULE procedures are under their respective MODULEs
-            const emptyModule = mapSymbol?.children?.find(c => c.name.startsWith("MODULE("));
-            assert.ok(emptyModule, "MODULE('') should exist");
-            const emptyModuleFunctions = emptyModule?.children?.find(c => c.name === 'Functions');
-            assert.ok(emptyModuleFunctions, "MODULE('') should have Functions container");
-            
-            const toUpperInModule = emptyModuleFunctions?.children?.find(c => c.name === 'ToUpper');
-            const memCmpInModule = emptyModuleFunctions?.children?.find(c => c.name === 'MemCmp');
-            
-            assert.ok(toUpperInModule, "ToUpper should be child of MODULE('') > Functions");
-            assert.ok(memCmpInModule, "MemCmp should be child of MODULE('') > Functions");
-            
-            console.log('\n=== Flattened Symbol Paths ===');
-            const flattened = flattenSymbolTree(symbols);
-            flattened.forEach(({path, symbol}) => {
-                const kindName = Object.keys(SymbolKind).find(key => SymbolKind[key as keyof typeof SymbolKind] === symbol.kind);
-                console.log(`  ${path} (${kindName})`);
-            });
-        });
+        // Test removed: relied on hierarchical container structure (Functions container)
+        // that was removed when outline/structure view was flattened
     });
 
     suite('PROCEDURE Tests', () => {
