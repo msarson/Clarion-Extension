@@ -6,6 +6,19 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 
 ---
 
+## [Unreleased]
+
+### ✨ Features
+- TBD
+
+### 🔧 Improvements
+- TBD
+
+### 🐛 Bug Fixes
+- TBD
+
+---
+
 ## [0.7.5] - 2024-12-24
 
 ### ✨ Features
