@@ -31,6 +31,7 @@
 		"outFiles": [
 		  "${workspaceFolder}/out/**/*.js"
 		],
+		"sourceMaps": true,
 		"preLaunchTask": "npm: watch",
 		"env": {
 		  "VSCODE_RELEASE_MODE": "true"

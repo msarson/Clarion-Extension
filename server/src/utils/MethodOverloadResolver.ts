@@ -6,7 +6,7 @@ import * as path from 'path';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("MethodOverloadResolver");
-logger.setLevel("error");
+logger.setLevel("info");
 
 /**
  * Information about a method declaration with location details
@@ -147,11 +147,18 @@ export class MethodOverloadResolver {
                 const currentDir = path.dirname(filePath);
                 const relativePath = path.join(currentDir, includeFileName);
                 if (fs.existsSync(relativePath)) {
-                    resolvedPath = relativePath;
+                    resolvedPath = path.resolve(relativePath); // Ensure absolute path
                 }
             }
             
+            // Ensure resolvedPath is absolute
+            if (resolvedPath && !path.isAbsolute(resolvedPath)) {
+                const currentDir = path.dirname(filePath);
+                resolvedPath = path.resolve(currentDir, resolvedPath);
+            }
+            
             if (resolvedPath) {
+                logger.info(`📁 Resolved INCLUDE path: ${resolvedPath}`);
                 const includeContent = fs.readFileSync(resolvedPath, 'utf8');
                 const includeLines = includeContent.split('\n');
                 

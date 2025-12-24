@@ -15,6 +15,16 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 - TBD
 
 ### 🐛 Bug Fixes
+- **Fixed Go to Implementation for multiple classes** - Resolved issue where Go to Implementation failed when multiple classes were defined in the same INC/CLW file pair
+  - Fixed regex offset calculation for class position tracking
+  - Corrected class name start position to account for leading whitespace
+  - Now properly matches method implementations to their class context
+- **Fixed LINK statement parsing** - Enhanced LINK pattern to support optional DLL linking parameters
+  - Pattern now handles: `LINK('file.lib')` and `LINK('file.lib',_LinkMode_)`
+  - Fixes issue where LINK statements with parameters weren't recognized
+- **Fixed hover for missing implementations** - Added visual indicator when method implementation cannot be found
+  - Shows ⚠️ "Implementation not found" message instead of hanging
+  - Applies to both METHOD and MAP procedure declarations
 - **Fixed overloaded method matching** - Go to Implementation and Add Method Implementation now correctly distinguish between overloaded methods with different parameter types (e.g., `STRING` vs `*STRING` vs `&STRING` vs `<STRING>`)
   - Previously only checked parameter count, causing wrong overload selection
   - Now uses full parameter type signature matching including omittable parameters

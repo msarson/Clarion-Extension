@@ -124,7 +124,7 @@ export class DocumentManager implements Disposable {
     // INCLUDE pattern: first param is filename (required extension), second param is section name (no extension required) or ONCE
     private readonly includePattern = /INCLUDE\s*\(\s*'([^']+\.[a-zA-Z0-9]+)'\s*(?:,\s*'([^']+?)'\s*)?(?:,\s*ONCE)?\)/ig;
     private readonly memberPattern = /\bMEMBER\s*\(\s*'([^']+\.[a-zA-Z0-9]+)'\s*\).*?/ig;
-    private readonly linkPattern = /LINK\s*\(\s*'([^']+\.[a-zA-Z0-9]+)'\s*\)/ig;
+    private readonly linkPattern = /LINK\s*\(\s*'([^']+\.[a-zA-Z0-9]+)'(?:\s*,\s*[^)]+)?\s*\)/ig;
     // Pattern to detect class method declarations
     private readonly methodPattern = /\b([A-Za-z0-9_]+)\s+PROCEDURE\s*\([^)]*\)/ig;
 
@@ -1150,7 +1150,10 @@ export class DocumentManager implements Disposable {
 
             let classMatch: RegExpExecArray | null;
             while ((classMatch = classRegex.exec(lowerText)) !== null) {
-                const classStartPos = classMatch.index;
+                // Find where the class name actually starts in the match (skip leading whitespace)
+                const leadingWhitespaceMatch = classMatch[0].match(/^\s*/);
+                const leadingWhitespaceLen = leadingWhitespaceMatch ? leadingWhitespaceMatch[0].length : 0;
+                const classStartPos = classMatch.index + leadingWhitespaceLen;
                 const classNameEndPos = classStartPos + classMatch[1].length;
                 const originalClassName = originalText.substring(classStartPos, classNameEndPos);
                 const classTail = lowerText.slice(classMatch.index);

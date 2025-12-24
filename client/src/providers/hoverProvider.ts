@@ -281,6 +281,15 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
             
             const fileLines = fileContent.split('\n');
             
+            // For method and MAP procedure declarations, check if implementation was resolved
+            if ((location.statementType || "").toUpperCase() === "METHOD" || (location.statementType || "").toUpperCase() === "MAPPROCEDURE") {
+                if (!location.sectionLineLocation) {
+                    // Implementation not found - show message
+                    hoverMessage.appendMarkdown(`\n\n⚠️ *Implementation not found*`);
+                    return hoverMessage;
+                }
+            }
+            
             let startLine = 0;
             if (location.sectionLineLocation) {
                 // Case-insensitive comparison for statement types

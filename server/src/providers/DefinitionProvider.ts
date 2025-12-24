@@ -12,7 +12,7 @@ import { TokenHelper } from '../utils/TokenHelper';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
-logger.setLevel("error"); // PERF: Only log errors to reduce overhead
+logger.setLevel("info");
 
 /**
  * Provides goto definition functionality for Clarion files
@@ -97,11 +97,15 @@ export class DefinitionProvider {
                 const className = methodImplMatch[1];
                 const methodName = methodImplMatch[2];
                 
+                logger.info(`🔍 Detected method implementation line: ${className}.${methodName}`);
+                
                 // Check if cursor is on the class or method name
                 const classStart = line.indexOf(className);
                 const classEnd = classStart + className.length;
                 const methodStart = line.indexOf(methodName, classEnd);
                 const methodEnd = methodStart + methodName.length;
+                
+                logger.info(`Cursor at ${position.character}, class range [${classStart}-${classEnd}], method range [${methodStart}-${methodEnd}]`);
                 
                 if ((position.character >= classStart && position.character <= classEnd) ||
                     (position.character >= methodStart && position.character <= methodEnd)) {
@@ -119,6 +123,8 @@ export class DefinitionProvider {
                             start: { line: declInfo.line, character: 0 },
                             end: { line: declInfo.line, character: 0 }
                         });
+                    } else {
+                        logger.info(`❌ No method declaration found for ${className}.${methodName}`);
                     }
                 }
             }
