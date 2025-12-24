@@ -786,11 +786,13 @@ export class DocumentManager implements Disposable {
                 }
             }
             
-            logger.info(`No exact parameter match found, falling back to first implementation`);
+            logger.info(`No exact parameter match found for signature [${parameterSignature.join(', ')}]`);
+            // Don't fall back to first implementation when we have a signature - that would be wrong for overloads
+            return null;
         }
         
-        // If no exact match or no parameter signature provided, return the first implementation
-        logger.info(`Returning first implementation at line ${implementations[0].line}`);
+        // If no parameter signature provided, return the first implementation as fallback
+        logger.info(`No parameter signature provided, returning first implementation at line ${implementations[0].line}`);
         return implementations[0].line;
     }
 
