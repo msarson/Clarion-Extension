@@ -22,7 +22,7 @@ import LoggerManager from './utils/LoggerManager';
 import { SolutionCache } from './SolutionCache';
 import { isInsideMapBlock } from '../../common/clarionUtils';
 const logger = LoggerManager.getLogger("DocumentManager");
-logger.setLevel("error"); // Temporarily set to info for debugging MAP procedure parsing
+logger.setLevel("info");
 
 /**
  * Interface representing document information including statement locations
@@ -655,27 +655,38 @@ export class DocumentManager implements Disposable {
             return [];
         }
         
+        logger.info(`parseImplementationParameters input: "${paramString}"`);
+        
         // Split by commas, trim each parameter, and extract type information
-        return paramString.split(',')
+        const result = paramString.split(',')
             .map(param => {
                 const trimmed = param.trim();
+                logger.info(`  Processing parameter: "${trimmed}"`);
                 
                 // Handle omittable parameters: <TYPE name> -> extract <TYPE>
                 if (trimmed.startsWith('<')) {
                     const match = trimmed.match(/^<([^>]+)>/);
                     if (match) {
+                        logger.info(`    Matched omittable: match[1]="${match[1]}"`);
                         // Extract just the type from <TYPE name>
                         const innerContent = match[1].trim();
                         const typePart = innerContent.split(/\s+/)[0];
-                        return `<${typePart.toLowerCase()}>`;
+                        const result = `<${typePart.toLowerCase()}>`;
+                        logger.info(`    Returning: "${result}"`);
+                        return result;
                     }
                 }
                 
                 // Handle regular parameters: TYPE name, *TYPE name, &TYPE name
                 const paramParts = trimmed.split(/\s+/);
+                const result = paramParts[0].toLowerCase();
+                logger.info(`    Returning: "${result}"`);
                 // Return just the type in lowercase for comparison
-                return paramParts[0].toLowerCase();
+                return result;
             });
+        
+        logger.info(`parseImplementationParameters result: [${result.join(', ')}]`);
+        return result;
     }
 
     /**

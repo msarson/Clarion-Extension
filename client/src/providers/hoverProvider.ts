@@ -265,7 +265,20 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
         }
 
         try {
-            const fileContent = await fs.promises.readFile(location.fullFileName, 'utf8');
+            // Try to get content from open editor first (for unsaved changes), fallback to disk
+            let fileContent: string;
+            const openDoc = vscode.workspace.textDocuments.find(doc =>
+                doc.uri.toString().toLowerCase() === vscode.Uri.file(location.fullFileName).toString().toLowerCase()
+            );
+            
+            if (openDoc) {
+                logger.info(`Reading hover content from open editor: ${location.fullFileName}`);
+                fileContent = openDoc.getText();
+            } else {
+                logger.info(`Reading hover content from disk: ${location.fullFileName}`);
+                fileContent = await fs.promises.readFile(location.fullFileName, 'utf8');
+            }
+            
             const fileLines = fileContent.split('\n');
             
             let startLine = 0;
