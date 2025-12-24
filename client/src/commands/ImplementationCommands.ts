@@ -181,7 +181,11 @@ function generateImplementation(
     const lines: string[] = [];
     
     // Method signature with alignment
-    const methodLine = `${className}.${methodDecl.methodName}${' '.repeat(Math.max(1, 12 - methodDecl.methodName.length))}PROCEDURE(${methodDecl.parameters})${methodDecl.returnType ? '  ' + methodDecl.returnType : ''}`;
+    // Return type should be added as a comment: !,returnType
+    let methodLine = `${className}.${methodDecl.methodName}${' '.repeat(Math.max(1, 12 - methodDecl.methodName.length))}PROCEDURE(${methodDecl.parameters})`;
+    if (methodDecl.returnType) {
+        methodLine += `  !${methodDecl.returnType}`;
+    }
     lines.push(methodLine);
     lines.push('');
     lines.push(`${indent}CODE`);
