@@ -11,11 +11,48 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 ### ✨ Features
 - TBD
 
-### 🔧 Improvements
+### 🔧 Improvements  
 - TBD
 
 ### 🐛 Bug Fixes
 - TBD
+
+---
+
+## [0.7.7] - 2025-12-24
+
+### 📚 Documentation
+- **Updated FEATURES.md** - Added all features from v0.7.4-0.7.6
+  - Create New Class command
+  - Add Method Implementation command
+  - Paste as Clarion String command
+  - CODE statement markers
+  - CLASS/QUEUE property validation
+  - Recent bug fixes section
+- **Created COMMANDS_AND_SETTINGS.md** - Comprehensive reference for all commands and settings
+- **Reorganized documentation structure**
+  - Moved developer docs to `docs/dev/`
+  - Moved AI context to `docs/ai/`
+  - Created README files for each section
+
+### 🧹 Cleanup
+- **Removed 60+ debug test files** from root directory
+  - test-*.js, test-*.clw files
+  - test-programs/* development files
+  - Significantly smaller package size
+- **Removed commercial StringTheory.inc file**
+  - Copyright violation - accidentally included in v0.7.5/v0.7.6
+  - Added to .gitignore to prevent re-inclusion
+- **Improved .vscodeignore**
+  - Package size reduced from 32,790 files (51.96 MB) to 20,578 files (37.61 MB)
+  - 37% fewer files, 27% smaller package
+  - Excludes all documentation, test files, and development artifacts
+  - Only ships runtime-required files
+
+### ⚠️ Important Note
+- v0.7.5 and v0.7.6 accidentally included a commercial StringTheory.inc file
+- File has been removed from all branches and added to .gitignore
+- v0.7.7 and all future releases will not contain this file
 
 ---
 
