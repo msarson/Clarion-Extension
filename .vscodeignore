@@ -1,58 +1,94 @@
-**/*.map
-scripts/**
-src/
-.git/**
-node_modules/.bin/**
-node_modules/**/test/**
-node_modules/**/tests/**
-node_modules/**/example/**
-node_modules/**/examples/**
-node_modules/**/docs/**
-node_modules/**/*.md
-node_modules/**/*.ts
-node_modules/**/*.map
-
-# Exclude source files - only ship compiled JS
+# Source files - only ship compiled JavaScript
 client/src/**
 server/src/**
-common/**
+common/**/*.ts
+**/*.map
 
-# Exclude test files
-test_*.clw
-*.log
+# TypeScript configuration
+**/tsconfig*.json
+.mocharc.json
 
-# Exclude documentation that's not needed in the extension
-CHANGELOG-old.md
-README-old.md
-RELEASE_NOTES_*.md
-RELEASE_SUMMARY.md
-PERFORMANCE_METRICS.md
+# Development and testing
+test-programs/**
+ExampleCode/**
+demo-*.clw
+Logs/**
+
+# Documentation (not needed at runtime)
+docs/**
+*.md
+!README.md
+!CHANGELOG.md
+!LICENSE
+
+# Development guides and notes
 PUBLISHING_GUIDE.md
-HOTFIX_*.md
-WelcomePanel.png
+TESTING.md
+TODO.md
+KNOWN_ISSUES.md
 vsc-extension-quickstart.md
-Clarion-Extension.code-workspace
+SESSION_RESUME*.md
+STARTUP_AI_PROMPT.md
+TIER1_MINIMAL_PROMPT.md
+ClarionExtensionFeatures.md
+WelcomePanel.png
 
-# Exclude GitHub files
+# Release files and old versions
+releases/**
+*.vsix
+clarion-extensions-*.vsix
+
+# AI prompts and development context
+prompt/**
+
+# Git and GitHub
+.git/**
+.gitignore
+.gitattributes
 .github/**
 
-# Exclude dev dependencies and config files
-tsconfig*.json
+# VS Code workspace files
 .vscode/**
-server/tsconfig.json
-# Note: server/package.json and server/package-lock.json are NOT excluded
-# Note: client/package.json and client/package-lock.json are NOT excluded
-# because they contain runtime dependencies needed by the extension
-client/tsconfig.json
+.vscode-test/**
+*.code-workspace
+Clarion-Extension.code-workspace
 
-# Exclude unnecessary node_modules subdirectories
-server/node_modules/**/*.md
-server/node_modules/**/*.txt
-server/node_modules/**/*.yml
-server/node_modules/**/test/**
-server/node_modules/**/tests/**
-server/node_modules/**/example/**
-server/node_modules/**/examples/**
-server/node_modules/**/docs/**
-server/node_modules/**/*.ts
-server/node_modules/**/*.map
+# Node modules binaries and dev files - exclude but keep actual modules
+**/node_modules/.bin/**
+**/node_modules/.package-lock.json
+**/node_modules/**/test/**
+**/node_modules/**/tests/**
+**/node_modules/**/example/**
+**/node_modules/**/examples/**
+**/node_modules/**/docs/**
+**/node_modules/**/*.md
+**/node_modules/**/*.txt
+**/node_modules/**/*.yml
+**/node_modules/**/*.yaml
+**/node_modules/**/*.ts
+**/node_modules/**/*.map
+**/node_modules/**/LICENSE*
+**/node_modules/**/CHANGELOG*
+**/node_modules/**/.github/**
+**/node_modules/**/README*
+
+# Log files
+*.log
+server.log
+
+# Announcement and release notes (development only)
+discourse-announcement.md
+release-announcement-*.md
+
+# Required files (explicitly NOT ignored):
+# - out/** (compiled extension code)
+# - syntaxes/** (language grammar)
+# - snippets/** (code snippets)
+# - images/** (extension icons)
+# - package.json (extension manifest)
+# - package-lock.json (dependency locking)
+# - README.md (marketplace description) - root only
+# - CHANGELOG.md (version history) - root only
+# - LICENSE (required) - root only
+# - client/package.json and server/package.json (manifests)
+# - node_modules runtime dependencies (vscode-languageclient, etc.)
