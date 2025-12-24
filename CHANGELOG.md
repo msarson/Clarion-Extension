@@ -22,6 +22,9 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 - **Fixed duplicate implementation creation** - Add Method Implementation no longer creates duplicates when run multiple times without saving
   - Now reads from editor's current state instead of stale disk content
   - Correctly detects existing implementations even if unsaved
+- **Fixed hover showing stale implementations** - Hover now shows correct implementation even with unsaved changes in MODULE files
+  - Previously read from disk, missing unsaved edits in open files
+  - Now reads from workspace for accurate hover information
 
 ---
 
