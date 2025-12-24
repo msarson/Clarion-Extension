@@ -189,12 +189,6 @@ function generateImplementation(
     lines.push(methodLine);
     lines.push('');
     lines.push(`${indent}CODE`);
-    
-    // Add RETURN statement if there's a return type
-    if (methodDecl.returnType) {
-        lines.push(`${indent}RETURN 0`);
-    }
-    
     lines.push('');
     
     return lines.join('\n');
