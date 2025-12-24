@@ -301,12 +301,12 @@ async function createClarionClass(): Promise<void> {
         
         logger.info(`Created class files: ${options.incFileName} and ${options.clwFileName}`);
         
-        // Open both files in editor
+        // Open both files in editor (same pane, .clw becomes active)
         const incUri = Uri.file(incFilePath);
         const clwUri = Uri.file(clwFilePath);
         
         await window.showTextDocument(incUri, { preview: false });
-        await window.showTextDocument(clwUri, { preview: false, viewColumn: 2 });
+        await window.showTextDocument(clwUri, { preview: false });
         
         window.showInformationMessage(`Class ${options.className} created successfully!`);
         
