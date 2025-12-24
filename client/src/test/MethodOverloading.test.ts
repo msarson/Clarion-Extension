@@ -510,4 +510,159 @@ TestClass.Process   PROCEDURE(STRING pValue, LONG pCount)
             return null;
         }
     });
+    
+    describe('Hover and Definition Provider - Overload Resolution', () => {
+        /**
+         * These tests verify that hover and goto definition correctly resolve
+         * overloaded methods based on parameter types, not just parameter count
+         */
+        
+        it('should resolve hover to correct overload based on parameter types', () => {
+            // Scenario: Multiple classes with same method name
+            // SystemStringClass.Str(STRING) at line 83
+            // SystemStringClass.Str(SystemStringClass) at line 87
+            
+            const incContent = `
+SystemStringClass                   CLASS,TYPE,MODULE('SystemString'),LINK('SystemString')
+Str                     PROCEDURE(STRING svalue)      ! Line 83
+! ... other methods
+Str                     PROCEDURE(SystemStringClass s) ! Line 87
+                      END
+`;
+            
+            const clwContent = `
+SystemStringClass.Str PROCEDURE(STRING s)              ! Implementation at line 206
+  CODE
+  SELF.pStr &= NEW STRING(SIZE(s))
+  SELF.pStr = s
+  
+SystemStringClass.Str PROCEDURE(SystemStringClass s)    ! Implementation at line 211
+  CODE
+  SELF.Str(s.Str())
+`;
+            
+            // When hovering over line 206 (STRING parameter)
+            const implLineString = 'SystemStringClass.Str PROCEDURE(STRING s)';
+            const paramsString = parseParameterSignature('STRING s');
+            
+            // When hovering over line 211 (SystemStringClass parameter)
+            const implLineClass = 'SystemStringClass.Str PROCEDURE(SystemStringClass s)';
+            const paramsClass = parseParameterSignature('SystemStringClass s');
+            
+            // These should be different signatures
+            assert.strictEqual(parametersMatch(paramsString, paramsClass), false,
+                'STRING and SystemStringClass parameters should not match');
+            
+            // Each should resolve to its own declaration
+            assert.deepStrictEqual(paramsString, ['string']);
+            assert.deepStrictEqual(paramsClass, ['systemstringclass']);
+        });
+        
+        it('should resolve goto definition to correct overload line number', () => {
+            // Test that F12 on implementation goes to correct declaration line
+            const incLines = [
+                'SystemStringClass                   CLASS,TYPE',
+                '! ... other members',
+                'Str                     PROCEDURE(STRING svalue)',      // Line 2 (index)
+                '! ... other methods',
+                '! ... other methods',  
+                '! ... other methods',
+                'Str                     PROCEDURE(SystemStringClass s)', // Line 6 (index)
+                '                      END'
+            ];
+            
+            // Implementation signatures
+            const stringImplParams = parseParameterSignature('STRING s');
+            const classImplParams = parseParameterSignature('SystemStringClass s');
+            
+            // Find matching declarations
+            let stringDeclLine: number | null = null;
+            let classDeclLine: number | null = null;
+            
+            for (let i = 0; i < incLines.length; i++) {
+                const match = incLines[i].match(/^\s*Str\s+PROCEDURE\s*\(([^)]*)\)/i);
+                if (match) {
+                    const declParams = parseParameterSignature(match[1]);
+                    if (parametersMatch(declParams, stringImplParams)) {
+                        stringDeclLine = i;
+                    }
+                    if (parametersMatch(declParams, classImplParams)) {
+                        classDeclLine = i;
+                    }
+                }
+            }
+            
+            assert.strictEqual(stringDeclLine, 2, 
+                'Should find STRING overload at line 2');
+            assert.strictEqual(classDeclLine, 6,
+                'Should find SystemStringClass overload at line 6');
+            assert.notStrictEqual(stringDeclLine, classDeclLine,
+                'Should resolve to different declaration lines');
+        });
+        
+        it('should handle custom type parameters correctly', () => {
+            // Real-world scenario: custom type vs primitive type
+            const decl1 = parseParameterSignature('MyCustomType pValue');
+            const decl2 = parseParameterSignature('STRING pValue');
+            const decl3 = parseParameterSignature('*MyCustomType pValue');
+            
+            // All should be different
+            assert.strictEqual(parametersMatch(decl1, decl2), false);
+            assert.strictEqual(parametersMatch(decl1, decl3), false);
+            assert.strictEqual(parametersMatch(decl2, decl3), false);
+            
+            // Verify parsed values
+            assert.deepStrictEqual(decl1, ['mycustomtype']);
+            assert.deepStrictEqual(decl2, ['string']);
+            assert.deepStrictEqual(decl3, ['*mycustomtype']);
+        });
+        
+        it('should handle multiline method declarations in hover', () => {
+            // Some declarations span multiple lines
+            const multilineDecl = `Str                     PROCEDURE(SystemStringClass s),
+                                              VIRTUAL`;
+            
+            // Extract just the parameter part
+            const match = multilineDecl.match(/PROCEDURE\s*\(([^)]*)\)/i);
+            assert.ok(match, 'Should match multiline declaration');
+            
+            const params = parseParameterSignature(match![1]);
+            assert.deepStrictEqual(params, ['systemstringclass']);
+        });
+        
+        it('should correctly identify method implementation lines for hover', () => {
+            // Test various implementation line formats
+            const testCases = [
+                {
+                    line: 'SystemStringClass.Str PROCEDURE(STRING s)',
+                    expected: { className: 'SystemStringClass', methodName: 'Str', params: ['string'] }
+                },
+                {
+                    line: 'SystemStringClass.Str PROCEDURE(SystemStringClass s)',
+                    expected: { className: 'SystemStringClass', methodName: 'Str', params: ['systemstringclass'] }
+                },
+                {
+                    line: 'MyClass.Process   PROCEDURE(*STRING pValue)',
+                    expected: { className: 'MyClass', methodName: 'Process', params: ['*string'] }
+                },
+                {
+                    line: 'TestClass.AddLine   PROCEDURE(&STRING pValue, LONG pLen)',
+                    expected: { className: 'TestClass', methodName: 'AddLine', params: ['&string', 'long'] }
+                }
+            ];
+            
+            testCases.forEach(testCase => {
+                const match = testCase.line.match(/^(\w+)\.(\w+)\s+PROCEDURE\s*\(([^)]*)\)/i);
+                assert.ok(match, `Should match: ${testCase.line}`);
+                
+                const className = match![1];
+                const methodName = match![2];
+                const params = parseParameterSignature(match![3]);
+                
+                assert.strictEqual(className, testCase.expected.className);
+                assert.strictEqual(methodName, testCase.expected.methodName);
+                assert.deepStrictEqual(params, testCase.expected.params);
+            });
+        });
+    });
 });

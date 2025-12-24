@@ -15,19 +15,28 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 - TBD
 
 ### 🐛 Bug Fixes
-- **Fixed duplicate hover on method implementations** - Hovering over method implementation lines no longer shows duplicate information
-  - Client-side hover now defers to server when hovering on implementation lines to avoid duplicate hovers
-  - Server has complete parameter type information and can match the correct overload
-- **Fixed hover on method implementations** - Hovering over method implementation lines now correctly shows the declaration with proper parameter type matching
-  - Added dynamic detection of method implementation lines (e.g., `ClassName.Method PROCEDURE(...)`) in hover provider
-  - Hover now works on both method declarations (in INC files) and implementations (in CLW files)
-  - Properly matches overloaded methods by parameter types when showing hover information
-- **Fixed Go to Definition for overloaded methods** - Go to Definition (F12) on method implementations now correctly navigates to the matching overload based on parameter types, not just count
-  - Previously when multiple overloads existed with same parameter count (e.g., `Str(STRING)` and `Str(*STRING)`), it would return the first match
-  - Now performs type-based matching to find the exact overload signature
-  - Handles pointer (`*`), reference (`&`), and omittable (`<>`) parameter modifiers correctly
+- **Fixed hover and Go to Definition for overloaded methods with parameter type matching**
+  - Resolved issue where overloaded methods with same parameter count but different types would navigate to wrong overload
+  - Example: `Str(STRING)` and `Str(SystemStringClass)` now correctly resolve to their specific implementations
+  - **Hover improvements:**
+    - Added dynamic detection of method implementation lines in client-side hover provider
+    - Client defers to server for complete type information to avoid duplicates
+    - Hover now works on both declarations (INC) and implementations (CLW)
+    - Properly matches overloaded methods by parameter types when showing hover
+  - **Go to Definition improvements:**
+    - F12 on method implementations now navigates to correct overload based on parameter types
+    - Type-based matching finds exact overload signature (not just parameter count)
+    - Handles pointer (`*`), reference (`&`), and omittable (`<>`) parameter modifiers correctly
 - **Fixed Go to Implementation for multiple classes** - Resolved issue where Go to Implementation failed when multiple classes were defined in the same INC/CLW file pair
   - Fixed regex offset calculation for class position tracking
+
+### 🧪 Testing
+- Added comprehensive test suite for method overload resolution (`MethodOverloading.test.ts`)
+  - Tests for parameter type parsing (STRING, *STRING, &STRING, custom types)
+  - Tests for parameter signature matching
+  - Tests for hover and definition provider overload resolution
+  - Tests for multiple overloads with same method name
+  - All 313 tests passing
   - Corrected class name start position to account for leading whitespace
   - Now properly matches method implementations to their class context
 - **Fixed LINK statement parsing** - Enhanced LINK pattern to support optional DLL linking parameters
