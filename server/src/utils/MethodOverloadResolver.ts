@@ -31,6 +31,7 @@ export class MethodOverloadResolver {
      * @param document The document to search in
      * @param tokens Tokens from the document
      * @param paramCount Optional parameter count for overload resolution
+     * @param implementationSignature Optional full signature for type-based matching
      * @returns Method declaration info or null if not found
      */
     public findMethodDeclaration(
@@ -38,7 +39,8 @@ export class MethodOverloadResolver {
         methodName: string,
         document: TextDocument,
         tokens: Token[],
-        paramCount?: number
+        paramCount?: number,
+        implementationSignature?: string
     ): MethodDeclarationInfo | null {
         logger.info(`Finding method declaration: ${className}.${methodName}${paramCount !== undefined ? ` with ${paramCount} parameters` : ''}`);
         
@@ -95,14 +97,14 @@ export class MethodOverloadResolver {
         }
         
         // Select best match from current file
-        const bestMatch = this.selectBestOverload(candidates, paramCount);
+        const bestMatch = this.selectBestOverload(candidates, paramCount, implementationSignature);
         if (bestMatch) {
             return bestMatch;
         }
         
         // If not found in current file, search INCLUDE files
         logger.info(`Method not found in current file, searching INCLUDEs`);
-        return this.findMethodDeclarationInIncludes(className, methodName, document, paramCount);
+        return this.findMethodDeclarationInIncludes(className, methodName, document, paramCount, implementationSignature);
     }
     
     /**
@@ -112,7 +114,8 @@ export class MethodOverloadResolver {
         className: string,
         methodName: string,
         document: TextDocument,
-        paramCount?: number
+        paramCount?: number,
+        implementationSignature?: string
     ): MethodDeclarationInfo | null {
         const filePath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
         const content = document.getText();
@@ -198,15 +201,16 @@ export class MethodOverloadResolver {
         }
         
         // Select best match from INCLUDE files
-        return this.selectBestOverload(candidates, paramCount);
+        return this.selectBestOverload(candidates, paramCount, implementationSignature);
     }
     
     /**
-     * Selects the best overload match based on parameter count
+     * Selects the best overload match based on parameter count and types
      */
     private selectBestOverload(
         candidates: MethodDeclarationInfo[],
-        paramCount?: number
+        paramCount?: number,
+        implementationSignature?: string
     ): MethodDeclarationInfo | null {
         if (candidates.length === 0) return null;
         
@@ -216,11 +220,29 @@ export class MethodOverloadResolver {
             return candidates[0];
         }
         
-        // Find exact match first
-        const exactMatch = candidates.find(c => c.paramCount === paramCount);
-        if (exactMatch) {
+        // Filter candidates by parameter count first
+        const exactCountMatches = candidates.filter(c => c.paramCount === paramCount);
+        
+        // If we have implementation signature and multiple matches with same count, try type matching
+        if (implementationSignature && exactCountMatches.length > 1) {
+            logger.info(`Multiple overloads with ${paramCount} parameters, attempting type matching`);
+            const implParams = this.extractParameterTypes(implementationSignature);
+            
+            // Try to find exact type match
+            for (const candidate of exactCountMatches) {
+                const declParams = this.extractParameterTypes(candidate.signature);
+                if (this.parametersMatch(implParams, declParams)) {
+                    logger.info(`Found exact type match with signature: ${candidate.signature}`);
+                    return candidate;
+                }
+            }
+            
+            logger.info(`No exact type match found, returning first candidate with matching count`);
+        }
+        
+        if (exactCountMatches.length > 0) {
             logger.info(`Found exact match with ${paramCount} parameters`);
-            return exactMatch;
+            return exactCountMatches[0];
         }
         
         // If no exact match, find closest (prefer higher param count for optional params)
@@ -238,6 +260,115 @@ export class MethodOverloadResolver {
         
         logger.info(`Selected overload with ${bestMatch.paramCount} parameters (implementation had ${paramCount})`);
         return bestMatch;
+    }
+    
+    /**
+     * Extracts parameter types from a method signature
+     * Returns array of normalized parameter types (e.g., ['STRING', '*STRING', 'LONG'])
+     */
+    private extractParameterTypes(signature: string): string[] {
+        const match = signature.match(/PROCEDURE\s*\(([^)]*)\)/i);
+        if (!match) return [];
+        
+        const paramList = match[1].trim();
+        if (paramList === '') return [];
+        
+        // Split by commas at depth 0 (respecting nested parens and angle brackets)
+        const params: string[] = [];
+        let currentParam = '';
+        let depth = 0;
+        let angleDepth = 0;
+        
+        for (let i = 0; i < paramList.length; i++) {
+            const char = paramList[i];
+            
+            if (char === '(') {
+                depth++;
+                currentParam += char;
+            } else if (char === ')') {
+                depth--;
+                currentParam += char;
+            } else if (char === '<') {
+                angleDepth++;
+                currentParam += char;
+            } else if (char === '>') {
+                angleDepth--;
+                currentParam += char;
+            } else if (char === ',' && depth === 0 && angleDepth === 0) {
+                params.push(currentParam.trim());
+                currentParam = '';
+            } else {
+                currentParam += char;
+            }
+        }
+        
+        if (currentParam.trim()) {
+            params.push(currentParam.trim());
+        }
+        
+        // Extract just the type from each parameter (remove variable names and defaults)
+        return params.map(param => this.extractParameterType(param));
+    }
+    
+    /**
+     * Extracts the type from a single parameter string
+     * Examples:
+     *   "STRING s" -> "STRING"
+     *   "*STRING pStr" -> "*STRING"
+     *   "<LONG lOpt>" -> "LONG"
+     *   "LONG lVal=0" -> "LONG"
+     */
+    private extractParameterType(param: string): string {
+        // Remove angle brackets for omittable parameters
+        let normalized = param.replace(/^<\s*/, '').replace(/\s*>$/, '');
+        
+        // Remove default values (=something)
+        normalized = normalized.replace(/\s*=.+$/, '');
+        
+        // Extract type - everything before the last word (which is the variable name)
+        // Handle special cases like *STRING, &STRING, etc.
+        const words = normalized.trim().split(/\s+/);
+        
+        if (words.length === 0) return '';
+        if (words.length === 1) return words[0].toUpperCase();
+        
+        // If last word is a valid type, it's the type (no variable name given)
+        // Otherwise, everything except last word is the type
+        const lastWord = words[words.length - 1];
+        
+        // Check if last word looks like a variable name (starts with letter, has mixed case or lowercase)
+        if (lastWord.match(/^[a-z]/i) && (lastWord !== lastWord.toUpperCase() || lastWord.length > 1)) {
+            // Last word is likely variable name, rest is type
+            return words.slice(0, -1).join(' ').toUpperCase();
+        }
+        
+        // All words are the type
+        return words.join(' ').toUpperCase();
+    }
+    
+    /**
+     * Compares two parameter type arrays to see if they match
+     * Handles reference indicators like *, &, etc.
+     */
+    private parametersMatch(implParams: string[], declParams: string[]): boolean {
+        if (implParams.length !== declParams.length) {
+            return false;
+        }
+        
+        for (let i = 0; i < implParams.length; i++) {
+            const implType = implParams[i];
+            const declType = declParams[i];
+            
+            // Normalize for comparison (remove extra spaces)
+            const normalizedImpl = implType.replace(/\s+/g, ' ').trim();
+            const normalizedDecl = declType.replace(/\s+/g, ' ').trim();
+            
+            if (normalizedImpl !== normalizedDecl) {
+                return false;
+            }
+        }
+        
+        return true;
     }
     
     /**

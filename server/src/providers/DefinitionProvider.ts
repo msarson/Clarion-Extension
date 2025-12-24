@@ -116,7 +116,7 @@ export class DefinitionProvider {
                     logger.info(`Method implementation has ${paramCount} parameters`);
                     
                     const tokens = this.tokenCache.getTokens(document);
-                    const declInfo = this.overloadResolver.findMethodDeclaration(className, methodName, document, tokens, paramCount);
+                    const declInfo = this.overloadResolver.findMethodDeclaration(className, methodName, document, tokens, paramCount, line);
                     if (declInfo) {
                         logger.info(`✅ Found method declaration at ${declInfo.file}:${declInfo.line} with ${declInfo.paramCount} parameters`);
                         return Location.create(declInfo.file, {

@@ -15,6 +15,10 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 - TBD
 
 ### 🐛 Bug Fixes
+- **Fixed Go to Definition for overloaded methods** - Go to Definition (F12) on method implementations now correctly navigates to the matching overload based on parameter types, not just count
+  - Previously when multiple overloads existed with same parameter count (e.g., `Str(STRING)` and `Str(*STRING)`), it would return the first match
+  - Now performs type-based matching to find the exact overload signature
+  - Handles pointer (`*`), reference (`&`), and omittable (`<>`) parameter modifiers correctly
 - **Fixed Go to Implementation for multiple classes** - Resolved issue where Go to Implementation failed when multiple classes were defined in the same INC/CLW file pair
   - Fixed regex offset calculation for class position tracking
   - Corrected class name start position to account for leading whitespace
