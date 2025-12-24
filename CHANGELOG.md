@@ -9,6 +9,33 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 ## [Unreleased]
 
 ### ✨ Features
+- **Create New Class Command**
+  - New command: "Clarion: Create New Class" with interactive wizard
+  - Creates both `.inc` and `.clw` files simultaneously
+  - Interactive prompts for:
+    - Class name (validated as Clarion identifier)
+    - Include filename (editable, defaults to `ClassName.inc`)
+    - Source filename (editable, defaults to `ClassName.clw`)
+    - Add Construct method (Yes/No)
+    - Add Destruct method (Yes/No)
+    - Location (current folder or browse for folder)
+  - File conflict detection with error and cancel
+  - Respects user tab/space editor settings
+  - Proper Clarion formatting and alignment
+  - Opens both files in tabs after creation
+  - Eliminates manual file creation and ensures naming consistency
+- **Add Method Implementation Command**
+  - New command: "Clarion: Add Method Implementation" with keybinding `Ctrl+Shift+I`
+  - Works when cursor is on a method declaration line in `.inc` file
+  - Automatically finds the corresponding `.clw` file via MODULE attribute
+  - Checks if implementation already exists (with parameter matching for overloads)
+  - If exists: Jumps to existing implementation
+  - If not exists: Generates and adds implementation at end of file
+  - Respects user tab/space settings
+  - Adds `RETURN` statement for methods with return types
+  - Includes return type as comment `!,ReturnType` on PROCEDURE line
+  - Only works within CLASS context (errors outside)
+  - Perfect for quickly adding method implementations without manual copying
 - **Paste as Clarion String Command**
   - New command: "Clarion: Paste as String" with keybinding `Ctrl+Shift+Alt+V`
   - Converts clipboard text into properly formatted Clarion string with continuation
