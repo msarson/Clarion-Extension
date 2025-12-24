@@ -23,7 +23,21 @@ describe('Method Overloading - Parameter Type Matching', () => {
         
         return paramString.split(',')
             .map(param => {
-                const paramParts = param.trim().split(/\s+/);
+                const trimmed = param.trim();
+                
+                // Handle omittable parameters: <TYPE name> -> extract <TYPE>
+                if (trimmed.startsWith('<')) {
+                    const match = trimmed.match(/^<([^>]+)>/);
+                    if (match) {
+                        // Extract just the type from <TYPE name>
+                        const innerContent = match[1].trim();
+                        const typePart = innerContent.split(/\s+/)[0];
+                        return `<${typePart.toLowerCase()}>`;
+                    }
+                }
+                
+                // Handle regular parameters: TYPE name, *TYPE name, &TYPE name
+                const paramParts = trimmed.split(/\s+/);
                 return paramParts[0].toLowerCase();
             });
     }
@@ -88,6 +102,32 @@ describe('Method Overloading - Parameter Type Matching', () => {
         it('should handle multiple parameters', () => {
             const result = parseParameterSignature('String p1, *String p2, Long p3');
             assert.deepStrictEqual(result, ['string', '*string', 'long']);
+        });
+        
+        it('should handle omittable parameters with angle brackets', () => {
+            // Omittable parameter: <LONG test>
+            const result = parseParameterSignature('<LONG test>');
+            
+            // Should extract <long> including the brackets
+            assert.deepStrictEqual(result, ['<long>'],
+                'Should preserve angle brackets for omittable parameters');
+        });
+        
+        it('should distinguish omittable vs required parameters', () => {
+            const omittable = parseParameterSignature('<STRING pValue>');
+            const required = parseParameterSignature('STRING pValue');
+            
+            assert.notDeepStrictEqual(omittable, required,
+                'Omittable and required parameters should be different');
+            assert.deepStrictEqual(omittable, ['<string>']);
+            assert.deepStrictEqual(required, ['string']);
+        });
+        
+        it('should handle mixed omittable and required parameters', () => {
+            const result = parseParameterSignature('STRING p1, <LONG p2>, *STRING p3');
+            
+            assert.deepStrictEqual(result, ['string', '<long>', '*string'],
+                'Should handle mix of required, omittable, and pointer parameters');
         });
         
         it('should handle empty parameter list', () => {

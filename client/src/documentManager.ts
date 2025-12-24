@@ -640,8 +640,21 @@ export class DocumentManager implements Disposable {
         // Split by commas, trim each parameter, and extract type information
         return paramString.split(',')
             .map(param => {
-                // Extract parameter type (ignore parameter name and attributes)
-                const paramParts = param.trim().split(/\s+/);
+                const trimmed = param.trim();
+                
+                // Handle omittable parameters: <TYPE name> -> extract <TYPE>
+                if (trimmed.startsWith('<')) {
+                    const match = trimmed.match(/^<([^>]+)>/);
+                    if (match) {
+                        // Extract just the type from <TYPE name>
+                        const innerContent = match[1].trim();
+                        const typePart = innerContent.split(/\s+/)[0];
+                        return `<${typePart.toLowerCase()}>`;
+                    }
+                }
+                
+                // Handle regular parameters: TYPE name, *TYPE name, &TYPE name
+                const paramParts = trimmed.split(/\s+/);
                 // Return just the type in lowercase for comparison
                 return paramParts[0].toLowerCase();
             });
@@ -1063,8 +1076,21 @@ export class DocumentManager implements Disposable {
         // Split by commas, trim each parameter, and extract type information
         return paramString.split(',')
             .map(param => {
-                // Extract parameter type (ignore parameter name and attributes)
-                const paramParts = param.trim().split(/\s+/);
+                const trimmed = param.trim();
+                
+                // Handle omittable parameters: <TYPE name> -> extract <TYPE>
+                if (trimmed.startsWith('<')) {
+                    const match = trimmed.match(/^<([^>]+)>/);
+                    if (match) {
+                        // Extract just the type from <TYPE name>
+                        const innerContent = match[1].trim();
+                        const typePart = innerContent.split(/\s+/)[0];
+                        return `<${typePart.toLowerCase()}>`;
+                    }
+                }
+                
+                // Handle regular parameters: TYPE name, *TYPE name, &TYPE name
+                const paramParts = trimmed.split(/\s+/);
                 // Return just the type in lowercase for comparison
                 return paramParts[0].toLowerCase();
             });

@@ -55,6 +55,7 @@ function parseMethodDeclaration(line: string): MethodDeclaration | null {
 
 /**
  * Parses parameter signature from parameter string
+ * Handles: regular types (STRING), pointers (*STRING), references (&STRING), and omittable (<STRING>)
  */
 function parseParameterSignature(paramString?: string): string[] {
     if (!paramString || paramString.trim() === '') {
@@ -63,7 +64,21 @@ function parseParameterSignature(paramString?: string): string[] {
     
     const result = paramString.split(',')
         .map(param => {
-            const paramParts = param.trim().split(/\s+/);
+            const trimmed = param.trim();
+            
+            // Handle omittable parameters: <TYPE name> -> extract <TYPE>
+            if (trimmed.startsWith('<')) {
+                const match = trimmed.match(/^<([^>]+)>/);
+                if (match) {
+                    // Extract just the type from <TYPE name>
+                    const innerContent = match[1].trim();
+                    const typePart = innerContent.split(/\s+/)[0];
+                    return `<${typePart.toLowerCase()}>`;
+                }
+            }
+            
+            // Handle regular parameters: TYPE name, *TYPE name, &TYPE name
+            const paramParts = trimmed.split(/\s+/);
             return paramParts[0].toLowerCase();
         });
     

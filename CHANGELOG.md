@@ -15,10 +15,13 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 - TBD
 
 ### 🐛 Bug Fixes
-- **Fixed overloaded method matching** - Go to Implementation and Add Method Implementation now correctly distinguish between overloaded methods with different parameter types (e.g., `STRING` vs `*STRING` vs `&STRING`)
+- **Fixed overloaded method matching** - Go to Implementation and Add Method Implementation now correctly distinguish between overloaded methods with different parameter types (e.g., `STRING` vs `*STRING` vs `&STRING` vs `<STRING>`)
   - Previously only checked parameter count, causing wrong overload selection
-  - Now uses full parameter type signature matching
-  - Fixes issue where pointer/reference overloads were not properly handled
+  - Now uses full parameter type signature matching including omittable parameters
+  - Fixes issue where pointer/reference/omittable overloads were not properly handled
+- **Fixed duplicate implementation creation** - Add Method Implementation no longer creates duplicates when run multiple times without saving
+  - Now reads from editor's current state instead of stale disk content
+  - Correctly detects existing implementations even if unsaved
 
 ---
 
