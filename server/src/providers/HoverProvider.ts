@@ -59,7 +59,8 @@ export class HoverProvider {
                 if ((position.character >= classStart && position.character <= classEnd) ||
                     (position.character >= methodStart && position.character <= methodEnd)) {
                     const tokens = this.tokenCache.getTokens(document);
-                    const declInfo = this.overloadResolver.findMethodDeclaration(className, methodName, document, tokens, paramCount);
+                    // Pass the full line as implementation signature for type matching
+                    const declInfo = this.overloadResolver.findMethodDeclaration(className, methodName, document, tokens, paramCount, line);
                     if (declInfo) {
                         return this.constructMethodImplementationHover(methodName, className, declInfo);
                     }
