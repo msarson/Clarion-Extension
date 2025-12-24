@@ -15,6 +15,7 @@ This folder contains internal documentation for developers working on the Clario
 - `DIAGNOSTIC_FEATURE_ANALYSIS.md` - Analysis of diagnostic features
 - `DIAGNOSTIC_INTEGRATION.md` - Diagnostic system integration plan
 - `SYMBOL_PROVIDER_REFACTORING_PLAN.md` - Symbol provider refactoring notes
+- `FEATURE_SMART_DETECTION.md` - Smart detection feature planning
 
 ### Test Documentation
 - `TDD_SESSION_SUMMARY.md` - Test-driven development session notes
@@ -23,34 +24,48 @@ This folder contains internal documentation for developers working on the Clario
 
 ### Release Documentation
 - `RELEASE_SUMMARY.md` - Internal release summaries and notes
+- `release-announcement-0.7.4.md` - Release announcement draft
+- `discourse-announcement.md` - Community announcement draft
+
+### Development Guides
+- `PUBLISHING_GUIDE.md` - How to publish updates to marketplace
+- `TESTING.md` - How to run tests and test structure
+- `TODO.md` - Outstanding tasks and feature tracking
+- `KNOWN_ISSUES.md` - Known bugs and limitations
+- `vsc-extension-quickstart.md` - VS Code extension development quickstart
 
 ## What Goes Where
 
 ### `/docs/` (Root - User-Facing)
 Documentation that **end users** of the extension need:
-- Feature guides (CheatSheet.md, GettingStarted.md, etc.)
+- Feature guides (FEATURES.md, GETTING_STARTED.md, COMMANDS_AND_SETTINGS.md)
+- Quick references (CheatSheet.md, BuildSettings.md)
 - Language reference (clarion-knowledge-base.md, CLARION_LANGUAGE_REFERENCE.md)
 - Release notes for users (RELEASE_NOTES_*.md)
-- Build configuration help (BuildSettings.md)
 
 ### `/docs/dev/` (This Folder - Developer-Facing)
 Documentation that **developers/contributors** need:
 - Bug fix analyses and solutions
 - Refactoring plans and architectural decisions
 - Test summaries and TDD sessions
-- Internal release notes
+- Internal release notes and announcements
+- Publishing and testing guides
+- Known issues and TODO tracking
 - Technical deep-dives
+
+### `/docs/ai/` (AI Context)
+AI assistant prompts and context:
+- Startup prompts (STARTUP_AI_PROMPT.md, TIER1_MINIMAL_PROMPT.md)
+- Feature descriptions for AI assistance (ClarionExtensionFeatures.md)
+- Session resume documents
 
 ### Root Directory
 High-level project documentation:
 - `README.md` - Project overview, installation, marketplace info
-- `TODO.md` - Outstanding tasks and feature tracking
 - `CHANGELOG.md` - User-facing version history
-- `TESTING.md` - How to run tests
-- `PUBLISHING_GUIDE.md` - How to publish updates
 
-### `/prompt/`
-AI assistant context and startup information
+### `/docs/ai-prompts/` and `/prompt/`
+Detailed AI assistant context and language rules
 
 ## Contributing
 
