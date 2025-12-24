@@ -574,8 +574,26 @@ export class DocumentManager implements Disposable {
                 return location;
             }
 
-            // Read the module file content
-            const moduleContent = fs.readFileSync(moduleFilePath, 'utf8');
+            // Try to read from open editor first (to include unsaved changes), fallback to disk
+            let moduleContent: string;
+            try {
+                const moduleUri = Uri.file(moduleFilePath);
+                const openDoc = workspace.textDocuments.find(doc => 
+                    doc.uri.toString().toLowerCase() === moduleUri.toString().toLowerCase()
+                );
+                
+                if (openDoc) {
+                    logger.info(`Reading MODULE content from open editor: ${moduleFilePath}`);
+                    moduleContent = openDoc.getText();
+                } else {
+                    logger.info(`Reading MODULE content from disk: ${moduleFilePath}`);
+                    moduleContent = fs.readFileSync(moduleFilePath, 'utf8');
+                }
+            } catch (error) {
+                logger.error(`Error reading MODULE file: ${error instanceof Error ? error.message : String(error)}`);
+                location.implementationResolved = true;
+                return location;
+            }
             
             // Search for the implementation with parameter matching
             const implLineNumber = this.findMethodImplementationLine(
