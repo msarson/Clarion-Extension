@@ -3,4 +3,7 @@ node_modules/
 client/out
 server/out
 out/
+Logs/
+temp-help-downloads/
+docs/ai-prompts/
 

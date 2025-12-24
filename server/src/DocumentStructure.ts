@@ -2,7 +2,7 @@ import { Token, TokenType } from "./ClarionTokenizer";
 import LoggerManager from "./logger";
 
 const logger = LoggerManager.getLogger("DocumentStructure");
-logger.setLevel("error");
+logger.setLevel("error"); // Production: Only log errors
 
 export class DocumentStructure {
     private structureStack: Token[] = [];
@@ -19,7 +19,7 @@ export class DocumentStructure {
     private tokensByLine: Map<number, Token[]> = new Map();
     private structuresByType: Map<string, Token[]> = new Map();
 
-    constructor(private tokens: Token[]) {
+    constructor(private tokens: Token[], private lines?: string[]) {
         // 🚀 PERFORMANCE: Build indexes first for fast lookups
         this.buildIndexes();
         this.maxLabelWidth = this.processLabels();
@@ -80,11 +80,35 @@ export class DocumentStructure {
                     case "DATA":
                         this.handleExecutionMarker(token);
                         break;
+                    case "WHILE":
+                    case "UNTIL":
+                        // Check if this WHILE/UNTIL terminates a LOOP
+                        this.handleLoopTerminator(token, i);
+                        break;
                 }
             } else if (token.type === TokenType.Structure) {
                 this.handleStructureToken(token);
             } else if (token.type === TokenType.EndStatement) {
                 this.handleEndStatementForStructure(token);
+            } else if (token.type === TokenType.Label && token.start === 0) {
+                // Special case: CODE/DATA at column 0 should be execution markers, not field labels
+                const upperValue = token.value.toUpperCase();
+                if (upperValue === 'CODE' || upperValue === 'DATA') {
+                    logger.info(`🔧 [ROUTINE-DATA-FIX] Handling CODE/DATA as execution marker: "${token.value}" at line ${token.line}`);
+                    logger.debug(`🔧 [ROUTINE-DATA-FIX] Handling CODE/DATA as execution marker: "${token.value}" at line ${token.line}`);
+                    this.handleExecutionMarker(token);
+                }
+                // Add label tokens as children of their parent structure (for GROUP/QUEUE/RECORD fields)
+                else if (this.structureStack.length > 0) {
+                    const parentStructure = this.structureStack[this.structureStack.length - 1];
+                    const structureTypes = ["RECORD", "GROUP", "QUEUE", "FILE", "VIEW", "WINDOW", "REPORT"];
+                    if (structureTypes.includes(parentStructure.value.toUpperCase())) {
+                        parentStructure.children = parentStructure.children || [];
+                        parentStructure.children.push(token);
+                        token.parent = parentStructure;
+                        logger.info(`📌 Added field '${token.value}' as child of structure '${parentStructure.value}'`);
+                    }
+                }
             }
             
         }
@@ -127,14 +151,18 @@ export class DocumentStructure {
         for (const token of this.tokens) {
             const insideExecutionCode = this.procedureStack.length > 0;
 
-            if (!insideExecutionCode && token.start === 0 && token.type !== TokenType.Comment && token.value !== '?') {
+            if (!insideExecutionCode && token.start === 0 && 
+                token.type !== TokenType.Comment && 
+                token.type !== TokenType.Directive && 
+                token.value !== '?') {
                 token.type = TokenType.Label;
                 token.label = token.value;
                 maxLabelWidth = Math.max(maxLabelWidth, token.value.length);
-                // logger.info(`📌 Label '${token.value}' detected at Line ${token.line}, forced to column 0.`);
+                logger.info(`📌 Label '${token.value}' detected at Line ${token.line}, structureStack.length=${this.structureStack.length}`);
 
                 if (this.structureStack.length > 0) {
                     let parentStructure = this.structureStack[this.structureStack.length - 1];
+                    logger.info(`📌 Parent structure: '${parentStructure.value}' at line ${parentStructure.line}`);
                     parentStructure.maxLabelLength = Math.max(parentStructure.maxLabelLength || 0, token.value.length);
 
                     // ✅ If we're inside a structure that can have fields, mark this as a structure field
@@ -143,6 +171,11 @@ export class DocumentStructure {
                     if (structureTypes.includes(parentStructure.value.toUpperCase())) {
                         token.isStructureField = true;
                         token.structureParent = parentStructure;
+                        
+                        // ✅ Add field as child of the parent structure
+                        parentStructure.children = parentStructure.children || [];
+                        parentStructure.children.push(token);
+                        logger.info(`📌 Added field '${token.value}' as child of structure '${parentStructure.value}'`);
 
                         // Find the label of the parent structure (if any)
                         // 🚀 PERFORMANCE: Use tokensByLine index instead of indexOf
@@ -295,24 +328,90 @@ export class DocumentStructure {
             }
         }
 
+        // ✅ Check if structure ends on the same line (single-line declaration)
+        // Examples: "AnswerDateTime GROUP(DateTimeType)." or "MyGroup GROUP;END"
+        const sameLine = this.tokensByLine.get(token.line) || [];
+        const structureIndex = sameLine.indexOf(token);
+        let endsOnSameLine = false;
+        
+        // Check source text for period (since periods may not be tokenized)
+        if (this.lines && token.line >= 0 && token.line < this.lines.length) {
+            const lineText = this.lines[token.line];
+            
+            // Check if line ends with period (after trimming whitespace)
+            if (lineText.trim().endsWith('.')) {
+                endsOnSameLine = true;
+                token.finishesAt = token.line;
+            }
+        }
+        
+        // Also check tokens for period or END (fallback if source text not available)
+        if (!endsOnSameLine) {
+            for (let i = structureIndex + 1; i < sameLine.length; i++) {
+                const t = sameLine[i];
+                
+                // Found period terminator
+                if (t.value === '.') {
+                    endsOnSameLine = true;
+                    token.finishesAt = token.line;
+                    break;
+                }
+                
+                // Found END keyword
+                if (t.type === TokenType.EndStatement || t.value.toUpperCase() === 'END') {
+                    endsOnSameLine = true;
+                    token.finishesAt = token.line;
+                    break;
+                }
+            }
+        }
+        
+        // If structure ends on same line, don't push to stack (no folding needed)
+        if (endsOnSameLine) {
+            return;
+        }
+        
+        // ✅ Special handling: MODULE inside CLASS/INTERFACE doesn't get pushed to stack
+        // It doesn't need its own END - the CLASS/INTERFACE END terminates it
+        if (token.value.toUpperCase() === 'MODULE' && this.structureStack.length > 0) {
+            const parentStructure = this.structureStack[this.structureStack.length - 1];
+            const parentType = parentStructure.value.toUpperCase();
+            
+            if (parentType === 'CLASS' || parentType === 'INTERFACE') {
+                // MODULE inside CLASS/INTERFACE - don't push to stack, just set parent relationship
+                token.parent = parentStructure;
+                parentStructure.children = parentStructure.children || [];
+                parentStructure.children.push(token);
+                // Set finishesAt to the parent's finishesAt (will be set when parent closes)
+                // For now, we'll set it in handleEndStatementForStructure
+                logger.info(`📌 MODULE inside ${parentType} at Line ${token.line} - not pushing to stack`);
+                return;
+            }
+        }
+
         token.maxLabelLength = 0;
         this.structureStack.push(token);
 
         // Add parent-child relationship with current procedure or structure
-        if (this.procedureStack.length > 0) {
-            const parentProcedure = this.procedureStack[this.procedureStack.length - 1];
-            token.parent = parentProcedure;
-            parentProcedure.children = parentProcedure.children || [];
-            parentProcedure.children.push(token);
-            logger.info(`🔗 Structure ${token.value} at Line ${token.line} parented to procedure ${parentProcedure.value}`);
-        } else if (this.structureStack.length > 1) {
-            // Only set parent to another structure if we're not inside a procedure
-            // and there's at least one other structure on the stack (the current one is already pushed)
+        // Special case: MODULE inside MAP should be child of MAP, not the containing procedure
+        const isModuleInMap = token.value.toUpperCase() === 'MODULE' && 
+                              this.structureStack.length > 1 &&
+                              this.structureStack[this.structureStack.length - 2].value.toUpperCase() === 'MAP';
+        
+        if (isModuleInMap || this.structureStack.length > 1) {
+            // Prioritize structure stack (nested structures or MODULE in MAP)
             const parentStructure = this.structureStack[this.structureStack.length - 2];
             token.parent = parentStructure;
             parentStructure.children = parentStructure.children || [];
             parentStructure.children.push(token);
             logger.info(`🔗 Structure ${token.value} at Line ${token.line} parented to structure ${parentStructure.value}`);
+        } else if (this.procedureStack.length > 0) {
+            // Fall back to procedure parent only if no structure parent exists
+            const parentProcedure = this.procedureStack[this.procedureStack.length - 1];
+            token.parent = parentProcedure;
+            parentProcedure.children = parentProcedure.children || [];
+            parentProcedure.children.push(token);
+            logger.info(`🔗 Structure ${token.value} at Line ${token.line} parented to procedure ${parentProcedure.value}`);
         }
 
         // 🚀 PERFORMANCE: Use tokensByLine to find previous token
@@ -447,7 +546,7 @@ export class DocumentStructure {
                 mapToken.children.push(token);
                 
                 // Extract the procedure name (everything before the opening parenthesis)
-                const procName = token.value.split("(")[0];
+                const procName = token.value.split("(")[0].trim();
                 
                 // CRITICAL FIX: Set the token's label to the procedure name
                 // This ensures it will be displayed correctly in the outline view
@@ -458,7 +557,50 @@ export class DocumentStructure {
         }
     }
 
+    private handleLoopTerminator(token: Token, index: number): void {
+        // WHILE or UNTIL can terminate a LOOP if:
+        // 1. It's not at the beginning of the LOOP (LOOP WHILE... or LOOP UNTIL...)
+        // 2. There's a LOOP on the structure stack
+        
+        // Check if there's a LOOP in the structure stack
+        const loopIndex = this.structureStack.findIndex(s => s.value.toUpperCase() === 'LOOP');
+        if (loopIndex === -1) {
+            // No LOOP to terminate - this must be LOOP WHILE/UNTIL (at the start)
+            return;
+        }
+        
+        const loopStructure = this.structureStack[loopIndex];
+        
+        // Check if this WHILE/UNTIL is on the same line as the LOOP
+        // If so, it's the opening condition, not a terminator
+        if (loopStructure.line === token.line) {
+            return;
+        }
+        
+        // This WHILE/UNTIL terminates the LOOP
+        // Pop everything from the stack until we get to (and including) the LOOP
+        while (this.structureStack.length > loopIndex) {
+            const poppedStructure = this.structureStack.pop()!;
+            poppedStructure.finishesAt = token.line;
+            logger.info(`🔚 Closed ${poppedStructure.value} at Line ${token.line} (terminated by ${token.value.toUpperCase()})`);
+        }
+    }
+
     private handleEndStatementForStructure(token: Token): void {
+        // ✅ Check if this END/period is an inline terminator
+        // If there's a structure keyword on the same line, this END/period terminates that structure, not the stack
+        const sameLine = this.tokensByLine.get(token.line) || [];
+        const structureOnSameLine = sameLine.find(t => 
+            t.type === TokenType.Structure && t !== token
+        );
+        
+        if (structureOnSameLine) {
+            // This is an inline terminator - don't pop from stack
+            logger.info(`🔚 Inline terminator '${token.value}' at Line ${token.line} for '${structureOnSameLine.value}' (not popping stack)`);
+            return;
+        }
+        
+        // This END/period terminates a structure from the stack
         const lastStructure = this.structureStack.pop();
         if (lastStructure) {
             lastStructure.finishesAt = token.line;
@@ -519,9 +661,56 @@ export class DocumentStructure {
             this.handleProcedureClosure(token.line - 1);
         }
         
-        const isMethodImpl = prevToken?.type === TokenType.Label && prevToken.value.includes(".");
+        // Check for method implementation: Look for pattern like "ClassName.MethodName PROCEDURE"
+        // This could be tokenized as: Label(ClassName) + Variable(MethodName) + Keyword(PROCEDURE)
+        // Or for interface methods: Label(ClassName) + Variable(InterfaceName) + Variable(MethodName) + Keyword(PROCEDURE)
+        // Or in some cases: Label(ClassName.MethodName) + Keyword(PROCEDURE)
+        // Or interface: Label(ClassName.InterfaceName.MethodName) + Keyword(PROCEDURE)
+        let isMethodImpl = false;
+        let fullProcedureName = prevToken?.value ?? "AnonymousProcedure";
         
-        token.label = prevToken?.value ?? "AnonymousProcedure";
+        // Check if prevToken is a label, variable, or attribute that might be part of a method name
+        if (prevToken?.type === TokenType.Label || prevToken?.type === TokenType.Variable || prevToken?.type === TokenType.Attribute) {
+            // Check if the previous token contains dots (entire qualified name in one token)
+            if (prevToken.value.includes(".")) {
+                // The previous token itself contains dots (entire name in one token)
+                // This handles: ClassName.MethodName or ClassName.InterfaceName.MethodName
+                fullProcedureName = prevToken.value;
+                isMethodImpl = true;
+            } else {
+                // Build the full name by looking back at previous tokens on the same line
+                // Collect all tokens before PROCEDURE that are part of the qualified name
+                const nameParts: string[] = [prevToken.value];
+                let lookbackIndex = index - 2;
+                
+                // Look back to collect ClassName.InterfaceName.MethodName pattern
+                while (lookbackIndex >= 0) {
+                    const lookbackToken = this.tokens[lookbackIndex];
+                    
+                    // Stop if we're on a different line
+                    if (lookbackToken.line !== token.line) break;
+                    
+                    // Stop if we hit a non-name token
+                    if (lookbackToken.type !== TokenType.Label && 
+                        lookbackToken.type !== TokenType.Variable && 
+                        lookbackToken.type !== TokenType.Attribute) {
+                        break;
+                    }
+                    
+                    // Add this part to the beginning
+                    nameParts.unshift(lookbackToken.value);
+                    lookbackIndex--;
+                }
+                
+                // If we collected more than one part, it's a method implementation
+                if (nameParts.length > 1) {
+                    fullProcedureName = nameParts.join('.');
+                    isMethodImpl = true;
+                }
+            }
+        }
+        
+        token.label = fullProcedureName;
         token.type = TokenType.Procedure; // ✅ Always keep as Procedure
         token.subType = isMethodImpl ? TokenType.MethodImplementation : TokenType.GlobalProcedure;
         

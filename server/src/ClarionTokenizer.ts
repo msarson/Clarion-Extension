@@ -1,74 +1,15 @@
 import { DocumentStructure } from './DocumentStructure';
 import LoggerManager from './logger';
+import { TokenType, Token } from './tokenizer/TokenTypes';
+import { PatternMatcher } from './tokenizer/PatternMatcher';
+import { StructureProcessor } from './tokenizer/StructureProcessor';
+import { STRUCTURE_PATTERNS } from './tokenizer/TokenPatterns';
+
 const logger = LoggerManager.getLogger("Tokenizer");
 logger.setLevel("error"); // Only show errors and PERF (PERF logs directly to console)
-export enum TokenType {
-    Comment,
-    String,
-    Keyword,
-    Directive,
-    Function,
-    Variable,
-    Number,
-    Operator,
-    Class,
-    Attribute,
-    Property,
-    Constant,
-    Type,
-    TypeAnnotation,
-    ImplicitVariable,
-    Structure,
-    ReferenceVariable,
-    LineContinuation,
-    Delimiter,
-    FunctionArgumentParameter,
-    PointerParameter,
-    FieldEquateLabel,
-    PropertyFunction,
-    Unknown,
-    Label,
-    EndStatement,
-    ClarionDocument, // ✅ PROGRAM / MEMBER token type
-    Procedure,
-    Routine,
-    ExecutionMarker,
-    Region,
-    ConditionalContinuation,
-    ColorValue,
-    StructureField,   // ✅ Field within a structure
-    StructurePrefix,   // ✅ Prefix notation for structure fields (e.g., INV:Customer)
-    // ✅ New Subtypes for PROCEDURE tokens
-    GlobalProcedure,           // PROCEDURE declared at global level (with CODE)
-    MethodDeclaration,         // PROCEDURE inside a CLASS/MAP/INTERFACE (definition only, no CODE)
-    MethodImplementation,      // e.g., ThisWindow.Init PROCEDURE (with CODE)
-    MapProcedure,              // Optional: inside MAP structure
-    InterfaceMethod,           // Optional: inside INTERFACE structure
-    // ✅ Window structure elements
-    WindowElement,             // Elements that appear in window structures (BUTTON, LIST, ITEM)
-    PictureFormat              // Picture format specifiers (e.g., @N10.2)
-}
 
-export interface Token {
-    label?: string; // ✅ Store label for the token
-    colorParams?: string[];
-    type: TokenType;
-    subType?: TokenType;
-    value: string;
-    line: number;
-    start: number;
-    finishesAt?: number;
-    parent?: Token;
-    children?: Token[];
-    executionMarker?: Token;  // ✅ First explicit "CODE" statement (if present)
-    hasLocalData?: boolean;   // ✅ True if "DATA" exists before "CODE"
-    inferredCode?: boolean;   // ✅ True if "CODE" is implied (not explicitly written)
-    maxLabelLength: number;   // ✅ Store max label length
-    structurePrefix?: string; // ✅ Store structure prefix (e.g., "INV" from PRE(INV))
-    isStructureField?: boolean; // ✅ Flag to identify structure fields
-    structureParent?: Token;  // ✅ Reference to the parent structure token
-    nestedLabel?: string;     // ✅ Store the label of the nesting structure (e.g., "Queue:Browse:1" for fields inside it)
-}
+// Re-export types for backward compatibility
+export { TokenType, Token } from './tokenizer/TokenTypes';
 
 
 
@@ -79,12 +20,6 @@ export class ClarionTokenizer {
     private tabSize: number;  // ✅ Store tabSize
     maxLabelWidth: number = 0;
 
-    // 🚀 PERFORMANCE: Pre-compiled regex patterns cache
-    private static compiledPatterns: Map<TokenType, RegExp> | null = null;
-    private static orderedTypes: TokenType[] | null = null;
-    // 🚀 PERFORMANCE: Pattern groups by character class for fast filtering
-    private static patternsByCharClass: Map<string, TokenType[]> | null = null;
-
     constructor(text: string, tabSize: number = 2) {  // ✅ Default to 2 if not provided
         this.text = text;
         this.tokens = [];
@@ -92,146 +27,7 @@ export class ClarionTokenizer {
         this.tabSize = tabSize;  // ✅ Store the provided or default value
         
         // 🚀 PERFORMANCE: Initialize compiled patterns once
-        if (!ClarionTokenizer.compiledPatterns) {
-            ClarionTokenizer.initializePatterns();
-        }
-    }
-
-    // 🚀 PERFORMANCE: Classify character for fast pattern filtering
-    private getCharClass(char: string): string {
-        if (char >= 'A' && char <= 'Z') return 'upper';
-        if (char >= 'a' && char <= 'z') return 'lower';
-        if (char === '_') return 'underscore';
-        if (char >= '0' && char <= '9') return 'digit';
-        if (char === '!') return 'comment';
-        if (char === "'") return 'string';
-        if (char === '&') return 'ampersand';
-        if (char === '@') return 'at';
-        if (char === '?') return 'question';
-        if (char === '|') return 'pipe';
-        if (char === '*') return 'star';
-        if ('+-*/=<>'.indexOf(char) >= 0) return 'operator';
-        if ('(),:.'.indexOf(char) >= 0) return 'delimiter';
-        if (char === ' ' || char === '\t') return 'whitespace';
-        return 'other';
-    }
-
-    // 🚀 PERFORMANCE: Pre-compile all regex patterns once
-    private static initializePatterns(): void {
-        ClarionTokenizer.compiledPatterns = new Map();
-        ClarionTokenizer.patternsByCharClass = new Map();
-        
-        // 🚀 PERFORMANCE: Optimized order balancing specificity and frequency
-        // Critical: More specific patterns MUST come before more general ones
-        // Also ordered by frequency within specificity groups
-        ClarionTokenizer.orderedTypes = [
-            // HIGH PRIORITY: Must match first due to specificity
-            TokenType.Comment,              // Very common, must be early to skip comment content
-            TokenType.LineContinuation,     // Must be early (can contain other tokens)
-            TokenType.String,               // Must be before Variable (strings can contain variable-like text)
-            
-            // LABELS & SPECIAL: Must be before general identifiers
-            TokenType.Label,                // Must be before Variable (labels are identifiers at column 0)
-            TokenType.FieldEquateLabel,     // Must be before Variable (?FieldName)
-            TokenType.ReferenceVariable,    // Must be before Variable (&Variable)
-            
-            // SPECIFIC IDENTIFIERS: Before general Variable
-            TokenType.ClarionDocument,      // Rare but specific (PROGRAM/MEMBER)
-            TokenType.ExecutionMarker,      // Specific (CODE/DATA)
-            TokenType.EndStatement,         // Specific (END/.)
-            TokenType.ConditionalContinuation, // Specific (ELSE/ELSIF/OF)
-            TokenType.Keyword,              // Common, more specific than Variable
-            TokenType.Directive,            // Specific keywords with special syntax
-            
-            // STRUCTURES: Before Variable but after keywords
-            TokenType.Structure,            // Must be before Variable
-            TokenType.WindowElement,        // Specific window controls
-            
-            // FUNCTIONS & PROPERTIES: Specific patterns
-            TokenType.Function,             // Must be before FunctionArgumentParameter
-            TokenType.FunctionArgumentParameter, // Must be before Variable
-            TokenType.PropertyFunction,     // Specific properties with parentheses
-            TokenType.Property,             // Specific property names
-            
-            // FIELD REFERENCES: Before Variable
-            TokenType.StructurePrefix,      // Must be before Variable (PREFIX:Field)
-            TokenType.StructureField,       // Must be before Variable (Structure.Field)
-            TokenType.Class,                // Must be before Variable (Class.Method)
-            
-            // TYPES: Before Variable
-            TokenType.Type,                 // Common, specific type keywords
-            TokenType.TypeAnnotation,       // Specific type annotations
-            
-            // COMPLEX PATTERNS: Before simple ones
-            TokenType.PointerParameter,     // *Variable before Variable
-            TokenType.PictureFormat,        // @... formats
-            
-            // SIMPLE TOKENS: Common, can be checked relatively early
-            TokenType.Number,               // Very common
-            TokenType.Operator,             // Very common
-            TokenType.Delimiter,            // Very common
-            
-            // ATTRIBUTES & CONSTANTS: After types
-            TokenType.Attribute,            // Specific attribute keywords
-            TokenType.Constant,             // Specific constants (TRUE/FALSE/NULL)
-            
-            // GENERAL: Last specific check before catchall
-            TokenType.ImplicitVariable,     // Variable with suffix ($/#/")
-            TokenType.Variable,             // General identifier - must be late
-            
-            // CATCHALL: Absolute last resort
-            TokenType.Unknown
-        ];
-        
-        for (const type of ClarionTokenizer.orderedTypes) {
-            const pattern = tokenPatterns[type];
-            if (pattern) {
-                ClarionTokenizer.compiledPatterns.set(type, pattern);
-            }
-        }
-        
-        // 🚀 PERFORMANCE: Build pattern groups by character class
-        // This allows us to skip entire groups of patterns based on first character
-        const charClassGroups: Record<string, TokenType[]> = {
-            'comment': [TokenType.Comment],
-            'string': [TokenType.String],
-            'question': [TokenType.FieldEquateLabel],
-            'at': [TokenType.PictureFormat],
-            'pipe': [TokenType.LineContinuation],
-            'ampersand': [TokenType.ReferenceVariable, TokenType.LineContinuation],
-            'star': [TokenType.PointerParameter],
-            'digit': [TokenType.Number],
-            'operator': [TokenType.Operator],
-            'delimiter': [TokenType.Delimiter],
-            'upper': [ // Uppercase letter - identifiers, keywords, structures
-                TokenType.Label, TokenType.Keyword, TokenType.Directive,
-                TokenType.ClarionDocument, TokenType.ExecutionMarker, TokenType.EndStatement,
-                TokenType.ConditionalContinuation, TokenType.Structure, TokenType.WindowElement,
-                TokenType.Function, TokenType.FunctionArgumentParameter, TokenType.PropertyFunction,
-                TokenType.Property, TokenType.StructurePrefix, TokenType.StructureField, TokenType.Class,
-                TokenType.Type, TokenType.TypeAnnotation, TokenType.Attribute, TokenType.Constant,
-                TokenType.ImplicitVariable, TokenType.Variable, TokenType.Unknown
-            ],
-            'lower': [ // Lowercase letter - identifiers, keywords (case-insensitive)
-                TokenType.Keyword, TokenType.Directive, TokenType.ClarionDocument,
-                TokenType.ExecutionMarker, TokenType.ConditionalContinuation, TokenType.Structure,
-                TokenType.Function, TokenType.FunctionArgumentParameter, TokenType.PropertyFunction,
-                TokenType.Property, TokenType.StructurePrefix, TokenType.StructureField, TokenType.Class,
-                TokenType.Type, TokenType.TypeAnnotation, TokenType.Attribute, TokenType.Constant,
-                TokenType.ImplicitVariable, TokenType.Variable, TokenType.Unknown
-            ],
-            'underscore': [ // Underscore - identifiers only
-                TokenType.Label, TokenType.ReferenceVariable, TokenType.Variable, 
-                TokenType.StructurePrefix, TokenType.StructureField, TokenType.Unknown
-            ],
-            'other': [ // Fallback - test all patterns
-                ...ClarionTokenizer.orderedTypes
-            ]
-        };
-        
-        for (const [charClass, types] of Object.entries(charClassGroups)) {
-            ClarionTokenizer.patternsByCharClass.set(charClass, types);
-        }
+        PatternMatcher.initializePatterns();
     }
 
 
@@ -265,6 +61,11 @@ export class ClarionTokenizer {
             const structureTime = performance.now() - structureStart;
             logger.info("🔍 [DEBUG] Document structure processed");
             
+            const prefixStart = performance.now();
+            StructureProcessor.processStructureFieldPrefixes(this.tokens, this.lines); // ✅ Step 2.5: Process structure field prefixes
+            const prefixTime = performance.now() - prefixStart;
+            logger.info(`🔍 [DEBUG] Structure field prefixes processed (${prefixTime.toFixed(2)}ms)`);
+            
             const routineVarsStart = performance.now();
             this.tokenizeRoutineVariables(); // ✅ Step 3: Tokenize routine DATA section variables
             const routineVarsTime = performance.now() - routineVarsStart;
@@ -294,7 +95,13 @@ export class ClarionTokenizer {
                 'tokenize_ms': tokenizeTime.toFixed(2),
                 'tokenize_pct': ((tokenizeTime/totalTime)*100).toFixed(1) + '%',
                 'structure_ms': structureTime.toFixed(2),
-                'structure_pct': ((structureTime/totalTime)*100).toFixed(1) + '%'
+                'structure_pct': ((structureTime/totalTime)*100).toFixed(1) + '%',
+                'prefix_ms': prefixTime.toFixed(2),
+                'prefix_pct': ((prefixTime/totalTime)*100).toFixed(1) + '%',
+                'routine_vars_ms': routineVarsTime.toFixed(2),
+                'routine_vars_pct': ((routineVarsTime/totalTime)*100).toFixed(1) + '%',
+                'procedure_vars_ms': procedureVarsTime.toFixed(2),
+                'procedure_vars_pct': ((procedureVarsTime/totalTime)*100).toFixed(1) + '%'
             });
             
             return this.tokens;
@@ -307,8 +114,8 @@ export class ClarionTokenizer {
 
     /** ✅ Step 1: Tokenize all lines */
     private tokenizeLines(lines: string[]): void {
-        const patterns = ClarionTokenizer.compiledPatterns!;
-        const types = ClarionTokenizer.orderedTypes!;
+        const patterns = PatternMatcher.getCompiledPatterns();
+        const types = PatternMatcher.getOrderedTypes();
         
         // 🔬 PROFILING: Track time spent per pattern type
         const patternTiming = new Map<TokenType, number>();
@@ -329,7 +136,7 @@ export class ClarionTokenizer {
             // 🚀 PERFORMANCE: Only expand tabs if line contains tabs
             let column = 0;
             if (line.includes('\t')) {
-                const expandedLine = this.expandTabs(line);
+                const expandedLine = StructureProcessor.expandTabs(line, this.tabSize);
                 column = expandedLine.match(/^(\s*)/)?.[0].length || 0;
             } else {
                 column = line.match(/^(\s*)/)?.[0].length || 0;
@@ -341,15 +148,67 @@ export class ClarionTokenizer {
 
                 // 🚀 PERFORMANCE: Character-class filtering - classify once, test only relevant patterns
                 const firstChar = substring[0];
-                const charClass = this.getCharClass(firstChar);
-                const relevantTypes = ClarionTokenizer.patternsByCharClass!.get(charClass) || types;
+                const charClass = PatternMatcher.getCharClass(firstChar);
+                const relevantTypes = PatternMatcher.getPatternsByCharClass().get(charClass) || types;
 
                 // Test only patterns relevant to this character class
                 for (const tokenType of relevantTypes) {
+                    // ✅ Special handling for Structure - test each pattern individually to preserve negative lookbehinds
+                    if (tokenType === TokenType.Structure) {
+                        // Test each structure pattern individually
+                        for (const [structName, structPattern] of Object.entries(STRUCTURE_PATTERNS)) {
+                            const testStart = performance.now();
+                            const match = structPattern.exec(substring);
+                            const testTime = performance.now() - testStart;
+                            
+                            patternTiming.set(tokenType, (patternTiming.get(tokenType) || 0) + testTime);
+                            patternTests.set(tokenType, (patternTests.get(tokenType) || 0) + 1);
+                            
+                            if (match && match.index === 0) {
+                                // ✅ CRITICAL FIX: Check if structure keyword is preceded by : or . in original line
+                                // This prevents matching keywords that are part of qualified identifiers like nts:case or obj.case
+                                if (position > 0) {
+                                    const prevChar = line[position - 1];
+                                    if (prevChar === ':' || prevChar === '.') {
+                                        // Skip this match - it's part of a qualified identifier
+                                        logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at position ${position} - preceded by '${prevChar}'`);
+                                        continue; // Try next structure pattern
+                                    }
+                                }
+                                
+                                patternMatches.set(tokenType, (patternMatches.get(tokenType) || 0) + 1);
+                                
+                                // ✅ Trim leading whitespace from token value (some patterns like FILE, QUEUE, VIEW include \s)
+                                const tokenValue = match[0].trimStart();
+                                
+                                // Create token for this structure
+                                const newToken: Token = {
+                                    type: TokenType.Structure,
+                                    value: tokenValue,
+                                    line: lineNumber,
+                                    start: column,
+                                    maxLabelLength: 0
+                                };
+                                
+                                this.tokens.push(newToken);
+                                position += match[0].length;
+                                column += match[0].length;
+                                matched = true;
+                                
+                                logger.info(`✅ Matched Structure '${structName}': ${tokenValue} at line ${lineNumber}`);
+                                break; // Found a match, stop testing other structure patterns
+                            }
+                        }
+                        
+                        if (matched) break; // Already found a structure match, skip other token types
+                        continue; // No structure match found, but skip the normal pattern.get() logic below and try next token type
+                    }
+                    
                     const pattern = patterns.get(tokenType);
                     if (!pattern) continue;
 
                     if (tokenType === TokenType.Label && column !== 0) continue; // ✅ Labels must be in column 0
+                    if (tokenType === TokenType.EndStatement && column === 0) continue; // ✅ END/. must NOT be at column 0
 
                     // 🔬 PROFILING: Time each pattern test
                     const testStart = performance.now();
@@ -360,30 +219,21 @@ export class ClarionTokenizer {
                     patternTests.set(tokenType, patternTests.get(tokenType)! + 1);
                     
                     if (match && match.index === 0) {
-                        patternMatches.set(tokenType, patternMatches.get(tokenType)! + 1);
-                        
-                        // Special handling for Structure tokens to avoid misclassifying variables
-                        let newTokenType = tokenType;
-                        if (tokenType === TokenType.Structure) {
-                            // Check if this is likely a variable reference rather than a structure declaration
-                            const upperValue = match[0].trim().toUpperCase();
-                            
-                            // Check if inside parentheses (function call)
-                            let parenDepth = 0;
-                            for (let i = 0; i < position; i++) {
-                                if (line[i] === '(') parenDepth++;
-                                if (line[i] === ')') parenDepth--;
-                            }
-                            
-                            // If inside parentheses or after a dot (e.g., SELF.AddItem(Toolbar)),
-                            // treat as a variable instead of a structure
-                            if (parenDepth > 0 ||
-                                (position > 0 && line.substring(0, position).includes('.')) ||
-                                (position > 0 && line.substring(0, position).trim().endsWith('='))) {
-                                newTokenType = TokenType.Variable;
-                                logger.info(`🔄 Reclassified '${match[0].trim()}' from Structure to Variable at line ${lineNumber}`);
+                        // ✅ CRITICAL FIX: For Keyword tokens, check if preceded by : or . in original line
+                        // This prevents matching keywords that are part of qualified identifiers like nts:case or obj.case
+                        if (tokenType === TokenType.Keyword && position > 0) {
+                            const prevChar = line[position - 1];
+                            if (prevChar === ':' || prevChar === '.') {
+                                // Skip this match - it's part of a qualified identifier
+                                logger.debug(`⏭️ Skipping keyword '${match[0]}' at position ${position} - preceded by '${prevChar}'`);
+                                continue;
                             }
                         }
+                        
+                        patternMatches.set(tokenType, patternMatches.get(tokenType)! + 1);
+                        
+                        // ✅ Structure tokens are handled above in special block
+                        let newTokenType = tokenType;
                         
                         let newToken: Token = {
                             type: newTokenType,
@@ -528,7 +378,7 @@ export class ClarionTokenizer {
 
         // ✅ Second Pass: Process Token Relationships
         // ✅ Create a DocumentStructure instance and process the tokens
-        const documentStructure = new DocumentStructure(this.tokens);
+        const documentStructure = new DocumentStructure(this.tokens, this.lines);
         documentStructure.process();
 
     }
@@ -552,27 +402,24 @@ export class ClarionTokenizer {
                 // Check for DATA keyword
                 if (line.match(/^\s*data\s*$/i)) {
                     inDataSection = true;
-                    logger.info(`Found DATA section in routine ${routine.value} at line ${lineNum}`);
                     continue;
                 }
                 
                 // Check for CODE keyword (ends DATA section)
                 if (line.match(/^\s*code\s*$/i)) {
                     inDataSection = false;
-                    logger.info(`DATA section ended at line ${lineNum}`);
                     break;
                 }
                 
                 // If in DATA section, tokenize variable declarations
                 if (inDataSection) {
-                    // Match variable declarations: varName   type
+                    // Match variable declarations: varName   type or varName type(size)
                     // Variables in routines start at column 0 (after any leading whitespace is removed)
-                    const varMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+(&?[A-Za-z_][A-Za-z0-9_]*)/i);
+                    // Updated to handle types with parameters like CSTRING(1024), STRING(255), etc.
+                    const varMatch = line.match(/^([A-Za-z_][A-Za-z0-9_:]*)\s+(&?[A-Za-z_][A-Za-z0-9_]*(?:\([^)]*\))?)/i);
                     if (varMatch) {
                         const varName = varMatch[1];
                         const isReference = varMatch[2].startsWith('&');
-                        
-                        logger.info(`Found routine variable: ${varName} (reference: ${isReference}) at line ${lineNum}`);
                         
                         // Create a Variable or ReferenceVariable token
                         const varToken: Token = {
@@ -602,10 +449,22 @@ export class ClarionTokenizer {
     private tokenizeProcedureLocalVariables(): void {
         // Find all procedures/methods/functions
         const procedures = this.tokens.filter(t => 
-            t.subType === TokenType.Procedure || 
-            t.subType === TokenType.MethodImplementation || 
-            t.subType === TokenType.Function
+            t.type === TokenType.Procedure || 
+            t.type === TokenType.Function ||
+            t.subType === TokenType.MethodImplementation
         );
+
+        // 🚀 PERF: Build line-to-token index ONCE (O(n) instead of O(n²))
+        const tokensByLine = new Map<number, Token[]>();
+        for (const token of this.tokens) {
+            if (!tokensByLine.has(token.line)) {
+                tokensByLine.set(token.line, []);
+            }
+            tokensByLine.get(token.line)!.push(token);
+        }
+
+        // Collect new tokens to add (batch insert at end)
+        const newTokens: Token[] = [];
 
         for (const proc of procedures) {
             const procEnd = proc.finishesAt || this.lines.length - 1;
@@ -620,13 +479,19 @@ export class ClarionTokenizer {
                     break;
                 }
                 
-                // Match variable declarations at column 0: varName   type
-                const varMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+(&?[A-Za-z_][A-Za-z0-9_]*)/i);
+                // Match variable declarations at column 0: varName   type or varName type(size)
+                const varMatch = line.match(/^([A-Za-z_][A-Za-z0-9_:]*)\s+(&?[A-Za-z_][A-Za-z0-9_]*(?:\([^)]*\))?)/i);
                 if (varMatch) {
                     const varName = varMatch[1];
                     const isReference = varMatch[2].startsWith('&');
                     
-                    logger.info(`Found procedure local variable: ${varName} (reference: ${isReference}) at line ${lineNum}`);
+                    // 🚀 PERF: O(1) lookup instead of O(n) find
+                    const lineTokens = tokensByLine.get(lineNum);
+                    const existingToken = lineTokens?.find(t => t.value === varName && t.start === 0);
+                    
+                    if (existingToken) {
+                        continue;
+                    }
                     
                     // Create a Variable or ReferenceVariable token
                     const varToken: Token = {
@@ -638,150 +503,15 @@ export class ClarionTokenizer {
                         maxLabelLength: 0
                     };
                     
-                    // Insert the token in the correct position
-                    let insertIndex = this.tokens.findIndex(t => t.line > lineNum);
-                    if (insertIndex === -1) {
-                        insertIndex = this.tokens.length;
-                    }
-                    
-                    this.tokens.splice(insertIndex, 0, varToken);
+                    newTokens.push(varToken);
                 }
             }
         }
-    }
 
-    /** ✅ Expand tabs into spaces for correct alignment */
-    private expandTabs(line: string): string {
-        let expanded = "";
-        let currentColumn = 0;
-
-        for (let char of line) {
-            if (char === "\t") {
-                let nextTabStop = Math.ceil((currentColumn + 1) / this.tabSize) * this.tabSize;
-                let spacesToAdd = nextTabStop - currentColumn; // ✅ Correct calculation
-                expanded += " ".repeat(spacesToAdd);
-                currentColumn = nextTabStop;
-            } else {
-                expanded += char;
-                currentColumn++;
-            }
+        // 🚀 PERF: Batch insert and sort ONCE instead of repeated splice operations
+        if (newTokens.length > 0) {
+            this.tokens.push(...newTokens);
+            this.tokens.sort((a, b) => a.line - b.line || a.start - b.start);
         }
-
-        return expanded;
     }
-
-
-
-
 }
-
-
-/** ✅ Ordered token types */
-const orderedTokenTypes: TokenType[] = [
-    TokenType.Directive,TokenType.Comment, TokenType.ClarionDocument, TokenType.ExecutionMarker, TokenType.Label, TokenType.LineContinuation, TokenType.String, TokenType.ReferenceVariable,
-    TokenType.Type, TokenType.PointerParameter, TokenType.FieldEquateLabel, TokenType.Property,
-    TokenType.PropertyFunction, TokenType.EndStatement, TokenType.Keyword, TokenType.Structure,
-    // ✅ Add StructurePrefix and StructureField before other variable types
-    TokenType.StructurePrefix, TokenType.StructureField,
-    // ✅ Add WindowElement after Structure elements but before other types
-    TokenType.WindowElement,
-    TokenType.ConditionalContinuation, TokenType.Function,  // ✅ Placed after Structure, before FunctionArgumentParameter
-    TokenType.FunctionArgumentParameter, TokenType.TypeAnnotation, TokenType.PictureFormat, TokenType.Number,
-    TokenType.Operator, TokenType.Class, TokenType.Attribute, TokenType.Constant, TokenType.Variable,
-    TokenType.ImplicitVariable, TokenType.Delimiter, TokenType.Unknown
-];
-
-const STRUCTURE_PATTERNS: Record<string, RegExp> = {
-    MODULE: /^\s*MODULE\b/i,  // MODULE should be the first word on the line
-    APPLICATION: /\bAPPLICATION\b(?=\s*(\(|,))/i,
-    CASE: /\bCASE\b/i,
-    CLASS: /\bCLASS\b/i,
-    GROUP: /\bGROUP\b/i,
-    FILE: /\sFILE\b/i,
-    INTERFACE: /\bINTERFACE\b/i,
-    IF: /\bIF\b/i,  // ✅ Re-added "IF" as a structure
-    JOIN: /\bJOIN\b/i,
-    LOOP: /\bLOOP\b/i,
-    MAP: /\bMAP\b/i,
-    MENU: /\bMENU\b(?=\s*(\(|,))/i,
-    MENUBAR: /\bMENUBAR\b/i,
-    //QUEUE: /\bQUEUE(?![:\(])\b/i,  // Prevents detecting Queue:Browse as a structure
-    QUEUE: /\s+\bQUEUE\b(?!:)/i,
-
-    // RECORD: /^\s*(\w+)\s+(RECORD)\b/i,
-    RECORD: /\bRECORD\b/i,
-    REPORT: /\bREPORT\b/i,
-    SECTION: /\bSECTION\b/i,
-    SHEET: /\bSHEET\b/i,
-    TAB: /\bTAB\b/i,
-    TOOLBAR: /^[ \t]*TOOLBAR\b(?=\s*(\(|,))/i,  // Only match TOOLBAR at beginning of line followed by ( or ,
-    VIEW: /\sVIEW\b/i,
-    WINDOW: /\bWINDOW\b(?=\s*(\(|,))/i,
-    OPTION: /\bOPTION\b/i,
-    ITEMIZE: /\bITEMIZE\b/i,
-    EXECUTE: /\bEXECUTE\b/i,
-    BEGIN: /\bBEGIN\b/i,  // ✅ Re-added
-    FORM: /\bFORM\b/i,  // ✅ Re-added
-    DETAIL: /\bDETAIL\b/i,  // ✅ Re-added
-    HEADER: /\bHEADER\b/i,  // ✅ Re-added
-    FOOTER: /\bFOOTER\b/i,  // ✅ Re-added
-    BREAK: /\bBREAK\b/i,  // ✅ Re-added
-    ACCEPT: /\bACCEPT\b/i,  // ✅ Re-added
-    OLE: /\bOLE\b/i
-};
-/** ✅ Token Patterns (Kept Exactly the Same) */
-export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
-    [TokenType.Comment]: /!.*/i,
-    [TokenType.LineContinuation]: /&?\s*\|.*/i,
-    [TokenType.String]: /'([^']|'')*'/i,
-    [TokenType.EndStatement]: /^\s*(END|\.)\s*(?:!.*)?$/i,  // ✅ Matches `END` or `.`
-    [TokenType.FunctionArgumentParameter]: /\b[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)/i,  // Captures anything inside ()
-    [TokenType.PointerParameter]: /\*\s*\b[A-Za-z_][A-Za-z0-9_]*\b/i,
-    [TokenType.FieldEquateLabel]: /\?[A-Za-z_][A-Za-z0-9_]*/i,
-    [TokenType.ClarionDocument]: /\b(?:PROGRAM|MEMBER)\b/i,
-    [TokenType.ConditionalContinuation]: /\b(?:ELSE|ELSIF|OF)\b/i,  // ✅ New type for ELSE and ELSIF
-    [TokenType.Keyword]: /\b(?:RETURN|THEN|UNTIL|EXIT|NEW|PROCEDURE|ROUTINE|PROC|BREAK|KEY)\b/i, // Added KEY to keywords
-    [TokenType.PictureFormat]: /(@N[^\s,]*|@[Ee][^\s,]*|@S\d+|@D\d{1,2}[.\-_'`<>]?\d{0,2}B?|@T\d{1,2}[.\-_'`]?[B]?|@[Pp][^Pp\n]+[Pp]B?|@[Kk][^Kk\n]+[Kk]B?)/i,
-
-    [TokenType.Structure]: new RegExp(
-        Object.values(STRUCTURE_PATTERNS).map(r => r.source).join("|"), "i"
-    ),
-    [TokenType.ExecutionMarker]: /^\s*(CODE|DATA)\s*$/i,  // ✅ Matches `CODE` or `DATA` only at start of line
-
-    [TokenType.Function]: /\b(?:COLOR|LINK|DLL)\b(?=\s*\()/i,
-    [TokenType.Directive]: /\b(?:ASSERT|BEGIN|COMPILE|INCLUDE|ITEMIZE|OMIT|ONCE|SECTION|SIZE)\b(?=\s*(\(|,))/i,
-    [TokenType.Property]: /\b(?:HVSCROLL|SEPARATOR|RESIZE|DEFAULT|CENTER|MAX|SYSTEM|IMM|DRIVER|PROP|PROPLIST|EVENT|CREATE|BRUSH|LEVEL|STD|CURSOR|BEEP|REJECT|CHARSET|PEN|LISTZONE|MSGMODE|TEXT|FREEZE|DDE|FF_|OCX|DOCK|MATCH|PAPER|DRIVEROP|DATATYPE|GradientTypes|STD|MDI|GRAY|HLP)\b/i,
-    [TokenType.PropertyFunction]: /\b(?:FORMAT|FONT|USE|ICON|STATUS|MSG|TIP|AT|PROJECT|PRE|FROM|NAME|DLL)\b(?=\s*\()/i,
-    //[TokenType.Label]: /^\s*([A-Za-z_][A-Za-z0-9_:]*)\b/i,
-    [TokenType.Label]: /^\s*([A-Za-z_][A-Za-z0-9_:.]*)\b/i,
-
-    // ✅ Add pattern for structure prefix notation (e.g., INV:Customer)
-    // Updated to handle complex prefixes like Queue:Browse:1:Field
-    [TokenType.StructurePrefix]: /\b[A-Za-z_][A-Za-z0-9_:]*:[A-Za-z_][A-Za-z0-9_]*\b/i,
-    
-    // ✅ Add pattern for structure field with dot notation (e.g., Invoice.Customer)
-    // Updated to handle complex structure names like Queue:Browse:1.Field
-    [TokenType.StructureField]: /\b[A-Za-z_][A-Za-z0-9_:]*\.[A-Za-z_][A-Za-z0-9_]*\b/i,
-
-    [TokenType.Variable]: /&?[A-Za-z_][A-Za-z0-9_]*\s*(?:&[A-Za-z_][A-Za-z0-9_]*)?/i,
-    // ✅ Added support for Binary, Octal, Hex constants
-    [TokenType.Number]: /[+-]?(?:\d+\.\d+|\d+(?!\.\d)|\d+[bBoOhH]|\h*[A-Fa-f0-9]+[hH])/,
-    [TokenType.Operator]: /[+\-*/=<>!&]/i,
-    [TokenType.Class]: /^[A-Za-z_][A-Za-z0-9_:]*\.[A-Za-z_][A-Za-z0-9_:.]*\s/i,
-    [TokenType.Attribute]: /\b(?:ABOVE|ABSOLUTE|AUTO|BINDABLE|CONST|DERIVED|DIM|EXTEND|EXTERNAL|GLOBALCLASS|IMM|IMPLEMENTS|INCLUDE|INS|LATE|MODULE|NOBAR|NOCASE|NOFRAME|NOMEMO|NOMERGE|NOSHEET|OPT|OVER|OVR|OWNER|PRIVATE|PROTECTED|PUBLIC|STATIC|THREAD|TYPE|VIRTUAL)\b/i,
-    [TokenType.Constant]: /\b(?:TRUE|FALSE|NULL|STD:*)\b/i,
-    // ✅ NEW: Detects QUEUE, GROUP, RECORD when used as parameters
-    [TokenType.TypeAnnotation]: /\b(?:QUEUE|GROUP|RECORD|FILE|VIEW|REPORT|MODULE)\s+\w+\)/i,
-    [TokenType.Type]: /\b(?:ANY|ASTRING|BFLOAT4|BFLOAT8|BLOB|MEMO|BOOL|BSTRING|BYTE|CSTRING|DATE|DECIMAL|DOUBLE|EQUATE|FLOAT4|LONG|LIKE|PDECIMAL|PSTRING|REAL|SHORT|SIGNED|SREAL|STRING|TIME|ULONG|UNSIGNED|USHORT|VARIANT)\b/i,
-    [TokenType.ImplicitVariable]: /\b[A-Za-z][A-Za-z0-9_]+(?:\$|#|")\b/i,
-    [TokenType.Delimiter]: /[,():]/i,  // ❌ Remove "." from here
-    [TokenType.ReferenceVariable]: /&[A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*(?::\d+)?)?/i,
-    [TokenType.Unknown]: /\S+/i,
-    
-    // ✅ Add pattern for window structure elements (BUTTON, LIST, ITEM)
-    // These elements appear as the first word on a line but not in column one (requiring at least one space beforehand)
-    // Window elements pattern - for STRING, only match when it's followed by a picture format (@...)
-    [TokenType.WindowElement]: /^[ \t]+(BUTTON|LIST|ITEM|PROMPT|ENTRY|RADIO|CHECK|SLIDER|BOX|IMAGE|PROGRESS|REGION|SPIN|LINE)\b(?!\s*:)|^[ \t]+STRING\s*\(@[^)]*\)/i
-    
-
-};

@@ -18,10 +18,11 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 import { globalSettings } from './globals';
-import LoggerManager from './logger';
+import LoggerManager from './utils/LoggerManager';
 import { SolutionCache } from './SolutionCache';
+import { isInsideMapBlock } from '../../common/clarionUtils';
 const logger = LoggerManager.getLogger("DocumentManager");
-logger.setLevel("error");
+logger.setLevel("error"); // Temporarily set to info for debugging MAP procedure parsing
 
 /**
  * Interface representing document information including statement locations
@@ -120,7 +121,8 @@ export class DocumentManager implements Disposable {
 
     //added detection for extensions
     private readonly modulePattern = /MODULE\s*\(\s*'([^']+\.[a-zA-Z0-9]+)'\s*(?:,\s*'([^']+\.[a-zA-Z0-9]+)'\s*)?\)/ig;
-    private readonly includePattern = /INCLUDE\s*\(\s*'([^']+\.[a-zA-Z0-9]+)'\s*(?:,\s*'([^']+\.[a-zA-Z0-9]+)'\s*)?(?:,\s*ONCE)?\)/ig;
+    // INCLUDE pattern: first param is filename (required extension), second param is section name (no extension required) or ONCE
+    private readonly includePattern = /INCLUDE\s*\(\s*'([^']+\.[a-zA-Z0-9]+)'\s*(?:,\s*'([^']+?)'\s*)?(?:,\s*ONCE)?\)/ig;
     private readonly memberPattern = /\bMEMBER\s*\(\s*'([^']+\.[a-zA-Z0-9]+)'\s*\).*?/ig;
     private readonly linkPattern = /LINK\s*\(\s*'([^']+\.[a-zA-Z0-9]+)'\s*\)/ig;
     // Pattern to detect class method declarations
@@ -447,12 +449,14 @@ export class DocumentManager implements Disposable {
 
             let targetUri = Uri.file(location.fullFileName);
 
-            // Case-insensitive check for section type
-            if ((location.statementType?.toUpperCase() === "SECTION" || location.statementType?.toUpperCase() === "METHOD") &&
-                location.sectionLineLocation) {
+            // For INCLUDE with section, SECTION, or METHOD types, add line fragment for cursor positioning
+            if (location.sectionLineLocation &&
+                (location.statementType?.toUpperCase() === "SECTION" || 
+                 location.statementType?.toUpperCase() === "METHOD" ||
+                 location.statementType?.toUpperCase() === "INCLUDE")) {
                 const lineQueryParam = `${location.sectionLineLocation.line + 1}:1`;
                 targetUri = targetUri.with({ fragment: lineQueryParam });
-                logger.info(`Created link with fragment: ${targetUri.toString()}`);
+                logger.info(`Created link with fragment for ${location.statementType}: ${targetUri.toString()}`);
             }
 
             const link = new DocumentLink(
@@ -499,8 +503,8 @@ export class DocumentManager implements Disposable {
      * @returns The updated location with implementation details, or the original location if implementation not found
      */
     async resolveMethodImplementation(location: ClarionLocation): Promise<ClarionLocation> {
-        // If implementation is already resolved or this is not a method, return as is
-        if (location.implementationResolved || location.statementType !== "METHOD") {
+        // If implementation is already resolved or this is not a method/MAP procedure, return as is
+        if (location.implementationResolved || (location.statementType !== "METHOD" && location.statementType !== "MAPPROCEDURE")) {
             return location;
         }
 
@@ -513,10 +517,48 @@ export class DocumentManager implements Disposable {
         }
 
         // Ensure we have the necessary metadata
-        if (!location.className || !location.methodName || !location.moduleFile) {
-            logger.error(`Missing metadata for method implementation resolution: class=${location.className}, method=${location.methodName}, module=${location.moduleFile}`);
+        if (!location.methodName) {
+            logger.error(`Missing metadata for method implementation resolution: method=${location.methodName}`);
             location.implementationResolved = true; // Mark as resolved to avoid repeated attempts
             return location;
+        }
+        
+        // If no MODULE file, implementation must be in the same file
+        if (!location.moduleFile) {
+            logger.info(`No MODULE file specified for ${location.className}.${location.methodName}, searching in same file`);
+            
+            try {
+                // Try to find implementation in the current document
+                const currentDocument = workspace.textDocuments.find(doc =>
+                    doc.uri.toString() === Uri.file(location.fullFileName).toString()
+                );
+                
+                if (currentDocument) {
+                    const currentContent = currentDocument.getText();
+                    const implLine = this.findMethodImplementationLine(
+                        currentContent,
+                        location.className || "", // Empty string for MAP procedures
+                        location.methodName,
+                        location.parameterSignature
+                    );
+                    
+                    if (implLine !== null) {
+                        logger.info(`✅ Found method implementation for ${location.className}.${location.methodName} in same file at line ${implLine}`);
+                        location.sectionLineLocation = new Position(implLine, 0);
+                    } else {
+                        logger.info(`❌ Could not find implementation for ${location.className}.${location.methodName} in same file`);
+                    }
+                } else {
+                    logger.info(`❌ Could not find open document for ${location.fullFileName}`);
+                }
+                
+                location.implementationResolved = true;
+                return location;
+            } catch (error) {
+                logger.error(`Error resolving implementation in same file: ${error instanceof Error ? error.message : String(error)}`);
+                location.implementationResolved = true;
+                return location;
+            }
         }
 
         try {
@@ -538,7 +580,7 @@ export class DocumentManager implements Disposable {
             // Search for the implementation with parameter matching
             const implLineNumber = this.findMethodImplementationLine(
                 moduleContent,
-                location.className,
+                location.className || "", // Empty string for MAP procedures
                 location.methodName,
                 location.parameterSignature
             );
@@ -559,7 +601,7 @@ export class DocumentManager implements Disposable {
                     const currentContent = currentDocument.getText();
                     const currentImplLine = this.findMethodImplementationLine(
                         currentContent,
-                        location.className,
+                        location.className || "", // Empty string for MAP procedures
                         location.methodName,
                         location.parameterSignature
                     );
@@ -660,14 +702,27 @@ export class DocumentManager implements Disposable {
         // Find all potential implementations of this method
         const implementations: Array<{line: number, params: string[]}> = [];
         
-        // Regex to find all implementations of this method with parameter capture
-        const implRegex = new RegExp(
-            String.raw`(^|\r?\n)[ \t]*` + cls + String.raw`(?:\.|::)` + mth +
-            String.raw`\s+(?:procedure|function)\s*\(([^)]*)\)`,
-            'gi'
-        );
+        // Determine if this is a MAP procedure (no class) or CLASS method
+        const isMapProcedure = !cls || cls === '';
         
-        logger.info(`Searching for implementation of ${cls}.${mth} as PROCEDURE or FUNCTION with parameter matching`);
+        let implRegex: RegExp;
+        if (isMapProcedure) {
+            // For MAP procedures: just "ProcedureName PROCEDURE(...)"
+            implRegex = new RegExp(
+                String.raw`(^|\r?\n)[ \t]*` + mth +
+                String.raw`\s+(?:procedure|function)\s*\(([^)]*)\)`,
+                'gi'
+            );
+            logger.info(`Searching for MAP procedure implementation: ${mth} as PROCEDURE or FUNCTION`);
+        } else {
+            // For CLASS methods: "ClassName.MethodName PROCEDURE(...)"
+            implRegex = new RegExp(
+                String.raw`(^|\r?\n)[ \t]*` + cls + String.raw`(?:\.|::)` + mth +
+                String.raw`\s+(?:procedure|function)\s*\(([^)]*)\)`,
+                'gi'
+            );
+            logger.info(`Searching for CLASS method implementation: ${cls}.${mth} as PROCEDURE or FUNCTION`);
+        }
         
         let match;
         while ((match = implRegex.exec(lowerContent)) !== null) {
@@ -675,6 +730,12 @@ export class DocumentManager implements Disposable {
             const lineNumber = content.substring(0, implPos).split('\n').length - 1;
             const paramString = match[2];
             const params = this.parseImplementationParameters(paramString);
+            
+            // For MAP procedures, skip if this line is inside a MAP block (declaration, not implementation)
+            if (isMapProcedure && isInsideMapBlock(lowerContent, match.index)) {
+                logger.info(`Skipping line ${lineNumber} - inside MAP block (declaration, not implementation)`);
+                continue;
+            }
             
             logger.info(`Found potential implementation at line ${lineNumber} with parameters: [${params.join(', ')}]`);
             
@@ -688,11 +749,20 @@ export class DocumentManager implements Disposable {
         if (implementations.length === 0) {
             logger.info(`No implementations found with parameter capture, trying fallback regex`);
             
-            const fallbackRegex = new RegExp(
-                String.raw`(^|\r?\n)[ \t]*` + cls + String.raw`(?:\.|::)` + mth +
-                String.raw`\s+(?:procedure|function)\s*(?:\([^)]*\))?`,
-                'i'
-            );
+            let fallbackRegex: RegExp;
+            if (isMapProcedure) {
+                fallbackRegex = new RegExp(
+                    String.raw`(^|\r?\n)[ \t]*` + mth +
+                    String.raw`\s+(?:procedure|function)\s*(?:\([^)]*\))?`,
+                    'i'
+                );
+            } else {
+                fallbackRegex = new RegExp(
+                    String.raw`(^|\r?\n)[ \t]*` + cls + String.raw`(?:\.|::)` + mth +
+                    String.raw`\s+(?:procedure|function)\s*(?:\([^)]*\))?`,
+                    'i'
+                );
+            }
             
             const m = fallbackRegex.exec(lowerContent);
             if (m) {
@@ -776,6 +846,7 @@ export class DocumentManager implements Disposable {
      * It extracts locations for "INCLUDE", "MODULE", and "MEMBER" patterns and stores these locations in the openDocuments map.
      */
     public async updateDocumentInfo(document: TextDocument) {
+        const parseStartTime = performance.now();
         logger.info(`📄 Processing document: ${document.uri.fsPath}`);
 
         // 🔹 Get latest lookup extensions
@@ -850,8 +921,21 @@ export class DocumentManager implements Disposable {
             // This prevents repeated processing of the same document
             this.openDocuments.set(document.uri.toString().toLowerCase(), { statementLocations });
 
+            const parseEndTime = performance.now();
+            const parseDuration = parseEndTime - parseStartTime;
+            const lineCount = document.lineCount;
+            const fileExtension = path.extname(document.uri.fsPath).toLowerCase();
+            
+            // Track document parse performance
+            const { trackPerformance } = await import('./telemetry');
+            trackPerformance('DocumentParse', parseDuration, { 
+                lineCount: lineCount.toString(), 
+                fileExtension,
+                statementCount: statementLocations.length.toString()
+            });
+
             if (statementLocations.length > 0) {
-                logger.info(`✅ Stored document info for ${document.uri.fsPath} with ${statementLocations.length} statement locations`);
+                logger.info(`✅ Stored document info for ${document.uri.fsPath} with ${statementLocations.length} statement locations in ${parseDuration.toFixed(2)}ms (${lineCount} lines)`);
 
                 // Log a sample of the statement locations for debugging
                 if (statementLocations.length > 0) {
@@ -859,7 +943,7 @@ export class DocumentManager implements Disposable {
                     logger.info(`🔍 Sample statement: Type=${sample.statementType}, File=${sample.fullFileName}, Position=${sample.linePosition?.line}:${sample.linePosition?.character}`);
                 }
             } else {
-                logger.info(`ℹ️ Stored empty document info for ${document.uri.fsPath}`);
+                logger.info(`ℹ️ Stored empty document info for ${document.uri.fsPath} in ${parseDuration.toFixed(2)}ms (${lineCount} lines)`);
             }
         } catch (error) {
             logger.error(`❌ Error updating document info: ${error instanceof Error ? error.message : String(error)}`);
@@ -1001,7 +1085,8 @@ export class DocumentManager implements Disposable {
             const originalText = document.getText();
             const lowerText = originalText.toLowerCase();
 
-            const classRegex = /([a-z0-9_]+)\s+class\s*(?:\([^)]*\))?\s*(?:,|$)/gis;
+            // Match CLASS definitions: ClassName CLASS,TYPE or ClassName CLASS
+            const classRegex = /^\s*([a-z_][a-z0-9_]*)\s+CLASS\b/gim;
             const moduleRegex = /module\s*\(\s*'([^']+)'\s*(?:[^)]*)\)/gis;
             const linkRegex = /link\s*\(\s*'([^']+)'(?:[^)]*)*\)/gis;
             logger.info(`Searching for class definitions with improved regex pattern`);
@@ -1020,27 +1105,35 @@ export class DocumentManager implements Disposable {
                 const classEndPos = classMatch.index + endInTail.index;
                 logger.info(`Class ${originalClassName} ends at position ${classEndPos}`);
                 const fullClassText = lowerText.substring(classMatch.index, classEndPos);
-                if (!fullClassText.includes('module')) {
-                    logger.info(`No MODULE keyword found for class ${originalClassName}, skipping.`);
-                    continue;
-                }
-                moduleRegex.lastIndex = 0;
-                const moduleMatch = moduleRegex.exec(fullClassText);
-                if (!moduleMatch) {
-                    logger.info(`No MODULE pattern matched for class ${originalClassName}, skipping.`);
-                    continue;
-                }
-                const moduleFile = moduleMatch[1];
-                linkRegex.lastIndex = 0;
-                const linkMatch = linkRegex.exec(fullClassText);
-                const linkFile = linkMatch ? linkMatch[1] : null;
-                logger.info(`Found class ${originalClassName} with MODULE ${moduleFile}${linkFile ? ` and LINK ${linkFile}` : ''}`);
                 
-                // Resolve the module file path (but don't read its content yet)
-                const moduleFilePath = await this.locationProvider.getFullPath(moduleFile, document.uri.fsPath, filePathCache);
-                if (!moduleFilePath) {
-                    logger.info(`❌ Could not resolve MODULE path: ${moduleFile} for class ${originalClassName}`);
-                    // Continue anyway to record the method declarations
+                // Check if CLASS has MODULE declaration
+                let moduleFile: string | null = null;
+                let linkFile: string | null = null;
+                let moduleFilePath: string | null = null;
+                
+                if (fullClassText.includes('module')) {
+                    moduleRegex.lastIndex = 0;
+                    const moduleMatch = moduleRegex.exec(fullClassText);
+                    if (moduleMatch) {
+                        moduleFile = moduleMatch[1];
+                        linkRegex.lastIndex = 0;
+                        const linkMatch = linkRegex.exec(fullClassText);
+                        linkFile = linkMatch ? linkMatch[1] : null;
+                        logger.info(`Found class ${originalClassName} with MODULE ${moduleFile}${linkFile ? ` and LINK ${linkFile}` : ''}`);
+                        
+                        // Resolve the module file path (but don't read its content yet)
+                        moduleFilePath = await this.locationProvider.getFullPath(moduleFile, document.uri.fsPath, filePathCache);
+                        if (!moduleFilePath) {
+                            logger.info(`❌ Could not resolve MODULE path: ${moduleFile} for class ${originalClassName}`);
+                            // Continue anyway to record the method declarations
+                        }
+                    } else {
+                        logger.info(`MODULE keyword found but no pattern matched for class ${originalClassName}`);
+                    }
+                } else {
+                    logger.info(`No MODULE keyword found for class ${originalClassName}, assuming implementation in same file`);
+                    // For classes without MODULE, use the current document as the implementation file
+                    moduleFilePath = document.uri.fsPath;
                 }
                 
                 const lowerClassContent = fullClassText;
@@ -1074,7 +1167,7 @@ export class DocumentManager implements Disposable {
                         // Store metadata for lazy implementation resolution
                         className: originalClassName,
                         methodName: originalMethodName,
-                        moduleFile: moduleFile,
+                        moduleFile: moduleFile || undefined, // Convert null to undefined for type compatibility
                         implementationResolved: false,
                         // Store parameter signature for matching overloaded methods
                         parameterSignature: parameterSignature
@@ -1084,7 +1177,71 @@ export class DocumentManager implements Disposable {
                 }
             }
             
-            logger.info(`Found ${methodLocations.length} method declarations (implementations will be resolved on demand)`);
+            logger.info(`Found ${methodLocations.length} CLASS method declarations`);
+            
+            // Process MAP procedure declarations
+            const mapRegex = /\bmap\b/gis;
+            const mapMatch = mapRegex.exec(lowerText);
+            
+            if (mapMatch) {
+                logger.info(`Found MAP at position ${mapMatch.index}`);
+                
+                // Find the END of the MAP
+                const mapStart = mapMatch.index;
+                const mapTail = lowerText.slice(mapStart);
+                const mapEndMatch = /^\s*end\b/mi.exec(mapTail);
+                
+                if (mapEndMatch) {
+                    const mapEnd = mapStart + mapEndMatch.index;
+                    const mapText = lowerText.substring(mapStart, mapEnd);
+                    const originalMapText = originalText.substring(mapStart, mapEnd);
+                    
+                    logger.info(`MAP ends at position ${mapEnd}`);
+                    
+                    // Look for PROCEDURE declarations in MAP
+                    const procRegex = /^[ \t]*([a-z0-9_]+)\s+procedure\s*\(([^)]*)\)/gim;
+                    let procMatch;
+                    
+                    while ((procMatch = procRegex.exec(mapText)) !== null) {
+                        // Extract original case from originalMapText
+                        const matchStart = procMatch.index;
+                        const matchEnd = matchStart + procMatch[0].length;
+                        const originalMatch = originalMapText.substring(matchStart, matchEnd);
+                        const nameMatch = originalMatch.match(/^[ \t]*([a-z0-9_]+)/i);
+                        if (!nameMatch) continue; // Skip if no match
+                        const originalProcName = nameMatch[1];
+                        
+                        const params = procMatch[2];
+                        const procPos = mapStart + procMatch.index;
+                        const procLine = document.positionAt(procPos).line;
+                        const procChar = document.positionAt(procPos).character;
+                        const procEndChar = procChar + originalProcName.length;
+                        
+                        // Parse parameter signature
+                        const parameterSignature = this.parseDeclarationParameters(params);
+                        
+                        logger.info(`Found MAP procedure: ${originalProcName}(${params}) at line ${procLine}`);
+                        logger.info(`Parsed parameter signature: [${parameterSignature.join(', ')}]`);
+                        
+                        // Store procedure metadata
+                        methodLocations.push({
+                            fullFileName: document.uri.fsPath, // MAP procedures are in same file
+                            linePosition: new Position(procLine, procChar),
+                            linePositionEnd: new Position(procLine, procEndChar),
+                            statementType: "MAPPROCEDURE", // MAP procedures are not class methods
+                            className: "", // No class for MAP procedures
+                            methodName: originalProcName, // Use original case (store procedure name in methodName for compatibility)
+                            moduleFile: undefined, // No MODULE for MAP procedures
+                            implementationResolved: false,
+                            parameterSignature: parameterSignature
+                        });
+                        
+                        logger.info(`Stored metadata for MAP procedure ${originalProcName}`);
+                    }
+                }
+            }
+            
+            logger.info(`Found ${methodLocations.length} total declarations (CLASS methods + MAP procedures)`);
         } catch (error) {
             logger.error(`Error processing method declarations: ${error instanceof Error ? error.message : String(error)}`);
         }

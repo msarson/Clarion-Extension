@@ -1,6 +1,6 @@
 import path = require("path");
 import { DiagnosticCollection, languages, Diagnostic, Uri, Position, Range, DiagnosticSeverity, window } from "vscode";
-import LoggerManager from './logger';
+import LoggerManager from './utils/LoggerManager';
 const logger = LoggerManager.getLogger("ProcessBuildErrors");
 
 const diagnosticCollection: DiagnosticCollection = languages.createDiagnosticCollection("clarion");
@@ -11,13 +11,14 @@ function processBuildErrors(
     logger.info("🔍 Processing build output for errors and warnings...");
     logger.info("📝 Raw Build Output:\n" + buildOutput);
 
-    // Single-line: 3> C:\...\Foo.Clw(123,4): error : Message [C:\...\Bar.cwproj]
+    // Single-line: C:\...\Foo.Clw(123,4): error : Message [C:\...\Bar.cwproj]
+    // Also matches: 3> C:\...\Foo.Clw(123,4): error : Message [C:\...\Bar.cwproj]
     const errorPattern =
-        /^.*?>\s*([A-Za-z]:\\.*?\.(?:[cC][lL][wW]|[iI][nN][cC]|[eE][qQ][uU]|[iI][nN][tT]))\((\d+),(\d+)\):\s+(error|warning)\s*:?\s*(.*?)(?:\s+\[([^\]]+)\])?$/gm;
+        /^(?:.*?>\s*)?([A-Za-z]:\\.*?\.(?:[cC][lL][wW]|[iI][nN][cC]|[eE][qQ][uU]|[iI][nN][tT]))\((\d+),(\d+)\):\s+(error|warning)\s*:?\s*(.*?)(?:\s+\[([^\]]+)\])?$/gm;
 
-    // Wrapped: 3> C:\...\Foo.Clw(123,\n    4): error : Message [C:\...\Bar.cwproj]
+    // Wrapped: C:\...\Foo.Clw(123,\n    4): error : Message [C:\...\Bar.cwproj]
     const wrappedErrorPattern =
-        /^.*?>\s*([A-Za-z]:\\.*?\.(?:[cC][lL][wW]|[iI][nN][cC]|[eE][qQ][uU]|[iI][nN][tT]))\((\d+),\s*$\r?\n^\s*(\d+)\):\s+(error|warning)\s*:?\s*(.*?)(?:\s+\[([^\]]+)\])?/gm;
+        /^(?:.*?>\s*)?([A-Za-z]:\\.*?\.(?:[cC][lL][wW]|[iI][nN][cC]|[eE][qQ][uU]|[iI][nN][tT]))\((\d+),\s*$\r?\n^\s*(\d+)\):\s+(error|warning)\s*:?\s*(.*?)(?:\s+\[([^\]]+)\])?/gm;
 
     // Generic MSBuild lines without a file:  MSBUILD : error MSB1009: ...
     const fallbackPattern =

@@ -32,11 +32,50 @@ export class StatusItem extends vscode.TreeItem {
 export class StatusViewProvider implements vscode.TreeDataProvider<StatusItem> {
     private _onDidChangeTreeData: vscode.EventEmitter<StatusItem | undefined | null | void> = new vscode.EventEmitter<StatusItem | undefined | null | void>();
     readonly onDidChangeTreeData: vscode.Event<StatusItem | undefined | null | void> = this._onDidChangeTreeData.event;
+    private treeView?: vscode.TreeView<StatusItem>;
 
     constructor() {}
+    
+    setTreeView(treeView: vscode.TreeView<StatusItem>): void {
+        this.treeView = treeView;
+    }
 
     refresh(): void {
         this._onDidChangeTreeData.fire();
+        this.updateTitle();
+    }
+    
+    private updateTitle(): void {
+        if (!this.treeView) return;
+        
+        const { warnings, errors } = this.countIssues();
+        
+        if (errors > 0 || warnings > 0) {
+            this.treeView.title = `Extension Status (${errors} ❌, ${warnings} ⚠️)`;
+        } else {
+            this.treeView.title = "Extension Status ✅";
+        }
+    }
+    
+    private countIssues(): { errors: number; warnings: number } {
+        let errors = 0;
+        let warnings = 0;
+        
+        const hasFolder = !!(vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0);
+        const isTrusted = vscode.workspace.isTrusted;
+        const hasSolution = !!globalSolutionFile;
+        const serverActive = isClientReady();
+        
+        // Count errors (❌)
+        if (!serverActive) errors++;
+        if (!isTrusted) errors++;
+        if (!hasFolder) errors++;
+        
+        // Count warnings (⚠️)
+        if (!hasSolution && hasFolder && isTrusted) warnings++;
+        if (!serverActive) warnings += 2; // Document symbols and folding
+        
+        return { errors, warnings };
     }
 
     getTreeItem(element: StatusItem): vscode.TreeItem {
@@ -53,7 +92,7 @@ export class StatusViewProvider implements vscode.TreeDataProvider<StatusItem> {
 
     private getStatusItems(): StatusItem[] {
         const items: StatusItem[] = [];
-        const hasWorkspace = !!vscode.workspace.workspaceFolders;
+        const hasFolder = !!(vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0);
         const isTrusted = vscode.workspace.isTrusted;
         const hasSolution = !!globalSolutionFile;
 
@@ -97,7 +136,7 @@ export class StatusViewProvider implements vscode.TreeDataProvider<StatusItem> {
         ));
 
         // Workspace Status
-        if (!hasWorkspace) {
+        if (!hasFolder) {
             items.push(new StatusItem(
                 "⚠️ Workspace: Not Saved",
                 "Solution management and advanced features require a workspace",
@@ -128,7 +167,7 @@ export class StatusViewProvider implements vscode.TreeDataProvider<StatusItem> {
         }
 
         // Solution Status
-        if (!hasWorkspace) {
+        if (!hasFolder) {
             items.push(new StatusItem(
                 "❌ Solution Management: Disabled",
                 "Workspace required",
@@ -159,7 +198,7 @@ export class StatusViewProvider implements vscode.TreeDataProvider<StatusItem> {
         }
 
         // Cross-file Navigation
-        if (!hasWorkspace || !isTrusted) {
+        if (!hasFolder || !isTrusted) {
             items.push(new StatusItem(
                 "⚠️ Cross-file Navigation: Limited",
                 "Current folder only (workspace required for full navigation)",
@@ -180,7 +219,7 @@ export class StatusViewProvider implements vscode.TreeDataProvider<StatusItem> {
         }
 
         // Build Tasks
-        if (!hasWorkspace || !isTrusted || !hasSolution) {
+        if (!hasFolder || !isTrusted || !hasSolution) {
             items.push(new StatusItem(
                 "❌ Build Tasks: Disabled",
                 "Requires workspace and solution",
@@ -194,20 +233,41 @@ export class StatusViewProvider implements vscode.TreeDataProvider<StatusItem> {
             ));
         }
 
-        // Add separator
-        items.push(new StatusItem("", "", undefined));
+        // Add separator only if we have tips to show
+        const tips: StatusItem[] = [];
         
-        // Help section
-        items.push(new StatusItem(
-            "💡 Tips",
-            "",
-            undefined,
-            [
-                new StatusItem("    • Open a Clarion file to see symbols", "", undefined),
-                new StatusItem("    • Save workspace for solution features", "", undefined),
-                new StatusItem("    • Trust workspace to enable full features", "", undefined)
-            ]
-        ));
+        // Show contextual tips based on current issues
+        if (!hasFolder) {
+            tips.push(new StatusItem("    💡 Save a workspace to unlock:", "", undefined));
+            tips.push(new StatusItem("       • Solution management", "", undefined));
+            tips.push(new StatusItem("       • Cross-file navigation", "", undefined));
+            tips.push(new StatusItem("       • Build tasks", "", undefined));
+        } else if (!isTrusted) {
+            tips.push(new StatusItem("    💡 Trust this workspace to enable:", "", undefined));
+            tips.push(new StatusItem("       • Solution features", "", undefined));
+            tips.push(new StatusItem("       • Full language features", "", undefined));
+            tips.push(new StatusItem("       • Build and debug tasks", "", undefined));
+        } else if (!hasSolution) {
+            tips.push(new StatusItem("    💡 Open a solution to unlock:", "", undefined));
+            tips.push(new StatusItem("       • Project management", "", undefined));
+            tips.push(new StatusItem("       • Redirection-based file resolution", "", undefined));
+            tips.push(new StatusItem("       • Build commands", "", undefined));
+        } else if (!serverActive) {
+            tips.push(new StatusItem("    💡 Language Server not active:", "", undefined));
+            tips.push(new StatusItem("       • Check Output panel for errors", "", undefined));
+            tips.push(new StatusItem("       • Try reloading VS Code", "", undefined));
+        }
+        
+        // Only show tips section if there are issues to address
+        if (tips.length > 0) {
+            items.push(new StatusItem("", "", undefined)); // Separator
+            items.push(new StatusItem(
+                "💡 Tips",
+                "",
+                undefined,
+                tips
+            ));
+        }
 
         return items;
     }

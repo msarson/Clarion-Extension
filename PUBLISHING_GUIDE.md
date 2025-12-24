@@ -10,6 +10,47 @@ You need two things:
 
 ---
 
+## Pre-Publishing Checklist
+
+Before publishing a new release, ensure:
+
+### 1. ✅ Update Version Number
+- Update version in `package.json`
+- Update version references in documentation if needed
+
+### 2. ✅ Build in Release Mode
+**IMPORTANT**: Always build in release mode for marketplace publishing!
+
+```bash
+# Compile with release mode logging (minimal console output)
+npm run compile:release
+
+# OR package directly with release mode
+npm run package:release
+```
+
+**What this does:**
+- Sets `VSCODE_RELEASE_MODE=true` environment variable
+- Activates minimal logging (error-level only)
+- Reduces console output for end users
+- Makes extension logs cleaner in production
+
+**Development vs Release Logging:**
+- **Development** (`npm run compile`): `warn` level logging for debugging
+- **Release** (`npm run compile:release`): `error` level only for production
+
+### 3. ✅ Run Tests
+```bash
+npm test
+```
+
+### 4. ✅ Update Documentation
+- Update `CHANGELOG.md` with new version
+- Update `README.md` if features changed
+- Commit all documentation changes
+
+---
+
 ## Step 1: Get Your VS Code Marketplace Token
 
 ### A. Check if you already have a token
@@ -116,8 +157,8 @@ vsce login msarson
 # Make sure you're on master with latest changes
 git pull origin master
 
-# Build
-npm run compile
+# Build IN RELEASE MODE (important!)
+npm run compile:release
 
 # Publish (this uses the version from package.json)
 vsce publish
@@ -125,12 +166,14 @@ vsce publish
 
 Or build and publish manually:
 ```bash
-# Package only (creates .vsix file)
-vsce package
+# Package IN RELEASE MODE (creates .vsix file)
+npm run package:release
 
 # Then publish the .vsix
-vsce publish clarion-extensions-0.5.8.vsix
+vsce publish clarion-extensions-0.7.3.vsix
 ```
+
+**⚠️ IMPORTANT**: Always use `npm run compile:release` or `npm run package:release` when building for publishing. This ensures minimal logging for end users.
 
 ---
 

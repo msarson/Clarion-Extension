@@ -1,0 +1,2112 @@
+# Clarion Language Knowledge Base
+
+This document provides comprehensive reference information about the Clarion programming language to help guide language server implementation and diagnostics.
+
+---
+
+## Conditional Compilation - OMIT and COMPILE
+
+### OMIT Directive
+
+**Syntax:** `OMIT(terminator [,expression])`
+
+The OMIT directive specifies a block of source code lines to be omitted from the compilation. The omitted block begins with the OMIT directive and ends with the line that contains the same string constant as the terminator. **The entire terminating line is included in the OMIT block.**
+
+**Key Rules:**
+- The `terminator` is a string constant (e.g., `'**END**'`, `'***'`) that marks the last line of the omitted block
+- The terminator string is **case-sensitive** - it must match exactly
+- The terminator can appear anywhere on the line (e.g., as a comment like `!**END**` or standalone like `***`)
+- The line containing the terminator is NOT compiled (it's part of the OMIT block)
+- An optional `expression` parameter allows conditional OMIT execution
+- If the expression is true, the OMIT executes (code is omitted)
+- If the expression is false or missing, code is omitted unconditionally
+
+**Expression Format:**
+```clarion
+<equate>
+<equate> = <integer constant>
+<equate> <> <integer constant>
+<equate> > <integer constant>
+<equate> < <integer constant>
+<equate> >= <integer constant>
+<equate> <= <integer constant>
+```
+
+**Nesting:**
+- Maximum nesting: 8 levels with conditions that don't omit, plus 1 additional level that does omit
+- OMIT and COMPILE blocks can be nested within each other
+
+**Examples:**
+```clarion
+! Unconditional OMIT
+OMIT('**END**')
+  SIGNED   EQUATE(SHORT)
+  UNSIGNED EQUATE(USHORT)
+**END**
+
+! Conditional OMIT - only omit if _WIDTH32_ is true
+OMIT('***',_WIDTH32_)
+  SIGNED   EQUATE(SHORT)
+  UNSIGNED EQUATE(USHORT)
+***
+
+! Terminator in comment
+OMIT('EndOfFile')
+  Demo EQUATE(0)
+  !EndOfFile
+
+! Multiple terminators
+OMIT('**END1**')
+  code1
+  OMIT('**END2**')
+    code2
+  **END2**
+**END1**
+```
+
+---
+
+### COMPILE Directive
+
+**Syntax:** `COMPILE(terminator [,expression])`
+
+The COMPILE directive specifies a block of source code lines to be included in the compilation. It works exactly like OMIT but with opposite logic.
+
+**Key Rules:**
+- Same terminator rules as OMIT (case-sensitive, can be anywhere on line)
+- The code between COMPILE and terminator is compiled only if the expression is true
+- If expression is false or missing, code is included unconditionally
+- Although not required, COMPILE without an expression is typically unnecessary since all code is compiled by default unless explicitly omitted
+
+**Examples:**
+```clarion
+! Conditional COMPILE - only compile if _WIDTH32_ is true
+COMPILE('***',_WIDTH32_)
+  SIGNED   EQUATE(LONG)
+  UNSIGNED EQUATE(ULONG)
+***
+
+! Nested OMIT/COMPILE
+COMPILE('**32bit**',_width32_)
+  COMPILE('*debug*',_debug_)
+    DEBUGGER::BUTTONLIST Equate('&Continue|&Halt|&Debug')
+  !*debug*
+  
+  OMIT('*debug*',_debug_)
+    DEBUGGER::BUTTONLIST Equate('&Continue|&Halt')
+  !*debug*
+!**32bit**
+```
+
+---
+
+### Diagnostic Rules for OMIT/COMPILE
+
+The language server should flag:
+
+1. **Unterminated OMIT blocks** - OMIT directive without matching terminator
+2. **Unterminated COMPILE blocks** - COMPILE directive without matching terminator
+3. **Case mismatch** - Terminator string with wrong case (e.g., `OMIT('**END**')` but terminator is `**end**`)
+
+The language server should NOT flag:
+
+1. Terminators in comments (e.g., `!**END**` is a valid terminator)
+2. Terminators standalone on their own line (e.g., just `***`)
+3. Properly matched OMIT/COMPILE blocks even if deeply nested
+
+---
+
+## Statement Terminators
+
+Clarion statements can be terminated in two ways:
+
+### 1. END Keyword
+```clarion
+IF condition
+  ! statements
+END
+
+LOOP
+  ! statements
+END
+```
+
+### 2. Inline Dot Terminator
+```clarion
+IF condition THEN statement.
+LOOP WHILE condition. ! Dot terminates the LOOP
+```
+
+**Rules:**
+- The dot (`.`) must be the last character on the line (whitespace/comments allowed after)
+- Only one statement per line when using dot terminator
+- LOOP can also be terminated with WHILE or UNTIL (no dot needed)
+
+---
+
+## Control Structures
+
+### IF Statement
+```clarion
+IF condition [THEN]
+  [statements]
+[ELSIF condition [THEN]]
+  [statements]
+[ELSE]
+  [statements]
+END
+
+! or inline:
+IF condition THEN statement.
+```
+
+**Diagnostic Rules:**
+- IF must be terminated with END or `.`
+- ELSIF and ELSE are optional
+- THEN keyword is optional
+
+### LOOP Statement
+```clarion
+LOOP
+  [statements]
+END
+
+LOOP
+  [statements]
+WHILE condition
+
+LOOP
+  [statements]
+UNTIL condition
+
+! or inline:
+LOOP WHILE condition.
+LOOP UNTIL condition.
+```
+
+**Diagnostic Rules:**
+- LOOP must be terminated with END, WHILE, UNTIL, or `.`
+- WHILE and UNTIL provide conditional termination
+
+### CASE Statement
+```clarion
+CASE condition
+OF expression [TO expression]
+  [statements]
+[OROF expression [TO expression]]
+  [statements]
+[ELSE]
+  [statements]
+END
+```
+
+**Purpose:** Selective execution structure based on condition matching.
+
+**Key Rules:**
+- `condition` - A numeric or string variable or expression to evaluate
+- `OF expression` - Executes statements when expression equals condition
+- `TO` - Allows a range of values (inclusive): `OF 1 TO 10`
+- `OROF expression` - Alternative match for the same OF block (control "falls through")
+- `ELSE` - Executes when no OF/OROF matches (optional, must be last)
+- Must terminate with END or `.`
+
+**Important Notes:**
+- Multiple OF options allowed in one CASE
+- Multiple OROF options can be associated with one OF
+- OROF does not terminate preceding statement groups (fall-through behavior)
+- More efficient than complex IF/ELSIF structures for multiple conditions
+- Both range expressions (OF-TO, OROF-TO) are evaluated even if condition is less than lower boundary
+
+**Examples:**
+```clarion
+! Simple CASE
+CASE UserChoice
+OF 1
+  Message('Option One')
+OF 2
+  Message('Option Two')
+ELSE
+  Message('Invalid Choice')
+END
+
+! CASE with ranges
+CASE Score
+OF 90 TO 100
+  Grade = 'A'
+OF 80 TO 89
+  Grade = 'B'
+OF 70 TO 79
+  Grade = 'C'
+ELSE
+  Grade = 'F'
+END
+
+! CASE with OROF (fall-through)
+CASE KeyCode
+OF MouseLeft
+OROF MouseRight
+  HandleMouseClick()
+OF KeyEnter
+OROF KeySpace
+  ProcessSelection()
+END
+```
+
+**Diagnostic Rules:**
+- CASE must be terminated with END or `.`
+- OF is required (at least one)
+- ELSE is optional but must be last if present
+- TO requires two expressions (lower and upper bounds)
+- OROF must be associated with a preceding OF
+
+### CHOOSE Function
+```clarion
+! Index-based selection
+CHOOSE(expression, value, value [,value...])
+
+! Condition-based selection
+CHOOSE(condition [,truevalue, falsevalue])
+```
+
+**Purpose:** Returns a chosen value from a list based on an expression or condition.
+
+**Syntax Forms:**
+
+1. **Index-based:** `CHOOSE(expression, value1, value2, value3, ...)`
+   - `expression` - Arithmetic expression that resolves to a positive integer
+   - Returns the value at position indicated by expression (1-based)
+   - If expression is out of range, returns the **last** value parameter
+
+2. **Condition-based:** `CHOOSE(condition [,truevalue, falsevalue])`
+   - `condition` - Logical expression
+   - Returns `truevalue` if true, `falsevalue` if false
+   - If no values provided, returns 1 (true) or 0 (false)
+
+**Return Data Type Rules:**
+| All Value Parameters | Return Data Type |
+|---------------------|------------------|
+| All LONG | LONG |
+| DECIMAL or LONG | DECIMAL |
+| All STRING | STRING |
+| DECIMAL, LONG, or STRING | DECIMAL |
+| Anything else | REAL |
+
+**Examples:**
+```clarion
+! Index-based selection
+DayName = CHOOSE(DayOfWeek, 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat')
+! If DayOfWeek = 1, returns 'Sun'
+! If DayOfWeek = 3, returns 'Tue'
+! If DayOfWeek = 99, returns 'Sat' (last value)
+
+! Condition-based (with values)
+Status = CHOOSE(Score >= 60, 'Pass', 'Fail')
+! Returns 'Pass' if Score >= 60, else 'Fail'
+
+! Condition-based (no values)
+Result = CHOOSE(X > Y)
+! Returns 1 if X > Y, else 0
+
+! Complex expression
+Price = CHOOSE(Quantity, 10.00, 9.50, 9.00, 8.50)
+! Quantity=1: $10.00, Quantity=2: $9.50, Quantity=3+: $8.50
+```
+
+**Key Notes:**
+- CHOOSE is a function, not a structure (no END required)
+- Expression/condition is evaluated first
+- Out-of-range index returns last value (not first or error)
+- Return type determined by value parameter types
+- More efficient than IF/ELSIF chains for simple selections
+
+### EXECUTE Structure
+```clarion
+EXECUTE expression
+  statement 1
+  statement 2
+  [BEGIN
+    statements
+  END]
+  statement n
+[ELSE]
+  statement
+END
+```
+
+**Purpose:** Single statement execution structure based on numeric index (1 to n).
+
+**Key Rules:**
+- `expression` - Numeric expression or integer variable
+- Each statement position corresponds to the expression value (1-based)
+- If expression = 1, executes statement 1
+- If expression = 2, executes statement 2
+- If expression = n, executes statement n
+- If expression = 0 or > n, executes ELSE statement (if present)
+- Must terminate with END or `.`
+
+**BEGIN Structure:**
+- Allows multiple statements to be treated as a single EXECUTE option
+- Terminated by END or `.`
+- Counts as one statement in the EXECUTE sequence
+
+**Important Notes:**
+- Most efficient structure for integer-based branching (1 to n)
+- More efficient than CASE or IF/ELSIF for sequential integer values
+- ELSE is optional - if omitted and expression is out of range, execution continues after EXECUTE
+- Can nest other structures (IF, CASE, LOOP, EXECUTE, BEGIN) within EXECUTE
+- EXECUTE can be nested within other structures
+
+**Examples:**
+```clarion
+! Simple EXECUTE
+EXECUTE MenuChoice
+  ProcessNew()
+  ProcessEdit()
+  ProcessDelete()
+  ProcessPrint()
+ELSE
+  Message('Invalid menu choice')
+END
+
+! EXECUTE with BEGIN blocks
+EXECUTE Action
+  InsertRecord()
+  BEGIN
+    LocateRecord()
+    UpdateRecord()
+  END
+  DeleteRecord()
+END
+
+! Nested structures
+EXECUTE ReportType
+  BEGIN
+    IF DetailLevel = 1 THEN
+      SummaryReport()
+    ELSE
+      DetailedReport()
+    END
+  END
+  QuickReport()
+  CustomReport()
+ELSE
+  Message('Unknown report type')
+END
+
+! Inline terminator
+EXECUTE Choice
+  X = 1
+  X = 2
+  X = 3
+.
+```
+
+**Diagnostic Rules:**
+- EXECUTE must be terminated with END or `.`
+- Expression must evaluate to a numeric value
+- BEGIN blocks within EXECUTE must be properly terminated
+- ELSE is optional but must appear after all statement options if present
+
+**Performance Comparison:**
+- **EXECUTE** - Most efficient for sequential integers (1 to n)
+- **CASE** - More efficient than IF/ELSIF for multiple discrete values
+- **IF/ELSIF** - Least efficient for multiple conditions
+
+---
+
+## File and Queue Operations
+
+### GET Statement
+```clarion
+! FILE usage - by key
+GET(file, key)
+
+! FILE usage - by file pointer
+GET(file, filepointer [,length])
+
+! FILE usage - by key pointer
+GET(key, keypointer)
+
+! QUEUE usage - by position
+GET(queue, pointer)
+
+! QUEUE usage - by key field(s)
+GET(queue, [+]key,...,[-]key)
+
+! QUEUE usage - by name string
+GET(queue, name)
+
+! QUEUE usage - by function
+GET(queue, function)
+```
+
+**Purpose:** Retrieves a specific record from a FILE or entry from a QUEUE.
+
+---
+
+### FILE Usage
+
+**GET(file, key)**
+- Gets the first record from the file matching the key component field values
+- Key must be declared as KEY or INDEX in the file structure
+- If no match found, posts "Record Not Found" error (35)
+
+**GET(file, filepointer [,length])**
+- Gets a record by relative position within the file
+- `filepointer` - Value returned by POINTER(file), file driver dependent
+- `length` - Optional bytes to read (1 to RECORD length, defaults to full RECORD)
+- If filepointer = 0, clears current record pointer (no record retrieved)
+- Out of range filepointer posts "Record Not Found" error (35)
+
+**GET(key, keypointer)**
+- Gets a record by relative position within the key
+- `keypointer` - Value returned by POINTER(key), file driver dependent
+- Out of range keypointer posts "Record Not Found" error (35)
+
+**Important FILE Notes:**
+- If GET is unsuccessful, RECORD buffer content is not affected
+- Filepointer/keypointer values are file driver dependent (could be record number, byte position, etc.)
+- Use `GET(file, 0)` to clear record pointer before using DUPLICATE for ADD
+
+---
+
+### QUEUE Usage
+
+**GET(queue, pointer)**
+- Retrieves entry at relative position (1-based)
+- Order is as entries were added or last SORTed
+- If pointer = 0, POINTER procedure returns 0
+- Out of range posts "Entry Not Found" error (30)
+
+**GET(queue, [+]key,...,[-]key)**
+- Searches for first QUEUE entry matching key field value(s)
+- Multiple key parameters allowed (up to 16), comma-separated
+- `+` prefix = ascending sort, `-` prefix = descending sort
+- If QUEUE not SORTed on these fields, creates "alternate sort order" cache
+- Posts "Entry Not Found" error (30) if no match
+
+**GET(queue, name)**
+- Searches by NAME attributes of fields
+- `name` - String containing NAME attributes, comma-separated
+- Optional `+` or `-` prefix for each field name
+- Case sensitive
+- Creates alternate sort order cache if not already sorted
+- Posts "Entry Not Found" error (30) if no match
+
+**GET(queue, function)**
+- Reads from positional value returned by function
+- Function must have two parameters (*GROUP or named GROUP passed by address)
+- Both parameters same type, cannot be omitted
+- Function returns SIGNED value
+- RAW, C, PASCAL attributes not permitted in prototype
+
+---
+
+**Common Error Codes:**
+| Code | Error |
+|------|-------|
+| 08 | Insufficient Memory |
+| 30 | Entry Not Found (QUEUE) |
+| 35 | Record Not Found (FILE) |
+| 36 | File Not Open |
+| 43 | Record Is Already Held |
+| 75 | Invalid Field Type Descriptor |
+
+**Examples:**
+```clarion
+! FILE - Get by key match
+CUS:Name = 'Smith'
+GET(Customer, CUS:NameKey)
+IF ERROR() THEN Message('Customer not found') .
+
+! FILE - Get by position
+FilePos# = POINTER(Customer)
+! ... later ...
+GET(Customer, FilePos#)
+
+! FILE - Clear record pointer
+GET(Customer, 0)  ! Clears pointer for DUPLICATE
+
+! QUEUE - Get by position
+GET(MyQueue, 5)  ! Get 5th entry
+
+! QUEUE - Get by field value
+QUE:Status = 'Active'
+GET(MyQueue, QUE:Status)
+
+! QUEUE - Get by multiple keys (sorted)
+QUE:LastName = 'Smith'
+QUE:FirstName = 'John'
+GET(MyQueue, +QUE:LastName, +QUE:FirstName)
+
+! QUEUE - Get by name string
+GET(MyQueue, '+LastName,+FirstName')
+```
+
+### SET Statement
+```clarion
+! FILE usage - physical order
+SET(file)
+SET(file, key)
+SET(file, filepointer)
+
+! KEY usage - keyed sequence
+SET(key)
+SET(key, key)
+SET(key, keypointer)
+SET(key, key, filepointer)
+
+! VIEW usage
+SET(view)
+SET(view, number)
+```
+
+**Purpose:** Initializes sequential processing of a FILE or VIEW for NEXT/PREVIOUS operations.
+
+**Important:** SET does not retrieve a record - it only sets up processing order and starting point.
+
+---
+
+### FILE Usage
+
+**SET(file)**
+- Physical record order processing
+- Positions to beginning (for NEXT) or end (for PREVIOUS)
+- No starting point specified
+
+**SET(file, key)**
+- Physical record order processing
+- Positions to first record matching key component field values
+- **RARELY USED** - only useful if file physically sorted in key order
+- **Common mistake:** Using this instead of `SET(key, key)`
+
+**SET(file, filepointer)**
+- Physical record order processing
+- Positions to record at filepointer position
+- filepointer from POINTER(file) - driver dependent value
+
+---
+
+### KEY Usage
+
+**SET(key)**
+- Keyed sequence processing in key sort order
+- Positions to beginning (for NEXT) or end (for PREVIOUS)
+- No starting point specified
+
+**SET(key, key)**
+- Keyed sequence processing in key sort order
+- Positions to first/last record matching key component field values
+- **Both key parameters must be the same**
+- If exact match: NEXT reads first match, PREVIOUS reads last match
+- If no exact match: NEXT reads next greater, PREVIOUS reads next lesser
+
+**SET(key, keypointer)**
+- Keyed sequence processing in key sort order
+- Positions to record at keypointer position within key
+- keypointer from POINTER(key) - driver dependent value
+
+**SET(key, key, filepointer)**
+- Keyed sequence processing in key sort order
+- Positions to record matching key values at exact record number (filepointer)
+- **Both key parameters must be the same**
+- Combines key matching with specific record position
+
+---
+
+### VIEW Usage
+
+**SET(view)**
+- Sequential processing for VIEW
+- Positions to beginning or end of filtered record set
+- Records sorted by ORDER attribute
+- VIEW must be OPEN before SET
+
+**SET(view, number)**
+- Sequential processing for VIEW with partial ORDER
+- `number` - Limits to first N expressions in ORDER attribute
+- Assumes values in first N ORDER expressions are fixed
+- VIEW must be OPEN before SET
+
+---
+
+**Important Notes:**
+- SET combined with NEXT processes forward through file/key
+- SET combined with PREVIOUS processes backward through file/key
+- filepointer/keypointer values are file driver dependent
+- Attempting to SET past end of file sets EOF() to true
+- Attempting to SET before beginning of file sets BOF() to true
+
+**Examples:**
+```clarion
+! FILE - Sequential processing from start
+SET(Customer)
+LOOP
+  NEXT(Customer)
+  IF ERROR() THEN BREAK .
+  ! Process record
+END
+
+! KEY - Process in key order
+SET(CUS:NameKey)
+LOOP
+  NEXT(Customer)
+  IF ERROR() THEN BREAK .
+  ! Process in name order
+END
+
+! KEY - Start at specific value
+CUS:LastName = 'Smith'
+SET(CUS:NameKey, CUS:NameKey)
+LOOP
+  NEXT(Customer)
+  IF ERROR() THEN BREAK .
+  IF CUS:LastName <> 'Smith' THEN BREAK .  ! Stop when past 'Smith'
+  ! Process all Smith records
+END
+
+! FILE - Resume from saved position
+SavePos# = POINTER(Customer)
+! ... later ...
+SET(Customer, SavePos#)
+NEXT(Customer)
+
+! KEY - Resume from saved key position
+SavePos# = POINTER(CUS:NameKey)
+! ... later ...
+SET(CUS:NameKey, SavePos#)
+NEXT(Customer)
+
+! VIEW - Sequential processing
+OPEN(CustomerView)
+SET(CustomerView)
+LOOP
+  NEXT(CustomerView)
+  IF ERROR() THEN BREAK .
+  ! Process filtered records
+END
+
+! VIEW - Partial ORDER
+SET(CustomerView, 2)  ! First 2 ORDER expressions fixed
+LOOP
+  NEXT(CustomerView)
+  IF ERROR() THEN BREAK .
+  ! Process subset
+END
+```
+
+**Common Patterns:**
+```clarion
+! Forward scan
+SET(key)
+LOOP
+  NEXT(file)
+  IF ERROR() THEN BREAK .
+END
+
+! Backward scan
+SET(key)
+LOOP
+  PREVIOUS(file)
+  IF ERROR() THEN BREAK .
+END
+
+! Range scan
+key:field = StartValue
+SET(key, key)
+LOOP
+  NEXT(file)
+  IF ERROR() OR key:field > EndValue THEN BREAK .
+END
+```
+
+---
+
+## MAP - Procedure Prototype Declarations
+
+### Syntax
+```clarion
+MAP
+  prototypes
+  [MODULE(filename)
+    prototypes
+  END]
+END
+```
+
+### Official Definition
+
+**MAP** - Contains the prototypes which declare the procedures and external source modules used in a PROGRAM, MEMBER module, or PROCEDURE.
+
+**prototypes** - Declare PROCEDUREs.
+
+**MODULE** - Declare a member source module that contains the definitions of the prototypes in the MODULE.
+
+### Overview
+
+A MAP structure contains the prototypes which declare the PROCEDUREs and external source modules used in a PROGRAM, MEMBER module, or PROCEDURE which are **not members of a CLASS structure**.
+
+### Scope Rules
+
+**PROGRAM MAP** - Declares prototypes of PROCEDUREs available for use throughout the program.
+
+**MEMBER MAP** - Declares prototypes of PROCEDUREs that are explicitly available in that MEMBER module. The same prototypes may be placed in multiple MEMBER modules to make them explicitly available in each.
+
+**PROCEDURE MAP** - Can be included within a PROCEDURE declaration. All prototypes of PROCEDUREs declared in a local PROCEDURE MAP may only be referenced within the PROCEDURE itself.
+
+### Automatic Includes
+
+A MAP structure is mandatory for any non-trivial Clarion program because:
+- **BUILTINS.CLW** is automatically included in your PROGRAM's MAP structure by the compiler
+- This file contains prototypes of most procedures in the Clarion internal library
+- **EQUATES.CLW** is also automatically included (contains constant EQUATEs used by BUILTINS.CLW)
+
+### Prototype Syntax Forms
+
+#### Form 1: With PROCEDURE Keyword (Column 0)
+**Rule:** When using the PROCEDURE keyword, the procedure label MUST be at column 0.
+
+```clarion
+MAP
+MyProc PROCEDURE(STRING pName),LONG    ! Label at column 0
+SaveData PROCEDURE(*DataGroup),BYTE   ! Label at column 0
+END
+```
+
+#### Form 2: Shorthand Syntax (Indented)
+**Rule:** When omitting the PROCEDURE keyword, the procedure name MUST be indented (NOT at column 0).
+
+**CRITICAL:** This is the ONLY place in Clarion where an identifier at indented position (not column 0) can be a procedure declaration.
+
+```clarion
+MAP
+  ToUpper(byte char), byte             ! Indented, no PROCEDURE keyword
+  ToLower(byte char), byte             ! Indented, no PROCEDURE keyword
+  MemCmp(long buf1, long buf2, unsigned count), long  ! With or without space before (
+END
+```
+
+**Space before parenthesis is optional:**
+- `ToUpper (byte char)` - Valid (with space)
+- `MemCmp(long buf1)` - Valid (without space)
+
+### MODULE within MAP
+
+MODULE sections within MAP declare a member source module that contains the definitions of the prototypes:
+
+```clarion
+MAP
+  ! Direct MAP procedures (prototypes)
+  SortCaseSensitive(*LinesGroupType p1, *LinesGroupType p2), Long
+  SortLength(*LinesGroupType p1, *LinesGroupType p2), Long
+  
+  MODULE('kernel32.dll')
+    GetTickCount(), ULONG              ! Indented, inside MODULE
+    GetCurrentProcessId(), ULONG       ! Indented, inside MODULE
+  END                                   ! Terminates MODULE
+  
+  MODULE('user32.dll')
+    MessageBoxA(LONG, *CSTRING, *CSTRING, LONG), LONG
+  END
+END
+```
+
+**Important MODULE Rules:**
+- MODULE declares an external source module filename
+- MODULE is terminated by END or by the start of another MODULE
+- Procedures inside MODULE use the same shorthand syntax (indented, no PROCEDURE keyword)
+- MODULE cannot appear outside of MAP
+- MODULE can also be used as an attribute in CLASS declarations (different usage)
+
+### Validation Rules
+
+**Valid:**
+```clarion
+MAP
+  ! Shorthand - indented, no PROCEDURE keyword
+  MyFunc(long x), long
+  
+  ! Traditional - column 0, with PROCEDURE keyword  
+MyProc PROCEDURE(string s), byte
+  
+  ! MODULE with prototypes
+  MODULE('mylib.dll')
+    LibFunc(long x), long
+  END
+END
+```
+
+**Invalid:**
+```clarion
+MAP
+MyFunc(long x), long          ! ERROR: Shorthand form must be indented
+  MyProc PROCEDURE(string s)  ! ERROR: PROCEDURE keyword requires column 0 label
+END
+```
+
+---
+
+## Procedure Implementations and RETURN Statements
+
+### MAP Declaration vs Implementation
+
+**Critical Rule:** Procedure implementations MUST NOT include the return type in the PROCEDURE statement, even if the MAP declaration specifies one.
+
+**MAP Declaration (with return type):**
+```clarion
+MAP
+  TextLineCount PROCEDURE(LONG TextFEQ),LONG  ! Declaration includes return type
+  DB            PROCEDURE(STRING Info)         ! No return type
+END
+```
+
+**Implementation (WITHOUT return type):**
+```clarion
+TextLineCount PROCEDURE(LONG TextFEQ)         ! Return type OMITTED
+LastLineNo LONG,AUTO
+  CODE
+  LOOP LastLineNo=TextFEQ{PROP:LineCount} TO 1 BY -1
+  WHILE ~TextFEQ{PROP:Line,LastLineNo}
+  RETURN LastLineNo                           ! Returns a value
+  
+DB PROCEDURE(STRING xMessage)                 ! No return type
+sz CSTRING(256)
+  CODE
+  sz = 'Debug: ' & CLIP(xMessage)
+  OutputDebugString(sz)
+  RETURN                                      ! Returns nothing (void)
+```
+
+### Why Implementation Cannot Have Return Type
+
+**Compiler Requirement:** If you add the return type to the implementation, the code will NOT compile. The return type is ONLY specified in the MAP declaration (prototype), never in the implementation.
+
+### Common Documentation Pattern
+
+Many developers add a comment to show the return type at the implementation for readability:
+
+```clarion
+TextLineCount PROCEDURE(LONG TextFEQ)!,LONG   ! Comment shows return type
+  CODE
+  ! ... implementation ...
+  RETURN LastLineNo
+```
+
+This is purely for documentation - the `!,LONG` is commented out and has no effect on compilation.
+
+### RETURN Statement Rules
+
+**For procedures WITH return type (declared in MAP):**
+```clarion
+MAP
+  GetCount PROCEDURE(),LONG                   ! Returns LONG
+END
+
+GetCount PROCEDURE()                          ! Implementation - no return type
+Count LONG
+  CODE
+  Count = 42
+  RETURN Count                                ! MUST return a value
+```
+
+**For procedures WITHOUT return type (void procedures):**
+```clarion
+MAP
+  LogMessage PROCEDURE(STRING Msg)            ! No return type (void)
+END
+
+LogMessage PROCEDURE(STRING Msg)              ! Implementation - no return type
+  CODE
+  MESSAGE(Msg)
+  RETURN                                      ! Empty RETURN is correct
+```
+
+**Mixed RETURN Statements:**
+A void procedure can have:
+- `RETURN` with no value (returns control to caller)
+- No explicit RETURN (implicit RETURN at end of procedure)
+- Multiple RETURN statements for early exit
+
+```clarion
+MAP
+  ProcessData PROCEDURE(LONG Value)           ! No return type
+END
+
+ProcessData PROCEDURE(LONG Value)
+  CODE
+  IF Value < 0
+    RETURN                                    ! Early exit - valid
+  END
+  ! ... process data ...
+  ! Implicit RETURN at end
+```
+
+### Validation Rules
+
+**Valid:**
+- MAP declares return type, implementation RETURNS a value
+- MAP has no return type, implementation has empty RETURN
+- MAP has no return type, implementation has no explicit RETURN
+- MAP has no return type, implementation has multiple empty RETURNs for flow control
+
+**Invalid:**
+- Adding return type to implementation (won't compile)
+- MAP declares return type, but implementation always returns empty
+- MAP has no return type, but implementation tries to return a value
+
+---
+
+## File Declarations
+
+### FILE Structure
+```clarion
+label FILE,DRIVER('driver')
+       [,CREATE] [,RECLAIM] [,OWNER('password')] [,ENCRYPT]
+       [,NAME('filename')] [,PRE(prefix)]
+       [,BINDABLE] [,TYPE] [,THREAD] [,EXTERNAL] [,DLL] [,OEM]
+  label KEY(components) [,attributes]
+  label INDEX(components) [,attributes]
+  label MEMO(size) [,attributes]
+  label BLOB [,attributes]
+  [label] RECORD
+    fields
+  END
+END
+```
+
+**Purpose:** Declares a data file structure describing a disk file.
+
+**Required Attributes:**
+- **DRIVER('driver')** - Specifies file type (PROP:DRIVER) - **REQUIRED**
+- **RECORD** - Declares record structure for fields - **REQUIRED**
+
+---
+
+### FILE Attributes
+
+**CREATE**
+- Allows file creation with CREATE statement during execution
+- Property: PROP:CREATE
+
+**RECLAIM**
+- Specifies reuse of deleted record space
+- Property: PROP:RECLAIM
+
+**OWNER('password')**
+- Specifies password for data encryption
+- Property: PROP:OWNER
+
+**ENCRYPT**
+- Encrypts the data file
+- Property: PROP:ENCRYPT
+
+**NAME('filename')**
+- Sets the filename
+- Property: PROP:NAME
+- Can be STRING,STATIC with THREAD attribute for per-thread filenames
+
+**PRE(prefix)**
+- Declares label prefix for the structure
+- All field labels automatically prefixed
+
+**BINDABLE**
+- All RECORD variables available for dynamic expressions
+- Enables BIND(file) for all fields
+- Uses NAME attribute (or label with prefix) as logical name
+- Creates larger .EXE - use only when many fields used dynamically
+
+**TYPE**
+- FILE is type definition for parameters
+- **Only available for Clarion#**
+
+**THREAD**
+- Separate record buffer allocated per execution thread
+- Buffer allocated only when thread OPENs file
+- Use with NAME('STRING,STATIC') for per-thread filenames
+- Property: PROP:THREAD
+- **Note:** Local FILEs (in PROCEDURE/ROUTINE) are automatically threaded
+
+**EXTERNAL**
+- FILE defined in external library
+- Memory allocated by external library
+- Allows access to public FILEs from external libraries
+
+**DLL**
+- FILE defined in .DLL
+- Required in addition to EXTERNAL attribute
+
+**OEM**
+- String data converted OEM ↔ ANSI on disk I/O
+- OEM ASCII to ANSI when reading
+- ANSI to OEM ASCII when writing
+- Property: PROP:OEM
+
+---
+
+### KEY and INDEX
+
+**KEY(components)**
+- Dynamically updated file access index
+- Components: field1[,field2,...]
+- Automatically maintained by file driver
+
+**INDEX(components)**
+- Static file access index
+- Must be built at run time
+- Not automatically maintained
+
+**Common KEY/INDEX Attributes:**
+- DUP - Allow duplicate key values
+- NOCASE - Case-insensitive comparison
+- OPT - Optional (null) key values
+- PRIMARY - Primary key
+
+---
+
+### MEMO and BLOB
+
+**MEMO(size)**
+- Variable length text field
+- Maximum 64K length
+- Memory allocated when FILE opened
+- De-allocated when FILE closed
+
+**BLOB**
+- Variable length memo field
+- May exceed 64K length
+- Memory allocated as needed when FILE open
+
+---
+
+### Important Notes
+
+**Memory Allocation:**
+- RECORD buffer allocated as static memory on heap
+- Remains static even if FILE declared in local data section
+- MEMO memory allocated at OPEN, de-allocated at CLOSE
+- BLOB memory allocated as needed after OPEN
+
+**Thread Safety:**
+- Local FILEs (in PROCEDURE/ROUTINE) automatically threaded
+- Global FILEs need explicit THREAD attribute for per-thread buffers
+- Thread buffer allocated only if thread OPENs the file
+
+**Driver Dependency:**
+- All attributes and data types depend on file driver support
+- Unsupported features cause error when FILE opened
+- Check driver documentation for restrictions
+
+**Termination:**
+- FILE structure must end with END or `.`
+
+---
+
+**Examples:**
+```clarion
+! Simple file declaration
+Customer FILE,DRIVER('TOPSPEED'),PRE(CUS),CREATE,RECLAIM
+          KEY(CUS:ID),PRIMARY
+          INDEX(CUS:LastName),DUP,NOCASE
+          RECORD
+CUS:ID         LONG
+CUS:LastName   STRING(30)
+CUS:FirstName  STRING(30)
+CUS:Address    STRING(50)
+CUS:Notes      MEMO(1000)
+          END
+        END
+
+! File with BINDABLE for dynamic expressions
+Report   FILE,DRIVER('TOPSPEED'),BINDABLE,NAME('REPORT.TPS')
+          RECORD
+ReportDate     DATE,NAME('Date')
+ReportAmount   DECIMAL(12,2),NAME('Amount')
+ReportStatus   STRING(20),NAME('Status')
+          END
+        END
+! Now can use: BIND(Report) and evaluate 'Amount * 1.1'
+
+! Threaded file for multi-threading
+LogFile  FILE,DRIVER('ASCII'),THREAD,NAME('LOG.TXT')
+          RECORD
+LogEntry  STRING(200)
+          END
+        END
+
+! Encrypted file with owner password
+Secure   FILE,DRIVER('TOPSPEED'),ENCRYPT,OWNER('MyPassword'),CREATE
+          KEY(SEC:ID),PRIMARY
+          RECORD
+SEC:ID    LONG
+SEC:Data  STRING(100)
+          END
+        END
+
+! External file from library
+External FILE,DRIVER('TOPSPEED'),EXTERNAL,PRE(EXT)
+          RECORD
+EXT:Field1  STRING(20)
+EXT:Field2  LONG
+          END
+        END
+
+! File with BLOB for large data
+Document FILE,DRIVER('TOPSPEED'),CREATE
+          KEY(DOC:ID),PRIMARY
+          RECORD
+DOC:ID      LONG
+DOC:Title   STRING(100)
+DOC:Content BLOB  ! Can exceed 64K
+          END
+        END
+```
+
+---
+
+## Data Structures
+
+### QUEUE Structure
+```clarion
+label QUEUE([group])
+       [,PRE(prefix)] [,STATIC] [,THREAD] [,TYPE] [,BINDABLE]
+       [,EXTERNAL] [,DLL]
+  fieldlabel variable [,NAME('name')]
+  ...
+END
+```
+
+**Purpose:** Declares a memory QUEUE structure (dynamic array with run-length compression).
+
+---
+
+### QUEUE Attributes
+
+**group (optional)**
+- Label of previously declared GROUP, QUEUE, or RECORD
+- QUEUE inherits fields from the named group
+- Can add additional fields after inherited ones
+- If no additional fields needed, can use group label as data type directly
+
+**PRE(prefix)**
+- Declares fieldlabel prefix for the structure
+- All field labels automatically prefixed
+
+**STATIC**
+- Declares procedure-local QUEUE with static memory allocation
+- Buffer remains persistent between procedure calls
+- Otherwise, procedure-local QUEUEs allocated on stack
+
+**THREAD**
+- Memory allocated once per execution thread
+- Implies STATIC attribute for procedure-local data
+- Separate QUEUE instance per thread
+
+**TYPE**
+- QUEUE is just a type definition (no memory allocated)
+- Used for QUEUEs passed as PROCEDURE parameters
+- Allows receiving procedure to directly address component fields
+- Parameter declaration instantiates local prefix (e.g., `PROCEDURE(LOC:PassedQueue)`)
+
+**BINDABLE**
+- All variables available for dynamic expressions
+- Enables `BIND(queue)` for all fields
+- Uses NAME attribute (or label with prefix) as logical name
+- Creates larger .EXE - use only when many fields used dynamically
+
+**EXTERNAL**
+- QUEUE defined in external library
+- Memory allocated by external library
+- Allows access to public QUEUEs from external libraries
+
+**DLL**
+- QUEUE defined in .DLL
+- Required in addition to EXTERNAL attribute
+
+---
+
+### Memory Management
+
+**Compression:**
+- Each entry run-length compressed during ADD or PUT
+- De-compressed during GET
+- Minimizes memory usage automatically
+
+**Overhead:**
+- 8 bytes per entry (uncompressed records)
+- 12 bytes per entry (compressed records)
+
+**Memory Allocation:**
+- **Procedure-local (no STATIC):**
+  - Buffer allocated on stack (if not too large)
+  - Entry memory freed when QUEUE FREEd or PROCEDURE RETURNs
+  - QUEUE automatically FREEd on RETURN
+  
+- **Global/Module/Local with STATIC:**
+  - Buffer allocated in static memory
+  - Data persistent between procedure calls
+  - Entry memory freed only when QUEUE explicitly FREEd
+
+**Entry Limits:**
+- Theoretical maximum: 2^26 (67,108,864) entries
+- Actual limit: Dependent on available virtual memory
+- Maximum size per entry: 4MB (sum of all variables)
+
+**Initialization:**
+- Variables in buffer NOT automatically initialized
+- Must explicitly assign values
+- Do NOT assume blanks or zeros
+
+---
+
+### Usage Notes
+
+**When Used in Expressions:**
+- QUEUE treated like GROUP data type
+- Can be used in assignments, expressions, parameter lists
+
+**Field Access:**
+- Use WHAT() and WHERE() procedures for positional field access
+- Direct field access using fieldlabel (with prefix if defined)
+
+**Dynamic Addition/Deletion:**
+- Memory dynamically allocated when entries added (ADD)
+- Memory freed when entries deleted (DELETE)
+- Entries compressed to minimize memory
+
+---
+
+**Examples:**
+```clarion
+! Simple QUEUE
+MyQueue  QUEUE
+Name      STRING(30)
+Age       LONG
+Status    STRING(20)
+        END
+
+! QUEUE with prefix
+CustomerQueue QUEUE,PRE(CQ)
+CQ:ID          LONG
+CQ:Name        STRING(50)
+CQ:Balance     DECIMAL(12,2)
+              END
+
+! QUEUE inheriting from GROUP
+PersonGroup GROUP
+Name         STRING(30)
+Age          LONG
+            END
+
+PersonQueue QUEUE(PersonGroup)  ! Inherits Name and Age
+Address      STRING(50)        ! Additional field
+            END
+
+! QUEUE with BINDABLE for dynamic expressions
+ReportQueue QUEUE,BINDABLE
+Amount       DECIMAL(12,2),NAME('Amount')
+Quantity     LONG,NAME('Qty')
+Total        DECIMAL(12,2),NAME('Total')
+            END
+! Now can use: BIND(ReportQueue) and evaluate 'Amount * Qty'
+
+! STATIC QUEUE for persistent data
+MyProc   PROCEDURE
+LocalQueue QUEUE,STATIC  ! Persists between calls
+Value       LONG
+           END
+CODE
+  ! Queue data persists across procedure calls
+
+! TYPE QUEUE for parameter passing
+EmployeeType QUEUE,TYPE
+EmpID         LONG
+EmpName       STRING(50)
+EmpSalary     DECIMAL(10,2)
+             END
+
+ProcessEmployee PROCEDURE(EmployeeType EMP)  ! EMP: prefix
+CODE
+  ! Access fields as EMP:EmpID, EMP:EmpName, etc.
+
+! Threaded QUEUE for multi-threading
+ThreadQueue QUEUE,THREAD
+ThreadData   STRING(100)
+ThreadCount  LONG
+            END
+
+! Simple usage
+MyQueue  QUEUE
+Item      STRING(20)
+        END
+CODE
+  CLEAR(MyQueue)
+  MyQueue.Item = 'First'
+  ADD(MyQueue)
+  
+  MyQueue.Item = 'Second'
+  ADD(MyQueue)
+  
+  LOOP X# = 1 TO RECORDS(MyQueue)
+    GET(MyQueue, X#)
+    MESSAGE(MyQueue.Item)
+  END
+  
+  FREE(MyQueue)  ! Free all entries
+```
+
+### GROUP Structure
+```clarion
+label GROUP([group])
+       [,PRE(prefix)] [,DIM(dimensions)] [,OVER(variable)] [,NAME('name')]
+       [,EXTERNAL] [,DLL] [,STATIC] [,THREAD] [,BINDABLE] [,TYPE]
+       [,PRIVATE] [,PROTECTED]
+  declarations
+END
+```
+
+**Purpose:** Declares a compound data structure for organizing related variables.
+
+---
+
+### GROUP Attributes
+
+**group (optional)**
+- Label of previously declared GROUP or QUEUE
+- GROUP inherits fields from the named group
+- Can add additional fields after inherited ones
+- If inheriting from QUEUE/RECORD, only fields inherited (not functionality)
+
+**PRE(prefix)**
+- Declares label prefix for variables within the structure
+- NOT valid on GROUP within FILE structure
+
+**DIM(dimensions)**
+- Dimensions variables into an array
+- Creates structured array
+- Access using Field Qualification syntax with subscripts
+
+**OVER(variable)**
+- Shares memory location with another variable or structure
+- Variables occupy same memory space
+
+**NAME('name')**
+- Specifies alternate "external" name for the field
+
+**EXTERNAL**
+- Variable defined in external library
+- Memory allocated by external library
+- NOT valid within FILE, QUEUE, or GROUP declarations
+
+**DLL**
+- Variable defined in .DLL
+- Required in addition to EXTERNAL attribute
+
+**STATIC**
+- Variable's memory permanently allocated
+- For procedure-local GROUPs, makes data persistent
+
+**THREAD**
+- Memory allocated once per execution thread
+- Implicitly adds STATIC attribute on procedure-local data
+
+**BINDABLE**
+- All variables available for dynamic expressions
+- Enables `BIND(group)` for all fields
+- Uses NAME attribute (or label with prefix) as logical name
+- Creates larger .EXE - use only when many fields used dynamically
+
+**TYPE**
+- GROUP is type definition (no memory allocated)
+- Used for GROUPs passed as PROCEDURE parameters
+- Allows receiving procedure to directly address component fields
+- Parameter declaration instantiates local prefix
+
+**PRIVATE**
+- GROUP and all component fields not visible outside module containing CLASS methods
+- Valid only in CLASS
+
+**PROTECTED**
+- Variable not visible outside base CLASS and derived CLASS methods
+- Valid only in CLASS
+
+---
+
+### Important Characteristics
+
+**String Treatment:**
+- When referenced in statement/expression, GROUP treated as STRING
+- Composed of all variables within structure
+
+**Numeric Storage Warning:**
+- Numeric variables (except DECIMAL) don't collate properly when treated as strings
+- Building KEY on GROUP with numeric variables may produce unexpected collating sequence
+
+**Nesting:**
+- GROUP may be nested within RECORD or another GROUP
+- Supports hierarchical data organization
+
+**Field Access:**
+- Use Field Qualification syntax (e.g., `GroupName.FieldName`)
+- WHAT() and WHERE() procedures allow positional field access
+
+---
+
+**Examples:**
+```clarion
+! Simple GROUP
+NameGroup GROUP
+FirstName  STRING(20)
+MiddleInit STRING(1)
+LastName   STRING(20)
+          END
+
+! GROUP with prefix
+AddressGrp GROUP,PRE(ADR)
+ADR:Street  STRING(50)
+ADR:City    STRING(30)
+ADR:State   STRING(2)
+ADR:Zip     STRING(10)
+           END
+
+! GROUP inheriting from another GROUP
+PersonType GROUP,TYPE
+Name        STRING(30)
+Age         LONG
+           END
+
+Employee   GROUP(PersonType)  ! Inherits Name and Age
+EmployeeID  LONG           ! Additional field
+Department  STRING(20)
+         END
+
+! Dimensioned GROUP (structured array)
+DateTimeGrp GROUP,DIM(10)
+Date           LONG                    ! Referenced as DateTimeGrp[1].Date
+StartStopTime  LONG,DIM(2)             ! Referenced as DateTimeGrp[1].StartStopTime[1]
+            END
+
+! BINDABLE GROUP for dynamic expressions
+FileNames GROUP,BINDABLE
+FileName   STRING(8),NAME('FILE')
+Dot        STRING('.'),NAME('Dot')
+Extension  STRING(3),NAME('EXT')
+          END
+! Now can use: BIND(FileNames) and evaluate dynamic expressions
+
+! TYPE GROUP for parameter passing
+PassGroup GROUP,TYPE
+F1         STRING(20)
+F2         STRING(1)
+F3         STRING(20)
+          END
+
+ProcessData PROCEDURE(PassGroup PG)  ! PG: prefix
+CODE
+  Message(PG.F1)  ! Access using field qualification
+
+! OVER attribute - shared memory
+TotalAmount DECIMAL(12,2)
+AmountParts GROUP,OVER(TotalAmount)
+Dollars      LONG
+Cents        SHORT
+            END
+! TotalAmount and AmountParts occupy same memory
+
+! Nested GROUP
+CustomerRec GROUP
+Name         STRING(50)
+Address      GROUP
+  Street      STRING(50)
+  City        STRING(30)
+  State       STRING(2)
+  Zip         STRING(10)
+              END
+Phone        STRING(20)
+            END
+! Access as CustomerRec.Address.City
+```
+
+### VIEW Structure
+```clarion
+label VIEW(primary_file)
+       [,FILTER(expression)]
+       [,ORDER(expression)]
+  [PROJECT(fields)]
+  [JOIN(secondary_file, relationship)
+    [PROJECT(fields)]
+    [JOIN(tertiary_file, relationship)
+      [PROJECT(fields)]
+    END]
+  END]
+END
+```
+
+**Purpose:** Declares a "virtual" file as a composite of related FILEs (relational Join and Project operations).
+
+---
+
+### VIEW Components
+
+**primary_file**
+- Label of the primary FILE of the VIEW
+- Must be previously OPENed before VIEW is OPENed
+
+**FILTER(expression)**
+- Expression to filter valid records for the VIEW
+- May include any fields declared in PROJECT statements
+- Operates across all levels of JOIN
+- Property: PROP:FILTER
+
+**ORDER(expression)**
+- Expression or list of expressions defining sorted order
+- Defines processing sequence for NEXT/PREVIOUS
+- Properties: PROP:ORDER, PROP:SQLOrder
+
+**PROJECT(fields)**
+- Specifies which fields to retrieve from file
+- If omitted, all fields retrieved
+- Only PROJECTed fields have defined contents
+- Implements relational "Project" operation
+
+**JOIN(secondary_file, relationship)**
+- Declares secondary related file
+- Implements relational "Join" operation
+- Multiple JOINs allowed (may be nested)
+- Default: "left outer join" (all primary records retrieved)
+- Use INNER attribute for "inner join" (only matching records)
+
+---
+
+### Important Characteristics
+
+**Virtual File:**
+- Data elements don't physically exist in VIEW
+- Logical construct addressing data from multiple FILEs
+- Fields reside in their respective FILE record buffers
+- No separate data buffer allocated for VIEW
+
+**Usage Requirements:**
+- VIEW must be explicitly OPENed
+- All primary and secondary FILEs must be previously OPENed
+- Must issue SET before or after OPEN to establish processing order
+- Use NEXT(view) or PREVIOUS(view) for sequential access
+- REGET available for random access
+
+**After CLOSE(view):**
+- Processing sequence of files undefined
+- Record buffers set to no current record (unless REGET issued before CLOSE)
+- Must use SET or RESET to re-establish file processing order
+
+**Threading:**
+- No explicit THREAD attribute on VIEW
+- Local VIEWs (PROCEDURE/ROUTINE) automatically threaded
+- Global/module VIEWs threaded if at least one joined FILE is threaded
+
+**Client-Server Performance:**
+- Designed for efficient database access on client-server systems
+- Join and Project operations performed on file server
+- Only results sent to client (dramatically improves network performance)
+
+---
+
+**Relational Operations:**
+
+**Join:**
+- Retrieves data from multiple files based on relationships
+- Default: Left outer join (all primary records, secondary fields CLEARed if no match)
+- Inner join: Only records with matches in all files
+
+**Project:**
+- Retrieves only specified fields, not entire record
+- Automatically implemented by PROJECT statements
+- Reduces data transfer overhead
+
+---
+
+**Example:**
+```clarion
+Customer FILE,DRIVER('TOPSPEED'),PRE(CUS)
+          KEY(CUS:AcctNumber),PRIMARY
+          RECORD
+CUS:AcctNumber LONG
+CUS:Name       STRING(30)
+CUS:City       STRING(20)
+          END
+        END
+
+Orders   FILE,DRIVER('TOPSPEED'),PRE(ORD)
+          KEY(ORD:AcctNumber)
+          RECORD
+ORD:AcctNumber  LONG
+ORD:OrderNumber LONG
+ORD:OrderDate   LONG
+ORD:Amount      DECIMAL(12,2)
+          END
+        END
+
+! VIEW joining Customer and Orders
+CustomerOrders VIEW(Customer)
+                PROJECT(CUS:AcctNumber, CUS:Name)
+                FILTER(CUS:City = 'Seattle')
+                ORDER(CUS:Name)
+                JOIN(ORD:AcctNumber, CUS:AcctNumber)
+                  PROJECT(ORD:OrderNumber, ORD:Amount)
+                END
+              END
+
+CODE
+  OPEN(Customer)
+  OPEN(Orders)
+  OPEN(CustomerOrders)
+  
+  SET(CustomerOrders)
+  LOOP
+    NEXT(CustomerOrders)
+    IF ERROR() THEN BREAK.
+    ! Process CUS:Name and ORD:Amount
+    MESSAGE(CUS:Name & ': $' & ORD:Amount)
+  END
+  
+  CLOSE(CustomerOrders)
+  CLOSE(Orders)
+  CLOSE(Customer)
+```
+
+---
+
+## Module Structure
+
+### Program Structure
+```clarion
+PROGRAM
+  ! global declarations
+  
+  MAP
+    MODULE('file')
+      PROCEDURE(params)
+    END
+  END
+  
+CODE
+  ! main program code
+```
+
+### Module Termination Rules
+
+**MODULE inside MAP structure:**
+
+MODULE sections inside MAP **MUST be terminated with END**:
+
+```clarion
+MAP
+  MODULE('KERNEL32')
+    GetTickCount PROCEDURE(),ULONG
+  END                  ! Terminates the MODULE
+  MODULE('USER32')
+    MessageBoxA PROCEDURE(),LONG
+  END                  ! Terminates the MODULE
+END                    ! Terminates the MAP
+```
+
+**MODULE inside CLASS/INTERFACE:**
+
+MODULE used as an attribute in CLASS or INTERFACE does NOT require END:
+
+```clarion
+MyClass CLASS,MODULE('MyClass.CLW')
+  Method1 PROCEDURE()
+END
+```
+
+**Diagnostic Rules:**
+- MODULE inside MAP: MUST have END terminator
+- MODULE as CLASS/INTERFACE attribute: Does NOT need END
+- MODULE can only appear inside MAP sections (as structure) or as CLASS/INTERFACE attribute
+
+---
+
+## DATA Scope
+
+1. **Global** - Declared before CODE in PROGRAM
+2. **Module** - Declared in MAP...MODULE
+3. **Local** - Declared after PROCEDURE, before CODE
+4. **Routine Local** - Declared after ROUTINE
+
+---
+
+## Column 0 Rules
+
+Labels must start in column 0:
+```clarion
+MyLabel  ROUTINE
+```
+
+Non-labels must NOT start in column 0 (use indentation).
+
+---
+
+## Object-Oriented Programming
+
+### CLASS Structure
+```clarion
+label CLASS([parentclass])
+       [,EXTERNAL] [,IMPLEMENTS(interface)] [,DLL(module)] [,STATIC]
+       [,THREAD] [,BINDABLE] [,MODULE(source)] [,LINK(source)]
+       [,TYPE] [,DIM(dimension)] [,NETCLASS] [,PARTIAL]
+  [data members]
+  [method prototypes]
+END
+```
+
+**Purpose:** Declares an object containing data members (properties) and methods that operate on the data.
+
+---
+
+### CLASS Attributes
+
+**parentclass (optional)**
+- Label of previously declared CLASS to inherit from (derived class)
+- Inherits all data members and methods
+- May add own data members and methods
+- May override inherited methods
+
+**EXTERNAL**
+- Object defined in external library
+- Memory allocated by external library
+
+**IMPLEMENTS(interface)**
+- Specifies INTERFACE for the CLASS
+- Adds interface methods to implementation
+
+**DLL(module)**
+- Object defined in .DLL
+- Required in addition to EXTERNAL
+
+**STATIC**
+- Data members' memory permanently allocated
+
+**THREAD**
+- Memory allocated once per execution thread
+- Constructors/Destructors called on thread start/exit
+
+**BINDABLE**
+- All variables available for dynamic expressions
+
+**MODULE(source)**
+- Specifies source module containing member PROCEDURE definitions
+- Functions like MODULE in MAP structure
+
+**LINK(source)**
+- Automatically adds source module to compiler's link list
+
+**TYPE**
+- CLASS is only type definition, not an instance
+- Used for parameter passing
+
+**DIM(dimension)**
+- Declares CLASS as an array
+
+**NETCLASS**
+- Switches off additional Clarion-specific code generation
+
+**PARTIAL**
+- CLASS definition split into multiple physical files
+
+---
+
+### Key Concepts
+
+**Inheritance (Derived Classes):**
+- Derived class inherits all data and methods from parentclass
+- Can add new data members and methods
+- Can override inherited methods (same name, same parameters)
+- Polymorphic methods (same name, different parameters) follow overloading rules
+
+**Encapsulation (Properties):**
+- Each instance contains its own set of data members
+- Data members may be PUBLIC, PRIVATE, or PROTECTED
+- Only one copy of methods (shared across instances)
+
+**Polymorphism (VIRTUAL Methods):**
+- VIRTUAL attribute allows parentclass to call derived class methods
+- Derived class VIRTUAL methods can call PARENT.Method
+- DERIVED attribute verifies virtual method exists in base class
+
+**Scoping:**
+- Global data: In scope throughout application
+- Module data: In scope throughout module
+- Local data: In scope only in procedure
+- Local Derived Methods: Share declaring procedure's scope
+
+---
+
+### Instantiation
+
+**Direct Declaration:**
+```clarion
+MyClass  CLASS,TYPE
+Field     LONG
+        END
+
+Obj1     MyClass  ! Declared instance (smaller, quicker)
+```
+
+**Reference with NEW:**
+```clarion
+Obj2     &MyClass  ! Reference variable
+CODE
+  Obj2 &= NEW(MyClass)  ! Explicit lifetime control
+  DISPOSE(Obj2)
+```
+
+---
+
+### Constructors and Destructors
+
+**Construct Method:**
+- Automatically invoked when object comes into scope
+- Called after data members allocated/initialized
+- May not receive parameters (unless multiple constructors)
+- May not use VIRTUAL attribute
+- Can be explicitly called
+
+**Destruct Method:**
+- Automatically invoked when object leaves scope
+- Called before data members de-allocated
+- May not receive parameters
+- Can be explicitly called
+
+**Inheritance:**
+- Parentclass constructor called before derived class (unless REPLACE)
+- Parentclass destructor called after derived class (unless REPLACE)
+
+---
+
+### Access Control
+
+**PUBLIC** (default)
+- Visible to all methods and any code where object is in scope
+
+**PRIVATE**
+- Visible only to methods within declaring CLASS
+- Visible to procedures in same source module
+
+**PROTECTED**
+- Visible to methods of declaring CLASS
+- Visible to methods of derived CLASSes
+
+---
+
+### Method Definition
+
+**Two syntax forms:**
+```clarion
+! Form 1: Prepend CLASS name
+MyClass.MyMethod PROCEDURE(LONG Param)
+CODE
+  ! Implementation
+
+! Form 2: CLASS as first implicit parameter
+MyMethod PROCEDURE(MyClass SELF, LONG Param)
+CODE
+  ! Implementation
+```
+
+---
+
+### SELF and PARENT
+
+**SELF**
+- References current object instance
+- Used within methods to access data members and methods
+- Allows generic reference regardless of class type
+
+**PARENT**
+- References parentclass from derived class methods
+- Allows calling base class methods
+- Cannot be used as formal parameter name
+
+---
+
+**Example:**
+```clarion
+! Base class
+BaseClass CLASS,TYPE
+Name       STRING(30)
+Init       PROCEDURE
+Process    PROCEDURE,VIRTUAL
+          END
+
+! Derived class
+DerivedClass CLASS(BaseClass)
+ExtraField    LONG
+Process       PROCEDURE,VIRTUAL,DERIVED
+           END
+
+! Instance
+MyObj    DerivedClass
+
+CODE
+  MyObj.Name = 'Test'
+  MyObj.Init()
+  MyObj.Process()
+
+! Method definitions
+BaseClass.Init PROCEDURE
+CODE
+  SELF.Name = 'Initialized'
+
+BaseClass.Process PROCEDURE
+CODE
+  MESSAGE('Base Process')
+
+DerivedClass.Process PROCEDURE
+CODE
+  PARENT.Process()  ! Call base class method
+  MESSAGE('Derived Process: ' & SELF.ExtraField)
+```
+
+---
+
+### INTERFACE Structure
+```clarion
+label INTERFACE([parentinterface])
+       [,TYPE] [,COM]
+  [method prototypes]
+END
+```
+
+**Purpose:** Collection of methods defining behavior to be implemented by a CLASS.
+
+---
+
+### INTERFACE Characteristics
+
+**parentinterface (optional)**
+- Inherits methods from parent interface
+- May add own methods
+- May override inherited methods
+
+**TYPE**
+- INTERFACE is type definition only (implicit)
+- May be explicitly specified
+
+**COM**
+- All methods use PASCAL calling convention
+- Used for COM implementation
+
+**Methods:**
+- Only PROCEDURE prototypes (no properties)
+- All methods implicitly VIRTUAL
+- Must be defined by implementing CLASS
+
+**Inheritance:**
+- Can create derived interfaces
+- Follows same override and overloading rules as CLASS
+
+---
+
+### Implementing INTERFACE
+
+**Declaration:**
+```clarion
+MyInterface INTERFACE
+DoSomething  PROCEDURE(LONG Param)
+            END
+
+MyClass     CLASS,IMPLEMENTS(MyInterface)
+            END
+```
+
+**Calling Interface Methods:**
+```clarion
+CODE
+  MyClass.MyInterface.DoSomething(10)  ! Use dot notation
+```
+
+**Method Definition:**
+- All interface methods must be defined in implementing CLASS
+- Use CLASS.INTERFACE.Method syntax in definition
+
+---
+
+## Character Encoding
+
+Clarion source files use **ANSI/ASCII encoding only**. They do NOT support:
+- UTF-8
+- Unicode
+- Multi-byte character sets
+
+---
+
+## SECTION - Code Organization Directive
+
+### SECTION Directive
+
+**Syntax:** `SECTION(string)`
+
+The SECTION directive identifies the beginning of a block of executable source code or data declarations which may be INCLUDEd in source code in another file.
+
+**Key Rules:**
+- `string` - A string constant which names the SECTION
+- Identifies a block of source code or data declarations
+- Used with INCLUDE to selectively include specific blocks
+- A SECTION is terminated by:
+  - The next SECTION directive, OR
+  - The end of the file
+
+**Purpose:**
+Allows organizing code into named blocks that can be selectively included in other files, rather than including entire files.
+
+**Usage with INCLUDE:**
+```clarion
+! In file MyData.clw:
+SECTION('GLOBAL DATA')
+GlobalVar    LONG
+GlobalString STRING(100)
+
+SECTION('LOCAL DATA')
+LocalVar     LONG
+LocalString  STRING(50)
+
+! In another file:
+INCLUDE('MyData.clw', 'GLOBAL DATA')  ! Only includes GLOBAL DATA section
+```
+
+**Examples:**
+```clarion
+! Common pattern in all-source programs
+SECTION('GLOBAL DATA')
+! Global variables and file structures
+Customer FILE,DRIVER('TOPSPEED')
+        KEY(CUS:ID),PRIMARY
+        RECORD
+CUS:ID    LONG
+CUS:Name  STRING(50)
+        END
+       END
+
+SECTION('AtSortReport Procedure DATA')
+! Procedure-specific data
+LocalQ   QUEUE
+Item      STRING(100)
+        END
+
+SECTION('Code')
+! Executable code for procedures
+AtSortReport PROCEDURE
+CODE
+  ! Procedure implementation
+```
+
+**Important Notes:**
+- SECTION names are case-sensitive
+- Commonly used in "all-source" program structure where data and code are in separate sections
+- When INCLUDE specifies a section name, only that section is included
+- If no section name specified in INCLUDE, the entire file is included
+
+**Diagnostic Rules:**
+- SECTION must have a string parameter
+- Section names should be unique within a file (not enforced by compiler but good practice)
+
+---

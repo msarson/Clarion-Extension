@@ -11,7 +11,7 @@ import { globalSolutionFile, globalSettings } from "./globals";
 import * as path from "path";
 import * as fs from "fs";
 import processBuildErrors from "./processBuildErrors";
-import LoggerManager from './logger';
+import LoggerManager from './utils/LoggerManager';
 import { PlatformUtils } from "./platformUtils";
 import { SolutionCache } from "./SolutionCache";
 import { ClarionProjectInfo } from "../../common/types";
@@ -229,7 +229,17 @@ export function prepareBuildParameters(buildConfig: {
     const solutionDir = path.dirname(globalSolutionFile);
     const clarionBinPath = globalSettings.redirectionPath.replace(/redirection.*/i, "bin");
     const msBuildPath = "C:\\Windows\\Microsoft.NET\\Framework\\v4.0.30319\\msbuild.exe";
-    const buildLogPath = path.join(solutionDir, "build_output.log");
+    
+    // Get custom log file path or use default
+    const customLogPath = workspace.getConfiguration("clarion.build").get<string>("logFilePath", "");
+    let buildLogPath: string;
+    if (customLogPath) {
+        // If custom path is provided, resolve it relative to solution directory if not absolute
+        buildLogPath = path.isAbsolute(customLogPath) ? customLogPath : path.join(solutionDir, customLogPath);
+    } else {
+        // Default to solution directory
+        buildLogPath = path.join(solutionDir, "build_output.log");
+    }
 
     // Extract target name correctly
     let targetName = "";
@@ -247,13 +257,14 @@ export function prepareBuildParameters(buildConfig: {
     const buildArgs = [
         "/property:GenerateFullPaths=true",
         "/t:build",
-        "/consoleloggerparameters:ErrorsOnly",
         `/property:Configuration=${selectedConfig}`,
         `/property:clarion_Sections=${selectedConfig}`,
         `/property:ClarionBinPath="${clarionBinPath}"`,
         "/property:NoDependency=true",
-        "/property:Verbosity=detailed",
-        "/property:WarningLevel=5"
+        "/verbosity:normal",
+        "/nologo",
+        `/fileLogger`,
+        `/fileLoggerParameters:LogFile="${buildLogPath}";verbosity=detailed;encoding=utf-8`
     ];
 
     // Log the build configuration
@@ -310,9 +321,9 @@ export async function executeBuildTask(params: {
     logger.info(`🔹 MSBuild path: ${msBuildPath}`);
     logger.info(`🔹 Build log path: ${buildLogPath}`);
 
-    // Create the shell execution - restore log file redirection
+    // Create the shell execution - MSBuild will handle logging via /fileLogger
     const execution = new ShellExecution(
-        `${msBuildPath} ${buildArgs.join(" ")} > "${buildLogPath}" 2>&1`,
+        `${msBuildPath} ${buildArgs.join(" ")}`,
         { cwd: solutionDir }
     );
 
@@ -363,10 +374,25 @@ function createBuildTask(execution: ShellExecution): Task {
         command: execution.commandLine
     };
 
-    // Hide terminal output again
+    // Get the user's preference for revealing output
+    const revealSetting = workspace.getConfiguration("clarion.build").get<string>("revealOutput", "never");
+    let revealKind = TaskRevealKind.Never;
+    
+    switch (revealSetting) {
+        case "always":
+            revealKind = TaskRevealKind.Always;
+            break;
+        case "onError":
+            revealKind = TaskRevealKind.Silent; // Will be shown on error
+            break;
+        default:
+            revealKind = TaskRevealKind.Never;
+    }
+
+    // Apply presentation options based on settings
     task.presentationOptions = {
-        reveal: TaskRevealKind.Never,
-        echo: false,
+        reveal: revealKind,
+        echo: revealKind !== TaskRevealKind.Never,
         focus: false,
         panel: TaskPanelKind.Dedicated
     };
@@ -414,8 +440,17 @@ function processTaskCompletion(
             logger.info("Captured Build Output");
             logger.info(data);
 
+            // Check if we should also show in Output panel
+            const showInOutputPanel = workspace.getConfiguration("clarion.build").get<boolean>("showInOutputPanel", false);
+            if (showInOutputPanel) {
+                const outputChannel = window.createOutputChannel("Clarion Build");
+                outputChannel.clear();
+                outputChannel.append(data);
+                outputChannel.show(true);
+            }
+
             if (event.exitCode !== 0) {
-                // ❌ Failed build: parse diagnostics
+                // ❌ Non-zero exit code: parse diagnostics to check for actual errors
                 const { errorCount, warningCount, diagnostics } = processBuildErrors(data);
                 const msbuildErrors = processGeneralMSBuildErrors(data);
 
@@ -431,21 +466,33 @@ function processTaskCompletion(
                         ? `Solution: ${targetName}`
                         : `Project: ${targetName}`;
 
-                let message = `❌ Build Failed (${targetInfo}): `;
+                // Only show error message if we actually found errors or warnings
+                if (totalErrors > 0 || warningCount > 0) {
+                    let message = `❌ Build Failed (${targetInfo}): `;
 
-                if (totalErrors > 0) {
-                    message += `${totalErrors} error${totalErrors !== 1 ? "s" : ""}`;
-                    if (warningCount > 0) {
-                        message += ` and ${warningCount} warning${warningCount !== 1 ? "s" : ""}`;
+                    if (totalErrors > 0) {
+                        message += `${totalErrors} error${totalErrors !== 1 ? "s" : ""}`;
+                        if (warningCount > 0) {
+                            message += ` and ${warningCount} warning${warningCount !== 1 ? "s" : ""}`;
+                        }
+                        message += ` found. Check the Problems Panel!`;
+                    } else if (warningCount > 0) {
+                        message += `${warningCount} warning${warningCount !== 1 ? "s" : ""} found. Check the Problems Panel!`;
                     }
-                    message += ` found. Check the Problems Panel!`;
-                } else if (warningCount > 0) {
-                    message += `${warningCount} warning${warningCount !== 1 ? "s" : ""} found. Check the Problems Panel!`;
-                } else {
-                    message += `Check the Problems Panel for details.`;
-                }
 
-                window.showErrorMessage(message);
+                    window.showErrorMessage(message);
+                } else {
+                    // Exit code was non-zero but no errors/warnings found
+                    // This can happen with some MSBuild configurations - treat as success
+                    logger.info("⚠️ Build returned non-zero exit code but no errors were found. Treating as successful build.");
+                    diagnosticCollection.clear();
+                    
+                    const successMessage =
+                        buildTarget === "Solution"
+                            ? `✅ Building Clarion Solution Complete: ${targetName}`
+                            : `✅ Building Clarion Project Complete: ${targetName}`;
+                    window.showInformationMessage(successMessage);
+                }
             } else {
                 // ✅ Success: clear old diagnostics
                 diagnosticCollection.clear();
@@ -458,16 +505,68 @@ function processTaskCompletion(
             }
         }
 
-        fs.unlink(buildLogPath, (unlinkErr) => {
-            if (unlinkErr) {
-                logger.info("Failed to delete build log:", unlinkErr);
-            } else {
-                logger.info("Deleted temporary build log");
-            }
-        });
+        // Check if we should preserve the log file
+        const preserveLogFile = workspace.getConfiguration("clarion.build").get<boolean>("preserveLogFile", false);
+        
+        if (!preserveLogFile) {
+            fs.unlink(buildLogPath, (unlinkErr) => {
+                if (unlinkErr) {
+                    logger.info("Failed to delete build log:", unlinkErr);
+                } else {
+                    logger.info("Deleted temporary build log");
+                }
+            });
+        } else {
+            logger.info(`Preserved build log at: ${buildLogPath}`);
+            window.showInformationMessage(`Build log saved at: ${buildLogPath}`);
+        }
     });
 }
 
+
+/**
+ * Builds the solution or a specific project
+ * @param buildTarget - Whether to build the solution or a project
+ * @param project - The project to build (if buildTarget is "Project")
+ * @param diagnosticCollection - The diagnostic collection to use for error reporting
+ * @param solutionTreeDataProvider - Optional solution tree provider to refresh if no solution is open
+ */
+export async function buildSolutionOrProject(
+    buildTarget: "Solution" | "Project",
+    project: ClarionProjectInfo | undefined,
+    diagnosticCollection: DiagnosticCollection,
+    solutionTreeDataProvider?: any
+): Promise<void> {
+    const buildConfig = {
+        buildTarget,
+        selectedProjectPath: project?.path ?? "",
+        projectObject: project
+    };
+
+    if (!validateBuildEnvironment()) {
+        return;
+    }
+
+    const solutionCache = SolutionCache.getInstance();
+    const solutionInfo = solutionCache.getSolutionInfo();
+
+    if (!solutionInfo) {
+        if (solutionTreeDataProvider) {
+            await solutionTreeDataProvider.refresh();
+        }
+        window.showInformationMessage(
+            "No solution is currently open. Use the 'Open Solution' button in the Solution View."
+        );
+        return;
+    }
+
+    const buildParams = {
+        ...prepareBuildParameters(buildConfig),
+        diagnosticCollection
+    };
+
+    await executeBuildTask(buildParams);
+}
 
 /**
  * Process general MSBuild errors that don't match the standard Clarion error format

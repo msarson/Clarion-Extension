@@ -50,10 +50,20 @@ The extension provides comprehensive solution management capabilities:
 - **Configuration Selection**: Switch between different build configurations
 - **File Watchers**: Automatic monitoring of solution, project, and redirection files for changes
 
+### Code Diagnostics (New in v0.7.2)
+
+- **Structure Termination Validation**: Real-time checking for unterminated IF, LOOP, and CLASS structures
+  - Detects missing END or dot (.) terminators
+  - Context-aware validation (e.g., MODULE in MAP vs CLASS)
+  - Understands inline dot terminators
+  - Clear diagnostic messages with suggested fixes
+
 ### Code Navigation and Structure
 
 - **Quick Open**: Navigate to files within the solution, including those in redirection paths (Ctrl+P)
 - **Structure View**: Hierarchical view of the code structure (procedures, classes, methods)
+  - **Cursor Synchronization (New)**: Automatically highlights current symbol as cursor moves through code
+  - Matches VS Code's built-in Outline view behavior
 - **Go to Definition (F12)**: Navigate to symbol definitions
   - Local variables: Jump from usage to declaration in DATA section
   - Parameters: Jump to parameter definition in procedure/method signature
@@ -143,6 +153,10 @@ The extension uses a Language Server Protocol implementation to provide rich lan
 
 - **Document Symbols**: Provides symbol information for the outline view and navigation
 - **Folding Ranges**: Smart code folding for procedures, classes, and blocks
+  - **Enhanced (New)**: Correctly handles inline dot terminators to prevent fold corruption
+- **Diagnostics**: Real-time validation of code structure
+  - **New**: Detects unterminated IF, LOOP, and CLASS structures
+  - Context-aware and scope-aware validation
 - **Color Provider**: Color highlighting and picker for color values in code
 - **Definition Provider**: Go to definition support
 - **Formatting Provider**: Code formatting according to Clarion conventions

@@ -76,16 +76,29 @@ export class TokenCache {
                 return cached.tokens;
             }
             
+            // 🚀 DEBUG: Log incremental check
+            if (cached) {
+                logger.info(`🔍 [INCREMENTAL CHECK] cached=${!!cached}, hasDocText=${!!cached.documentText}, canIncremental=${cached.documentText ? this.canUseIncrementalUpdate(currentText, cached.documentText) : false}`);
+            } else {
+                logger.info(`🔍 [INCREMENTAL CHECK] No cached data available`);
+            }
+            
             // 🚀 PERFORMANCE: Try incremental update if we have cached data
             if (cached && cached.documentText && this.canUseIncrementalUpdate(currentText, cached.documentText)) {
-                logger.info(`🚀 Attempting incremental tokenization for ${document.uri}`);
+                logger.info(`🚀 [PERF] Attempting incremental tokenization for ${document.uri}`);
                 const incStart = performance.now();
                 try {
                     const tokens = this.incrementalTokenize(document, cached, currentText);
                     if (tokens) {
                         const incTime = performance.now() - incStart;
                         const totalTime = performance.now() - perfStart;
-                        logger.info(`✅ Incremental tokenization successful, got ${tokens.length} tokens (${incTime.toFixed(2)}ms tokenize, ${totalTime.toFixed(2)}ms total)`);
+                        logger.perf('Incremental tokenization', {
+                            'total_ms': totalTime.toFixed(2),
+                            'tokenize_ms': incTime.toFixed(2),
+                            'tokens': tokens.length,
+                            'uri': document.uri
+                        });
+                        logger.info(`✅ [PERF] Incremental tokenization successful: ${tokens.length} tokens in ${incTime.toFixed(2)}ms (${totalTime.toFixed(2)}ms total)`);
                         return tokens;
                     }
                 } catch (incError) {
@@ -94,7 +107,7 @@ export class TokenCache {
             }
 
             // Full tokenization
-            logger.info(`🟢 Running full tokenizer for ${document.uri} (version ${document.version})`);
+            logger.info(`🟢 [PERF] Running full tokenizer for ${document.uri} (version ${document.version}) - no incremental cache available`);
             const fullStart = performance.now();
             
             try {
@@ -226,6 +239,49 @@ export class TokenCache {
      */
     private expandToDependencies(changedLines: Set<number>, cached: CachedTokenData, totalLines: number): Set<number> {
         const expanded = new Set(changedLines);
+        
+        // CRITICAL: If a PROCEDURE/CLASS/MAP/INTERFACE line changes, we need to re-tokenize
+        // everything inside it because child structures depend on parent context
+        for (const lineNum of changedLines) {
+            const lineData = cached.lineTokens.get(lineNum);
+            if (lineData) {
+                const lineUpper = lineData.lineText.toUpperCase();
+                // Check if this line contains a structure keyword
+                if (lineUpper.includes('PROCEDURE') || lineUpper.includes('CLASS') || 
+                    lineUpper.includes('MAP') || lineUpper.includes('INTERFACE') ||
+                    lineUpper.includes('MODULE')) {
+                    // Find all tokens that are children of this structure
+                    // Re-tokenize from this line to the end of the structure
+                    for (const token of cached.tokens) {
+                        if (token.line === lineNum && token.finishesAt && token.finishesAt > lineNum) {
+                            // This is a multi-line structure starting on the changed line
+                            // Re-tokenize everything from here to finishesAt
+                            for (let line = lineNum; line <= token.finishesAt && line < totalLines; line++) {
+                                expanded.add(line);
+                            }
+                            break;
+                        }
+                    }
+                    
+                    // If we didn't find a finishesAt, be conservative and re-tokenize
+                    // from this line to the next PROCEDURE/class-level keyword
+                    let foundEnd = false;
+                    for (let line = lineNum + 1; line < totalLines && line < lineNum + 100; line++) {
+                        const nextLineData = cached.lineTokens.get(line);
+                        if (nextLineData) {
+                            const nextUpper = nextLineData.lineText.trim().toUpperCase();
+                            // Stop at next procedure/class or at column 0 keywords that end structures
+                            if (nextUpper.startsWith('PROCEDURE ') || nextUpper.startsWith('CLASS ') ||
+                                (nextUpper === 'END' && nextLineData.lineText.trim() === 'END')) {
+                                foundEnd = true;
+                                break;
+                            }
+                        }
+                        expanded.add(line);
+                    }
+                }
+            }
+        }
         
         // Add lines that are part of multi-line structures
         for (const token of cached.tokens) {

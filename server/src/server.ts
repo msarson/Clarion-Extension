@@ -18,7 +18,9 @@ process.on('unhandledRejection', (reason, promise) => {
 import {
     DocumentFormattingParams,
     DocumentSymbolParams,
+    DocumentSymbol,
     FoldingRangeParams,
+    FoldingRange,
     InitializeParams,
     InitializeResult,
     TextEdit,
@@ -33,7 +35,7 @@ import {
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
-import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
+import { ClarionDocumentSymbolProvider } from './providers/ClarionDocumentSymbolProvider';
 
 import { Token } from './ClarionTokenizer';
 import { TokenCache } from './TokenCache';
@@ -51,16 +53,17 @@ import { SolutionManager } from './solution/solutionManager';
 import { RedirectionFileParserServer } from './solution/redirectionFileParserServer';
 import { DefinitionProvider } from './providers/DefinitionProvider';
 import { HoverProvider } from './providers/HoverProvider';
+import { DiagnosticProvider } from './providers/DiagnosticProvider';
+import { SignatureHelpProvider } from './providers/SignatureHelpProvider';
 import path = require('path');
 import { ClarionSolutionInfo } from 'common/types';
 
 import * as fs from 'fs';
 import { URI } from 'vscode-languageserver';
+import { setServerInitialized, serverInitialized } from './serverState';
+
 const logger = LoggerManager.getLogger("Server");
 logger.setLevel("error");
-
-// Track server initialization state
-export let serverInitialized = false;
 
 // Track if a solution operation is in progress
 export let solutionOperationInProgress = false;
@@ -73,6 +76,7 @@ export let solutionOperationInProgress = false;
 const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider();
 const definitionProvider = new DefinitionProvider();
 const hoverProvider = new HoverProvider();
+const signatureHelpProvider = new SignatureHelpProvider();
 
 // ✅ Create Connection and Documents Manager
 const connection = createConnection(ProposedFeatures.all);
@@ -130,7 +134,12 @@ connection.onInitialize((params) => {
                 foldingRangeProvider: true,
                 colorProvider: true,
                 definitionProvider: true,
-                hoverProvider: true
+                // Note: implementationProvider is handled client-side in extension.ts
+                hoverProvider: true,
+                signatureHelpProvider: {
+                    triggerCharacters: ['(', ','],
+                    retriggerCharacters: [')']
+                }
             }
         };
     } catch (error) {
@@ -153,7 +162,7 @@ connection.onInitialized(() => {
         logger.info(`📥 [CRITICAL] Server is now fully initialized`);
         
         // Set the serverInitialized flag
-        serverInitialized = true;
+        setServerInitialized(true);
         
         // Register SolutionManager handlers if it exists
         const solutionManager = SolutionManager.getInstance();
@@ -225,6 +234,9 @@ documents.onDidOpen((event) => {
                 logger.error(`❌ [CRITICAL] Error checking XML content: ${xmlError instanceof Error ? xmlError.message : String(xmlError)}`);
             }
         }
+        
+        // Validate document for diagnostics
+        validateTextDocument(document);
     } catch (error) {
         logger.error(`❌ [CRITICAL] Error in onDidOpen: ${error instanceof Error ? error.message : String(error)}`);
         logger.error(`❌ [CRITICAL] Error stack: ${error instanceof Error && error.stack ? error.stack : 'No stack available'}`);
@@ -238,9 +250,41 @@ const tokenCache = TokenCache.getInstance();
 
 export let globalClarionSettings: any = {};
 
+// ✅ Diagnostic validation function
+function validateTextDocument(document: TextDocument): void {
+    try {
+        // Skip non-Clarion files
+        if (!document.uri.toLowerCase().endsWith('.clw') && 
+            !document.uri.toLowerCase().endsWith('.inc') &&
+            !document.uri.toLowerCase().endsWith('.equ')) {
+            return;
+        }
+
+        logger.info(`🔍 Validating document: ${document.uri}`);
+        
+        // PERFORMANCE: Use cached tokens instead of re-tokenizing
+        const tokens = getTokens(document);
+        const diagnostics = DiagnosticProvider.validateDocument(document, tokens);
+        
+        logger.info(`🔍 Found ${diagnostics.length} diagnostics for: ${document.uri}`);
+        
+        // Send diagnostics to client
+        connection.sendDiagnostics({ uri: document.uri, diagnostics });
+    } catch (error) {
+        logger.error(`❌ Error validating document: ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
+
 // ✅ Token Cache for Performance
 
-let debounceTimeout: NodeJS.Timeout | null = null;
+// 🚀 PERF: Per-document debounce map
+const debounceTimeouts = new Map<string, NodeJS.Timeout>();
+
+// 🚀 PERF: Track documents being actively edited (serve stale tokens during typing)
+const documentsBeingEdited = new Set<string>();
+
+// 🚀 PERF: Track last processed document version to avoid redundant work
+const lastProcessedVersions = new Map<string, number>();
 /**
  * ✅ Retrieves cached tokens or tokenizes the document if not cached.
  */
@@ -299,9 +343,22 @@ connection.onFoldingRanges((params: FoldingRangeParams) => {
 
         logger.info(`📂 [DEBUG] Computing folding ranges for: ${uri}, language: ${document.languageId}`);
         
+        // 🚀 PERF: If document is being edited, return cached folding ranges immediately
+        if (documentsBeingEdited.has(uri) && foldingCache.has(uri)) {
+            logger.info(`⚡ [PERF] Document being edited, returning cached folding ranges`);
+            return foldingCache.get(uri)!;
+        }
+        
         const tokenStart = performance.now();
         const tokens = getTokens(document);
         const tokenTime = performance.now() - tokenStart;
+        
+        // If tokenization took > 50ms, return cached folding ranges to avoid blocking the UI
+        if (tokenTime > 50 && foldingCache.has(uri)) {
+            logger.info(`⚡ [PERF] Returning cached folding ranges (tokenization took ${tokenTime.toFixed(0)}ms)`);
+            return foldingCache.get(uri)!;
+        }
+        
         logger.info(`🔍 [DEBUG] Got ${tokens.length} tokens for folding ranges`);
         logger.perf('Folding: getTokens', { time_ms: tokenTime.toFixed(2), tokens: tokens.length });
         
@@ -309,6 +366,10 @@ connection.onFoldingRanges((params: FoldingRangeParams) => {
         const foldingProvider = new ClarionFoldingProvider(tokens);
         const ranges = foldingProvider.computeFoldingRanges();
         const foldTime = performance.now() - foldStart;
+        
+        // 🚀 PERF: Cache the folding ranges
+        foldingCache.set(uri, ranges);
+        
         logger.info(`📂 [DEBUG] Computed ${ranges.length} folding ranges for: ${uri}`);
         
         const totalTime = performance.now() - perfStart;
@@ -333,53 +394,77 @@ documents.onDidChangeContent(event => {
     try {
         const document = event.document;
         const uri = document.uri;
+        const currentVersion = document.version;
         
-        // Log all document details
-        logger.info(`📝 [CRITICAL] Document content changed: ${uri}`);
-        logger.info(`📝 [CRITICAL] Document details:
-            - URI: ${uri}
-            - Language ID: ${document.languageId}
-            - Version: ${document.version}
-            - Line Count: ${document.lineCount}
-            - Content Length: ${document.getText().length}
-            - First 100 chars: ${document.getText().substring(0, 100).replace(/\n/g, '\\n')}
-        `);
+        // 🚀 PERF: Skip if we've already processed this version
+        const lastVersion = lastProcessedVersions.get(uri);
+        if (lastVersion !== undefined && lastVersion >= currentVersion) {
+            logger.info(`⏭️ Skipping duplicate onDidChangeContent: ${uri} version=${currentVersion} (already processed ${lastVersion})`);
+            return;
+        }
+        
+        logger.info(`📝 onDidChangeContent: ${uri} version=${currentVersion}`);
         
         // Skip XML files
         if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
-            logger.info(`🔍 [CRITICAL] XML file content changed: ${uri}`);
-            logger.info(`🔍 [CRITICAL] XML file content (first 200 chars): ${document.getText().substring(0, 200).replace(/\n/g, '\\n')}`);
             return;
         }
 
-        // Clear tokens from cache
-        logger.info(`🔍 [CRITICAL] Clearing tokens for changed document: ${uri}`);
-        try {
-            tokenCache.clearTokens(document.uri); // 🔥 Always clear immediately
-            logger.info(`🔍 [CRITICAL] Successfully cleared tokens for document: ${uri}`);
-        } catch (cacheError) {
-            logger.error(`❌ [CRITICAL] Error clearing tokens: ${cacheError instanceof Error ? cacheError.message : String(cacheError)}`);
+        // Update last processed version
+        lastProcessedVersions.set(uri, currentVersion);
+
+        // 🚀 PERF: Per-document debounce - clear existing timeout for THIS document
+        const existingTimeout = debounceTimeouts.get(uri);
+        if (existingTimeout) {
+            logger.info(`🔄 Resetting debounce for: ${uri}`);
+            clearTimeout(existingTimeout);
         }
 
-        // Set up debounced token refresh
-        if (debounceTimeout) {
-            logger.info(`🔍 [CRITICAL] Clearing existing debounce timeout for: ${uri}`);
-            clearTimeout(debounceTimeout);
-        }
+        // 🚀 PERF: Mark document as being edited (serve stale tokens)
+        documentsBeingEdited.add(uri);
+        
+        // 🚀 PERF: Invalidate caches immediately so fresh data is computed after debounce
+        symbolCache.delete(uri);
+        foldingCache.delete(uri);
 
-        logger.info(`🔍 [CRITICAL] Setting up debounced token refresh for: ${uri}`);
-        debounceTimeout = setTimeout(() => {
+        // 🚀 PERF: Don't clear cache until debounce completes
+        // This allows other features to use stale tokens while user is typing
+        const timeout = setTimeout(() => {
             try {
-                logger.info(`🔍 [CRITICAL] Debounce timeout triggered, refreshing tokens for: ${uri}`);
-                const tokens = getTokens(document); // ⬅️ refreshes the cache
-                logger.info(`🔍 [CRITICAL] Successfully refreshed tokens after edit: ${uri}, got ${tokens.length} tokens`);
+                logger.info(`🔍 Debounce timeout triggered, refreshing tokens for: ${uri}`);
+                
+                // Clear "being edited" flag FIRST
+                documentsBeingEdited.delete(uri);
+                
+                // Caches already cleared immediately on change - no need to clear again
+                
+                // 🚀 PERF: Let TokenCache handle incremental updates - don't clear!
+                // TokenCache has smart incremental tokenization that reuses unchanged parts
+                // Clearing here forces full re-tokenization on every change
+                // tokenCache.clearTokens(document.uri); // REMOVED: Let incremental updates work
+                const tokens = getTokens(document);
+                logger.info(`🔍 Successfully refreshed tokens after edit: ${uri}, got ${tokens.length} tokens`);
+                
+                // Validate document using fresh tokens
+                validateTextDocument(document);
+                
+                // 🔄 Notify client that document symbols have changed
+                // This triggers structure view to refresh with fresh symbols
+                connection.sendNotification('clarion/symbolsRefreshed', { uri });
+                
+                // Clean up timeout from map
+                debounceTimeouts.delete(uri);
             } catch (tokenError) {
-                logger.error(`❌ [CRITICAL] Error refreshing tokens in debounce: ${tokenError instanceof Error ? tokenError.message : String(tokenError)}`);
+                logger.error(`❌ Error refreshing tokens in debounce: ${tokenError instanceof Error ? tokenError.message : String(tokenError)}`);
+                documentsBeingEdited.delete(uri); // Cleanup on error
             }
-        }, 300);
+        }, 500);
+        
+        // Store timeout for this document
+        debounceTimeouts.set(uri, timeout);
     } catch (error) {
-        logger.error(`❌ [CRITICAL] Error in onDidChangeContent: ${error instanceof Error ? error.message : String(error)}`);
-        logger.error(`❌ [CRITICAL] Error stack: ${error instanceof Error && error.stack ? error.stack : 'No stack available'}`);
+        logger.error(`❌ Error in onDidChangeContent: ${error instanceof Error ? error.message : String(error)}`);
+        logger.error(`❌ Error stack: ${error instanceof Error && error.stack ? error.stack : 'No stack available'}`);
     }
 });
 
@@ -431,6 +516,10 @@ connection.onDocumentFormatting((params: DocumentFormattingParams): TextEdit[] =
 });
 
 
+// Cache for document symbols to avoid recomputing during rapid typing
+const symbolCache = new Map<string, DocumentSymbol[]>();
+const foldingCache = new Map<string, FoldingRange[]>();
+
 connection.onDocumentSymbol((params: DocumentSymbolParams) => {
     const perfStart = performance.now();
     try {
@@ -454,23 +543,28 @@ connection.onDocumentSymbol((params: DocumentSymbolParams) => {
             return [];
         }
 
-        // Check if a solution operation is in progress - if so, prioritize solution view
-        if (solutionOperationInProgress || (global as any).solutionOperationInProgress) {
-            logger.info(`⚠️ [DEBUG] Solution operation in progress, deferring document symbol request for: ${uri}`);
-            return [];
-        }
-
         logger.info(`📂 [DEBUG] Computing document symbols for: ${uri}, language: ${document.languageId}`);
         
         const tokenStart = performance.now();
         const tokens = getTokens(document);  // ✅ No need for async
         const tokenTime = performance.now() - tokenStart;
+        
+        // If tokenization took > 50ms, return cached symbols to avoid blocking the UI
+        if (tokenTime > 50 && symbolCache.has(uri)) {
+            logger.info(`⚡ [PERF] Returning cached symbols (tokenization took ${tokenTime.toFixed(0)}ms)`);
+            return symbolCache.get(uri)!;
+        }
+        
         logger.info(`🔍 [DEBUG] Got ${tokens.length} tokens for document symbols`);
         logger.perf('Symbols: getTokens', { time_ms: tokenTime.toFixed(2), tokens: tokens.length });
         
         const symbolStart = performance.now();
         const symbols = clarionDocumentSymbolProvider.provideDocumentSymbols(tokens, uri);
         const symbolTime = performance.now() - symbolStart;
+        
+        // Cache the symbols for quick retrieval during typing
+        symbolCache.set(uri, symbols);
+        
         logger.info(`🧩 [DEBUG] Returned ${symbols.length} document symbols for ${uri}`);
 
         const totalTime = performance.now() - perfStart;
@@ -595,6 +689,8 @@ documents.onDidClose(event => {
         logger.info(`🔍 [CRITICAL] Clearing tokens for document: ${uri}`);
         try {
             tokenCache.clearTokens(uri);
+            symbolCache.delete(uri);
+            foldingCache.delete(uri);
             logger.info(`🔍 [CRITICAL] Successfully cleared tokens for document: ${uri}`);
         } catch (cacheError) {
             logger.error(`❌ [CRITICAL] Error clearing tokens: ${cacheError instanceof Error ? cacheError.message : String(cacheError)}`);
@@ -1092,6 +1188,37 @@ connection.onHover(async (params) => {
         return hover;
     } catch (error) {
         logger.error(`❌ Error providing hover: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+    }
+});
+
+// Handle signature help requests
+connection.onSignatureHelp(async (params) => {
+    logger.debug(`🔔 [SIG-HELP] Received signature help request for: ${params.textDocument.uri} at position ${params.position.line}:${params.position.character}`);
+    
+    if (!serverInitialized) {
+        logger.debug(`⚠️ [SIG-HELP] Server not initialized yet, delaying signature help request`);
+        return null;
+    }
+    
+    const document = documents.get(params.textDocument.uri);
+    if (!document) {
+        logger.debug(`⚠️ [SIG-HELP] Document not found: ${params.textDocument.uri}`);
+        return null;
+    }
+    
+    try {
+        const signatureHelp = await signatureHelpProvider.provideSignatureHelp(document, params.position);
+        if (signatureHelp) {
+            logger.debug(`✅ [SIG-HELP] Found ${signatureHelp.signatures.length} signature(s) for ${params.textDocument.uri}`);
+            logger.debug(`✅ [SIG-HELP] Active signature: ${signatureHelp.activeSignature}, Active parameter: ${signatureHelp.activeParameter}`);
+        } else {
+            logger.debug(`⚠️ [SIG-HELP] No signature help found for ${params.textDocument.uri}`);
+        }
+        return signatureHelp;
+    } catch (error) {
+        console.error(`❌ [SIG-HELP] Error providing signature help: ${error instanceof Error ? error.message : String(error)}`);
+        console.error(`❌ [SIG-HELP] Stack: ${error instanceof Error ? error.stack : 'No stack'}`);
         return null;
     }
 });

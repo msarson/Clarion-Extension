@@ -1,6 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
-import LoggerManager from '../logger';
+import LoggerManager from '../utils/LoggerManager';
 import { globalSettings } from '../globals';
 import { getLanguageClient, isClientReady } from '../LanguageClientManager';
 

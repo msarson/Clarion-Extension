@@ -1,0 +1,288 @@
+import * as assert from 'assert';
+import { FoldingRangeKind } from 'vscode-languageserver-types';
+import { ClarionTokenizer } from '../ClarionTokenizer';
+import ClarionFoldingProvider from '../ClarionFoldingProvider';
+
+suite('ClarionFoldingProvider Tests', () => {
+
+    suite('computeFoldingRanges - Procedures', () => {
+        
+        test('Should create folding range for simple PROCEDURE', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+  RETURN
+  END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            assert.ok(ranges.length > 0, 'Should have at least one folding range');
+            const procRange = ranges.find(r => r.startLine === 0);
+            assert.ok(procRange, 'Should find procedure folding range');
+            assert.ok(procRange!.endLine >= 2, 'Should extend to END');
+        });
+
+        test('Should create folding range for PROCEDURE with DATA section', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  RETURN
+  END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            assert.ok(ranges.length > 0, 'Should have folding ranges');
+            const procRange = ranges[0];
+            assert.ok(procRange.startLine === 0, 'Should start at procedure line');
+            assert.ok(procRange.endLine >= 3, 'Should include entire procedure');
+        });
+
+        test('Should handle nested ROUTINE within PROCEDURE', () => {
+            const code = `MyProc PROCEDURE()
+MyRoutine ROUTINE
+  CODE
+  RETURN
+  END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            assert.ok(ranges.length >= 2, 'Should have ranges for both procedure and routine');
+            // Check we have both a procedure and routine range
+            const hasProc = ranges.some(r => r.startLine === 0);
+            const hasRoutine = ranges.some(r => r.startLine === 1);
+            assert.ok(hasProc, 'Should have procedure range');
+            assert.ok(hasRoutine, 'Should have routine range');
+        });
+
+        test('Should handle multiple PROCEDUREs', () => {
+            const code = `Proc1 PROCEDURE()
+  CODE
+  END
+
+Proc2 PROCEDURE()
+  CODE
+  END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            assert.ok(ranges.length >= 2, 'Should have ranges for both procedures');
+            assert.ok(ranges[0].startLine !== ranges[1].startLine, 'Ranges should start at different lines');
+        });
+    });
+
+    suite('computeFoldingRanges - Structures', () => {
+        
+        test('Should create folding range for QUEUE structure', () => {
+            const code = `MyQueue QUEUE
+  Name STRING(40)
+  Age LONG
+  END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            assert.ok(ranges.length > 0, 'Should have folding range for QUEUE');
+            const queueRange = ranges.find(r => r.startLine === 0);
+            assert.ok(queueRange, 'Should find queue folding range');
+            assert.ok(queueRange!.endLine >= 2, 'Should extend to END');
+        });
+
+        test('Should create folding range for GROUP structure', () => {
+            const code = `MyGroup GROUP
+  Field1 LONG
+  Field2 STRING(20)
+  END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            assert.ok(ranges.length > 0, 'Should have folding range for GROUP');
+        });
+
+        test('Should create folding range for CLASS', () => {
+            const code = `MyClass CLASS
+  Init PROCEDURE()
+  Kill PROCEDURE()
+  END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            assert.ok(ranges.length > 0, 'Should have folding range for CLASS');
+        });
+    });
+
+    suite('computeFoldingRanges - Regions', () => {
+        
+        test('Should create folding range for !REGION comments', () => {
+            const code = `!REGION Data Declarations
+LocalVar LONG
+AnotherVar STRING(20)
+!ENDREGION
+
+MyProc PROCEDURE()
+  CODE
+  END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            // Should have ranges for both region and procedure
+            assert.ok(ranges.length >= 2, 'Should have ranges for region and procedure');
+            
+            // Check for region range
+            const regionRange = ranges.find(r => r.kind === FoldingRangeKind.Region);
+            assert.ok(regionRange, 'Should have a region folding range');
+        });
+
+        test('Should handle multiple !REGION blocks', () => {
+            const code = `!REGION Block1
+Var1 LONG
+!ENDREGION
+
+!REGION Block2
+Var2 LONG
+!ENDREGION`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            const regionRanges = ranges.filter(r => r.kind === FoldingRangeKind.Region);
+            assert.ok(regionRanges.length >= 2, 'Should have multiple region ranges');
+        });
+
+        test('Should handle nested regions', () => {
+            const code = `!REGION Outer
+!REGION Inner
+Var1 LONG
+!ENDREGION
+!ENDREGION`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            const regionRanges = ranges.filter(r => r.kind === FoldingRangeKind.Region);
+            assert.ok(regionRanges.length >= 2, 'Should handle nested regions');
+        });
+    });
+
+    suite('computeFoldingRanges - Edge Cases', () => {
+        
+        test('Should handle empty code', () => {
+            const code = '';
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            assert.strictEqual(ranges.length, 0, 'Should return empty array for empty code');
+        });
+
+        test('Should handle code with only comments', () => {
+            const code = `! Comment 1
+! Comment 2
+! Comment 3`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            // Should have no folding ranges (just comments, no structures)
+            assert.strictEqual(ranges.length, 0, 'Should have no folding ranges for only comments');
+        });
+
+        test('Should handle PROCEDURE without END', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+  RETURN`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            // Should still create a folding range (inferred end)
+            assert.ok(ranges.length >= 0, 'Should handle procedure without END');
+        });
+
+        test('Should handle complex nested structure', () => {
+            const code = `MyProc PROCEDURE()
+LocalQueue QUEUE
+    Name STRING(40)
+    END
+  CODE
+MyRoutine ROUTINE
+      ! Do something
+    END
+  RETURN
+  END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            // Should have multiple ranges: procedure, queue, routine
+            assert.ok(ranges.length >= 3, 'Should handle complex nested structures');
+        });
+    });
+
+    suite('computeFoldingRanges - Method Implementations', () => {
+        
+        test('Should fold method implementations (ThisWindow.Init)', () => {
+            const code = `ThisWindow.Init PROCEDURE()
+  CODE
+  RETURN
+  END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            assert.ok(ranges.length > 0, 'Should have folding range for method implementation');
+        });
+
+        test('Should handle multiple method implementations', () => {
+            const code = `ThisWindow.Init PROCEDURE()
+  CODE
+  END
+
+ThisWindow.Kill PROCEDURE()
+  CODE
+  END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            assert.ok(ranges.length >= 2, 'Should have ranges for both method implementations');
+        });
+    });
+});

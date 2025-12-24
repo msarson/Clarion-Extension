@@ -2,9 +2,10 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { DocumentManager } from '../documentManager'; // Adjust the import path based on your project structure
 import { ClarionLocation } from './LocationProvider'; // Make sure this import is correct
-import LoggerManager from '../logger';
+import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("HoverProvider");
+logger.setLevel("error");
 
 /**
  * Provides hover information for Clarion code elements.
@@ -45,20 +46,11 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
         const methodCallInfo = this.detectMethodCall(document, position);
         if (methodCallInfo) {
             logger.info(`Detected method call to ${methodCallInfo.methodName} with ${methodCallInfo.paramCount} parameters`);
-            const implementationLocation = await this.findMethodImplementationForCall(document, methodCallInfo.methodName, methodCallInfo.paramCount);
-            if (implementationLocation) {
-                // Create a ClarionLocation-like object for the method implementation
-                const clarionLocation: ClarionLocation = {
-                    fullFileName: implementationLocation.uri.fsPath,
-                    statementType: "METHOD",
-                    sectionLineLocation: implementationLocation.range.start,
-                    linePosition: implementationLocation.range.start,
-                    methodName: methodCallInfo.methodName,
-                    implementationResolved: true
-                };
-                const hoverMessage = await this.constructHoverMessage(clarionLocation);
-                return new vscode.Hover(hoverMessage);
-            }
+            
+            // For method calls, defer to server hover which shows declaration info
+            // Just return undefined so server handles it - server has the complete signature with return type
+            logger.info(`Deferring method call hover to server for complete declaration info`);
+            return undefined;
         }
         
         // If not a method call, proceed with existing logic for declarations
@@ -70,9 +62,10 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
 
         logger.info(`Found location at position: ${location.statementType} to ${location.fullFileName}`);
         
-        // For method declarations, lazily resolve the implementation when needed
-        if (location.statementType === "METHOD" && !location.implementationResolved) {
-            logger.info(`Lazily resolving method implementation for hover: ${location.className}.${location.methodName}`);
+        // For method and MAP procedure declarations, lazily resolve the implementation when needed
+        if ((location.statementType === "METHOD" || location.statementType === "MAPPROCEDURE") && !location.implementationResolved) {
+            const displayName = location.className ? `${location.className}.${location.methodName}` : location.methodName;
+            logger.info(`Lazily resolving implementation for hover: ${displayName}`);
             location = await this.documentManager.resolveMethodImplementation(location);
         }
         
@@ -242,7 +235,7 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
         return hoverMessage;
     }
 
-    private async constructHoverMessage(location: ClarionLocation): Promise<vscode.MarkdownString> {
+    private async constructHoverMessage(location: ClarionLocation, declarationInfo?: { signature: string; file: string; line: number } | null): Promise<vscode.MarkdownString> {
         const linesToShow = 10;
         const hoverMessage = new vscode.MarkdownString();
         hoverMessage.isTrusted = true; // Enable command links in hover
@@ -254,9 +247,18 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
             const statementType = location.statementType.toUpperCase();
             logger.info(`Statement type: ${statementType}`);
             
-            if (statementType === "METHOD") {
-                logger.info(`Showing method implementation from: ${location.fullFileName}`);
-                hoverMessage.appendMarkdown(`**Method Implementation in: ${location.fullFileName}**\n\n`);
+            if (statementType === "METHOD" || statementType === "MAPPROCEDURE") {
+                const typeLabel = statementType === "MAPPROCEDURE" ? "Procedure" : "Method";
+                logger.info(`Showing ${typeLabel.toLowerCase()} implementation from: ${location.fullFileName}`);
+                
+                // Show signature first if available
+                if (declarationInfo) {
+                    hoverMessage.appendMarkdown(`**${typeLabel} Signature:**\n\n`);
+                    hoverMessage.appendCodeblock(declarationInfo.signature, 'clarion');
+                    hoverMessage.appendMarkdown(`\n---\n\n`);
+                }
+                
+                hoverMessage.appendMarkdown(`**Implementation in: ${location.fullFileName}**\n\n`);
             } else {
                 hoverMessage.appendMarkdown(`**${location.statementType}: ${location.fullFileName}**\n\n`);
             }
@@ -270,7 +272,7 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
             if (location.sectionLineLocation) {
                 // Case-insensitive comparison for statement types
                 const statementType = (location.statementType || "").toUpperCase();
-                if (statementType === "METHOD") {
+                if (statementType === "METHOD" || statementType === "MAPPROCEDURE") {
                     const lineNumber = location.sectionLineLocation.line + 1;
                     const commandUri = vscode.Uri.parse(`command:clarion.goToMethodImplementation?${encodeURIComponent(JSON.stringify([location.fullFileName, location.sectionLineLocation.line, 0]))}`);
                     hoverMessage.appendMarkdown(` - Implementation Line: [${lineNumber}](${commandUri} "Go to Implementation (Ctrl+F12)") *(Click or press Ctrl+F12 to navigate)*\n\n`);
@@ -280,10 +282,10 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
                 startLine = location.sectionLineLocation.line;
             }
 
-            // For method implementations, show signature and first 15 lines of implementation
+            // For method and procedure implementations, show signature and first 3 lines of implementation
             // Case-insensitive comparison
-            if ((location.statementType || "").toUpperCase() === "METHOD") {
-                const maxLinesToShow = 15;
+            if ((location.statementType || "").toUpperCase() === "METHOD" || (location.statementType || "").toUpperCase() === "MAPPROCEDURE") {
+                const maxLinesToShow = 3;  // Reduced to 3 to show both client and server hover info
                 let codeLineIndex = -1;
                 let endLine = startLine + maxLinesToShow;
                 
@@ -305,11 +307,15 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
                     
                     // Check for nested method/routine implementations and stop before them
                     for (let i = codeLineIndex + 1; i < endLine; i++) {
-                        const trimmedLine = fileLines[i].trim().toUpperCase();
-                        // Stop if we encounter another METHOD, ROUTINE, or PROCEDURE definition
-                        if (trimmedLine.match(/^[A-Z_][A-Z0-9_]*\s+(PROCEDURE|ROUTINE|METHOD)/)) {
+                        const line = fileLines[i];
+                        const trimmedLine = line.trim().toUpperCase();
+                        
+                        // Stop if we encounter another PROCEDURE/ROUTINE implementation
+                        // These start at column 0 or with minimal indentation (not inside the current procedure)
+                        // Match: "MyProc PROCEDURE" or "Class.Method PROCEDURE" or "Label ROUTINE"
+                        if (line.match(/^[A-Za-z_][A-Za-z0-9_.:]*\s+(PROCEDURE|ROUTINE)\b/i)) {
                             endLine = i;
-                            logger.info(`Found nested method/routine at line ${i}, stopping before it`);
+                            logger.info(`Found another procedure/routine implementation at line ${i}, stopping before it`);
                             break;
                         }
                     }
@@ -322,8 +328,27 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
                 logger.info(`Showing method content (${endLine - startLine} lines)`);
                 hoverMessage.appendCodeblock(methodContent, 'clarion');
             } else {
-                // For other types, just show the standard number of lines
-                const sectionContent = fileLines.slice(startLine, startLine + linesToShow).join('\n');
+                // For other types (INCLUDE with SECTION, etc.), show lines until next SECTION
+                let endLine = startLine + linesToShow;
+                
+                // Check if this is an INCLUDE with a section - if so, stop at the next SECTION
+                const statementTypeUpper = (location.statementType || "").toUpperCase();
+                if (statementTypeUpper === "INCLUDE" && location.sectionLineLocation) {
+                    // We're showing an INCLUDE'd section, find where it ends
+                    for (let i = startLine + 1; i < Math.min(fileLines.length, startLine + 100); i++) {
+                        const trimmedLine = fileLines[i].trim().toUpperCase();
+                        // Stop at next SECTION directive
+                        if (trimmedLine.startsWith('SECTION(')) {
+                            endLine = i;
+                            logger.info(`Found next SECTION at line ${i}, stopping before it`);
+                            break;
+                        }
+                    }
+                    // Don't go beyond 30 lines even if no SECTION found
+                    endLine = Math.min(endLine, startLine + 30);
+                }
+                
+                const sectionContent = fileLines.slice(startLine, endLine).join('\n');
                 hoverMessage.appendCodeblock(sectionContent, 'clarion');
             }
         } catch (error: unknown) {

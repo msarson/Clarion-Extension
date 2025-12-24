@@ -1,9 +1,10 @@
-import { workspace, ConfigurationTarget, window } from 'vscode';
+import { workspace, ConfigurationTarget, window, Uri, WorkspaceConfiguration } from 'vscode';
 import * as fs from 'fs';
 import { parseStringPromise } from 'xml2js';
 import { ClarionExtensionCommands } from './ClarionExtensionCommands';
-import LoggerManager from './logger';
+import LoggerManager from './utils/LoggerManager';
 import * as path from 'path';
+import { SettingsStorageManager } from './utils/SettingsStorageManager';
 const logger = LoggerManager.getLogger("Globals");
 
 // Interface for solution settings
@@ -14,7 +15,19 @@ export interface ClarionSolutionSettings {
     configuration: string;
 }
 
-// ✅ These are stored in workspace settings
+/**
+ * Helper function to get the correct configuration target (always folder-level)
+ * Returns WorkspaceFolder if a folder is open, undefined otherwise
+ */
+export function getClarionConfigTarget(): ConfigurationTarget | undefined {
+    if (workspace.workspaceFolders && workspace.workspaceFolders.length > 0) {
+        return ConfigurationTarget.WorkspaceFolder;
+    }
+    logger.warn("⚠️ No folder open - cannot determine config target");
+    return undefined;
+}
+
+// ✅ These are stored in folder settings (.vscode/settings.json)
 export let globalSolutionFile: string = "";
 export let globalClarionPropertiesFile: string = "";
 export let globalClarionVersion: string = "";
@@ -27,13 +40,15 @@ export async function setGlobalClarionSelection(
     solutionFile: string,
     clarionPropertiesFile: string,
     clarionVersion: string,
-    clarionConfiguration: string
+    clarionConfiguration: string,
+    skipSave: boolean = false
 ) {
     logger.info("🔄 Updating global settings:", {
         solutionFile,
         clarionPropertiesFile,
         clarionVersion,
-        clarionConfiguration
+        clarionConfiguration,
+        skipSave
     });
 
     // ✅ Update global variables
@@ -49,44 +64,52 @@ export async function setGlobalClarionSelection(
         - globalClarionVersion: ${globalClarionVersion || 'not set'}
         - _globalClarionConfiguration: ${_globalClarionConfiguration || 'not set'}`);
 
-    // ✅ Only save to workspace if all required values are set
+    // ✅ Only save to storage if all required values are set and skipSave is false
+    if (skipSave) {
+        logger.info("⏭️  Skipping save to storage (skipSave = true)");
+        return;
+    }
+    
     if (solutionFile && clarionPropertiesFile && clarionVersion) {
-        logger.info("✅ All required settings are set. Saving to workspace settings...");
+        logger.info("✅ All required settings are set. Saving using smart storage manager...");
         
-        // Update the current solution settings
-        await workspace.getConfiguration().update('clarion.solutionFile', solutionFile, ConfigurationTarget.Workspace);
-        await workspace.getConfiguration().update('clarion.propertiesFile', clarionPropertiesFile, ConfigurationTarget.Workspace);
-        await workspace.getConfiguration().update('clarion.version', clarionVersion, ConfigurationTarget.Workspace);
-        await workspace.getConfiguration().update('clarion.configuration', clarionConfiguration, ConfigurationTarget.Workspace);
-        
-        // Update the current solution in the solutions array
-        await updateSolutionsArray(solutionFile, clarionPropertiesFile, clarionVersion, clarionConfiguration);
-        
-        // Set the current solution
-        await workspace.getConfiguration().update('clarion.currentSolution', solutionFile, ConfigurationTarget.Workspace);
+        // Use the smart storage manager (handles workspace vs folder storage)
+        await SettingsStorageManager.saveSolutionSettings(
+            solutionFile,
+            clarionPropertiesFile,
+            clarionVersion,
+            clarionConfiguration
+        );
 
-        // ✅ Ensure lookup extensions are written ONLY when a valid solution exists
-        const config = workspace.getConfiguration("clarion");
+        // ✅ Ensure lookup extensions are written (only if we have a folder)
+        if (workspace.workspaceFolders && workspace.workspaceFolders.length > 0) {
+            const workspaceFolder = workspace.workspaceFolders[0];
+            const config = workspace.getConfiguration("clarion", workspaceFolder.uri);
+            const target = ConfigurationTarget.WorkspaceFolder;
 
-        const fileSearchExtensions = config.inspect<string[]>("fileSearchExtensions")?.workspaceValue;
-        const defaultLookupExtensions = config.inspect<string[]>("defaultLookupExtensions")?.workspaceValue;
+            const fileSearchExtensions = config.inspect<string[]>("fileSearchExtensions");
+            const defaultLookupExtensions = config.inspect<string[]>("defaultLookupExtensions");
 
-        const updatePromises: Thenable<void>[] = [];
+            const updatePromises: Thenable<void>[] = [];
 
-        if (!fileSearchExtensions) {
-            updatePromises.push(config.update("fileSearchExtensions", DEFAULT_EXTENSIONS, ConfigurationTarget.Workspace));
-        }
+            // Check if not set at folder level
+            if (!fileSearchExtensions?.workspaceFolderValue) {
+                updatePromises.push(config.update("fileSearchExtensions", DEFAULT_EXTENSIONS, target));
+            }
 
-        if (!defaultLookupExtensions) {
-            updatePromises.push(config.update("defaultLookupExtensions", DEFAULT_EXTENSIONS, ConfigurationTarget.Workspace));
-        }
+            if (!defaultLookupExtensions?.workspaceFolderValue) {
+                updatePromises.push(config.update("defaultLookupExtensions", DEFAULT_EXTENSIONS, target));
+            }
 
-        if (updatePromises.length > 0) {
-            await Promise.all(updatePromises);
-            logger.info("✅ Default lookup settings applied to workspace.json.");
+            if (updatePromises.length > 0) {
+                await Promise.all(updatePromises);
+                logger.info("✅ Default lookup settings applied.");
+            }
+        } else {
+            logger.info("ℹ️ No folder open - skipping lookup extensions update");
         }
     } else {
-        logger.warn("⚠️ Not saving to workspace settings: One or more required values are missing.");
+        logger.warn("⚠️ Not saving to storage: One or more required values are missing.");
     }
 }
 
@@ -213,7 +236,18 @@ export const globalSettings = {
     async migrateToSolutionsArray() {
         logger.info("🔄 Checking if migration to solutions array is needed...");
         
-        const config = workspace.getConfiguration("clarion");
+        // Only proceed if we have a folder open
+        if (!workspace.workspaceFolders || workspace.workspaceFolders.length === 0) {
+            logger.info("ℹ️ No folder open - skipping migration");
+            return;
+        }
+        
+        // Always use WorkspaceFolder target (folder settings)
+        const workspaceFolder = workspace.workspaceFolders[0];
+        const target = ConfigurationTarget.WorkspaceFolder;
+        const config = workspace.getConfiguration("clarion", workspaceFolder.uri);
+        
+        logger.info(`📝 Using WorkspaceFolder configuration scope for: ${workspaceFolder.uri.fsPath}`);
         
         // Check if we already have a solutions array
         const solutions = config.get<ClarionSolutionSettings[]>("solutions", []);
@@ -240,15 +274,15 @@ export const globalSettings = {
             };
             
             // Add to solutions array if not already there
-            if (!solutions.some(s => s.solutionFile === solutionFile)) {
+            if (!solutions.some((s: ClarionSolutionSettings) => s.solutionFile === solutionFile)) {
                 solutions.push(newSolution);
-                await config.update("solutions", solutions, ConfigurationTarget.Workspace);
+                await config.update("solutions", solutions, target);
                 logger.info(`✅ Added solution to solutions array: ${solutionFile}`);
             }
             
             // Set current solution if not already set
             if (!currentSolution) {
-                await config.update("currentSolution", solutionFile, ConfigurationTarget.Workspace);
+                await config.update("currentSolution", solutionFile, target);
                 logger.info(`✅ Set current solution to: ${solutionFile}`);
             }
             
@@ -258,9 +292,15 @@ export const globalSettings = {
         }
     },
     
-    /** ✅ Load settings from workspace.json */
+    /** ✅ Load settings from .vscode/settings.json */
     async initializeFromWorkspace() {
-        logger.info("🔄 Loading settings from workspace.json...");
+        logger.info("🔄 Loading settings from .vscode/settings.json...");
+
+        // ✅ Early exit if no folder open
+        if (!workspace.workspaceFolders || workspace.workspaceFolders.length === 0) {
+            logger.info("ℹ️ No folder open - skipping initialization");
+            return;
+        }
 
         // Check if we need to migrate existing settings to the solutions array
         await this.migrateToSolutionsArray();
@@ -296,54 +336,65 @@ export const globalSettings = {
             - clarion.version: ${clarionVersion || 'not set'}
             - clarion.configuration: ${clarionConfiguration || 'not set'}`);
 
-        // ✅ Set global variables
-        await setGlobalClarionSelection(solutionFile, clarionPropertiesFile, clarionVersion, clarionConfiguration);
-
-        // ✅ Ensure ClarionProperties.xml exists before parsing
-        if (!clarionPropertiesFile || !fs.existsSync(clarionPropertiesFile)) {
-            logger.warn("⚠️ ClarionProperties.xml not found. Skipping extraction of additional settings.");
+        // ✅ Early exit if no solution is configured - don't try to save empty settings
+        if (!solutionFile) {
+            logger.info("ℹ️ No solution settings found in workspace - skipping initialization");
             return;
         }
 
-        try {
-            // ✅ Parse ClarionProperties.xml
-            const xmlContent = fs.readFileSync(clarionPropertiesFile, "utf-8");
-            const parsedXml = await parseStringPromise(xmlContent);
+        // ✅ Set global variables (skip save during initialization to avoid recursion)
+        if (solutionFile) {
+            // Skip save since we're loading from existing workspace settings
+            await setGlobalClarionSelection(solutionFile, clarionPropertiesFile, clarionVersion, clarionConfiguration, true);
 
-            const versions = parsedXml.ClarionProperties?.Properties?.find(
-                (p: any) => p.$.name === "Clarion.Versions"
-            );
-            const selectedVersion = versions?.Properties?.find(
-                (p: any) => p.$.name === clarionVersion
-            );
-
-            if (!selectedVersion) {
-                logger.warn(`⚠️ Clarion version '${clarionVersion}' not found in ClarionProperties.xml.`);
+            // ✅ Ensure ClarionProperties.xml exists before parsing
+            if (!clarionPropertiesFile || !fs.existsSync(clarionPropertiesFile)) {
+                logger.warn("⚠️ ClarionProperties.xml not found. Skipping extraction of additional settings.");
                 return;
             }
 
-            // ✅ Extract additional settings
-            globalSettings.redirectionFile =
-                selectedVersion.Properties?.find((p: any) => p.$.name === "RedirectionFile")?.Name?.[0]?.$.value || "";
+            try {
+                // ✅ Parse ClarionProperties.xml
+                const xmlContent = fs.readFileSync(clarionPropertiesFile, "utf-8");
+                const parsedXml = await parseStringPromise(xmlContent);
 
-            globalSettings.redirectionPath =
-                selectedVersion.Properties?.find((p: any) => p.$.name === "RedirectionFile")?.Properties?.find(
-                    (p: any) => p.$.name === "Macros"
-                )?.reddir?.[0]?.$.value || "";
+                const versions = parsedXml.ClarionProperties?.Properties?.find(
+                    (p: any) => p.$.name === "Clarion.Versions"
+                );
+                const selectedVersion = versions?.Properties?.find(
+                    (p: any) => p.$.name === clarionVersion
+                );
 
-            globalSettings.macros = ClarionExtensionCommands.extractMacros(selectedVersion.Properties);
-            globalSettings.libsrcPaths =
-                selectedVersion.libsrc?.[0]?.$.value.split(";") || [];
+                if (!selectedVersion) {
+                    logger.warn(`⚠️ Clarion version '${clarionVersion}' not found in ClarionProperties.xml.`);
+                    return;
+                }
 
-             logger.info("✅ Extracted Clarion settings from ClarionProperties.xml", {
-                redirectionFile: globalSettings.redirectionFile,
-                redirectionPath: globalSettings.redirectionPath,
-                macros: globalSettings.macros,
-                libsrcPaths: globalSettings.libsrcPaths
-            });
+                // ✅ Extract additional settings
+                globalSettings.redirectionFile =
+                    selectedVersion.Properties?.find((p: any) => p.$.name === "RedirectionFile")?.Name?.[0]?.$.value || "";
 
-        } catch (error) {
-            logger.error("❌ Error parsing ClarionProperties.xml:", error);
+                globalSettings.redirectionPath =
+                    selectedVersion.Properties?.find((p: any) => p.$.name === "RedirectionFile")?.Properties?.find(
+                        (p: any) => p.$.name === "Macros"
+                    )?.reddir?.[0]?.$.value || "";
+
+                globalSettings.macros = ClarionExtensionCommands.extractMacros(selectedVersion.Properties);
+                globalSettings.libsrcPaths =
+                    selectedVersion.libsrc?.[0]?.$.value.split(";") || [];
+
+                logger.info("✅ Extracted Clarion settings from ClarionProperties.xml", {
+                    redirectionFile: globalSettings.redirectionFile,
+                    redirectionPath: globalSettings.redirectionPath,
+                    macros: globalSettings.macros,
+                    libsrcPaths: globalSettings.libsrcPaths
+                });
+
+            } catch (error) {
+                logger.error("❌ Error parsing ClarionProperties.xml:", error);
+            }
+        } else {
+            logger.info("ℹ️ No solution settings found in workspace - skipping initialization");
         }
     }
 };

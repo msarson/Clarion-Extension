@@ -40,11 +40,10 @@ Clarion-Extension.code-workspace
 tsconfig*.json
 .vscode/**
 server/tsconfig.json
-server/package.json
-server/package-lock.json
+# Note: server/package.json and server/package-lock.json are NOT excluded
+# Note: client/package.json and client/package-lock.json are NOT excluded
+# because they contain runtime dependencies needed by the extension
 client/tsconfig.json
-client/package.json
-client/package-lock.json
 
 # Exclude unnecessary node_modules subdirectories
 server/node_modules/**/*.md

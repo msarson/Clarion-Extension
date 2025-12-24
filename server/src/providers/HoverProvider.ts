@@ -3,15 +3,21 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import LoggerManager from '../logger';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
+import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
+import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { TokenHelper } from '../utils/TokenHelper';
+import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 
 const logger = LoggerManager.getLogger("HoverProvider");
-logger.setLevel("info");
+logger.setLevel("error"); // PERF: Only log errors to reduce overhead
 
 /**
  * Provides hover information for local variables and parameters
  */
 export class HoverProvider {
     private tokenCache = TokenCache.getInstance();
+    private memberResolver = new ClassMemberResolver();
+    private overloadResolver = new MethodOverloadResolver();
 
     /**
      * Provides hover information for a position in the document
@@ -21,7 +27,7 @@ export class HoverProvider {
 
         try {
             // Get the word at the current position
-            const wordRange = this.getWordRangeAtPosition(document, position);
+            const wordRange = TokenHelper.getWordRangeAtPosition(document, position);
             if (!wordRange) {
                 logger.info('No word found at position');
                 return null;
@@ -36,10 +42,13 @@ export class HoverProvider {
                 end: { line: position.line, character: Number.MAX_VALUE }
             });
             
-            const methodImplMatch = line.match(/^(\w+)\.(\w+)\s+PROCEDURE/i);
+            const methodImplMatch = line.match(/^(\w+)\.(\w+)\s+PROCEDURE\s*\((.*?)\)/i);
             if (methodImplMatch) {
                 const className = methodImplMatch[1];
                 const methodName = methodImplMatch[2];
+                
+                // Count parameters from the implementation signature
+                const paramCount = this.overloadResolver.countParametersInDeclaration(line);
                 
                 // Check if cursor is on the class or method name
                 const classStart = line.indexOf(className);
@@ -49,28 +58,106 @@ export class HoverProvider {
                 
                 if ((position.character >= classStart && position.character <= classEnd) ||
                     (position.character >= methodStart && position.character <= methodEnd)) {
-                    const declInfo = this.findMethodDeclarationInfo(className, methodName, document);
+                    const tokens = this.tokenCache.getTokens(document);
+                    const declInfo = this.overloadResolver.findMethodDeclaration(className, methodName, document, tokens, paramCount);
                     if (declInfo) {
                         return this.constructMethodImplementationHover(methodName, className, declInfo);
                     }
                 }
             }
 
+            // Check if this is a MAP procedure implementation and show declaration hover
+            const mapProcMatch = line.match(/^(\w+)\s+PROCEDURE\s*\(/i);
+            if (mapProcMatch) {
+                const procName = mapProcMatch[1];
+                const procNameEnd = mapProcMatch.index! + procName.length;
+                
+                // Check if cursor is on the procedure name
+                if (position.character >= mapProcMatch.index! && position.character <= procNameEnd) {
+                    // Find the MAP declaration for this procedure
+                    const mapDeclaration = this.findMapDeclaration(document, procName);
+                    if (mapDeclaration) {
+                        return {
+                            contents: {
+                                kind: 'markdown',
+                                value: `**MAP Declaration**\n\n\`\`\`clarion\n${mapDeclaration}\n\`\`\``
+                            }
+                        };
+                    }
+                }
+            }
+
+            // Check if this is a structure/group name followed by a dot (e.g., hovering over "MyGroup" in "MyGroup.MyVar")
+            // Search for a dot starting from the word's position in the line
+            const wordStartInLine = line.indexOf(word, Math.max(0, position.character - word.length));
+            const dotIndex = line.indexOf('.', wordStartInLine);
+            
+            if (dotIndex > wordStartInLine && dotIndex < wordStartInLine + word.length + 5) {
+                // There's a dot right after the word - this looks like structure.field notation
+                logger.info(`Detected dot notation for word: ${word}, dotIndex: ${dotIndex}`);
+                
+                const tokens = this.tokenCache.getTokens(document);
+                const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, position.line);
+                if (currentScope) {
+                    // Look for the GROUP/QUEUE/etc definition
+                    const structureInfo = this.findLocalVariableInfo(word, tokens, currentScope, document, word);
+                    if (structureInfo) {
+                        logger.info(`✅ HOVER-RETURN: Found structure info for ${word}`);
+                        return this.constructVariableHover(word, structureInfo, currentScope);
+                    } else {
+                        logger.info(`❌ HOVER-MISS: Could not find structure info for ${word}`);
+                    }
+                }
+            }
+
             // Check if this is a class member access (self.member or variable.member)
-            const dotIndex = line.lastIndexOf('.', position.character - 1);
-            if (dotIndex > 0) {
-                const beforeDot = line.substring(0, dotIndex).trim();
-                const afterDot = line.substring(dotIndex + 1).trim();
+            const dotBeforeIndex = line.lastIndexOf('.', position.character - 1);
+            if (dotBeforeIndex > 0) {
+                const beforeDot = line.substring(0, dotBeforeIndex).trim();
+                const afterDot = line.substring(dotBeforeIndex + 1).trim();
                 const fieldMatch = afterDot.match(/^(\w+)/);
                 
-                if (fieldMatch && fieldMatch[1].toLowerCase() === word.toLowerCase()) {
-                    // This is a member access
+                // Extract field name from word (in case TokenHelper returned "prefix.field")
+                const fieldName = word.includes('.') ? word.split('.').pop()! : word;
+                
+                if (fieldMatch && fieldMatch[1].toLowerCase() === fieldName.toLowerCase()) {
+                    // Check if this is a method call (has parentheses)
+                    const hasParentheses = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
+                    
+                    // This is a member access (hovering over the field after the dot)
                     if (beforeDot.toLowerCase() === 'self' || beforeDot.endsWith('self')) {
                         // self.member - class member
                         const tokens = this.tokenCache.getTokens(document);
-                        const memberInfo = this.findClassMemberInfo(word, document, position.line, tokens);
+                        
+                        // If it's a method call, count parameters
+                        let paramCount: number | undefined;
+                        if (hasParentheses) {
+                            paramCount = this.memberResolver.countParametersInCall(line, fieldName);
+                            logger.info(`Method call detected with ${paramCount} parameters`);
+                        }
+                        
+                        const memberInfo = this.memberResolver.findClassMemberInfo(fieldName, document, position.line, tokens, paramCount);
                         if (memberInfo) {
-                            return this.constructClassMemberHover(word, memberInfo);
+                            return this.constructClassMemberHover(fieldName, memberInfo);
+                        }
+                    } else {
+                        // variable.member - structure field access (e.g., MyGroup.MyVar)
+                        const structureNameMatch = beforeDot.match(/(\w+)\s*$/);
+                        if (structureNameMatch) {
+                            const structureName = structureNameMatch[1];
+                            logger.info(`Detected structure field access: ${structureName}.${word}`);
+                            
+                            const tokens = this.tokenCache.getTokens(document);
+                            const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, position.line);
+                            if (currentScope) {
+                                // Try to find the structure field using dot notation reference
+                                const fullReference = `${structureName}.${word}`;
+                                const variableInfo = this.findLocalVariableInfo(word, tokens, currentScope, document, fullReference);
+                                if (variableInfo) {
+                                    logger.info(`✅ HOVER-RETURN: Found structure field info for ${fullReference}`);
+                                    return this.constructVariableHover(fullReference, variableInfo, currentScope);
+                                }
+                            }
                         }
                     }
                 }
@@ -78,7 +165,7 @@ export class HoverProvider {
 
             // Get tokens and find current scope
             const tokens = this.tokenCache.getTokens(document);
-            const currentScope = this.getInnermostScopeAtLine(tokens, position.line);
+            const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, position.line);
 
             if (!currentScope) {
                 logger.info('No scope found - cannot provide variable/parameter hover');
@@ -87,23 +174,34 @@ export class HoverProvider {
 
             logger.info(`Current scope: ${currentScope.value}`);
 
-            // Check if this is a parameter
-            logger.info(`Checking if ${word} is a parameter...`);
-            const parameterInfo = this.findParameterInfo(word, document, currentScope);
-            if (parameterInfo) {
-                logger.info(`Found parameter info for ${word}`);
-                return this.constructParameterHover(word, parameterInfo, currentScope);
+            // Strip prefix if present (e.g., LOC:Field -> Field)
+            const colonIndex = word.lastIndexOf(':');
+            let searchWord = word;
+            let prefixPart = '';
+            
+            if (colonIndex > 0) {
+                prefixPart = word.substring(0, colonIndex);
+                searchWord = word.substring(colonIndex + 1);
+                logger.info(`Detected prefixed variable in hover: prefix="${prefixPart}", field="${searchWord}"`);
             }
-            logger.info(`${word} is not a parameter`);
+
+            // Check if this is a parameter
+            logger.info(`Checking if ${searchWord} is a parameter...`);
+            const parameterInfo = this.findParameterInfo(searchWord, document, currentScope);
+            if (parameterInfo) {
+                logger.info(`Found parameter info for ${searchWord}`);
+                return this.constructParameterHover(searchWord, parameterInfo, currentScope);
+            }
+            logger.info(`${searchWord} is not a parameter`);
 
             // Check if this is a local variable
-            logger.info(`Checking if ${word} is a local variable...`);
-            const variableInfo = this.findLocalVariableInfo(word, tokens, currentScope, document);
+            logger.info(`Checking if ${searchWord} is a local variable...`);
+            const variableInfo = this.findLocalVariableInfo(searchWord, tokens, currentScope, document, word);
             if (variableInfo) {
-                logger.info(`Found variable info for ${word}: type=${variableInfo.type}, line=${variableInfo.line}`);
+                logger.info(`✅ HOVER-RETURN: Found variable info for ${searchWord}: type=${variableInfo.type}, line=${variableInfo.line}`);
                 return this.constructVariableHover(word, variableInfo, currentScope);
             }
-            logger.info(`${word} is not a local variable`);
+            logger.info(`❌ HOVER-RETURN: ${searchWord} is not a local variable - returning null`);
 
             return null;
         } catch (error) {
@@ -114,6 +212,7 @@ export class HoverProvider {
 
     /**
      * Gets the word range at a position
+     * Enhanced to include colons for Clarion prefix notation (e.g., LOC:Field)
      */
     private getWordRangeAtPosition(document: TextDocument, position: Position): Range | null {
         const line = document.getText({
@@ -121,19 +220,32 @@ export class HoverProvider {
             end: { line: position.line + 1, character: 0 }
         });
 
-        const wordPattern = /[A-Za-z_][A-Za-z0-9_]*/g;
-        let match: RegExpExecArray | null;
-
-        while ((match = wordPattern.exec(line)) !== null) {
-            const start = match.index;
-            const end = start + match[0].length;
-
-            if (position.character >= start && position.character <= end) {
-                return {
-                    start: { line: position.line, character: start },
-                    end: { line: position.line, character: end }
-                };
+        // Always check for prefix notation (PREFIX:Field) by looking backwards for colon
+        let start = position.character;
+        while (start > 0) {
+            const char = line.charAt(start - 1);
+            if (/[a-zA-Z0-9_:]/.test(char)) {
+                start--;
+            } else {
+                break;
             }
+        }
+        
+        let end = position.character;
+        while (end < line.length) {
+            const char = line.charAt(end);
+            if (/[a-zA-Z0-9_:]/.test(char)) {
+                end++;
+            } else {
+                break;
+            }
+        }
+        
+        if (start < end) {
+            return {
+                start: { line: position.line, character: start },
+                end: { line: position.line, character: end }
+            };
         }
 
         return null;
@@ -141,13 +253,14 @@ export class HoverProvider {
 
     /**
      * Gets the innermost scope at a line
+     * Excludes MethodDeclaration (CLASS method declarations in DATA section)
      */
     private getInnermostScopeAtLine(tokens: Token[], line: number): Token | undefined {
         const scopes = tokens.filter(token =>
+            // Only consider actual procedure implementations and global procedures, not method declarations in CLASS
             (token.subType === TokenType.Procedure ||
                 token.subType === TokenType.GlobalProcedure ||
                 token.subType === TokenType.MethodImplementation ||
-                token.subType === TokenType.MethodDeclaration ||
                 token.subType === TokenType.Routine) &&
             token.line <= line &&
             (token.finishesAt === undefined || token.finishesAt >= line)
@@ -216,11 +329,289 @@ export class HoverProvider {
     }
 
     /**
-     * Finds local variable information
+     * Finds local variable information using the document symbol tree
+     * This is more reliable than token-based search as it uses the outline provider's hierarchy
      */
-    private findLocalVariableInfo(word: string, tokens: Token[], currentScope: Token, document: TextDocument): { type: string; line: number } | null {
-        logger.info(`findLocalVariableInfo called for word: ${word}, scope: ${currentScope.value}`);
+    private findLocalVariableInfo(word: string, tokens: Token[], currentScope: Token, document: TextDocument, originalWord?: string): { type: string; line: number } | null {
+        logger.info(`findLocalVariableInfo called for word: ${word}, scope: ${currentScope.value} at line ${currentScope.line}, subType: ${currentScope.subType}`);
         
+        // Try the document symbol approach - more reliable
+        const symbolProvider = new ClarionDocumentSymbolProvider();
+        const symbols = symbolProvider.provideDocumentSymbols(tokens, document.uri);
+        
+        // Find the procedure symbol that contains the current line
+        const procedureSymbol = this.findProcedureContainingLine(symbols, currentScope.line);
+        if (procedureSymbol) {
+            logger.info(`Found procedure symbol: ${procedureSymbol.name}`);
+            logger.info(`Procedure has ${procedureSymbol.children?.length || 0} children`);
+            
+            // Debug: Log first 10 children
+            if (procedureSymbol.children) {
+                procedureSymbol.children.slice(0, 10).forEach((child: any) => {
+                    logger.info(`  Child: name="${child.name}", kind=${child.kind}, detail="${child.detail}"`);
+                });
+            }
+            
+            // Search for the variable in the procedure's children
+            // Use originalWord if available (includes prefix like LOC:MyVar), otherwise use word
+            const searchText = originalWord || word;
+            logger.info(`PREFIX-DEBUG: Searching with searchText="${searchText}", originalWord="${originalWord}", word="${word}"`);
+            const varSymbol = this.findVariableInSymbol(procedureSymbol, searchText);
+            if (varSymbol) {
+                logger.info(`Found variable in symbol tree: ${varSymbol.name}, detail: ${varSymbol.detail}, kind: ${varSymbol.kind}`);
+                
+                // Extract type from _clarionType if available, otherwise parse from detail
+                let type = (varSymbol as any)._clarionType || varSymbol.detail || 'Unknown';
+                
+                // Special handling for GROUP/QUEUE/FILE structures (kind = 23)
+                if (varSymbol.kind === 23 && type === 'Unknown') {
+                    // Extract structure type from name pattern like "GROUP (MyGroup)"
+                    const structTypeMatch = varSymbol.name.match(/^(\w+)\s*\(/);
+                    if (structTypeMatch) {
+                        type = structTypeMatch[1]; // e.g., "GROUP", "QUEUE", "FILE"
+                        logger.info(`Extracted structure type from name: ${type}`);
+                    }
+                }
+                
+                return {
+                    type: type,
+                    line: varSymbol.range.start.line
+                };
+            }
+        }
+        
+        // Fallback to old token-based logic
+        logger.info(`PREFIX-DEBUG: Symbol tree search failed, falling back to token search for "${word}"`);
+        return this.findLocalVariableInfoLegacy(word, tokens, currentScope, document);
+    }
+    
+    /**
+     * Find procedure symbol that contains the given line
+     */
+    private findProcedureContainingLine(symbols: any[], line: number): any | null {
+        for (const symbol of symbols) {
+            if (symbol.range.start.line <= line && symbol.range.end.line >= line) {
+                // Check if this is a procedure
+                if (symbol.kind === 12) { // SymbolKind.Function
+                    return symbol;
+                }
+                // Recursively search children
+                if (symbol.children) {
+                    const result = this.findProcedureContainingLine(symbol.children, line);
+                    if (result) return result;
+                }
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * Find variable in symbol's children by name (handles prefixed labels)
+     */
+    private findVariableInSymbol(symbol: any, fieldName: string): any | null {
+        if (!symbol.children) return null;
+        
+        logger.info(`Searching for field "${fieldName}" in symbol with ${symbol.children.length} children`);
+        
+        for (const child of symbol.children) {
+            // Check if this is a GROUP/QUEUE/FILE structure symbol (SymbolKind.Struct = 23)
+            if (child.kind === 23) {
+                // Extract group name from pattern like "GROUP (MyGroup)" or "QUEUE (MyQueue)"
+                const groupNameMatch = child.name.match(/\(([^)]+)\)/);
+                if (groupNameMatch) {
+                    const groupName = groupNameMatch[1];
+                    if (groupName.toLowerCase() === fieldName.toLowerCase()) {
+                        logger.info(`✅ Matched GROUP/QUEUE/FILE structure: ${groupName}`);
+                        return child;
+                    }
+                }
+                
+                // Also search within the structure's children
+                if (child.children) {
+                    const result = this.findVariableInSymbol(child, fieldName);
+                    if (result) return result;
+                }
+            }
+            // Check if this is a variable symbol (SymbolKind.Variable = 13)
+            else if (child.kind === 13) {
+                // Use _clarionVarName if available (more reliable), otherwise extract from name
+                const varName = (child as any)._clarionVarName || child.name.match(/^([^\s]+)/)?.[1] || child.name;
+                
+                logger.info(`  PREFIX-CHECK: Checking child: varName="${varName}", _isPartOfStructure=${!!(child as any)._isPartOfStructure}, _possibleReferences=${(child as any)._possibleReferences ? JSON.stringify((child as any)._possibleReferences) : 'undefined'}`);
+                
+                // CRITICAL FIX: Check against _possibleReferences for structure fields
+                // Structure fields can ONLY be accessed via their prefixed forms (PREFIX:Field)
+                // or dot notation (Structure.Field), NEVER by unprefixed name alone
+                if ((child as any)._isPartOfStructure && (child as any)._possibleReferences) {
+                    const possibleRefs = (child as any)._possibleReferences as string[];
+                    logger.info(`  PREFIX-CHECK: Structure field "${varName}" has possible references: ${possibleRefs.join(', ')}`);
+                    
+                    // Check if fieldName matches any of the valid prefixed/dotted references
+                    const matchesReference = possibleRefs.some(ref => 
+                        ref.toUpperCase() === fieldName.toUpperCase()
+                    );
+                    
+                    // Also check if fieldName itself is the unprefixed varName - if so, REJECT it
+                    const isUnprefixedMatch = varName.toUpperCase() === fieldName.toUpperCase();
+                    
+                    if (matchesReference && !isUnprefixedMatch) {
+                        logger.info(`✅ PREFIX-MATCH: Matched structure field "${fieldName}" via valid reference`);
+                        return child;
+                    } else if (isUnprefixedMatch) {
+                        logger.info(`❌ PREFIX-REJECT: "${fieldName}" cannot access structure field "${varName}" - must use ${possibleRefs.join(' or ')}`);
+                        continue;
+                    } else {
+                        logger.info(`❌ PREFIX-SKIP: "${fieldName}" does not match any valid reference for structure field "${varName}"`);
+                        continue;
+                    }
+                }
+                // For regular variables (not structure fields), match exact name
+                else if (varName.toLowerCase() === fieldName.toLowerCase()) {
+                    logger.info(`✅ Matched regular variable: child.name="${child.name}", extracted="${varName}", searching for="${fieldName}"`);
+                    return child;
+                }
+                
+                // Also search nested children if this is a structure variable
+                if (child.children) {
+                    const result = this.findVariableInSymbol(child, fieldName);
+                    if (result) return result;
+                }
+            }
+            // For other kinds, still search children
+            else if (child.children) {
+                const result = this.findVariableInSymbol(child, fieldName);
+                if (result) return result;
+            }
+        }
+        
+        logger.info(`❌ No match found for "${fieldName}"`);
+        return null;
+    }
+    
+    /**
+     * Legacy token-based variable search (fallback)
+     */
+    private findLocalVariableInfoLegacy(word: string, tokens: Token[], currentScope: Token, document: TextDocument): { type: string; line: number } | null {
+        logger.info(`PREFIX-LEGACY-START: Entering legacy search for "${word}", currentScope.subType=${currentScope.subType}`);
+        
+        // For PROCEDURE/METHOD: Search the DATA section (everything before CODE)
+        if (currentScope.subType === TokenType.Procedure || 
+            currentScope.subType === TokenType.MethodImplementation ||
+            currentScope.subType === TokenType.MethodDeclaration) {
+            
+            logger.info(`Entering procedure DATA section search (subType matched: ${currentScope.subType})`);
+            
+            const codeMarker = currentScope.executionMarker;
+            let dataEnd = codeMarker ? codeMarker.line : currentScope.finishesAt;
+            
+            // If we don't have a CODE marker or finishesAt, find the next procedure
+            if (dataEnd === undefined) {
+                const nextProcedure = tokens.find(t =>
+                    (t.subType === TokenType.Procedure ||
+                     t.subType === TokenType.MethodImplementation ||
+                     t.subType === TokenType.MethodDeclaration) &&
+                    t.line > currentScope.line
+                );
+                
+                if (nextProcedure) {
+                    dataEnd = nextProcedure.line;
+                    logger.info(`Using next procedure at line ${dataEnd} as DATA section boundary`);
+                } else {
+                    dataEnd = tokens[tokens.length - 1].line;
+                    logger.info(`No next procedure found, using end of file at line ${dataEnd}`);
+                }
+            }
+            
+            logger.info(`Searching procedure DATA section from line ${currentScope.line} to ${dataEnd}`);
+            
+            // Debug: Show all tokens with matching name in the range
+            const allMatchingInRange = tokens.filter(t => 
+                t.value.toLowerCase() === word.toLowerCase() &&
+                t.line > currentScope.line &&
+                (dataEnd === undefined || t.line < dataEnd)
+            );
+            logger.info(`Debug: Found ${allMatchingInRange.length} tokens matching "${word}" in range ${currentScope.line}-${dataEnd}`);
+            allMatchingInRange.forEach(t => {
+                logger.info(`  -> Line ${t.line}, Type: ${t.type}, Start: ${t.start}, Value: "${t.value}"`);
+            });
+            
+            // Look for variables in DATA section, handling prefixed labels
+            const variableTokens = tokens.filter(token => {
+                // Match by name - either exact match or as part of prefixed label
+                const exactMatch = token.value.toLowerCase() === word.toLowerCase();
+                const prefixedMatch = token.type === TokenType.Label && 
+                                     token.value.includes(':') &&
+                                     token.value.toLowerCase().endsWith(':' + word.toLowerCase());
+                
+                if (!exactMatch && !prefixedMatch) {
+                    return false;
+                }
+                
+                if (token.type !== TokenType.Variable && token.type !== TokenType.Label) {
+                    return false;
+                }
+                
+                if (token.line <= currentScope.line || (dataEnd !== undefined && token.line >= dataEnd)) {
+                    return false;
+                }
+                
+                // For exact matches, handle prefixed variables (token not at position 0)
+                if (exactMatch && token.start > 0) {
+                    const labelAtStart = tokens.find(t =>
+                        t.line === token.line &&
+                        t.start === 0 &&
+                        t.type === TokenType.Label
+                    );
+                    
+                    if (labelAtStart && labelAtStart.value.includes(':')) {
+                        logger.info(`Found prefixed label in hover: ${labelAtStart.value} with field: ${token.value} at line ${token.line}`);
+                        return true;
+                    }
+                    
+                    return false;
+                }
+                
+                // Prefixed label match or token at position 0 is valid
+                if (prefixedMatch) {
+                    logger.info(`Found prefixed label by suffix match: ${token.value} at line ${token.line}`);
+                }
+                return true;
+            });
+
+            logger.info(`Found ${variableTokens.length} variable tokens for ${word} in procedure DATA section`);
+            
+            if (variableTokens.length > 0) {
+                const varToken = variableTokens[0];
+                logger.info(`PREFIX-LEGACY: Found token - value="${varToken.value}", isStructureField=${!!varToken.isStructureField}, structurePrefix="${varToken.structurePrefix}"`);
+                
+                // CRITICAL FIX: Check if this is a structure field that requires a prefix
+                // Skip structure fields when searching for bare field names
+                if (varToken.isStructureField || varToken.structurePrefix) {
+                    logger.info(`PREFIX-LEGACY: Token "${varToken.value}" is a structure field with prefix "${varToken.structurePrefix}" - skipping for bare field name search`);
+                    // Don't return structure fields for bare name searches
+                    // They should only be accessible via prefix (LOC:Field) or dot notation (Group.Field)
+                    return null;
+                }
+                
+                // Get the source line to extract type information
+                const content = document.getText();
+                const lines = content.split('\n');
+                const varLine = lines[varToken.line];
+                
+                if (varLine) {
+                    // Extract type from the line - handle both simple and prefixed labels
+                    const typeMatch = varLine.match(/\s+(&?[A-Z][A-Za-z0-9_]*(?:\([^)]*\))?)/i);
+                    if (typeMatch) {
+                        return {
+                            type: typeMatch[1].trim(),
+                            line: varToken.line
+                        };
+                    }
+                }
+            }
+        }
+        
+        // Fallback to old logic for routines or if procedure search failed
         // Find variable tokens at column 0 within the current scope
         const variableTokens = tokens.filter(token =>
             (token.type === TokenType.Variable ||
@@ -247,6 +638,16 @@ export class HoverProvider {
         }
 
         const varToken = variableTokens[0];
+        logger.info(`PREFIX-LEGACY-OTHER: Found token - value="${varToken.value}", line=${varToken.line}, type=${varToken.type}`);
+        logger.info(`PREFIX-LEGACY-OTHER: Token properties - isStructureField=${varToken.isStructureField}, structurePrefix=${varToken.structurePrefix}`);
+        logger.info(`PREFIX-LEGACY-OTHER: Token object keys: ${Object.keys(varToken).join(', ')}`);
+        
+        // CRITICAL FIX: Check if this is a structure field that requires a prefix
+        // Skip structure fields when searching for bare field names
+        if (varToken.isStructureField || varToken.structurePrefix) {
+            logger.info(`PREFIX-LEGACY-OTHER: Token "${varToken.value}" is a structure field with prefix "${varToken.structurePrefix}" - skipping for bare field name search`);
+            return null;
+        }
         
         // Get the source line to extract type information
         const content = document.getText();
@@ -306,10 +707,16 @@ export class HoverProvider {
         const isRoutine = scope.subType === TokenType.Routine;
         const variableType = isRoutine ? 'Routine Variable' : 'Local Variable';
         
+        // CRITICAL FIX: Keep the full variable name including prefix (e.g., LOC:SMTPbccAddress)
+        // Don't strip the prefix - it's part of the variable's identity
+        const displayName = name;
+        
         const markdown = [
-            `**${variableType}:** \`${name}\``,
+            `**${variableType}:** \`${displayName}\``,
             ``,
             `**Type:** \`${info.type}\``,
+            ``,
+            `**Scope:** ${isRoutine ? 'Routine' : 'Procedure'}`,
             ``,
             `**Declared at:** line ${info.line + 1}`,
             ``,
@@ -327,10 +734,10 @@ export class HoverProvider {
     /**
      * Finds class member information for hover
      */
-    private findClassMemberInfo(memberName: string, document: TextDocument, currentLine: number, tokens: Token[]): { type: string; className: string; line: number; file: string } | null {
-        logger.info(`🔍 findClassMemberInfo called for member: ${memberName}`);
+    private findClassMemberInfo(memberName: string, document: TextDocument, currentLine: number, tokens: Token[], paramCount?: number): { type: string; className: string; line: number; file: string } | null {
+        logger.info(`🔍 findClassMemberInfo called for member: ${memberName}${paramCount !== undefined ? ` with ${paramCount} parameters` : ''}`);
         // Find the current scope to get the class name
-        let currentScope = this.getInnermostScopeAtLine(tokens, currentLine);
+        let currentScope = TokenHelper.getInnermostScopeAtLine(tokens, currentLine);
         if (!currentScope) {
             logger.info('❌ No scope found');
             return null;
@@ -341,7 +748,7 @@ export class HoverProvider {
         // If we're in a routine, we need the parent scope (the method/procedure) to get the class name
         if (currentScope.subType === TokenType.Routine) {
             logger.info(`Current scope is a routine (${currentScope.value}), looking for parent scope`);
-            const parentScope = this.getParentScopeOfRoutine(tokens, currentScope);
+            const parentScope = TokenHelper.getParentScopeOfRoutine(tokens, currentScope);
             if (parentScope) {
                 currentScope = parentScope;
                 logger.info(`Using parent scope: ${currentScope.value}`);
@@ -391,6 +798,10 @@ export class HoverProvider {
             
             if (labelToken) {
                 logger.info(`✅ Found class ${className} at line ${labelToken.line}`);
+                
+                // Collect all matching members (for overload resolution)
+                const candidates: { type: string; line: number; paramCount: number }[] = [];
+                
                 // Search for member in this class
                 for (let i = labelToken.line + 1; i < tokens.length; i++) {
                     const lineTokens = tokens.filter(t => t.line === i);
@@ -404,31 +815,67 @@ export class HoverProvider {
                     
                     if (memberToken) {
                         logger.info(`Found member token: ${memberToken.value} at start ${memberToken.start}`);
-                        logger.info(`All tokens on line ${i}: ${lineTokens.map(t => `[${t.value}:${t.start}:${t.type}]`).join(' ')}`);
                         
-                        // Get the first token after the member name - this is the type
-                        // It could be a simple type (LONG, BYTE), reference type (&STRING), 
-                        // or complex type (class name like StringTheory)
+                        // Get the type signature
                         const memberEnd = memberToken.start + memberToken.value.length;
                         const typeTokens = lineTokens.filter(t => t.start > memberEnd);
-                        logger.info(`Type tokens after member: ${typeTokens.map(t => `[${t.value}:${t.start}:${t.type}]`).join(' ')}`);
                         const type = typeTokens.length > 0 ? typeTokens[0].value : 'Unknown';
-                        logger.info(`Selected type: ${type}`);
-                        return { type, className, line: i, file: document.uri };
+                        
+                        // Count parameters in declaration if it's a PROCEDURE
+                        let declParamCount = 0;
+                        if (type.toUpperCase() === 'PROCEDURE') {
+                            // Get full line to extract parameter list
+                            const content = document.getText();
+                            const lines = content.split('\n');
+                            const fullLine = lines[i];
+                            declParamCount = this.countParametersInDeclaration(fullLine);
+                        }
+                        
+                        candidates.push({ type, line: i, paramCount: declParamCount });
+                        logger.info(`Candidate: ${memberName} with ${declParamCount} parameters at line ${i}`);
                     }
+                }
+                
+                // If we have parameter count from call, find best match
+                if (paramCount !== undefined && candidates.length > 0) {
+                    // Find exact match first
+                    let bestMatch = candidates.find(c => c.paramCount === paramCount);
+                    
+                    // If no exact match, find closest (prefer higher param count for optional params)
+                    if (!bestMatch) {
+                        bestMatch = candidates.reduce((best, curr) => {
+                            const bestDiff = Math.abs(best.paramCount - paramCount);
+                            const currDiff = Math.abs(curr.paramCount - paramCount);
+                            
+                            // If same distance, prefer the one with MORE parameters (optional params)
+                            if (currDiff === bestDiff) {
+                                return curr.paramCount > best.paramCount ? curr : best;
+                            }
+                            
+                            return currDiff < bestDiff ? curr : best;
+                        });
+                    }
+                    
+                    logger.info(`Selected overload with ${bestMatch.paramCount} parameters (call had ${paramCount})`);
+                    return { type: bestMatch.type, className, line: bestMatch.line, file: document.uri };
+                }
+                
+                // No parameter count or single candidate - return first match
+                if (candidates.length > 0) {
+                    return { type: candidates[0].type, className, line: candidates[0].line, file: document.uri };
                 }
             }
         }
         
         // If not found in current file, search INCLUDE files
         logger.info(`⚠️ Class ${className} not found in current file - searching INCLUDE files`);
-        return this.findClassMemberInIncludes(className, memberName, document);
+        return this.findClassMemberInIncludes(className, memberName, document, paramCount);
     }
 
     /**
      * Searches for class member info in INCLUDE files
      */
-    private findClassMemberInIncludes(className: string, memberName: string, document: TextDocument): { type: string; className: string; line: number; file: string } | null {
+    private findClassMemberInIncludes(className: string, memberName: string, document: TextDocument, paramCount?: number): { type: string; className: string; line: number; file: string } | null {
         const content = document.getText();
         const lines = content.split('\n');
         
@@ -482,7 +929,10 @@ export class HoverProvider {
                     if (classMatch) {
                         logger.info(`Found class ${className} in INCLUDE at line ${j}`);
                         
-                        // Find the member
+                        // Collect all matching members for overload resolution
+                        const candidates: { type: string; line: number; paramCount: number }[] = [];
+                        
+                        // Find all members with this name
                         for (let k = j + 1; k < includeLines.length; k++) {
                             const memberLine = includeLines[k];
                             if (memberLine.match(/^\s*END\s*$/i) || memberLine.match(/^END\s*$/i)) {
@@ -497,9 +947,48 @@ export class HoverProvider {
                                 // Remove trailing comments (! or //)
                                 const typeWithoutComment = afterMember.split(/\s*[!\/\/]/).shift() || afterMember;
                                 const type = typeWithoutComment.trim() || 'Unknown';
-                                logger.info(`Extracted type: ${type}`);
-                                return { type, className, line: k, file: resolvedPath };
+                                
+                                // Count parameters if it's a PROCEDURE
+                                let declParamCount = 0;
+                                if (type.toUpperCase().startsWith('PROCEDURE')) {
+                                    declParamCount = this.countParametersInDeclaration(memberLine);
+                                    logger.info(`Counting params in: ${memberLine}`);
+                                    logger.info(`Detected ${declParamCount} parameters`);
+                                }
+                                
+                                candidates.push({ type, line: k, paramCount: declParamCount });
+                                logger.info(`Candidate: ${memberName} with ${declParamCount} parameters - ${type}`);
                             }
+                        }
+                        
+                        // If we have parameter count from call, find best match
+                        if (paramCount !== undefined && candidates.length > 0) {
+                            // Find exact match first
+                            let bestMatch = candidates.find(c => c.paramCount === paramCount);
+                            
+                            // If no exact match, find closest (prefer higher param count for optional params)
+                            if (!bestMatch) {
+                                bestMatch = candidates.reduce((best, curr) => {
+                                    const bestDiff = Math.abs(best.paramCount - paramCount);
+                                    const currDiff = Math.abs(curr.paramCount - paramCount);
+                                    
+                                    // If same distance, prefer the one with MORE parameters (optional params)
+                                    if (currDiff === bestDiff) {
+                                        return curr.paramCount > best.paramCount ? curr : best;
+                                    }
+                                    
+                                    return currDiff < bestDiff ? curr : best;
+                                });
+                            }
+                            
+                            logger.info(`Selected overload with ${bestMatch.paramCount} parameters (call had ${paramCount})`);
+                            return { type: bestMatch.type, className, line: bestMatch.line, file: resolvedPath };
+                        }
+                        
+                        // No parameter count or single candidate - return first match
+                        if (candidates.length > 0) {
+                            logger.info(`Returning first candidate (no param matching needed)`);
+                            return { type: candidates[0].type, className, line: candidates[0].line, file: resolvedPath };
                         }
                     }
                 }
@@ -541,12 +1030,23 @@ export class HoverProvider {
             markdown.push(``);
             markdown.push(`**Declared in:** \`${fileName}\` at line **${info.line + 1}**`);
             markdown.push(``);
-            markdown.push(`*(F12 will navigate to the definition)*`);
+            
+            // Add navigation hints - F12 for definition, Ctrl+F12 for implementation (methods only)
+            if (isMethod) {
+                markdown.push(`*(F12 to definition | Ctrl+F12 to implementation)*`);
+            } else {
+                markdown.push(`*(F12 will navigate to the definition)*`);
+            }
         } else {
             markdown.push(``);
             markdown.push(`**Declared in:** ${info.file}`);
             markdown.push(``);
-            markdown.push(`*Press F12 to go to definition*`);
+            
+            if (isMethod) {
+                markdown.push(`*(F12 to definition | Ctrl+F12 to implementation)*`);
+            } else {
+                markdown.push(`*Press F12 to go to definition*`);
+            }
         }
         
         return {
@@ -555,124 +1055,6 @@ export class HoverProvider {
                 value: markdown.join('\n')
             }
         };
-    }
-
-    /**
-     * Finds method declaration info from CLASS (for hover on implementation)
-     */
-    private findMethodDeclarationInfo(className: string, methodName: string, document: TextDocument): { signature: string; file: string; line: number } | null {
-        // Search in current file first
-        const tokens = this.tokenCache.getTokens(document);
-        const classTokens = tokens.filter(token =>
-            token.type === TokenType.Structure &&
-            token.value.toUpperCase() === 'CLASS' &&
-            token.line > 0
-        );
-        
-        for (const classToken of classTokens) {
-            const labelToken = tokens.find(t =>
-                t.type === TokenType.Label &&
-                t.line === classToken.line &&
-                t.value.toLowerCase() === className.toLowerCase()
-            );
-            
-            if (labelToken) {
-                // Search for method in class
-                for (let i = labelToken.line + 1; i < tokens.length; i++) {
-                    const lineTokens = tokens.filter(t => t.line === i);
-                    const endToken = lineTokens.find(t => t.value.toUpperCase() === 'END' && t.start === 0);
-                    if (endToken) break;
-                    
-                    const methodToken = lineTokens.find(t =>
-                        t.value.toLowerCase() === methodName.toLowerCase() &&
-                        t.start === 0
-                    );
-                    
-                    if (methodToken) {
-                        // Get the full line as signature
-                        const content = document.getText();
-                        const lines = content.split('\n');
-                        const signature = lines[i].trim();
-                        return { signature, file: document.uri, line: i };
-                    }
-                }
-            }
-        }
-        
-        // Search in INCLUDE files
-        return this.findMethodDeclarationInIncludes(className, methodName, document);
-    }
-
-    /**
-     * Searches INCLUDE files for method declaration
-     */
-    private findMethodDeclarationInIncludes(className: string, methodName: string, document: TextDocument): { signature: string; file: string; line: number } | null {
-        const filePath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
-        const content = document.getText();
-        const lines = content.split('\n');
-        
-        // Find INCLUDE statements
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const includeMatch = line.match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
-            if (!includeMatch) continue;
-            
-            const includeFileName = includeMatch[1];
-            let resolvedPath: string | null = null;
-            
-            // Try solution-wide redirection
-            const SolutionManager = require('../solution/solutionManager').SolutionManager;
-            const solutionManager = SolutionManager.getInstance();
-            if (solutionManager && solutionManager.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const redirectionParser = project.getRedirectionParser();
-                    const resolved = redirectionParser.findFile(includeFileName);
-                    if (resolved && resolved.path && require('fs').existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        break;
-                    }
-                }
-            }
-            
-            // Fallback to relative path
-            if (!resolvedPath) {
-                const path = require('path');
-                const currentDir = path.dirname(filePath);
-                const relativePath = path.join(currentDir, includeFileName);
-                if (require('fs').existsSync(relativePath)) {
-                    resolvedPath = relativePath;
-                }
-            }
-            
-            if (resolvedPath) {
-                const fs = require('fs');
-                const includeContent = fs.readFileSync(resolvedPath, 'utf8');
-                const includeLines = includeContent.split('\n');
-                
-                // Find the class
-                for (let j = 0; j < includeLines.length; j++) {
-                    const includeLine = includeLines[j];
-                    const classMatch = includeLine.match(new RegExp(`^${className}\\s+CLASS`, 'i'));
-                    if (classMatch) {
-                        // Find the method
-                        for (let k = j + 1; k < includeLines.length; k++) {
-                            const methodLine = includeLines[k];
-                            if (methodLine.match(/^\s*END\s*$/i) || methodLine.match(/^END\s*$/i)) {
-                                break;
-                            }
-                            
-                            const methodMatch = methodLine.match(new RegExp(`^\\s*(${methodName})\\s+PROCEDURE`, 'i'));
-                            if (methodMatch) {
-                                const signature = methodLine.trim();
-                                return { signature, file: resolvedPath, line: k };
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        return null;
     }
 
     /**
@@ -700,5 +1082,109 @@ export class HoverProvider {
                 value: markdown.join('\n')
             }
         };
+    }
+
+    /**
+     * Counts parameters in a method call
+     * Simple implementation: counts commas at parenthesis depth 0
+     */
+    private countParametersInCall(line: string, methodName: string): number {
+        // Find the opening parenthesis after the method name
+        const methodIndex = line.toLowerCase().indexOf(methodName.toLowerCase());
+        if (methodIndex === -1) return 0;
+        
+        const afterMethod = line.substring(methodIndex + methodName.length);
+        const parenIndex = afterMethod.indexOf('(');
+        if (parenIndex === -1) return 0;
+        
+        const paramList = afterMethod.substring(parenIndex + 1);
+        
+        let depth = 0;
+        let commaCount = 0;
+        let hasContent = false;
+        
+        for (let i = 0; i < paramList.length; i++) {
+            const char = paramList[i];
+            
+            if (char === '(') {
+                depth++;
+            } else if (char === ')') {
+                if (depth === 0) {
+                    // End of parameter list
+                    return hasContent ? commaCount + 1 : 0;
+                }
+                depth--;
+            } else if (char === ',' && depth === 0) {
+                commaCount++;
+            } else if (char.trim() !== '' && depth === 0) {
+                hasContent = true;
+            }
+        }
+        
+        return hasContent ? commaCount + 1 : 0;
+    }
+
+    /**
+     * Counts parameters in a method declaration
+     * Extracts parameter list from PROCEDURE(...) 
+     */
+    private countParametersInDeclaration(line: string): number {
+        const match = line.match(/PROCEDURE\s*\(([^)]*)\)/i);
+        if (!match) return 0;
+        
+        const paramList = match[1].trim();
+        if (paramList === '') return 0;
+        
+        // Simple comma counting (not perfect but good enough for most cases)
+        let depth = 0;
+        let commaCount = 0;
+        
+        for (let i = 0; i < paramList.length; i++) {
+            const char = paramList[i];
+            
+            if (char === '(') {
+                depth++;
+            } else if (char === ')') {
+                depth--;
+            } else if (char === ',' && depth === 0) {
+                commaCount++;
+            }
+        }
+        
+        return commaCount + 1;
+    }
+
+    /**
+     * Find MAP declaration for a procedure
+     */
+    private findMapDeclaration(document: TextDocument, procName: string): string | null {
+        const text = document.getText();
+        const lines = text.split(/\r?\n/);
+        
+        // Find MAP block
+        let inMap = false;
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+            
+            if (/^\s*MAP\s*$/i.test(trimmed)) {
+                inMap = true;
+                continue;
+            }
+            
+            if (inMap && /^\s*END\s*$/i.test(trimmed)) {
+                break; // End of MAP, procedure not found
+            }
+            
+            if (inMap) {
+                // Check if this line declares our procedure
+                const declMatch = trimmed.match(/^(\w+)\s+PROCEDURE/i);
+                if (declMatch && declMatch[1].toLowerCase() === procName.toLowerCase()) {
+                    return trimmed;
+                }
+            }
+        }
+        
+        return null;
     }
 }
