@@ -85,7 +85,21 @@ Settings are saved in `.vscode/settings.json` within the folder - commit them wi
 
 ## What's New
 
-### Version 0.7.4 (Dec 2024)
+### Version 0.7.5 (Dec 2025)
+
+#### ✨ New Productivity Features
+- **Create New Class** - Interactive wizard creates both .inc and .clw files with proper formatting
+- **Add Method Implementation** (`Ctrl+Shift+I`) - Automatically generate method implementations from declarations
+  - Finds MODULE file and checks for existing implementations
+  - Jumps to existing or generates new implementation at EOF
+  - Handles method overloads with parameter matching
+- **Paste as Clarion String** (`Ctrl+Shift+Alt+V`) - Convert clipboard text to properly formatted Clarion strings
+  - Automatic quote escaping and continuation syntax
+  - Configurable line terminators (space/CRLF/none)
+  - Optional leading whitespace trimming
+  - Perfect for pasting SQL queries or multi-line text
+
+### Version 0.7.4 (Dec 2025)
 
 #### 🔧 Improved Stability & Performance
 - **Major codebase refactoring** - 82% reduction in main extension file (975→175 lines)
@@ -99,7 +113,7 @@ Settings are saved in `.vscode/settings.json` within the folder - commit them wi
 - **Structure view** - Now follows cursor correctly on startup
 - **ROUTINE parsing** - Improved recognition in all contexts
 
-### Version 0.7.3 (Dec 2024)
+### Version 0.7.3 (Dec 2025)
 
 #### 🚀 Folder-Based Workflow
 - **No more workspace files** - Just open folder containing solution
