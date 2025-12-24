@@ -204,15 +204,16 @@ function findExistingImplementation(
         
         const match = line.match(pattern);
         if (match) {
+            logger.info(`Found potential implementation at line ${i}: "${line}"`);
             // Check parameter signature matches
             const implParamSignature = parseParameterSignature(match[1]);
-            logger.info(`Found potential implementation at line ${i}: signature [${implParamSignature.join(', ')}]`);
+            logger.info(`  Extracted signature: [${implParamSignature.join(', ')}]`);
             
             if (parametersMatch(parameterSignature, implParamSignature)) {
                 logger.info(`✓ Signature matches! Returning line ${i}`);
                 return i;
             } else {
-                logger.info(`✗ Signature does not match`);
+                logger.info(`✗ Signature does not match (expected [${parameterSignature.join(', ')}])`);
             }
         }
     }
@@ -301,8 +302,12 @@ async function addMethodImplementation(editor: TextEditor): Promise<void> {
     
     logger.info(`Target file: ${targetFilePath}`);
     
-    // Read target file
-    const clwContent = fs.readFileSync(targetFilePath, 'utf8');
+    // Open the target document first to get the latest content (including unsaved changes)
+    const targetUri = Uri.file(targetFilePath);
+    const targetDoc = await workspace.openTextDocument(targetUri);
+    
+    // Use document content instead of reading from disk (to include unsaved changes)
+    const clwContent = targetDoc.getText();
     
     // Check if implementation already exists
     const existingLine = findExistingImplementation(
@@ -316,8 +321,6 @@ async function addMethodImplementation(editor: TextEditor): Promise<void> {
         // Implementation exists - jump to it
         logger.info(`Implementation found at line ${existingLine}, jumping to it`);
         
-        const targetUri = Uri.file(targetFilePath);
-        const targetDoc = await workspace.openTextDocument(targetUri);
         const targetEditor = await window.showTextDocument(targetDoc);
         
         const position = new Position(existingLine, 0);
@@ -329,12 +332,10 @@ async function addMethodImplementation(editor: TextEditor): Promise<void> {
     }
     
     // Generate implementation
-    const indent = getIndentString(Uri.file(targetFilePath));
+    const indent = getIndentString(targetUri);
     const implementation = generateImplementation(classContext.className, methodDecl, indent);
     
-    // Append to end of file
-    const targetUri = Uri.file(targetFilePath);
-    const targetDoc = await workspace.openTextDocument(targetUri);
+    // Append to end of file (document already opened above)
     const lastLine = targetDoc.lineCount - 1;
     const lastLineText = targetDoc.lineAt(lastLine).text;
     
