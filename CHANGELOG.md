@@ -72,7 +72,7 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
     - `false` - Preserves original indentation inside strings
   - Only active in Clarion files for safety
   - Perfect for pasting SQL queries, HTML, or any multi-line text into Clarion code
-  - Demo file: `demo-paste-as-string.clw`
+  - Demo file: `ExampleCode/demo-paste-as-string.clw`
 - **Extension Status Command**
   - New command: "Clarion: Show Extension Status" (accessible via Ctrl+Shift+P)
   - Displays comprehensive extension status in Output panel
