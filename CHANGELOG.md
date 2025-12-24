@@ -6,7 +6,7 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 
 ---
 
-## [Unreleased]
+## [0.7.5] - 2024-12-24
 
 ### ✨ Features
 - **Create New Class Command**
@@ -32,8 +32,8 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
   - If exists: Jumps to existing implementation
   - If not exists: Generates and adds implementation at end of file
   - Respects user tab/space settings
-  - Adds `RETURN` statement for methods with return types
-  - Includes return type as comment `!,ReturnType` on PROCEDURE line
+  - Includes return type as comment `!,ReturnType` on PROCEDURE line (not in signature)
+  - Developer adds RETURN statement as needed
   - Only works within CLASS context (errors outside)
   - Perfect for quickly adding method implementations without manual copying
 - **Paste as Clarion String Command**
