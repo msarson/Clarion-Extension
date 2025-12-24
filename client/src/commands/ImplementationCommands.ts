@@ -15,6 +15,7 @@ interface MethodDeclaration {
     parameters: string;
     returnType: string | null;
     parameterCount: number;
+    parameterSignature: string[];
 }
 
 /**
@@ -40,14 +41,52 @@ function parseMethodDeclaration(line: string): MethodDeclaration | null {
     const parameters = match[2].trim();
     const returnType = match[3] ? match[3].trim() : null;
     const parameterCount = countParameters(parameters);
+    const parameterSignature = parseParameterSignature(parameters);
     
     return {
         methodName,
         fullSignature: line.trim(),
         parameters,
         returnType,
-        parameterCount
+        parameterCount,
+        parameterSignature
     };
+}
+
+/**
+ * Parses parameter signature from parameter string
+ */
+function parseParameterSignature(paramString?: string): string[] {
+    if (!paramString || paramString.trim() === '') {
+        return [];
+    }
+    
+    return paramString.split(',')
+        .map(param => {
+            const paramParts = param.trim().split(/\s+/);
+            return paramParts[0].toLowerCase();
+        });
+}
+
+/**
+ * Compares two parameter signatures
+ */
+function parametersMatch(declaredParams: string[], implParams: string[]): boolean {
+    if (declaredParams.length !== implParams.length) {
+        return false;
+    }
+    
+    if (declaredParams.length === 0 && implParams.length === 0) {
+        return true;
+    }
+    
+    for (let i = 0; i < declaredParams.length; i++) {
+        if (declaredParams[i] !== implParams[i]) {
+            return false;
+        }
+    }
+    
+    return true;
 }
 
 /**
@@ -144,7 +183,7 @@ function findExistingImplementation(
     clwContent: string,
     className: string,
     methodName: string,
-    parameterCount: number
+    parameterSignature: string[]
 ): number | null {
     const lines = clwContent.split(/\r?\n/);
     
@@ -159,9 +198,9 @@ function findExistingImplementation(
         
         const match = line.match(pattern);
         if (match) {
-            // Check parameter count matches
-            const implParamCount = countParameters(match[1]);
-            if (implParamCount === parameterCount) {
+            // Check parameter signature matches
+            const implParamSignature = parseParameterSignature(match[1]);
+            if (parametersMatch(parameterSignature, implParamSignature)) {
                 return i;
             }
         }
@@ -258,7 +297,7 @@ async function addMethodImplementation(editor: TextEditor): Promise<void> {
         clwContent,
         classContext.className,
         methodDecl.methodName,
-        methodDecl.parameterCount
+        methodDecl.parameterSignature
     );
     
     if (existingLine !== null) {
