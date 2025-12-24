@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("ImplementationCommands");
-logger.setLevel("error");
+logger.setLevel("info");
 
 /**
  * Information about a method declaration
@@ -61,11 +61,14 @@ function parseParameterSignature(paramString?: string): string[] {
         return [];
     }
     
-    return paramString.split(',')
+    const result = paramString.split(',')
         .map(param => {
             const paramParts = param.trim().split(/\s+/);
             return paramParts[0].toLowerCase();
         });
+    
+    logger.info(`parseParameterSignature("${paramString}") => [${result.join(', ')}]`);
+    return result;
 }
 
 /**
@@ -187,12 +190,15 @@ function findExistingImplementation(
 ): number | null {
     const lines = clwContent.split(/\r?\n/);
     
+    logger.info(`Searching for existing implementation: ${className}.${methodName} with signature [${parameterSignature.join(', ')}]`);
+    
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         
         // Match: ClassName.MethodName    PROCEDURE(params)
+        // Allow optional whitespace at start of line
         const pattern = new RegExp(
-            `^${className}\\.${methodName}\\s+PROCEDURE\\s*\\(([^)]*)\\)`,
+            `^\\s*${className}\\.${methodName}\\s+PROCEDURE\\s*\\(([^)]*)\\)`,
             'i'
         );
         
@@ -200,12 +206,18 @@ function findExistingImplementation(
         if (match) {
             // Check parameter signature matches
             const implParamSignature = parseParameterSignature(match[1]);
+            logger.info(`Found potential implementation at line ${i}: signature [${implParamSignature.join(', ')}]`);
+            
             if (parametersMatch(parameterSignature, implParamSignature)) {
+                logger.info(`✓ Signature matches! Returning line ${i}`);
                 return i;
+            } else {
+                logger.info(`✗ Signature does not match`);
             }
         }
     }
     
+    logger.info(`No existing implementation found`);
     return null;
 }
 

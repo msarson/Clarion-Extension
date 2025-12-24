@@ -347,6 +347,56 @@ TestClass.AddLine   PROCEDURE(*STRING pValue)
                 'Should return null when no matching signature exists');
         });
         
+        it('should find existing implementation with pointer parameter', () => {
+            const clwContent = `
+TestClass.AddLine   PROCEDURE(*STRING pValue)
+  CODE
+`;
+            
+            const lines = clwContent.split(/\r?\n/);
+            
+            // Parse the declaration signature  
+            const declSignature = parseParameterSignature('*STRING pValue');
+            
+            // Should find the existing implementation
+            const result = findImplementationWithTypeMatching(
+                lines,
+                'TestClass',
+                'AddLine',
+                declSignature
+            );
+            
+            assert.strictEqual(result, 1,
+                'Should find existing *STRING implementation at line 1');
+        });
+        
+        it('should match pointer parameters from declaration vs implementation', () => {
+            // Simulate what happens in real usage:
+            // Declaration line: "AddLine   PROCEDURE(*STRING pValue),virtual"
+            // Implementation line: "TestClass.AddLine   PROCEDURE(*STRING pValue)"
+            
+            const declarationLine = 'AddLine   PROCEDURE(*STRING pValue),virtual';
+            const implementationLine = 'TestClass.AddLine   PROCEDURE(*STRING pValue)';
+            
+            // Parse both
+            const declMatch = declarationLine.match(/^(\w+)\s+PROCEDURE\s*\(([^)]*)\)/i);
+            const implMatch = implementationLine.match(/TestClass\.(\w+)\s+PROCEDURE\s*\(([^)]*)\)/i);
+            
+            assert.ok(declMatch, 'Should match declaration');
+            assert.ok(implMatch, 'Should match implementation');
+            
+            const declParams = parseParameterSignature(declMatch![2]);
+            const implParams = parseParameterSignature(implMatch![2]);
+            
+            assert.deepStrictEqual(declParams, ['*string'],
+                'Declaration should parse to [*string]');
+            assert.deepStrictEqual(implParams, ['*string'],
+                'Implementation should parse to [*string]');
+            
+            assert.strictEqual(parametersMatch(declParams, implParams), true,
+                'Declaration and implementation signatures should match');
+        });
+        
         it('should distinguish between multiple overloads', () => {
             // Example: Process(), Process(String), Process(*String), Process(String, Long)
             const clwContent = `
