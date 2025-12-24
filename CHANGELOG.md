@@ -6,16 +6,11 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 
 ---
 
-## [Unreleased]
+## [0.7.6] - 2025-12-24
 
-### ✨ Features
-- TBD
-
-### 🔧 Improvements
-- TBD
-
-### 🐛 Bug Fixes
-- TBD
+### 📚 Documentation
+- **Fixed README.md** - Added missing v0.7.5 section and corrected year to 2025
+- No functional changes from v0.7.5
 
 ---
 
