@@ -14,6 +14,7 @@ import { registerBuildCommands } from './commands/BuildCommands';
 import { registerSolutionManagementCommands, registerSolutionOpeningCommands, registerMiscSolutionCommands } from './commands/SolutionCommands';
 import { registerProjectFileCommands } from './commands/ProjectFileCommands';
 import { registerStatusCommands } from './commands/ViewCommands';
+import { registerTextEditingCommands } from './commands/TextEditingCommands';
 import { createSolutionTreeView, createStructureView } from './views/ViewManager';
 import { registerLanguageFeatures } from './providers/LanguageFeatureManager';
 import * as SolutionOpener from './solution/SolutionOpener';
@@ -119,6 +120,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
     
     // Register status command (replaces old status view)
     context.subscriptions.push(...registerStatusCommands(context));
+    
+    // Register text editing commands (paste as string)
+    context.subscriptions.push(...registerTextEditingCommands(context));
     
     context.subscriptions.push(...disposables);
     

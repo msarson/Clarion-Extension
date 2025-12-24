@@ -120,6 +120,11 @@
                 "command": "clarion.buildSolution",
                 "key": "ctrl+shift+b",
                 "when": "clarion.solutionOpen"
+            },
+            {
+                "command": "clarion.pasteAsString",
+                "key": "ctrl+shift+alt+v",
+                "when": "editorTextFocus && editorLangId == clarion"
             }
         ],
         "viewsContainers": {
@@ -272,6 +277,10 @@
             {
                 "command": "clarion.generateApp",
                 "title": "Generate Application"
+            },
+            {
+                "command": "clarion.pasteAsString",
+                "title": "Clarion: Paste as String"
             }
         ],
         "menus": {
@@ -853,6 +862,21 @@
                     "type": "boolean",
                     "default": true,
                     "description": "When enabled, uses a local .sln file parser as a fast fallback when the language server is not ready or times out."
+                },
+                "clarion.pasteAsString.lineTerminator": {
+                    "type": "string",
+                    "enum": [
+                        "space",
+                        "crlf",
+                        "none"
+                    ],
+                    "default": "space",
+                    "enumDescriptions": [
+                        "Add a trailing space to each line (recommended for SQL queries)",
+                        "Add <13,10> line break to each line",
+                        "No line terminator (lines concatenate seamlessly)"
+                    ],
+                    "description": "How to terminate each line when pasting as Clarion string. Controls whether lines are separated by spaces, line breaks, or nothing."
                 }
             }
         }

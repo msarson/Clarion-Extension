@@ -9,6 +9,19 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 ## [Unreleased]
 
 ### ✨ Features
+- **Paste as Clarion String Command**
+  - New command: "Clarion: Paste as String" with keybinding `Ctrl+Shift+Alt+V`
+  - Converts clipboard text into properly formatted Clarion string with continuation
+  - Automatically escapes single quotes (converts `'` to `''`)
+  - Adds Clarion string continuation syntax (`& |`)
+  - Configurable line terminator via `clarion.pasteAsString.lineTerminator`:
+    - `"space"` (default) - Adds trailing space to each line (ideal for SQL queries)
+    - `"crlf"` - Adds `<13,10>` line break to each line
+    - `"none"` - No separator between lines
+  - Respects current indentation level
+  - Only active in Clarion files for safety
+  - Perfect for pasting SQL queries, HTML, or any multi-line text into Clarion code
+  - Demo file: `demo-paste-as-string.clw`
 - **Extension Status Command**
   - New command: "Clarion: Show Extension Status" (accessible via Ctrl+Shift+P)
   - Displays comprehensive extension status in Output panel
