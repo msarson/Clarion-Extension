@@ -281,6 +281,10 @@
             {
                 "command": "clarion.pasteAsString",
                 "title": "Clarion: Paste as String"
+            },
+            {
+                "command": "clarion.createClass",
+                "title": "Clarion: Create New Class"
             }
         ],
         "menus": {

@@ -15,6 +15,7 @@ import { registerSolutionManagementCommands, registerSolutionOpeningCommands, re
 import { registerProjectFileCommands } from './commands/ProjectFileCommands';
 import { registerStatusCommands } from './commands/ViewCommands';
 import { registerTextEditingCommands } from './commands/TextEditingCommands';
+import { registerClassCreationCommands } from './commands/ClassCreationCommands';
 import { createSolutionTreeView, createStructureView } from './views/ViewManager';
 import { registerLanguageFeatures } from './providers/LanguageFeatureManager';
 import * as SolutionOpener from './solution/SolutionOpener';
@@ -123,6 +124,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
     
     // Register text editing commands (paste as string)
     context.subscriptions.push(...registerTextEditingCommands(context));
+    
+    // Register class creation commands
+    context.subscriptions.push(...registerClassCreationCommands(context));
     
     context.subscriptions.push(...disposables);
     
