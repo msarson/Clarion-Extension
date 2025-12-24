@@ -645,6 +645,23 @@ export class DocumentManager implements Disposable {
     }
     
     /**
+     * Helper function to extract and parse parameter signature from a method implementation line
+     *
+     * @param line - The full method implementation line (e.g., "MyClass.Method PROCEDURE(STRING s, LONG n)")
+     * @returns An array of parameter types (normalized for comparison)
+     */
+    private parseMethodParameterSignature(line: string): string[] {
+        // Extract parameters from PROCEDURE(...) or FUNCTION(...)
+        const match = line.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i);
+        if (!match) {
+            return [];
+        }
+        
+        const paramString = match[1];
+        return this.parseImplementationParameters(paramString);
+    }
+
+    /**
      * Helper function to parse parameter signatures from Clarion method implementations
      *
      * @param paramString - The parameter string from a method implementation
@@ -750,17 +767,19 @@ export class DocumentManager implements Disposable {
         let implRegex: RegExp;
         if (isMapProcedure) {
             // For MAP procedures: just "ProcedureName PROCEDURE(...)"
+            // Use [\s\S] to match across lines for parameters
             implRegex = new RegExp(
                 String.raw`(^|\r?\n)[ \t]*` + mth +
-                String.raw`\s+(?:procedure|function)\s*\(([^)]*)\)`,
+                String.raw`\s+(?:procedure|function)\s*\(([^)]*(?:\)|\r?\n[\s\S]*?\)))\s*(?:,|!|$|\r?\n)`,
                 'gi'
             );
             logger.info(`Searching for MAP procedure implementation: ${mth} as PROCEDURE or FUNCTION`);
         } else {
             // For CLASS methods: "ClassName.MethodName PROCEDURE(...)"
+            // Use [\s\S] to match across lines for parameters
             implRegex = new RegExp(
                 String.raw`(^|\r?\n)[ \t]*` + cls + String.raw`(?:\.|::)` + mth +
-                String.raw`\s+(?:procedure|function)\s*\(([^)]*)\)`,
+                String.raw`\s+(?:procedure|function)\s*\(([^)]*(?:\)|\r?\n[\s\S]*?\)))\s*(?:,|!|$|\r?\n)`,
                 'gi'
             );
             logger.info(`Searching for CLASS method implementation: ${cls}.${mth} as PROCEDURE or FUNCTION`);
@@ -855,6 +874,77 @@ export class DocumentManager implements Disposable {
             return undefined;
         }
         
+        // First, check if this is a method implementation line
+        const doc = workspace.textDocuments.find(d => d.uri.toString() === documentUri.toString());
+        if (doc) {
+            const line = doc.lineAt(position.line).text;
+            
+            // Check for CLASS method implementation: "ClassName.MethodName PROCEDURE(...)"
+            const methodImplMatch = line.match(/^(\w+)\.(\w+)\s+PROCEDURE\s*\(/i);
+            if (methodImplMatch) {
+                const className = methodImplMatch[1];
+                const methodName = methodImplMatch[2];
+                const classStart = line.indexOf(className);
+                const classEnd = classStart + className.length;
+                const methodStart = line.indexOf(methodName, classEnd);
+                const methodEnd = methodStart + methodName.length;
+                
+                // Check if cursor is on the class or method name
+                if ((position.character >= classStart && position.character <= classEnd) ||
+                    (position.character >= methodStart && position.character <= methodEnd)) {
+                    
+                    logger.info(`Detected method implementation line: ${className}.${methodName}`);
+                    
+                    // Parse parameter signature from implementation
+                    const paramSignature = this.parseMethodParameterSignature(line);
+                    
+                    // Create a synthetic location pointing to the declaration in the INC file
+                    // The hover provider will resolve the actual declaration location
+                    const location: ClarionLocation = {
+                        fullFileName: documentUri.fsPath,
+                        linePosition: new Position(position.line, classStart),
+                        linePositionEnd: new Position(position.line, methodEnd),
+                        statementType: "METHOD",
+                        className: className,
+                        methodName: methodName,
+                        parameterSignature: paramSignature,
+                        implementationResolved: false
+                    };
+                    
+                    return location;
+                }
+            }
+            
+            // Check for MAP procedure implementation: "ProcedureName PROCEDURE(...)"
+            const mapProcMatch = line.match(/^(\w+)\s+PROCEDURE\s*\(/i);
+            if (mapProcMatch) {
+                const procName = mapProcMatch[1];
+                const procStart = mapProcMatch.index!;
+                const procEnd = procStart + procName.length;
+                
+                // Check if cursor is on the procedure name
+                if (position.character >= procStart && position.character <= procEnd) {
+                    logger.info(`Detected MAP procedure implementation line: ${procName}`);
+                    
+                    // Parse parameter signature from implementation
+                    const paramSignature = this.parseMethodParameterSignature(line);
+                    
+                    const location: ClarionLocation = {
+                        fullFileName: documentUri.fsPath,
+                        linePosition: new Position(position.line, procStart),
+                        linePositionEnd: new Position(position.line, procEnd),
+                        statementType: "MAPPROCEDURE",
+                        methodName: procName,
+                        parameterSignature: paramSignature,
+                        implementationResolved: false
+                    };
+                    
+                    return location;
+                }
+            }
+        }
+        
+        // If not a method implementation, check stored statement locations
         if (documentInfo) {
             for (const location of documentInfo.statementLocations) {
                 if (!location.linePosition || !location.linePositionEnd) {

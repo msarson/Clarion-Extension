@@ -15,6 +15,10 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 - TBD
 
 ### 🐛 Bug Fixes
+- **Fixed hover on method implementations** - Hovering over method implementation lines now correctly shows the declaration with proper parameter type matching
+  - Added dynamic detection of method implementation lines (e.g., `ClassName.Method PROCEDURE(...)`) in hover provider
+  - Hover now works on both method declarations (in INC files) and implementations (in CLW files)
+  - Properly matches overloaded methods by parameter types when showing hover information
 - **Fixed Go to Definition for overloaded methods** - Go to Definition (F12) on method implementations now correctly navigates to the matching overload based on parameter types, not just count
   - Previously when multiple overloads existed with same parameter count (e.g., `Str(STRING)` and `Str(*STRING)`), it would return the first match
   - Now performs type-based matching to find the exact overload signature
