@@ -1,9 +1,10 @@
+import * as vscode from 'vscode';
 import { DefinitionProvider, TextDocument, Position, CancellationToken, ProviderResult, Location, Uri, Definition, LocationLink } from 'vscode';
 import { DocumentManager } from '../documentManager';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
-logger.setLevel("error");
+logger.setLevel("info");
 
 /**
  * Provides "Go to Definition" functionality for Clarion class methods and MAP procedures.
@@ -95,8 +96,12 @@ export class ClarionDefinitionProvider implements DefinitionProvider {
     }
     
     /**
-     * Check if we're on a PROCEDURE implementation and find its MAP declaration
+     * Check if we're on a PROCEDURE implementation and find its declaration
      * This handles the reverse direction: from implementation back to declaration
+     * 
+     * Supports both:
+     * - MAP procedures: searches MAP block in same file
+     * - CLASS methods: searches CLASS definition in INCLUDE files
      */
     private findMapDeclarationFromImplementation(document: TextDocument, position: Position): Location | null {
         const line = document.lineAt(position.line);
@@ -114,14 +119,128 @@ export class ClarionDefinitionProvider implements DefinitionProvider {
         
         logger.info(`Detected PROCEDURE implementation: ${fullName} (simple: ${simpleName})`);
         
-        // Search for MAP declaration
+        // Check if this is a CLASS method (has a dot in the name)
+        if (fullName.includes('.')) {
+            const className = fullName.substring(0, fullName.lastIndexOf('.'));
+            logger.info(`Detected CLASS method: ${className}.${simpleName}`);
+            
+            // Use DocumentManager to find the CLASS declaration
+            const classDeclaration = this.findClassMethodDeclaration(document, className, simpleName);
+            if (classDeclaration) {
+                return classDeclaration;
+            }
+        }
+        
+        // Otherwise, search for MAP declaration in the same file
         const mapDeclaration = this.findMapDeclaration(document, simpleName);
         if (mapDeclaration) {
             logger.info(`Found MAP declaration for ${simpleName} at line ${mapDeclaration.line}`);
             return new Location(document.uri, mapDeclaration);
         }
         
-        logger.info(`No MAP declaration found for ${simpleName}`);
+        logger.info(`No declaration found for ${simpleName}`);
+        return null;
+    }
+    
+    /**
+     * Find a CLASS method declaration by searching INCLUDE files
+     */
+    private findClassMethodDeclaration(document: TextDocument, className: string, methodName: string): Location | null {
+        try {
+            logger.info(`Searching for CLASS method declaration: ${className}.${methodName}`);
+            
+            // Get all statement locations for the current document
+            const docInfo = this.documentManager.getDocumentInfo(document.uri);
+            if (!docInfo || !docInfo.statementLocations) {
+                logger.info(`No document info found for ${document.uri.fsPath}`);
+                return null;
+            }
+            
+            // Find INCLUDE statements
+            const includes = docInfo.statementLocations.filter(loc => 
+                loc.statementType === "INCLUDE"
+            );
+            
+            logger.info(`Found ${includes.length} INCLUDE statements`);
+            
+            // Search each INCLUDE file for the class definition
+            for (const includeLocation of includes) {
+                const includeUri = Uri.file(includeLocation.fullFileName);
+                
+                // Check if the INCLUDE file is open in the editor
+                const includeDoc = vscode.workspace.textDocuments.find(doc =>
+                    doc.uri.toString().toLowerCase() === includeUri.toString().toLowerCase()
+                );
+                
+                if (!includeDoc) {
+                    logger.info(`INCLUDE file not open: ${includeLocation.fullFileName}`);
+                    continue;
+                }
+                
+                logger.info(`Searching INCLUDE file: ${includeLocation.fullFileName}`);
+                
+                // Search for the method declaration in the INCLUDE file
+                const methodPosition = this.findMethodInClass(includeDoc, className, methodName);
+                if (methodPosition) {
+                    logger.info(`Found CLASS method declaration at ${includeLocation.fullFileName}:${methodPosition.line}`);
+                    return new Location(includeUri, methodPosition);
+                }
+            }
+            
+            logger.info(`No CLASS method declaration found for ${className}.${methodName}`);
+            return null;
+        } catch (error) {
+            logger.error(`Error finding CLASS method declaration: ${error instanceof Error ? error.message : String(error)}`);
+            return null;
+        }
+    }
+    
+    /**
+     * Search for a method declaration within a CLASS definition
+     */
+    private findMethodInClass(document: TextDocument, className: string, methodName: string): Position | null {
+        const content = document.getText();
+        const lines = content.split('\n');
+        
+        // Find the CLASS definition
+        let inClass = false;
+        let classIndent = 0;
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim().toUpperCase();
+            
+            // Check for CLASS definition
+            const classMatch = line.match(/^(\s*)(\w+)\s+CLASS/i);
+            if (classMatch) {
+                const foundClassName = classMatch[2];
+                if (foundClassName.toUpperCase() === className.toUpperCase()) {
+                    logger.info(`Found CLASS ${className} at line ${i}`);
+                    inClass = true;
+                    classIndent = classMatch[1].length;
+                    continue;
+                }
+            }
+            
+            if (inClass) {
+                // Check if we've left the class (line at same or less indentation that's not just whitespace)
+                if (line.length > 0 && !line.startsWith(' '.repeat(classIndent + 1)) && line.trim() !== '') {
+                    logger.info(`End of CLASS ${className} at line ${i}`);
+                    break;
+                }
+                
+                // Look for method declaration: MethodName PROCEDURE(...)
+                const methodMatch = line.match(/^\s*(\w+)\s+PROCEDURE\s*\(/i);
+                if (methodMatch) {
+                    const foundMethodName = methodMatch[1];
+                    if (foundMethodName.toUpperCase() === methodName.toUpperCase()) {
+                        logger.info(`Found method ${methodName} at line ${i}`);
+                        return new Position(i, 0);
+                    }
+                }
+            }
+        }
+        
         return null;
     }
     
