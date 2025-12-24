@@ -225,41 +225,7 @@ describe('Method Overloading - Parameter Type Matching', () => {
         });
     });
     
-    describe('Add Method Implementation - findExistingImplementation bug', () => {
-        /**
-         * Simulates the current buggy behavior in ImplementationCommands.ts
-         * which only checks parameter COUNT, not parameter TYPES
-         */
-        function findExistingImplementation_BUGGY(
-            clwContent: string,
-            className: string,
-            methodName: string,
-            parameterCount: number
-        ): number | null {
-            const lines = clwContent.split(/\r?\n/);
-            
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i];
-                
-                // Match: ClassName.MethodName    PROCEDURE(params)
-                const pattern = new RegExp(
-                    `^${className}\\.${methodName}\\s+PROCEDURE\\s*\\(([^)]*)\\)`,
-                    'i'
-                );
-                
-                const match = line.match(pattern);
-                if (match) {
-                    // BUG: Only checks parameter count, not types
-                    const implParamCount = countParameters(match[1]);
-                    if (implParamCount === parameterCount) {
-                        return i;
-                    }
-                }
-            }
-            
-            return null;
-        }
-        
+    describe('Add Method Implementation - findExistingImplementation', () => {
         /**
          * Helper to count parameters (from ImplementationCommands.ts)
          */
@@ -284,55 +250,12 @@ describe('Method Overloading - Parameter Type Matching', () => {
             return commaCount + 1;
         }
         
-        it('should demonstrate the bug: finds wrong overload based on count only', () => {
-            const clwContent = `
-SomeClass.SomeOtherMethod   PROCEDURE(STRING tempVar)
-  CODE
-  RETURN ''
-
-SomeClass.SomeOtherMethod   PROCEDURE(*STRING tempVar)
-  CODE
-  RETURN ''
-`;
-            
-            // Both methods have 1 parameter, so count-only matching finds the first one
-            const foundLine = findExistingImplementation_BUGGY(clwContent, 'SomeClass', 'SomeOtherMethod', 1);
-            
-            // Bug: This returns line 1 (String version) for BOTH overloads
-            assert.strictEqual(foundLine, 1, 
-                'Buggy implementation finds first method with matching count');
-            
-            // The bug is that we cannot distinguish between:
-            // - SomeOtherMethod(STRING tempVar)
-            // - SomeOtherMethod(*STRING tempVar)
-            // Because both have parameterCount = 1
-        });
-        
-        it('should fail to distinguish String vs *String overloads', () => {
+        it('should correctly distinguish String vs *String overloads', () => {
             const clwContent = `
 TestClass.AddLine   PROCEDURE(STRING pValue)
   CODE
 
 TestClass.AddLine   PROCEDURE(*STRING pValue)  
-  CODE
-`;
-            
-            // When checking for AddLine(*STRING), it incorrectly finds AddLine(STRING)
-            const foundLine = findExistingImplementation_BUGGY(clwContent, 'TestClass', 'AddLine', 1);
-            
-            assert.strictEqual(foundLine, 1, 
-                'Bug: finds first method with count=1, regardless of pointer modifier');
-            
-            // This prevents adding the *STRING overload because it thinks it already exists
-        });
-        
-        it('should correctly distinguish with type-aware matching', () => {
-            // This test shows what the CORRECT behavior should be
-            const clwContent = `
-TestClass.AddLine   PROCEDURE(STRING pValue)
-  CODE
-
-TestClass.AddLine   PROCEDURE(*STRING pValue)
   CODE
 `;
             
@@ -359,6 +282,113 @@ TestClass.AddLine   PROCEDURE(*STRING pValue)
             
             assert.strictEqual(pointerMatch, 4, 
                 'Should find AddLine(*STRING) at line 4');
+            
+            // Verify they don't cross-match
+            assert.notStrictEqual(stringMatch, pointerMatch,
+                'String and pointer overloads should be found at different lines');
+        });
+        
+        it('should handle SomeOtherMethod overloads correctly', () => {
+            const clwContent = `
+SomeClass.SomeOtherMethod   PROCEDURE(STRING tempVar)
+  CODE
+  RETURN ''
+
+SomeClass.SomeOtherMethod   PROCEDURE(*STRING tempVar)
+  CODE
+  RETURN ''
+`;
+            
+            const lines = clwContent.split(/\r?\n/);
+            
+            // Test STRING version
+            const stringResult = findImplementationWithTypeMatching(
+                lines,
+                'SomeClass',
+                'SomeOtherMethod',
+                parseParameterSignature('STRING tempVar')
+            );
+            
+            assert.strictEqual(stringResult, 1,
+                'Should find STRING version at line 1');
+            
+            // Test *STRING version
+            const pointerResult = findImplementationWithTypeMatching(
+                lines,
+                'SomeClass',
+                'SomeOtherMethod',
+                parseParameterSignature('*STRING tempVar')
+            );
+            
+            assert.strictEqual(pointerResult, 5,
+                'Should find *STRING version at line 5');
+        });
+        
+        it('should return null when no matching signature found', () => {
+            const clwContent = `
+TestClass.AddLine   PROCEDURE(STRING pValue)
+  CODE
+
+TestClass.AddLine   PROCEDURE(*STRING pValue)  
+  CODE
+`;
+            
+            const lines = clwContent.split(/\r?\n/);
+            
+            // Look for &STRING version that doesn't exist
+            const refMatch = findImplementationWithTypeMatching(
+                lines,
+                'TestClass',
+                'AddLine',
+                parseParameterSignature('&STRING pValue')
+            );
+            
+            assert.strictEqual(refMatch, null,
+                'Should return null when no matching signature exists');
+        });
+        
+        it('should distinguish between multiple overloads', () => {
+            // Example: Process(), Process(String), Process(*String), Process(String, Long)
+            const clwContent = `
+TestClass.Process   PROCEDURE()
+  CODE
+
+TestClass.Process   PROCEDURE(STRING pValue)
+  CODE
+
+TestClass.Process   PROCEDURE(*STRING pValue)
+  CODE
+
+TestClass.Process   PROCEDURE(STRING pValue, LONG pCount)
+  CODE
+`;
+            
+            const lines = clwContent.split(/\r?\n/);
+            
+            // Test each overload
+            const noParams = findImplementationWithTypeMatching(
+                lines, 'TestClass', 'Process',
+                parseParameterSignature('')
+            );
+            assert.strictEqual(noParams, 1, 'Should find Process() at line 1');
+            
+            const stringParam = findImplementationWithTypeMatching(
+                lines, 'TestClass', 'Process',
+                parseParameterSignature('STRING pValue')
+            );
+            assert.strictEqual(stringParam, 4, 'Should find Process(STRING) at line 4');
+            
+            const pointerParam = findImplementationWithTypeMatching(
+                lines, 'TestClass', 'Process',
+                parseParameterSignature('*STRING pValue')
+            );
+            assert.strictEqual(pointerParam, 7, 'Should find Process(*STRING) at line 7');
+            
+            const twoParams = findImplementationWithTypeMatching(
+                lines, 'TestClass', 'Process',
+                parseParameterSignature('STRING pValue, LONG pCount')
+            );
+            assert.strictEqual(twoParams, 10, 'Should find Process(STRING, LONG) at line 10');
         });
         
         /**
