@@ -125,6 +125,11 @@
                 "command": "clarion.pasteAsString",
                 "key": "ctrl+shift+alt+v",
                 "when": "editorTextFocus && editorLangId == clarion"
+            },
+            {
+                "command": "clarion.addImplementation",
+                "key": "ctrl+shift+i",
+                "when": "editorTextFocus && editorLangId == clarion"
             }
         ],
         "viewsContainers": {
@@ -285,6 +290,10 @@
             {
                 "command": "clarion.createClass",
                 "title": "Clarion: Create New Class"
+            },
+            {
+                "command": "clarion.addImplementation",
+                "title": "Clarion: Add Method Implementation"
             }
         ],
         "menus": {
