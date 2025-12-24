@@ -15,6 +15,9 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 - TBD
 
 ### 🐛 Bug Fixes
+- **Fixed duplicate hover on method implementations** - Hovering over method implementation lines no longer shows duplicate information
+  - Client-side hover now defers to server when hovering on implementation lines to avoid duplicate hovers
+  - Server has complete parameter type information and can match the correct overload
 - **Fixed hover on method implementations** - Hovering over method implementation lines now correctly shows the declaration with proper parameter type matching
   - Added dynamic detection of method implementation lines (e.g., `ClassName.Method PROCEDURE(...)`) in hover provider
   - Hover now works on both method declarations (in INC files) and implementations (in CLW files)
