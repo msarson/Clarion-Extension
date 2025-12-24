@@ -32,11 +32,14 @@ PROGRAM
 !   WHERE OrderDate > '2024-01-01'
 !   ORDER BY OrderDate DESC
 !
-! After paste, it becomes:
+! After paste with cursor at position shown by ▼:
+!                                ▼
 SqlQuery1 STRING('SELECT CustomerName, OrderDate, TotalAmount ' & |
                  'FROM Orders ' & |
                  'WHERE OrderDate > ''2024-01-01'' ' & |
                  'ORDER BY OrderDate DESC')
+!
+! Notice: All opening quotes (') align at the same column!
 
 ! Example 2: Multi-line message with CRLF terminator
 ! Copy this text:
@@ -61,7 +64,7 @@ HtmlContent STRING('<div class="container"> ' & |
                    '</div>')
 
 ! Example 4: Complex SQL with indentation
-! The feature preserves your current indentation level
+! The feature aligns all opening quotes at the cursor position
 ! Copy this SQL:
 !   SELECT
 !     c.Name,
@@ -69,12 +72,14 @@ HtmlContent STRING('<div class="container"> ' & |
 !   FROM Customers c
 !   JOIN Orders o ON c.ID = o.CustomerID
 !
-! After paste (with proper indentation):
+! Place cursor here:  ▼
   ComplexQuery STRING('SELECT ' & |
                       '  c.Name, ' & |
                       '  o.Total ' & |
                       'FROM Customers c ' & |
                       'JOIN Orders o ON c.ID = o.CustomerID')
+!
+! All continuation line quotes align at the same column as the first line!
 
 ! =========================================================================
 ! BENEFITS:
@@ -82,7 +87,7 @@ HtmlContent STRING('<div class="container"> ' & |
 ! - Automatically escapes single quotes (converts ' to '')
 ! - Adds proper Clarion string continuation (& |)
 ! - Handles multi-line text intelligently
-! - Respects current indentation
+! - **Aligns all opening quotes at the same column position**
 ! - Configurable line termination (space, CRLF, or none)
 ! - Works only in Clarion files for safety
 ! - Saves time formatting strings manually

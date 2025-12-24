@@ -13,16 +13,22 @@ type LineTerminator = 'space' | 'crlf' | 'none';
  * Converts clipboard or selected text into Clarion string format
  * @param text - Text to convert
  * @param lineTerminator - How to terminate each line (space, crlf, or none)
- * @param indentation - Base indentation to apply to the result
+ * @param baseIndentation - Base indentation for first line
+ * @param cursorColumn - Column position where cursor is (for aligning continuation lines)
  * @returns Formatted Clarion string
  */
-function convertToClarionString(text: string, lineTerminator: LineTerminator, indentation: string): string {
+function convertToClarionString(text: string, lineTerminator: LineTerminator, baseIndentation: string, cursorColumn: number): string {
     const lines = text.split(/\r?\n/);
     const result: string[] = [];
+    
+    // For continuation lines, we need to align the opening quote with the first line's opening quote
+    // The first line starts at cursorColumn, so continuation lines need the same column position
+    const continuationIndent = ' '.repeat(cursorColumn);
     
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const isLastLine = i === lines.length - 1;
+        const isFirstLine = i === 0;
         
         // Escape single quotes by doubling them
         const escapedLine = line.replace(/'/g, "''");
@@ -52,7 +58,13 @@ function convertToClarionString(text: string, lineTerminator: LineTerminator, in
         }
         
         // Add indentation
-        result.push(indentation + clarionLine);
+        if (isFirstLine) {
+            // First line: no extra indentation (cursor is already positioned)
+            result.push(clarionLine);
+        } else {
+            // Continuation lines: align the opening quote with first line's opening quote
+            result.push(continuationIndent + clarionLine);
+        }
     }
     
     return result.join('\n');
@@ -101,11 +113,15 @@ async function pasteAsClarionString(): Promise<void> {
         return;
     }
     
-    // Get current indentation
+    // Get cursor position (column where the opening quote will appear)
+    const position = editor.selection.active;
+    const cursorColumn = position.character;
+    
+    // Get current indentation for reference
     const indentation = getIndentation(editor);
     
     // Convert to Clarion string
-    const clarionString = convertToClarionString(clipboardText, lineTerminator, indentation);
+    const clarionString = convertToClarionString(clipboardText, lineTerminator, indentation, cursorColumn);
     
     // Insert at cursor position
     await editor.edit(editBuilder => {

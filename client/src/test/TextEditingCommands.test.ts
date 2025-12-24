@@ -3,13 +3,18 @@ import { workspace, WorkspaceConfiguration } from 'vscode';
 
 // Mock the convertToClarionString function for testing
 // In a real implementation, we'd import the actual function
-function convertToClarionString(text: string, lineTerminator: 'space' | 'crlf' | 'none', indentation: string): string {
+function convertToClarionString(text: string, lineTerminator: 'space' | 'crlf' | 'none', indentation: string, cursorColumn: number): string {
     const lines = text.split(/\r?\n/);
     const result: string[] = [];
+    
+    // For continuation lines, we need to align the opening quote with the first line's opening quote
+    // The first line starts at cursorColumn, so continuation lines need the same column position
+    const continuationIndent = ' '.repeat(cursorColumn);
     
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const isLastLine = i === lines.length - 1;
+        const isFirstLine = i === 0;
         
         // Escape single quotes by doubling them
         const escapedLine = line.replace(/'/g, "''");
@@ -39,7 +44,13 @@ function convertToClarionString(text: string, lineTerminator: 'space' | 'crlf' |
         }
         
         // Add indentation
-        result.push(indentation + clarionLine);
+        if (isFirstLine) {
+            // First line: no extra indentation (cursor is already positioned)
+            result.push(clarionLine);
+        } else {
+            // Continuation lines: align the opening quote with first line's opening quote
+            result.push(continuationIndent + clarionLine);
+        }
     }
     
     return result.join('\n');
@@ -52,7 +63,7 @@ suite('TextEditingCommands Test Suite', () => {
         test('should convert single line with space terminator', () => {
             const input = 'SELECT * FROM Orders';
             const expected = "'SELECT * FROM Orders'";
-            const result = convertToClarionString(input, 'space', '');
+            const result = convertToClarionString(input, 'space', '', 0);
             assert.strictEqual(result, expected);
         });
         
@@ -62,7 +73,7 @@ suite('TextEditingCommands Test Suite', () => {
                 "'SELECT CustomerName ' & |\n" +
                 "'FROM Orders ' & |\n" +
                 "'WHERE Total > 100'";
-            const result = convertToClarionString(input, 'space', '');
+            const result = convertToClarionString(input, 'space', '', 0);
             assert.strictEqual(result, expected);
         });
         
@@ -72,7 +83,7 @@ suite('TextEditingCommands Test Suite', () => {
                 "'Line 1<13,10>' & |\n" +
                 "'Line 2<13,10>' & |\n" +
                 "'Line 3'";
-            const result = convertToClarionString(input, 'crlf', '');
+            const result = convertToClarionString(input, 'crlf', '', 0);
             assert.strictEqual(result, expected);
         });
         
@@ -82,7 +93,7 @@ suite('TextEditingCommands Test Suite', () => {
                 "'Part1' & |\n" +
                 "'Part2' & |\n" +
                 "'Part3'";
-            const result = convertToClarionString(input, 'none', '');
+            const result = convertToClarionString(input, 'none', '', 0);
             assert.strictEqual(result, expected);
         });
         
@@ -91,16 +102,16 @@ suite('TextEditingCommands Test Suite', () => {
             const expected = 
                 "'It''s a test ' & |\n" +
                 "'With ''quotes'''";
-            const result = convertToClarionString(input, 'space', '');
+            const result = convertToClarionString(input, 'space', '', 0);
             assert.strictEqual(result, expected);
         });
         
-        test('should apply indentation', () => {
+        test('should apply indentation to continuation lines', () => {
             const input = 'Line 1\nLine 2';
             const expected = 
-                "  'Line 1 ' & |\n" +
+                "'Line 1 ' & |\n" +
                 "  'Line 2'";
-            const result = convertToClarionString(input, 'space', '  ');
+            const result = convertToClarionString(input, 'space', '  ', 2);
             assert.strictEqual(result, expected);
         });
         
@@ -115,7 +126,7 @@ suite('TextEditingCommands Test Suite', () => {
                 "'FROM Orders ' & |\n" +
                 "'WHERE OrderDate > ''2024-01-01'' ' & |\n" +
                 "'ORDER BY OrderDate DESC'";
-            const result = convertToClarionString(input, 'space', '');
+            const result = convertToClarionString(input, 'space', '', 0);
             assert.strictEqual(result, expected);
         });
         
@@ -125,7 +136,7 @@ suite('TextEditingCommands Test Suite', () => {
                 "'Line 1 ' & |\n" +
                 "' ' & |\n" +
                 "'Line 3'";
-            const result = convertToClarionString(input, 'space', '');
+            const result = convertToClarionString(input, 'space', '', 0);
             assert.strictEqual(result, expected);
         });
         
@@ -135,24 +146,25 @@ suite('TextEditingCommands Test Suite', () => {
                 "'Line 1 ' & |\n" +
                 "'Line 2 ' & |\n" +
                 "'Line 3'";
-            const result = convertToClarionString(input, 'space', '');
+            const result = convertToClarionString(input, 'space', '', 0);
             assert.strictEqual(result, expected);
         });
         
-        test('should handle complex SQL with indentation', () => {
+        test('should handle complex SQL with indentation alignment', () => {
             const input = 
                 'SELECT\n' +
                 '  c.Name,\n' +
                 '  o.Total\n' +
                 'FROM Customers c\n' +
                 'JOIN Orders o ON c.ID = o.CustomerID';
+            // Cursor at column 17 (after "SqlQuery STRING(")
             const expected = 
-                "    'SELECT ' & |\n" +
-                "    '  c.Name, ' & |\n" +
-                "    '  o.Total ' & |\n" +
-                "    'FROM Customers c ' & |\n" +
-                "    'JOIN Orders o ON c.ID = o.CustomerID'";
-            const result = convertToClarionString(input, 'space', '    ');
+                "'SELECT ' & |\n" +
+                "                 '  c.Name, ' & |\n" +
+                "                 '  o.Total ' & |\n" +
+                "                 'FROM Customers c ' & |\n" +
+                "                 'JOIN Orders o ON c.ID = o.CustomerID'";
+            const result = convertToClarionString(input, 'space', '', 17);
             assert.strictEqual(result, expected);
         });
     });
