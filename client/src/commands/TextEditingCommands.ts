@@ -13,11 +13,12 @@ type LineTerminator = 'space' | 'crlf' | 'none';
  * Converts clipboard or selected text into Clarion string format
  * @param text - Text to convert
  * @param lineTerminator - How to terminate each line (space, crlf, or none)
+ * @param trimLeadingWhitespace - Whether to remove leading whitespace from each line
  * @param baseIndentation - Base indentation for first line
  * @param cursorColumn - Column position where cursor is (for aligning continuation lines)
  * @returns Formatted Clarion string
  */
-function convertToClarionString(text: string, lineTerminator: LineTerminator, baseIndentation: string, cursorColumn: number): string {
+function convertToClarionString(text: string, lineTerminator: LineTerminator, trimLeadingWhitespace: boolean, baseIndentation: string, cursorColumn: number): string {
     const lines = text.split(/\r?\n/);
     const result: string[] = [];
     
@@ -26,14 +27,19 @@ function convertToClarionString(text: string, lineTerminator: LineTerminator, ba
     const continuationIndent = ' '.repeat(cursorColumn);
     
     for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
+        let line = lines[i];
         const isLastLine = i === lines.length - 1;
         const isFirstLine = i === 0;
+        
+        // Optionally trim leading whitespace
+        if (trimLeadingWhitespace) {
+            line = line.trimStart();
+        }
         
         // Escape single quotes by doubling them
         const escapedLine = line.replace(/'/g, "''");
         
-        // Build the string line
+        // Build the string line - preserve the original content exactly
         let clarionLine = `'${escapedLine}`;
         
         // Add line terminator if not the last line
@@ -105,6 +111,7 @@ async function pasteAsClarionString(): Promise<void> {
     // Get configuration for line terminator
     const config = workspace.getConfiguration('clarion');
     const lineTerminator = config.get<LineTerminator>('pasteAsString.lineTerminator', 'space');
+    const trimLeadingWhitespace = config.get<boolean>('pasteAsString.trimLeadingWhitespace', true);
     
     // Read clipboard
     const clipboardText = await env.clipboard.readText();
@@ -121,7 +128,7 @@ async function pasteAsClarionString(): Promise<void> {
     const indentation = getIndentation(editor);
     
     // Convert to Clarion string
-    const clarionString = convertToClarionString(clipboardText, lineTerminator, indentation, cursorColumn);
+    const clarionString = convertToClarionString(clipboardText, lineTerminator, trimLeadingWhitespace, indentation, cursorColumn);
     
     // Insert at cursor position
     await editor.edit(editBuilder => {

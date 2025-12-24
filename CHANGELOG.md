@@ -14,11 +14,14 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
   - Converts clipboard text into properly formatted Clarion string with continuation
   - Automatically escapes single quotes (converts `'` to `''`)
   - Adds Clarion string continuation syntax (`& |`)
+  - Aligns all opening quotes at the same column position
   - Configurable line terminator via `clarion.pasteAsString.lineTerminator`:
     - `"space"` (default) - Adds trailing space to each line (ideal for SQL queries)
     - `"crlf"` - Adds `<13,10>` line break to each line
     - `"none"` - No separator between lines
-  - Respects current indentation level
+  - Configurable whitespace trimming via `clarion.pasteAsString.trimLeadingWhitespace`:
+    - `true` (default) - Removes leading whitespace from each line (ideal for pasting code)
+    - `false` - Preserves original indentation inside strings
   - Only active in Clarion files for safety
   - Perfect for pasting SQL queries, HTML, or any multi-line text into Clarion code
   - Demo file: `demo-paste-as-string.clw`

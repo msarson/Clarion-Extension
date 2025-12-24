@@ -18,10 +18,17 @@ PROGRAM
 ! 4. Text is converted to Clarion string format with proper escaping and continuation
 !
 ! CONFIGURATION:
-! In VS Code settings, set clarion.pasteAsString.lineTerminator to:
-! - "space" (default) - Adds trailing space (good for SQL queries)
-! - "crlf" - Adds <13,10> line break characters
-! - "none" - No separator between lines
+! In VS Code settings, configure:
+! - clarion.pasteAsString.lineTerminator: "space", "crlf", or "none"
+! - clarion.pasteAsString.trimLeadingWhitespace: true (default) or false
+!
+! With trimLeadingWhitespace = true (recommended):
+!   Leading spaces are removed from each line before wrapping in quotes
+!   Perfect for pasting indented code
+!
+! With trimLeadingWhitespace = false:
+!   Original spacing is preserved inside the string
+!   Use when the spacing is meaningful
 !
 ! =========================================================================
 
@@ -81,6 +88,26 @@ HtmlContent STRING('<div class="container"> ' & |
 !
 ! All continuation line quotes align at the same column as the first line!
 
+! Example 5: Indented code with trimLeadingWhitespace = true (default)
+! Copy this indented Clarion code:
+!     CASE Value
+!     OF 1 ; DoSomething()
+!     OF 2 ; DoSomethingElse()
+!     END
+!
+! Result - leading spaces removed:
+CodeStr STRING('CASE Value ' & |
+               'OF 1 ; DoSomething() ' & |
+               'OF 2 ; DoSomethingElse() ' & |
+               'END')
+
+! Example 6: With trimLeadingWhitespace = false
+! Same code, but spaces preserved inside string:
+CodeStr2 STRING('    CASE Value ' & |
+                '    OF 1 ; DoSomething() ' & |
+                '    OF 2 ; DoSomethingElse() ' & |
+                '    END')
+
 ! =========================================================================
 ! BENEFITS:
 ! =========================================================================
@@ -88,6 +115,7 @@ HtmlContent STRING('<div class="container"> ' & |
 ! - Adds proper Clarion string continuation (& |)
 ! - Handles multi-line text intelligently
 ! - **Aligns all opening quotes at the same column position**
+! - **Trims leading whitespace by default** (configurable)
 ! - Configurable line termination (space, CRLF, or none)
 ! - Works only in Clarion files for safety
 ! - Saves time formatting strings manually

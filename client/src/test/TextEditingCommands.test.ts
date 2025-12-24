@@ -3,7 +3,7 @@ import { workspace, WorkspaceConfiguration } from 'vscode';
 
 // Mock the convertToClarionString function for testing
 // In a real implementation, we'd import the actual function
-function convertToClarionString(text: string, lineTerminator: 'space' | 'crlf' | 'none', indentation: string, cursorColumn: number): string {
+function convertToClarionString(text: string, lineTerminator: 'space' | 'crlf' | 'none', trimLeadingWhitespace: boolean, indentation: string, cursorColumn: number): string {
     const lines = text.split(/\r?\n/);
     const result: string[] = [];
     
@@ -12,9 +12,14 @@ function convertToClarionString(text: string, lineTerminator: 'space' | 'crlf' |
     const continuationIndent = ' '.repeat(cursorColumn);
     
     for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
+        let line = lines[i];
         const isLastLine = i === lines.length - 1;
         const isFirstLine = i === 0;
+        
+        // Optionally trim leading whitespace
+        if (trimLeadingWhitespace) {
+            line = line.trimStart();
+        }
         
         // Escape single quotes by doubling them
         const escapedLine = line.replace(/'/g, "''");
@@ -63,7 +68,7 @@ suite('TextEditingCommands Test Suite', () => {
         test('should convert single line with space terminator', () => {
             const input = 'SELECT * FROM Orders';
             const expected = "'SELECT * FROM Orders'";
-            const result = convertToClarionString(input, 'space', '', 0);
+            const result = convertToClarionString(input, 'space', true, '', 0);
             assert.strictEqual(result, expected);
         });
         
@@ -73,7 +78,7 @@ suite('TextEditingCommands Test Suite', () => {
                 "'SELECT CustomerName ' & |\n" +
                 "'FROM Orders ' & |\n" +
                 "'WHERE Total > 100'";
-            const result = convertToClarionString(input, 'space', '', 0);
+            const result = convertToClarionString(input, 'space', true, '', 0);
             assert.strictEqual(result, expected);
         });
         
@@ -83,7 +88,7 @@ suite('TextEditingCommands Test Suite', () => {
                 "'Line 1<13,10>' & |\n" +
                 "'Line 2<13,10>' & |\n" +
                 "'Line 3'";
-            const result = convertToClarionString(input, 'crlf', '', 0);
+            const result = convertToClarionString(input, 'crlf', true, '', 0);
             assert.strictEqual(result, expected);
         });
         
@@ -93,7 +98,7 @@ suite('TextEditingCommands Test Suite', () => {
                 "'Part1' & |\n" +
                 "'Part2' & |\n" +
                 "'Part3'";
-            const result = convertToClarionString(input, 'none', '', 0);
+            const result = convertToClarionString(input, 'none', true, '', 0);
             assert.strictEqual(result, expected);
         });
         
@@ -102,7 +107,7 @@ suite('TextEditingCommands Test Suite', () => {
             const expected = 
                 "'It''s a test ' & |\n" +
                 "'With ''quotes'''";
-            const result = convertToClarionString(input, 'space', '', 0);
+            const result = convertToClarionString(input, 'space', true, '', 0);
             assert.strictEqual(result, expected);
         });
         
@@ -111,7 +116,7 @@ suite('TextEditingCommands Test Suite', () => {
             const expected = 
                 "'Line 1 ' & |\n" +
                 "  'Line 2'";
-            const result = convertToClarionString(input, 'space', '  ', 2);
+            const result = convertToClarionString(input, 'space', true, '  ', 2);
             assert.strictEqual(result, expected);
         });
         
@@ -126,7 +131,7 @@ suite('TextEditingCommands Test Suite', () => {
                 "'FROM Orders ' & |\n" +
                 "'WHERE OrderDate > ''2024-01-01'' ' & |\n" +
                 "'ORDER BY OrderDate DESC'";
-            const result = convertToClarionString(input, 'space', '', 0);
+            const result = convertToClarionString(input, 'space', true, '', 0);
             assert.strictEqual(result, expected);
         });
         
@@ -136,7 +141,7 @@ suite('TextEditingCommands Test Suite', () => {
                 "'Line 1 ' & |\n" +
                 "' ' & |\n" +
                 "'Line 3'";
-            const result = convertToClarionString(input, 'space', '', 0);
+            const result = convertToClarionString(input, 'space', true, '', 0);
             assert.strictEqual(result, expected);
         });
         
@@ -146,7 +151,7 @@ suite('TextEditingCommands Test Suite', () => {
                 "'Line 1 ' & |\n" +
                 "'Line 2 ' & |\n" +
                 "'Line 3'";
-            const result = convertToClarionString(input, 'space', '', 0);
+            const result = convertToClarionString(input, 'space', true, '', 0);
             assert.strictEqual(result, expected);
         });
         
@@ -160,11 +165,31 @@ suite('TextEditingCommands Test Suite', () => {
             // Cursor at column 17 (after "SqlQuery STRING(")
             const expected = 
                 "'SELECT ' & |\n" +
-                "                 '  c.Name, ' & |\n" +
-                "                 '  o.Total ' & |\n" +
+                "                 'c.Name, ' & |\n" +
+                "                 'o.Total ' & |\n" +
                 "                 'FROM Customers c ' & |\n" +
                 "                 'JOIN Orders o ON c.ID = o.CustomerID'";
-            const result = convertToClarionString(input, 'space', '', 17);
+            const result = convertToClarionString(input, 'space', true, '', 17);
+            assert.strictEqual(result, expected);
+        });
+        
+        test('should trim leading whitespace when enabled', () => {
+            const input = '    CASE Value\n    OF 1 ; DoSomething()\n    END';
+            const expected = 
+                "'CASE Value ' & |\n" +
+                "'OF 1 ; DoSomething() ' & |\n" +
+                "'END'";
+            const result = convertToClarionString(input, 'space', true, '', 0);
+            assert.strictEqual(result, expected);
+        });
+        
+        test('should preserve leading whitespace when disabled', () => {
+            const input = '    CASE Value\n    OF 1 ; DoSomething()\n    END';
+            const expected = 
+                "'    CASE Value ' & |\n" +
+                "'    OF 1 ; DoSomething() ' & |\n" +
+                "'    END'";
+            const result = convertToClarionString(input, 'space', false, '', 0);
             assert.strictEqual(result, expected);
         });
     });

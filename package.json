@@ -877,6 +877,11 @@
                         "No line terminator (lines concatenate seamlessly)"
                     ],
                     "description": "How to terminate each line when pasting as Clarion string. Controls whether lines are separated by spaces, line breaks, or nothing."
+                },
+                "clarion.pasteAsString.trimLeadingWhitespace": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Remove leading whitespace from each line when pasting as Clarion string. Recommended when pasting indented code."
                 }
             }
         }
