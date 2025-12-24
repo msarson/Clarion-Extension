@@ -162,6 +162,11 @@ Complete feature documentation for the Clarion Extension for Visual Studio Code.
 #### EXECUTE Statement Validation
 - **Expression type checking** - Warns if expression should be numeric
 
+#### CLASS/QUEUE Property Validation
+- **QUEUE in CLASS** - QUEUE structures not allowed as direct CLASS properties (use &QUEUE reference)
+- **QUEUE nesting** - QUEUE structures cannot be nested inside other QUEUEs (use &QUEUE reference)
+- **GROUP structures** - Remain valid as CLASS properties and inside QUEUEs
+
 #### RETURN Statement Validation
 - **Missing RETURN statements** - Validates procedures/methods with return types
 - **Empty RETURN validation** - Flags procedures where all RETURN statements are empty
@@ -174,9 +179,58 @@ Complete feature documentation for the Clarion Extension for Visual Studio Code.
 - **Quick fixes** (where applicable)
 - **Severity levels** - Errors, warnings, information
 
+### Recent Bug Fixes (v0.7.4-0.7.5)
+- **Single-line IF...THEN** - No longer incorrectly flagged as missing END ([#24](https://github.com/msarson/Clarion-Extension/issues/24))
+- **COMPILE/OMIT FILE validation** - Correctly handles conditional FILE declarations ([#23](https://github.com/msarson/Clarion-Extension/issues/23))
+- **Keywords as field names** - Fixed tokenizer treating `nts:case`, `obj.record` as keywords
+- **Dot terminator detection** - Distinguishes inline dots (`IF x THEN y.`) from standalone terminators
+- **RECORD field nesting** - Fields now properly nested under RECORD structure in outline
+- **Incremental tokenization** - Fixed stale diagnostics after document changes
+- **Follow Cursor** - Now works correctly for all methods in implementation
+
 ---
 
 ## Code Editing
+
+### Create New Class Command
+- **Interactive wizard** - Creates both .inc and .clw files with proper formatting
+- **Customizable setup**:
+  - Class name validation (valid Clarion identifier)
+  - Editable file names (defaults to ClassName.inc/clw)
+  - Optional Construct/Destruct methods
+  - Folder selection (current folder or browse)
+- **File conflict detection** - Prevents accidental overwrite
+- **Respects editor settings** - Uses your tab/space preferences
+- **Auto-opens files** - Both files opened as tabs after creation
+
+### Add Method Implementation
+- **Auto-generate implementations** (`Ctrl+Shift+I`) - From method declaration to implementation
+- **Smart file resolution** - Finds MODULE file automatically
+- **Duplicate detection** - Checks if implementation already exists (with parameter matching)
+- **Jump to existing** - If found, navigates to existing implementation
+- **Generate new** - If not found, adds implementation at end of file
+- **Return type as comment** - Includes `!,ReturnType` on PROCEDURE line
+- **Respects editor settings** - Uses your tab/space preferences
+- **CLASS context only** - Works within CLASS declarations
+
+### Paste as Clarion String
+- **Format clipboard as string** (`Ctrl+Shift+Alt+V`) - Converts multi-line text to Clarion string format
+- **Auto-escaping** - Single quotes converted to double quotes (`'` → `''`)
+- **Continuation syntax** - Adds `& |` between lines
+- **Quote alignment** - All opening quotes at same column position
+- **Configurable terminators**:
+  - `"space"` (default) - Trailing space on each line (ideal for SQL)
+  - `"crlf"` - Adds `<13,10>` line break
+  - `"none"` - No separator
+- **Whitespace trimming** - Optional leading whitespace removal (default: enabled)
+- **Respects indentation** - Maintains current cursor position alignment
+- **Clarion files only** - Only active in .clw/.inc files for safety
+
+### CODE Statement Markers
+- **Navigation markers** - CODE statement appears in outline for easy navigation
+- **Entry point finding** - Click CODE to jump to execution start
+- **PROGRAM support** - Quickly find PROGRAM entry point
+- **ROUTINE support** - CODE markers after DATA sections in routines
 
 ### Code Folding
 - **Tokenizer-based folding** for improved accuracy
@@ -254,6 +308,10 @@ Complete feature documentation for the Clarion Extension for Visual Studio Code.
 - [Build Settings](BuildSettings.md) - Detailed build configuration
 - [Clarion Knowledge Base](clarion-knowledge-base.md) - Language reference
 - [GitHub Repository](https://github.com/msarson/Clarion-Extension)
+
+---
+
+*Last updated: December 24, 2025 - Version 0.7.6*
 - [Issues & Feature Requests](https://github.com/msarson/Clarion-Extension/issues)
 
 ---
