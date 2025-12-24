@@ -865,7 +865,7 @@ export class DocumentManager implements Disposable {
      * @param position - The position within the document
      * @returns The location of the link if found, otherwise undefined
      */
-    findLinkAtPosition(documentUri: Uri, position: Position): ClarionLocation | undefined {
+    findLinkAtPosition(documentUri: Uri, position: Position, detectImplementations: boolean = false): ClarionLocation | undefined {
         const documentInfo = this.getDocumentInfo(documentUri);
         logger.info(`Finding link at position ${position.line}:${position.character} in ${documentUri.fsPath}`);
 
@@ -874,14 +874,15 @@ export class DocumentManager implements Disposable {
             return undefined;
         }
         
-        // First, check if this is a method implementation line
-        const doc = workspace.textDocuments.find(d => d.uri.toString() === documentUri.toString());
-        if (doc) {
-            const line = doc.lineAt(position.line).text;
-            
-            // Check for CLASS method implementation: "ClassName.MethodName PROCEDURE(...)"
-            const methodImplMatch = line.match(/^(\w+)\.(\w+)\s+PROCEDURE\s*\(/i);
-            if (methodImplMatch) {
+        // Only check for method implementation lines if detectImplementations is true
+        if (detectImplementations) {
+            const doc = workspace.textDocuments.find(d => d.uri.toString() === documentUri.toString());
+            if (doc) {
+                const line = doc.lineAt(position.line).text;
+                
+                // Check for CLASS method implementation: "ClassName.MethodName PROCEDURE(...)"
+                const methodImplMatch = line.match(/^(\w+)\.(\w+)\s+PROCEDURE\s*\(/i);
+                if (methodImplMatch) {
                 const className = methodImplMatch[1];
                 const methodName = methodImplMatch[2];
                 const classStart = line.indexOf(className);
@@ -915,31 +916,32 @@ export class DocumentManager implements Disposable {
                 }
             }
             
-            // Check for MAP procedure implementation: "ProcedureName PROCEDURE(...)"
-            const mapProcMatch = line.match(/^(\w+)\s+PROCEDURE\s*\(/i);
-            if (mapProcMatch) {
-                const procName = mapProcMatch[1];
-                const procStart = mapProcMatch.index!;
-                const procEnd = procStart + procName.length;
-                
-                // Check if cursor is on the procedure name
-                if (position.character >= procStart && position.character <= procEnd) {
-                    logger.info(`Detected MAP procedure implementation line: ${procName}`);
+                // Check for MAP procedure implementation: "ProcedureName PROCEDURE(...)"
+                const mapProcMatch = line.match(/^(\w+)\s+PROCEDURE\s*\(/i);
+                if (mapProcMatch) {
+                    const procName = mapProcMatch[1];
+                    const procStart = mapProcMatch.index!;
+                    const procEnd = procStart + procName.length;
                     
-                    // Parse parameter signature from implementation
-                    const paramSignature = this.parseMethodParameterSignature(line);
-                    
-                    const location: ClarionLocation = {
-                        fullFileName: documentUri.fsPath,
-                        linePosition: new Position(position.line, procStart),
-                        linePositionEnd: new Position(position.line, procEnd),
-                        statementType: "MAPPROCEDURE",
-                        methodName: procName,
-                        parameterSignature: paramSignature,
-                        implementationResolved: false
-                    };
-                    
-                    return location;
+                    // Check if cursor is on the procedure name
+                    if (position.character >= procStart && position.character <= procEnd) {
+                        logger.info(`Detected MAP procedure implementation line: ${procName}`);
+                        
+                        // Parse parameter signature from implementation
+                        const paramSignature = this.parseMethodParameterSignature(line);
+                        
+                        const location: ClarionLocation = {
+                            fullFileName: documentUri.fsPath,
+                            linePosition: new Position(position.line, procStart),
+                            linePositionEnd: new Position(position.line, procEnd),
+                            statementType: "MAPPROCEDURE",
+                            methodName: procName,
+                            parameterSignature: paramSignature,
+                            implementationResolved: false
+                        };
+                        
+                        return location;
+                    }
                 }
             }
         }

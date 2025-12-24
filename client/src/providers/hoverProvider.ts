@@ -54,7 +54,8 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
         }
         
         // If not a method call, proceed with existing logic for declarations
-        let location = this.documentManager.findLinkAtPosition(document.uri, position);
+        // Pass true to detect method implementations for hover
+        let location = this.documentManager.findLinkAtPosition(document.uri, position, true);
         if (!location) {
             logger.info(`No location found at position ${position.line}:${position.character} - deferring to server`);
             return undefined; // Let server handle variable/parameter hovers

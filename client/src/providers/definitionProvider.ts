@@ -58,7 +58,8 @@ export class ClarionDefinitionProvider implements DefinitionProvider {
         }
         
         // Otherwise, find the link at the current position (forward direction: declaration → implementation)
-        const location = this.documentManager.findLinkAtPosition(document.uri, position);
+        // Pass true to detect method implementations for go-to-definition
+        const location = this.documentManager.findLinkAtPosition(document.uri, position, true);
         if (!location) {
             logger.info(`No location found at position ${position.line}:${position.character} - deferring to server`);
             return undefined; // Return undefined to let server-side provider handle it

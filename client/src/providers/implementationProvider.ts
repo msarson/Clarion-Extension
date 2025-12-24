@@ -176,7 +176,8 @@ export class ClarionImplementationProvider implements ImplementationProvider {
         }
         
         // If not a method call, proceed with the existing logic for method declarations
-        const location = this.documentManager.findLinkAtPosition(document.uri, position);
+        // Pass true to detect method implementations for go-to-implementation
+        const location = this.documentManager.findLinkAtPosition(document.uri, position, true);
         if (!location) {
             logger.info(`No location found at position ${position.line}:${position.character}`);
             return null;
