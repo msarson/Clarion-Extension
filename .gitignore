@@ -10,3 +10,6 @@ docs/ai-prompts/
 # Exclude commercial/copyrighted third-party code
 StringTheory.inc
 StringTheory.clw
+
+# Development/AI working files
+dev/
