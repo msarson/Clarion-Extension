@@ -129,6 +129,33 @@ export class DefinitionProvider {
                 }
             }
 
+            // Check if this is a MAP procedure implementation line (e.g., "ProcessOrder PROCEDURE")
+            // Navigate to the MAP declaration
+            // Match any line with PROCEDURE keyword (not a class method)
+            if (line.toUpperCase().includes('PROCEDURE') && !methodImplMatch) {
+                // Try to extract procedure name
+                const procImplMatch = line.match(/^\s*(\w+)\s+PROCEDURE/i);
+                if (procImplMatch) {
+                    const procName = procImplMatch[1];
+                    logger.info(`🔍 Detected procedure implementation line: ${procName}`);
+                    
+                    // Check if cursor is on the procedure name
+                    const procStart = line.indexOf(procName);
+                    const procEnd = procStart + procName.length;
+                    
+                    if (position.character >= procStart && position.character <= procEnd) {
+                        logger.info(`F12 on procedure implementation: ${procName}`);
+                        
+                        const tokens = this.tokenCache.getTokens(document);
+                        const mapDecl = this.findMapProcedureDeclaration(procName, tokens, document);
+                        if (mapDecl) {
+                            logger.info(`✅ Found MAP declaration at line ${mapDecl.range.start.line}`);
+                            return mapDecl;
+                        }
+                    }
+                }
+            }
+
             // Check if this is a structure field reference (either dot notation or prefix notation)
             const structureFieldDefinition = await this.findStructureFieldDefinition(word, document, position);
             if (structureFieldDefinition) {
@@ -142,6 +169,15 @@ export class DefinitionProvider {
             if (labelDefinition) {
                 logger.info(`Found label definition for ${word} in the current document`);
                 return labelDefinition;
+            }
+
+            // Check if we're inside a MAP block and the word is a procedure declaration
+            // Navigate to the PROCEDURE implementation
+            const tokens = this.tokenCache.getTokens(document);
+            const mapProcImpl = this.findMapProcedureImplementation(word, tokens, document, position);
+            if (mapProcImpl) {
+                logger.info(`Found PROCEDURE implementation for MAP declaration: ${word}`);
+                return mapProcImpl;
             }
 
             // Next, check if this is a reference to a Clarion structure (queue, window, view, etc.)
@@ -2115,6 +2151,118 @@ export class DefinitionProvider {
             }
         }
         
+        return null;
+    }
+
+    /**
+     * Finds a MAP procedure declaration for a given PROCEDURE implementation
+     * (Reverse navigation: PROCEDURE → MAP)
+     */
+    private findMapProcedureDeclaration(procName: string, tokens: Token[], document: TextDocument): Location | null {
+        logger.info(`Looking for MAP declaration for procedure: ${procName}`);
+
+        // Get document text and split into lines
+        const content = document.getText();
+        const lines = content.split('\n');
+
+        // Find MAP blocks by searching for MAP...END
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            
+            // Found start of MAP block
+            if (line.toUpperCase() === 'MAP') {
+                logger.info(`Found MAP block starting at line ${i}`);
+                
+                // Search within this MAP block for the procedure name
+                for (let j = i + 1; j < lines.length; j++) {
+                    const mapLine = lines[j].trim();
+                    
+                    // End of MAP block
+                    if (mapLine.toUpperCase().startsWith('END')) {
+                        logger.info(`End of MAP block at line ${j}`);
+                        break;
+                    }
+                    
+                    // Check if this line declares our procedure
+                    // Match: ProcName(...) or ProcName PROCEDURE(...) or ProcName,PROCEDURE(...)
+                    const procPattern = new RegExp(`^\\s*${procName}\\s*[,(]`, 'i');
+                    if (procPattern.test(lines[j])) {
+                        logger.info(`Found MAP declaration for ${procName} at line ${j}`);
+                        return Location.create(document.uri, {
+                            start: { line: j, character: 0 },
+                            end: { line: j, character: lines[j].length }
+                        });
+                    }
+                }
+            }
+        }
+
+        logger.info(`No MAP declaration found for ${procName}`);
+        return null;
+    }
+
+    /**
+     * Finds a PROCEDURE implementation for a procedure declared in a MAP block
+     * (Forward navigation: MAP declaration → PROCEDURE)
+     */
+    private findMapProcedureImplementation(procName: string, tokens: Token[], document: TextDocument, position: Position): Location | null {
+        logger.info(`Checking if ${procName} is in a MAP block`);
+
+        // Get document text and split into lines
+        const content = document.getText();
+        const lines = content.split('\n');
+
+        // Check if current position is within a MAP block
+        let isInMap = false;
+        for (let i = 0; i < lines.length && i <= position.line; i++) {
+            const line = lines[i].trim();
+            if (line.toUpperCase() === 'MAP') {
+                // Found MAP start, check if position is before END
+                for (let j = i + 1; j < lines.length; j++) {
+                    if (lines[j].trim().toUpperCase().startsWith('END')) {
+                        // If position is between MAP and END, we're in a MAP block
+                        if (position.line > i && position.line < j) {
+                            isInMap = true;
+                            logger.info(`Position is inside MAP block at line ${i}`);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!isInMap) {
+            return null;
+        }
+
+        // Find the PROCEDURE implementation (outside MAP blocks)
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            
+            // Skip lines inside MAP blocks
+            if (line.trim().toUpperCase() === 'MAP') {
+                // Skip to END of this MAP block
+                for (let j = i + 1; j < lines.length; j++) {
+                    if (lines[j].trim().toUpperCase().startsWith('END')) {
+                        i = j;
+                        break;
+                    }
+                }
+                continue;
+            }
+
+            // Check if this line is a PROCEDURE implementation
+            const procImplPattern = new RegExp(`^\\s*${procName}\\s+PROCEDURE`, 'i');
+            if (procImplPattern.test(line)) {
+                logger.info(`Found PROCEDURE implementation for ${procName} at line ${i}`);
+                return Location.create(document.uri, {
+                    start: { line: i, character: 0 },
+                    end: { line: i, character: line.length }
+                });
+            }
+        }
+
+        logger.info(`No PROCEDURE implementation found for ${procName}`);
         return null;
     }
 }
