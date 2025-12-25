@@ -23,6 +23,7 @@ import { SolutionCache } from './SolutionCache';
 import { isInsideMapBlock } from '../../common/clarionUtils';
 const logger = LoggerManager.getLogger("DocumentManager");
 logger.setLevel("info");
+logger.setLevel("info");
 
 /**
  * Interface representing document information including statement locations
@@ -423,7 +424,8 @@ export class DocumentManager implements Disposable {
         }
 
         const links: DocumentLink[] = [];
-        const supportedTypes = ["INCLUDE", "MODULE", "MEMBER", "SECTION", "LINK", "METHOD"];
+        // Note: METHOD is intentionally excluded - methods are handled by hover/definition providers, not as clickable links
+        const supportedTypes = ["INCLUDE", "MODULE", "MEMBER", "SECTION", "LINK"];
         
         logger.info(`Generating links for ${uri.fsPath} with ${documentInfo.statementLocations.length} locations`);
         
@@ -874,7 +876,29 @@ export class DocumentManager implements Disposable {
             return undefined;
         }
         
-        // First, check if this is a method implementation line
+        // First, check stored statement locations (declarations from MAP blocks, CLASS definitions, etc.)
+        if (documentInfo) {
+            for (const location of documentInfo.statementLocations) {
+                if (!location.linePosition || !location.linePositionEnd) {
+                    continue;
+                }
+                
+                const linkRange = new Range(
+                    location.linePosition,
+                    location.linePositionEnd
+                );
+
+                if (linkRange.contains(position)) {
+                    logger.info(`Found link at position: ${location.statementType} to ${location.fullFileName}`);
+                    
+                    // For method declarations, we don't need to resolve the implementation here
+                    // The hover provider will call resolveMethodImplementation when needed
+                    return location;
+                }
+            }
+        }
+        
+        // If not in stored locations, check if this is a method implementation line
         const doc = workspace.textDocuments.find(d => d.uri.toString() === documentUri.toString());
         if (doc) {
             const line = doc.lineAt(position.line).text;
@@ -939,28 +963,6 @@ export class DocumentManager implements Disposable {
                         implementationResolved: false
                     };
                     
-                    return location;
-                }
-            }
-        }
-        
-        // If not a method implementation, check stored statement locations
-        if (documentInfo) {
-            for (const location of documentInfo.statementLocations) {
-                if (!location.linePosition || !location.linePositionEnd) {
-                    continue;
-                }
-                
-                const linkRange = new Range(
-                    location.linePosition,
-                    location.linePositionEnd
-                );
-
-                if (linkRange.contains(position)) {
-                    logger.info(`Found link at position: ${location.statementType} to ${location.fullFileName}`);
-                    
-                    // For method declarations, we don't need to resolve the implementation here
-                    // The hover provider will call resolveMethodImplementation when needed
                     return location;
                 }
             }

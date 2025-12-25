@@ -53,7 +53,7 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
             return undefined;
         }
         
-        // If not a method call, proceed with existing logic for declarations
+        // Check if we're on a method/procedure declaration or implementation
         let location = this.documentManager.findLinkAtPosition(document.uri, position);
         if (!location) {
             logger.info(`No location found at position ${position.line}:${position.character} - deferring to server`);
@@ -62,16 +62,7 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
 
         logger.info(`Found location at position: ${location.statementType} to ${location.fullFileName}`);
         
-        // If hovering on a method implementation line itself (not declaration), defer to server
-        // The server has complete information about parameter types and can match the correct overload
-        if ((location.statementType === "METHOD" || location.statementType === "MAPPROCEDURE") && 
-            location.fullFileName === document.uri.fsPath && 
-            location.linePosition && location.linePosition.line === position.line) {
-            logger.info(`Hovering on method implementation line - deferring to server for complete info`);
-            return undefined;
-        }
-        
-        // For method and MAP procedure declarations, lazily resolve the implementation when needed
+        // For method and MAP procedure declarations, show hover with implementation
         if ((location.statementType === "METHOD" || location.statementType === "MAPPROCEDURE") && !location.implementationResolved) {
             const displayName = location.className ? `${location.className}.${location.methodName}` : location.methodName;
             logger.info(`Lazily resolving implementation for hover: ${displayName}`);

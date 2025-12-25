@@ -43,30 +43,8 @@ export class ClarionDocumentLinkProvider implements DocumentLinkProvider {
             await this.documentManager.updateDocumentInfo(document);
         }
         
-        // Try to get links from cache or generate new ones
-        let links = this.documentManager.generateDocumentLinks(document.uri);
-        
-        // Filter out METHOD links since they will be handled by the implementation provider
-        links = links.filter(link => {
-            // Get the position in the document for this link
-            const position = link.range.start;
-            
-            // Find the location at this position to check its metadata
-            const location = this.documentManager.findLinkAtPosition(document.uri, position);
-            
-            // If this is a METHOD type location, filter it out
-            if (location && location.statementType === "METHOD") {
-                const methodName = location.className && location.methodName
-                    ? `${location.className}.${location.methodName}`
-                    : "unknown method";
-                
-                logger.info(`Filtering out method link: ${methodName} -> will be handled by implementation provider`);
-                return false;
-            }
-            
-            // Keep all other link types (INCLUDE, MODULE, MEMBER, SECTION, LINK)
-            return true;
-        });
+        // Get document links (METHOD links are not generated, only INCLUDE, MODULE, MEMBER, SECTION, LINK)
+        const links = this.documentManager.generateDocumentLinks(document.uri);
         
         logger.info(`✅ Generated ${links.length} links for ${document.uri.fsPath}`);
         
