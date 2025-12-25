@@ -13,7 +13,6 @@ const logger = LoggerManager.getLogger("LanguageFeatureManager");
 let hoverProviderDisposable: Disposable | null = null;
 let documentLinkProviderDisposable: Disposable | null = null;
 let implementationProviderDisposable: Disposable | null = null;
-let definitionProviderDisposable: Disposable | null = null;
 let semanticTokensProviderDisposable: Disposable | null = null;
 
 /**
@@ -82,25 +81,6 @@ export function registerLanguageFeatures(context: ExtensionContext, documentMana
     
     logger.info(`📄 Registered Implementation Provider for extensions: ${lookupExtensions.join(', ')}`);
     
-    // ✅ DISABLED: Client-side Definition Provider blocks server-side providers
-    // All definition requests now handled by:
-    // 1. Middleware for reverse MAP navigation (implementation → declaration)
-    // 2. Server-side DefinitionProvider for everything else
-    // This includes: variables, parameters, methods, structures, etc.
-    if (definitionProviderDisposable) {
-        definitionProviderDisposable.dispose();
-    }
-    
-    // REMOVED: Client-side Definition Provider
-    // logger.info("🔍 Registering Definition Provider for class methods...");
-    // definitionProviderDisposable = languages.registerDefinitionProvider(
-    //     documentSelectors,
-    //     new ClarionDefinitionProvider(documentManager)
-    // );
-    // context.subscriptions.push(definitionProviderDisposable);
-    // 
-    // logger.info(`📄 Registered Definition Provider for extensions: ${lookupExtensions.join(', ')}`);
-    
     // ✅ Register Prefix Decorator for variable highlighting
     if (semanticTokensProviderDisposable) {
         semanticTokensProviderDisposable.dispose(); // Remove old provider if it exists
@@ -131,10 +111,6 @@ export function disposeLanguageFeatures() {
     if (implementationProviderDisposable) {
         implementationProviderDisposable.dispose();
         implementationProviderDisposable = null;
-    }
-    if (definitionProviderDisposable) {
-        definitionProviderDisposable.dispose();
-        definitionProviderDisposable = null;
     }
     if (semanticTokensProviderDisposable) {
         semanticTokensProviderDisposable.dispose();

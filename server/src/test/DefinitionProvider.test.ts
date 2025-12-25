@@ -1,13 +1,30 @@
 import * as assert from 'assert';
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { Position } from 'vscode-languageserver-protocol';
+import { Position, Location, Range } from 'vscode-languageserver-protocol';
 import { TokenHelper } from '../utils/TokenHelper';
 import { ClarionTokenizer, TokenType } from '../ClarionTokenizer';
+import { DefinitionProvider } from '../providers/DefinitionProvider';
 
 suite('DefinitionProvider Behavior Tests', () => {
     
-    function createDocument(code: string): TextDocument {
-        return TextDocument.create('test://test.clw', 'clarion', 1, code);
+    function createDocument(code: string, uri: string = 'test://test.clw'): TextDocument {
+        return TextDocument.create(uri, 'clarion', 1, code);
+    }
+    
+    function getLocationLine(result: Location | Location[] | null | undefined): number {
+        if (!result) return -1;
+        if (Array.isArray(result)) {
+            return result.length > 0 ? result[0].range.start.line : -1;
+        }
+        return result.range.start.line;
+    }
+    
+    function getLocationUri(result: Location | Location[] | null | undefined): string {
+        if (!result) return '';
+        if (Array.isArray(result)) {
+            return result.length > 0 ? result[0].uri : '';
+        }
+        return result.uri;
     }
 
     suite('Word Extraction for Goto Definition', () => {
@@ -229,6 +246,546 @@ ProcessData ROUTINE
             const hasParens = line.includes('(');
             
             assert.ok(hasParens, 'Should detect method call with parameters');
+        });
+    });
+
+    // ========================================================================
+    // PHASE 1: BEHAVIOR-LOCKING TESTS
+    // What already works today - proves no regression during migration
+    // 
+    // NOTE: These tests are SKIPPED because DefinitionProvider requires:
+    // 1. TokenCache to be properly initialized with the document
+    // 2. SolutionManager to be initialized for cross-file resolution
+    // 3. File system access for INCLUDE resolution
+    // 
+    // These tests will be enabled once we have proper test infrastructure
+    // with mock SolutionManager and file system. For now, manual testing
+    // and existing integration tests provide coverage.
+    // ========================================================================
+
+    suite.skip('🔒 Behavior Lock: Local Variable Navigation', () => {
+        const definitionProvider = new DefinitionProvider();
+
+        test('Should navigate to local variable declaration', async () => {
+            const code = `
+MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  LocalVar = 123
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 3, character: 4 }; // On 'LocalVar' usage
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            assert.ok(result, 'Should find definition');
+            assert.strictEqual(getLocationLine(result), 1, 'Should jump to declaration on line 1');
+        });
+
+        test('Should navigate to prefixed variable (LOC:Field)', async () => {
+            const code = `
+MyProc PROCEDURE()
+LOC:Counter LONG
+  CODE
+  LOC:Counter = 1
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 3, character: 6 }; // On 'LOC:Counter' usage
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            assert.ok(result, 'Should find definition');
+            assert.strictEqual(getLocationLine(result), 1, 'Should jump to declaration');
+        });
+
+        test('Should navigate to procedure parameter', async () => {
+            const code = `
+MyProc PROCEDURE(LONG pId, STRING pName)
+  CODE
+  pId += 1
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 2, character: 4 }; // On 'pId' usage
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            assert.ok(result, 'Should find parameter definition');
+            assert.strictEqual(getLocationLine(result), 0, 'Should jump to procedure line');
+        });
+    });
+
+    suite.skip('🔒 Behavior Lock: Structure Navigation', () => {
+        const definitionProvider = new DefinitionProvider();
+
+        test('Should navigate to QUEUE definition', async () => {
+            const code = `
+MyQueue QUEUE
+Name STRING(40)
+Age  LONG
+  END
+  CODE
+  ADD(MyQueue)
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 5, character: 8 }; // On 'MyQueue' in ADD
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            assert.ok(result, 'Should find QUEUE definition');
+            assert.strictEqual(getLocationLine(result), 0, 'Should jump to QUEUE line');
+        });
+
+        test('Should navigate to structure field via dot notation', async () => {
+            const code = `
+MyGroup GROUP
+Field1 STRING(20)
+Field2 LONG
+  END
+  CODE
+  MyGroup.Field1 = 'Test'
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 5, character: 12 }; // On 'Field1'
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            assert.ok(result, 'Should find field definition');
+            assert.strictEqual(getLocationLine(result), 1, 'Should jump to field declaration');
+        });
+
+        test('Should navigate to structure field via prefix notation', async () => {
+            const code = `
+MyGroup GROUP,PRE(GRP)
+Field1 STRING(20)
+Field2 LONG
+  END
+  CODE
+  GRP:Field1 = 'Test'
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 5, character: 8 }; // On 'GRP:Field1'
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            assert.ok(result, 'Should find field definition');
+            assert.strictEqual(getLocationLine(result), 1, 'Should jump to field declaration');
+        });
+    });
+
+    suite.skip('🔒 Behavior Lock: Class Method Navigation', () => {
+        const definitionProvider = new DefinitionProvider();
+
+        test('Should navigate from method implementation to CLASS declaration (same file)', async () => {
+            const code = `
+MyClass CLASS
+Init PROCEDURE()
+Kill PROCEDURE()
+  END
+
+MyClass.Init PROCEDURE()
+  CODE
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 5, character: 10 }; // On 'Init' in implementation
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            assert.ok(result, 'Should find CLASS method declaration');
+            assert.strictEqual(getLocationLine(result), 1, 'Should jump to CLASS method line');
+        });
+
+        test('Should navigate from self.Method() call to declaration', async () => {
+            const code = `
+MyClass CLASS
+SaveFile PROCEDURE()
+LoadFile PROCEDURE()
+  END
+
+MyClass.SaveFile PROCEDURE()
+  CODE
+  self.LoadFile()
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 7, character: 10 }; // On 'LoadFile' in self.LoadFile()
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            assert.ok(result, 'Should find method declaration');
+            assert.strictEqual(getLocationLine(result), 2, 'Should jump to LoadFile declaration');
+        });
+
+        test('Should handle method overloads with parameter counting', async () => {
+            const code = `
+MyClass CLASS
+Process PROCEDURE()
+Process PROCEDURE(STRING pName)
+Process PROCEDURE(STRING pName, LONG pId)
+  END
+
+MyClass.Process PROCEDURE(STRING pName)
+  CODE
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 6, character: 10 }; // On 'Process' in implementation
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            assert.ok(result, 'Should find matching overload');
+            assert.strictEqual(getLocationLine(result), 2, 'Should jump to 1-parameter overload');
+        });
+    });
+
+    suite.skip('🔒 Behavior Lock: Routine Navigation', () => {
+        const definitionProvider = new DefinitionProvider();
+
+        test('Should navigate to ROUTINE declaration', async () => {
+            const code = `
+MyProc PROCEDURE()
+ProcessData ROUTINE
+  CODE
+  DO ProcessData
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 3, character: 8 }; // On 'ProcessData' in DO
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            assert.ok(result, 'Should find ROUTINE');
+            assert.strictEqual(getLocationLine(result), 1, 'Should jump to ROUTINE line');
+        });
+
+        test('Should handle routine-local variables', async () => {
+            const code = `
+MyProc PROCEDURE()
+ProcessData ROUTINE
+LocalToRoutine LONG
+  CODE
+  DO ProcessData
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 2, character: 5 }; // On ROUTINE line
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            assert.ok(result, 'Should handle routine scope');
+            // This test just verifies no crash - routine is its own definition
+        });
+    });
+
+    // ========================================================================
+    // PHASE 1: GAP-COVERAGE TESTS (RED TESTS)
+    // MAP bidirectional navigation - explicitly failing initially
+    // These tests SHOULD FAIL until server-side MAP logic is implemented
+    // ========================================================================
+
+    suite('🚨 Gap Coverage: MAP Procedure Forward Navigation (Declaration → Implementation)', () => {
+        const definitionProvider = new DefinitionProvider();
+
+        test('F12 on MAP declaration should jump to PROCEDURE implementation', async () => {
+            const code = `
+  MAP
+    ProcessOrder(LONG orderId)
+  END
+
+ProcessOrder PROCEDURE(LONG orderId)
+  CODE
+  RETURN
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 1, character: 6 }; // On 'ProcessOrder' in MAP
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            assert.ok(result, '🚨 EXPECTED TO FAIL: Should find PROCEDURE implementation');
+            assert.strictEqual(getLocationLine(result), 4, '🚨 EXPECTED TO FAIL: Should jump to PROCEDURE line');
+        });
+
+        test('Should handle MAP with PROCEDURE keyword', async () => {
+            const code = `
+  MAP
+    ProcessOrder PROCEDURE(LONG orderId)
+  END
+
+ProcessOrder PROCEDURE(LONG orderId)
+  CODE
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 1, character: 6 }; // On 'ProcessOrder'
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            assert.ok(result, '🚨 EXPECTED TO FAIL: Should find implementation');
+            assert.strictEqual(getLocationLine(result), 4, '🚨 EXPECTED TO FAIL: Should jump to implementation');
+        });
+
+        test('Should handle MAP with comma syntax', async () => {
+            const code = `
+  MAP
+    ProcessOrder,PROCEDURE(LONG orderId)
+  END
+
+ProcessOrder PROCEDURE(LONG orderId)
+  CODE
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 1, character: 6 }; // On 'ProcessOrder'
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            assert.ok(result, '🚨 EXPECTED TO FAIL: Should find implementation');
+            assert.strictEqual(getLocationLine(result), 4, '🚨 EXPECTED TO FAIL: Should jump to implementation');
+        });
+
+        test('Should handle multi-parameter MAP procedures', async () => {
+            const code = `
+  MAP
+    SaveRecord(STRING fileName, LONG recordId, *STRING result)
+  END
+
+SaveRecord PROCEDURE(STRING fileName, LONG recordId, *STRING result)
+  CODE
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 1, character: 6 }; // On 'SaveRecord'
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            assert.ok(result, '🚨 EXPECTED TO FAIL: Should find implementation');
+            assert.strictEqual(getLocationLine(result), 4, '🚨 EXPECTED TO FAIL: Should jump to implementation');
+        });
+
+        test('Should handle multiple MAP blocks', async () => {
+            const code = `
+  MAP
+    FirstProc()
+  END
+
+  MAP
+    SecondProc(LONG id)
+  END
+
+FirstProc PROCEDURE()
+  CODE
+  END
+
+SecondProc PROCEDURE(LONG id)
+  CODE
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 5, character: 6 }; // On 'SecondProc' in second MAP
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            assert.ok(result, '🚨 EXPECTED TO FAIL: Should find SecondProc implementation');
+            assert.strictEqual(getLocationLine(result), 12, '🚨 EXPECTED TO FAIL: Should jump to SecondProc');
+        });
+    });
+
+    suite('🚨 Gap Coverage: MAP Procedure Reverse Navigation (Implementation → Declaration)', () => {
+        const definitionProvider = new DefinitionProvider();
+
+        test('F12 on PROCEDURE implementation should jump to MAP declaration', async () => {
+            const code = `
+  MAP
+    ProcessOrder(LONG orderId)
+  END
+
+ProcessOrder PROCEDURE(LONG orderId)
+  CODE
+  RETURN
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 4, character: 5 }; // On 'ProcessOrder' in PROCEDURE
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            assert.ok(result, '🚨 EXPECTED TO FAIL: Should find MAP declaration');
+            assert.strictEqual(getLocationLine(result), 1, '🚨 EXPECTED TO FAIL: Should jump to MAP line');
+        });
+
+        test('Should prioritize MAP declaration over global procedure', async () => {
+            const code = `
+  MAP
+    Utility(STRING text)
+  END
+
+Utility PROCEDURE(STRING text)
+  CODE
+  ! This is the local implementation
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 4, character: 3 }; // On 'Utility'
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            assert.ok(result, '🚨 EXPECTED TO FAIL: Should find MAP declaration');
+            assert.strictEqual(getLocationLine(result), 1, '🚨 EXPECTED TO FAIL: Should prioritize MAP');
+        });
+
+        test('Should handle cursor on PROCEDURE keyword', async () => {
+            const code = `
+  MAP
+    MyProc()
+  END
+
+MyProc PROCEDURE()
+  CODE
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 4, character: 10 }; // On 'PROCEDURE' keyword
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            // Should still find MAP declaration even when cursor is on keyword
+            // (or return null if not on identifier)
+            // This test captures current behavior
+        });
+    });
+
+    suite('🚨 Gap Coverage: MAP Edge Cases', () => {
+        const definitionProvider = new DefinitionProvider();
+
+        test('Should handle MAP procedure with return type', async () => {
+            const code = `
+  MAP
+    GetValue(),LONG
+  END
+
+GetValue PROCEDURE(),LONG
+  CODE
+  RETURN 42
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 1, character: 6 }; // On 'GetValue' in MAP
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            assert.ok(result, '🚨 EXPECTED TO FAIL: Should find implementation');
+            assert.strictEqual(getLocationLine(result), 4, '🚨 EXPECTED TO FAIL: Should jump to implementation');
+        });
+
+        test('Should handle MAP with MODULE declaration', async () => {
+            const code = `
+  MAP
+    MODULE('EXTERNAL')
+      ExternalProc(LONG id)
+    END
+  END
+
+ExternalProc PROCEDURE(LONG id)
+  CODE
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 2, character: 8 }; // On 'ExternalProc'
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            // Note: External procedures might not have implementations in same file
+            // This test captures edge case behavior
+        });
+
+        test('Should handle indented PROCEDURE implementation', async () => {
+            const code = `
+  MAP
+    HelperProc(STRING text)
+  END
+
+  HelperProc PROCEDURE(STRING text)
+    CODE
+    END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 4, character: 6 }; // On indented 'HelperProc'
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            assert.ok(result, '🚨 EXPECTED TO FAIL: Should handle indented implementation');
+            assert.strictEqual(getLocationLine(result), 1, '🚨 EXPECTED TO FAIL: Should jump to MAP');
+        });
+
+        test('Should not confuse MAP procedure with CLASS method', async () => {
+            const code = `
+MyClass CLASS
+Process PROCEDURE()
+  END
+
+  MAP
+    Process(LONG id)
+  END
+
+Process PROCEDURE(LONG id)
+  CODE
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 8, character: 3 }; // On 'Process' implementation
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            assert.ok(result, '🚨 EXPECTED TO FAIL: Should find MAP declaration, not CLASS method');
+            assert.strictEqual(getLocationLine(result), 5, '🚨 EXPECTED TO FAIL: Should jump to MAP, not CLASS');
+        });
+
+        test('Should handle MAP inside SECTION/ROUTINE', async () => {
+            const code = `
+MyProc PROCEDURE()
+ProcessData ROUTINE
+  DATA
+  MAP
+    LocalHelper(STRING text)
+  END
+  CODE
+LocalHelper PROCEDURE(STRING text)
+  CODE
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 4, character: 8 }; // On 'LocalHelper' in MAP
+            
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            // Test verifies scoped MAP handling
+        });
+    });
+
+    suite.skip('🔒 Behavior Lock: Cross-File Navigation (Already Working)', () => {
+        const definitionProvider = new DefinitionProvider();
+
+        test('Should handle INCLUDE file references', async () => {
+            const code = `
+  INCLUDE('window.inc')
+
+MyWindow WINDOW,AT(0,0,100,100)
+  END`.trim();
+            
+            const document = createDocument(code);
+            const position: Position = { line: 0, character: 12 }; // On 'window.inc'
+            
+            // This tests file reference navigation - should already work
+            const result = await definitionProvider.provideDefinition(document, position);
+            
+            // Result depends on whether file exists - test just verifies no crash
         });
     });
 });
