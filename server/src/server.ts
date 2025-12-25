@@ -30,7 +30,8 @@ import {
     ColorInformation,
     ColorPresentationParams,
     ColorPresentation,
-    TextDocumentSyncKind
+    TextDocumentSyncKind,
+    SignatureHelp
 } from 'vscode-languageserver-protocol';
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
@@ -1198,13 +1199,13 @@ connection.onSignatureHelp(async (params) => {
     
     if (!serverInitialized) {
         logger.debug(`⚠️ [SIG-HELP] Server not initialized yet, delaying signature help request`);
-        return null;
+        return undefined;
     }
     
     const document = documents.get(params.textDocument.uri);
     if (!document) {
         logger.debug(`⚠️ [SIG-HELP] Document not found: ${params.textDocument.uri}`);
-        return null;
+        return undefined;
     }
     
     try {
@@ -1212,14 +1213,20 @@ connection.onSignatureHelp(async (params) => {
         if (signatureHelp) {
             logger.debug(`✅ [SIG-HELP] Found ${signatureHelp.signatures.length} signature(s) for ${params.textDocument.uri}`);
             logger.debug(`✅ [SIG-HELP] Active signature: ${signatureHelp.activeSignature}, Active parameter: ${signatureHelp.activeParameter}`);
+            // Convert undefined to null for activeSignature and activeParameter to match protocol
+            return {
+                ...signatureHelp,
+                activeSignature: signatureHelp.activeSignature ?? null,
+                activeParameter: signatureHelp.activeParameter ?? null
+            };
         } else {
             logger.debug(`⚠️ [SIG-HELP] No signature help found for ${params.textDocument.uri}`);
         }
-        return signatureHelp;
+        return signatureHelp || undefined;
     } catch (error) {
         console.error(`❌ [SIG-HELP] Error providing signature help: ${error instanceof Error ? error.message : String(error)}`);
         console.error(`❌ [SIG-HELP] Stack: ${error instanceof Error ? error.stack : 'No stack'}`);
-        return null;
+        return undefined;
     }
 });
 
