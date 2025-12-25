@@ -46,8 +46,8 @@ export class PatternMatcher {
             'operator': [TokenType.Operator],
             'delimiter': [TokenType.Delimiter, TokenType.DataTypeParameter, TokenType.EndStatement],
             'upper': [ // Uppercase letter - identifiers, keywords, structures
-                TokenType.Directive, TokenType.Label, TokenType.Keyword,
-                TokenType.ClarionDocument, TokenType.ExecutionMarker, TokenType.EndStatement,
+                TokenType.Directive, TokenType.EndStatement, TokenType.Label, TokenType.Keyword,
+                TokenType.ClarionDocument, TokenType.ExecutionMarker,
                 TokenType.ConditionalContinuation, TokenType.Structure, TokenType.WindowElement,
                 TokenType.Type, TokenType.TypeAnnotation, // MUST be before Function to avoid STRING(50) as function
                 TokenType.Function, TokenType.FunctionArgumentParameter, TokenType.PropertyFunction,

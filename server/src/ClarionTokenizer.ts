@@ -208,7 +208,6 @@ export class ClarionTokenizer {
                     if (!pattern) continue;
 
                     if (tokenType === TokenType.Label && column !== 0) continue; // ✅ Labels must be in column 0
-                    if (tokenType === TokenType.EndStatement && column === 0) continue; // ✅ END/. must NOT be at column 0
 
                     // 🔬 PROFILING: Time each pattern test
                     const testStart = performance.now();

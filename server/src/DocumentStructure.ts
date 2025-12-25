@@ -154,6 +154,7 @@ export class DocumentStructure {
             if (!insideExecutionCode && token.start === 0 && 
                 token.type !== TokenType.Comment && 
                 token.type !== TokenType.Directive && 
+                token.type !== TokenType.EndStatement &&  // ✅ Don't convert END tokens to labels
                 token.value !== '?') {
                 token.type = TokenType.Label;
                 token.label = token.value;
