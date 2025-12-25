@@ -72,13 +72,14 @@ END`;
             'Second PROCEDURE should NOT be child of MAP');
     });
 
-    test('All structure types should have finishesAt set at EOF', () => {
+    test('All structure types should have finishesAt set with proper END', () => {
         const structureTypes = ['MAP', 'CLASS', 'INTERFACE', 'GROUP', 'QUEUE', 'RECORD'];
         
         for (const structType of structureTypes) {
             const code = `My${structType} ${structType}
   Field1 LONG
-  Field2 STRING(20)`;
+  Field2 STRING(20)
+END`;
             
             const tokenizer = new ClarionTokenizer(code);
             const tokens = tokenizer.tokenize();
@@ -90,6 +91,8 @@ END`;
             assert.ok(structToken, `Should find ${structType} token`);
             assert.ok(structToken?.finishesAt !== undefined,
                 `${structType} should have finishesAt set (currently ${structToken?.finishesAt})`);
+            assert.strictEqual(structToken?.finishesAt, 3, 
+                `${structType} should finish at line 3 (END line)`);
         }
     });
 

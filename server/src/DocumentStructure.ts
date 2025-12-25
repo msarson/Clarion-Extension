@@ -115,8 +115,6 @@ export class DocumentStructure {
         
         // Close any procedures that are still open at the end of the file
         this.closeRemainingProcedures();
-        // Close any structures that are still open at the end of the file
-        this.closeRemainingStructures();
         this.assignMaxLabelLengths();
     }
     
@@ -783,23 +781,6 @@ export class DocumentStructure {
             if (lastRoutine) {
                 lastRoutine.finishesAt = this.tokens[this.tokens.length - 1]?.line ?? 0;
                 logger.warn(`⚠️ [EOF] ROUTINE '${lastRoutine.value}' closed at Line ${lastRoutine.finishesAt}`);
-            }
-        }
-    }
-
-    public closeRemainingStructures(): void {
-        // Close any structures that are still open at EOF
-        // This ensures all structure tokens have finishesAt set
-        while (this.structureStack.length > 0) {
-            const lastStructure = this.structureStack.pop();
-            if (lastStructure) {
-                lastStructure.finishesAt = this.tokens[this.tokens.length - 1]?.line ?? 0;
-                logger.warn(`⚠️ [EOF] STRUCTURE '${lastStructure.value}' closed at Line ${lastStructure.finishesAt}`);
-                
-                // Update depth counter for special structure types
-                if (["CLASS", "MAP", "INTERFACE", "MODULE"].includes(lastStructure.value.toUpperCase())) {
-                    this.insideClassOrInterfaceOrMapDepth = Math.max(0, this.insideClassOrInterfaceOrMapDepth - 1);
-                }
             }
         }
     }
