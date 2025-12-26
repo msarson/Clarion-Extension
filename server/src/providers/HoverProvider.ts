@@ -68,8 +68,9 @@ export class HoverProvider {
             }
 
             // Check if this is a MAP procedure implementation and show declaration hover
+            // Skip if we're inside a MAP block (those are declarations, not implementations)
             const mapProcMatch = line.match(/^(\w+)\s+PROCEDURE\s*\(/i);
-            if (mapProcMatch) {
+            if (mapProcMatch && !this.isInMapBlock(document, position.line)) {
                 const procName = mapProcMatch[1];
                 const procNameEnd = mapProcMatch.index! + procName.length;
                 
