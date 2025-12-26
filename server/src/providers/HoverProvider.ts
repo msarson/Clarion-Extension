@@ -1246,6 +1246,7 @@ export class HoverProvider {
     private findProcedureImplementation(document: TextDocument, procName: string): { line: number, signature: string, preview: string } | null {
         const text = document.getText();
         const lines = text.split(/\r?\n/);
+        const tokens = this.tokenCache.getTokens(document);
         
         let inMap = false;
         for (let i = 0; i < lines.length; i++) {
@@ -1270,13 +1271,29 @@ export class HoverProvider {
             // Match: ProcName PROCEDURE(...) at start of line (implementation)
             const implMatch = line.match(/^(\w+)\s+PROCEDURE\s*\(/i);
             if (implMatch && implMatch[1].toLowerCase() === procName.toLowerCase()) {
-                // Found the implementation, now get preview lines
+                // Found the implementation, try to find its token for finishesAt
+                const procToken = tokens.find(t => 
+                    (t.subType === TokenType.Procedure || t.subType === TokenType.GlobalProcedure) &&
+                    t.line === i &&
+                    t.value.toLowerCase() === procName.toLowerCase()
+                );
+                
                 const previewLines: string[] = [line.trim()];
                 const maxPreviewLines = 10;
                 
+                // Determine end line: use finishesAt if available, otherwise use heuristic
+                let endLine: number;
+                if (procToken && procToken.finishesAt !== undefined) {
+                    // Use token's finishesAt to stop exactly at procedure end
+                    endLine = Math.min(procToken.finishesAt, i + maxPreviewLines + 5); // +5 for data section
+                } else {
+                    // Fallback: search up to 30 lines
+                    endLine = Math.min(lines.length, i + 30);
+                }
+                
                 // Find CODE statement and grab lines after it
                 let foundCode = false;
-                for (let j = i + 1; j < Math.min(lines.length, i + 30); j++) {
+                for (let j = i + 1; j <= endLine; j++) {
                     const previewLine = lines[j];
                     const previewTrimmed = previewLine.trim().toUpperCase();
                     
@@ -1287,7 +1304,7 @@ export class HoverProvider {
                     }
                     
                     if (foundCode) {
-                        // Add lines after CODE up to maxPreviewLines
+                        // Add lines after CODE up to maxPreviewLines or procedure end
                         if (previewLines.length - 1 < maxPreviewLines) { // -1 because first line is signature
                             previewLines.push(previewLine);
                         } else {
