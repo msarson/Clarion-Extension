@@ -90,8 +90,10 @@ export class HoverProvider {
 
             // Check if this is inside a MAP block (declaration) and show implementation hover
             if (this.isInMapBlock(document, position.line)) {
-                // Check if this line declares a procedure
-                const mapDeclMatch = line.match(/^\s*(\w+)\s+PROCEDURE/i);
+                // MAP declarations have two formats:
+                // 1. Indented: "    MyProc(params)" - no PROCEDURE keyword
+                // 2. Column 0: "MyProc    PROCEDURE(params)" - with PROCEDURE keyword
+                const mapDeclMatch = line.match(/^\s*(\w+)\s*(?:PROCEDURE\s*)?\(/i);
                 if (mapDeclMatch) {
                     const procName = mapDeclMatch[1];
                     const procNameStart = line.indexOf(procName);
@@ -1203,8 +1205,10 @@ export class HoverProvider {
             }
             
             if (inMap) {
-                // Check if this line declares our procedure
-                const declMatch = trimmed.match(/^(\w+)\s+PROCEDURE/i);
+                // MAP declarations have two formats:
+                // 1. Indented: "    MyProc(params)" - no PROCEDURE keyword
+                // 2. Column 0: "MyProc    PROCEDURE(params)" - with PROCEDURE keyword
+                const declMatch = trimmed.match(/^(\w+)\s*(?:PROCEDURE\s*)?\(/i);
                 if (declMatch && declMatch[1].toLowerCase() === procName.toLowerCase()) {
                     return trimmed;
                 }
