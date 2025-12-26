@@ -895,6 +895,11 @@
                     "type": "boolean",
                     "default": true,
                     "description": "Remove leading whitespace from each line when pasting as Clarion string. Recommended when pasting indented code."
+                },
+                "clarion.unreachableCode.enabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable or disable visual dimming of unreachable code in Clarion procedures and methods. Detects code after unconditional RETURN, EXIT, or HALT statements at top execution level."
                 }
             }
         }
