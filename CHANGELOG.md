@@ -6,6 +6,34 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 
 ---
 
+## [0.7.8] - 2025-12-26
+
+### ✨ Features
+- **Unreachable Code Detection (Phase 1)** - Visual dimming of provably unreachable code in procedures and methods
+  - Detects code after unconditional RETURN, EXIT, or HALT statements at top execution level
+  - Respects Clarion semantics: ROUTINE blocks are always reachable, STOP is not a terminator
+  - Handles complex nested structures: ACCEPT, LOOP, CASE, IF, EXECUTE, BEGIN
+  - Non-intrusive visual dimming with 40% opacity
+  - Zero false positives by design - conservative detection only
+  - Linear O(n) performance with no editor impact
+  - Configurable via `clarion.unreachableCode.enabled` setting (default: enabled)
+  - Includes comprehensive documentation and test cases
+
+### 🔧 Improvements
+- **Structure depth tracking** - Enhanced tracking of nested control structures for accurate unreachable code detection
+  - Added support for ACCEPT, EXECUTE, and BEGIN blocks
+  - Fixed dot (.) detection to only treat standalone dots as structure enders
+  - Statement-terminating dots (e.g., `RETURN.`) no longer misinterpreted
+  - Improved depth bounds checking to prevent negative depth values
+
+### 📚 Documentation
+- Added `docs/UNREACHABLE_CODE_PHASE1.md` - Complete feature documentation
+- Added `IMPLEMENTATION_SUMMARY.md` - Implementation details and architecture
+- Added `TESTING_CHECKLIST.md` - Comprehensive testing guide
+- Added test files in `test-programs/unreachable-code/` directory
+
+---
+
 ## [Unreleased]
 
 ### ✨ Features

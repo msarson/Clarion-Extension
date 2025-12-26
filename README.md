@@ -62,6 +62,7 @@ Settings are saved in `.vscode/settings.json` within the folder - commit them wi
 - **Method overload support** - Correctly resolves overloaded methods based on parameters
 - **Hover tooltips** - Preview file contents, method signatures
 - **Structure view** - Complete code outline with follow cursor
+- **Unreachable code detection** - Visual dimming of code after RETURN/EXIT/HALT statements
 - **Create New Class** - Interactive wizard creates both .inc and .clw files with proper formatting
 - **Add Method Implementation** (`Ctrl+Shift+I`) - Automatically generate method implementations from declarations
 - **Paste as Clarion String** (`Ctrl+Shift+Alt+V`) - Convert clipboard text to properly formatted Clarion strings with escaping and continuation
@@ -84,6 +85,18 @@ Settings are saved in `.vscode/settings.json` within the folder - commit them wi
 ---
 
 ## What's New
+
+### Version 0.7.8 (Dec 2025)
+
+#### ✨ New Code Analysis Feature
+- **Unreachable Code Detection** - Visual dimming of code that is provably unreachable
+  - Detects code after unconditional RETURN, EXIT, or HALT at top execution level
+  - Respects Clarion semantics: ROUTINE blocks always reachable, STOP is not a terminator
+  - Handles complex nested structures (ACCEPT, LOOP, CASE, IF, EXECUTE, BEGIN)
+  - Configurable via `clarion.unreachableCode.enabled` setting (default: enabled)
+  - Non-intrusive 40% opacity dimming for unreachable lines
+  - Zero false positives by design - only marks provably unreachable code
+  - Linear O(n) performance with no impact on editor responsiveness
 
 ### Version 0.7.5 (Dec 2025)
 
