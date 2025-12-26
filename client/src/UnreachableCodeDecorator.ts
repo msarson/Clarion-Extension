@@ -166,11 +166,18 @@ export class UnreachableCodeDecorator {
             }
             
             // Track structure depth to ensure we only detect top-level terminators
+            // Update depth BEFORE checking for terminators
             if (inCode && !inRoutine) {
-                structureDepth += this.getStructureDepthChange(upperCode);
+                const depthChange = this.getStructureDepthChange(upperCode);
+                structureDepth += depthChange;
+                
+                // Ensure depth never goes negative
+                if (structureDepth < 0) {
+                    structureDepth = 0;
+                }
             }
             
-            // Check for terminator at top level
+            // Check for terminator at top level (AFTER updating depth)
             if (inCode && !terminated && structureDepth === 0 && !inRoutine) {
                 if (this.isUnconditionalTerminator(upperCode)) {
                     terminated = true;
@@ -236,18 +243,25 @@ export class UnreachableCodeDecorator {
     private getStructureDepthChange(upperCode: string): number {
         let change = 0;
         
-        // Structure starters
-        if (/\b(IF|LOOP|CASE)\b/.test(upperCode)) {
+        // Structure starters (keywords that require END or dot termination)
+        if (/\b(IF|LOOP|CASE|ACCEPT|EXECUTE|BEGIN)\b/.test(upperCode)) {
             change++;
         }
         
         // Structure enders
-        if (/\b(END|\.)\s*$/.test(upperCode)) {
+        // END keyword always ends a structure
+        if (/\bEND\b/.test(upperCode)) {
+            change--;
+        }
+        
+        // Dot (.) ends a structure ONLY if it's alone or starts the line
+        // A dot at the end of a statement (like "RETURN.") is NOT a structure ender
+        if (/^\s*\.\s*$/.test(upperCode)) {
             change--;
         }
         
         // Handle single-line IF (IF condition THEN action)
-        // This doesn't increase depth
+        // This doesn't increase depth because it doesn't require END
         if (/\bIF\b.*\bTHEN\b/.test(upperCode) && !/\bEND\b/.test(upperCode)) {
             change--; // Compensate for the IF increment
         }
