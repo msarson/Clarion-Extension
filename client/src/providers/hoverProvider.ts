@@ -8,15 +8,14 @@ const logger = LoggerManager.getLogger("HoverProvider");
 logger.setLevel("info");
 
 /**
- * Provides hover information for Clarion code elements (client-side).
+ * Provides hover information for Clarion code elements.
  *
- * This provider handles non-semantic navigation hovers:
- * - File/include/module navigation (INCLUDE, MODULE, LINK statements)
- * - Routine/label references (e.g., in DO statements)
- *
- * Semantic symbol hovers (methods, procedures, variables, parameters) are deferred
- * to the server-side hover provider, which has complete semantic context (tokens,
- * DocumentStructure, finishesAt, method overload resolution, etc.).
+ * This provider implements the lazy loading approach for method implementations:
+ * - When a user hovers over a method declaration, it first gets the location from DocumentManager
+ * - If the location is a method and its implementation hasn't been resolved yet, it calls
+ *   resolveMethodImplementation to find the actual implementation on-demand
+ * - This defers the expensive implementation lookup until it's actually needed
+ * - Once resolved, the implementation details are cached to avoid repeated lookups
  */
 export class ClarionHoverProvider implements vscode.HoverProvider {
     private documentManager: DocumentManager;
@@ -63,14 +62,13 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
 
         logger.info(`Found location at position: ${location.statementType} to ${location.fullFileName}`);
         
-        // CONSOLIDATION: Defer to server for all semantic symbols (method/procedure declarations)
-        // Server has complete semantic context (tokens, DocumentStructure, finishesAt, etc.)
-        if (location.statementType === "METHOD" || location.statementType === "MAPPROCEDURE") {
-            logger.info(`Deferring ${location.statementType} hover to server (semantic symbol)`);
-            return undefined;
+        // For method and MAP procedure declarations, show hover with implementation
+        if ((location.statementType === "METHOD" || location.statementType === "MAPPROCEDURE") && !location.implementationResolved) {
+            const displayName = location.className ? `${location.className}.${location.methodName}` : location.methodName;
+            logger.info(`Lazily resolving implementation for hover: ${displayName}`);
+            location = await this.documentManager.resolveMethodImplementation(location);
         }
         
-        // Only handle non-semantic navigation (INCLUDE, MODULE, etc.)
         const hoverMessage = await this.constructHoverMessage(location);
         return new vscode.Hover(hoverMessage);
     }
