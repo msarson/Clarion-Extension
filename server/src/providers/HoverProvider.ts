@@ -1246,9 +1246,27 @@ export class HoverProvider {
         const text = document.getText();
         const lines = text.split(/\r?\n/);
         
+        let inMap = false;
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
-            // Match: ProcName PROCEDURE(...) at start of line
+            const trimmed = line.trim();
+            
+            // Track MAP blocks to skip declarations
+            if (/^\s*MAP\s*$/i.test(trimmed)) {
+                inMap = true;
+                continue;
+            }
+            if (inMap && /^\s*END\s*$/i.test(trimmed)) {
+                inMap = false;
+                continue;
+            }
+            
+            // Skip lines inside MAP blocks (those are declarations, not implementations)
+            if (inMap) {
+                continue;
+            }
+            
+            // Match: ProcName PROCEDURE(...) at start of line (implementation)
             const implMatch = line.match(/^(\w+)\s+PROCEDURE\s*\(/i);
             if (implMatch && implMatch[1].toLowerCase() === procName.toLowerCase()) {
                 return {
