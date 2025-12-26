@@ -7,6 +7,9 @@ logger.setLevel("error");
 class ClarionFoldingProvider {
     private tokens: Token[];
     private foldingRanges: FoldingRange[];
+    // 🧪 EXPERIMENT: Track how often we use finishesAt vs inference
+    private finishesAtUsedCount: number = 0;
+    private inferenceUsedCount: number = 0;
 
     constructor(tokens: Token[]) {
         this.tokens = tokens;
@@ -16,6 +19,9 @@ class ClarionFoldingProvider {
     public computeFoldingRanges(): FoldingRange[] {
         const perfStart = performance.now();
         this.foldingRanges = [];
+        // 🧪 EXPERIMENT: Reset counters
+        this.finishesAtUsedCount = 0;
+        this.inferenceUsedCount = 0;
     
         // 🚀 PERFORMANCE: Filter once and collect regions in same pass
         const foldableTokens: Token[] = [];
@@ -48,19 +54,14 @@ class ClarionFoldingProvider {
         logger.perf('Folding: filter', { time_ms: filterTime.toFixed(2), foldable: foldableTokens.length, regions: regionComments.length });
         
     
-        // 🔍 Infer missing finishesAt for PROCEDUREs
-        for (let i = 0; i < foldableTokens.length; i++) {
-            const token = foldableTokens[i];
-    
-            if (token.subType === TokenType.Procedure && token.finishesAt == null) {
-                this.inferProcedureEnd(token, foldableTokens);
-            }
-        }
-
+        // 🧪 EXPERIMENT: No longer infer missing finishesAt - rely on DocumentStructure to provide it
+        // The old inference logic is REMOVED to test if finishesAt is reliable enough
+        // If this causes problems, it indicates DocumentStructure needs fixes
+        
         for (const t of foldableTokens) {
             const subTypeName = t.subType !== undefined ? TokenType[t.subType] : TokenType[t.type];
-            logger.info(`[DEBUG] Foldable: ${t.value} (${subTypeName}) Line ${t.line}–${t.finishesAt}`);
-
+            const hasFinishesAt = t.finishesAt !== undefined && t.finishesAt !== null;
+            logger.info(`🧪 [EXPERIMENT] Foldable: ${t.value} (${subTypeName}) Line ${t.line}–${t.finishesAt} | finishesAt=${hasFinishesAt ? 'DEFINED' : 'UNDEFINED'}`);
         }
         
     
@@ -72,10 +73,13 @@ class ClarionFoldingProvider {
         // ✅ Process REGIONS using pre-filtered comments
         this.foldRegionsOptimized(regionComments);
     
-        logger.info(`📏 [FOLDING] Returning ${this.foldingRanges.length} ranges`);
+        logger.info(`🧪 [EXPERIMENT] Folding Summary: ${this.foldingRanges.length} ranges | finishesAt used: ${this.finishesAtUsedCount}, inference needed: ${this.inferenceUsedCount}`);
         return this.foldingRanges;
     }
     
+    // 🧪 EXPERIMENT: Removed inferProcedureEnd - rely on DocumentStructure instead
+    // This method is commented out to test if finishesAt is reliable without inference
+    /*
     private inferProcedureEnd(token: Token, procedures: Token[]): void {
         const index = procedures.indexOf(token);
     
@@ -93,12 +97,25 @@ class ClarionFoldingProvider {
     
         logger.info(`📌 [FoldingProvider] Inferred finishesAt for '${token.value}' as Line ${token.finishesAt}`);
     }
+    */
     
 
     private processFolding(token: Token): void {
-        if (!token.finishesAt || token.line >= token.finishesAt) {
+        // 🧪 EXPERIMENT: Strictly require finishesAt to be defined
+        // This is the core of the experiment - do NOT fall back to inference
+        if (token.finishesAt === undefined || token.finishesAt === null) {
+            this.inferenceUsedCount++;
+            logger.warn(`🧪 [EXPERIMENT] ⚠️ Missing finishesAt for '${token.value}' (${TokenType[token.subType || token.type]}) at Line ${token.line} - SKIPPING fold (inference disabled)`);
+            return; // Skip - no folding without explicit finishesAt
+        }
+        
+        if (token.line >= token.finishesAt) {
+            logger.info(`🧪 [EXPERIMENT] Skipping single-line element '${token.value}' at Line ${token.line}`);
             return; // Skip invalid or single-line elements
         }
+        
+        // 🧪 EXPERIMENT: Track that we're using finishesAt
+        this.finishesAtUsedCount++;
     
         // Only fold these subtypes:
         const foldableSubTypes = [
@@ -122,7 +139,7 @@ class ClarionFoldingProvider {
             kind: FoldingRangeKind.Region
         });
     
-        logger.info(`✅ [FoldingProvider] Folded '${token.value}' (${TokenType[token.subType]}) from Line ${token.line} to ${token.finishesAt}`);
+        logger.info(`✅ [EXPERIMENT] Folded '${token.value}' (${TokenType[token.subType]}) from Line ${token.line} to ${token.finishesAt} using finishesAt`);
     
         // ✅ Fold CODE block if applicable
         if (
@@ -140,7 +157,7 @@ class ClarionFoldingProvider {
                 kind: FoldingRangeKind.Region
             });
     
-            logger.info(`✅ [FoldingProvider] Execution fold for '${token.value}' from Line ${startLine} to ${token.finishesAt}`);
+            logger.info(`✅ [EXPERIMENT] Execution fold for '${token.value}' from Line ${startLine} to ${token.finishesAt}`);
         }
     
         // ✅ Extra fold if routine has local DATA
@@ -153,7 +170,7 @@ class ClarionFoldingProvider {
                 kind: FoldingRangeKind.Region
             });
     
-            logger.info(`✅ [FoldingProvider] ROUTINE '${token.value}' with local DATA folded from Line ${startLine} to ${token.finishesAt}`);
+            logger.info(`✅ [EXPERIMENT] ROUTINE '${token.value}' with local DATA folded from Line ${startLine} to ${token.finishesAt}`);
         }
     
         // ✅ Extra fold if routine has inferred CODE (even without DATA)
@@ -164,7 +181,7 @@ class ClarionFoldingProvider {
                 kind: FoldingRangeKind.Region
             });
     
-            logger.info(`✅ [FoldingProvider] ROUTINE '${token.value}' with inferred CODE folded from Line ${token.line} to ${token.finishesAt}`);
+            logger.info(`✅ [EXPERIMENT] ROUTINE '${token.value}' with inferred CODE folded from Line ${token.line} to ${token.finishesAt}`);
         }
     
         // ✅ Recursively process children
