@@ -123,4 +123,46 @@ END`;
         assert.ok(groupToken!.finishesAt! < queueToken!.finishesAt!,
             'Inner GROUP should finish before outer QUEUE');
     });
+
+    // ⚠️ REPRODUCTION TEST: Standalone dot terminator on separate line
+    test('IF structure with standalone dot on separate line should close structure', () => {
+        const code = `TestProc PROCEDURE()
+x LONG
+  CODE
+  IF x > 0 THEN
+    MESSAGE('Error allocating string of size ' & x)
+  .
+  RETURN`;
+        
+        const tokenizer = new ClarionTokenizer(code);
+        const tokens = tokenizer.tokenize();
+        
+        // Find the IF token
+        const ifToken = tokens.find(t => t.value.toUpperCase() === 'IF' && t.type === TokenType.Structure);
+        assert.ok(ifToken, 'Should find IF token');
+        assert.strictEqual(ifToken?.line, 3, 'IF should be on line 3');
+        
+        // Find the dot token
+        const dotToken = tokens.find(t => t.value === '.' && t.type === TokenType.EndStatement && t.line === 5);
+        assert.ok(dotToken, 'Should find standalone dot token on line 5');
+        
+        // ✅ CRITICAL ASSERTIONS:
+        // 1. IF structure should have finishesAt set
+        assert.ok(ifToken?.finishesAt !== undefined,
+            `IF should have finishesAt set (currently ${ifToken?.finishesAt})`);
+        
+        // 2. IF should finish at the dot line (line 5)
+        assert.strictEqual(ifToken?.finishesAt, 5,
+            `IF should finish at line 5 (dot line), but finishesAt is ${ifToken?.finishesAt}`);
+        
+        // 3. IF should NOT be left on the structure stack (verified by finishesAt being set)
+        // This is implicitly tested by assertion #1 and #2
+        
+        // 🔍 DEBUG: Log token details for investigation
+        console.log(`\n=== DEBUG: IF Token Details ===`);
+        console.log(`IF token type: ${TokenType[ifToken!.type]}`);
+        console.log(`IF token subType: ${ifToken!.subType !== undefined ? TokenType[ifToken!.subType] : 'undefined'}`);
+        console.log(`IF token finishesAt: ${ifToken!.finishesAt}`);
+        console.log(`IF token line: ${ifToken!.line}`);
+    });
 });

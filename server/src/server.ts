@@ -390,6 +390,66 @@ connection.onFoldingRanges((params: FoldingRangeParams) => {
 
 
 
+/**
+ * 🔍 Detect if a document edit may affect structure lifecycle
+ * Structure-affecting edits require full re-tokenization to maintain correctness
+ * 
+ * An edit is structure-affecting if it involves:
+ * - Structure keywords: IF, CASE, LOOP, CLASS, MAP, GROUP, QUEUE, RECORD, etc.
+ * - Structure terminators: END, standalone dot (.)
+ * - CODE keyword (starts executable section)
+ * - Structural indentation changes (column 0 keywords)
+ * 
+ * @param document Current document state
+ * @returns true if edit may affect structure lifecycle, false otherwise
+ */
+function isStructureAffectingEdit(document: TextDocument): boolean {
+    // Get current document text
+    const text = document.getText();
+    
+    // 🚀 PERF: Get cached tokens to detect what changed
+    // If no cache exists, this is first edit - let incremental handle it
+    const cached = tokenCache['cache'].get(document.uri);
+    if (!cached || !cached.documentText) {
+        return false; // No baseline to compare, incremental will handle
+    }
+    
+    // 🚀 PERF: Quick length check - if document length changed significantly, likely structural
+    const lengthDiff = Math.abs(text.length - cached.documentText.length);
+    if (lengthDiff > 50) {
+        return true; // Large changes likely affect structure
+    }
+    
+    // 🔍 CORRECTNESS: Detect changed lines by comparing text
+    const newLines = text.split(/\r?\n/);
+    const oldLines = cached.documentText.split(/\r?\n/);
+    
+    // Check each changed line for structure-affecting keywords
+    const maxLines = Math.max(newLines.length, oldLines.length);
+    for (let i = 0; i < maxLines; i++) {
+        const newLine = newLines[i] || '';
+        const oldLine = oldLines[i] || '';
+        
+        if (newLine !== oldLine) {
+            // Line changed - check if it contains structure-affecting content
+            const combinedLine = (newLine + ' ' + oldLine).toUpperCase();
+            
+            // Check for structure keywords
+            if (/\b(IF|CASE|LOOP|CLASS|MAP|GROUP|QUEUE|RECORD|FILE|INTERFACE|MODULE|EXECUTE|BEGIN|ACCEPT|ROUTINE|CODE|END)\b/.test(combinedLine)) {
+                return true;
+            }
+            
+            // Check for standalone dot (period not part of number/member access)
+            // Pattern: whitespace followed by dot followed by whitespace/comment/EOL
+            if (/\s+\.\s*(!|$)/.test(newLine) || /\s+\.\s*(!|$)/.test(oldLine)) {
+                return true;
+            }
+        }
+    }
+    
+    return false; // No structure-affecting changes detected
+}
+
 // ✅ Handle Content Changes (Recompute Tokens)
 documents.onDidChangeContent(event => {
     try {
@@ -428,6 +488,15 @@ documents.onDidChangeContent(event => {
         symbolCache.delete(uri);
         foldingCache.delete(uri);
 
+        // 🔍 CORRECTNESS: Check if this edit affects structure lifecycle
+        // If so, clear token cache to force full re-tokenization
+        // Otherwise, let incremental tokenization optimize performance
+        const isStructureAffecting = isStructureAffectingEdit(document);
+        if (isStructureAffecting) {
+            logger.info(`🔄 Structure-affecting edit detected, clearing token cache for: ${uri}`);
+            tokenCache.clearTokens(uri);
+        }
+
         // 🚀 PERF: Don't clear cache until debounce completes
         // This allows other features to use stale tokens while user is typing
         const timeout = setTimeout(() => {
@@ -439,10 +508,8 @@ documents.onDidChangeContent(event => {
                 
                 // Caches already cleared immediately on change - no need to clear again
                 
-                // 🚀 PERF: Let TokenCache handle incremental updates - don't clear!
-                // TokenCache has smart incremental tokenization that reuses unchanged parts
-                // Clearing here forces full re-tokenization on every change
-                // tokenCache.clearTokens(document.uri); // REMOVED: Let incremental updates work
+                // Token cache already cleared if structure-affecting (above)
+                // Otherwise incremental tokenization will handle it efficiently
                 const tokens = getTokens(document);
                 logger.info(`🔍 Successfully refreshed tokens after edit: ${uri}, got ${tokens.length} tokens`);
                 
