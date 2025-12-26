@@ -108,7 +108,7 @@ export class HoverProvider {
                             return {
                                 contents: {
                                     kind: 'markdown',
-                                    value: `**Implementation** (line ${implInfo.line + 1})\n\n\`\`\`clarion\n${implInfo.signature}\n\`\`\``
+                                    value: `**Implementation** (line ${implInfo.line + 1})\n\n\`\`\`clarion\n${implInfo.preview}\n\`\`\``
                                 }
                             };
                         }
@@ -1243,7 +1243,7 @@ export class HoverProvider {
     /**
      * Find implementation of a MAP procedure
      */
-    private findProcedureImplementation(document: TextDocument, procName: string): { line: number, signature: string } | null {
+    private findProcedureImplementation(document: TextDocument, procName: string): { line: number, signature: string, preview: string } | null {
         const text = document.getText();
         const lines = text.split(/\r?\n/);
         
@@ -1270,9 +1270,39 @@ export class HoverProvider {
             // Match: ProcName PROCEDURE(...) at start of line (implementation)
             const implMatch = line.match(/^(\w+)\s+PROCEDURE\s*\(/i);
             if (implMatch && implMatch[1].toLowerCase() === procName.toLowerCase()) {
+                // Found the implementation, now get preview lines
+                const previewLines: string[] = [line.trim()];
+                const maxPreviewLines = 10;
+                
+                // Find CODE statement and grab lines after it
+                let foundCode = false;
+                for (let j = i + 1; j < Math.min(lines.length, i + 30); j++) {
+                    const previewLine = lines[j];
+                    const previewTrimmed = previewLine.trim().toUpperCase();
+                    
+                    if (previewTrimmed === 'CODE') {
+                        foundCode = true;
+                        previewLines.push(previewLine);
+                        continue;
+                    }
+                    
+                    if (foundCode) {
+                        // Add lines after CODE up to maxPreviewLines
+                        if (previewLines.length - 1 < maxPreviewLines) { // -1 because first line is signature
+                            previewLines.push(previewLine);
+                        } else {
+                            break;
+                        }
+                    } else {
+                        // Before CODE, just add the line (could be data section, etc.)
+                        previewLines.push(previewLine);
+                    }
+                }
+                
                 return {
                     line: i,
-                    signature: line.trim()
+                    signature: line.trim(),
+                    preview: previewLines.join('\n')
                 };
             }
         }
