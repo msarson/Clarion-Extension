@@ -88,6 +88,31 @@ export class HoverProvider {
                 }
             }
 
+            // Check if this is inside a MAP block (declaration) and show implementation hover
+            if (this.isInMapBlock(document, position.line)) {
+                // Check if this line declares a procedure
+                const mapDeclMatch = line.match(/^\s*(\w+)\s+PROCEDURE/i);
+                if (mapDeclMatch) {
+                    const procName = mapDeclMatch[1];
+                    const procNameStart = line.indexOf(procName);
+                    const procNameEnd = procNameStart + procName.length;
+                    
+                    // Check if cursor is on the procedure name
+                    if (position.character >= procNameStart && position.character <= procNameEnd) {
+                        // Find the implementation
+                        const implInfo = this.findProcedureImplementation(document, procName);
+                        if (implInfo) {
+                            return {
+                                contents: {
+                                    kind: 'markdown',
+                                    value: `**Implementation** (line ${implInfo.line + 1})\n\n\`\`\`clarion\n${implInfo.signature}\n\`\`\``
+                                }
+                            };
+                        }
+                    }
+                }
+            }
+
             // Check if this is a structure/group name followed by a dot (e.g., hovering over "MyGroup" in "MyGroup.MyVar")
             // Search for a dot starting from the word's position in the line
             const wordStartInLine = line.indexOf(word, Math.max(0, position.character - word.length));
@@ -1183,6 +1208,49 @@ export class HoverProvider {
                 if (declMatch && declMatch[1].toLowerCase() === procName.toLowerCase()) {
                     return trimmed;
                 }
+            }
+        }
+        
+        return null;
+    }
+
+    /**
+     * Check if a line is inside a MAP block
+     */
+    private isInMapBlock(document: TextDocument, lineNumber: number): boolean {
+        const text = document.getText();
+        const lines = text.split(/\r?\n/);
+        
+        let inMap = false;
+        for (let i = 0; i <= lineNumber && i < lines.length; i++) {
+            const trimmed = lines[i].trim();
+            
+            if (/^\s*MAP\s*$/i.test(trimmed)) {
+                inMap = true;
+            } else if (inMap && /^\s*END\s*$/i.test(trimmed)) {
+                inMap = false;
+            }
+        }
+        
+        return inMap;
+    }
+
+    /**
+     * Find implementation of a MAP procedure
+     */
+    private findProcedureImplementation(document: TextDocument, procName: string): { line: number, signature: string } | null {
+        const text = document.getText();
+        const lines = text.split(/\r?\n/);
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            // Match: ProcName PROCEDURE(...) at start of line
+            const implMatch = line.match(/^(\w+)\s+PROCEDURE\s*\(/i);
+            if (implMatch && implMatch[1].toLowerCase() === procName.toLowerCase()) {
+                return {
+                    line: i,
+                    signature: line.trim()
+                };
             }
         }
         
