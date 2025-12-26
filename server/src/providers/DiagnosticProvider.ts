@@ -105,12 +105,12 @@ export class DiagnosticProvider {
                 continue;
             }
             
-            // Special handling for IF - check if it's a single-line IF...THEN statement
+            // Special handling for IF - check if it has inline termination (END or dot on same line)
             if (structureType === 'IF') {
                 const tokenIndex = tokens.indexOf(token);
-                const isSingleLineIf = this.isSingleLineIfThen(tokens, tokenIndex);
-                if (isSingleLineIf) {
-                    continue; // Single-line IF doesn't need terminator
+                const hasInlineTerminator = this.isSingleLineIfThen(tokens, tokenIndex);
+                if (hasInlineTerminator) {
+                    continue; // IF has inline END or dot terminator, no separate validation needed
                 }
             }
             
@@ -332,9 +332,21 @@ export class DiagnosticProvider {
     }
     
     /**
-     * Check if this is a single-line IF...THEN statement that doesn't need END
-     * Format: IF condition THEN statement
-     * Returns true if THEN is found on same line with code after it
+     * Check if this is an inline IF...THEN with proper termination on same line
+     * 
+     * CLARION RULE: ALL IF structures require termination (END or dot)
+     * Valid inline patterns:
+     *   - IF x THEN y.         (dot terminator)
+     *   - IF x THEN y END      (END terminator)
+     *   - of ?field ; IF x THEN y END  (semicolon-separated)
+     * 
+     * Invalid pattern:
+     *   - IF x THEN y          (no terminator - MUST be flagged!)
+     * 
+     * This function returns true ONLY if the IF has inline termination,
+     * meaning it doesn't need separate validation (already terminated on same line).
+     * 
+     * @returns true if IF is properly terminated inline, false otherwise
      */
     private static isSingleLineIfThen(tokens: Token[], ifTokenIndex: number): boolean {
         const ifToken = tokens[ifTokenIndex];
@@ -349,14 +361,16 @@ export class DiagnosticProvider {
                 break;
             }
             
-            // Check if this is a semicolon (statement separator) - this makes it a single-line IF
+            // Check if this is a semicolon (statement separator) - check for inline termination after it
             if (token.type === TokenType.Operator && token.value === ';') {
-                return true;
+                // Semicolon found, continue looking for THEN and terminator after it
+                continue;
             }
             
             // Check if this is THEN keyword
             if (token.type === TokenType.Keyword && token.value.toUpperCase() === 'THEN') {
-                // Check if there's code after THEN on the same line
+                // Check if there's an inline terminator (END or dot) after THEN on same line
+                let hasStatement = false;
                 for (let j = i + 1; j < tokens.length; j++) {
                     const nextToken = tokens[j];
                     
@@ -365,28 +379,29 @@ export class DiagnosticProvider {
                         break;
                     }
                     
-                    // Check for END keyword - if present, this is a complete IF...THEN...END on one line
-                    // Don't treat it as single-line (it needs its END terminator validated)
+                    // Check for END keyword - inline terminator found!
                     if (nextToken.type === TokenType.EndStatement && nextToken.value.toUpperCase() === 'END') {
-                        return false; // Has explicit END terminator, treat as regular multi-line IF
+                        return true; // Has inline END terminator
                     }
                     
-                    // Check for semicolon - this makes it a single-line IF
-                    if (nextToken.type === TokenType.Operator && nextToken.value === ';') {
-                        return true;
+                    // Check for dot terminator - inline terminator found!
+                    if (nextToken.type === TokenType.EndStatement && nextToken.value === '.') {
+                        return true; // Has inline dot terminator
                     }
                     
-                    // If we find any meaningful token (not just whitespace/comments), it's a single-line IF
+                    // Track if we found a statement (non-comment token)
                     if (nextToken.type !== TokenType.Comment) {
-                        return true;
+                        hasStatement = true;
                     }
                 }
-                // THEN found but no code after it on same line - this is multi-line IF
+                
+                // THEN found with statement but NO terminator on same line
+                // This MUST be validated (it's missing END or dot)
                 return false;
             }
         }
         
-        // No THEN found - this is multi-line IF
+        // No THEN found on same line - this is multi-line IF
         return false;
     }
     
