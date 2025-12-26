@@ -7,6 +7,7 @@ logger.setLevel("error");
 class ClarionFoldingProvider {
     private tokens: Token[];
     private foldingRanges: FoldingRange[];
+    private inferenceUsedCount: number = 0;
 
     constructor(tokens: Token[]) {
         this.tokens = tokens;
@@ -16,6 +17,7 @@ class ClarionFoldingProvider {
     public computeFoldingRanges(): FoldingRange[] {
         const perfStart = performance.now();
         this.foldingRanges = [];
+        this.inferenceUsedCount = 0; // Reset counter for this computation
     
         // 🚀 PERFORMANCE: Filter once and collect regions in same pass
         const foldableTokens: Token[] = [];
@@ -49,11 +51,14 @@ class ClarionFoldingProvider {
         
     
         // 🔍 Infer missing finishesAt for PROCEDUREs
+        // NOTE: finishesAt is the preferred boundary for folding (set by DocumentStructure).
+        // Inference exists as a fallback to support incomplete/malformed code and editor-time states.
         for (let i = 0; i < foldableTokens.length; i++) {
             const token = foldableTokens[i];
     
             if (token.subType === TokenType.Procedure && token.finishesAt == null) {
                 this.inferProcedureEnd(token, foldableTokens);
+                this.inferenceUsedCount++;
             }
         }
 
@@ -72,6 +77,11 @@ class ClarionFoldingProvider {
         // ✅ Process REGIONS using pre-filtered comments
         this.foldRegionsOptimized(regionComments);
     
+        // Log aggregate inference fallback usage at debug level
+        if (this.inferenceUsedCount > 0) {
+            logger.debug(`FoldingProvider: finishesAt missing for ${this.inferenceUsedCount} structures; inference fallback used`);
+        }
+        
         logger.info(`📏 [FOLDING] Returning ${this.foldingRanges.length} ranges`);
         return this.foldingRanges;
     }
