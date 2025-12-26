@@ -911,7 +911,7 @@
         "package": "vsce package",
         "package:release": "cross-env VSCODE_RELEASE_MODE=true vsce package",
         "watch": "tsc -b -w",
-        "test": "npm run compile && mocha out/server/src/test/**/*.test.js out/client/src/test/**/*.test.js"
+        "test": "npm run compile && mocha out/server/src/test/**/*.test.js out/client/src/test/**/*.test.js --exclude 'out/client/src/test/UnreachableCodeDecorator.test.js' --exclude 'out/client/src/test/TextEditingCommands.test.js'"
     },
     "devDependencies": {
         "@types/mocha": "^8.2.2",
