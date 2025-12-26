@@ -4,6 +4,7 @@ import { ClarionDocumentLinkProvider } from './documentLinkProvier';
 import { ClarionHoverProvider } from './hoverProvider';
 import { ClarionImplementationProvider } from './implementationProvider';
 import { ClarionDecorator } from '../ClarionDecorator';
+import { UnreachableCodeDecorator } from '../UnreachableCodeDecorator';
 import { globalSettings } from '../globals';
 import LoggerManager from '../utils/LoggerManager';
 
@@ -14,6 +15,7 @@ let hoverProviderDisposable: Disposable | null = null;
 let documentLinkProviderDisposable: Disposable | null = null;
 let implementationProviderDisposable: Disposable | null = null;
 let semanticTokensProviderDisposable: Disposable | null = null;
+let unreachableCodeDecoratorDisposable: Disposable | null = null;
 
 /**
  * Registers all language feature providers
@@ -94,6 +96,20 @@ export function registerLanguageFeatures(context: ExtensionContext, documentMana
     context.subscriptions.push(semanticTokensProviderDisposable);
     
     logger.info(`🎨 Registered Clarion Decorator for variable and comment highlighting`);
+    
+    // ✅ Register Unreachable Code Decorator
+    if (unreachableCodeDecoratorDisposable) {
+        unreachableCodeDecoratorDisposable.dispose();
+    }
+    
+    logger.info("🔍 Registering Unreachable Code Decorator...");
+    const unreachableCodeDecorator = new UnreachableCodeDecorator();
+    unreachableCodeDecoratorDisposable = {
+        dispose: () => unreachableCodeDecorator.dispose()
+    };
+    context.subscriptions.push(unreachableCodeDecoratorDisposable);
+    
+    logger.info(`🔍 Registered Unreachable Code Decorator`);
 }
 
 /**
@@ -115,5 +131,9 @@ export function disposeLanguageFeatures() {
     if (semanticTokensProviderDisposable) {
         semanticTokensProviderDisposable.dispose();
         semanticTokensProviderDisposable = null;
+    }
+    if (unreachableCodeDecoratorDisposable) {
+        unreachableCodeDecoratorDisposable.dispose();
+        unreachableCodeDecoratorDisposable = null;
     }
 }
