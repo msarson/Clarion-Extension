@@ -8,14 +8,15 @@ const logger = LoggerManager.getLogger("HoverProvider");
 logger.setLevel("error");
 
 /**
- * Provides hover information for Clarion code elements.
+ * Provides hover information for Clarion code elements (client-side).
  *
- * This provider implements the lazy loading approach for method implementations:
- * - When a user hovers over a method declaration, it first gets the location from DocumentManager
- * - If the location is a method and its implementation hasn't been resolved yet, it calls
- *   resolveMethodImplementation to find the actual implementation on-demand
- * - This defers the expensive implementation lookup until it's actually needed
- * - Once resolved, the implementation details are cached to avoid repeated lookups
+ * This provider handles non-semantic navigation hovers:
+ * - File/include/module navigation (INCLUDE, MODULE, LINK statements)
+ * - Routine/label references (e.g., in DO statements)
+ *
+ * Semantic symbol hovers (methods, procedures, variables, parameters) are deferred
+ * to the server-side hover provider, which has complete semantic context (tokens,
+ * DocumentStructure, finishesAt, method overload resolution, etc.).
  */
 export class ClarionHoverProvider implements vscode.HoverProvider {
     private documentManager: DocumentManager;
