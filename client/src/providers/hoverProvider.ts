@@ -62,13 +62,14 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
 
         logger.info(`Found location at position: ${location.statementType} to ${location.fullFileName}`);
         
-        // For method and MAP procedure declarations, show hover with implementation
-        if ((location.statementType === "METHOD" || location.statementType === "MAPPROCEDURE") && !location.implementationResolved) {
-            const displayName = location.className ? `${location.className}.${location.methodName}` : location.methodName;
-            logger.info(`Lazily resolving implementation for hover: ${displayName}`);
-            location = await this.documentManager.resolveMethodImplementation(location);
+        // CONSOLIDATION: Defer to server for all semantic symbols (method/procedure declarations)
+        // Server has complete semantic context (tokens, DocumentStructure, finishesAt, etc.)
+        if (location.statementType === "METHOD" || location.statementType === "MAPPROCEDURE") {
+            logger.info(`Deferring ${location.statementType} hover to server (semantic symbol)`);
+            return undefined;
         }
         
+        // Only handle non-semantic navigation (INCLUDE, MODULE, etc.)
         const hoverMessage = await this.constructHoverMessage(location);
         return new vscode.Hover(hoverMessage);
     }
