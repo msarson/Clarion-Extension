@@ -237,11 +237,15 @@ export class ClarionTokenizer {
                         // ✅ Structure tokens are handled above in special block
                         let newTokenType = tokenType;
                         
+                        // Calculate actual start position accounting for leading whitespace in match
+                        const trimmedValue = match[0].trim();
+                        const leadingWhitespace = match[0].length - trimmedValue.length;
+                        
                         let newToken: Token = {
                             type: newTokenType,
-                            value: match[0].trim(),
+                            value: trimmedValue,
                             line: lineNumber,
-                            start: position,
+                            start: position + leadingWhitespace,
                             maxLabelLength: 0
                         };
                         

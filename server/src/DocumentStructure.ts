@@ -607,7 +607,7 @@ export class DocumentStructure {
         const lastStructure = this.structureStack.pop();
         if (lastStructure) {
             lastStructure.finishesAt = token.line;
-            token.start = this.structureIndentMap.get(lastStructure) || 0;
+            // Don't overwrite END token's start position - it's already correct from tokenizer
             logger.info(`🔚 Closed ${lastStructure.value} at Line ${token.line}`);
             if (["CLASS", "MAP", "INTERFACE", "MODULE"].includes(lastStructure.value.toUpperCase())) {
                 this.insideClassOrInterfaceOrMapDepth = Math.max(0, this.insideClassOrInterfaceOrMapDepth - 1);
