@@ -7,6 +7,7 @@ import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
+import { ProcedureUtils } from '../utils/ProcedureUtils';
 
 const logger = LoggerManager.getLogger("HoverProvider");
 logger.setLevel("info"); // PERF: Only log errors to reduce overhead
@@ -858,9 +859,9 @@ export class HoverProvider {
                         const typeTokens = lineTokens.filter(t => t.start > memberEnd);
                         const type = typeTokens.length > 0 ? typeTokens[0].value : 'Unknown';
                         
-                        // Count parameters in declaration if it's a PROCEDURE
+                        // Count parameters in declaration if it's a PROCEDURE/FUNCTION
                         let declParamCount = 0;
-                        if (type.toUpperCase() === 'PROCEDURE') {
+                        if (ProcedureUtils.isProcedureKeyword(type)) {
                             // Get full line to extract parameter list
                             const content = document.getText();
                             const lines = content.split('\n');
@@ -985,9 +986,9 @@ export class HoverProvider {
                                 const typeWithoutComment = afterMember.split(/\s*[!\/\/]/).shift() || afterMember;
                                 const type = typeWithoutComment.trim() || 'Unknown';
                                 
-                                // Count parameters if it's a PROCEDURE
+                                // Count parameters if it's a PROCEDURE/FUNCTION
                                 let declParamCount = 0;
-                                if (type.toUpperCase().startsWith('PROCEDURE')) {
+                                if (ProcedureUtils.isProcedureKeyword(type.split(/\s+/)[0])) {
                                     declParamCount = this.countParametersInDeclaration(memberLine);
                                     logger.info(`Counting params in: ${memberLine}`);
                                     logger.info(`Detected ${declParamCount} parameters`);

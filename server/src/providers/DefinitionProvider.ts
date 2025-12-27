@@ -10,6 +10,7 @@ import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
+import { ProcedureUtils } from '../utils/ProcedureUtils';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
 logger.setLevel("info");
@@ -129,18 +130,18 @@ export class DefinitionProvider {
                 }
             }
 
-            // Check if this is a MAP procedure implementation line (e.g., "ProcessOrder PROCEDURE")
+            // Check if this is a MAP procedure/function implementation line (e.g., "ProcessOrder PROCEDURE" or "ProcessOrder FUNCTION")
             // Navigate to the MAP declaration
-            // Match any line with PROCEDURE keyword (not a class method)
-            if (line.toUpperCase().includes('PROCEDURE') && !methodImplMatch) {
+            // Match any line with PROCEDURE or FUNCTION keyword (not a class method)
+            if ((line.toUpperCase().includes('PROCEDURE') || line.toUpperCase().includes('FUNCTION')) && !methodImplMatch) {
                 // Try to extract procedure name
-                const procImplMatch = line.match(/^\s*(\w+)\s+PROCEDURE/i);
+                const procImplMatch = line.match(/^\s*(\w+)\s+(PROCEDURE|FUNCTION)/i);
                 if (procImplMatch) {
                     const procName = procImplMatch[1];
                     logger.info(`🔍 Detected procedure implementation line: ${procName}`);
 
                     // Allow F12 anywhere on the implementation signature line (not only on the name)
-                    // This improves usability when cursor is on 'PROCEDURE' or inside the parameter list
+                    // This improves usability when cursor is on 'PROCEDURE'/'FUNCTION' or inside the parameter list
                     logger.info(`F12 navigating from implementation to MAP declaration for: ${procName}`);
 
                     const tokens = this.tokenCache.getTokens(document);
