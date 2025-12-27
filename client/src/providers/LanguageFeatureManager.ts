@@ -60,14 +60,23 @@ export function registerLanguageFeatures(context: ExtensionContext, documentMana
         hoverProviderDisposable.dispose(); // Remove old provider if it exists
     }
 
-    logger.info("📝 Registering Hover Provider...");
-    hoverProviderDisposable = languages.registerHoverProvider(
-        documentSelectors,
-        new ClarionHoverProvider(documentManager)
-    );
-    context.subscriptions.push(hoverProviderDisposable);
-
-    logger.info(`📄 Registered Hover Provider for extensions: ${lookupExtensions.join(', ')}`);
+    // ❌ Client-side hover provider disabled - server handles all hovers via LSP
+    // The server-side HoverProvider has complete functionality including:
+    // - Cross-file method declaration lookups via INCLUDE files
+    // - Method implementation → declaration navigation  
+    // - Variable and parameter hover information
+    // - Routine/label hover information
+    // Having both client and server hover providers caused duplicate/confusing information
+    // 
+    // logger.info("📝 Registering Hover Provider...");
+    // hoverProviderDisposable = languages.registerHoverProvider(
+    //     documentSelectors,
+    //     new ClarionHoverProvider(documentManager)
+    // );
+    // context.subscriptions.push(hoverProviderDisposable);
+    // logger.info(`📄 Registered Hover Provider for extensions: ${lookupExtensions.join(', ')}`);
+    
+    logger.info("ℹ️ Hover Provider: Using server-side only (client-side disabled to prevent duplicate information)");
     
     // ✅ Register Implementation Provider for "Go to Implementation" functionality
     if (implementationProviderDisposable) {
