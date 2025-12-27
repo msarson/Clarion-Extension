@@ -8,6 +8,7 @@ import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
+import { MapProcedureResolver } from '../utils/MapProcedureResolver';
 
 const logger = LoggerManager.getLogger("HoverProvider");
 logger.setLevel("info"); // PERF: Only log errors to reduce overhead
@@ -19,6 +20,7 @@ export class HoverProvider {
     private tokenCache = TokenCache.getInstance();
     private memberResolver = new ClassMemberResolver();
     private overloadResolver = new MethodOverloadResolver();
+    private mapResolver = new MapProcedureResolver();
 
     /**
      * Provides hover information for a position in the document
@@ -77,13 +79,19 @@ export class HoverProvider {
                 
                 // Check if cursor is on the procedure name
                 if (position.character >= mapProcMatch.index! && position.character <= procNameEnd) {
-                    // Find the MAP declaration for this procedure
-                    const mapDeclaration = this.findMapDeclaration(document, procName);
-                    if (mapDeclaration) {
+                    // Find the MAP declaration for this procedure using resolver
+                    const tokens = this.tokenCache.getTokens(document);
+                    const mapLocation = this.mapResolver.findMapDeclaration(procName, tokens, document);
+                    if (mapLocation) {
+                        // Extract the text at that location
+                        const mapLine = document.getText({
+                            start: mapLocation.range.start,
+                            end: mapLocation.range.end
+                        });
                         return {
                             contents: {
                                 kind: 'markdown',
-                                value: `**MAP Declaration**\n\n\`\`\`clarion\n${mapDeclaration}\n\`\`\``
+                                value: `**MAP Declaration**\n\n\`\`\`clarion\n${mapLine.trim()}\n\`\`\``
                             }
                         };
                     }
@@ -246,87 +254,6 @@ export class HoverProvider {
             logger.error(`Error providing hover: ${error instanceof Error ? error.message : String(error)}`);
             return null;
         }
-    }
-
-    /**
-     * Gets the word range at a position
-     * Enhanced to include colons for Clarion prefix notation (e.g., LOC:Field)
-     */
-    private getWordRangeAtPosition(document: TextDocument, position: Position): Range | null {
-        const line = document.getText({
-            start: { line: position.line, character: 0 },
-            end: { line: position.line + 1, character: 0 }
-        });
-
-        // Always check for prefix notation (PREFIX:Field) by looking backwards for colon
-        let start = position.character;
-        while (start > 0) {
-            const char = line.charAt(start - 1);
-            if (/[a-zA-Z0-9_:]/.test(char)) {
-                start--;
-            } else {
-                break;
-            }
-        }
-        
-        let end = position.character;
-        while (end < line.length) {
-            const char = line.charAt(end);
-            if (/[a-zA-Z0-9_:]/.test(char)) {
-                end++;
-            } else {
-                break;
-            }
-        }
-        
-        if (start < end) {
-            return {
-                start: { line: position.line, character: start },
-                end: { line: position.line, character: end }
-            };
-        }
-
-        return null;
-    }
-
-    /**
-     * Gets the innermost scope at a line
-     * Excludes MethodDeclaration (CLASS method declarations in DATA section)
-     */
-    private getInnermostScopeAtLine(tokens: Token[], line: number): Token | undefined {
-        const scopes = tokens.filter(token =>
-            // Only consider actual procedure implementations and global procedures, not method declarations in CLASS
-            (token.subType === TokenType.Procedure ||
-                token.subType === TokenType.GlobalProcedure ||
-                token.subType === TokenType.MethodImplementation ||
-                token.subType === TokenType.Routine) &&
-            token.line <= line &&
-            (token.finishesAt === undefined || token.finishesAt >= line)
-        );
-
-        return scopes.length > 0 ? scopes[scopes.length - 1] : undefined;
-    }
-
-    /**
-     * Finds the parent scope (procedure/method) containing a routine
-     */
-    private getParentScopeOfRoutine(tokens: Token[], routineScope: Token): Token | undefined {
-        // Find all procedure/method scopes that contain this routine
-        const parentScopes = tokens.filter(token =>
-            (token.subType === TokenType.Procedure ||
-                token.subType === TokenType.GlobalProcedure ||
-                token.subType === TokenType.MethodImplementation ||
-                token.subType === TokenType.MethodDeclaration) &&
-            token.line < routineScope.line &&
-            (token.finishesAt === undefined || token.finishesAt >= routineScope.line)
-        );
-
-        if (parentScopes.length === 0) {
-            return undefined;
-        }
-
-        // Return the closest parent (highest line number)
-        return parentScopes.reduce((a, b) => a.line > b.line ? a : b);
     }
 
     /**
