@@ -31,6 +31,15 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
 
         logger.info(`Hover requested at position ${position.line}:${position.character} in ${document.uri.fsPath}`);
         
+        // Check if this is a method implementation line - defer to server
+        // Server handles: implementation → declaration hover
+        const line = document.lineAt(position.line).text;
+        const methodImplMatch = line.match(/^(\w+)\.(\w+)\s+(PROCEDURE|FUNCTION)\s*\(/i);
+        if (methodImplMatch) {
+            logger.info(`Detected method implementation line - deferring to server`);
+            return undefined;
+        }
+        
         // First, check if this is a routine reference (in DO statements)
         const labelInfo = this.detectLabelOrRoutineReference(document, position);
         if (labelInfo) {
@@ -70,6 +79,7 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
         }
         
         // For class methods, show hover with implementation (may be cross-file)
+        // Client handles: declaration → implementation hover
         if (location.statementType === "METHOD" && !location.implementationResolved) {
             const displayName = location.className ? `${location.className}.${location.methodName}` : location.methodName;
             logger.info(`Lazily resolving implementation for hover: ${displayName}`);
