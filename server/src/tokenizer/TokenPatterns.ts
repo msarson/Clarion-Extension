@@ -26,7 +26,7 @@ export const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     // ✅ RECORD should not match when it's part of a field name (preceded by : or . or alphanumeric)
     // Use negative lookbehind to ensure RECORD is standalone
     RECORD: /(?<![:\w.])\bRECORD\b/i,
-    REPORT: /\bREPORT\b/i,
+    REPORT: /(?<![<:\w.])\bREPORT\b/i,  // ✅ Don't match inside template parameters like <report pReport> or after qualifiers
     SECTION: /\bSECTION\b/i,
     SHEET: /\bSHEET\b/i,
     TAB: /\bTAB\b/i,
