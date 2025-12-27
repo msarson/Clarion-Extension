@@ -8,6 +8,7 @@ import { Token, TokenType } from '../ClarionTokenizer.js';
 import { HierarchyManager, ParentStackEntry } from './utils/HierarchyManager';
 import { SymbolFinder } from './utils/SymbolFinder';
 import { isAttributeKeyword, isDataType } from '../utils/AttributeKeywords';
+import { ProcedureUtils } from '../utils/ProcedureUtils';
 
 /**
  * Extended DocumentSymbol with Clarion-specific metadata
@@ -424,9 +425,9 @@ export class ClarionDocumentSymbolProvider {
                             break;
                         }
                         
-                        // If we find a procedure declaration with PROCEDURE keyword, mark it
+                        // If we find a procedure declaration with PROCEDURE or FUNCTION keyword, mark it
                         if (nextToken.type === TokenType.Keyword &&
-                            nextToken.value.toUpperCase() === "PROCEDURE") {
+                            ProcedureUtils.isProcedureKeyword(nextToken.value)) {
                             // Mark this as a MAP/MODULE procedure
                             nextToken.subType = TokenType.MapProcedure;
                             lastProcedureLine = nextToken.line;
@@ -592,7 +593,7 @@ export class ClarionDocumentSymbolProvider {
             // CRITICAL FIX: Also check for method declarations
             if ((insideDefinitionBlock || insideClassOrModule) &&
                 (
-                    (type === TokenType.Keyword && value.toUpperCase() === "PROCEDURE") ||
+                    (type === TokenType.Keyword && ProcedureUtils.isProcedureKeyword(value)) ||
                     sub === TokenType.MethodDeclaration ||
                     sub === TokenType.InterfaceMethod ||
                     sub === TokenType.MapProcedure
@@ -1763,28 +1764,28 @@ export class ClarionDocumentSymbolProvider {
             }
             // FIXED: Check for TokenType.Procedure, not TokenType.Keyword
             if (t.type === TokenType.Procedure || 
-                (t.type === TokenType.Keyword && t.value.toUpperCase() === 'PROCEDURE')) {
-                logger.info(`      - ✅ Found PROCEDURE keyword!`);
+                (t.type === TokenType.Keyword && ProcedureUtils.isProcedureKeyword(t.value))) {
+                logger.info(`      - ✅ Found PROCEDURE/FUNCTION keyword!`);
                 foundProcedureKeyword = true;
                 break;
             }
         }
         
         if (foundProcedureKeyword) {
-            logger.info(`   ⚠️ Skipping - this token is part of a PROCEDURE declaration`);
+            logger.info(`   ⚠️ Skipping - this token is part of a PROCEDURE/FUNCTION declaration`);
             return;
         }
-        logger.info(`   ℹ️ No PROCEDURE keyword found, proceeding with variable parsing`);
+        logger.info(`   ℹ️ No PROCEDURE/FUNCTION keyword found, proceeding with variable parsing`);
 
         // CRITICAL: Skip if previous token is a Label that's part of a method name
-        // Pattern: Label(ClassName) + Variable(MethodName) + PROCEDURE
+        // Pattern: Label(ClassName) + Variable(MethodName) + PROCEDURE/FUNCTION
         // e.g., StringTheory._Test PROCEDURE()
         if (prevToken && prevToken.type === TokenType.Label && token.type === TokenType.Variable) {
-            // Check if there's another variable/label followed by PROCEDURE on this line
+            // Check if there's another variable/label followed by PROCEDURE/FUNCTION on this line
             let nextIdx = index + 1;
             while (nextIdx < tokens.length && tokens[nextIdx].line === line) {
                 if (tokens[nextIdx].type === TokenType.Procedure ||
-                    (tokens[nextIdx].type === TokenType.Keyword && tokens[nextIdx].value.toUpperCase() === 'PROCEDURE')) {
+                    (tokens[nextIdx].type === TokenType.Keyword && ProcedureUtils.isProcedureKeyword(tokens[nextIdx].value))) {
                     logger.info(`   ⚠️ Skipping - previous Label "${prevToken.value}" is part of method name`);
                     return;
                 }

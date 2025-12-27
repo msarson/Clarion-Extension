@@ -1,5 +1,6 @@
 import { Token, TokenType } from "./ClarionTokenizer";
 import LoggerManager from "./logger";
+import { ProcedureUtils } from './utils/ProcedureUtils';
 
 const logger = LoggerManager.getLogger("DocumentStructure");
 logger.setLevel("error"); // Production: Only log errors
@@ -69,10 +70,15 @@ export class DocumentStructure {
     
             // ✅ Always prioritize structure tokens first
             if (token.type === TokenType.Keyword || token.type === TokenType.ExecutionMarker) {
-                switch (token.value.toUpperCase()) {
-                    case "PROCEDURE":
-                        this.handleProcedureToken(token, i);
-                        break;
+                const upperValue = token.value.toUpperCase();
+                
+                // Handle PROCEDURE and FUNCTION (both are procedure declarations in modern Clarion)
+                if (ProcedureUtils.isProcedureKeyword(upperValue)) {
+                    this.handleProcedureToken(token, i);
+                    continue;
+                }
+                
+                switch (upperValue) {
                     case "ROUTINE":
                         this.handleRoutineToken(token, i);
                         break;
