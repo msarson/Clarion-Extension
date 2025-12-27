@@ -151,7 +151,7 @@ export class ClarionTokenizer {
                 const charClass = PatternMatcher.getCharClass(firstChar);
                 const relevantTypes = PatternMatcher.getPatternsByCharClass().get(charClass) || types;
 
-                // ✅ Check if current position is inside parentheses (...) or template parameters <...>
+                // ✅ Check if current position is inside parentheses (...) or optional parameters <...>
                 // Structure keywords inside these contexts are parameter types, not structure declarations
                 const isInsideParamsOrTemplate = (pos: number): boolean => {
                     let openParens = 0;
@@ -179,10 +179,10 @@ export class ClarionTokenizer {
                             patternTests.set(tokenType, (patternTests.get(tokenType) || 0) + 1);
                             
                             if (match && match.index === 0) {
-                                // ✅ CRITICAL FIX: Check if structure keyword is inside template parameters or qualified identifiers or parameter lists
+                                // ✅ CRITICAL FIX: Check if structure keyword is inside optional parameters or qualified identifiers or parameter lists
                                 // This prevents matching keywords that are:
                                 // - Part of qualified identifiers like nts:case or obj.case (preceded by : or .)
-                                // - Inside template parameters like <report pReport> (inside unclosed <...>)
+                                // - Inside optional parameters like <report pReport> (inside unclosed <...>)
                                 // - Inside parameter lists like PROCEDURE(...,REPORT,...) (inside unclosed (...))
                                 if (position > 0) {
                                     const prevChar = line[position - 1];
@@ -193,9 +193,9 @@ export class ClarionTokenizer {
                                     }
                                 }
                                 
-                                // Check if inside parentheses or template parameters
+                                // Check if inside parentheses or optional parameters
                                 if (isInsideParamsOrTemplate(position)) {
-                                    logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at position ${position} - inside parameters or template`);
+                                    logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at position ${position} - inside parameters or optional params`);
                                     continue; // Try next structure pattern
                                 }
                                 
