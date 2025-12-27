@@ -138,20 +138,18 @@ export class DefinitionProvider {
                 if (procImplMatch) {
                     const procName = procImplMatch[1];
                     logger.info(`🔍 Detected procedure implementation line: ${procName}`);
-                    
-                    // Check if cursor is on the procedure name
-                    const procStart = line.indexOf(procName);
-                    const procEnd = procStart + procName.length;
-                    
-                    if (position.character >= procStart && position.character <= procEnd) {
-                        logger.info(`F12 on procedure implementation: ${procName}`);
-                        
-                        const tokens = this.tokenCache.getTokens(document);
-                        const mapDecl = this.findMapProcedureDeclaration(procName, tokens, document);
-                        if (mapDecl) {
-                            logger.info(`✅ Found MAP declaration at line ${mapDecl.range.start.line}`);
-                            return mapDecl;
-                        }
+
+                    // Allow F12 anywhere on the implementation signature line (not only on the name)
+                    // This improves usability when cursor is on 'PROCEDURE' or inside the parameter list
+                    logger.info(`F12 navigating from implementation to MAP declaration for: ${procName}`);
+
+                    const tokens = this.tokenCache.getTokens(document);
+                    const mapDecl = this.findMapProcedureDeclaration(procName, tokens, document);
+                    if (mapDecl) {
+                        logger.info(`✅ Found MAP declaration at line ${mapDecl.range.start.line}`);
+                        return mapDecl;
+                    } else {
+                        logger.info(`❌ MAP declaration not found in current file for ${procName}`);
                     }
                 }
             }
@@ -2184,8 +2182,10 @@ export class DefinitionProvider {
                     }
                     
                     // Check if this line declares our procedure
-                    // Match: ProcName(...) or ProcName PROCEDURE(...) or ProcName,PROCEDURE(...)
-                    const procPattern = new RegExp(`^\\s*${procName}\\s*[,(]`, 'i');
+                    // Match two formats:
+                    // 1. ProcName        PROCEDURE(...) - at column 0 with PROCEDURE keyword
+                    // 2.     ProcName(...) - indented without PROCEDURE keyword
+                    const procPattern = new RegExp(`^\\s*${procName}\\s*(\\(|PROCEDURE)`, 'i');
                     if (procPattern.test(lines[j])) {
                         logger.info(`Found MAP declaration for ${procName} at line ${j}`);
                         return Location.create(document.uri, {

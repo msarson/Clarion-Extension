@@ -9,7 +9,7 @@ import { TokenHelper } from '../utils/TokenHelper';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 
 const logger = LoggerManager.getLogger("HoverProvider");
-logger.setLevel("error"); // PERF: Only log errors to reduce overhead
+logger.setLevel("info"); // PERF: Only log errors to reduce overhead
 
 /**
  * Provides hover information for local variables and parameters
@@ -91,19 +91,25 @@ export class HoverProvider {
 
             // Check if this is inside a MAP block (declaration) and show implementation hover
             if (this.isInMapBlock(document, position.line)) {
+                logger.info(`Inside MAP block at line ${position.line}`);
                 // MAP declarations have two formats:
                 // 1. Indented: "    MyProc(params)" - no PROCEDURE keyword
                 // 2. Column 0: "MyProc    PROCEDURE(params)" - with PROCEDURE keyword
                 const mapDeclMatch = line.match(/^\s*(\w+)\s*(?:PROCEDURE\s*)?\(/i);
+                logger.info(`MAP declaration regex match: ${mapDeclMatch ? 'YES' : 'NO'}, line="${line}"`);
                 if (mapDeclMatch) {
                     const procName = mapDeclMatch[1];
                     const procNameStart = line.indexOf(procName);
                     const procNameEnd = procNameStart + procName.length;
                     
+                    logger.info(`Procedure name: "${procName}", range: ${procNameStart}-${procNameEnd}, cursor at: ${position.character}`);
+                    
                     // Check if cursor is on the procedure name
                     if (position.character >= procNameStart && position.character <= procNameEnd) {
+                        logger.info(`Cursor is on procedure name, searching for implementation...`);
                         // Find the implementation
                         const implInfo = this.findProcedureImplementation(document, procName);
+                        logger.info(`Implementation found: ${implInfo ? 'YES at line ' + (implInfo.line + 1) : 'NO'}`);
                         if (implInfo) {
                             return {
                                 contents: {
@@ -112,6 +118,8 @@ export class HoverProvider {
                                 }
                             };
                         }
+                    } else {
+                        logger.info(`Cursor NOT on procedure name (cursor at ${position.character}, name range ${procNameStart}-${procNameEnd})`);
                     }
                 }
             }
@@ -1244,11 +1252,13 @@ export class HoverProvider {
      * Find implementation of a MAP procedure
      */
     private findProcedureImplementation(document: TextDocument, procName: string): { line: number, signature: string, preview: string } | null {
+        logger.info(`🔍 findProcedureImplementation searching for: "${procName}"`);
         const text = document.getText();
         const lines = text.split(/\r?\n/);
         const tokens = this.tokenCache.getTokens(document);
         
         let inMap = false;
+        let checkedLines = 0;
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             const trimmed = line.trim();
@@ -1256,10 +1266,12 @@ export class HoverProvider {
             // Track MAP blocks to skip declarations
             if (/^\s*MAP\s*$/i.test(trimmed)) {
                 inMap = true;
+                logger.info(`Entering MAP block at line ${i}`);
                 continue;
             }
             if (inMap && /^\s*END\s*$/i.test(trimmed)) {
                 inMap = false;
+                logger.info(`Exiting MAP block at line ${i}`);
                 continue;
             }
             
@@ -1270,7 +1282,14 @@ export class HoverProvider {
             
             // Match: ProcName PROCEDURE(...) at start of line (implementation)
             const implMatch = line.match(/^(\w+)\s+PROCEDURE\s*\(/i);
+            if (implMatch) {
+                checkedLines++;
+                if (checkedLines <= 5) {
+                    logger.info(`Line ${i}: Found PROCEDURE "${implMatch[1]}" (looking for "${procName}")`);
+                }
+            }
             if (implMatch && implMatch[1].toLowerCase() === procName.toLowerCase()) {
+                logger.info(`✅ Found matching implementation at line ${i}: "${implMatch[1]}"`);
                 // Found the implementation, try to find its token for finishesAt
                 const procToken = tokens.find(t => 
                     (t.subType === TokenType.Procedure || t.subType === TokenType.GlobalProcedure) &&
@@ -1293,8 +1312,9 @@ export class HoverProvider {
                 
                 // Find CODE statement and grab lines after it
                 let foundCode = false;
-                for (let j = i + 1; j <= endLine; j++) {
+                for (let j = i + 1; j <= endLine && j < lines.length; j++) {
                     const previewLine = lines[j];
+                    if (!previewLine) continue; // Safety check
                     const previewTrimmed = previewLine.trim().toUpperCase();
                     
                     if (previewTrimmed === 'CODE') {
@@ -1324,6 +1344,149 @@ export class HoverProvider {
             }
         }
         
+        logger.info(`❌ No implementation found for "${procName}" (checked ${checkedLines} PROCEDURE declarations)`);
+        return null;
+    }
+
+    /**
+     * Resolve files via Clarion redirection or relative path from the current document
+     */
+    private resolveViaRedirection(fileName: string, document: TextDocument): string | null {
+        const fs = require('fs');
+        const path = require('path');
+
+        // Current document absolute path
+        const filePath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
+        let resolvedPath: string | null = null;
+
+        try {
+            const SolutionManager = require('../solution/solutionManager').SolutionManager;
+            const solutionManager = SolutionManager.getInstance();
+            if (solutionManager && solutionManager.solution) {
+                for (const project of solutionManager.solution.projects) {
+                    const redirectionParser = project.getRedirectionParser();
+                    const resolved = redirectionParser.findFile(fileName);
+                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
+                        resolvedPath = resolved.path;
+                        break;
+                    }
+                }
+            }
+        } catch (e) {
+            logger.error(`Redirection resolution error: ${e instanceof Error ? e.message : String(e)}`);
+        }
+
+        // Fallback to a path relative to current file directory
+        if (!resolvedPath) {
+            const currentDir = path.dirname(filePath);
+            const relativePath = path.join(currentDir, fileName);
+            if (fs.existsSync(relativePath)) {
+                resolvedPath = relativePath;
+            }
+        }
+
+        return resolvedPath;
+    }
+
+    /**
+     * Collect MODULE('...') files from MAP blocks, resolved via redirection.
+     * If a MODULE label cannot be resolved to an actual file (e.g., WIN32API dummies), it's skipped.
+     */
+    private getModuleFilesFromMap(document: TextDocument): string[] {
+        const text = document.getText();
+        const lines = text.split(/\r?\n/);
+        const files: string[] = [];
+        let inMap = false;
+
+        for (let i = 0; i < lines.length; i++) {
+            const trimmed = lines[i].trim();
+
+            if (/^\s*MAP\s*$/i.test(trimmed)) {
+                inMap = true;
+                continue;
+            }
+            if (inMap && /^\s*END\s*$/i.test(trimmed)) {
+                inMap = false;
+                continue;
+            }
+            if (!inMap) continue;
+
+            const modMatch = trimmed.match(/^\s*MODULE\s*\(\s*['"](.+?)['"]\s*\)\s*$/i);
+            if (modMatch) {
+                const fileName = modMatch[1];
+                const resolved = this.resolveViaRedirection(fileName, document);
+                if (resolved) {
+                    files.push(resolved);
+                    logger.info(`MAP/MODULE -> resolved "${fileName}" to "${resolved}"`);
+                } else {
+                    // Unresolved module labels (e.g., WIN32API dummies) are ignored
+                    logger.info(`MAP/MODULE -> could not resolve "${fileName}"`);
+                }
+            }
+        }
+
+        // De-duplicate
+        return Array.from(new Set(files));
+    }
+
+    /**
+     * Find procedure implementation in an external file
+     */
+    private findProcedureImplementationInFile(filePath: string, procName: string): { line: number, signature: string, preview: string } | null {
+        const fs = require('fs');
+        if (!fs.existsSync(filePath)) return null;
+
+        const content = fs.readFileSync(filePath, 'utf8');
+        const lines = content.split(/\r?\n/);
+
+        let inMap = false;
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            // Skip MAP block content (declarations only)
+            if (/^\s*MAP\s*$/i.test(trimmed)) { inMap = true; continue; }
+            if (inMap && /^\s*END\s*$/i.test(trimmed)) { inMap = false; continue; }
+            if (inMap) continue;
+
+            // Implementation: ProcName PROCEDURE(...)
+            const implMatch = line.match(/^(\w+)\s+PROCEDURE\s*\(/i);
+            if (implMatch && implMatch[1].toLowerCase() === procName.toLowerCase()) {
+                const previewLines: string[] = [line.trim()];
+                const maxPreviewLines = 10;
+                let foundCode = false;
+                const endLine = Math.min(lines.length - 1, i + 30);
+
+                for (let j = i + 1; j <= endLine; j++) {
+                    const pl = lines[j];
+                    if (!pl) continue;
+                    const ptrim = pl.trim().toUpperCase();
+
+                    if (ptrim === 'CODE') {
+                        foundCode = true;
+                        previewLines.push(pl);
+                        continue;
+                    }
+
+                    if (foundCode) {
+                        if (previewLines.length - 1 < maxPreviewLines) {
+                            previewLines.push(pl);
+                        } else {
+                            break;
+                        }
+                    } else {
+                        previewLines.push(pl);
+                    }
+                }
+
+                return {
+                    line: i,
+                    signature: line.trim(),
+                    preview: previewLines.join('\n')
+                };
+            }
+        }
+
         return null;
     }
 }
