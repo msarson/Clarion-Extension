@@ -163,13 +163,11 @@ export class DefinitionProvider {
             }
 
             // ✅ Check if we're ON a declaration (method declaration in class or MAP procedure declaration)
-            // If so, F12 should return the current location (we're already at the definition)
+            // If so, return null - we're already at the definition, no navigation needed
+            // VSCode won't show an error for this case
             if (this.isOnDeclaration(line, position, word)) {
-                logger.info(`F12 pressed on declaration - returning current location (already at definition)`);
-                return Location.create(document.uri, {
-                    start: { line: position.line, character: 0 },
-                    end: { line: position.line, character: line.length }
-                });
+                logger.info(`F12 pressed on declaration - already at definition, returning null (no navigation)`);
+                return null;
             }
 
             // First, check if this is a reference to a label in the current document
