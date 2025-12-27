@@ -165,12 +165,13 @@ export class ClarionTokenizer {
                             patternTests.set(tokenType, (patternTests.get(tokenType) || 0) + 1);
                             
                             if (match && match.index === 0) {
-                                // ✅ CRITICAL FIX: Check if structure keyword is preceded by : or . in original line
+                                // ✅ CRITICAL FIX: Check if structure keyword is preceded by : or . or < in original line
                                 // This prevents matching keywords that are part of qualified identifiers like nts:case or obj.case
+                                // or inside template parameters like <report pReport>
                                 if (position > 0) {
                                     const prevChar = line[position - 1];
-                                    if (prevChar === ':' || prevChar === '.') {
-                                        // Skip this match - it's part of a qualified identifier
+                                    if (prevChar === ':' || prevChar === '.' || prevChar === '<') {
+                                        // Skip this match - it's part of a qualified identifier or template parameter
                                         logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at position ${position} - preceded by '${prevChar}'`);
                                         continue; // Try next structure pattern
                                     }
