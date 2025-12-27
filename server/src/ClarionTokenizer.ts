@@ -181,12 +181,15 @@ export class ClarionTokenizer {
                                 // ✅ Trim leading whitespace from token value (some patterns like FILE, QUEUE, VIEW include \s)
                                 const tokenValue = match[0].trimStart();
                                 
+                                // Calculate actual start position accounting for leading whitespace in match
+                                const leadingWhitespace = match[0].length - tokenValue.length;
+                                
                                 // Create token for this structure
                                 const newToken: Token = {
                                     type: TokenType.Structure,
                                     value: tokenValue,
                                     line: lineNumber,
-                                    start: column,
+                                    start: position + leadingWhitespace,
                                     maxLabelLength: 0
                                 };
                                 
@@ -238,7 +241,7 @@ export class ClarionTokenizer {
                             type: newTokenType,
                             value: match[0].trim(),
                             line: lineNumber,
-                            start: column,
+                            start: position,
                             maxLabelLength: 0
                         };
                         

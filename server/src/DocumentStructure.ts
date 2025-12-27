@@ -504,7 +504,9 @@ export class DocumentStructure {
             }
         }
 
-        let indentLevel = this.maxLabelWidth;
+        // Store the structure's actual indent position for later use when closing with END
+        // Use the structure token's actual start position, not maxLabelWidth
+        let indentLevel = token.start;
         this.structureIndentMap.set(token, indentLevel);
     }
 
