@@ -218,6 +218,10 @@ export class DefinitionProvider {
     }
 
     /**
+     * TODO REFACTORING: Legacy method with complex structure field validation logic
+     * Kept for now because it handles prefix validation (_possibleReferences)
+     * Future: Move this validation logic to SymbolDefinitionResolver
+     * 
      * Finds the definition of a label in the current document
      * Now handles prefixed labels (e.g., LOC:SomeField)
      */
@@ -469,7 +473,7 @@ export class DefinitionProvider {
                 if (word.toLowerCase() === structureName.toLowerCase()) {
                     // Cursor is on structure name - find the structure declaration
                     logger.info(`Detected dot notation: cursor on structure "${structureName}" in ${structureName}.${fieldName}`);
-                    return this.findLabelDefinition(structureName, document, position);
+                    return this.symbolResolver.findLabelDefinition(structureName, document, position, tokens);
                 } else if (word.toLowerCase() === fieldName.toLowerCase()) {
                     // Cursor is on field name - find the field within the structure
                     logger.info(`Detected dot notation: cursor on field "${fieldName}" in ${structureName}.${fieldName}`);
@@ -1366,6 +1370,10 @@ export class DefinitionProvider {
     }
 
     /**
+     * TODO REFACTORING: Legacy method with enhanced file reference detection
+     * Kept for now because it checks if label exists before treating as file
+     * Future: Move this logic to FileDefinitionResolver
+     * 
      * Determines if the word at the position is likely a file reference
      */
     private isLikelyFileReference(word: string, document: TextDocument, position: Position): boolean {
