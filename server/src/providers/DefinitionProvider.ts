@@ -162,6 +162,13 @@ export class DefinitionProvider {
                 return structureFieldDefinition;
             }
 
+            // ✅ Check if we're ON a declaration (method declaration in class or MAP procedure declaration)
+            // If so, F12 should not navigate anywhere - we're already at the definition
+            if (this.isOnDeclaration(line, position, word)) {
+                logger.info(`F12 pressed on declaration - already at definition, not navigating`);
+                return null;
+            }
+
             // First, check if this is a reference to a label in the current document
             // This is the highest priority - look for labels in the same scope first
             const labelDefinition = await this.findLabelDefinition(word, document, position);
@@ -2265,5 +2272,35 @@ export class DefinitionProvider {
 
         logger.info(`No PROCEDURE implementation found for ${procName}`);
         return null;
+    }
+
+    /**
+     * Checks if cursor is on a declaration line (method declaration or MAP procedure)
+     * When on a declaration, F12 should not navigate (already at definition)
+     */
+    private isOnDeclaration(line: string, position: Position, word: string): boolean {
+        // Check if line contains PROCEDURE or FUNCTION keyword (but not a method implementation)
+        const hasProcedureKeyword = /\b(PROCEDURE|FUNCTION)\b/i.test(line);
+        if (!hasProcedureKeyword) {
+            return false;
+        }
+        
+        // Rule out method implementations (ClassName.MethodName PROCEDURE)
+        const isMethodImplementation = /^\s*\w+\.\w+\s+(PROCEDURE|FUNCTION)/i.test(line);
+        if (isMethodImplementation) {
+            return false;
+        }
+        
+        // Check if word appears before PROCEDURE/FUNCTION keyword (declaration pattern)
+        // Examples:
+        //   SomeMethod   PROCEDURE(...)
+        //   TestProc     FUNCTION(...)
+        const procMatch = line.match(/^(\s*)(\w+)\s+(PROCEDURE|FUNCTION)/i);
+        if (procMatch && procMatch[2].toLowerCase() === word.toLowerCase()) {
+            logger.info(`Detected cursor on declaration: ${word}`);
+            return true;
+        }
+        
+        return false;
     }
 }
