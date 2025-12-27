@@ -205,7 +205,7 @@ export class DefinitionProvider {
 
             // Finally, check if this is a file reference
             // This is the lowest priority - only look for files if no local definitions are found
-            if (this.fileResolver.isLikelyFileReference(word, document, position)) {
+            if (this.fileResolver.isLikelyFileReference(word, document, position, tokens)) {
                 logger.info(`No local definition found for ${word}, looking for file reference`);
                 return await this.fileResolver.findFileDefinition(word, document.uri);
             }

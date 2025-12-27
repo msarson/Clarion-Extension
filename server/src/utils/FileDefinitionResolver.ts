@@ -5,6 +5,7 @@
 
 import { Location, Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import { Token, TokenType } from '../ClarionTokenizer';
 import { SolutionManager } from '../solution/solutionManager';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -15,23 +16,86 @@ const logger = LoggerManager.getLogger("FileDefinitionResolver");
 export class FileDefinitionResolver {
     /**
      * Checks if a word is likely a file reference based on context
+     * Includes check for existing labels to avoid false positives
      */
-    public isLikelyFileReference(word: string, document: TextDocument, position: Position): boolean {
-        // Get the line to check context
+    public isLikelyFileReference(word: string, document: TextDocument, position: Position, tokens: Token[]): boolean {
+        // First, check if the word exists as a label in the document
+        // If it does, it's more likely to be a reference to that label than a file
+        const labelExists = tokens.some(token =>
+            token.type === TokenType.Label &&
+            token.value.toLowerCase() === word.toLowerCase()
+        );
+
+        // If a label with this name exists, it's probably not a file reference
+        if (labelExists) {
+            logger.info(`Word "${word}" exists as a label in the document, not treating as file reference`);
+            return false;
+        }
+
+        // Get the current line
         const line = document.getText({
             start: { line: position.line, character: 0 },
             end: { line: position.line, character: Number.MAX_VALUE }
         });
 
-        // Check if in an INCLUDE or MEMBER statement
-        if (/INCLUDE\s*\(\s*['"]/.test(line) || /MEMBER\s*\(\s*['"]/.test(line)) {
-            logger.info(`Word ${word} is in INCLUDE/MEMBER statement`);
-            return true;
+        // Check for common Clarion file inclusion patterns
+        const includePatterns = [
+            /\bINCLUDE\b\s*\(?(['"]?[\w\.]+['"]?)?\)?/i,
+            /\bUSE\b\s*\(?(['"]?[\w\.]+['"]?)?\)?/i,
+            /\bIMPORT\b\s*\(?(['"]?[\w\.]+['"]?)?\)?/i,
+            /\bEQUATE\b\s*\(?(['"]?[\w\.]+['"]?)?\)?/i,
+            /\bFROM\b\s*\(?(['"]?[\w\.]+['"]?)?\)?/i,
+            /\bSOURCE\b\s*\(?(['"]?[\w\.]+['"]?)?\)?/i,
+            /\bMODULE\b\s*\(?(['"]?[\w\.]+['"]?)?\)?/i
+        ];
+
+        // Check if the line contains any of the include patterns
+        let isIncludeLine = false;
+        for (const pattern of includePatterns) {
+            if (pattern.test(line)) {
+                isIncludeLine = true;
+                break;
+            }
         }
 
-        // Check if it looks like a filename (has extension)
-        if (/\.(clw|inc|equ|int|trn)$/i.test(word)) {
-            logger.info(`Word ${word} looks like a filename`);
+        // If this is an include line, check if the word is part of it
+        if (isIncludeLine) {
+            for (const pattern of includePatterns) {
+                const match = line.match(pattern);
+                if (match) {
+                    // If the pattern matched and the word is part of the match, it's likely a file reference
+                    if (match[1] && match[1].includes(word)) {
+                        logger.info(`Word "${word}" is part of an include pattern match`);
+                        return true;
+                    }
+
+                    // If the pattern is on the same line as the word, it's likely a file reference
+                    if (line.indexOf(word) > line.search(pattern)) {
+                        logger.info(`Word "${word}" appears after an include pattern`);
+                        return true;
+                    }
+                }
+            }
+
+            // Check if the word is surrounded by quotes or parentheses, which often indicates a file
+            const wordStart = line.indexOf(word);
+            if (wordStart > 0) {
+                const prevChar = line.charAt(wordStart - 1);
+                const nextCharPos = wordStart + word.length;
+                const nextChar = nextCharPos < line.length ? line.charAt(nextCharPos) : '';
+
+                if ((prevChar === '"' || prevChar === "'" || prevChar === '(') &&
+                    (nextChar === '"' || nextChar === "'" || nextChar === ')' || nextChar === ',')) {
+                    logger.info(`Word "${word}" is surrounded by quotes or parentheses in an include line`);
+                    return true;
+                }
+            }
+        }
+
+        // If the word has a file extension and is not found as a label in the document,
+        // it might be a file reference
+        if (/\.(clw|inc|txa|tpl|tpw|trn|int|equ|def)$/i.test(word)) {
+            logger.info(`Word "${word}" has a file extension and no matching label, treating as file reference`);
             return true;
         }
 
