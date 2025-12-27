@@ -151,6 +151,20 @@ export class ClarionTokenizer {
                 const charClass = PatternMatcher.getCharClass(firstChar);
                 const relevantTypes = PatternMatcher.getPatternsByCharClass().get(charClass) || types;
 
+                // ✅ Check if current position is inside parentheses (...) or template parameters <...>
+                // Structure keywords inside these contexts are parameter types, not structure declarations
+                const isInsideParamsOrTemplate = (pos: number): boolean => {
+                    let openParens = 0;
+                    let openBrackets = 0;
+                    for (let i = 0; i < pos; i++) {
+                        if (line[i] === '(') openParens++;
+                        else if (line[i] === ')') openParens--;
+                        else if (line[i] === '<') openBrackets++;
+                        else if (line[i] === '>') openBrackets--;
+                    }
+                    return openParens > 0 || openBrackets > 0;
+                };
+
                 // Test only patterns relevant to this character class
                 for (const tokenType of relevantTypes) {
                     // ✅ Special handling for Structure - test each pattern individually to preserve negative lookbehinds
@@ -165,16 +179,24 @@ export class ClarionTokenizer {
                             patternTests.set(tokenType, (patternTests.get(tokenType) || 0) + 1);
                             
                             if (match && match.index === 0) {
-                                // ✅ CRITICAL FIX: Check if structure keyword is preceded by : or . or < in original line
-                                // This prevents matching keywords that are part of qualified identifiers like nts:case or obj.case
-                                // or inside template parameters like <report pReport>
+                                // ✅ CRITICAL FIX: Check if structure keyword is inside template parameters or qualified identifiers or parameter lists
+                                // This prevents matching keywords that are:
+                                // - Part of qualified identifiers like nts:case or obj.case (preceded by : or .)
+                                // - Inside template parameters like <report pReport> (inside unclosed <...>)
+                                // - Inside parameter lists like PROCEDURE(...,REPORT,...) (inside unclosed (...))
                                 if (position > 0) {
                                     const prevChar = line[position - 1];
-                                    if (prevChar === ':' || prevChar === '.' || prevChar === '<') {
-                                        // Skip this match - it's part of a qualified identifier or template parameter
+                                    // Skip if preceded by qualifier characters or comma (parameter separator)
+                                    if (prevChar === ':' || prevChar === '.' || prevChar === ',' || prevChar === '<') {
                                         logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at position ${position} - preceded by '${prevChar}'`);
                                         continue; // Try next structure pattern
                                     }
+                                }
+                                
+                                // Check if inside parentheses or template parameters
+                                if (isInsideParamsOrTemplate(position)) {
+                                    logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at position ${position} - inside parameters or template`);
+                                    continue; // Try next structure pattern
                                 }
                                 
                                 patternMatches.set(tokenType, (patternMatches.get(tokenType) || 0) + 1);
