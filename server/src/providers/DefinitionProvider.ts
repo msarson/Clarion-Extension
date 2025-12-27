@@ -11,18 +11,25 @@ import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
+import { MapProcedureResolver } from '../utils/MapProcedureResolver';
+import { SymbolDefinitionResolver } from '../utils/SymbolDefinitionResolver';
+import { FileDefinitionResolver } from '../utils/FileDefinitionResolver';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
 logger.setLevel("info");
 
 /**
  * Provides goto definition functionality for Clarion files
+ * Coordinates multiple specialized resolvers for different definition types
  */
 export class DefinitionProvider {
     private tokenCache = TokenCache.getInstance();
     private symbolProvider = new ClarionDocumentSymbolProvider();
     private memberResolver = new ClassMemberResolver();
     private overloadResolver = new MethodOverloadResolver();
+    private mapResolver = new MapProcedureResolver();
+    private symbolResolver = new SymbolDefinitionResolver();
+    private fileResolver = new FileDefinitionResolver();
     /**
      * Provides definition locations for a given position in a document
      * @param document The text document
@@ -132,26 +139,21 @@ export class DefinitionProvider {
 
             // Check if this is a MAP procedure/function implementation line (e.g., "ProcessOrder PROCEDURE" or "ProcessOrder FUNCTION")
             // Navigate to the MAP declaration
-            // Match any line with PROCEDURE or FUNCTION keyword (not a class method)
-            if ((line.toUpperCase().includes('PROCEDURE') || line.toUpperCase().includes('FUNCTION')) && !methodImplMatch) {
-                // Try to extract procedure name
-                const procImplMatch = line.match(/^\s*(\w+)\s+(PROCEDURE|FUNCTION)/i);
-                if (procImplMatch) {
-                    const procName = procImplMatch[1];
-                    logger.info(`🔍 Detected procedure implementation line: ${procName}`);
+            const procImpl = this.mapResolver.detectProcedureImplementation(line);
+            if (procImpl) {
+                logger.info(`🔍 Detected procedure implementation line: ${procImpl.procName}`);
 
-                    // Allow F12 anywhere on the implementation signature line (not only on the name)
-                    // This improves usability when cursor is on 'PROCEDURE'/'FUNCTION' or inside the parameter list
-                    logger.info(`F12 navigating from implementation to MAP declaration for: ${procName}`);
+                // Allow F12 anywhere on the implementation signature line (not only on the name)
+                // This improves usability when cursor is on 'PROCEDURE'/'FUNCTION' or inside the parameter list
+                logger.info(`F12 navigating from implementation to MAP declaration for: ${procImpl.procName}`);
 
-                    const tokens = this.tokenCache.getTokens(document);
-                    const mapDecl = this.findMapProcedureDeclaration(procName, tokens, document);
-                    if (mapDecl) {
-                        logger.info(`✅ Found MAP declaration at line ${mapDecl.range.start.line}`);
-                        return mapDecl;
-                    } else {
-                        logger.info(`❌ MAP declaration not found in current file for ${procName}`);
-                    }
+                const tokens = this.tokenCache.getTokens(document);
+                const mapDecl = this.mapResolver.findMapDeclaration(procImpl.procName, tokens, document);
+                if (mapDecl) {
+                    logger.info(`✅ Found MAP declaration at line ${mapDecl.range.start.line}`);
+                    return mapDecl;
+                } else {
+                    logger.info(`❌ MAP declaration not found in current file for ${procImpl.procName}`);
                 }
             }
 
@@ -172,7 +174,8 @@ export class DefinitionProvider {
 
             // First, check if this is a reference to a label in the current document
             // This is the highest priority - look for labels in the same scope first
-            const labelDefinition = await this.findLabelDefinition(word, document, position);
+            const tokens = this.tokenCache.getTokens(document);
+            const labelDefinition = this.symbolResolver.findLabelDefinition(word, document, position, tokens);
             if (labelDefinition) {
                 logger.info(`Found label definition for ${word} in the current document`);
                 return labelDefinition;
@@ -180,8 +183,7 @@ export class DefinitionProvider {
 
             // Check if we're inside a MAP block and the word is a procedure declaration
             // Navigate to the PROCEDURE implementation
-            const tokens = this.tokenCache.getTokens(document);
-            const mapProcImpl = this.findMapProcedureImplementation(word, tokens, document, position);
+            const mapProcImpl = this.mapResolver.findProcedureImplementation(word, tokens, document, position);
             if (mapProcImpl) {
                 logger.info(`Found PROCEDURE implementation for MAP declaration: ${word}`);
                 return mapProcImpl;
@@ -203,9 +205,9 @@ export class DefinitionProvider {
 
             // Finally, check if this is a file reference
             // This is the lowest priority - only look for files if no local definitions are found
-            if (this.isLikelyFileReference(word, document, position)) {
+            if (this.fileResolver.isLikelyFileReference(word, document, position)) {
                 logger.info(`No local definition found for ${word}, looking for file reference`);
-                return await this.findFileDefinition(word, document.uri);
+                return await this.fileResolver.findFileDefinition(word, document.uri);
             }
 
             return null;
