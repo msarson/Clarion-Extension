@@ -935,6 +935,49 @@ export class DefinitionProvider {
         const globalLocation = await this.findGlobalDefinition(searchWord, document.uri);
         if (globalLocation) return globalLocation;
     
+        // 🔗 MEMBER file parent search fallback
+        logger.info(`🔍 Checking for MEMBER parent file for global variable lookup`);
+        const memberToken = tokens.find(t => 
+            t.value && t.value.toUpperCase() === 'MEMBER' && 
+            t.line < 5 && 
+            t.referencedFile
+        );
+        
+        if (memberToken && memberToken.referencedFile) {
+            logger.info(`Found MEMBER reference to: ${memberToken.referencedFile}`);
+            
+            // Read the parent file
+            if (fs.existsSync(memberToken.referencedFile)) {
+                try {
+                    const parentContents = await fs.promises.readFile(memberToken.referencedFile, 'utf-8');
+                    const parentDoc = TextDocument.create(
+                        `file:///${memberToken.referencedFile.replace(/\\/g, '/')}`,
+                        'clarion',
+                        1,
+                        parentContents
+                    );
+                    const parentTokens = this.tokenCache.getTokens(parentDoc);
+                    
+                    // Search for global variable (Label at column 0, before first CODE/PROCEDURE)
+                    const globalVar = parentTokens.find(t =>
+                        t.type === TokenType.Label &&
+                        t.start === 0 &&
+                        t.value.toLowerCase() === searchWord.toLowerCase()
+                    );
+                    
+                    if (globalVar) {
+                        logger.info(`✅ Found global variable in MEMBER parent: ${globalVar.value} at line ${globalVar.line}`);
+                        return Location.create(parentDoc.uri, {
+                            start: { line: globalVar.line, character: globalVar.start },
+                            end: { line: globalVar.line, character: globalVar.start + globalVar.value.length }
+                        });
+                    }
+                } catch (err) {
+                    logger.error(`Error reading MEMBER parent file: ${err}`);
+                }
+            }
+        }
+    
         // 🎯 Try FILE structure fallback
         logger.info(`🧐 Still no match; checking for FILE/QUEUE/GROUP label fallback`);
 
