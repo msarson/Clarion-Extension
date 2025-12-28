@@ -69,4 +69,5 @@ export interface Token {
     isStructureField?: boolean; // ✅ Flag to identify structure fields
     structureParent?: Token;  // ✅ Reference to the parent structure token
     nestedLabel?: string;     // ✅ Store the label of the nesting structure (e.g., "Queue:Browse:1" for fields inside it)
+    moduleFile?: string;      // ✅ Store MODULE('filename') for CLASS structures
 }

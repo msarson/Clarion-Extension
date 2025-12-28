@@ -399,6 +399,16 @@ export class DocumentStructure {
         token.maxLabelLength = 0;
         this.structureStack.push(token);
 
+        // ✅ Parse MODULE('filename') attribute for CLASS structures
+        if (token.value.toUpperCase() === 'CLASS' && this.lines && token.line >= 0 && token.line < this.lines.length) {
+            const lineText = this.lines[token.line];
+            const moduleMatch = lineText.match(/Module\s*\(\s*'([^']+)'\s*\)/i);
+            if (moduleMatch) {
+                token.moduleFile = moduleMatch[1];
+                logger.info(`✅ CLASS at line ${token.line} has MODULE: ${token.moduleFile}`);
+            }
+        }
+
         // Add parent-child relationship with current procedure or structure
         // Special case: MODULE inside MAP should be child of MAP, not the containing procedure
         const isModuleInMap = token.value.toUpperCase() === 'MODULE' && 

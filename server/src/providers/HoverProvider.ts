@@ -198,15 +198,17 @@ export class HoverProvider {
             if (currentToken && currentToken.label) {
                 logger.info(`Found method declaration: ${currentToken.label} at line ${position.line}`);
                 
-                // Find the class name this method belongs to
-                const className = this.findClassNameForMethodDeclaration(methodTokens, position.line);
+                // Find the class name and get its MODULE file
+                const classToken = this.findClassTokenForMethodDeclaration(methodTokens, position.line);
                 
-                if (className) {
-                    logger.info(`Method ${currentToken.label} belongs to class ${className}`);
+                if (classToken && classToken.label) {
+                    const className = classToken.label;
+                    const moduleFile = classToken.moduleFile;
                     
-                    // Find the MODULE file from the class definition
-                    const moduleFile = this.extractModuleFromClass(methodTokens, className, document);
-                    logger.info(`Class ${className} has module file: ${moduleFile || 'none'}`);
+                    logger.info(`Method ${currentToken.label} belongs to class ${className}`);
+                    if (moduleFile) {
+                        logger.info(`Class has MODULE: ${moduleFile}`);
+                    }
                     
                     // Count parameters in the declaration
                     const paramCount = this.overloadResolver.countParametersInDeclaration(line);
@@ -217,7 +219,7 @@ export class HoverProvider {
                         currentToken.label,
                         document,
                         paramCount,
-                        moduleFile  // Pass the module file hint
+                        moduleFile
                     );
                     
                     if (implLocation) {
@@ -1066,44 +1068,9 @@ export class HoverProvider {
     }
 
     /**
-     * Extract the MODULE file from a class definition
+     * Find the CLASS token for a method declaration at the given line
      */
-    private extractModuleFromClass(tokens: Token[], className: string, document: TextDocument): string | null {
-        // Find the CLASS token for this class
-        const classToken = tokens.find(t =>
-            t.type === TokenType.Structure &&
-            t.value.toUpperCase() === 'CLASS'
-        );
-        
-        if (!classToken) return null;
-        
-        // Find the label token on the same line
-        const labelToken = tokens.find(t =>
-            t.type === TokenType.Label &&
-            t.line === classToken.line &&
-            t.value.toLowerCase() === className.toLowerCase()
-        );
-        
-        if (!labelToken) return null;
-        
-        // Get the full line text
-        const content = document.getText();
-        const lines = content.split('\n');
-        const classLine = lines[classToken.line];
-        
-        // Extract MODULE('filename') from the class line
-        const moduleMatch = classLine.match(/Module\s*\(\s*'([^']+)'\s*\)/i);
-        if (moduleMatch) {
-            return moduleMatch[1];
-        }
-        
-        return null;
-    }
-
-    /**
-     * Find the class name for a method declaration at the given line
-     */
-    private findClassNameForMethodDeclaration(tokens: Token[], methodLine: number): string | null {
+    private findClassTokenForMethodDeclaration(tokens: Token[], methodLine: number): Token | null {
         // Search backwards from the method line to find the CLASS token
         for (let i = tokens.length - 1; i >= 0; i--) {
             const token = tokens[i];
@@ -1115,28 +1082,20 @@ export class HoverProvider {
             
             // Look for CLASS structure
             if (token.type === TokenType.Structure && token.value.toUpperCase() === 'CLASS') {
-                // Find the label on the same line
-                const labelToken = tokens.find(t =>
-                    t.type === TokenType.Label &&
-                    t.line === token.line
-                );
+                // Check if this class contains our method line
+                // Find the END of this class
+                let classEndLine = -1;
+                for (let j = i + 1; j < tokens.length; j++) {
+                    const endToken = tokens[j];
+                    if (endToken.value.toUpperCase() === 'END' && endToken.start === 0 && endToken.line > token.line) {
+                        classEndLine = endToken.line;
+                        break;
+                    }
+                }
                 
-                if (labelToken) {
-                    // Check if this class contains our method line
-                    // Find the END of this class
-                    let classEndLine = -1;
-                    for (let j = i + 1; j < tokens.length; j++) {
-                        const endToken = tokens[j];
-                        if (endToken.value.toUpperCase() === 'END' && endToken.start === 0 && endToken.line > token.line) {
-                            classEndLine = endToken.line;
-                            break;
-                        }
-                    }
-                    
-                    // Check if method is within this class
-                    if (classEndLine === -1 || methodLine < classEndLine) {
-                        return labelToken.value;
-                    }
+                // Check if method is within this class
+                if (classEndLine === -1 || methodLine < classEndLine) {
+                    return token;  // Return the CLASS token itself
                 }
             }
         }

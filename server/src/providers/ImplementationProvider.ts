@@ -216,15 +216,17 @@ export class ImplementationProvider {
         if (tokenAtPosition && tokenAtPosition.label) {
             logger.info(`Found method/procedure declaration: ${tokenAtPosition.label}`);
             
-            // Extract class name from the context (find the parent CLASS token)
-            const className = this.findClassNameForMethod(tokens, position.line);
+            // Find the CLASS token for this method
+            const classToken = this.findClassTokenForMethod(tokens, position.line);
             
-            if (className) {
-                logger.info(`Method ${tokenAtPosition.label} belongs to class ${className}`);
+            if (classToken && classToken.label) {
+                const className = classToken.label;
+                const moduleFile = classToken.moduleFile;
                 
-                // Find the MODULE file from the class definition
-                const moduleFile = this.extractModuleFromClass(tokens, className, document);
-                logger.info(`Class ${className} has module file: ${moduleFile || 'none'}`);
+                logger.info(`Method ${tokenAtPosition.label} belongs to class ${className}`);
+                if (moduleFile) {
+                    logger.info(`Class has MODULE: ${moduleFile}`);
+                }
                 
                 // Count parameters in the declaration line for overload matching
                 const paramCount = this.countParametersInLine(line);
@@ -370,9 +372,9 @@ export class ImplementationProvider {
     }
 
     /**
-     * Find the class name for a method at the given line
+     * Find the CLASS token for a method at the given line
      */
-    private findClassNameForMethod(tokens: Token[], methodLine: number): string | null {
+    private findClassTokenForMethod(tokens: Token[], methodLine: number): Token | null {
         // Search backwards from the method line to find the CLASS token
         for (let i = tokens.length - 1; i >= 0; i--) {
             const token = tokens[i];
@@ -384,65 +386,22 @@ export class ImplementationProvider {
             
             // Look for CLASS structure
             if (token.type === TokenType.Structure && token.value.toUpperCase() === 'CLASS') {
-                // Find the label on the same line
-                const labelToken = tokens.find(t =>
-                    t.type === TokenType.Label &&
-                    t.line === token.line
-                );
-                
-                if (labelToken) {
-                    // Check if this class contains our method line
-                    // Find the END of this class
-                    let classEndLine = -1;
-                    for (let j = i + 1; j < tokens.length; j++) {
-                        const endToken = tokens[j];
-                        if (endToken.value.toUpperCase() === 'END' && endToken.start === 0 && endToken.line > token.line) {
-                            classEndLine = endToken.line;
-                            break;
-                        }
-                    }
-                    
-                    // Check if method is within this class
-                    if (classEndLine === -1 || methodLine < classEndLine) {
-                        return labelToken.value;
+                // Check if this class contains our method line
+                // Find the END of this class
+                let classEndLine = -1;
+                for (let j = i + 1; j < tokens.length; j++) {
+                    const endToken = tokens[j];
+                    if (endToken.value.toUpperCase() === 'END' && endToken.start === 0 && endToken.line > token.line) {
+                        classEndLine = endToken.line;
+                        break;
                     }
                 }
+                
+                // Check if method is within this class
+                if (classEndLine === -1 || methodLine < classEndLine) {
+                    return token;  // Return the CLASS token itself
+                }
             }
-        }
-        
-        return null;
-    }
-
-    /**
-     * Extract the MODULE file from a class definition
-     */
-    private extractModuleFromClass(tokens: Token[], className: string, document: TextDocument): string | null {
-        // Find the CLASS token for this class
-        const classToken = tokens.find(t =>
-            t.type === TokenType.Structure &&
-            t.value.toUpperCase() === 'CLASS'
-        );
-        
-        if (!classToken) return null;
-        
-        // Find the label token on the same line
-        const labelToken = tokens.find(t =>
-            t.type === TokenType.Label &&
-            t.line === classToken.line &&
-            t.value.toLowerCase() === className.toLowerCase()
-        );
-        
-        if (!labelToken) return null;
-        
-        // Get the full line text
-        const content = document.getText();
-        const lines = content.split('\n');
-        const classLine = lines[classToken.line];
-        
-        // Extract MODULE('filename') from the class line
-        const moduleMatch = classLine.match(/Module\s*\(\s*'([^']+)'\s*\)/i);
-        if (moduleMatch) {
-            return moduleMatch[1];
         }
         
         return null;
