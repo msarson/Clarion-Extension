@@ -22,7 +22,7 @@ import LoggerManager from './utils/LoggerManager';
 import { SolutionCache } from './SolutionCache';
 import { isInsideMapBlock } from '../../common/clarionUtils';
 const logger = LoggerManager.getLogger("DocumentManager");
-logger.setLevel("info");
+logger.setLevel("error");
 
 /**
  * Interface representing document information including statement locations
@@ -467,7 +467,13 @@ export class DocumentManager implements Disposable {
             
             // Add tooltip showing the target file and section if applicable
             if (location.sectionName) {
-                link.tooltip = `${path.basename(location.fullFileName)} - Section: ${location.sectionName}`;
+                // Read section content for tooltip preview
+                const sectionPreview = this.getSectionPreview(location.fullFileName, location.sectionName);
+                if (sectionPreview) {
+                    link.tooltip = `${path.basename(location.fullFileName)} - Section: ${location.sectionName}\n\n${sectionPreview}`;
+                } else {
+                    link.tooltip = `${path.basename(location.fullFileName)} - Section: ${location.sectionName}`;
+                }
             } else {
                 link.tooltip = path.basename(location.fullFileName);
             }
@@ -489,6 +495,63 @@ export class DocumentManager implements Disposable {
         }
         
         return links;
+    }
+
+    /**
+     * Gets a preview of a SECTION's content for displaying in tooltips.
+     * Returns the first few lines of the section (up to maxLines).
+     * 
+     * @param filePath - Full path to the file containing the section
+     * @param sectionName - Name of the section to preview
+     * @param maxLines - Maximum number of lines to include (default: 5)
+     * @returns Preview string or empty if section not found
+     */
+    private getSectionPreview(filePath: string, sectionName: string, maxLines: number = 5): string {
+        try {
+            const fileContent = fs.readFileSync(filePath, 'utf8');
+            const lines = fileContent.split('\n');
+            
+            // Find the section line
+            const sectionIndex = lines.findIndex(line =>
+                line.toLowerCase().includes(`section('${sectionName.toLowerCase()}')`)
+            );
+            
+            if (sectionIndex === -1) {
+                return '';
+            }
+            
+            const previewLines: string[] = [];
+            
+            // Find the end of the section (next SECTION or end of file)
+            let endIndex = lines.length;
+            for (let i = sectionIndex + 1; i < lines.length; i++) {
+                if (lines[i].match(/SECTION\s*\(/i)) {
+                    endIndex = i;
+                    break;
+                }
+            }
+            
+            // Collect up to maxLines (not including the SECTION line itself)
+            const linesToShow = Math.min(maxLines, endIndex - sectionIndex - 1);
+            for (let i = 1; i <= linesToShow && sectionIndex + i < endIndex; i++) {
+                const line = lines[sectionIndex + i].trim();
+                if (line) { // Only include non-empty lines
+                    previewLines.push(line);
+                }
+                if (previewLines.length >= maxLines) {
+                    break;
+                }
+            }
+            
+            if (previewLines.length > 0) {
+                return previewLines.join('\n') + (endIndex - sectionIndex - 1 > maxLines ? '\n...' : '');
+            }
+            
+            return '';
+        } catch (error) {
+            logger.error(`Error reading section preview: ${error instanceof Error ? error.message : String(error)}`);
+            return '';
+        }
     }
 
     /**
