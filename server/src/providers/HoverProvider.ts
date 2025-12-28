@@ -408,7 +408,63 @@ export class HoverProvider {
             const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, position.line);
 
             if (!currentScope) {
-                logger.info('No scope found - cannot provide variable/parameter hover');
+                logger.info('No scope found - checking for global variable in MEMBER parent file');
+                
+                // 🔗 Check for global variable in MEMBER parent file
+                const memberToken = tokens.find(t => 
+                    t.value && t.value.toUpperCase() === 'MEMBER' && 
+                    t.line < 5 && 
+                    t.referencedFile
+                );
+                
+                if (memberToken && memberToken.referencedFile) {
+                    logger.info(`Found MEMBER reference to: ${memberToken.referencedFile}`);
+                    
+                    if (fs.existsSync(memberToken.referencedFile)) {
+                        try {
+                            const parentContents = await fs.promises.readFile(memberToken.referencedFile, 'utf-8');
+                            const parentDoc = TextDocument.create(
+                                `file:///${memberToken.referencedFile.replace(/\\/g, '/')}`,
+                                'clarion',
+                                1,
+                                parentContents
+                            );
+                            const parentTokens = this.tokenCache.getTokens(parentDoc);
+                            
+                            // Search for global variable (Label at column 0)
+                            const globalVar = parentTokens.find(t =>
+                                t.type === TokenType.Label &&
+                                t.start === 0 &&
+                                t.value.toLowerCase() === word.toLowerCase()
+                            );
+                            
+                            if (globalVar) {
+                                logger.info(`✅ Found global variable in MEMBER parent: ${globalVar.value} at line ${globalVar.line}`);
+                                
+                                // Find the type by looking at the next token
+                                const globalIndex = parentTokens.indexOf(globalVar);
+                                let typeInfo = 'UNKNOWN';
+                                if (globalIndex + 1 < parentTokens.length) {
+                                    const nextToken = parentTokens[globalIndex + 1];
+                                    if (nextToken.line === globalVar.line && nextToken.type === TokenType.Type) {
+                                        typeInfo = nextToken.value;
+                                    }
+                                }
+                                
+                                return {
+                                    contents: {
+                                        kind: 'markdown',
+                                        value: `**Global Variable**: \`${globalVar.value}\`\n\n**Type**: \`${typeInfo}\`\n\n**Defined in**: ${path.basename(memberToken.referencedFile)}`
+                                    }
+                                };
+                            }
+                        } catch (err) {
+                            logger.error(`Error reading MEMBER parent file: ${err}`);
+                        }
+                    }
+                }
+                
+                logger.info('No scope found and no global variable in MEMBER parent - cannot provide hover');
                 return null;
             }
 
@@ -441,63 +497,7 @@ export class HoverProvider {
                 logger.info(`✅ HOVER-RETURN: Found variable info for ${searchWord}: type=${variableInfo.type}, line=${variableInfo.line}`);
                 return this.constructVariableHover(word, variableInfo, currentScope);
             }
-            logger.info(`❌ HOVER-RETURN: ${searchWord} is not a local variable`);
-            
-            // 🔗 Check for global variable in MEMBER parent file
-            logger.info(`🔍 Checking for global variable in MEMBER parent file`);
-            const memberToken = tokens.find(t => 
-                t.value && t.value.toUpperCase() === 'MEMBER' && 
-                t.line < 5 && 
-                t.referencedFile
-            );
-            
-            if (memberToken && memberToken.referencedFile) {
-                logger.info(`Found MEMBER reference to: ${memberToken.referencedFile}`);
-                
-                if (fs.existsSync(memberToken.referencedFile)) {
-                    try {
-                        const parentContents = await fs.promises.readFile(memberToken.referencedFile, 'utf-8');
-                        const parentDoc = TextDocument.create(
-                            `file:///${memberToken.referencedFile.replace(/\\/g, '/')}`,
-                            'clarion',
-                            1,
-                            parentContents
-                        );
-                        const parentTokens = this.tokenCache.getTokens(parentDoc);
-                        
-                        // Search for global variable (Label at column 0)
-                        const globalVar = parentTokens.find(t =>
-                            t.type === TokenType.Label &&
-                            t.start === 0 &&
-                            t.value.toLowerCase() === searchWord.toLowerCase()
-                        );
-                        
-                        if (globalVar) {
-                            logger.info(`✅ Found global variable in MEMBER parent: ${globalVar.value} at line ${globalVar.line}`);
-                            
-                            // Find the type by looking at the next token
-                            const globalIndex = parentTokens.indexOf(globalVar);
-                            let typeInfo = 'UNKNOWN';
-                            if (globalIndex + 1 < parentTokens.length) {
-                                const nextToken = parentTokens[globalIndex + 1];
-                                if (nextToken.line === globalVar.line && nextToken.type === TokenType.Type) {
-                                    typeInfo = nextToken.value;
-                                }
-                            }
-                            
-                            return {
-                                contents: {
-                                    kind: 'markdown',
-                                    value: `**Global Variable**: \`${globalVar.value}\`\n\n**Type**: \`${typeInfo}\`\n\n**Defined in**: ${path.basename(memberToken.referencedFile)}`
-                                }
-                            };
-                        }
-                    } catch (err) {
-                        logger.error(`Error reading MEMBER parent file: ${err}`);
-                    }
-                }
-            }
-
+            logger.info(`❌ HOVER-RETURN: ${searchWord} is not a local variable - returning null`);
             return null;
         } catch (error) {
             logger.error(`Error providing hover: ${error instanceof Error ? error.message : String(error)}`);
