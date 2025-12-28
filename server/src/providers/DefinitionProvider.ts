@@ -156,6 +156,26 @@ export class DefinitionProvider {
                     return mapDecl;
                 } else {
                     logger.info(`❌ MAP declaration not found in current file for ${tokenAtPosition.label}`);
+                    
+                    // Check if this file has MEMBER at top, indicating it's part of another file
+                    const memberToken = tokens.find(t => 
+                        t.line < 5 && // MEMBER should be at top of file
+                        t.value.toUpperCase() === 'MEMBER' &&
+                        t.referencedFile
+                    );
+                    
+                    if (memberToken?.referencedFile) {
+                        logger.info(`File has MEMBER('${memberToken.referencedFile}'), searching parent file for MAP declaration`);
+                        const memberDecl = await this.findMapDeclarationInMemberFile(
+                            tokenAtPosition.label,
+                            memberToken.referencedFile,
+                            document,
+                            line
+                        );
+                        if (memberDecl) {
+                            return memberDecl;
+                        }
+                    }
                 }
             }
 
@@ -1633,7 +1653,7 @@ export class DefinitionProvider {
         if (isMethodImplementation) {
             return false;
         }
-        
+
         // Check if word appears before PROCEDURE/FUNCTION keyword (declaration pattern)
         // Examples:
         //   SomeMethod   PROCEDURE(...)
@@ -1643,7 +1663,176 @@ export class DefinitionProvider {
             logger.info(`Detected cursor on declaration: ${word}`);
             return true;
         }
-        
+
         return false;
+    }
+
+    /**
+     * Find MAP declaration in MEMBER parent file
+     * Searches parent file for MAP block with MODULE pointing back to current file
+     * @param procName Procedure name to find
+     * @param memberFile Parent file from MEMBER('filename')
+     * @param document Current document (implementation file)
+     * @param signature Optional signature for overload matching
+     */
+    private async findMapDeclarationInMemberFile(
+        procName: string,
+        memberFile: string,
+        document: TextDocument,
+        signature?: string
+    ): Promise<Location | null> {
+        try {
+            const fs = await import('fs');
+            const path = await import('path');
+            
+            // Resolve MEMBER file path
+            const solutionManager = SolutionManager.getInstance();
+            let resolvedPath: string | null = null;
+            
+            // Try solution-wide redirection first
+            if (solutionManager && solutionManager.solution) {
+                for (const project of solutionManager.solution.projects) {
+                    const redirectionParser = project.getRedirectionParser();
+                    const resolved = redirectionParser.findFile(memberFile);
+                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
+                        resolvedPath = resolved.path;
+                        logger.info(`✅ Resolved MEMBER file via redirection: ${resolvedPath}`);
+                        break;
+                    }
+                }
+            }
+            
+            // Fallback to relative path
+            if (!resolvedPath) {
+                const currentDir = path.dirname(decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\'));
+                const relativePath = path.join(currentDir, memberFile);
+                if (fs.existsSync(relativePath)) {
+                    resolvedPath = path.resolve(relativePath);
+                    logger.info(`✅ Resolved MEMBER file via relative path: ${resolvedPath}`);
+                }
+            }
+            
+            if (!resolvedPath) {
+                logger.info(`❌ Could not resolve MEMBER file: ${memberFile}`);
+                return null;
+            }
+            
+            // Get current filename for reverse lookup
+            const currentFileName = path.basename(document.uri);
+            logger.info(`Searching for MAP MODULE('${currentFileName}') in ${resolvedPath}`);
+            
+            // Read and tokenize parent file
+            const content = fs.readFileSync(resolvedPath, 'utf8');
+            const ClarionTokenizer = (await import('../ClarionTokenizer')).ClarionTokenizer;
+            const tokenizer = new ClarionTokenizer(content);
+            const parentTokens = tokenizer.tokenize();
+            
+            // Find MAP blocks
+            const mapBlocks = parentTokens.filter(t =>
+                t.type === TokenType.Structure &&
+                t.value.toUpperCase() === 'MAP'
+            );
+            
+            if (mapBlocks.length === 0) {
+                logger.info(`No MAP blocks found in ${memberFile}`);
+                return null;
+            }
+            
+            // Search each MAP for MODULE pointing to current file
+            for (const mapBlock of mapBlocks) {
+                const mapStart = mapBlock.line;
+                const mapEnd = mapBlock.finishesAt;
+                
+                if (mapEnd === undefined) continue;
+                
+                // Find MODULE blocks in this MAP
+                const moduleBlocks = parentTokens.filter(t =>
+                    t.type === TokenType.Structure &&
+                    t.value.toUpperCase() === 'MODULE' &&
+                    t.line > mapStart &&
+                    t.line < mapEnd
+                );
+                
+                for (const moduleBlock of moduleBlocks) {
+                    // Find MODULE token with referencedFile on same line
+                    const moduleToken = parentTokens.find(t =>
+                        t.line === moduleBlock.line &&
+                        t.value.toUpperCase() === 'MODULE' &&
+                        t.referencedFile
+                    );
+                    
+                    // Check if this MODULE points to our current file
+                    if (moduleToken?.referencedFile && 
+                        path.basename(moduleToken.referencedFile).toLowerCase() === currentFileName.toLowerCase()) {
+                        logger.info(`✅ Found MODULE('${moduleToken.referencedFile}') pointing to current file`);
+                        
+                        // Find procedure declaration in this MODULE block
+                        const moduleStart = moduleBlock.line;
+                        const moduleEnd = moduleBlock.finishesAt;
+                        
+                        if (moduleEnd === undefined) continue;
+                        
+                        // Look for MapProcedure tokens matching procName
+                        const procedureDecls = parentTokens.filter(t =>
+                            t.line > moduleStart &&
+                            t.line < moduleEnd &&
+                            (t.subType === TokenType.MapProcedure || t.type === TokenType.Function) &&
+                            (t.label?.toLowerCase() === procName.toLowerCase() ||
+                             t.value.toLowerCase() === procName.toLowerCase())
+                        );
+                        
+                        if (procedureDecls.length === 0) {
+                            logger.info(`Procedure ${procName} not found in this MODULE block`);
+                            continue;
+                        }
+                        
+                        // If only one, return it
+                        if (procedureDecls.length === 1) {
+                            const decl = procedureDecls[0];
+                            logger.info(`✅ Found MAP declaration at line ${decl.line}`);
+                            return Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
+                                start: { line: decl.line, character: 0 },
+                                end: { line: decl.line, character: decl.value.length }
+                            });
+                        }
+                        
+                        // Multiple declarations - use overload resolution
+                        if (signature) {
+                            const ProcedureSignatureUtils = (await import('../utils/ProcedureSignatureUtils')).ProcedureSignatureUtils;
+                            const lines = content.split('\n');
+                            const implParams = ProcedureSignatureUtils.extractParameterTypes(signature);
+                            
+                            for (const decl of procedureDecls) {
+                                const declSignature = lines[decl.line].trim();
+                                const declParams = ProcedureSignatureUtils.extractParameterTypes(declSignature);
+                                
+                                if (ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
+                                    logger.info(`✅ Found matching overload at line ${decl.line}`);
+                                    return Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
+                                        start: { line: decl.line, character: 0 },
+                                        end: { line: decl.line, character: decl.value.length }
+                                    });
+                                }
+                            }
+                        }
+                        
+                        // Fallback to first declaration
+                        const decl = procedureDecls[0];
+                        logger.info(`Returning first declaration at line ${decl.line}`);
+                        return Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
+                            start: { line: decl.line, character: 0 },
+                            end: { line: decl.line, character: decl.value.length }
+                        });
+                    }
+                }
+            }
+            
+            logger.info(`❌ No MAP MODULE('${currentFileName}') found in ${memberFile}`);
+            return null;
+            
+        } catch (error) {
+            logger.error(`Error searching MEMBER file: ${error}`);
+            return null;
+        }
     }
 }
