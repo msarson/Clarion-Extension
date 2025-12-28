@@ -33,6 +33,8 @@ export interface ClarionLocation {
     statementType?: string;
     /** Original regex match result */
     result?: RegExpExecArray;
+    /** Section name for INCLUDE statements with sections */
+    sectionName?: string;
     
     // Method metadata for lazy implementation resolution
     /** Class name for method declarations (used for lazy implementation lookup) */
@@ -122,6 +124,7 @@ export class LocationProvider {
                     linePositionEnd: new Position(match.lineIndex, valueEnd),
                     statementType: '',
                     result: match,
+                    sectionName: match[2] || undefined, // Store the section name if present
                 };
 
                 locations.push(location);

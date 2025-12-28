@@ -464,6 +464,14 @@ export class DocumentManager implements Disposable {
                 new Range(location.linePosition, location.linePositionEnd),
                 targetUri
             );
+            
+            // Add tooltip showing the target file and section if applicable
+            if (location.sectionName) {
+                link.tooltip = `${path.basename(location.fullFileName)} - Section: ${location.sectionName}`;
+            } else {
+                link.tooltip = path.basename(location.fullFileName);
+            }
+            
             links.push(link);
             logger.info(`Added link for ${location.statementType} at line ${location.linePosition.line} to ${targetUri.toString()}`);
         }
