@@ -81,7 +81,8 @@ export class HoverProvider {
                 if (position.character >= mapProcMatch.index! && position.character <= procNameEnd) {
                     // Find the MAP declaration for this procedure using resolver
                     const tokens = this.tokenCache.getTokens(document);
-                    const mapLocation = this.mapResolver.findMapDeclaration(procName, tokens, document);
+                    // Pass implementation signature for overload resolution
+                    const mapLocation = this.mapResolver.findMapDeclaration(procName, tokens, document, line);
                     if (mapLocation) {
                         // Extract the text at that location
                         const mapLine = document.getText({

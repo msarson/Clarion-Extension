@@ -149,7 +149,8 @@ export class DefinitionProvider {
                 logger.info(`🔍 Detected procedure implementation: ${tokenAtPosition.label}`);
                 logger.info(`F12 navigating from implementation to MAP declaration for: ${tokenAtPosition.label}`);
 
-                const mapDecl = this.mapResolver.findMapDeclaration(tokenAtPosition.label, tokens, document);
+                // Pass implementation signature for overload resolution
+                const mapDecl = this.mapResolver.findMapDeclaration(tokenAtPosition.label, tokens, document, line);
                 if (mapDecl) {
                     logger.info(`✅ Found MAP declaration at line ${mapDecl.range.start.line}`);
                     return mapDecl;
@@ -183,7 +184,7 @@ export class DefinitionProvider {
 
             // Check if we're inside a MAP block and the word is a procedure declaration
             // Navigate to the PROCEDURE implementation
-            const mapProcImpl = this.mapResolver.findProcedureImplementation(word, tokens, document, position);
+            const mapProcImpl = this.mapResolver.findProcedureImplementation(word, tokens, document, position, line);
             if (mapProcImpl) {
                 logger.info(`Found PROCEDURE implementation for MAP declaration: ${word}`);
                 return mapProcImpl;
