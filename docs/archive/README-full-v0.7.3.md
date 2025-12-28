@@ -398,7 +398,7 @@ Large Clarion files (14k+ lines) now have significantly improved response times.
 ### Enhancements
 - **Improved Method Hover Display**: Method hovers now show up to 15 lines of actual implementation code after the CODE statement
 - **Interactive Navigation in Hover**: Click the line number link in hovers to jump directly to method implementation
-- **Keyboard Shortcut Hint**: Hover displays "Click or press Ctrl+F12 to navigate" to guide users
+- **Keyboard Shortcut Hint**: Hover displays "Ctrl+F12 to navigate" to guide users
 - **Method Call Hover Support**: Hovers now work for method calls within implementations (e.g., `self.SetLength(...)`)
 - **Routine Navigation**: Complete navigation support for DO statements with hover preview and Ctrl+F12 navigation
 - **Local Variable and Parameter Navigation**: F12 navigation and hover tooltips for local variables and procedure/method parameters

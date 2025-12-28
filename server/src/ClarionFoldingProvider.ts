@@ -3,7 +3,7 @@ import { Token, TokenType } from "./ClarionTokenizer.js";
 import LoggerManager from './logger';
 
 const logger = LoggerManager.getLogger("FoldingProvider");
-logger.setLevel("info");
+logger.setLevel("error");
 class ClarionFoldingProvider {
     private tokens: Token[];
     private foldingRanges: FoldingRange[];

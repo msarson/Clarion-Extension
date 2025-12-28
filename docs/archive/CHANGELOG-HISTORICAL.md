@@ -132,7 +132,7 @@ All features and fixes from v0.6.4 (see below).
 - **Enhanced hover content**: Method implementation hovers now show up to 15 lines of actual implementation code after the CODE statement (previously stopped at CODE)
 - **Smart boundary detection**: Automatically stops before nested method/routine implementations within the 15-line preview
 - **Interactive navigation**: Added clickable line number link in hover to jump directly to method implementation
-- **Keyboard shortcut hint**: Hover displays "Click or press Ctrl+F12 to navigate" to guide users
+- **Keyboard shortcut hint**: Hover displays "Ctrl+F12 to navigate" to guide users
 - **Better developer experience**: Aligns hover behavior with standard IDE practices (VS Code, Visual Studio, IntelliJ) by showing actual implementation preview
 - **Method call hover support**: Hovers now work for method calls within implementations (e.g., hovering over `self.SetLength(...)` shows the SetLength implementation)
   - Intelligently matches methods by parameter count

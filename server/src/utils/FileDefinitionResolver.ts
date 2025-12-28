@@ -6,7 +6,6 @@
 import { Location, Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
-import { SolutionManager } from '../solution/solutionManager';
 import * as path from 'path';
 import * as fs from 'fs';
 import LoggerManager from '../logger';
@@ -41,12 +40,13 @@ export class FileDefinitionResolver {
         // Check for common Clarion file inclusion patterns
         const includePatterns = [
             /\bINCLUDE\b\s*\(?(['"]?[\w\.]+['"]?)?\)?/i,
-            /\bUSE\b\s*\(?(['"]?[\w\.]+['"]?)?\)?/i,
-            /\bIMPORT\b\s*\(?(['"]?[\w\.]+['"]?)?\)?/i,
-            /\bEQUATE\b\s*\(?(['"]?[\w\.]+['"]?)?\)?/i,
-            /\bFROM\b\s*\(?(['"]?[\w\.]+['"]?)?\)?/i,
-            /\bSOURCE\b\s*\(?(['"]?[\w\.]+['"]?)?\)?/i,
-            /\bMODULE\b\s*\(?(['"]?[\w\.]+['"]?)?\)?/i
+            // /\bUSE\b\s*\(?(['"]?[\w\.]+['"]?)?\)?/i,
+            // /\bIMPORT\b\s*\(?(['"]?[\w\.]+['"]?)?\)?/i,
+            // /\bEQUATE\b\s*\(?(['"]?[\w\.]+['"]?)?\)?/i,
+            // /\bFROM\b\s*\(?(['"]?[\w\.]+['"]?)?\)?/i,
+            // /\bSOURCE\b\s*\(?(['"]?[\w\.]+['"]?)?\)?/i,
+            /\bMODULE\b\s*\(?(['"]?[\w\.]+['"]?)?\)?/i,
+            /\bMEMBER\b\s*\(?(['"]?[\w\.]+['"]?)?\)?/i
         ];
 
         // Check if the line contains any of the include patterns
@@ -77,15 +77,15 @@ export class FileDefinitionResolver {
                 }
             }
 
-            // Check if the word is surrounded by quotes or parentheses, which often indicates a file
+            // Check if the word is surrounded by quotes, which often indicates a file
             const wordStart = line.indexOf(word);
             if (wordStart > 0) {
                 const prevChar = line.charAt(wordStart - 1);
                 const nextCharPos = wordStart + word.length;
                 const nextChar = nextCharPos < line.length ? line.charAt(nextCharPos) : '';
 
-                if ((prevChar === '"' || prevChar === "'" || prevChar === '(') &&
-                    (nextChar === '"' || nextChar === "'" || nextChar === ')' || nextChar === ',')) {
+                if ((prevChar === "'" ) &&
+                    (nextChar === "'" || nextChar === ',')) {
                     logger.info(`Word "${word}" is surrounded by quotes or parentheses in an include line`);
                     return true;
                 }

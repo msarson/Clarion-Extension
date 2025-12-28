@@ -5,7 +5,7 @@ import { ClarionLocation } from './LocationProvider'; // Make sure this import i
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("HoverProvider");
-logger.setLevel("info");
+logger.setLevel("error");
 
 /**
  * Provides hover information for Clarion code elements.
@@ -233,7 +233,7 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
         ]))}`);
         
         hoverMessage.appendMarkdown(`**Routine: ${labelName}**\n\n`);
-        hoverMessage.appendMarkdown(` - Line: [${lineNumber}](${commandUri} "Go to Routine (F12)") *(Click or press F12 to navigate)*\n\n`);
+        hoverMessage.appendMarkdown(` - Line: [${lineNumber}](${commandUri} "Go to Routine (F12)") *(press F12 to navigate)*\n\n`);
         
         try {
             const content = document.getText();
@@ -314,7 +314,7 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
                 if (statementType === "METHOD" || statementType === "MAPPROCEDURE") {
                     const lineNumber = location.sectionLineLocation.line + 1;
                     const commandUri = vscode.Uri.parse(`command:clarion.goToMethodImplementation?${encodeURIComponent(JSON.stringify([location.fullFileName, location.sectionLineLocation.line, 0]))}`);
-                    hoverMessage.appendMarkdown(` - Implementation Line: [${lineNumber}](${commandUri} "Go to Implementation (Ctrl+F12)") *(Click or press Ctrl+F12 to navigate)*\n\n`);
+                    hoverMessage.appendMarkdown(` - Implementation Line: [${lineNumber}](${commandUri} "Go to Implementation (Ctrl+F12)") *(press Ctrl+F12 to navigate)*\n\n`);
                 } else if (statementType === "SECTION") {
                     hoverMessage.appendMarkdown(` - Section Line: ${location.sectionLineLocation.line + 1}\n\n`);
                 }
