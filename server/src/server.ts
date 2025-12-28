@@ -56,6 +56,7 @@ import { DefinitionProvider } from './providers/DefinitionProvider';
 import { HoverProvider } from './providers/HoverProvider';
 import { DiagnosticProvider } from './providers/DiagnosticProvider';
 import { SignatureHelpProvider } from './providers/SignatureHelpProvider';
+import { ImplementationProvider } from './providers/ImplementationProvider';
 import path = require('path');
 import { ClarionSolutionInfo } from 'common/types';
 
@@ -78,6 +79,7 @@ const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider();
 const definitionProvider = new DefinitionProvider();
 const hoverProvider = new HoverProvider();
 const signatureHelpProvider = new SignatureHelpProvider();
+const implementationProvider = new ImplementationProvider();
 
 // ✅ Create Connection and Documents Manager
 const connection = createConnection(ProposedFeatures.all);
@@ -135,7 +137,7 @@ connection.onInitialize((params) => {
                 foldingRangeProvider: true,
                 colorProvider: true,
                 definitionProvider: true,
-                // Note: implementationProvider is handled client-side in extension.ts
+                implementationProvider: true,
                 hoverProvider: true,
                 signatureHelpProvider: {
                     triggerCharacters: ['(', ','],
@@ -1227,6 +1229,35 @@ connection.onDefinition(async (params) => {
         return definition;
     } catch (error) {
         logger.error(`❌ Error providing definition: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+    }
+});
+
+// Handle implementation requests
+connection.onImplementation(async (params) => {
+    logger.info(`📂 Received implementation request for: ${params.textDocument.uri} at position ${params.position.line}:${params.position.character}`);
+    
+    if (!serverInitialized) {
+        logger.info(`⚠️ [DELAY] Server not initialized yet, delaying implementation request`);
+        return null;
+    }
+    
+    const document = documents.get(params.textDocument.uri);
+    if (!document) {
+        logger.info(`⚠️ Document not found: ${params.textDocument.uri}`);
+        return null;
+    }
+    
+    try {
+        const implementation = await implementationProvider.provideImplementation(document, params.position);
+        if (implementation) {
+            logger.info(`✅ Found implementation for ${params.textDocument.uri}`);
+        } else {
+            logger.info(`⚠️ No implementation found for ${params.textDocument.uri}`);
+        }
+        return implementation;
+    } catch (error) {
+        logger.error(`❌ Error providing implementation: ${error instanceof Error ? error.message : String(error)}`);
         return null;
     }
 });

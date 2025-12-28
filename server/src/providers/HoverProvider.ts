@@ -84,15 +84,15 @@ export class HoverProvider {
                     // Pass implementation signature for overload resolution
                     const mapLocation = this.mapResolver.findMapDeclaration(procName, tokens, document, line);
                     if (mapLocation) {
-                        // Extract the text at that location
+                        // Get the full line where the MAP declaration occurs
                         const mapLine = document.getText({
-                            start: mapLocation.range.start,
-                            end: mapLocation.range.end
-                        });
+                            start: { line: mapLocation.range.start.line, character: 0 },
+                            end: { line: mapLocation.range.start.line + 1, character: 0 }
+                        }).trim();
                         return {
                             contents: {
                                 kind: 'markdown',
-                                value: `**MAP Declaration**\n\n\`\`\`clarion\n${mapLine.trim()}\n\`\`\``
+                                value: `**MAP Declaration** _(Press F12 to navigate)_\n\n\`\`\`clarion\n${mapLine}\n\`\`\``
                             }
                         };
                     }
@@ -116,17 +116,32 @@ export class HoverProvider {
                     
                     // Check if cursor is on the procedure name
                     if (position.character >= procNameStart && position.character <= procNameEnd) {
-                        logger.info(`Cursor is on procedure name, searching for implementation...`);
-                        // Find the implementation
-                        const implInfo = this.findProcedureImplementation(document, procName);
-                        logger.info(`Implementation found: ${implInfo ? 'YES at line ' + (implInfo.line + 1) : 'NO'}`);
-                        if (implInfo) {
-                            return {
-                                contents: {
-                                    kind: 'markdown',
-                                    value: `**Implementation** (line ${implInfo.line + 1})\n\n\`\`\`clarion\n${implInfo.preview}\n\`\`\``
-                                }
-                            };
+                        logger.info(`Cursor is on procedure name, searching for implementation with overload resolution...`);
+                        
+                        // Use MapProcedureResolver for overload resolution
+                        const tokens = this.tokenCache.getTokens(document);
+                        const implLocation = this.mapResolver.findProcedureImplementation(
+                            procName, 
+                            tokens, 
+                            document, 
+                            position, 
+                            line  // Pass declaration signature for overload matching
+                        );
+                        
+                        if (implLocation) {
+                            logger.info(`✅ Found implementation with overload resolution at line ${implLocation.range.start.line}`);
+                            // Get preview of implementation
+                            const implInfo = this.findProcedureImplementationPreview(document, procName, implLocation.range.start.line);
+                            if (implInfo) {
+                                return {
+                                    contents: {
+                                        kind: 'markdown',
+                                        value: `**Implementation** _(Press Ctrl+F12 to navigate)_ — line ${implInfo.line + 1}\n\n\`\`\`clarion\n${implInfo.preview}\n\`\`\``
+                                    }
+                                };
+                            }
+                        } else {
+                            logger.info(`❌ No implementation found for ${procName}`);
                         }
                     } else {
                         logger.info(`Cursor NOT on procedure name (cursor at ${position.character}, name range ${procNameStart}-${procNameEnd})`);
@@ -848,62 +863,110 @@ export class HoverProvider {
             }
             if (implMatch && implMatch[1].toLowerCase() === procName.toLowerCase()) {
                 logger.info(`✅ Found matching implementation at line ${i}: "${implMatch[1]}"`);
-                // Found the implementation, try to find its token for finishesAt
-                const procToken = tokens.find(t => 
-                    (t.subType === TokenType.Procedure || t.subType === TokenType.GlobalProcedure) &&
-                    t.line === i &&
-                    t.value.toLowerCase() === procName.toLowerCase()
-                );
-                
-                const previewLines: string[] = [line.trim()];
-                const maxPreviewLines = 10;
-                
-                // Determine end line: use finishesAt if available, otherwise use heuristic
-                let endLine: number;
-                if (procToken && procToken.finishesAt !== undefined) {
-                    // Use token's finishesAt to stop exactly at procedure end
-                    endLine = Math.min(procToken.finishesAt, i + maxPreviewLines + 5); // +5 for data section
-                } else {
-                    // Fallback: search up to 30 lines
-                    endLine = Math.min(lines.length, i + 30);
-                }
-                
-                // Find CODE statement and grab lines after it
-                let foundCode = false;
-                for (let j = i + 1; j <= endLine && j < lines.length; j++) {
-                    const previewLine = lines[j];
-                    if (!previewLine) continue; // Safety check
-                    const previewTrimmed = previewLine.trim().toUpperCase();
-                    
-                    if (previewTrimmed === 'CODE') {
-                        foundCode = true;
-                        previewLines.push(previewLine);
-                        continue;
-                    }
-                    
-                    if (foundCode) {
-                        // Add lines after CODE up to maxPreviewLines or procedure end
-                        if (previewLines.length - 1 < maxPreviewLines) { // -1 because first line is signature
-                            previewLines.push(previewLine);
-                        } else {
-                            break;
-                        }
-                    } else {
-                        // Before CODE, just add the line (could be data section, etc.)
-                        previewLines.push(previewLine);
-                    }
-                }
-                
-                return {
-                    line: i,
-                    signature: line.trim(),
-                    preview: previewLines.join('\n')
-                };
+                return this.findProcedureImplementationPreview(document, procName, i);
             }
         }
         
-        logger.info(`❌ No implementation found for "${procName}" (checked ${checkedLines} PROCEDURE declarations)`);
+        logger.info(`❌ No implementation found for "${procName}"`);
         return null;
+    }
+
+    /**
+     * Get preview for a procedure implementation at a specific line
+     * Shows either the full implementation if short, or first N lines if long
+     */
+    private findProcedureImplementationPreview(document: TextDocument, procName: string, lineNumber: number): { line: number, signature: string, preview: string } | null {
+        const text = document.getText();
+        const lines = text.split(/\r?\n/);
+        const tokens = this.tokenCache.getTokens(document);
+        
+        if (lineNumber >= lines.length) {
+            return null;
+        }
+        
+        const line = lines[lineNumber];
+        
+        // Find the procedure token to get finishesAt
+        const procToken = tokens.find(t => 
+            (t.subType === TokenType.Procedure || t.subType === TokenType.GlobalProcedure || 
+             t.subType === TokenType.MethodImplementation) &&
+            t.line === lineNumber &&
+            t.value.toLowerCase() === procName.toLowerCase()
+        );
+        
+        const previewLines: string[] = [line.trim()];
+        const maxPreviewLines = 15; // Show up to 15 lines for long procedures
+        
+        // Determine the actual end of the procedure
+        let procedureEndLine: number;
+        if (procToken && procToken.finishesAt !== undefined) {
+            // Use token's finishesAt to know exactly where procedure ends
+            procedureEndLine = procToken.finishesAt;
+            logger.info(`Procedure ${procName} ends at line ${procedureEndLine} (finishesAt)`);
+        } else {
+            // Fallback: estimate by searching for next procedure or end of file
+            procedureEndLine = this.findProcedureEnd(lines, lineNumber);
+            logger.info(`Procedure ${procName} estimated end at line ${procedureEndLine} (heuristic)`);
+        }
+        
+        // Calculate total lines in procedure (excluding signature)
+        const totalProcedureLines = procedureEndLine - lineNumber;
+        
+        // Decide whether to show full implementation or truncated preview
+        let showFullImplementation = false;
+        let linesToShow = maxPreviewLines;
+        
+        if (totalProcedureLines <= maxPreviewLines) {
+            // Short procedure - show everything
+            showFullImplementation = true;
+            linesToShow = totalProcedureLines;
+            logger.info(`Short procedure (${totalProcedureLines} lines) - showing full implementation`);
+        } else {
+            // Long procedure - show first maxPreviewLines
+            logger.info(`Long procedure (${totalProcedureLines} lines) - showing first ${maxPreviewLines} lines`);
+        }
+        
+        // Collect the preview lines
+        let linesAdded = 0;
+        for (let j = lineNumber + 1; j <= procedureEndLine && j < lines.length && linesAdded < linesToShow; j++) {
+            const previewLine = lines[j];
+            previewLines.push(previewLine);
+            linesAdded++;
+        }
+        
+        // Add ellipsis if we truncated
+        if (!showFullImplementation && linesAdded === maxPreviewLines && totalProcedureLines > maxPreviewLines) {
+            previewLines.push('  ...');
+            previewLines.push(`  ! ${totalProcedureLines - maxPreviewLines} more lines`);
+        }
+        
+        return {
+            line: lineNumber,
+            signature: line.trim(),
+            preview: previewLines.join('\n')
+        };
+    }
+    
+    /**
+     * Estimate where a procedure ends by looking for the next procedure or END
+     */
+    private findProcedureEnd(lines: string[], startLine: number): number {
+        for (let i = startLine + 1; i < lines.length; i++) {
+            const trimmed = lines[i].trim();
+            
+            // Check for next procedure/function at column 0 or minimal indent
+            if (/^(\w+\.)?(\w+)\s+(PROCEDURE|FUNCTION)/i.test(lines[i])) {
+                return i - 1;
+            }
+            
+            // Check for END at column 0 or standalone END
+            if (/^\s*END\s*$/i.test(trimmed)) {
+                return i;
+            }
+        }
+        
+        // Default: 50 lines or end of file
+        return Math.min(startLine + 50, lines.length - 1);
     }
 
 }

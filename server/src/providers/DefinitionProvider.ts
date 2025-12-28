@@ -166,14 +166,6 @@ export class DefinitionProvider {
                 return structureFieldDefinition;
             }
 
-            // ✅ Check if we're ON a declaration (method declaration in class or MAP procedure declaration)
-            // If so, return null - we're already at the definition, no navigation needed
-            // VSCode won't show an error for this case
-            if (this.isOnDeclaration(line, position, word)) {
-                logger.info(`F12 pressed on declaration - already at definition, returning null (no navigation)`);
-                return null;
-            }
-
             // First, check if this is a reference to a label in the current document
             // This is the highest priority - look for labels in the same scope first
             const labelDefinition = this.symbolResolver.findLabelDefinition(word, document, position, tokens);
@@ -188,6 +180,15 @@ export class DefinitionProvider {
             if (mapProcImpl) {
                 logger.info(`Found PROCEDURE implementation for MAP declaration: ${word}`);
                 return mapProcImpl;
+            }
+
+            // ✅ Check if we're ON a declaration (method declaration in class or MAP procedure declaration)
+            // If so, return null - we're already at the definition, no navigation needed
+            // This check must come AFTER MAP navigation checks so MAP declarations can navigate to implementations
+            // VSCode won't show an error for this case
+            if (this.isOnDeclaration(line, position, word)) {
+                logger.info(`F12 pressed on declaration - already at definition, returning null (no navigation)`);
+                return null;
             }
 
             // Next, check if this is a reference to a Clarion structure (queue, window, view, etc.)

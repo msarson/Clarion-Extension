@@ -508,8 +508,8 @@ ProcessOrder PROCEDURE(LONG orderId)
             
             const result = await definitionProvider.provideDefinition(document, position);
             
-            assert.ok(result, '🚨 EXPECTED TO FAIL: Should find PROCEDURE implementation');
-            assert.strictEqual(getLocationLine(result), 4, '🚨 EXPECTED TO FAIL: Should jump to PROCEDURE line');
+            assert.ok(result, 'Should find PROCEDURE implementation');
+            assert.strictEqual(getLocationLine(result), 4, 'Should jump to PROCEDURE line');
         });
 
         test('Should handle MAP with PROCEDURE keyword', async () => {
@@ -527,8 +527,8 @@ ProcessOrder PROCEDURE(LONG orderId)
             
             const result = await definitionProvider.provideDefinition(document, position);
             
-            assert.ok(result, '🚨 EXPECTED TO FAIL: Should find implementation');
-            assert.strictEqual(getLocationLine(result), 4, '🚨 EXPECTED TO FAIL: Should jump to implementation');
+            assert.ok(result, 'Should find implementation');
+            assert.strictEqual(getLocationLine(result), 4, 'Should jump to implementation');
         });
 
         test('Should handle MAP with comma syntax', async () => {
@@ -546,8 +546,8 @@ ProcessOrder PROCEDURE(LONG orderId)
             
             const result = await definitionProvider.provideDefinition(document, position);
             
-            assert.ok(result, '🚨 EXPECTED TO FAIL: Should find implementation');
-            assert.strictEqual(getLocationLine(result), 4, '🚨 EXPECTED TO FAIL: Should jump to implementation');
+            assert.ok(result, 'Should find implementation');
+            assert.strictEqual(getLocationLine(result), 4, 'Should jump to implementation');
         });
 
         test('Should handle multi-parameter MAP procedures', async () => {
@@ -565,8 +565,8 @@ SaveRecord PROCEDURE(STRING fileName, LONG recordId, *STRING result)
             
             const result = await definitionProvider.provideDefinition(document, position);
             
-            assert.ok(result, '🚨 EXPECTED TO FAIL: Should find implementation');
-            assert.strictEqual(getLocationLine(result), 4, '🚨 EXPECTED TO FAIL: Should jump to implementation');
+            assert.ok(result, 'Should find implementation');
+            assert.strictEqual(getLocationLine(result), 4, 'Should jump to implementation');
         });
 
         test('Should handle multiple MAP blocks', async () => {
@@ -592,8 +592,8 @@ SecondProc PROCEDURE(LONG id)
             
             const result = await definitionProvider.provideDefinition(document, position);
             
-            assert.ok(result, '🚨 EXPECTED TO FAIL: Should find SecondProc implementation');
-            assert.strictEqual(getLocationLine(result), 12, '🚨 EXPECTED TO FAIL: Should jump to SecondProc');
+            assert.ok(result, 'Should find SecondProc implementation');
+            assert.strictEqual(getLocationLine(result), 12, 'Should jump to SecondProc');
         });
     });
 
@@ -616,8 +616,8 @@ ProcessOrder PROCEDURE(LONG orderId)
             
             const result = await definitionProvider.provideDefinition(document, position);
             
-            assert.ok(result, '🚨 EXPECTED TO FAIL: Should find MAP declaration');
-            assert.strictEqual(getLocationLine(result), 1, '🚨 EXPECTED TO FAIL: Should jump to MAP line');
+            assert.ok(result, 'Should find MAP declaration');
+            assert.strictEqual(getLocationLine(result), 1, 'Should jump to MAP line');
         });
 
         test('Should prioritize MAP declaration over global procedure', async () => {
@@ -636,8 +636,8 @@ Utility PROCEDURE(STRING text)
             
             const result = await definitionProvider.provideDefinition(document, position);
             
-            assert.ok(result, '🚨 EXPECTED TO FAIL: Should find MAP declaration');
-            assert.strictEqual(getLocationLine(result), 1, '🚨 EXPECTED TO FAIL: Should prioritize MAP');
+            assert.ok(result, 'Should find MAP declaration');
+            assert.strictEqual(getLocationLine(result), 1, 'Should prioritize MAP');
         });
 
         test('Should handle cursor on PROCEDURE keyword', async () => {
@@ -680,8 +680,8 @@ GetValue PROCEDURE(),LONG
             
             const result = await definitionProvider.provideDefinition(document, position);
             
-            assert.ok(result, '🚨 EXPECTED TO FAIL: Should find implementation');
-            assert.strictEqual(getLocationLine(result), 4, '🚨 EXPECTED TO FAIL: Should jump to implementation');
+            assert.ok(result, 'Should find implementation');
+            assert.strictEqual(getLocationLine(result), 4, 'Should jump to implementation');
         });
 
         test('Should handle MAP with MODULE declaration', async () => {
@@ -720,8 +720,8 @@ ExternalProc PROCEDURE(LONG id)
             
             const result = await definitionProvider.provideDefinition(document, position);
             
-            assert.ok(result, '🚨 EXPECTED TO FAIL: Should handle indented implementation');
-            assert.strictEqual(getLocationLine(result), 1, '🚨 EXPECTED TO FAIL: Should jump to MAP');
+            assert.ok(result, 'Should handle indented implementation');
+            assert.strictEqual(getLocationLine(result), 1, 'Should jump to MAP');
         });
 
         test('Should not confuse MAP procedure with CLASS method', async () => {
@@ -743,8 +743,8 @@ Process PROCEDURE(LONG id)
             
             const result = await definitionProvider.provideDefinition(document, position);
             
-            assert.ok(result, '🚨 EXPECTED TO FAIL: Should find MAP declaration, not CLASS method');
-            assert.strictEqual(getLocationLine(result), 5, '🚨 EXPECTED TO FAIL: Should jump to MAP, not CLASS');
+            assert.ok(result, 'Should find MAP declaration, not CLASS method');
+            assert.strictEqual(getLocationLine(result), 5, 'Should jump to MAP, not CLASS');
         });
 
         test('Should handle MAP inside SECTION/ROUTINE', async () => {

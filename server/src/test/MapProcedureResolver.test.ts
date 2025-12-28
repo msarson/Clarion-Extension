@@ -248,6 +248,112 @@ HelperProc PROCEDURE()
         });
     });
 
+    suite('Overload Resolution', () => {
+        
+        test('Should resolve overloaded MAP procedure by parameter types (STRING, STRING vs LONG)', () => {
+            const code = `  MAP
+    AtSortReport(STRING StartConfigGrp, STRING StartReRunGrp)
+    AtSortReport(LONG orderId)
+  END
+
+AtSortReport PROCEDURE(STRING StartConfigGrp, STRING StartReRunGrp)
+  CODE
+  RETURN
+
+AtSortReport PROCEDURE(LONG orderId)
+  CODE
+  RETURN`;
+            
+            const document = createDocument(code);
+            const tokens = tokenizeAndBuildStructure(code);
+            const resolver = new MapProcedureResolver();
+            
+            // From implementation with STRING, STRING - should match line 1
+            const implSignature1 = 'AtSortReport PROCEDURE(STRING StartConfigGrp, STRING StartReRunGrp)';
+            const result1 = resolver.findMapDeclaration('AtSortReport', tokens, document, implSignature1);
+            
+            assert.ok(result1, 'Should find declaration for STRING, STRING overload');
+            assert.strictEqual(result1!.range.start.line, 1, 'Should match STRING, STRING overload at line 1');
+            
+            // From implementation with LONG - should match line 2
+            const implSignature2 = 'AtSortReport PROCEDURE(LONG orderId)';
+            const result2 = resolver.findMapDeclaration('AtSortReport', tokens, document, implSignature2);
+            
+            assert.ok(result2, 'Should find declaration for LONG overload');
+            assert.strictEqual(result2!.range.start.line, 2, 'Should match LONG overload at line 2');
+        });
+
+        test('Should resolve overloaded implementation from MAP declaration', () => {
+            const code = `  MAP
+    ProcessOrder(LONG orderId)
+    ProcessOrder(STRING orderCode, LONG customerId)
+  END
+
+ProcessOrder PROCEDURE(LONG orderId)
+  CODE
+  RETURN
+  END
+
+ProcessOrder PROCEDURE(STRING orderCode, LONG customerId)
+  CODE
+  RETURN
+  END`;
+            
+            const document = createDocument(code);
+            const tokens = tokenizeAndBuildStructure(code);
+            const resolver = new MapProcedureResolver();
+            
+            // From MAP declaration with LONG - should match line 5
+            const position1: Position = { line: 1, character: 6 };
+            const declSignature1 = 'ProcessOrder(LONG orderId)';
+            const result1 = resolver.findProcedureImplementation('ProcessOrder', tokens, document, position1, declSignature1);
+            
+            assert.ok(result1, 'Should find implementation for LONG overload');
+            assert.strictEqual(result1!.range.start.line, 5, 'Should match LONG implementation at line 5');
+            
+            // From MAP declaration with STRING, LONG - should match line 10
+            const position2: Position = { line: 2, character: 6 };
+            const declSignature2 = 'ProcessOrder(STRING orderCode, LONG customerId)';
+            const result2 = resolver.findProcedureImplementation('ProcessOrder', tokens, document, position2, declSignature2);
+            
+            assert.ok(result2, 'Should find implementation for STRING, LONG overload');
+            assert.strictEqual(result2!.range.start.line, 10, 'Should match STRING, LONG implementation at line 10');
+        });
+
+        test('Should handle pointer types in overloads', () => {
+            const code = `  MAP
+    UpdateRecord(*CustomerType cust)
+    UpdateRecord(&CustomerType cust)
+  END
+
+UpdateRecord PROCEDURE(*CustomerType cust)
+  CODE
+  RETURN
+
+UpdateRecord PROCEDURE(&CustomerType cust)
+  CODE
+  RETURN`;
+            
+            const document = createDocument(code);
+            const tokens = tokenizeAndBuildStructure(code);
+            const resolver = new MapProcedureResolver();
+            
+            // Test pointer type
+            const implSignature1 = 'UpdateRecord PROCEDURE(*CustomerType cust)';
+            const result1 = resolver.findMapDeclaration('UpdateRecord', tokens, document, implSignature1);
+            
+            assert.ok(result1, 'Should find declaration for pointer type');
+            assert.strictEqual(result1!.range.start.line, 1, 'Should match pointer type at line 1');
+            
+            // Test reference type
+            const implSignature2 = 'UpdateRecord PROCEDURE(&CustomerType cust)';
+            const result2 = resolver.findMapDeclaration('UpdateRecord', tokens, document, implSignature2);
+            
+            assert.ok(result2, 'Should find declaration for reference type');
+            assert.strictEqual(result2!.range.start.line, 2, 'Should match reference type at line 2');
+        });
+    });
+
     suite('Edge Cases', () => {
         
         test('Should not confuse MAP procedure with CLASS method', () => {

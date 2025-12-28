@@ -5,7 +5,7 @@ import { SolutionCache } from '../SolutionCache';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("LocationProvider");
-logger.setLevel("error");
+logger.setLevel("info");
 
 /**
  * Represents a location in Clarion code, with support for lazy method implementation resolution.
@@ -86,24 +86,37 @@ export class LocationProvider {
                 // Get the full path using the server-side redirection, with cache
                 const fileName = await this.getFullPath(matchedFileName, document.uri.fsPath, pathCache);
 
+                let resolvedFileName: string | null = null;
+                let sectionLineNumber = 0;
+                
                 if (!fileName) {
                     logger.info(`Could not resolve path for: ${matchedFileName}`);
-                    continue;
-                }
-
-                if (!fs.existsSync(fileName)) {
-                    logger.info(`File does not exist: ${fileName}`);
-                    continue;
+                    // Try relative path as fallback
+                    const documentDir = path.dirname(document.uri.fsPath);
+                    const relativePath = path.join(documentDir, matchedFileName);
+                    if (fs.existsSync(relativePath)) {
+                        resolvedFileName = relativePath;
+                        logger.info(`✅ Found file using relative path: ${relativePath}`);
+                    } else {
+                        logger.info(`❌ File not found even with relative path: ${relativePath}`);
+                        continue; // Skip this match - don't create a link for non-existent files
+                    }
+                } else if (!fs.existsSync(fileName)) {
+                    logger.info(`❌ File does not exist: ${fileName}`);
+                    continue; // Skip this match - don't create a link for non-existent files
+                } else {
+                    resolvedFileName = fileName;
+                    // Try to find section line number if file exists
+                    const sectionName = match[2] || '';
+                    sectionLineNumber = this.findSectionLineNumber(fileName, sectionName);
                 }
 
                 const valueToFind = match[1];
                 const valueStart = match.index + match[0].indexOf(valueToFind);
                 const valueEnd = valueStart + valueToFind.length;
-                const sectionName = match[2] || '';
-                const sectionLineNumber = this.findSectionLineNumber(fileName, sectionName);
 
                 const location: ClarionLocation = {
-                    fullFileName: fileName,
+                    fullFileName: resolvedFileName,
                     sectionLineLocation: new Position(sectionLineNumber, 0),
                     linePosition: new Position(match.lineIndex, valueStart),
                     linePositionEnd: new Position(match.lineIndex, valueEnd),
@@ -112,7 +125,7 @@ export class LocationProvider {
                 };
 
                 locations.push(location);
-                logger.info(`Added location for ${fileName}`);
+                logger.info(`Added location for ${resolvedFileName}`);
             } catch (error) {
                 logger.error(`Error processing match: ${error instanceof Error ? error.message : String(error)}`);
             }
@@ -203,6 +216,15 @@ export class LocationProvider {
             logger.info(`✅ Resolved via server-side redirection: ${globalFile}`);
             if (cache) cache.set(cacheKey, globalFile);
             return globalFile;
+        }
+
+        // 🔹 Final fallback: check if file exists in the same directory as documentFrom
+        const documentDir = path.dirname(documentFrom);
+        const localPath = path.join(documentDir, fileName);
+        if (fs.existsSync(localPath)) {
+            logger.info(`✅ Found file in same directory as source: ${localPath}`);
+            if (cache) cache.set(cacheKey, localPath);
+            return localPath;
         }
 
         logger.info(`❌ Could not resolve file: ${fileName}`);

@@ -2,18 +2,21 @@ import { languages, ExtensionContext, Disposable } from 'vscode';
 import { DocumentManager } from '../documentManager';
 import { ClarionDocumentLinkProvider } from './documentLinkProvier';
 import { ClarionHoverProvider } from './hoverProvider';
-import { ClarionImplementationProvider } from './implementationProvider';
+// Implementation provider moved to server-side
+// import { ClarionImplementationProvider } from './implementationProvider';
 import { ClarionDecorator } from '../ClarionDecorator';
 import { UnreachableCodeDecorator } from '../UnreachableCodeDecorator';
 import { globalSettings } from '../globals';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("LanguageFeatureManager");
+logger.setLevel("error");
 
 // Track disposables to ensure only one instance of each provider
 let hoverProviderDisposable: Disposable | null = null;
 let documentLinkProviderDisposable: Disposable | null = null;
-let implementationProviderDisposable: Disposable | null = null;
+// Implementation provider now handled by language server
+// let implementationProviderDisposable: Disposable | null = null;
 let semanticTokensProviderDisposable: Disposable | null = null;
 let unreachableCodeDecoratorDisposable: Disposable | null = null;
 
@@ -73,19 +76,9 @@ export function registerLanguageFeatures(context: ExtensionContext, documentMana
     context.subscriptions.push(hoverProviderDisposable);
     logger.info(`📄 Registered Hover Provider for extensions: ${lookupExtensions.join(', ')}`);
     
-    // ✅ Register Implementation Provider for "Go to Implementation" functionality
-    if (implementationProviderDisposable) {
-        implementationProviderDisposable.dispose(); // Remove old provider if it exists
-    }
-    
-    logger.info("🔍 Registering Implementation Provider...");
-    implementationProviderDisposable = languages.registerImplementationProvider(
-        documentSelectors,
-        new ClarionImplementationProvider(documentManager)
-    );
-    context.subscriptions.push(implementationProviderDisposable);
-    
-    logger.info(`📄 Registered Implementation Provider for extensions: ${lookupExtensions.join(', ')}`);
+    // ✅ Implementation Provider now handled by language server (server-side)
+    // Client-side registration removed - see server/src/providers/ImplementationProvider.ts
+    logger.info("ℹ️  Implementation Provider is handled by the language server");
     
     // ✅ Register Prefix Decorator for variable highlighting
     if (semanticTokensProviderDisposable) {
@@ -128,10 +121,7 @@ export function disposeLanguageFeatures() {
         documentLinkProviderDisposable.dispose();
         documentLinkProviderDisposable = null;
     }
-    if (implementationProviderDisposable) {
-        implementationProviderDisposable.dispose();
-        implementationProviderDisposable = null;
-    }
+    // Implementation provider is now server-side, no client disposal needed
     if (semanticTokensProviderDisposable) {
         semanticTokensProviderDisposable.dispose();
         semanticTokensProviderDisposable = null;

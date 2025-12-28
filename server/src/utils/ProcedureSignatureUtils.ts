@@ -11,9 +11,17 @@ export class ProcedureSignatureUtils {
     /**
      * Extracts parameter types from a procedure/method signature
      * Returns array of normalized parameter types (e.g., ['STRING', '*STRING', 'LONG'])
+     * Handles both traditional format (with PROCEDURE/FUNCTION keyword) and shorthand MAP format
      */
     public static extractParameterTypes(signature: string): string[] {
-        const match = signature.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i);
+        // Try with PROCEDURE/FUNCTION keyword first
+        let match = signature.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i);
+        
+        // If no match, try shorthand MAP format: ProcName(params) or ProcName(params),ReturnType
+        if (!match) {
+            match = signature.match(/^\s*\w+\s*\(([^)]*)\)/);
+        }
+        
         if (!match) return [];
         
         const paramList = match[1].trim();
@@ -121,9 +129,17 @@ export class ProcedureSignatureUtils {
     /**
      * Counts parameters in a procedure/method signature
      * Handles omittable parameters like <LONG SomeVar> and default values LONG SomeVar=1
+     * Handles both traditional format (with PROCEDURE/FUNCTION keyword) and shorthand MAP format
      */
     public static countParameters(signature: string): number {
-        const match = signature.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i);
+        // Try with PROCEDURE/FUNCTION keyword first
+        let match = signature.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i);
+        
+        // If no match, try shorthand MAP format: ProcName(params) or ProcName(params),ReturnType
+        if (!match) {
+            match = signature.match(/^\s*\w+\s*\(([^)]*)\)/);
+        }
+        
         if (!match) return 0;
         
         const paramList = match[1].trim();

@@ -22,7 +22,7 @@ import LoggerManager from './utils/LoggerManager';
 import { SolutionCache } from './SolutionCache';
 import { isInsideMapBlock } from '../../common/clarionUtils';
 const logger = LoggerManager.getLogger("DocumentManager");
-logger.setLevel("error");
+logger.setLevel("info");
 
 /**
  * Interface representing document information including statement locations
@@ -423,7 +423,7 @@ export class DocumentManager implements Disposable {
         }
 
         const links: DocumentLink[] = [];
-        // Note: METHOD is intentionally excluded - methods are handled by hover/definition providers, not as clickable links
+        // Note: METHOD and MAPPROCEDURE are intentionally excluded - methods are handled by hover/definition providers, not as clickable links
         const supportedTypes = ["INCLUDE", "MODULE", "MEMBER", "SECTION", "LINK"];
         
         logger.info(`Generating links for ${uri.fsPath} with ${documentInfo.statementLocations.length} locations`);
