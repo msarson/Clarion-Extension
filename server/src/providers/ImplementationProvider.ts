@@ -11,7 +11,6 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Location, Position } from 'vscode-languageserver-protocol';
 import { Token, TokenType } from '../ClarionTokenizer';
-import { DocumentStructure } from '../DocumentStructure';
 import { TokenCache } from '../TokenCache';
 import { MapProcedureResolver } from '../utils/MapProcedureResolver';
 import { SolutionManager } from '../solution/solutionManager';
@@ -40,8 +39,7 @@ export class ImplementationProvider {
         logger.info(`Implementation requested at ${position.line}:${position.character} in ${document.uri}`);
 
         const tokens = this.tokenCache.getTokens(document);
-        const documentStructure = new DocumentStructure(tokens);
-        documentStructure.process();
+        const documentStructure = this.tokenCache.getStructure(document);
         
         const line = document.getText({
             start: { line: position.line, character: 0 },

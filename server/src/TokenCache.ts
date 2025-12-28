@@ -1,5 +1,6 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { ClarionTokenizer, Token } from './ClarionTokenizer';
+import { DocumentStructure } from './DocumentStructure';
 import LoggerManager from './logger';
 
 const logger = LoggerManager.getLogger("TokenCache");
@@ -20,6 +21,7 @@ interface LineTokenData {
 interface CachedTokenData {
     version: number;
     tokens: Token[];
+    structure: DocumentStructure; // 🚀 PERFORMANCE: Cache DocumentStructure too
     lineTokens: Map<number, LineTokenData>; // 🚀 PERFORMANCE: Line-based cache
     documentText: string; // Track full text for change detection
 }
@@ -117,11 +119,17 @@ export class TokenCache {
                 // 🚀 PERFORMANCE: Build line-based cache
                 const cacheStart = performance.now();
                 const lineTokens = this.buildLineTokenMap(document, tokens);
+                
+                // 🚀 PERFORMANCE: Create and cache DocumentStructure
+                const structure = new DocumentStructure(tokens);
+                structure.process();
+                
                 const cacheTime = performance.now() - cacheStart;
                 
                 this.cache.set(document.uri, { 
                     version: document.version, 
                     tokens,
+                    structure,
                     lineTokens,
                     documentText: currentText
                 });
@@ -146,6 +154,27 @@ export class TokenCache {
             logger.error(`❌ [DEBUG] Unexpected error in TokenCache.getTokens after ${totalTime.toFixed(2)}ms: ${error instanceof Error ? error.message : String(error)}`);
             return [];
         }
+    }
+
+    /**
+     * Get DocumentStructure for a document, using cached structure if available
+     * @param document The text document
+     * @returns DocumentStructure
+     */
+    public getStructure(document: TextDocument): DocumentStructure {
+        // Ensure tokens are cached (which also caches structure)
+        this.getTokens(document);
+        
+        const cached = this.cache.get(document.uri);
+        if (cached && cached.structure) {
+            return cached.structure;
+        }
+        
+        // Fallback: create new structure (shouldn't happen if getTokens worked)
+        const tokens = this.getTokens(document);
+        const structure = new DocumentStructure(tokens);
+        structure.process();
+        return structure;
     }
 
     /**
@@ -415,9 +444,15 @@ export class TokenCache {
         // Update cache
         const cacheStart = performance.now();
         const lineTokens = this.buildLineTokenMap(document, mergedTokens);
+        
+        // 🚀 PERFORMANCE: Create and cache DocumentStructure
+        const structure = new DocumentStructure(mergedTokens);
+        structure.process();
+        
         this.cache.set(document.uri, {
             version: document.version,
             tokens: mergedTokens,
+            structure,
             lineTokens,
             documentText: newText
         });

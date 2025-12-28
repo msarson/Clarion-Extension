@@ -20,16 +20,16 @@ suite('ImplementationProvider - DocumentStructure API Integration', () => {
 
     suite('MAP procedure implementation finding (integration test)', () => {
         test('should find implementation for MAP declaration', async () => {
-            const code = `MyMap MAP
-  TestProc PROCEDURE()
-END
+            const code = `  MAP
+    TestProc PROCEDURE()
+  END
 
 TestProc PROCEDURE()
 CODE
   RETURN
 END`;
             const doc = TextDocument.create('test://test.clw', 'clarion', 1, code);
-            const position = Position.create(1, 5); // On "TestProc" in MAP
+            const position = Position.create(1, 7); // On "TestProc" in MAP
             
             const location = await provider.provideImplementation(doc, position);
             
@@ -40,11 +40,11 @@ END`;
         });
 
         test('should handle MAP declaration without implementation', async () => {
-            const code = `MyMap MAP
-  NonExistent PROCEDURE()
-END`;
+            const code = `  MAP
+    NonExistent PROCEDURE()
+  END`;
             const doc = TextDocument.create('test://test.clw', 'clarion', 1, code);
-            const position = Position.create(1, 5); // On "NonExistent" in MAP
+            const position = Position.create(1, 7); // On "NonExistent" in MAP
             
             const location = await provider.provideImplementation(doc, position);
             
@@ -52,10 +52,10 @@ END`;
         });
 
         test('should handle overloaded procedures correctly', async () => {
-            const code = `MyMap MAP
-  TestProc PROCEDURE()
-  TestProc PROCEDURE(STRING s)
-END
+            const code = `  MAP
+    TestProc PROCEDURE()
+    TestProc PROCEDURE(STRING s)
+  END
 
 TestProc PROCEDURE()
 CODE
@@ -67,7 +67,7 @@ CODE
   RETURN
 END`;
             const doc = TextDocument.create('test://test.clw', 'clarion', 1, code);
-            const position = Position.create(2, 5); // On second "TestProc" in MAP
+            const position = Position.create(2, 7); // On second "TestProc" in MAP
             
             const location = await provider.provideImplementation(doc, position);
             
