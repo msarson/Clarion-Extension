@@ -11,6 +11,7 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Location, Position } from 'vscode-languageserver-protocol';
 import { Token, TokenType } from '../ClarionTokenizer';
+import { DocumentStructure } from '../DocumentStructure';
 import { TokenCache } from '../TokenCache';
 import { MapProcedureResolver } from '../utils/MapProcedureResolver';
 import { SolutionManager } from '../solution/solutionManager';
@@ -39,6 +40,9 @@ export class ImplementationProvider {
         logger.info(`Implementation requested at ${position.line}:${position.character} in ${document.uri}`);
 
         const tokens = this.tokenCache.getTokens(document);
+        const documentStructure = new DocumentStructure(tokens);
+        documentStructure.process();
+        
         const line = document.getText({
             start: { line: position.line, character: 0 },
             end: { line: position.line, character: Number.MAX_SAFE_INTEGER }
@@ -52,7 +56,7 @@ export class ImplementationProvider {
         }
 
         // 2. Check if this is a MAP procedure declaration (inside MAP block)
-        if (this.isInMapBlock(document, position.line)) {
+        if (documentStructure.isInMapBlock(position.line)) {
             const mapProcMatch = line.match(/^\s*(\w+)\s*(?:PROCEDURE\s*)?\(/i);
             if (mapProcMatch) {
                 const procName = mapProcMatch[1];
@@ -94,38 +98,6 @@ export class ImplementationProvider {
     /**
      * Check if a line is inside a MAP block
      */
-    private isInMapBlock(document: TextDocument, lineNumber: number): boolean {
-        const text = document.getText();
-        const lines = text.split(/\r?\n/);
-
-        let inMap = false;
-        let moduleDepth = 0; // Track nested MODULE blocks
-        
-        for (let i = 0; i <= lineNumber && i < lines.length; i++) {
-            const trimmed = lines[i].trim().toUpperCase();
-
-            // Check for MAP start
-            if (trimmed === 'MAP') {
-                inMap = true;
-                moduleDepth = 0;
-            } 
-            // Check for MODULE start (inside MAP)
-            else if (inMap && /^MODULE\s*\(/i.test(trimmed)) {
-                moduleDepth++;
-            }
-            // Check for END - could close MODULE or MAP
-            else if (trimmed === 'END') {
-                if (moduleDepth > 0) {
-                    moduleDepth--; // Close MODULE
-                } else if (inMap) {
-                    inMap = false; // Close MAP
-                }
-            }
-        }
-
-        return inMap;
-    }
-
     /**
      * Find routine implementation (labels followed by ROUTINE keyword)
      */
