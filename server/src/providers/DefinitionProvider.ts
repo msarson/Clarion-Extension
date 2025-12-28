@@ -145,6 +145,9 @@ export class DefinitionProvider {
                 t.subType === TokenType.GlobalProcedure
             );
             
+            logger.info(`Tokens on line ${position.line}: ${tokens.filter(t => t.line === position.line).map(t => `type=${t.type}, subType=${t.subType}, value="${t.value}", label="${t.label}"`).join('; ')}`);
+            logger.info(`Token at position with GlobalProcedure subtype: ${tokenAtPosition ? `YES (label="${tokenAtPosition.label}")` : 'NO'}`);
+            
             if (tokenAtPosition && tokenAtPosition.label) {
                 logger.info(`🔍 Detected procedure implementation: ${tokenAtPosition.label}`);
                 logger.info(`F12 navigating from implementation to MAP declaration for: ${tokenAtPosition.label}`);
@@ -207,6 +210,14 @@ export class DefinitionProvider {
                 return labelDefinition;
             }
 
+            // Next, check if this is a reference to a variable or other symbol
+            // Do this BEFORE checking MAP procedure implementations to avoid false positives
+            const symbolDefinition = await this.findSymbolDefinition(word, document, position);
+            if (symbolDefinition) {
+                logger.info(`Found symbol definition for ${word} in the current document`);
+                return symbolDefinition;
+            }
+
             // Check if we're inside a MAP block and the word is a procedure declaration
             // Navigate to the PROCEDURE implementation
             const mapProcImpl = this.mapResolver.findProcedureImplementation(word, tokens, document, position, line);
@@ -231,12 +242,7 @@ export class DefinitionProvider {
                 return structureDefinition;
             }
 
-            // Then, check if this is a reference to a variable or other symbol
-            const symbolDefinition = await this.findSymbolDefinition(word, document, position);
-            if (symbolDefinition) {
-                logger.info(`Found symbol definition for ${word} in the current document`);
-                return symbolDefinition;
-            }
+
 
             // Finally, check if this is a file reference
             // This is the lowest priority - only look for files if no local definitions are found
@@ -946,22 +952,64 @@ export class DefinitionProvider {
         if (memberToken && memberToken.referencedFile) {
             logger.info(`Found MEMBER reference to: ${memberToken.referencedFile}`);
             
+            // Resolve the full path - same logic as FileDefinitionResolver
+            const currentFilePath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
+            const currentDir = path.dirname(currentFilePath);
+            let parentFilePath: string | null = null;
+            
+            // Try solution-wide redirection first
+            const SolutionManager = require('../solution/solutionManager').SolutionManager;
+            const solutionManager = SolutionManager.getInstance();
+            
+            if (solutionManager && solutionManager.solution) {
+                for (const project of solutionManager.solution.projects) {
+                    const redirectionParser = project.getRedirectionParser();
+                    const resolved = redirectionParser.findFile(memberToken.referencedFile);
+                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
+                        parentFilePath = resolved.path;
+                        break;
+                    }
+                }
+            }
+            
+            // Fallback to relative path
+            if (!parentFilePath) {
+                const relativePath = path.join(currentDir, memberToken.referencedFile);
+                if (fs.existsSync(relativePath)) {
+                    parentFilePath = relativePath;
+                }
+            }
+            
+            logger.info(`Resolved MEMBER file path: ${parentFilePath}`);
+            
             // Read the parent file
-            if (fs.existsSync(memberToken.referencedFile)) {
+            if (parentFilePath && fs.existsSync(parentFilePath)) {
                 try {
-                    const parentContents = await fs.promises.readFile(memberToken.referencedFile, 'utf-8');
+                    const parentContents = await fs.promises.readFile(parentFilePath, 'utf-8');
+                    // Construct proper file URI for Windows paths
+                    const normalizedPath = parentFilePath.replace(/\\/g, '/');
+                    const parentUri = normalizedPath.startsWith('/') ? `file://${normalizedPath}` : `file:///${normalizedPath}`;
+                    logger.info(`Constructed parent URI: ${parentUri}`);
                     const parentDoc = TextDocument.create(
-                        `file:///${memberToken.referencedFile.replace(/\\/g, '/')}`,
+                        parentUri,
                         'clarion',
                         1,
                         parentContents
                     );
                     const parentTokens = this.tokenCache.getTokens(parentDoc);
                     
-                    // Search for global variable (Label at column 0, before first CODE/PROCEDURE)
+                    // Find first CODE token to establish boundary for global scope
+                    const firstCodeToken = parentTokens.find(t => 
+                        t.type === TokenType.Keyword && 
+                        t.value.toUpperCase() === 'CODE'
+                    );
+                    const globalScopeEndLine = firstCodeToken ? firstCodeToken.line : Number.MAX_SAFE_INTEGER;
+                    
+                    // Search for global variable (Label at column 0, before first CODE)
                     const globalVar = parentTokens.find(t =>
                         t.type === TokenType.Label &&
                         t.start === 0 &&
+                        t.line < globalScopeEndLine &&
                         t.value.toLowerCase() === searchWord.toLowerCase()
                     );
                     
