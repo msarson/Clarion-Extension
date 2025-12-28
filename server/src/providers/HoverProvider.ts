@@ -149,6 +149,60 @@ export class HoverProvider {
                 }
             }
 
+            // Check if this is a method declaration in a CLASS (declaration) and show implementation hover
+            const methodTokens = this.tokenCache.getTokens(document);
+            const currentToken = methodTokens.find(t =>
+                t.line === position.line &&
+                t.subType === TokenType.MethodDeclaration &&
+                position.character >= t.start &&
+                position.character <= t.start + t.value.length
+            );
+            
+            if (currentToken && currentToken.label) {
+                logger.info(`Found method declaration: ${currentToken.label} at line ${position.line}`);
+                
+                // Find the class name this method belongs to
+                const className = this.findClassNameForMethodDeclaration(methodTokens, position.line);
+                
+                if (className) {
+                    logger.info(`Method ${currentToken.label} belongs to class ${className}`);
+                    
+                    // Count parameters in the declaration
+                    const paramCount = this.overloadResolver.countParametersInDeclaration(line);
+                    
+                    // Search for implementation using cross-file lookup
+                    const implLocation = await this.findMethodImplementationCrossFile(
+                        className,
+                        currentToken.label,
+                        document,
+                        paramCount
+                    );
+                    
+                    if (implLocation) {
+                        logger.info(`✅ Found implementation at ${implLocation}:${implLocation.split(':')[1]}`);
+                        
+                        // Get preview of implementation
+                        const implInfo = await this.getMethodImplementationPreview(implLocation);
+                        if (implInfo) {
+                            return {
+                                contents: {
+                                    kind: 'markdown',
+                                    value: `**Implementation** _(Press Ctrl+F12 to navigate)_ — line ${implInfo.line + 1}\n\n\`\`\`clarion\n${implInfo.preview}\n\`\`\``
+                                }
+                            };
+                        }
+                    } else {
+                        logger.info(`❌ No implementation found for ${className}.${currentToken.label}`);
+                        return {
+                            contents: {
+                                kind: 'markdown',
+                                value: `**Method Declaration:** \`${className}.${currentToken.label}\`\n\n⚠️ *Implementation not found*`
+                            }
+                        };
+                    }
+                }
+            }
+
             // Check if this is a structure/group name followed by a dot (e.g., hovering over "MyGroup" in "MyGroup.MyVar")
             // Search for a dot starting from the word's position in the line
             const wordStartInLine = line.indexOf(word, Math.max(0, position.character - word.length));
@@ -967,6 +1021,160 @@ export class HoverProvider {
         
         // Default: 50 lines or end of file
         return Math.min(startLine + 50, lines.length - 1);
+    }
+
+    /**
+     * Find the class name for a method declaration at the given line
+     */
+    private findClassNameForMethodDeclaration(tokens: Token[], methodLine: number): string | null {
+        // Search backwards from the method line to find the CLASS token
+        for (let i = tokens.length - 1; i >= 0; i--) {
+            const token = tokens[i];
+            
+            // Stop if we've gone past the method line
+            if (token.line > methodLine) {
+                continue;
+            }
+            
+            // Look for CLASS structure
+            if (token.type === TokenType.Structure && token.value.toUpperCase() === 'CLASS') {
+                // Find the label on the same line
+                const labelToken = tokens.find(t =>
+                    t.type === TokenType.Label &&
+                    t.line === token.line
+                );
+                
+                if (labelToken) {
+                    // Check if this class contains our method line
+                    // Find the END of this class
+                    let classEndLine = -1;
+                    for (let j = i + 1; j < tokens.length; j++) {
+                        const endToken = tokens[j];
+                        if (endToken.value.toUpperCase() === 'END' && endToken.start === 0 && endToken.line > token.line) {
+                            classEndLine = endToken.line;
+                            break;
+                        }
+                    }
+                    
+                    // Check if method is within this class
+                    if (classEndLine === -1 || methodLine < classEndLine) {
+                        return labelToken.value;
+                    }
+                }
+            }
+        }
+        
+        return null;
+    }
+
+    /**
+     * Find method implementation across all files using SolutionManager
+     * Returns the file URI and line number as a string like "file:///path:lineNumber"
+     */
+    private async findMethodImplementationCrossFile(
+        className: string,
+        methodName: string,
+        currentDocument: TextDocument,
+        paramCount?: number
+    ): Promise<string | null> {
+        const fs = require('fs');
+        const path = require('path');
+        const { SolutionManager } = require('../solution/solutionManager');
+        
+        logger.info(`Searching for ${className}.${methodName} implementation cross-file`);
+        
+        // Search in solution files
+        const solutionManager = SolutionManager.getInstance();
+        if (!solutionManager || !solutionManager.solution) {
+            logger.info(`No solution manager available for cross-file search`);
+            return null;
+        }
+        
+        logger.info(`Searching ${solutionManager.solution.projects.length} projects`);
+        
+        // Get all source files from all projects
+        for (const project of solutionManager.solution.projects) {
+            for (const sourceFile of project.sourceFiles) {
+                const fullPath = path.join(project.path, sourceFile.relativePath);
+                
+                // Only search .clw files
+                if (!fullPath.toLowerCase().endsWith('.clw')) {
+                    continue;
+                }
+                
+                if (!fs.existsSync(fullPath)) {
+                    continue;
+                }
+                
+                try {
+                    const content = fs.readFileSync(fullPath, 'utf8');
+                    const lines = content.split(/\r?\n/);
+                    
+                    // Search for method implementation: ClassName.MethodName PROCEDURE
+                    for (let i = 0; i < lines.length; i++) {
+                        const fileLine = lines[i];
+                        const implMatch = fileLine.match(/^\s*(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i);
+                        
+                        if (implMatch && 
+                            implMatch[1].toUpperCase() === className.toUpperCase() &&
+                            implMatch[2].toUpperCase() === methodName.toUpperCase()) {
+                            
+                            // Found a potential match - check parameter count if specified
+                            if (paramCount !== undefined) {
+                                const params = implMatch[3].trim();
+                                const implParamCount = params === '' ? 0 : params.split(',').length;
+                                
+                                if (implParamCount !== paramCount) {
+                                    logger.info(`Parameter count mismatch: expected ${paramCount}, found ${implParamCount}`);
+                                    continue;
+                                }
+                            }
+                            
+                            logger.info(`✅ Found implementation in ${fullPath} at line ${i}`);
+                            const fileUri = `file:///${fullPath.replace(/\\/g, '/')}`;
+                            
+                            return `${fileUri}:${i}`;
+                        }
+                    }
+                } catch (error) {
+                    logger.error(`Error reading file ${fullPath}: ${error instanceof Error ? error.message : String(error)}`);
+                }
+            }
+        }
+        
+        logger.info(`❌ No implementation found for ${className}.${methodName}`);
+        return null;
+    }
+
+    /**
+     * Get a preview of a method implementation at a specific location
+     * Location is in format "file:///path:lineNumber"
+     */
+    private async getMethodImplementationPreview(location: string): Promise<{ line: number; preview: string } | null> {
+        const fs = require('fs');
+        
+        // Parse the location string
+        const parts = location.split(':');
+        const lineNumber = parseInt(parts[parts.length - 1]);
+        const filePath = parts.slice(0, -1).join(':').replace('file:///', '').replace(/\//g, '\\');
+        
+        try {
+            const content = fs.readFileSync(filePath, 'utf8');
+            const lines = content.split(/\r?\n/);
+            
+            // Show first 3 lines of the implementation
+            const maxLines = 3;
+            const endLine = Math.min(lines.length, lineNumber + maxLines);
+            const previewLines = lines.slice(lineNumber, endLine);
+            
+            return {
+                line: lineNumber,
+                preview: previewLines.join('\n')
+            };
+        } catch (error) {
+            logger.error(`Error reading implementation preview: ${error instanceof Error ? error.message : String(error)}`);
+            return null;
+        }
     }
 
 }

@@ -78,12 +78,11 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
             return undefined;
         }
         
-        // For class methods, show hover with implementation (may be cross-file)
-        // Client handles: declaration → implementation hover
-        if (location.statementType === "METHOD" && !location.implementationResolved) {
-            const displayName = location.className ? `${location.className}.${location.methodName}` : location.methodName;
-            logger.info(`Lazily resolving implementation for hover: ${displayName}`);
-            location = await this.documentManager.resolveMethodImplementation(location);
+        // CONSOLIDATION: Defer METHOD declarations to server (cross-file implementation lookup)
+        // Server now has full cross-file implementation lookup via SolutionManager
+        if (location.statementType === "METHOD") {
+            logger.info(`Deferring METHOD declaration hover to server (cross-file implementation lookup)`);
+            return undefined;
         }
         
         const hoverMessage = await this.constructHoverMessage(location);
