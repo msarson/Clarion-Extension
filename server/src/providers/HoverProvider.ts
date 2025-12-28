@@ -1165,14 +1165,17 @@ export class HoverProvider {
         if (moduleFile) {
             logger.info(`Looking for module file: ${moduleFile}`);
             
-            // Try redirection parser first
+            const currentPath = decodeURIComponent(currentDocument.uri.replace('file:///', '')).replace(/\//g, '\\');
+            
+            // Use redirection parser to resolve the module file
+            // It will check redirection paths, then fall back to current document's directory
             const solutionManager = SolutionManager.getInstance();
             if (solutionManager && solutionManager.solution) {
                 for (const project of solutionManager.solution.projects) {
                     const redirectionParser = project.getRedirectionParser();
-                    const resolved = redirectionParser.findFile(moduleFile);
+                    const resolved = redirectionParser.findFile(moduleFile, currentPath);
                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {
-                        logger.info(`Found module file via redirection: ${resolved.path}`);
+                        logger.info(`Found module file via redirection: ${resolved.path} (source: ${resolved.source})`);
                         const implLine = this.searchFileForImplementation(resolved.path, className, methodName, paramCount);
                         if (implLine !== null) {
                             const fileUri = `file:///${resolved.path.replace(/\\/g, '/')}`;
@@ -1180,19 +1183,18 @@ export class HoverProvider {
                         }
                     }
                 }
-            }
-            
-            // Fallback: Try relative to current document
-            const currentPath = decodeURIComponent(currentDocument.uri.replace('file:///', '')).replace(/\//g, '\\');
-            const currentDir = path.dirname(currentPath);
-            const relativeModulePath = path.join(currentDir, moduleFile);
-            
-            if (fs.existsSync(relativeModulePath)) {
-                logger.info(`Found module file at: ${relativeModulePath}`);
-                const implLine = this.searchFileForImplementation(relativeModulePath, className, methodName, paramCount);
-                if (implLine !== null) {
-                    const fileUri = `file:///${relativeModulePath.replace(/\\/g, '/')}`;
-                    return `${fileUri}:${implLine}`;
+            } else {
+                // No solution open - try relative path as last resort
+                const currentDir = path.dirname(currentPath);
+                const relativeModulePath = path.join(currentDir, moduleFile);
+                
+                if (fs.existsSync(relativeModulePath)) {
+                    logger.info(`Found module file at: ${relativeModulePath} (no solution open)`);
+                    const implLine = this.searchFileForImplementation(relativeModulePath, className, methodName, paramCount);
+                    if (implLine !== null) {
+                        const fileUri = `file:///${relativeModulePath.replace(/\\/g, '/')}`;
+                        return `${fileUri}:${implLine}`;
+                    }
                 }
             }
         }
