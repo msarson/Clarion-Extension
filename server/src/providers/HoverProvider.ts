@@ -924,13 +924,27 @@ export class HoverProvider {
         const lines = text.split(/\r?\n/);
         
         let inMap = false;
+        let moduleDepth = 0; // Track nested MODULE blocks
+        
         for (let i = 0; i <= lineNumber && i < lines.length; i++) {
-            const trimmed = lines[i].trim();
+            const trimmed = lines[i].trim().toUpperCase();
             
+            // Check for MAP start
             if (/^\s*MAP\s*$/i.test(trimmed)) {
                 inMap = true;
-            } else if (inMap && /^\s*END\s*$/i.test(trimmed)) {
-                inMap = false;
+                moduleDepth = 0;
+            } 
+            // Check for MODULE start (inside MAP)
+            else if (inMap && /^MODULE\s*\(/i.test(trimmed)) {
+                moduleDepth++;
+            }
+            // Check for END - could close MODULE or MAP
+            else if (/^\s*END\s*$/i.test(trimmed)) {
+                if (moduleDepth > 0) {
+                    moduleDepth--; // Close MODULE
+                } else if (inMap) {
+                    inMap = false; // Close MAP
+                }
             }
         }
         
