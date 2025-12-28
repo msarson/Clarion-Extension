@@ -1165,7 +1165,24 @@ export class HoverProvider {
         if (moduleFile) {
             logger.info(`Looking for module file: ${moduleFile}`);
             
-            // Try relative to current document first
+            // Try redirection parser first
+            const solutionManager = SolutionManager.getInstance();
+            if (solutionManager && solutionManager.solution) {
+                for (const project of solutionManager.solution.projects) {
+                    const redirectionParser = project.getRedirectionParser();
+                    const resolved = redirectionParser.findFile(moduleFile);
+                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
+                        logger.info(`Found module file via redirection: ${resolved.path}`);
+                        const implLine = this.searchFileForImplementation(resolved.path, className, methodName, paramCount);
+                        if (implLine !== null) {
+                            const fileUri = `file:///${resolved.path.replace(/\\/g, '/')}`;
+                            return `${fileUri}:${implLine}`;
+                        }
+                    }
+                }
+            }
+            
+            // Fallback: Try relative to current document
             const currentPath = decodeURIComponent(currentDocument.uri.replace('file:///', '')).replace(/\//g, '\\');
             const currentDir = path.dirname(currentPath);
             const relativeModulePath = path.join(currentDir, moduleFile);
@@ -1176,26 +1193,6 @@ export class HoverProvider {
                 if (implLine !== null) {
                     const fileUri = `file:///${relativeModulePath.replace(/\\/g, '/')}`;
                     return `${fileUri}:${implLine}`;
-                }
-            }
-            
-            // If not found relative, try solution manager
-            const solutionManager = SolutionManager.getInstance();
-            if (solutionManager && solutionManager.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    for (const sourceFile of project.sourceFiles) {
-                        if (sourceFile.name.toLowerCase() === moduleFile.toLowerCase()) {
-                            const fullPath = path.join(project.path, sourceFile.relativePath);
-                            if (fs.existsSync(fullPath)) {
-                                logger.info(`Found module file in solution: ${fullPath}`);
-                                const implLine = this.searchFileForImplementation(fullPath, className, methodName, paramCount);
-                                if (implLine !== null) {
-                                    const fileUri = `file:///${fullPath.replace(/\\/g, '/')}`;
-                                    return `${fileUri}:${implLine}`;
-                                }
-                            }
-                        }
-                    }
                 }
             }
         }
