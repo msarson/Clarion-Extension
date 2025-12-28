@@ -50,6 +50,9 @@ export class DefinitionProvider {
             const word = document.getText(wordRange);
             logger.info(`Found word: "${word}" at position`);
             
+            // Get tokens once for reuse throughout the method
+            const tokens = this.tokenCache.getTokens(document);
+            
             // Get the line to check context
             const line = document.getText({
                 start: { line: position.line, character: 0 },
@@ -84,7 +87,6 @@ export class DefinitionProvider {
                         const paramCount = this.memberResolver.countParametersInCall(line, methodName);
                         logger.info(`Method call has ${paramCount} parameters`);
                         
-                        const tokens = this.tokenCache.getTokens(document);
                         const memberInfo = this.memberResolver.findClassMemberInfo(methodName, document, position.line, tokens, paramCount);
                         
                         if (memberInfo) {
@@ -123,7 +125,6 @@ export class DefinitionProvider {
                     const paramCount = this.overloadResolver.countParametersInDeclaration(line);
                     logger.info(`Method implementation has ${paramCount} parameters`);
                     
-                    const tokens = this.tokenCache.getTokens(document);
                     const declInfo = this.overloadResolver.findMethodDeclaration(className, methodName, document, tokens, paramCount, line);
                     if (declInfo) {
                         logger.info(`✅ Found method declaration at ${declInfo.file}:${declInfo.line} with ${declInfo.paramCount} parameters`);
@@ -139,21 +140,21 @@ export class DefinitionProvider {
 
             // Check if this is a MAP procedure/function implementation line (e.g., "ProcessOrder PROCEDURE" or "ProcessOrder FUNCTION")
             // Navigate to the MAP declaration
-            const procImpl = this.mapResolver.detectProcedureImplementation(line);
-            if (procImpl) {
-                logger.info(`🔍 Detected procedure implementation line: ${procImpl.procName}`);
+            const tokenAtPosition = tokens.find(t =>
+                t.line === position.line &&
+                t.subType === TokenType.GlobalProcedure
+            );
+            
+            if (tokenAtPosition && tokenAtPosition.label) {
+                logger.info(`🔍 Detected procedure implementation: ${tokenAtPosition.label}`);
+                logger.info(`F12 navigating from implementation to MAP declaration for: ${tokenAtPosition.label}`);
 
-                // Allow F12 anywhere on the implementation signature line (not only on the name)
-                // This improves usability when cursor is on 'PROCEDURE'/'FUNCTION' or inside the parameter list
-                logger.info(`F12 navigating from implementation to MAP declaration for: ${procImpl.procName}`);
-
-                const tokens = this.tokenCache.getTokens(document);
-                const mapDecl = this.mapResolver.findMapDeclaration(procImpl.procName, tokens, document);
+                const mapDecl = this.mapResolver.findMapDeclaration(tokenAtPosition.label, tokens, document);
                 if (mapDecl) {
                     logger.info(`✅ Found MAP declaration at line ${mapDecl.range.start.line}`);
                     return mapDecl;
                 } else {
-                    logger.info(`❌ MAP declaration not found in current file for ${procImpl.procName}`);
+                    logger.info(`❌ MAP declaration not found in current file for ${tokenAtPosition.label}`);
                 }
             }
 
@@ -174,7 +175,6 @@ export class DefinitionProvider {
 
             // First, check if this is a reference to a label in the current document
             // This is the highest priority - look for labels in the same scope first
-            const tokens = this.tokenCache.getTokens(document);
             const labelDefinition = this.symbolResolver.findLabelDefinition(word, document, position, tokens);
             if (labelDefinition) {
                 logger.info(`Found label definition for ${word} in the current document`);

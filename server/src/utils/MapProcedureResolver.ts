@@ -12,27 +12,6 @@ const logger = LoggerManager.getLogger("MapProcedureResolver");
 
 export class MapProcedureResolver {
     /**
-     * Checks if line is a MAP procedure implementation (not a method implementation)
-     */
-    public detectProcedureImplementation(line: string): { procName: string } | null {
-        if (!(line.toUpperCase().includes('PROCEDURE') || line.toUpperCase().includes('FUNCTION'))) {
-            return null;
-        }
-        
-        const methodImplMatch = line.match(/^(\w+)\.(\w+)\s+(PROCEDURE|FUNCTION)/i);
-        if (methodImplMatch) {
-            return null;
-        }
-        
-        const procImplMatch = line.match(/^\s*(\w+)\s+(PROCEDURE|FUNCTION)/i);
-        if (procImplMatch) {
-            return { procName: procImplMatch[1] };
-        }
-        
-        return null;
-    }
-
-    /**
      * Finds MAP procedure declaration for a PROCEDURE implementation
      * Searches for MapProcedure tokens or Function tokens inside MAP blocks
      */
