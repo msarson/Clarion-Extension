@@ -1287,6 +1287,8 @@ export class HoverProvider {
      */
     private async getMethodImplementationPreview(location: string): Promise<{ line: number; preview: string } | null> {
         const fs = require('fs');
+        const path = require('path');
+        const { TextDocument } = require('vscode-languageserver-textdocument');
         
         // Parse the location string
         const parts = location.split(':');
@@ -1297,15 +1299,61 @@ export class HoverProvider {
             const content = fs.readFileSync(filePath, 'utf8');
             const lines = content.split(/\r?\n/);
             
-            // Show first 3 lines of the implementation
-            const maxLines = 3;
-            const endLine = Math.min(lines.length, lineNumber + maxLines);
-            const previewLines = lines.slice(lineNumber, endLine);
+            // Try to get the implementation token to find finishesAt
+            const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
+            const document = TextDocument.create(fileUri, 'clarion', 1, content);
+            const tokens = this.tokenCache.getTokens(document);
             
-            return {
-                line: lineNumber,
-                preview: previewLines.join('\n')
-            };
+            // Find the procedure/method token at this line
+            const implToken = tokens.find(t => 
+                t.line === lineNumber &&
+                (t.subType === TokenType.MethodImplementation || 
+                 t.subType === TokenType.Procedure ||
+                 t.subType === TokenType.GlobalProcedure)
+            );
+            
+            let endLine: number;
+            const maxPreviewLines = 15;
+            
+            if (implToken && implToken.finishesAt !== undefined) {
+                // Use finishesAt to know exactly where the procedure ends
+                endLine = Math.min(implToken.finishesAt + 1, lineNumber + maxPreviewLines);
+                logger.info(`Using finishesAt=${implToken.finishesAt} for preview (${endLine - lineNumber} lines)`);
+            } else {
+                // Fallback: Find next procedure/routine or use max lines
+                endLine = lineNumber + maxPreviewLines;
+                for (let i = lineNumber + 1; i < Math.min(lines.length, lineNumber + 50); i++) {
+                    const line = lines[i];
+                    // Check for next procedure/routine implementation at column 0
+                    if (/^(\w+\.)?(\w+)\s+(PROCEDURE|ROUTINE|FUNCTION)\b/i.test(line)) {
+                        endLine = i;
+                        logger.info(`Found next procedure/routine at line ${i}, stopping before it`);
+                        break;
+                    }
+                }
+                endLine = Math.min(endLine, lines.length);
+            }
+            
+            // If the implementation is short (<=15 lines), show it all
+            const totalLines = endLine - lineNumber;
+            if (totalLines <= maxPreviewLines) {
+                logger.info(`Short implementation (${totalLines} lines) - showing full preview`);
+                const previewLines = lines.slice(lineNumber, endLine);
+                return {
+                    line: lineNumber,
+                    preview: previewLines.join('\n')
+                };
+            } else {
+                // Long implementation - show first 15 lines with ellipsis
+                logger.info(`Long implementation (${totalLines} lines) - showing first ${maxPreviewLines} lines`);
+                const previewLines = lines.slice(lineNumber, lineNumber + maxPreviewLines);
+                previewLines.push('  ...');
+                previewLines.push(`  ! ${totalLines - maxPreviewLines} more lines`);
+                return {
+                    line: lineNumber,
+                    preview: previewLines.join('\n')
+                };
+            }
         } catch (error) {
             logger.error(`Error reading implementation preview: ${error instanceof Error ? error.message : String(error)}`);
             return null;
