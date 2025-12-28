@@ -158,11 +158,24 @@ export class DefinitionProvider {
                     logger.info(`❌ MAP declaration not found in current file for ${tokenAtPosition.label}`);
                     
                     // Check if this file has MEMBER at top, indicating it's part of another file
+                    logger.info(`Checking for MEMBER token in first 5 lines...`);
                     const memberToken = tokens.find(t => 
                         t.line < 5 && // MEMBER should be at top of file
                         t.value.toUpperCase() === 'MEMBER' &&
                         t.referencedFile
                     );
+                    
+                    if (memberToken) {
+                        logger.info(`✅ Found MEMBER token at line ${memberToken.line}: value="${memberToken.value}", referencedFile="${memberToken.referencedFile}"`);
+                    } else {
+                        logger.info(`❌ No MEMBER token found with referencedFile in first 5 lines`);
+                        // Debug: Show all tokens in first 5 lines
+                        const firstTokens = tokens.filter(t => t.line < 5);
+                        logger.info(`Debug: Found ${firstTokens.length} tokens in first 5 lines:`);
+                        firstTokens.forEach(t => {
+                            logger.info(`  Line ${t.line}: type=${t.type}, value="${t.value}", referencedFile="${t.referencedFile || 'undefined'}"`);
+                        });
+                    }
                     
                     if (memberToken?.referencedFile) {
                         logger.info(`File has MEMBER('${memberToken.referencedFile}'), searching parent file for MAP declaration`);

@@ -1,4 +1,4 @@
-import { Hover, Position, Range } from 'vscode-languageserver-protocol';
+import { Hover, Location, Position, Range } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import LoggerManager from '../logger';
 import { Token, TokenType } from '../ClarionTokenizer';
@@ -1374,4 +1374,102 @@ export class HoverProvider {
         }
     }
 
+
+    /**
+     * Find MAP declaration in MEMBER parent file
+     */
+    private async findMapDeclarationInMemberFile(
+        procName: string,
+        memberFile: string,
+        document: TextDocument,
+        signature?: string
+    ): Promise<Location | null> {
+        try {
+            const fs = await import('fs');
+            const path = await import('path');
+            
+            const SolutionManager = (await import('../solution/solutionManager')).SolutionManager;
+            const solutionManager = SolutionManager.getInstance();
+            let resolvedPath: string | null = null;
+            
+            if (solutionManager && solutionManager.solution) {
+                for (const project of solutionManager.solution.projects) {
+                    const redirectionParser = project.getRedirectionParser();
+                    const resolved = redirectionParser.findFile(memberFile);
+                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
+                        resolvedPath = resolved.path;
+                        break;
+                    }
+                }
+            }
+            
+            if (!resolvedPath) {
+                const currentDir = path.dirname(decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\'));
+                const relativePath = path.join(currentDir, memberFile);
+                if (fs.existsSync(relativePath)) {
+                    resolvedPath = path.resolve(relativePath);
+                }
+            }
+            
+            if (!resolvedPath) return null;
+            
+            const currentFileName = path.basename(document.uri);
+            const content = fs.readFileSync(resolvedPath, 'utf8');
+            const ClarionTokenizer = (await import('../ClarionTokenizer')).ClarionTokenizer;
+            const TokenType = (await import('../ClarionTokenizer')).TokenType;
+            const tokenizer = new ClarionTokenizer(content);
+            const parentTokens = tokenizer.tokenize();
+            
+            const mapBlocks = parentTokens.filter(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'MAP');
+            if (mapBlocks.length === 0) return null;
+            
+            for (const mapBlock of mapBlocks) {
+                const mapStart = mapBlock.line;
+                const mapEnd = mapBlock.finishesAt;
+                if (mapEnd === undefined) continue;
+                
+                const moduleBlocks = parentTokens.filter(t =>
+                    t.type === TokenType.Structure &&
+                    t.value.toUpperCase() === 'MODULE' &&
+                    t.line > mapStart && t.line < mapEnd
+                );
+                
+                for (const moduleBlock of moduleBlocks) {
+                    const moduleToken = parentTokens.find(t =>
+                        t.line === moduleBlock.line &&
+                        t.value.toUpperCase() === 'MODULE' &&
+                        t.referencedFile
+                    );
+                    
+                    if (moduleToken?.referencedFile && 
+                        path.basename(moduleToken.referencedFile).toLowerCase() === currentFileName.toLowerCase()) {
+                        
+                        const moduleStart = moduleBlock.line;
+                        const moduleEnd = moduleBlock.finishesAt;
+                        if (moduleEnd === undefined) continue;
+                        
+                        const procedureDecls = parentTokens.filter(t =>
+                            t.line > moduleStart && t.line < moduleEnd &&
+                            (t.subType === TokenType.MapProcedure || t.type === TokenType.Function) &&
+                            (t.label?.toLowerCase() === procName.toLowerCase() ||
+                             t.value.toLowerCase() === procName.toLowerCase())
+                        );
+                        
+                        if (procedureDecls.length > 0) {
+                            const decl = procedureDecls[0];
+                            return Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
+                                start: { line: decl.line, character: 0 },
+                                end: { line: decl.line, character: decl.value.length }
+                            });
+                        }
+                    }
+                }
+            }
+            
+            return null;
+        } catch (error) {
+            logger.error(`Error searching MEMBER file for hover: ${error}`);
+            return null;
+        }
+    }
 }
