@@ -119,6 +119,9 @@ export class DocumentStructure {
             
         }
         
+        // Resolve file references for all tokens that have them
+        this.resolveFileReferences();
+        
         // Close any procedures that are still open at the end of the file
         this.closeRemainingProcedures();
         this.assignMaxLabelLengths();
@@ -399,13 +402,16 @@ export class DocumentStructure {
         token.maxLabelLength = 0;
         this.structureStack.push(token);
 
-        // ✅ Parse MODULE('filename') attribute for CLASS structures
+        // ✅ Parse and resolve file references for CLASS structures
         if (token.value.toUpperCase() === 'CLASS' && this.lines && token.line >= 0 && token.line < this.lines.length) {
             const lineText = this.lines[token.line];
+            
+            // Extract MODULE('filename') or LINK('filename') from the class line
             const moduleMatch = lineText.match(/Module\s*\(\s*'([^']+)'\s*\)/i);
             if (moduleMatch) {
-                token.moduleFile = moduleMatch[1];
-                logger.info(`✅ CLASS at line ${token.line} has MODULE: ${token.moduleFile}`);
+                const filename = moduleMatch[1];
+                token.referencedFile = filename;  // Store unresolved filename for now
+                logger.info(`✅ CLASS at line ${token.line} references MODULE: ${filename}`);
             }
         }
 
@@ -800,6 +806,28 @@ export class DocumentStructure {
                 lastRoutine.finishesAt = this.tokens[this.tokens.length - 1]?.line ?? 0;
                 logger.warn(`⚠️ [EOF] ROUTINE '${lastRoutine.value}' closed at Line ${lastRoutine.finishesAt}`);
             }
+        }
+    }
+
+    /**
+     * Resolve file references for tokens that have unresolved filenames
+     * Handles MODULE, INCLUDE, LINK, MEMBER, etc.
+     */
+    private resolveFileReferences(): void {
+        // Note: We're storing unresolved filenames for now
+        // Actual path resolution should happen via RedirectionParser when needed
+        // This keeps DocumentStructure lightweight and doesn't require solution context
+        
+        // Parse INCLUDE statements
+        for (const token of this.tokens) {
+            if (token.value && token.value.toUpperCase().includes('INCLUDE') && token.value.includes("'")) {
+                const includeMatch = token.value.match(/INCLUDE\s*\(\s*['"]([^'"]+)['"]\s*\)/i);
+                if (includeMatch) {
+                    token.referencedFile = includeMatch[1];
+                    logger.info(`✅ INCLUDE at line ${token.line} references: ${token.referencedFile}`);
+                }
+            }
+            // Could add LINK, MEMBER, etc. here in the future
         }
     }
 }
