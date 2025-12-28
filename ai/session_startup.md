@@ -21,6 +21,13 @@
    - Zero breaking changes - new APIs added alongside existing functionality
    - Ready for Phase 2: Update ImplementationProvider to use new APIs
 
+**6. Phase 2 - HoverProvider Refactoring (TDD) - IN PROGRESS**
+   - Starting refactoring of HoverProvider to use DocumentStructure APIs
+   - Found `isInMapBlock()` method (30 lines) - duplicate of code just removed from ImplementationProvider
+   - Used 3 times in HoverProvider (lines 78, 79, 142)
+   - Plan: Replace with `documentStructure.isInMapBlock()` API
+   - Goal: Remove ~30 more lines of duplicated code
+
 ### ✅ Completed Earlier Today
 1. **SECTION Hover Bug Fixed**
    - Fixed hover showing wrong line when comments contain SECTION-like text

@@ -31,6 +31,9 @@ export class HoverProvider {
         logger.info(`Providing hover for position ${position.line}:${position.character} in ${document.uri}`);
 
         try {
+            // Get DocumentStructure for MAP block detection
+            const documentStructure = this.tokenCache.getStructure(document);
+            
             // Get the word at the current position
             const wordRange = TokenHelper.getWordRangeAtPosition(document, position);
             if (!wordRange) {
@@ -75,8 +78,8 @@ export class HoverProvider {
             // Check if this is a MAP procedure implementation and show declaration hover
             // Skip if we're inside a MAP block (those are declarations, not implementations)
             const mapProcMatch = line.match(/^(\w+)\s+PROCEDURE\s*\(/i);
-            logger.info(`MAP procedure regex test: line="${line}", match=${!!mapProcMatch}, inMapBlock=${this.isInMapBlock(document, position.line)}`);
-            if (mapProcMatch && !this.isInMapBlock(document, position.line)) {
+            logger.info(`MAP procedure regex test: line="${line}", match=${!!mapProcMatch}, inMapBlock=${documentStructure.isInMapBlock(position.line)}`);
+            if (mapProcMatch && !documentStructure.isInMapBlock(position.line)) {
                 const procName = mapProcMatch[1];
                 const procNameEnd = mapProcMatch.index! + procName.length;
                 
@@ -139,7 +142,7 @@ export class HoverProvider {
             }
 
             // Check if this is inside a MAP block (declaration) and show implementation hover
-            if (this.isInMapBlock(document, position.line)) {
+            if (documentStructure.isInMapBlock(position.line)) {
                 logger.info(`Inside MAP block at line ${position.line}`);
                 // MAP declarations have two formats:
                 // 1. Indented: "    MyProc(params)" - no PROCEDURE keyword
@@ -1108,38 +1111,6 @@ export class HoverProvider {
     /**
      * Check if a line is inside a MAP block
      */
-    private isInMapBlock(document: TextDocument, lineNumber: number): boolean {
-        const text = document.getText();
-        const lines = text.split(/\r?\n/);
-        
-        let inMap = false;
-        let moduleDepth = 0; // Track nested MODULE blocks
-        
-        for (let i = 0; i <= lineNumber && i < lines.length; i++) {
-            const trimmed = lines[i].trim().toUpperCase();
-            
-            // Check for MAP start
-            if (/^\s*MAP\s*$/i.test(trimmed)) {
-                inMap = true;
-                moduleDepth = 0;
-            } 
-            // Check for MODULE start (inside MAP)
-            else if (inMap && /^MODULE\s*\(/i.test(trimmed)) {
-                moduleDepth++;
-            }
-            // Check for END - could close MODULE or MAP
-            else if (/^\s*END\s*$/i.test(trimmed)) {
-                if (moduleDepth > 0) {
-                    moduleDepth--; // Close MODULE
-                } else if (inMap) {
-                    inMap = false; // Close MAP
-                }
-            }
-        }
-        
-        return inMap;
-    }
-
     /**
      * Find implementation of a MAP procedure
      */
