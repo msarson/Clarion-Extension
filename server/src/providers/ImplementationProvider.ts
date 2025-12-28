@@ -99,13 +99,27 @@ export class ImplementationProvider {
         const lines = text.split(/\r?\n/);
 
         let inMap = false;
+        let moduleDepth = 0; // Track nested MODULE blocks
+        
         for (let i = 0; i <= lineNumber && i < lines.length; i++) {
             const trimmed = lines[i].trim().toUpperCase();
 
+            // Check for MAP start
             if (trimmed === 'MAP') {
                 inMap = true;
-            } else if (inMap && trimmed === 'END') {
-                inMap = false;
+                moduleDepth = 0;
+            } 
+            // Check for MODULE start (inside MAP)
+            else if (inMap && /^MODULE\s*\(/i.test(trimmed)) {
+                moduleDepth++;
+            }
+            // Check for END - could close MODULE or MAP
+            else if (trimmed === 'END') {
+                if (moduleDepth > 0) {
+                    moduleDepth--; // Close MODULE
+                } else if (inMap) {
+                    inMap = false; // Close MAP
+                }
             }
         }
 
