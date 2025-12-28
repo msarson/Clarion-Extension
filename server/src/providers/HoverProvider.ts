@@ -204,9 +204,10 @@ export class HoverProvider {
                 if (classToken && classToken.label) {
                     const className = classToken.label;
                     
-                    // Find MODULE token on the same line as the class
+                    // Find MODULE token on the same line as the class (after the CLASS token)
                     const moduleToken = methodTokens.find(t => 
                         t.line === classToken.line &&
+                        t.start > classToken.start &&  // Must come after CLASS token
                         t.referencedFile &&
                         t.value.toUpperCase().includes('MODULE')
                     );
