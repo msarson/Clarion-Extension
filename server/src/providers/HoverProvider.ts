@@ -73,6 +73,7 @@ export class HoverProvider {
             // Check if this is a MAP procedure implementation and show declaration hover
             // Skip if we're inside a MAP block (those are declarations, not implementations)
             const mapProcMatch = line.match(/^(\w+)\s+PROCEDURE\s*\(/i);
+            logger.info(`MAP procedure regex test: line="${line}", match=${!!mapProcMatch}, inMapBlock=${this.isInMapBlock(document, position.line)}`);
             if (mapProcMatch && !this.isInMapBlock(document, position.line)) {
                 const procName = mapProcMatch[1];
                 const procNameEnd = mapProcMatch.index! + procName.length;
@@ -95,6 +96,42 @@ export class HoverProvider {
                                 value: `**MAP Declaration** _(Press F12 to navigate)_\n\n\`\`\`clarion\n${mapLine}\n\`\`\``
                             }
                         };
+                    } else {
+                        // Not found in current file, check for MEMBER
+                        logger.info(`MAP declaration not found in current file, checking for MEMBER...`);
+                        const memberToken = tokens.find(t => 
+                            t.line < 5 && 
+                            t.value.toUpperCase() === 'MEMBER' &&
+                            t.referencedFile
+                        );
+                        
+                        if (memberToken?.referencedFile) {
+                            logger.info(`Found MEMBER('${memberToken.referencedFile}'), searching parent for MAP declaration`);
+                            const memberMapLocation = await this.findMapDeclarationInMemberFile(
+                                procName,
+                                memberToken.referencedFile,
+                                document,
+                                line
+                            );
+                            
+                            if (memberMapLocation) {
+                                // Read the declaration line from external file
+                                const fs = await import('fs');
+                                const filePath = decodeURIComponent(memberMapLocation.uri.replace('file:///', '')).replace(/\//g, '\\');
+                                if (fs.existsSync(filePath)) {
+                                    const content = fs.readFileSync(filePath, 'utf8');
+                                    const lines = content.split('\n');
+                                    const mapLine = lines[memberMapLocation.range.start.line]?.trim() || '';
+                                    const fileName = memberToken.referencedFile;
+                                    return {
+                                        contents: {
+                                            kind: 'markdown',
+                                            value: `**MAP Declaration in ${fileName}** _(Press F12 to navigate)_\n\n\`\`\`clarion\n${mapLine}\n\`\`\``
+                                        }
+                                    };
+                                }
+                            }
+                        }
                     }
                 }
             }
