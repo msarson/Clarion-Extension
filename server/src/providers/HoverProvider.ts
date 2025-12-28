@@ -130,13 +130,36 @@ export class HoverProvider {
                         
                         if (implLocation) {
                             logger.info(`✅ Found implementation with overload resolution at line ${implLocation.range.start.line}`);
+                            
+                            // Check if implementation is in a different file
+                            const implUri = implLocation.uri;
+                            const currentUri = document.uri;
+                            
+                            let implDocument = document;
+                            if (implUri !== currentUri) {
+                                // Load the external file
+                                logger.info(`Implementation is in external file: ${implUri}`);
+                                const fs = await import('fs');
+                                const filePath = decodeURIComponent(implUri.replace('file:///', '')).replace(/\//g, '\\');
+                                
+                                if (fs.existsSync(filePath)) {
+                                    const content = fs.readFileSync(filePath, 'utf8');
+                                    const TextDocument = (await import('vscode-languageserver-textdocument')).TextDocument;
+                                    implDocument = TextDocument.create(implUri, 'clarion', 1, content);
+                                    logger.info(`Loaded external document for preview`);
+                                } else {
+                                    logger.error(`External file not found: ${filePath}`);
+                                }
+                            }
+                            
                             // Get preview of implementation
-                            const implInfo = this.findProcedureImplementationPreview(document, procName, implLocation.range.start.line);
+                            const implInfo = this.findProcedureImplementationPreview(implDocument, procName, implLocation.range.start.line);
                             if (implInfo) {
+                                const fileInfo = implUri !== currentUri ? ` in ${implUri.split('/').pop()}` : '';
                                 return {
                                     contents: {
                                         kind: 'markdown',
-                                        value: `**Implementation** _(Press Ctrl+F12 to navigate)_ — line ${implInfo.line + 1}\n\n\`\`\`clarion\n${implInfo.preview}\n\`\`\``
+                                        value: `**Implementation${fileInfo}** _(Press Ctrl+F12 to navigate)_ — line ${implInfo.line + 1}\n\n\`\`\`clarion\n${implInfo.preview}\n\`\`\``
                                     }
                                 };
                             }
