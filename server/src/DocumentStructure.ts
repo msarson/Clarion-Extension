@@ -876,4 +876,234 @@ export class DocumentStructure {
         
         return null;
     }
+
+    // =====================================================
+    // 🎯 Phase 1: Semantic Query APIs
+    // High-level APIs to reduce code duplication in providers
+    // =====================================================
+
+    /**
+     * Gets all MAP structure blocks in the document
+     * @returns Array of MAP tokens (empty if none found)
+     */
+    public getMapBlocks(): Token[] {
+        const mapTokens = this.structuresByType.get('MAP');
+        return mapTokens ? [...mapTokens] : [];
+    }
+
+    /**
+     * Gets the MEMBER parent file (if this file is a MEMBER of another)
+     * Searches first 10 lines for MEMBER statement
+     * @returns Unresolved filename or null
+     */
+    public getMemberParentFile(): string | null {
+        // MEMBER should be in first 10 lines of file
+        const memberToken = this.tokens.find(t => 
+            t.line < 10 &&
+            t.value && 
+            t.value.toUpperCase() === 'MEMBER' &&
+            t.referencedFile
+        );
+        
+        return memberToken?.referencedFile || null;
+    }
+
+    /**
+     * Gets the MODULE file referenced by a CLASS token
+     * Looks for MODULE in the CLASS's attribute list on the same line
+     * @param classToken The CLASS structure token
+     * @returns Unresolved filename or null
+     */
+    public getClassModuleFile(classToken: Token): string | null {
+        if (!classToken || classToken.type !== TokenType.Structure || classToken.value.toUpperCase() !== 'CLASS') {
+            return null;
+        }
+
+        // Find MODULE token on same line with referencedFile
+        // MODULE in CLASS attributes appears after the CLASS token
+        const moduleToken = this.tokens.find(t =>
+            t.line === classToken.line &&
+            t.start > classToken.start &&
+            t.value.toUpperCase() === 'MODULE' &&
+            t.referencedFile
+        );
+
+        return moduleToken?.referencedFile || null;
+    }
+
+    /**
+     * Checks if a line is inside a MAP block (between MAP and its END)
+     * @param line Line number to check
+     * @returns true if line is inside a MAP block, false otherwise
+     */
+    public isInMapBlock(line: number): boolean {
+        // Get all MAP blocks
+        const mapBlocks = this.getMapBlocks();
+        
+        for (const mapToken of mapBlocks) {
+            const mapStart = mapToken.line;
+            const mapEnd = mapToken.finishesAt;
+            
+            // Line must be after MAP declaration and before END
+            if (mapEnd !== undefined && line > mapStart && line < mapEnd) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+
+    /**
+     * Gets all CLASS structure blocks in the document
+     * @returns Array of CLASS tokens (empty if none found)
+     */
+    public getClasses(): Token[] {
+        const classTokens = this.structuresByType.get('CLASS');
+        return classTokens ? [...classTokens] : [];
+    }
+
+    /**
+     * Finds all MAP procedure declarations with matching name
+     * Searches inside MAP blocks for procedure declarations (including overloads)
+     * @param procName Procedure name to search for (case-insensitive)
+     * @returns Array of matching tokens (empty if none found)
+     */
+    public findMapDeclarations(procName: string): Token[] {
+        const results: Token[] = [];
+        const upperProcName = procName.toUpperCase();
+        
+        // Get all MAP blocks
+        const mapBlocks = this.getMapBlocks();
+        
+        for (const mapToken of mapBlocks) {
+            const mapStart = mapToken.line;
+            const mapEnd = mapToken.finishesAt;
+            
+            if (mapEnd === undefined) continue;
+            
+            // Find all tokens inside this MAP block
+            for (const token of this.tokens) {
+                if (token.line <= mapStart || token.line >= mapEnd) continue;
+                
+                // Check if this is a MAP procedure declaration
+                const isMatch = (token.subType === TokenType.MapProcedure && 
+                                 token.label?.toUpperCase() === upperProcName) ||
+                                (token.type === TokenType.Function && 
+                                 token.value.toUpperCase() === upperProcName);
+                
+                if (isMatch) {
+                    results.push(token);
+                }
+            }
+        }
+        
+        return results;
+    }
+
+    /**
+     * Finds all global procedure implementations (not in MAP blocks)
+     * @param procName Procedure name to search for (case-insensitive)
+     * @returns Array of matching procedure tokens (empty if none found)
+     */
+    public findProcedureImplementations(procName: string): Token[] {
+        const results: Token[] = [];
+        const upperProcName = procName.toUpperCase();
+        
+        // Search for GlobalProcedure tokens
+        for (const token of this.tokens) {
+            if (token.subType === TokenType.GlobalProcedure &&
+                token.label?.toUpperCase() === upperProcName) {
+                results.push(token);
+            }
+        }
+        
+        return results;
+    }
+
+    /**
+     * Gets all global variables (labels at column 0 before first CODE marker)
+     * Excludes procedure declarations and structure declarations
+     * @returns Array of global variable tokens (empty if none found)
+     */
+    public getGlobalVariables(): Token[] {
+        const results: Token[] = [];
+        
+        // Find first CODE marker to determine global scope boundary
+        const firstCode = this.getFirstCodeMarker();
+        const globalScopeEndLine = firstCode ? firstCode.line : Number.MAX_SAFE_INTEGER;
+        
+        // Find all labels at column 0 before first CODE
+        for (const token of this.tokens) {
+            if (token.type === TokenType.Label &&
+                token.start === 0 &&
+                token.line < globalScopeEndLine) {
+                
+                const upperValue = token.value.toUpperCase();
+                
+                // Skip keywords that might be tokenized as labels (DATA, CODE)
+                if (upperValue === 'DATA' || upperValue === 'CODE') {
+                    continue;
+                }
+                
+                // Exclude procedure declarations (have PROCEDURE or FUNCTION after them)
+                // Exclude structure declarations (have CLASS, QUEUE, GROUP, etc. after them)
+                const lineTokens = this.tokensByLine.get(token.line) || [];
+                const hasStructureKeyword = lineTokens.some(t =>
+                    t.start > token.start &&
+                    t.type === TokenType.Structure
+                );
+                
+                const hasProcedureKeyword = lineTokens.some(t =>
+                    t.start > token.start &&
+                    (t.value.toUpperCase() === 'PROCEDURE' ||
+                     t.value.toUpperCase() === 'FUNCTION')
+                );
+                
+                if (!hasStructureKeyword && !hasProcedureKeyword) {
+                    results.push(token);
+                }
+            }
+        }
+        
+        return results;
+    }
+
+    /**
+     * Gets the first CODE marker token in the document
+     * This marks the boundary between global scope and procedural code
+     * CODE can be tokenized as either Keyword or Label depending on context
+     * @returns First CODE token or null if not found
+     */
+    public getFirstCodeMarker(): Token | null {
+        // Find first CODE keyword or label
+        for (const token of this.tokens) {
+            if (token.value.toUpperCase() === 'CODE' &&
+                (token.type === TokenType.Keyword || token.type === TokenType.Label)) {
+                return token;
+            }
+        }
+        
+        return null;
+    }
+
+    /**
+     * Checks if a token is in global scope (before first PROCEDURE)
+     * @param token Token to check
+     * @returns true if in global scope, false otherwise
+     */
+    public isInGlobalScope(token: Token): boolean {
+        // Find first procedure declaration
+        const firstProc = this.tokens.find(t =>
+            t.subType === TokenType.GlobalProcedure ||
+            t.value.toUpperCase() === 'PROCEDURE'
+        );
+        
+        // If no procedure exists, everything is in global scope
+        if (!firstProc) {
+            return true;
+        }
+        
+        // Token is in global scope if it comes before first PROCEDURE
+        return token.line < firstProc.line;
+    }
 }
