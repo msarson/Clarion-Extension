@@ -168,26 +168,47 @@ export class MapProcedureResolver {
 
         const mapBlock = mapStructures[0];
         
-        // Check if this MAP block contains a MODULE with source file
-        const moduleToken = tokens.find(t =>
+        // Find the MODULE block that contains the current position
+        // MODULE blocks are Structure tokens with value='MODULE' or 'Module'
+        const moduleBlocks = tokens.filter(t =>
+            t.type === TokenType.Structure &&
+            t.value.toUpperCase() === 'MODULE' &&
             t.line > mapBlock.line &&
             t.line < (mapBlock.finishesAt || Infinity) &&
-            t.value.toUpperCase() === 'MODULE' &&
-            t.referencedFile
+            t.line < position.line &&  // MODULE must be before position
+            t.finishesAt !== undefined &&
+            t.finishesAt > position.line  // MODULE must extend past position
         );
         
-        if (moduleToken?.referencedFile) {
-            logger.info(`MAP contains MODULE('${moduleToken.referencedFile}'), searching external file`);
-            const externalImpl = await this.findImplementationInModuleFile(
-                procName, 
-                moduleToken.referencedFile,
-                document,
-                declarationSignature
+        // If position is inside a MODULE block, find the MODULE token with referencedFile
+        if (moduleBlocks.length > 0) {
+            const containingModule = moduleBlocks[0];
+            logger.info(`Position is inside MODULE block at line ${containingModule.line}`);
+            
+            // Find the MODULE keyword token (with referencedFile) on that line
+            const moduleToken = tokens.find(t =>
+                t.line === containingModule.line &&
+                t.value.toUpperCase() === 'MODULE' &&
+                t.referencedFile
             );
-            if (externalImpl) {
-                return externalImpl;
+            
+            if (moduleToken?.referencedFile) {
+                logger.info(`MAP contains MODULE('${moduleToken.referencedFile}'), searching external file`);
+                const externalImpl = await this.findImplementationInModuleFile(
+                    procName, 
+                    moduleToken.referencedFile,
+                    document,
+                    declarationSignature
+                );
+                if (externalImpl) {
+                    return externalImpl;
+                }
+                logger.info(`No implementation found in MODULE file, searching current file`);
+            } else {
+                logger.info(`MODULE block found but no referencedFile (probably Windows API)`);
             }
-            logger.info(`No implementation found in MODULE file, searching current file`);
+        } else {
+            logger.info(`Position not inside any MODULE block, procedure is in MAP without MODULE`);
         }
 
         // Find all GlobalProcedure implementations with matching name in current file
