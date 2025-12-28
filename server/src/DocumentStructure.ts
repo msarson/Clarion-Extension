@@ -798,52 +798,82 @@ export class DocumentStructure {
 
     /**
      * Resolve file references for tokens that contain file references
-     * Handles MODULE, INCLUDE, LINK, MEMBER, etc. by checking token values
+     * Handles MODULE, INCLUDE, LINK, MEMBER, etc. by checking token sequences
      */
     private resolveFileReferences(): void {
         // Note: We're storing unresolved filenames
         // Actual path resolution happens via RedirectionParser when needed
         
-        for (const token of this.tokens) {
+        for (let i = 0; i < this.tokens.length; i++) {
+            const token = this.tokens[i];
             if (!token.value) continue;
             
             const upperValue = token.value.toUpperCase();
             
-            // Check for MODULE('filename')
-            if (upperValue.includes('MODULE') && token.value.includes("'")) {
-                const match = token.value.match(/Module\s*\(\s*['"]([^'"]+)['"]\s*\)/i);
-                if (match) {
-                    token.referencedFile = match[1];
+            // Check for MODULE followed by ('filename')
+            if (upperValue === 'MODULE') {
+                const filename = this.extractFilenameAfterKeyword(i);
+                if (filename) {
+                    token.referencedFile = filename;
                     logger.info(`✅ MODULE token at line ${token.line} references: ${token.referencedFile}`);
                 }
             }
             
-            // Check for LINK('filename')
-            if (upperValue.includes('LINK') && token.value.includes("'")) {
-                const match = token.value.match(/Link\s*\(\s*['"]([^'"]+)['"]\s*(?:,\s*\d+\s*)?\)/i);
-                if (match) {
-                    token.referencedFile = match[1];
+            // Check for LINK followed by ('filename') or ('filename',num)
+            if (upperValue === 'LINK') {
+                const filename = this.extractFilenameAfterKeyword(i);
+                if (filename) {
+                    token.referencedFile = filename;
                     logger.info(`✅ LINK token at line ${token.line} references: ${token.referencedFile}`);
                 }
             }
             
-            // Check for INCLUDE('filename')
-            if (upperValue.includes('INCLUDE') && token.value.includes("'")) {
-                const match = token.value.match(/Include\s*\(\s*['"]([^'"]+)['"]\s*\)/i);
-                if (match) {
-                    token.referencedFile = match[1];
+            // Check for INCLUDE followed by ('filename')
+            if (upperValue === 'INCLUDE') {
+                const filename = this.extractFilenameAfterKeyword(i);
+                if (filename) {
+                    token.referencedFile = filename;
                     logger.info(`✅ INCLUDE token at line ${token.line} references: ${token.referencedFile}`);
                 }
             }
             
-            // Check for MEMBER('filename')
-            if (upperValue.includes('MEMBER') && token.value.includes("'")) {
-                const match = token.value.match(/Member\s*\(\s*['"]([^'"]+)['"]\s*\)/i);
-                if (match) {
-                    token.referencedFile = match[1];
+            // Check for MEMBER followed by ('filename')
+            if (upperValue === 'MEMBER') {
+                const filename = this.extractFilenameAfterKeyword(i);
+                if (filename) {
+                    token.referencedFile = filename;
                     logger.info(`✅ MEMBER token at line ${token.line} references: ${token.referencedFile}`);
                 }
             }
         }
+    }
+    
+    /**
+     * Extract filename from token sequence like: KEYWORD ( 'filename' )
+     * @param keywordIndex Index of the keyword token (MODULE, LINK, INCLUDE, etc.)
+     * @returns The filename string or null
+     */
+    private extractFilenameAfterKeyword(keywordIndex: number): string | null {
+        // Expected pattern: KEYWORD ( 'filename' ) [,num]
+        // tokens[i] = KEYWORD
+        // tokens[i+1] = (
+        // tokens[i+2] = 'filename'
+        // tokens[i+3] = )
+        
+        if (keywordIndex + 3 >= this.tokens.length) return null;
+        
+        const openParen = this.tokens[keywordIndex + 1];
+        const filenameToken = this.tokens[keywordIndex + 2];
+        const closeParen = this.tokens[keywordIndex + 3];
+        
+        if (openParen?.value === '(' && 
+            filenameToken?.value &&
+            filenameToken.value.startsWith("'") &&
+            closeParen?.value === ')') {
+            // Remove quotes from filename
+            return filenameToken.value.replace(/^'|'$/g, '');
+        }
+        
+        return null;
     }
 }

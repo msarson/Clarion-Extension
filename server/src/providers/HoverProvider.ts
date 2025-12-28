@@ -214,6 +214,15 @@ export class HoverProvider {
                     
                     const moduleFile = moduleToken?.referencedFile;
                     
+                    // Debug: Show all tokens on the CLASS line
+                    if (!moduleFile) {
+                        logger.info(`❌ No MODULE token found on class line ${classToken.line}. Tokens on this line:`);
+                        const lineTokens = methodTokens.filter(t => t.line === classToken.line);
+                        lineTokens.forEach(t => {
+                            logger.info(`  Token: type=${t.type}, value="${t.value}", start=${t.start}, referencedFile=${t.referencedFile}`);
+                        });
+                    }
+                    
                     logger.info(`Method ${currentToken.label} belongs to class ${className}`);
                     if (moduleFile) {
                         logger.info(`Class references MODULE: ${moduleFile}`);
