@@ -15,6 +15,8 @@ import { TokenCache } from '../TokenCache';
 import { MapProcedureResolver } from '../utils/MapProcedureResolver';
 import { SolutionManager } from '../solution/solutionManager';
 import LoggerManager from '../logger';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const logger = LoggerManager.getLogger("ImplementationProvider");
 
@@ -189,8 +191,30 @@ export class ImplementationProvider {
 
         if (tokenAtPosition && tokenAtPosition.label) {
             logger.info(`Found method/procedure declaration: ${tokenAtPosition.label}`);
-            // TODO: Use SolutionManager to find implementation in other files
-            // For now, search in current file
+            
+            // Extract class name from the context (find the parent CLASS token)
+            const className = this.findClassNameForMethod(tokens, position.line);
+            
+            if (className) {
+                logger.info(`Method ${tokenAtPosition.label} belongs to class ${className}`);
+                
+                // Count parameters in the declaration line for overload matching
+                const paramCount = this.countParametersInLine(line);
+                
+                // Search for implementation cross-file
+                const implementation = await this.findMethodImplementationCrossFile(
+                    className,
+                    tokenAtPosition.label,
+                    document,
+                    paramCount
+                );
+                
+                if (implementation) {
+                    return implementation;
+                }
+            }
+            
+            // Fallback to current file search
             return this.findMethodImplementationInFile(document, tokenAtPosition.label);
         }
 
@@ -313,6 +337,157 @@ export class ImplementationProvider {
             );
         }
 
+        return null;
+    }
+
+    /**
+     * Find the class name for a method at the given line
+     */
+    private findClassNameForMethod(tokens: Token[], methodLine: number): string | null {
+        // Search backwards from the method line to find the CLASS token
+        for (let i = tokens.length - 1; i >= 0; i--) {
+            const token = tokens[i];
+            
+            // Stop if we've gone past the method line
+            if (token.line > methodLine) {
+                continue;
+            }
+            
+            // Look for CLASS structure
+            if (token.type === TokenType.Structure && token.value.toUpperCase() === 'CLASS') {
+                // Find the label on the same line
+                const labelToken = tokens.find(t =>
+                    t.type === TokenType.Label &&
+                    t.line === token.line
+                );
+                
+                if (labelToken) {
+                    // Check if this class contains our method line
+                    // Find the END of this class
+                    let classEndLine = -1;
+                    for (let j = i + 1; j < tokens.length; j++) {
+                        const endToken = tokens[j];
+                        if (endToken.value.toUpperCase() === 'END' && endToken.start === 0 && endToken.line > token.line) {
+                            classEndLine = endToken.line;
+                            break;
+                        }
+                    }
+                    
+                    // Check if method is within this class
+                    if (classEndLine === -1 || methodLine < classEndLine) {
+                        return labelToken.value;
+                    }
+                }
+            }
+        }
+        
+        return null;
+    }
+
+    /**
+     * Count parameters in a line
+     */
+    private countParametersInLine(line: string): number {
+        const match = line.match(/\(([^)]*)\)/);
+        if (!match) return 0;
+        
+        const paramList = match[1].trim();
+        if (paramList === '') return 0;
+        
+        return paramList.split(',').length;
+    }
+
+    /**
+     * Find method implementation across all files in solution
+     */
+    private async findMethodImplementationCrossFile(
+        className: string,
+        methodName: string,
+        currentDocument: TextDocument,
+        paramCount?: number
+    ): Promise<Location | null> {
+        logger.info(`Searching for ${className}.${methodName} implementation cross-file`);
+        
+        // First, search in current file
+        const localImpl = this.findMethodImplementationInFile(currentDocument, methodName, paramCount);
+        if (localImpl) {
+            return localImpl;
+        }
+        
+        // Search in solution files
+        const solutionManager = SolutionManager.getInstance();
+        if (!solutionManager || !solutionManager.solution) {
+            logger.info(`No solution manager available for cross-file search`);
+            return null;
+        }
+        
+        logger.info(`Searching ${solutionManager.solution.projects.length} projects`);
+        
+        // Get all source files from all projects
+        for (const project of solutionManager.solution.projects) {
+            for (const sourceFile of project.sourceFiles) {
+                const fullPath = path.join(project.path, sourceFile.relativePath);
+                
+                // Skip current file (already searched)
+                const currentPath = decodeURIComponent(currentDocument.uri.replace('file:///', '')).replace(/\//g, '\\');
+                if (fullPath.toLowerCase() === currentPath.toLowerCase()) {
+                    continue;
+                }
+                
+                // Only search .clw files
+                if (!fullPath.toLowerCase().endsWith('.clw')) {
+                    continue;
+                }
+                
+                if (!fs.existsSync(fullPath)) {
+                    continue;
+                }
+                
+                logger.info(`Searching file: ${fullPath}`);
+                
+                try {
+                    const content = fs.readFileSync(fullPath, 'utf8');
+                    const lines = content.split(/\r?\n/);
+                    
+                    // Search for method implementation: ClassName.MethodName PROCEDURE
+                    for (let i = 0; i < lines.length; i++) {
+                        const line = lines[i];
+                        const implMatch = line.match(/^\s*(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i);
+                        
+                        if (implMatch && 
+                            implMatch[1].toUpperCase() === className.toUpperCase() &&
+                            implMatch[2].toUpperCase() === methodName.toUpperCase()) {
+                            
+                            // Found a potential match - check parameter count if specified
+                            if (paramCount !== undefined) {
+                                const params = implMatch[3].trim();
+                                const implParamCount = params === '' ? 0 : params.split(',').length;
+                                
+                                if (implParamCount !== paramCount) {
+                                    logger.info(`Parameter count mismatch: expected ${paramCount}, found ${implParamCount}`);
+                                    continue;
+                                }
+                            }
+                            
+                            logger.info(`✅ Found implementation in ${fullPath} at line ${i}`);
+                            const fileUri = `file:///${fullPath.replace(/\\/g, '/')}`;
+                            
+                            return Location.create(
+                                fileUri,
+                                {
+                                    start: { line: i, character: 0 },
+                                    end: { line: i, character: implMatch[0].length }
+                                }
+                            );
+                        }
+                    }
+                } catch (error) {
+                    logger.error(`Error reading file ${fullPath}: ${error instanceof Error ? error.message : String(error)}`);
+                }
+            }
+        }
+        
+        logger.info(`❌ No implementation found for ${className}.${methodName}`);
         return null;
     }
 }
