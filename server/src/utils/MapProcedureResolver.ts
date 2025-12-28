@@ -138,13 +138,13 @@ export class MapProcedureResolver {
      * @param position Position in MAP declaration
      * @param declarationSignature Optional declaration signature for overload matching
      */
-    public findProcedureImplementation(
+    public async findProcedureImplementation(
         procName: string, 
         tokens: Token[], 
         document: TextDocument, 
         position: Position,
         declarationSignature?: string
-    ): Location | null {
+    ): Promise<Location | null> {
         logger.info(`Looking for implementation of ${procName} from position ${position.line}`);
 
         if (!tokens || tokens.length === 0) {
@@ -166,7 +166,31 @@ export class MapProcedureResolver {
             return null;
         }
 
-        // Find all GlobalProcedure implementations with matching name
+        const mapBlock = mapStructures[0];
+        
+        // Check if this MAP block contains a MODULE with source file
+        const moduleToken = tokens.find(t =>
+            t.line > mapBlock.line &&
+            t.line < (mapBlock.finishesAt || Infinity) &&
+            t.value.toUpperCase() === 'MODULE' &&
+            t.referencedFile
+        );
+        
+        if (moduleToken?.referencedFile) {
+            logger.info(`MAP contains MODULE('${moduleToken.referencedFile}'), searching external file`);
+            const externalImpl = await this.findImplementationInModuleFile(
+                procName, 
+                moduleToken.referencedFile,
+                document,
+                declarationSignature
+            );
+            if (externalImpl) {
+                return externalImpl;
+            }
+            logger.info(`No implementation found in MODULE file, searching current file`);
+        }
+
+        // Find all GlobalProcedure implementations with matching name in current file
         const candidates: Array<{ token: Token, signature: string }> = [];
         
         const implementations = tokens.filter(t =>
@@ -230,5 +254,119 @@ export class MapProcedureResolver {
             start: { line: impl.line, character: 0 },
             end: { line: impl.line, character: impl.value.length }
         });
+    }
+
+    /**
+     * Search for procedure implementation in external MODULE file
+     * Uses RedirectionParser to resolve file path
+     * @param procName Procedure name to find
+     * @param moduleFile Filename from MODULE('filename')
+     * @param document Current document (for path resolution context)
+     * @param declarationSignature Optional signature for overload matching
+     */
+    private async findImplementationInModuleFile(
+        procName: string,
+        moduleFile: string,
+        document: TextDocument,
+        declarationSignature?: string
+    ): Promise<Location | null> {
+        try {
+            const fs = await import('fs');
+            const path = await import('path');
+            
+            // Try to resolve the file path using redirection
+            const SolutionManager = (await import('../solution/solutionManager')).SolutionManager;
+            const solutionManager = SolutionManager.getInstance();
+            
+            let resolvedPath: string | null = null;
+            
+            // Try solution-wide redirection first
+            if (solutionManager && solutionManager.solution) {
+                for (const project of solutionManager.solution.projects) {
+                    const redirectionParser = project.getRedirectionParser();
+                    const resolved = redirectionParser.findFile(moduleFile);
+                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
+                        resolvedPath = resolved.path;
+                        logger.info(`✅ Resolved MODULE file via redirection: ${resolvedPath}`);
+                        break;
+                    }
+                }
+            }
+            
+            // Fallback to relative path from current document
+            if (!resolvedPath) {
+                const currentDir = path.dirname(decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\'));
+                const relativePath = path.join(currentDir, moduleFile);
+                if (fs.existsSync(relativePath)) {
+                    resolvedPath = path.resolve(relativePath);
+                    logger.info(`✅ Resolved MODULE file via relative path: ${resolvedPath}`);
+                }
+            }
+            
+            if (!resolvedPath) {
+                logger.info(`❌ Could not resolve MODULE file: ${moduleFile}`);
+                return null;
+            }
+            
+            // Read and tokenize the MODULE file
+            const content = fs.readFileSync(resolvedPath, 'utf8');
+            const ClarionTokenizer = (await import('../ClarionTokenizer')).ClarionTokenizer;
+            const tokenizer = new ClarionTokenizer(content);
+            const moduleTokens = tokenizer.tokenize();
+            
+            // Find GlobalProcedure implementations
+            const implementations = moduleTokens.filter(t =>
+                t.subType === TokenType.GlobalProcedure &&
+                t.label?.toLowerCase() === procName.toLowerCase()
+            );
+            
+            if (implementations.length === 0) {
+                logger.info(`No implementation found in MODULE file for ${procName}`);
+                return null;
+            }
+            
+            // If only one, return it
+            if (implementations.length === 1) {
+                const impl = implementations[0];
+                logger.info(`✅ Found implementation in MODULE file at line ${impl.line}`);
+                return Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
+                    start: { line: impl.line, character: 0 },
+                    end: { line: impl.line, character: impl.value.length }
+                });
+            }
+            
+            // Multiple implementations - try overload resolution
+            logger.info(`Found ${implementations.length} overloaded implementations in MODULE file`);
+            
+            if (declarationSignature) {
+                const lines = content.split('\n');
+                const declParams = ProcedureSignatureUtils.extractParameterTypes(declarationSignature);
+                
+                for (const impl of implementations) {
+                    const signature = lines[impl.line].trim();
+                    const implParams = ProcedureSignatureUtils.extractParameterTypes(signature);
+                    
+                    if (ProcedureSignatureUtils.parametersMatch(declParams, implParams)) {
+                        logger.info(`✅ Found exact type match in MODULE file at line ${impl.line}`);
+                        return Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
+                            start: { line: impl.line, character: 0 },
+                            end: { line: impl.line, character: impl.value.length }
+                        });
+                    }
+                }
+            }
+            
+            // Fallback to first implementation
+            const impl = implementations[0];
+            logger.info(`Returning first implementation from MODULE file at line ${impl.line}`);
+            return Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
+                start: { line: impl.line, character: 0 },
+                end: { line: impl.line, character: impl.value.length }
+            });
+            
+        } catch (error) {
+            logger.error(`Error searching MODULE file: ${error}`);
+            return null;
+        }
     }
 }

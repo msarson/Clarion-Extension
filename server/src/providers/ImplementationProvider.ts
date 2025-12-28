@@ -64,7 +64,7 @@ export class ImplementationProvider {
                     logger.info(`Found MAP procedure declaration: ${procName}`);
                     
                     // Use MapProcedureResolver for overload resolution
-                    const implLocation = this.mapResolver.findProcedureImplementation(
+                    const implLocation = await this.mapResolver.findProcedureImplementation(
                         procName,
                         tokens,
                         document,

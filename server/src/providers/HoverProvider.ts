@@ -120,7 +120,7 @@ export class HoverProvider {
                         
                         // Use MapProcedureResolver for overload resolution
                         const tokens = this.tokenCache.getTokens(document);
-                        const implLocation = this.mapResolver.findProcedureImplementation(
+                        const implLocation = await this.mapResolver.findProcedureImplementation(
                             procName, 
                             tokens, 
                             document, 

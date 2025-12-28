@@ -19,7 +19,7 @@ suite('MapProcedureResolver - DocumentStructure-based Tests', () => {
 
     suite('Forward Navigation: MAP Declaration → PROCEDURE Implementation', () => {
         
-        test('Should find implementation for simple MAP procedure', () => {
+        test('Should find implementation for simple MAP procedure', async () => {
             const code = `  MAP
     ProcessOrder(LONG orderId)
   END
@@ -35,13 +35,13 @@ ProcessOrder PROCEDURE(LONG orderId)
             
             // Test from MAP declaration line (line 1, "ProcessOrder")
             const position: Position = { line: 1, character: 6 };
-            const result = resolver.findProcedureImplementation('ProcessOrder', tokens, document, position);
+            const result = await resolver.findProcedureImplementation('ProcessOrder', tokens, document, position);
             
             assert.ok(result, 'Should find implementation');
             assert.strictEqual(result!.range.start.line, 4, 'Should jump to line 4 (PROCEDURE)');
         });
 
-        test('Should find implementation for MAP procedure with PROCEDURE keyword', () => {
+        test('Should find implementation for MAP procedure with PROCEDURE keyword', async () => {
             const code = `  MAP
     ProcessOrder PROCEDURE(LONG orderId)
   END
@@ -55,13 +55,13 @@ ProcessOrder PROCEDURE(LONG orderId)
             const resolver = new MapProcedureResolver();
             
             const position: Position = { line: 1, character: 6 };
-            const result = resolver.findProcedureImplementation('ProcessOrder', tokens, document, position);
+            const result = await resolver.findProcedureImplementation('ProcessOrder', tokens, document, position);
             
             assert.ok(result, 'Should find implementation');
             assert.strictEqual(result!.range.start.line, 4, 'Should jump to implementation');
         });
 
-        test('Should find implementation in multi-parameter procedure', () => {
+        test('Should find implementation in multi-parameter procedure', async () => {
             const code = `  MAP
     SaveRecord(STRING fileName, LONG recordId, *STRING result)
   END
@@ -75,13 +75,13 @@ SaveRecord PROCEDURE(STRING fileName, LONG recordId, *STRING result)
             const resolver = new MapProcedureResolver();
             
             const position: Position = { line: 1, character: 6 };
-            const result = resolver.findProcedureImplementation('SaveRecord', tokens, document, position);
+            const result = await resolver.findProcedureImplementation('SaveRecord', tokens, document, position);
             
             assert.ok(result, 'Should find implementation');
             assert.strictEqual(result!.range.start.line, 4, 'Should jump to implementation');
         });
 
-        test('Should handle multiple MAP blocks correctly', () => {
+        test('Should handle multiple MAP blocks correctly', async () => {
             const code = `  MAP
     FirstProc()
   END
@@ -104,13 +104,13 @@ SecondProc PROCEDURE(LONG id)
             
             // Test second MAP block
             const position: Position = { line: 5, character: 6 };
-            const result = resolver.findProcedureImplementation('SecondProc', tokens, document, position);
+            const result = await resolver.findProcedureImplementation('SecondProc', tokens, document, position);
             
             assert.ok(result, 'Should find SecondProc implementation');
             assert.strictEqual(result!.range.start.line, 12, 'Should jump to SecondProc');
         });
 
-        test('Should handle MAP procedure with return type', () => {
+        test('Should handle MAP procedure with return type', async () => {
             const code = `  MAP
     GetValue(),LONG
   END
@@ -125,13 +125,13 @@ GetValue PROCEDURE(),LONG
             const resolver = new MapProcedureResolver();
             
             const position: Position = { line: 1, character: 6 };
-            const result = resolver.findProcedureImplementation('GetValue', tokens, document, position);
+            const result = await resolver.findProcedureImplementation('GetValue', tokens, document, position);
             
             assert.ok(result, 'Should find implementation');
             assert.strictEqual(result!.range.start.line, 4, 'Should jump to implementation');
         });
 
-        test('Should return null when not inside MAP block', () => {
+        test('Should return null when not inside MAP block', async () => {
             const code = `ProcessOrder PROCEDURE(LONG orderId)
   CODE
   RETURN
@@ -143,7 +143,7 @@ GetValue PROCEDURE(),LONG
             
             // Position outside MAP block
             const position: Position = { line: 0, character: 6 };
-            const result = resolver.findProcedureImplementation('ProcessOrder', tokens, document, position);
+            const result = await resolver.findProcedureImplementation('ProcessOrder', tokens, document, position);
             
             assert.strictEqual(result, null, 'Should return null when not in MAP');
         });
@@ -151,7 +151,7 @@ GetValue PROCEDURE(),LONG
 
     suite('Reverse Navigation: PROCEDURE Implementation → MAP Declaration', () => {
         
-        test('Should find MAP declaration from procedure implementation', () => {
+        test('Should find MAP declaration from procedure implementation', async () => {
             const code = `  MAP
     ProcessOrder(LONG orderId)
   END
@@ -171,7 +171,7 @@ ProcessOrder PROCEDURE(LONG orderId)
             assert.strictEqual(result!.range.start.line, 1, 'Should jump to MAP line');
         });
 
-        test('Should find MAP declaration with PROCEDURE keyword', () => {
+        test('Should find MAP declaration with PROCEDURE keyword', async () => {
             const code = `  MAP
     ProcessOrder PROCEDURE(LONG orderId)
   END
@@ -190,7 +190,7 @@ ProcessOrder PROCEDURE(LONG orderId)
             assert.strictEqual(result!.range.start.line, 1, 'Should jump to MAP line');
         });
 
-        test('Should handle procedure with return type', () => {
+        test('Should handle procedure with return type', async () => {
             const code = `  MAP
     GetValue(),LONG
   END
@@ -210,7 +210,7 @@ GetValue PROCEDURE(),LONG
             assert.strictEqual(result!.range.start.line, 1, 'Should jump to MAP line');
         });
 
-        test('Should return null when no MAP declaration exists', () => {
+        test('Should return null when no MAP declaration exists', async () => {
             const code = `ProcessOrder PROCEDURE(LONG orderId)
   CODE
   RETURN
@@ -225,7 +225,7 @@ GetValue PROCEDURE(),LONG
             assert.strictEqual(result, null, 'Should return null when no MAP declaration');
         });
 
-        test('Should handle MODULE inside MAP', () => {
+        test('Should handle MODULE inside MAP', async () => {
             const code = `  MAP
     MODULE('KERNEL32')
       GetTickCount(),ULONG
@@ -250,7 +250,7 @@ HelperProc PROCEDURE()
 
     suite('Overload Resolution', () => {
         
-        test('Should resolve overloaded MAP procedure by parameter types (STRING, STRING vs LONG)', () => {
+        test('Should resolve overloaded MAP procedure by parameter types (STRING, STRING vs LONG)', async () => {
             const code = `  MAP
     AtSortReport(STRING StartConfigGrp, STRING StartReRunGrp)
     AtSortReport(LONG orderId)
@@ -283,7 +283,7 @@ AtSortReport PROCEDURE(LONG orderId)
             assert.strictEqual(result2!.range.start.line, 2, 'Should match LONG overload at line 2');
         });
 
-        test('Should resolve overloaded implementation from MAP declaration', () => {
+        test('Should resolve overloaded implementation from MAP declaration', async () => {
             const code = `  MAP
     ProcessOrder(LONG orderId)
     ProcessOrder(STRING orderCode, LONG customerId)
@@ -306,7 +306,7 @@ ProcessOrder PROCEDURE(STRING orderCode, LONG customerId)
             // From MAP declaration with LONG - should match line 5
             const position1: Position = { line: 1, character: 6 };
             const declSignature1 = 'ProcessOrder(LONG orderId)';
-            const result1 = resolver.findProcedureImplementation('ProcessOrder', tokens, document, position1, declSignature1);
+            const result1 = await resolver.findProcedureImplementation('ProcessOrder', tokens, document, position1, declSignature1);
             
             assert.ok(result1, 'Should find implementation for LONG overload');
             assert.strictEqual(result1!.range.start.line, 5, 'Should match LONG implementation at line 5');
@@ -314,13 +314,13 @@ ProcessOrder PROCEDURE(STRING orderCode, LONG customerId)
             // From MAP declaration with STRING, LONG - should match line 10
             const position2: Position = { line: 2, character: 6 };
             const declSignature2 = 'ProcessOrder(STRING orderCode, LONG customerId)';
-            const result2 = resolver.findProcedureImplementation('ProcessOrder', tokens, document, position2, declSignature2);
+            const result2 = await resolver.findProcedureImplementation('ProcessOrder', tokens, document, position2, declSignature2);
             
             assert.ok(result2, 'Should find implementation for STRING, LONG overload');
             assert.strictEqual(result2!.range.start.line, 10, 'Should match STRING, LONG implementation at line 10');
         });
 
-        test('Should handle pointer types in overloads', () => {
+        test('Should handle pointer types in overloads', async () => {
             const code = `  MAP
     UpdateRecord(*CustomerType cust)
     UpdateRecord(&CustomerType cust)
@@ -356,7 +356,7 @@ UpdateRecord PROCEDURE(&CustomerType cust)
 
     suite('Edge Cases', () => {
         
-        test('Should not confuse MAP procedure with CLASS method', () => {
+        test('Should not confuse MAP procedure with CLASS method', async () => {
             const code = `MyClass CLASS
   Process PROCEDURE()
   END
@@ -380,7 +380,7 @@ Process PROCEDURE(LONG id)
             assert.strictEqual(result!.range.start.line, 5, 'Should jump to MAP, not CLASS');
         });
 
-        test('Should handle indented PROCEDURE implementation', () => {
+        test('Should handle indented PROCEDURE implementation', async () => {
             const code = `  MAP
     HelperProc(STRING text)
   END
@@ -400,3 +400,4 @@ Process PROCEDURE(LONG id)
         });
     });
 });
+
