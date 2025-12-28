@@ -402,19 +402,6 @@ export class DocumentStructure {
         token.maxLabelLength = 0;
         this.structureStack.push(token);
 
-        // ✅ Parse and resolve file references for CLASS structures
-        if (token.value.toUpperCase() === 'CLASS' && this.lines && token.line >= 0 && token.line < this.lines.length) {
-            const lineText = this.lines[token.line];
-            
-            // Extract MODULE('filename') or LINK('filename') from the class line
-            const moduleMatch = lineText.match(/Module\s*\(\s*'([^']+)'\s*\)/i);
-            if (moduleMatch) {
-                const filename = moduleMatch[1];
-                token.referencedFile = filename;  // Store unresolved filename for now
-                logger.info(`✅ CLASS at line ${token.line} references MODULE: ${filename}`);
-            }
-        }
-
         // Add parent-child relationship with current procedure or structure
         // Special case: MODULE inside MAP should be child of MAP, not the containing procedure
         const isModuleInMap = token.value.toUpperCase() === 'MODULE' && 
@@ -810,24 +797,53 @@ export class DocumentStructure {
     }
 
     /**
-     * Resolve file references for tokens that have unresolved filenames
-     * Handles MODULE, INCLUDE, LINK, MEMBER, etc.
+     * Resolve file references for tokens that contain file references
+     * Handles MODULE, INCLUDE, LINK, MEMBER, etc. by checking token values
      */
     private resolveFileReferences(): void {
-        // Note: We're storing unresolved filenames for now
-        // Actual path resolution should happen via RedirectionParser when needed
-        // This keeps DocumentStructure lightweight and doesn't require solution context
+        // Note: We're storing unresolved filenames
+        // Actual path resolution happens via RedirectionParser when needed
         
-        // Parse INCLUDE statements
         for (const token of this.tokens) {
-            if (token.value && token.value.toUpperCase().includes('INCLUDE') && token.value.includes("'")) {
-                const includeMatch = token.value.match(/INCLUDE\s*\(\s*['"]([^'"]+)['"]\s*\)/i);
-                if (includeMatch) {
-                    token.referencedFile = includeMatch[1];
-                    logger.info(`✅ INCLUDE at line ${token.line} references: ${token.referencedFile}`);
+            if (!token.value) continue;
+            
+            const upperValue = token.value.toUpperCase();
+            
+            // Check for MODULE('filename')
+            if (upperValue.includes('MODULE') && token.value.includes("'")) {
+                const match = token.value.match(/Module\s*\(\s*['"]([^'"]+)['"]\s*\)/i);
+                if (match) {
+                    token.referencedFile = match[1];
+                    logger.info(`✅ MODULE token at line ${token.line} references: ${token.referencedFile}`);
                 }
             }
-            // Could add LINK, MEMBER, etc. here in the future
+            
+            // Check for LINK('filename')
+            if (upperValue.includes('LINK') && token.value.includes("'")) {
+                const match = token.value.match(/Link\s*\(\s*['"]([^'"]+)['"]\s*(?:,\s*\d+\s*)?\)/i);
+                if (match) {
+                    token.referencedFile = match[1];
+                    logger.info(`✅ LINK token at line ${token.line} references: ${token.referencedFile}`);
+                }
+            }
+            
+            // Check for INCLUDE('filename')
+            if (upperValue.includes('INCLUDE') && token.value.includes("'")) {
+                const match = token.value.match(/Include\s*\(\s*['"]([^'"]+)['"]\s*\)/i);
+                if (match) {
+                    token.referencedFile = match[1];
+                    logger.info(`✅ INCLUDE token at line ${token.line} references: ${token.referencedFile}`);
+                }
+            }
+            
+            // Check for MEMBER('filename')
+            if (upperValue.includes('MEMBER') && token.value.includes("'")) {
+                const match = token.value.match(/Member\s*\(\s*['"]([^'"]+)['"]\s*\)/i);
+                if (match) {
+                    token.referencedFile = match[1];
+                    logger.info(`✅ MEMBER token at line ${token.line} references: ${token.referencedFile}`);
+                }
+            }
         }
     }
 }

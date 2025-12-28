@@ -198,12 +198,20 @@ export class HoverProvider {
             if (currentToken && currentToken.label) {
                 logger.info(`Found method declaration: ${currentToken.label} at line ${position.line}`);
                 
-                // Find the class name and get its referenced file (MODULE)
+                // Find the class token and then look for MODULE token on same line
                 const classToken = this.findClassTokenForMethodDeclaration(methodTokens, position.line);
                 
                 if (classToken && classToken.label) {
                     const className = classToken.label;
-                    const moduleFile = classToken.referencedFile;  // Using referencedFile now
+                    
+                    // Find MODULE token on the same line as the class
+                    const moduleToken = methodTokens.find(t => 
+                        t.line === classToken.line &&
+                        t.referencedFile &&
+                        t.value.toUpperCase().includes('MODULE')
+                    );
+                    
+                    const moduleFile = moduleToken?.referencedFile;
                     
                     logger.info(`Method ${currentToken.label} belongs to class ${className}`);
                     if (moduleFile) {

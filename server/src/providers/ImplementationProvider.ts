@@ -221,7 +221,15 @@ export class ImplementationProvider {
             
             if (classToken && classToken.label) {
                 const className = classToken.label;
-                const moduleFile = classToken.referencedFile;  // Using referencedFile now
+                
+                // Find MODULE token on the same line as the class
+                const moduleToken = tokens.find(t => 
+                    t.line === classToken.line &&
+                    t.referencedFile &&
+                    t.value.toUpperCase().includes('MODULE')
+                );
+                
+                const moduleFile = moduleToken?.referencedFile;
                 
                 logger.info(`Method ${tokenAtPosition.label} belongs to class ${className}`);
                 if (moduleFile) {
