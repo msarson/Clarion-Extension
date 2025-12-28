@@ -1,7 +1,6 @@
 import { ImplementationProvider, TextDocument, Position, CancellationToken, ProviderResult, Location, Uri, Definition, LocationLink } from 'vscode';
 import { DocumentManager } from '../documentManager';
 import LoggerManager from '../utils/LoggerManager';
-import { isInsideMapBlock } from '../../../common/clarionUtils';
 
 const logger = LoggerManager.getLogger("ImplementationProvider");
 logger.setLevel("info");
@@ -270,8 +269,7 @@ export class ClarionImplementationProvider implements ImplementationProvider {
 
     /**
      * Finds a MAP procedure implementation in the document
-     * MAP procedures are implemented at column 0 with PROCEDURE keyword
-     * Skips MAP...END blocks which contain forward declarations, not implementations
+     * Uses improved MAP block detection by checking for proper END statements
      */
     private findMapProcedureImplementation(document: TextDocument, procName: string): Location | null {
         const content = document.getText();
@@ -279,40 +277,43 @@ export class ClarionImplementationProvider implements ImplementationProvider {
         
         logger.info(`Searching for MAP procedure implementation: ${procName}`);
         
-        // Strip class prefix if present (e.g., "WindowPreview.TextLineCount" -> "TextLineCount")
-        // MAP declarations may include class prefix, but implementations do not
+        // Strip class prefix if present
         const simpleProcName = procName.includes('.') ? procName.split('.').pop()! : procName;
         logger.info(`Searching for implementation (simple name): ${simpleProcName}`);
         
-        // Search for procedure implementation
-        // Implementations can have leading whitespace
-        let currentPosition = 0;
+        // Build a list of MAP block ranges to skip
+        const mapBlocks: Array<{start: number, end: number}> = [];
+        let inMap = false;
+        let mapStart = -1;
+        
+        for (let i = 0; i < lines.length; i++) {
+            const trimmed = lines[i].trim().toUpperCase();
+            
+            if (trimmed === 'MAP' && !inMap) {
+                inMap = true;
+                mapStart = i;
+            } else if (trimmed.startsWith('END') && inMap) {
+                mapBlocks.push({ start: mapStart, end: i });
+                inMap = false;
+            }
+        }
+        
+        // Search for procedure implementation, skipping MAP blocks
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             
-            // Skip empty lines
-            if (line.trim().length === 0) {
-                currentPosition += line.length + 1; // +1 for newline
+            // Skip if inside a MAP block
+            const isInMapBlock = mapBlocks.some(block => i >= block.start && i <= block.end);
+            if (isInMapBlock) {
                 continue;
             }
             
-            // Match: ProcName PROCEDURE or ProcName.MethodName PROCEDURE
-            // Allow leading whitespace for indented implementations
+            // Match: ProcName PROCEDURE
             const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_\.]*)\s+PROCEDURE/i);
             if (match) {
                 const foundName = match[1];
                 const simpleFoundName = foundName.includes('.') ? foundName.split('.').pop()! : foundName;
                 
-                // Check if this is inside a MAP block (forward declaration)
-                if (isInsideMapBlock(content, currentPosition)) {
-                    logger.info(`Found PROCEDURE at line ${i}: ${foundName} (simple: ${simpleFoundName}) - SKIPPING (inside MAP block)`);
-                    currentPosition += line.length + 1;
-                    continue;
-                }
-                
-                logger.info(`Found PROCEDURE at line ${i}: ${foundName} (simple: ${simpleFoundName})`);
-                
-                // Case-insensitive comparison using simple names (without class prefix)
                 if (simpleFoundName.toUpperCase() === simpleProcName.toUpperCase()) {
                     logger.info(`✅ Match found for ${procName} at line ${i}`);
                     return new Location(
@@ -321,8 +322,6 @@ export class ClarionImplementationProvider implements ImplementationProvider {
                     );
                 }
             }
-            
-            currentPosition += line.length + 1; // +1 for newline
         }
         
         logger.info(`❌ No implementation found for MAP procedure ${procName}`);
