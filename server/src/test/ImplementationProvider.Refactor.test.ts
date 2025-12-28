@@ -17,6 +17,13 @@ suite('ImplementationProvider - DocumentStructure API Integration', () => {
         provider = new ImplementationProvider();
         tokenCache = TokenCache.getInstance();
     });
+    
+    teardown(() => {
+        // Clear any cached documents after each test
+        tokenCache.clearTokens('test://test1.clw');
+        tokenCache.clearTokens('test://test2.clw');
+        tokenCache.clearTokens('test://test3.clw');
+    });
 
     suite('MAP procedure implementation finding (integration test)', () => {
         test('should find implementation for MAP declaration', async () => {
@@ -28,7 +35,7 @@ TestProc PROCEDURE()
 CODE
   RETURN
 END`;
-            const doc = TextDocument.create('test://test.clw', 'clarion', 1, code);
+            const doc = TextDocument.create('test://test1.clw', 'clarion', 1, code);
             const position = Position.create(1, 7); // On "TestProc" in MAP
             
             const location = await provider.provideImplementation(doc, position);
@@ -43,7 +50,7 @@ END`;
             const code = `  MAP
     NonExistent PROCEDURE()
   END`;
-            const doc = TextDocument.create('test://test.clw', 'clarion', 1, code);
+            const doc = TextDocument.create('test://test2.clw', 'clarion', 1, code);
             const position = Position.create(1, 7); // On "NonExistent" in MAP
             
             const location = await provider.provideImplementation(doc, position);
@@ -66,7 +73,7 @@ TestProc PROCEDURE(STRING s)
 CODE
   RETURN
 END`;
-            const doc = TextDocument.create('test://test.clw', 'clarion', 1, code);
+            const doc = TextDocument.create('test://test3.clw', 'clarion', 1, code);
             const position = Position.create(2, 7); // On second "TestProc" in MAP
             
             const location = await provider.provideImplementation(doc, position);
