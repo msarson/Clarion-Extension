@@ -204,6 +204,10 @@ export class HoverProvider {
                 if (className) {
                     logger.info(`Method ${currentToken.label} belongs to class ${className}`);
                     
+                    // Find the MODULE file from the class definition
+                    const moduleFile = this.extractModuleFromClass(methodTokens, className, document);
+                    logger.info(`Class ${className} has module file: ${moduleFile || 'none'}`);
+                    
                     // Count parameters in the declaration
                     const paramCount = this.overloadResolver.countParametersInDeclaration(line);
                     
@@ -212,7 +216,8 @@ export class HoverProvider {
                         className,
                         currentToken.label,
                         document,
-                        paramCount
+                        paramCount,
+                        moduleFile  // Pass the module file hint
                     );
                     
                     if (implLocation) {
@@ -1061,6 +1066,41 @@ export class HoverProvider {
     }
 
     /**
+     * Extract the MODULE file from a class definition
+     */
+    private extractModuleFromClass(tokens: Token[], className: string, document: TextDocument): string | null {
+        // Find the CLASS token for this class
+        const classToken = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.value.toUpperCase() === 'CLASS'
+        );
+        
+        if (!classToken) return null;
+        
+        // Find the label token on the same line
+        const labelToken = tokens.find(t =>
+            t.type === TokenType.Label &&
+            t.line === classToken.line &&
+            t.value.toLowerCase() === className.toLowerCase()
+        );
+        
+        if (!labelToken) return null;
+        
+        // Get the full line text
+        const content = document.getText();
+        const lines = content.split('\n');
+        const classLine = lines[classToken.line];
+        
+        // Extract MODULE('filename') from the class line
+        const moduleMatch = classLine.match(/Module\s*\(\s*'([^']+)'\s*\)/i);
+        if (moduleMatch) {
+            return moduleMatch[1];
+        }
+        
+        return null;
+    }
+
+    /**
      * Find the class name for a method declaration at the given line
      */
     private findClassNameForMethodDeclaration(tokens: Token[], methodLine: number): string | null {
@@ -1112,7 +1152,8 @@ export class HoverProvider {
         className: string,
         methodName: string,
         currentDocument: TextDocument,
-        paramCount?: number
+        paramCount?: number,
+        moduleFile?: string | null
     ): Promise<string | null> {
         const fs = require('fs');
         const path = require('path');
@@ -1120,7 +1161,46 @@ export class HoverProvider {
         
         logger.info(`Searching for ${className}.${methodName} implementation cross-file`);
         
-        // Search in solution files
+        // If we have a module file hint, try to find it first
+        if (moduleFile) {
+            logger.info(`Looking for module file: ${moduleFile}`);
+            
+            // Try relative to current document first
+            const currentPath = decodeURIComponent(currentDocument.uri.replace('file:///', '')).replace(/\//g, '\\');
+            const currentDir = path.dirname(currentPath);
+            const relativeModulePath = path.join(currentDir, moduleFile);
+            
+            if (fs.existsSync(relativeModulePath)) {
+                logger.info(`Found module file at: ${relativeModulePath}`);
+                const implLine = this.searchFileForImplementation(relativeModulePath, className, methodName, paramCount);
+                if (implLine !== null) {
+                    const fileUri = `file:///${relativeModulePath.replace(/\\/g, '/')}`;
+                    return `${fileUri}:${implLine}`;
+                }
+            }
+            
+            // If not found relative, try solution manager
+            const solutionManager = SolutionManager.getInstance();
+            if (solutionManager && solutionManager.solution) {
+                for (const project of solutionManager.solution.projects) {
+                    for (const sourceFile of project.sourceFiles) {
+                        if (sourceFile.name.toLowerCase() === moduleFile.toLowerCase()) {
+                            const fullPath = path.join(project.path, sourceFile.relativePath);
+                            if (fs.existsSync(fullPath)) {
+                                logger.info(`Found module file in solution: ${fullPath}`);
+                                const implLine = this.searchFileForImplementation(fullPath, className, methodName, paramCount);
+                                if (implLine !== null) {
+                                    const fileUri = `file:///${fullPath.replace(/\\/g, '/')}`;
+                                    return `${fileUri}:${implLine}`;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Fallback: Search all solution files
         const solutionManager = SolutionManager.getInstance();
         if (!solutionManager || !solutionManager.solution) {
             logger.info(`No solution manager available for cross-file search`);
@@ -1143,43 +1223,62 @@ export class HoverProvider {
                     continue;
                 }
                 
-                try {
-                    const content = fs.readFileSync(fullPath, 'utf8');
-                    const lines = content.split(/\r?\n/);
-                    
-                    // Search for method implementation: ClassName.MethodName PROCEDURE
-                    for (let i = 0; i < lines.length; i++) {
-                        const fileLine = lines[i];
-                        const implMatch = fileLine.match(/^\s*(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i);
-                        
-                        if (implMatch && 
-                            implMatch[1].toUpperCase() === className.toUpperCase() &&
-                            implMatch[2].toUpperCase() === methodName.toUpperCase()) {
-                            
-                            // Found a potential match - check parameter count if specified
-                            if (paramCount !== undefined) {
-                                const params = implMatch[3].trim();
-                                const implParamCount = params === '' ? 0 : params.split(',').length;
-                                
-                                if (implParamCount !== paramCount) {
-                                    logger.info(`Parameter count mismatch: expected ${paramCount}, found ${implParamCount}`);
-                                    continue;
-                                }
-                            }
-                            
-                            logger.info(`✅ Found implementation in ${fullPath} at line ${i}`);
-                            const fileUri = `file:///${fullPath.replace(/\\/g, '/')}`;
-                            
-                            return `${fileUri}:${i}`;
-                        }
-                    }
-                } catch (error) {
-                    logger.error(`Error reading file ${fullPath}: ${error instanceof Error ? error.message : String(error)}`);
+                const implLine = this.searchFileForImplementation(fullPath, className, methodName, paramCount);
+                if (implLine !== null) {
+                    const fileUri = `file:///${fullPath.replace(/\\/g, '/')}`;
+                    return `${fileUri}:${implLine}`;
                 }
             }
         }
         
         logger.info(`❌ No implementation found for ${className}.${methodName}`);
+        return null;
+    }
+
+    /**
+     * Search a specific file for a method implementation
+     * Returns the line number if found, null otherwise
+     */
+    private searchFileForImplementation(
+        filePath: string,
+        className: string,
+        methodName: string,
+        paramCount?: number
+    ): number | null {
+        const fs = require('fs');
+        
+        try {
+            const content = fs.readFileSync(filePath, 'utf8');
+            const lines = content.split(/\r?\n/);
+            
+            // Search for method implementation: ClassName.MethodName PROCEDURE
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const implMatch = line.match(/^\s*(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i);
+                
+                if (implMatch && 
+                    implMatch[1].toUpperCase() === className.toUpperCase() &&
+                    implMatch[2].toUpperCase() === methodName.toUpperCase()) {
+                    
+                    // Found a potential match - check parameter count if specified
+                    if (paramCount !== undefined) {
+                        const params = implMatch[3].trim();
+                        const implParamCount = params === '' ? 0 : params.split(',').length;
+                        
+                        if (implParamCount !== paramCount) {
+                            logger.info(`Parameter count mismatch: expected ${paramCount}, found ${implParamCount}`);
+                            continue;
+                        }
+                    }
+                    
+                    logger.info(`✅ Found implementation in ${filePath} at line ${i}`);
+                    return i;
+                }
+            }
+        } catch (error) {
+            logger.error(`Error reading file ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        
         return null;
     }
 
