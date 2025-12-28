@@ -455,42 +455,66 @@ export class RedirectionFileParserServer {
   /**
    * Finds a file in the redirection paths
    * @param filename The filename to find
+   * @param sourceFilePath Optional path to the file that is including/referencing this file (for local path resolution)
    * @returns The resolved file path info if found, null otherwise
    */
-  public findFile(filename: string): ResolvedFilePath | null {
+  public findFile(filename: string, sourceFilePath?: string): ResolvedFilePath | null {
     // Add instrumentation
     const t0 = Date.now();
     const resolverInstanceId = this.hashCode();
-    logger.debug(`[RED][resolve] name="${filename}" instId=${resolverInstanceId}`);
+    logger.debug(`[RED][resolve] name="${filename}" instId=${resolverInstanceId} source="${sourceFilePath || 'none'}"`);
 
     // Create a map to track which paths we've already checked to avoid duplicates
     const checkedPaths = new Set<string>();
     
-    for (const entry of this.entries) {
-      if (this.matchesMask(entry.extension, filename)) {
-        for (const dir of entry.paths) {
-          const candidate = path.join(dir, filename);
-          const normalizedCandidate = path.normalize(candidate);
-          
-          // Skip if we've already checked this path
-          if (checkedPaths.has(normalizedCandidate)) {
-            continue;
-          }
-          
-          checkedPaths.add(normalizedCandidate);
-          
-          if (fs.existsSync(normalizedCandidate)) {
-            const result = {
-              path: normalizedCandidate,
-              source: FilePathSource.Redirected,
-              entry: entry
-            };
+    // If we have redirection entries, search through them
+    if (this.entries.length > 0) {
+      for (const entry of this.entries) {
+        if (this.matchesMask(entry.extension, filename)) {
+          for (const dir of entry.paths) {
+            const candidate = path.join(dir, filename);
+            const normalizedCandidate = path.normalize(candidate);
             
-            const duration = Date.now() - t0;
-            logger.debug(`[RED][resolve:end] name="${filename}" → ${normalizedCandidate} durMs=${duration}`);
-            return result;
+            // Skip if we've already checked this path
+            if (checkedPaths.has(normalizedCandidate)) {
+              continue;
+            }
+            
+            checkedPaths.add(normalizedCandidate);
+            
+            if (fs.existsSync(normalizedCandidate)) {
+              const result = {
+                path: normalizedCandidate,
+                source: FilePathSource.Redirected,
+                entry: entry
+              };
+              
+              const duration = Date.now() - t0;
+              logger.debug(`[RED][resolve:end] name="${filename}" → ${normalizedCandidate} durMs=${duration}`);
+              return result;
+            }
           }
         }
+      }
+    }
+    
+    // If no redirection entries are available (no solution open) or file not found in redirection paths,
+    // try to find the file in the same directory as the source file
+    if (sourceFilePath) {
+      const sourceDir = path.dirname(sourceFilePath);
+      const localCandidate = path.join(sourceDir, filename);
+      const normalizedLocal = path.normalize(localCandidate);
+      
+      if (!checkedPaths.has(normalizedLocal) && fs.existsSync(normalizedLocal)) {
+        const result = {
+          path: normalizedLocal,
+          source: FilePathSource.Project, // Use Project source to indicate it's a local file
+          entry: undefined
+        };
+        
+        const duration = Date.now() - t0;
+        logger.debug(`[RED][resolve:end] name="${filename}" → ${normalizedLocal} (local) durMs=${duration}`);
+        return result;
       }
     }
     
@@ -500,11 +524,11 @@ export class RedirectionFileParserServer {
   }
   
   // Async version of findFile
-  public async findFileAsync(filename: string): Promise<ResolvedFilePath | null> {
+  public async findFileAsync(filename: string, sourceFilePath?: string): Promise<ResolvedFilePath | null> {
     // Add instrumentation
     const t0 = Date.now();
     const resolverInstanceId = this.hashCode();
-    logger.debug(`[RED][resolve] name="${filename}" instId=${resolverInstanceId}`);
+    logger.debug(`[RED][resolve] name="${filename}" instId=${resolverInstanceId} source="${sourceFilePath || 'none'}"`);
 
     // Helper for async existence check
     const fileExists = async (filePath: string) => {
@@ -522,39 +546,57 @@ export class RedirectionFileParserServer {
     // Create an array of promises to check all possible paths in parallel
     const checkPromises: Promise<ResolvedFilePath | null>[] = [];
     
-    for (const entry of this.entries) {
-      if (this.matchesMask(entry.extension, filename)) {
-        for (const dir of entry.paths) {
-          const candidate = path.join(dir, filename);
-          const normalizedCandidate = path.normalize(candidate);
-          
-          // Skip if we've already checked this path
-          if (checkedPaths.has(normalizedCandidate)) {
-            continue;
-          }
-          
-          checkedPaths.add(normalizedCandidate);
-          
-          // Create a promise to check this path
-          const checkPromise = fileExists(normalizedCandidate).then(exists => {
-            if (exists) {
-              return {
-                path: normalizedCandidate,
-                source: FilePathSource.Redirected,
-                entry: entry
-              };
+    // If we have redirection entries, search through them
+    if (this.entries.length > 0) {
+      for (const entry of this.entries) {
+        if (this.matchesMask(entry.extension, filename)) {
+          for (const dir of entry.paths) {
+            const candidate = path.join(dir, filename);
+            const normalizedCandidate = path.normalize(candidate);
+            
+            // Skip if we've already checked this path
+            if (checkedPaths.has(normalizedCandidate)) {
+              continue;
             }
-            return null;
-          });
-          
-          checkPromises.push(checkPromise);
+            
+            checkedPaths.add(normalizedCandidate);
+            
+            // Create a promise to check this path
+            const checkPromise = fileExists(normalizedCandidate).then(exists => {
+              if (exists) {
+                return {
+                  path: normalizedCandidate,
+                  source: FilePathSource.Redirected,
+                  entry: entry
+                };
+              }
+              return null;
+            });
+            
+            checkPromises.push(checkPromise);
+          }
         }
       }
     }
     
     // Wait for all checks to complete and find the first successful result
     const results = await Promise.all(checkPromises);
-    const result = results.find(result => result !== null) || null;
+    let result = results.find(result => result !== null) || null;
+    
+    // If no result found and we have a source file path, try local directory
+    if (!result && sourceFilePath) {
+      const sourceDir = path.dirname(sourceFilePath);
+      const localCandidate = path.join(sourceDir, filename);
+      const normalizedLocal = path.normalize(localCandidate);
+      
+      if (!checkedPaths.has(normalizedLocal) && await fileExists(normalizedLocal)) {
+        result = {
+          path: normalizedLocal,
+          source: FilePathSource.Project, // Use Project source to indicate it's a local file
+          entry: undefined
+        };
+      }
+    }
     
     const duration = Date.now() - t0;
     if (result) {

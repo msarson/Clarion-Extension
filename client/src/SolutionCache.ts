@@ -1667,17 +1667,22 @@ export class SolutionCache {
 
     /**
      * Finds a file with the specified extension in any project's search paths
+     * @param filename The filename to search for
+     * @param sourceFilePath Optional path to the file that is including/referencing this file
      * @returns The file path if found, or an empty string if not found
      */
-    public async findFileWithExtension(filename: string): Promise<string> {
+    public async findFileWithExtension(filename: string, sourceFilePath?: string): Promise<string> {
         const startTime = performance.now();
         
         // Normalize the filename for case-insensitive comparison
         const normalizedFilename = filename.toLowerCase();
         
+        // Create a cache key that includes the source file path if provided
+        const cacheKey = sourceFilePath ? `${normalizedFilename}|${sourceFilePath}` : normalizedFilename;
+        
         // Check cache first
-        if (this.filePathCache.has(normalizedFilename)) {
-            const cachedPath = this.filePathCache.get(normalizedFilename)!;
+        if (this.filePathCache.has(cacheKey)) {
+            const cachedPath = this.filePathCache.get(cacheKey)!;
             logger.info(`✅ Cache hit for ${filename}: ${cachedPath}`);
             return cachedPath;
         }
@@ -1692,7 +1697,7 @@ export class SolutionCache {
             return "";
         }
 
-        logger.info(`🔍 Searching for file: ${filename}`);
+        logger.info(`🔍 Searching for file: ${filename}${sourceFilePath ? ` (from ${sourceFilePath})` : ''}`);
         
         // Skip server lookup for system modules during initialization
         if (this.activationInProgress && this.isLibSrcPath(filename)) {
@@ -1701,13 +1706,13 @@ export class SolutionCache {
         }
         
         // Try FS + redirection first before calling the server
-        const fsResult = await this.tryFindFileLocally(filename);
+        const fsResult = await this.tryFindFileLocally(filename, sourceFilePath);
         if (fsResult) {
             const endTime = performance.now();
             logger.info(`✅ File found locally: ${fsResult} in ${(endTime - startTime).toFixed(2)}ms`);
             
             // Cache the result
-            this.filePathCache.set(normalizedFilename, fsResult);
+            this.filePathCache.set(cacheKey, fsResult);
             
             return fsResult;
         }
@@ -1779,14 +1784,24 @@ export class SolutionCache {
      * @param filename The filename to find
      * @returns The full path if found, or empty string if not found
      */
-    private async tryFindFileLocally(filename: string): Promise<string> {
+    private async tryFindFileLocally(filename: string, sourceFilePath?: string): Promise<string> {
         const startTime = performance.now();
-        logger.info(`🔍 Trying to find file locally: ${filename}`);
+        logger.info(`🔍 Trying to find file locally: ${filename}${sourceFilePath ? ` (from ${sourceFilePath})` : ''}`);
         
         // Try direct path first
         if (fs.existsSync(filename)) {
             logger.info(`✅ File exists at direct path: ${filename}`);
             return filename;
+        }
+        
+        // If we have a source file path, try to find the file in the same directory first
+        if (sourceFilePath) {
+            const sourceDir = path.dirname(sourceFilePath);
+            const localPath = path.join(sourceDir, filename);
+            if (fs.existsSync(localPath)) {
+                logger.info(`✅ File found in same directory as source: ${localPath}`);
+                return localPath;
+            }
         }
         
         // Try in solution directory

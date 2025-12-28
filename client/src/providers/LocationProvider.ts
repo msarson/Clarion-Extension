@@ -211,20 +211,12 @@ export class LocationProvider {
         }
 
         // 🔹 Fallback to global settings - this will use the server-side redirection parser
-        const globalFile = await this.solutionCache.findFileWithExtension(fileName);
+        // The redirection parser now also checks for files in the same directory as the source
+        const globalFile = await this.solutionCache.findFileWithExtension(fileName, documentFrom);
         if (globalFile !== "") {
             logger.info(`✅ Resolved via server-side redirection: ${globalFile}`);
             if (cache) cache.set(cacheKey, globalFile);
             return globalFile;
-        }
-
-        // 🔹 Final fallback: check if file exists in the same directory as documentFrom
-        const documentDir = path.dirname(documentFrom);
-        const localPath = path.join(documentDir, fileName);
-        if (fs.existsSync(localPath)) {
-            logger.info(`✅ Found file in same directory as source: ${localPath}`);
-            if (cache) cache.set(cacheKey, localPath);
-            return localPath;
         }
 
         logger.info(`❌ Could not resolve file: ${fileName}`);
