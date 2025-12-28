@@ -18,6 +18,11 @@ export class MapProcedureResolver {
     public findMapDeclaration(procName: string, tokens: Token[], document: TextDocument): Location | null {
         logger.info(`Looking for MAP declaration for procedure: ${procName}`);
 
+        if (!tokens || tokens.length === 0) {
+            logger.info(`No tokens available`);
+            return null;
+        }
+
         // Find all MAP structures
         const mapStructures = tokens.filter(t => 
             t.type === TokenType.Structure && 
@@ -67,6 +72,11 @@ export class MapProcedureResolver {
      */
     public findProcedureImplementation(procName: string, tokens: Token[], document: TextDocument, position: Position): Location | null {
         logger.info(`Looking for implementation of ${procName} from position ${position.line}`);
+
+        if (!tokens || tokens.length === 0) {
+            logger.info(`No tokens available`);
+            return null;
+        }
 
         // Check if position is inside a MAP block
         const mapStructures = tokens.filter(t =>
