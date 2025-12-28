@@ -16,36 +16,33 @@ console.log('');
 const tokenizer = new ClarionTokenizer(code);
 const tokens = tokenizer.tokenize();
 
-// Find MAP structure
-const mapStructure = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'MAP');
-console.log('\n=== MAP Structure ===');
-if (mapStructure) {
-    console.log(`Found MAP at line ${mapStructure.line}`);
-    console.log(`Children count: ${mapStructure.children?.length || 0}`);
-    if (mapStructure.children) {
-        mapStructure.children.forEach((child, i) => {
-            console.log(`  Child[${i}]: line=${child.line}, type=${TokenType[child.type]}, subType=${child.subType ? TokenType[child.subType] : 'none'}, value="${child.value}"`);
-        });
-    }
+// Test from inside MAP block - should find implementation
+const { MapProcedureResolver } = require('./utils/MapProcedureResolver');
+const { TextDocument } = require('vscode-languageserver-textdocument');
+
+const document = TextDocument.create('test://test.clw', 'clarion', 1, code);
+const resolver = new MapProcedureResolver();
+
+// Position on line 1 (ProcessOrder declaration in MAP)
+const position = { line: 1, character: 10 };
+console.log(`\nTesting findProcedureImplementation from position ${position.line}:${position.character}`);
+const result = resolver.findProcedureImplementation('ProcessOrder', tokens, document, position);
+
+if (result) {
+    console.log(`✅ Found implementation at line ${result.range.start.line}`);
 } else {
-    console.log('MAP structure not found!');
+    console.log('❌ No implementation found');
 }
 
-console.log('\n=== Tokens in MAP block (lines 0-2) ===');
-tokens.filter(t => t.line >= 0 && t.line <= 2).forEach((t, i) => {
-    console.log(`Line ${t.line}: type=${TokenType[t.type]}, subType=${t.subType ? TokenType[t.subType] : 'none'}, value="${t.value}", parent="${t.parent?.value || 'none'}"`);
+// Debug: Show what tokens exist
+console.log('\n=== MAP Structures ===');
+const mapStructures = tokens.filter(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'MAP');
+mapStructures.forEach(m => {
+    console.log(`MAP at line ${m.line}, finishesAt: ${m.finishesAt}`);
 });
 
-console.log('\n=== MapProcedure Tokens ===');
-const mapProcs = tokens.filter(t => t.subType === TokenType.MapProcedure);
-console.log(`Found ${mapProcs.length} MapProcedure tokens`);
-mapProcs.forEach(t => {
-    console.log(`Line ${t.line}: "${t.value}", label="${t.label}", parent="${t.parent?.value || 'none'}"`);
-});
-
-console.log('\n=== GlobalProcedure Tokens ===');
-const globalProcs = tokens.filter(t => t.subType === TokenType.GlobalProcedure);
-console.log(`Found ${globalProcs.length} GlobalProcedure tokens`);
-globalProcs.forEach(t => {
-    console.log(`Line ${t.line}: "${t.value}", label="${t.label}", parent="${t.parent?.value || 'none'}"`);
+console.log('\n=== Function tokens on line 1 ===');
+const funcTokens = tokens.filter(t => t.line === 1 && t.type === TokenType.Function);
+funcTokens.forEach(t => {
+    console.log(`Function: "${t.value}", parent: ${t.parent?.value || 'none'}`);
 });
