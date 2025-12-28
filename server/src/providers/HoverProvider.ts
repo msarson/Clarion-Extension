@@ -151,12 +151,49 @@ export class HoverProvider {
 
             // Check if this is a method declaration in a CLASS (declaration) and show implementation hover
             const methodTokens = this.tokenCache.getTokens(document);
-            const currentToken = methodTokens.find(t =>
-                t.line === position.line &&
+            
+            logger.info(`Checking for method declaration at line ${position.line}, char ${position.character}`);
+            logger.info(`Total tokens at this line: ${methodTokens.filter(t => t.line === position.line).length}`);
+            
+            // Look for a token that could be a method declaration
+            // It could be:
+            // 1. A token with subType=MethodDeclaration
+            // 2. A Label token followed by PROCEDURE on the same line (method declaration in CLASS)
+            const lineTokens = methodTokens.filter(t => t.line === position.line);
+            
+            let currentToken = lineTokens.find(t =>
                 t.subType === TokenType.MethodDeclaration &&
                 position.character >= t.start &&
                 position.character <= t.start + t.value.length
             );
+            
+            // If not found by subType, check if this is a Label followed by PROCEDURE (method declaration pattern)
+            if (!currentToken) {
+                const labelToken = lineTokens.find(t => 
+                    t.type === TokenType.Label && 
+                    t.start === 0 &&
+                    position.character >= t.start &&
+                    position.character <= t.start + t.value.length
+                );
+                
+                const procedureToken = lineTokens.find(t => 
+                    t.value.toUpperCase() === 'PROCEDURE'
+                );
+                
+                // If we have a label at start of line and PROCEDURE on same line, it's likely a method declaration
+                if (labelToken && procedureToken) {
+                    logger.info(`Found method declaration pattern: Label="${labelToken.value}" + PROCEDURE on line ${position.line}`);
+                    currentToken = labelToken;
+                }
+            }
+            
+            if (!currentToken) {
+                // Debug: show what tokens are on this line
+                logger.info(`Tokens on line ${position.line}:`);
+                lineTokens.forEach(t => {
+                    logger.info(`  - type=${t.type}, subType=${t.subType}, value="${t.value}", start=${t.start}, label="${t.label}"`);
+                });
+            }
             
             if (currentToken && currentToken.label) {
                 logger.info(`Found method declaration: ${currentToken.label} at line ${position.line}`);
