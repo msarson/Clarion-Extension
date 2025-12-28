@@ -20,7 +20,7 @@ import { DocumentSymbol, SymbolKind as LSPSymbolKind } from 'vscode-languageserv
 import LoggerManager from '../utils/LoggerManager';
 import { SymbolElementRegistry } from '../utils/SymbolElementRegistry';
 const logger = LoggerManager.getLogger("StructureViewProvider");
-logger.setLevel("info"); // Enable debug logging to troubleshoot follow cursor
+logger.setLevel("error"); // Enable debug logging to troubleshoot follow cursor
 
 // 📊 PERFORMANCE: Create perf logger that always logs
 const perfLogger = LoggerManager.getLogger("StructureViewPerf");
@@ -447,7 +447,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         // Container nodes are organizational groupings with no real code position
         
         // Debug: Log ALL nodes to see what's happening
-        console.log(`🔍 getTreeItem called: name='${element.name}', kind=${element.kind}, detail='${element.detail}'`);
+     //   console.log(`🔍 getTreeItem called: name='${element.name}', kind=${element.kind}, detail='${element.detail}'`);
         
         const isContainerNode = 
             element.name === "Methods" || 
@@ -468,7 +468,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 element.range.end.character
             );
 
-            console.log(`✅ HOTFIX: Navigation command attached to: ${element.name}`);
+          //  console.log(`✅ HOTFIX: Navigation command attached to: ${element.name}`);
             treeItem.command = {
                 command: 'clarion.goToSymbol',
                 title: 'Go to Symbol',

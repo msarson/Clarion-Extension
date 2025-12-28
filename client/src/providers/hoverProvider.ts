@@ -5,7 +5,7 @@ import { ClarionLocation } from './LocationProvider'; // Make sure this import i
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("HoverProvider");
-logger.setLevel("error");
+logger.setLevel("info");
 
 /**
  * Provides hover information for Clarion code elements.
@@ -367,28 +367,52 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
                 logger.info(`Showing method content (${endLine - startLine} lines)`);
                 hoverMessage.appendCodeblock(methodContent, 'clarion');
             } else {
-                // For other types (INCLUDE with SECTION, etc.), show lines until next SECTION
+                // For other types (INCLUDE, etc.), show lines until next SECTION or limit
                 let endLine = startLine + linesToShow;
                 
                 // Check if this is an INCLUDE with a section - if so, stop at the next SECTION
                 const statementTypeUpper = (location.statementType || "").toUpperCase();
-                if (statementTypeUpper === "INCLUDE" && location.sectionLineLocation) {
-                    // We're showing an INCLUDE'd section, find where it ends
-                    for (let i = startLine + 1; i < Math.min(fileLines.length, startLine + 100); i++) {
+                if (statementTypeUpper === "INCLUDE") {
+                    // If we have a sectionName, we should already be positioned at the SECTION line
+                    // Start showing content from the SECTION declaration itself
+                    let contentStartLine = startLine;
+                    if (location.sectionName && location.sectionLineLocation) {
+                        // Show the SECTION(...) line as the first line
+                        contentStartLine = startLine;
+                        logger.info(`INCLUDE with section '${location.sectionName}', starting content from line ${contentStartLine + 1} (0-indexed: ${contentStartLine})`);
+                        logger.info(`  SECTION line: "${fileLines[startLine]}"`);
+                    }
+                    
+                    // Find where this section ends (next SECTION or EOF)
+                    endLine = Math.min(fileLines.length, contentStartLine + 50); // Look ahead up to 50 lines
+                    for (let i = contentStartLine + 1; i < endLine; i++) {  // Start search from line AFTER contentStartLine
                         const trimmedLine = fileLines[i].trim().toUpperCase();
                         // Stop at next SECTION directive
                         if (trimmedLine.startsWith('SECTION(')) {
                             endLine = i;
-                            logger.info(`Found next SECTION at line ${i}, stopping before it`);
+                            logger.info(`Found next SECTION at line ${i + 1} (0-indexed: ${i}), stopping before it`);
+                            logger.info(`  Matched line content: "${fileLines[i]}"`);
                             break;
                         }
                     }
-                    // Don't go beyond 30 lines even if no SECTION found
-                    endLine = Math.min(endLine, startLine + 30);
+                    
+                    // Limit display to first 10 lines if section is long
+                    const maxDisplayLines = 10;
+                    const actualContentLines = endLine - contentStartLine;
+                    logger.info(`Section has ${actualContentLines} lines of content before next SECTION or EOF`);
+                    if (actualContentLines > maxDisplayLines) {
+                        endLine = contentStartLine + maxDisplayLines;
+                        logger.info(`Section too long, limiting to ${maxDisplayLines} lines`);
+                    }
+                    
+                    const displayContent = fileLines.slice(contentStartLine, endLine).join('\n');
+                    hoverMessage.appendCodeblock(displayContent, 'clarion');
+                } else {
+                    // For non-INCLUDE types, just show a limited number of lines
+                    endLine = Math.min(fileLines.length, startLine + linesToShow);
+                    const displayContent = fileLines.slice(startLine, endLine).join('\n');
+                    hoverMessage.appendCodeblock(displayContent, 'clarion');
                 }
-                
-                const sectionContent = fileLines.slice(startLine, endLine).join('\n');
-                hoverMessage.appendCodeblock(sectionContent, 'clarion');
             }
         } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : String(error);

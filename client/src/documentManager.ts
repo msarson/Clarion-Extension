@@ -465,19 +465,6 @@ export class DocumentManager implements Disposable {
                 targetUri
             );
             
-            // Add tooltip showing the target file and section if applicable
-            if (location.sectionName) {
-                // Read section content for tooltip preview
-                const sectionPreview = this.getSectionPreview(location.fullFileName, location.sectionName);
-                if (sectionPreview) {
-                    link.tooltip = `${path.basename(location.fullFileName)} - Section: ${location.sectionName}\n\n${sectionPreview}`;
-                } else {
-                    link.tooltip = `${path.basename(location.fullFileName)} - Section: ${location.sectionName}`;
-                }
-            } else {
-                link.tooltip = path.basename(location.fullFileName);
-            }
-            
             links.push(link);
             logger.info(`Added link for ${location.statementType} at line ${location.linePosition.line} to ${targetUri.toString()}`);
         }
@@ -1220,7 +1207,8 @@ export class DocumentManager implements Disposable {
                     linePosition: location.linePosition,
                     linePositionEnd: location.linePositionEnd,
                     statementType: statementType,
-                    result: location.result
+                    result: location.result,
+                    sectionName: location.sectionName  // Preserve section name for INCLUDE statements
                 };
 
                 statementLocations.push(statementLocation);

@@ -5,7 +5,7 @@ import { SolutionCache } from '../SolutionCache';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("LocationProvider");
-logger.setLevel("error");
+logger.setLevel("info");
 
 /**
  * Represents a location in Clarion code, with support for lazy method implementation resolution.
@@ -99,6 +99,9 @@ export class LocationProvider {
                     if (fs.existsSync(relativePath)) {
                         resolvedFileName = relativePath;
                         logger.info(`✅ Found file using relative path: ${relativePath}`);
+                        // Try to find section line number if file exists
+                        const sectionName = match[2] || '';
+                        sectionLineNumber = this.findSectionLineNumber(relativePath, sectionName);
                     } else {
                         logger.info(`❌ File not found even with relative path: ${relativePath}`);
                         continue; // Skip this match - don't create a link for non-existent files
@@ -280,25 +283,62 @@ export class LocationProvider {
     }
 
     private findSectionLineNumber(fullPath: string, targetSection: string): number {
+        if (!targetSection) {
+            logger.info(`No target section specified, returning line 0`);
+            return 0;
+        }
+        
+        logger.info(`Looking for SECTION('${targetSection}') in file: ${fullPath}`);
         const matchingDocument = workspace.textDocuments.find(document => document.uri.fsPath === fullPath);
 
-        if (matchingDocument && targetSection !== '') {
+        if (matchingDocument) {
             const lines = matchingDocument.getText().split('\n');
-            const sectionIndex = lines.findIndex(line =>
-                line.toLowerCase().includes(`section('${targetSection.toLowerCase()}')`)
-            );
-            return sectionIndex !== -1 ? sectionIndex : 0;
+            // Use regex to match SECTION keyword followed by the section name - case insensitive
+            // This ensures we match actual SECTION statements, not the text in comments
+            const sectionRegex = new RegExp(`^\\s*SECTION\\s*\\(\\s*'${targetSection.replace(/'/g, "''")}'\\s*\\)`, 'i');
+            logger.info(`Using regex from open document: ${sectionRegex.source}`);
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                // Skip comment lines (lines that start with ! after optional whitespace)
+                if (/^\s*!/.test(line)) {
+                    continue;
+                }
+                // Remove inline comments before testing (everything after ! on the line)
+                const commentIndex = line.indexOf('!');
+                const codeOnly = commentIndex >= 0 ? line.substring(0, commentIndex) : line;
+                if (sectionRegex.test(codeOnly)) {
+                    logger.info(`✅ Found SECTION at line ${i + 1} (0-indexed: ${i}): ${line.substring(0, 80)}`);
+                    return i;
+                }
+            }
+            logger.info(`❌ SECTION not found in open document`);
+            return 0;
         }
 
         try {
             const fileContent = fs.readFileSync(fullPath, 'utf8');
             const lines = fileContent.split('\n');
-            const sectionIndex = lines.findIndex(line =>
-                line.toLowerCase().includes(`section('${targetSection.toLowerCase()}')`)
-            );
-            return sectionIndex !== -1 ? sectionIndex : 0;
+            // Use regex to match SECTION keyword followed by the section name - case insensitive
+            const sectionRegex = new RegExp(`^\\s*SECTION\\s*\\(\\s*'${targetSection.replace(/'/g, "''")}'\\s*\\)`, 'i');
+            logger.info(`Using regex from disk: ${sectionRegex.source}`);
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                // Skip comment lines (lines that start with ! after optional whitespace)
+                if (/^\s*!/.test(line)) {
+                    continue;
+                }
+                // Remove inline comments before testing (everything after ! on the line)
+                const commentIndex = line.indexOf('!');
+                const codeOnly = commentIndex >= 0 ? line.substring(0, commentIndex) : line;
+                if (sectionRegex.test(codeOnly)) {
+                    logger.info(`✅ Found SECTION at line ${i + 1} (0-indexed: ${i}): ${line.substring(0, 80)}`);
+                    return i;
+                }
+            }
+            logger.info(`❌ SECTION not found in file`);
+            return 0;
         } catch (error) {
-            logger.info('Error reading file content:', error);
+            logger.error('Error reading file content:', error);
             return 0;
         }
     }
