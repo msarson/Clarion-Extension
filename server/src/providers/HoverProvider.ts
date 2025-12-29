@@ -9,6 +9,8 @@ import { TokenHelper } from '../utils/TokenHelper';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { MapProcedureResolver } from '../utils/MapProcedureResolver';
+import { CrossFileResolver } from '../utils/CrossFileResolver';
+import { BuiltinFunctionService } from '../utils/BuiltinFunctionService';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -23,6 +25,8 @@ export class HoverProvider {
     private memberResolver = new ClassMemberResolver();
     private overloadResolver = new MethodOverloadResolver();
     private mapResolver = new MapProcedureResolver();
+    private crossFileResolver = new CrossFileResolver();
+    private builtinService = BuiltinFunctionService.getInstance();
 
     /**
      * Provides hover information for a position in the document
@@ -44,11 +48,50 @@ export class HoverProvider {
             const word = document.getText(wordRange);
             logger.info(`Found word: "${word}" at position`);
 
-            // Check if this is a method implementation line and show declaration hover
+            // Get the line to check context
             const line = document.getText({
                 start: { line: position.line, character: 0 },
                 end: { line: position.line, character: Number.MAX_VALUE }
             });
+
+            // Check if this word is a built-in function (but NOT a class method call)
+            // Only show built-in hover if the word is standalone (not preceded by a dot)
+            if (this.builtinService.isBuiltin(word)) {
+                // Get text before the word to check if it's a class method call
+                const textBeforeWord = document.getText({
+                    start: { line: position.line, character: 0 },
+                    end: { line: position.line, character: wordRange.start.character }
+                });
+                
+                // If there's a dot immediately before the word, it's a class method, not a built-in
+                if (!textBeforeWord.trimEnd().endsWith('.')) {
+                    logger.info(`Found built-in function: ${word}`);
+                    
+                    // Check if there's an opening paren after the word
+                    const textAfterWord = document.getText({
+                        start: { line: position.line, character: wordRange.end.character },
+                        end: { line: position.line, character: Math.min(wordRange.end.character + 10, line.length) }
+                    }).trimStart();
+                    
+                    let paramCount: number | null = null;
+                    
+                    if (textAfterWord.startsWith('(')) {
+                        // There's a paren, count the actual parameters
+                        paramCount = this.countParametersInCall(line, word);
+                        logger.info(`Parameter count in call: ${paramCount}`);
+                    } else {
+                        // No paren after word - assume () (zero parameters)
+                        paramCount = 0;
+                        logger.info(`No parentheses found - assuming 0 parameters`);
+                    }
+                    
+                    return this.constructBuiltinFunctionHover(word, paramCount);
+                } else {
+                    logger.info(`Word ${word} is preceded by dot - treating as class method, not built-in`);
+                }
+            }
+            
+            // Check if this is a method implementation line and show declaration hover
             
             const methodImplMatch = line.match(/^(\w+)\.(\w+)\s+PROCEDURE\s*\((.*?)\)/i);
             if (methodImplMatch) {
@@ -112,21 +155,21 @@ export class HoverProvider {
                         
                         if (memberToken?.referencedFile) {
                             logger.info(`Found MEMBER('${memberToken.referencedFile}'), searching parent for MAP declaration`);
-                            const memberMapLocation = await this.findMapDeclarationInMemberFile(
+                            
+                            // Use CrossFileResolver to find MAP declaration
+                            const memberMapResult = await this.crossFileResolver.findMapDeclarationInMemberFile(
                                 procName,
                                 memberToken.referencedFile,
                                 document,
                                 line
                             );
                             
-                            if (memberMapLocation) {
+                            if (memberMapResult) {
                                 // Read the declaration line from external file
-                                const fs = await import('fs');
-                                const filePath = decodeURIComponent(memberMapLocation.uri.replace('file:///', '')).replace(/\//g, '\\');
-                                if (fs.existsSync(filePath)) {
-                                    const content = fs.readFileSync(filePath, 'utf8');
+                                if (fs.existsSync(memberMapResult.file)) {
+                                    const content = fs.readFileSync(memberMapResult.file, 'utf8');
                                     const lines = content.split('\n');
-                                    const mapLine = lines[memberMapLocation.range.start.line]?.trim() || '';
+                                    const mapLine = lines[memberMapResult.line]?.trim() || '';
                                     const fileName = memberToken.referencedFile;
                                     return {
                                         contents: {
@@ -1511,102 +1554,118 @@ export class HoverProvider {
         }
     }
 
+    /**
+     * Constructs hover information for built-in Clarion functions
+     */
+    private constructBuiltinFunctionHover(functionName: string, paramCount: number | null): Hover {
+        const signatures = this.builtinService.getSignatures(functionName);
+        
+        if (signatures.length === 0) {
+            return {
+                contents: {
+                    kind: 'markdown',
+                    value: `**Built-in Function**\n\n\`${functionName}\``
+                }
+            };
+        }
+
+        // If we have a parameter count, filter signatures to show only matching ones
+        let matchingSignatures = signatures;
+        if (paramCount !== null) {
+            matchingSignatures = signatures.filter(sig => 
+                sig.parameters && sig.parameters.length === paramCount
+            );
+            
+            // If no exact match, show all signatures
+            if (matchingSignatures.length === 0) {
+                matchingSignatures = signatures;
+            }
+        }
+
+        // Format matching signatures
+        let content = `**Built-in Function: ${functionName}**\n\n`;
+        
+        if (paramCount !== null && matchingSignatures.length < signatures.length) {
+            content += `_Showing signature(s) matching ${paramCount} parameter(s)_\n\n`;
+        }
+        
+        matchingSignatures.forEach((sig, index) => {
+            if (matchingSignatures.length > 1) {
+                content += `**Overload ${index + 1}:**\n\n`;
+            }
+            
+            content += `\`\`\`clarion\n${sig.label}\n\`\`\`\n\n`;
+            
+            if (sig.documentation) {
+                content += `${sig.documentation}\n\n`;
+            }
+            
+            if (sig.parameters && sig.parameters.length > 0) {
+                content += `**Parameters:**\n\n`;
+                sig.parameters.forEach(param => {
+                    content += `- \`${param.label}\`\n`;
+                });
+                content += `\n`;
+            }
+            
+            if (index < matchingSignatures.length - 1) {
+                content += `---\n\n`;
+            }
+        });
+
+        return {
+            contents: {
+                kind: 'markdown',
+                value: content.trim()
+            }
+        };
+    }
 
     /**
-     * Find MAP declaration in MEMBER parent file
+     * Counts parameters in a function call
+     * Returns null if unable to parse
      */
-    private async findMapDeclarationInMemberFile(
-        procName: string,
-        memberFile: string,
-        document: TextDocument,
-        signature?: string
-    ): Promise<Location | null> {
-        try {
-            const fs = await import('fs');
-            const path = await import('path');
-            
-            const SolutionManager = (await import('../solution/solutionManager')).SolutionManager;
-            const solutionManager = SolutionManager.getInstance();
-            let resolvedPath: string | null = null;
-            
-            if (solutionManager && solutionManager.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const redirectionParser = project.getRedirectionParser();
-                    const resolved = redirectionParser.findFile(memberFile);
-                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        break;
-                    }
-                }
-            }
-            
-            if (!resolvedPath) {
-                const currentDir = path.dirname(decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\'));
-                const relativePath = path.join(currentDir, memberFile);
-                if (fs.existsSync(relativePath)) {
-                    resolvedPath = path.resolve(relativePath);
-                }
-            }
-            
-            if (!resolvedPath) return null;
-            
-            const currentFileName = path.basename(document.uri);
-            const content = fs.readFileSync(resolvedPath, 'utf8');
-            const ClarionTokenizer = (await import('../ClarionTokenizer')).ClarionTokenizer;
-            const TokenType = (await import('../ClarionTokenizer')).TokenType;
-            const tokenizer = new ClarionTokenizer(content);
-            const parentTokens = tokenizer.tokenize();
-            
-            const mapBlocks = parentTokens.filter(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'MAP');
-            if (mapBlocks.length === 0) return null;
-            
-            for (const mapBlock of mapBlocks) {
-                const mapStart = mapBlock.line;
-                const mapEnd = mapBlock.finishesAt;
-                if (mapEnd === undefined) continue;
-                
-                const moduleBlocks = parentTokens.filter(t =>
-                    t.type === TokenType.Structure &&
-                    t.value.toUpperCase() === 'MODULE' &&
-                    t.line > mapStart && t.line < mapEnd
-                );
-                
-                for (const moduleBlock of moduleBlocks) {
-                    const moduleToken = parentTokens.find(t =>
-                        t.line === moduleBlock.line &&
-                        t.value.toUpperCase() === 'MODULE' &&
-                        t.referencedFile
-                    );
-                    
-                    if (moduleToken?.referencedFile && 
-                        path.basename(moduleToken.referencedFile).toLowerCase() === currentFileName.toLowerCase()) {
-                        
-                        const moduleStart = moduleBlock.line;
-                        const moduleEnd = moduleBlock.finishesAt;
-                        if (moduleEnd === undefined) continue;
-                        
-                        const procedureDecls = parentTokens.filter(t =>
-                            t.line > moduleStart && t.line < moduleEnd &&
-                            (t.subType === TokenType.MapProcedure || t.type === TokenType.Function) &&
-                            (t.label?.toLowerCase() === procName.toLowerCase() ||
-                             t.value.toLowerCase() === procName.toLowerCase())
-                        );
-                        
-                        if (procedureDecls.length > 0) {
-                            const decl = procedureDecls[0];
-                            return Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
-                                start: { line: decl.line, character: 0 },
-                                end: { line: decl.line, character: decl.value.length }
-                            });
-                        }
-                    }
-                }
-            }
-            
-            return null;
-        } catch (error) {
-            logger.error(`Error searching MEMBER file for hover: ${error}`);
+    private countParametersInCall(line: string, functionName: string): number | null {
+        // Find the function call in the line
+        const funcPattern = new RegExp(`\\b${functionName}\\s*\\(`, 'i');
+        const match = line.match(funcPattern);
+        if (!match || match.index === undefined) {
             return null;
         }
+
+        const startPos = match.index + match[0].length;
+        let depth = 1;
+        let paramCount = 0;
+        let hasContent = false;
+
+        for (let i = startPos; i < line.length; i++) {
+            const char = line[i];
+
+            if (char === '(') {
+                depth++;
+            } else if (char === ')') {
+                depth--;
+                if (depth === 0) {
+                    // Found closing paren
+                    if (hasContent) {
+                        paramCount++;
+                    }
+                    return paramCount;
+                }
+            } else if (char === ',' && depth === 1) {
+                paramCount++;
+                hasContent = false;
+            } else if (char.trim() !== '') {
+                hasContent = true;
+            }
+        }
+
+        // Unclosed parentheses - return what we have so far
+        if (hasContent) {
+            paramCount++;
+        }
+        return paramCount;
     }
+
+
 }

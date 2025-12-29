@@ -1,0 +1,616 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Clarion built-in function definitions for signature help and IntelliSense",
+  "functions": [
+    {
+      "name": "CLIP",
+      "signatures": [
+        {
+          "params": ["STRING string"],
+          "returnType": "STRING",
+          "description": "Removes trailing spaces from a string and returns the trimmed result. Frequently used with concatenation. Not needed for CSTRING or PSTRING types."
+        }
+      ]
+    },
+    {
+      "name": "SUB",
+      "signatures": [
+        {
+          "params": ["STRING string", "LONG position", "LONG length"],
+          "returnType": "STRING",
+          "description": "Returns a substring starting at position for length characters. Position can be negative to count from end (-1 is last char). Zero-based in Clarion#."
+        }
+      ]
+    },
+    {
+      "name": "UPPER",
+      "signatures": [
+        {
+          "params": ["STRING string"],
+          "returnType": "STRING",
+          "description": "Converts all alphabetic characters in the string to uppercase. Non-alphabetic characters are unchanged."
+        }
+      ]
+    },
+    {
+      "name": "LOWER",
+      "signatures": [
+        {
+          "params": ["STRING string"],
+          "returnType": "STRING",
+          "description": "Converts all alphabetic characters in the string to lowercase. Non-alphabetic characters are unchanged."
+        }
+      ]
+    },
+    {
+      "name": "LEN",
+      "signatures": [
+        {
+          "params": ["STRING string"],
+          "returnType": "LONG",
+          "description": "Returns the total length of the string including trailing spaces. For length without trailing spaces, use LEN(CLIP(string))."
+        }
+      ]
+    },
+    {
+      "name": "FORMAT",
+      "signatures": [
+        {
+          "params": ["numeric value", "STRING picture"],
+          "returnType": "STRING",
+          "description": "Formats a numeric value (BYTE/SHORT/LONG/REAL/DECIMAL) into a string using a picture token (e.g., '@n10.2' for decimals, '@d1' for dates)."
+        }
+      ]
+    },
+    {
+      "name": "MESSAGE",
+      "signatures": [
+        {
+          "params": ["STRING text"],
+          "returnType": "BYTE",
+          "description": "Displays a simple message box with the text and an OK button. Returns button code when dismissed (always 1 for OK)."
+        },
+        {
+          "params": ["STRING text", "STRING title"],
+          "returnType": "BYTE",
+          "description": "Displays a message box with custom title bar text and an OK button. Returns button code when dismissed."
+        },
+        {
+          "params": ["STRING text", "STRING title", "LONG icon"],
+          "returnType": "BYTE",
+          "description": "Displays a message box with custom title, icon/buttons (ICON:Asterisk, ICON:Hand, etc.). Returns button code indicating which button was clicked."
+        },
+        {
+          "params": ["STRING text", "STRING title", "LONG icon", "LONG button"],
+          "returnType": "BYTE",
+          "description": "Displays a message box with custom title, icon, and button configuration. Full control over appearance. Returns button code."
+        }
+      ]
+    },
+    {
+      "name": "EOF",
+      "signatures": [
+        {
+          "params": ["FILE file"],
+          "returnType": "LONG",
+          "description": "Returns non-zero (true) when the last record has been read by NEXT/SKIP. Not supported by all drivers - prefer checking ERRORCODE() after NEXT instead."
+        }
+      ]
+    },
+    {
+      "name": "EXISTS",
+      "signatures": [
+        {
+          "params": ["STRING filename"],
+          "returnType": "LONG",
+          "description": "Returns non-zero if the specified file or directory exists on disk. Can include full path or use current directory. Returns 1 if found, 0 if not."
+        }
+      ]
+    },
+    {
+      "name": "RECORDS",
+      "signatures": [
+        {
+          "params": ["FILE file"],
+          "returnType": "LONG",
+          "description": "Returns the total number of records currently in the file. File must be open. Useful for progress bars and pre-sizing queues."
+        }
+      ]
+    },
+    {
+      "name": "NAME",
+      "signatures": [
+        {
+          "params": ["FILE file"],
+          "returnType": "STRING",
+          "description": "Returns the filename from the FILE's NAME attribute without the path. To get the full path, use FULLNAME attribute instead."
+        }
+      ]
+    },
+    {
+      "name": "PATH",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "STRING",
+          "description": "Returns the current working directory as a string. This is where files are created/opened by default if no path is specified."
+        }
+      ]
+    },
+    {
+      "name": "COPY",
+      "signatures": [
+        {
+          "params": ["STRING source", "STRING destination"],
+          "returnType": "",
+          "description": "Copies a file from source path to destination path. Overwrites destination if it exists. Check ERRORCODE() to verify success."
+        }
+      ]
+    },
+    {
+      "name": "REMOVE",
+      "signatures": [
+        {
+          "params": ["STRING filename"],
+          "returnType": "",
+          "description": "Deletes the specified file from disk permanently. Check ERRORCODE() after to verify success. Cannot be undone."
+        }
+      ]
+    },
+    {
+      "name": "RENAME",
+      "signatures": [
+        {
+          "params": ["STRING oldname", "STRING newname"],
+          "returnType": "",
+          "description": "Renames a file or directory from oldname to newname. Can also move files between directories. Check ERRORCODE() for success."
+        }
+      ]
+    },
+    {
+      "name": "ERRORCODE",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "STRING",
+          "description": "Returns the error code number as a string from the most recent file operation (OPEN, GET, ADD, etc.). Returns empty string if no error. Check after every file operation."
+        }
+      ]
+    },
+    {
+      "name": "ERROR",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "STRING",
+          "description": "Returns the full error message text from the most recent file operation. More descriptive than ERRORCODE(). Returns empty string if no error."
+        }
+      ]
+    },
+    {
+      "name": "FILEERROR",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "STRING",
+          "description": "Returns the file driver-specific error message from the most recent operation. Provides low-level driver details beyond ERROR()."
+        }
+      ]
+    },
+    {
+      "name": "FILEERRORCODE",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "LONG",
+          "description": "Returns the file driver-specific error code as a numeric value. Useful for programmatic error handling and driver-specific error checking."
+        }
+      ]
+    },
+    {
+      "name": "ADD",
+      "signatures": [
+        {
+          "params": ["FILE file"],
+          "returnType": "",
+          "description": "Adds a new record to a file. The record buffer contains the data to write. Check ERRORCODE() after to verify success."
+        },
+        {
+          "params": ["FILE file", "LONG length"],
+          "returnType": "",
+          "description": "Adds a new record to a file with specified byte length. Used for variable-length records or MEMO fields."
+        },
+        {
+          "params": ["QUEUE queue"],
+          "returnType": "",
+          "description": "Adds a new entry to the end of a queue. The queue structure fields contain the data to add."
+        },
+        {
+          "params": ["QUEUE queue", "LONG position"],
+          "returnType": "",
+          "description": "Inserts a new entry into a queue at the specified position (1-based). Existing entries shift down."
+        }
+      ]
+    },
+    {
+      "name": "PUT",
+      "signatures": [
+        {
+          "params": ["FILE file"],
+          "returnType": "",
+          "description": "Updates the current file record (last one read by GET/NEXT/PREVIOUS) with data from the record buffer."
+        },
+        {
+          "params": ["FILE file", "LONG pointer"],
+          "returnType": "",
+          "description": "Writes the record buffer to a specific record number in the file. Used for direct/random access updates."
+        },
+        {
+          "params": ["FILE file", "LONG pointer", "LONG length"],
+          "returnType": "",
+          "description": "Writes the record buffer to a specific position with specified byte length. For variable-length records."
+        },
+        {
+          "params": ["QUEUE queue"],
+          "returnType": "",
+          "description": "Updates the current queue entry (last one accessed by GET) with data from the queue structure."
+        },
+        {
+          "params": ["VIEW view"],
+          "returnType": "",
+          "description": "Updates the current view record (last one read by NEXT/PREVIOUS) in the view's primary file."
+        }
+      ]
+    },
+    {
+      "name": "GET",
+      "signatures": [
+        {
+          "params": ["FILE file", "KEY key"],
+          "returnType": "",
+          "description": "Reads a record from file by matching the key fields. Key fields in record buffer must be set first. Posts error if not found."
+        },
+        {
+          "params": ["FILE file", "LONG pointer"],
+          "returnType": "",
+          "description": "Reads a specific record by record number (1-based) into the record buffer. Used for direct/random access."
+        },
+        {
+          "params": ["QUEUE queue", "LONG position"],
+          "returnType": "",
+          "description": "Retrieves a queue entry at the specified position (1-based) into the queue structure fields."
+        }
+      ]
+    },
+    {
+      "name": "DELETE",
+      "signatures": [
+        {
+          "params": ["FILE file"],
+          "returnType": "",
+          "description": "Removes the current record from the file (last one accessed by GET/NEXT/PREVIOUS/ADD/PUT). Removes all key entries too."
+        },
+        {
+          "params": ["QUEUE queue"],
+          "returnType": "",
+          "description": "Removes the current queue entry (last one accessed by GET or ADD). All subsequent entries shift up. Memory is deallocated."
+        },
+        {
+          "params": ["VIEW view"],
+          "returnType": "",
+          "description": "Removes the current record from the view's primary file (last accessed by NEXT/PREVIOUS). Secondary files are not affected."
+        }
+      ]
+    },
+    {
+      "name": "SET",
+      "signatures": [
+        {
+          "params": ["FILE file"],
+          "returnType": "",
+          "description": "Positions file pointer to the beginning of the file in record number sequence. Used before NEXT to read from start."
+        },
+        {
+          "params": ["FILE file", "KEY key"],
+          "returnType": "",
+          "description": "Positions file pointer to the start of a specific key's sequence. Key fields in record buffer define the position. Used before NEXT."
+        },
+        {
+          "params": ["FILE file", "LONG pointer"],
+          "returnType": "",
+          "description": "Positions file pointer to a specific record number. Used before NEXT to start sequential reading from that record."
+        },
+        {
+          "params": ["KEY key"],
+          "returnType": "",
+          "description": "Positions to the start of a specific key's sequence for the implied file. Key fields define position. Used before NEXT."
+        }
+      ]
+    },
+    {
+      "name": "NEXT",
+      "signatures": [
+        {
+          "params": ["FILE file"],
+          "returnType": "",
+          "description": "Reads the next record in the current sequence (set by SET or last key used) into the record buffer. Returns error at end of file."
+        },
+        {
+          "params": ["VIEW view"],
+          "returnType": "",
+          "description": "Reads the next record in the view's sequence into the view structure. Joins related file records automatically."
+        }
+      ]
+    },
+    {
+      "name": "PREVIOUS",
+      "signatures": [
+        {
+          "params": ["FILE file"],
+          "returnType": "",
+          "description": "Reads the previous record in the current sequence (opposite of NEXT) into the record buffer. Returns error at beginning of file."
+        },
+        {
+          "params": ["VIEW view"],
+          "returnType": "",
+          "description": "Reads the previous record in the view's sequence into the view structure. Moves backward through the result set."
+        }
+      ]
+    },
+    {
+      "name": "OPEN",
+      "signatures": [
+        {
+          "params": ["FILE file"],
+          "returnType": "",
+          "description": "Opens a file for reading and writing. Creates the file if it doesn't exist (unless CREATE attribute is 0). Check ERRORCODE() after."
+        },
+        {
+          "params": ["FILE file", "LONG mode"],
+          "returnType": "",
+          "description": "Opens a file with specific access mode (Read/Write + Deny Write/Read/None/All). Mode controls user access and multi-user sharing."
+        },
+        {
+          "params": ["VIEW view"],
+          "returnType": "",
+          "description": "Opens a VIEW for processing. The component files must already be open. Use SET before OPEN to establish sequence."
+        },
+        {
+          "params": ["WINDOW window"],
+          "returnType": "",
+          "description": "Activates a WINDOW for processing. Nothing displays until DISPLAY or ACCEPT is encountered. Allows pre-display customization."
+        },
+        {
+          "params": ["WINDOW window", "WINDOW owner"],
+          "returnType": "",
+          "description": "Opens a WINDOW with an owner window. The owned window appears on top and is auto-hidden/closed with its owner."
+        },
+        {
+          "params": ["APPLICATION app"],
+          "returnType": "",
+          "description": "Activates an APPLICATION window. Nothing displays until DISPLAY or ACCEPT. Use for main application window setup."
+        },
+        {
+          "params": ["APPLICATION app", "WINDOW owner"],
+          "returnType": "",
+          "description": "Opens an APPLICATION with an owner window. Establishes parent-child window relationship."
+        },
+        {
+          "params": ["REPORT report"],
+          "returnType": "",
+          "description": "Activates a REPORT structure for printing. Must OPEN before printing any REPORT structures."
+        }
+      ]
+    },
+    {
+      "name": "CLOSE",
+      "signatures": [
+        {
+          "params": ["FILE file"],
+          "returnType": "",
+          "description": "Closes an open file and flushes any pending writes. Frees memory and releases locks. Always close files when done."
+        },
+        {
+          "params": ["VIEW view"],
+          "returnType": "",
+          "description": "Closes an open VIEW. Automatically closed on RETURN if declared locally. State of component files becomes undefined."
+        },
+        {
+          "params": ["WINDOW window"],
+          "returnType": "",
+          "description": "Closes an APPLICATION or WINDOW. Releases memory and redraws underlying screen. Auto-closes child windows first."
+        },
+        {
+          "params": ["REPORT report"],
+          "returnType": "",
+          "description": "Closes a REPORT structure. Prints final page FOOTER and group FOOTERs. Deletes PREVIEW metafiles if applicable."
+        }
+      ]
+    },
+    {
+      "name": "CREATE",
+      "signatures": [
+        {
+          "params": ["FILE file"],
+          "returnType": "",
+          "description": "Creates an empty data file with the structure defined in the FILE declaration. Overwrites existing file if it exists."
+        },
+        {
+          "params": ["FILE file", "LONG mode"],
+          "returnType": "",
+          "description": "Creates an empty data file with a specific create mode. Mode controls file creation behavior and options."
+        }
+      ]
+    },
+    {
+      "name": "INCLUDE",
+      "signatures": [
+        {
+          "params": ["STRING filename"],
+          "returnType": "",
+          "description": "Compiler directive that includes source code from another file at this point. File is compiled as if it appeared inline. Extension .CLW assumed if omitted."
+        },
+        {
+          "params": ["STRING filename", "STRING section"],
+          "returnType": "",
+          "description": "Includes only a specific SECTION from the specified file. The section parameter matches the SECTION directive's string in the source file."
+        }
+      ]
+    },
+    {
+      "name": "MEMBER",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Compiler directive that identifies this source file as a MEMBER module containing procedures. Must appear at top of file before any MAP."
+        },
+        {
+          "params": ["STRING program"],
+          "returnType": "",
+          "description": "Identifies this as a MEMBER module with a specific program name. Used in multi-program applications to associate members with programs."
+        }
+      ]
+    },
+    {
+      "name": "MODULE",
+      "signatures": [
+        {
+          "params": ["STRING sourcefile"],
+          "returnType": "",
+          "description": "Declares a module within a MAP structure. Names a MEMBER source file or external library containing procedure definitions. Used in MAP...END blocks."
+        }
+      ]
+    },
+    {
+      "name": "LINK",
+      "signatures": [
+        {
+          "params": ["STRING linkfile"],
+          "returnType": "",
+          "description": "CLASS attribute that adds a file (.OBJ, .LIB) to the linker's link list. Without extension, .OBJ is assumed. Used in CLASS declarations."
+        },
+        {
+          "params": ["STRING linkfile", "LONG flag"],
+          "returnType": "",
+          "description": "Conditionally links a file based on flag value. If flag is non-zero, file is linked; if zero, link is skipped. Useful with compile-time defines."
+        }
+      ]
+    },
+    {
+      "name": "CLEAR",
+      "signatures": [
+        {
+          "params": ["variable label"],
+          "returnType": "",
+          "description": "Clears a variable, GROUP, RECORD, QUEUE, CLASS, or FILE to default values. Numeric fields become zero, STRINGs become spaces, PSTRING/CSTRING become zero length. Reference variables set to NULL. Arrays are cleared entirely."
+        },
+        {
+          "params": ["variable label", "LONG n"],
+          "returnType": "",
+          "description": "Clears with special values: n=1 sets to highest possible value (e.g., all ASCII 255 for STRING); n=-1 sets to lowest possible value (e.g., all ASCII zeroes for STRING, zero length for PSTRING/CSTRING)."
+        }
+      ]
+    },
+    {
+      "name": "PROGRAM",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Declares the main program module. Only one PROGRAM per application. Must be the first declaration in the main source file. Use MEMBER for additional source modules that contain procedures called by the program."
+        }
+      ]
+    },
+    {
+      "name": "CODE",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Begins the executable code section of a PROCEDURE. Must appear after all data declarations (variables, files, windows, etc.). Everything after CODE until END is executable statements."
+        }
+      ]
+    },
+    {
+      "name": "OMIT",
+      "signatures": [
+        {
+          "params": ["STRING terminator"],
+          "returnType": "",
+          "description": "Compiler directive that omits a block of source code from compilation. Block ends at the line containing the terminator string. Used for commenting out large sections or conditional compilation."
+        },
+        {
+          "params": ["STRING terminator", "expression"],
+          "returnType": "",
+          "description": "Conditionally omits code based on expression (typically an EQUATE). If expression evaluates to true, the block is omitted. Supports operators: =, <>, <, >, <=, >=. Example: OMIT('!end',DEBUG=0)"
+        }
+      ]
+    },
+    {
+      "name": "COMPILE",
+      "signatures": [
+        {
+          "params": ["STRING terminator"],
+          "returnType": "",
+          "description": "Compiler directive that includes a block of source code in compilation. Block ends at the line containing the terminator string. Opposite of OMIT - used for conditional compilation."
+        },
+        {
+          "params": ["STRING terminator", "expression"],
+          "returnType": "",
+          "description": "Conditionally compiles code based on expression (typically an EQUATE). If expression evaluates to true, the block is included. Supports operators: =, <>, <, >, <=, >=. Example: COMPILE('!end',DEBUG=1)"
+        }
+      ]
+    },
+    {
+      "name": "MAP",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Declares a block of external procedure prototypes. Used in PROGRAM or MEMBER modules to declare procedures from other modules. Contains MODULE() sections and/or individual procedure prototypes. Ends with END."
+        }
+      ]
+    },
+    {
+      "name": "FREE",
+      "signatures": [
+        {
+          "params": ["QUEUE queue"],
+          "returnType": "",
+          "description": "Deletes all entries from a QUEUE and deallocates memory. Does not clear the queue's data buffer. Important: If queue contains reference variables or ANY fields, CLEAR each entry before FREE to avoid memory leaks."
+        }
+      ]
+    },
+    {
+      "name": "DISPLAY",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Writes contents of all USE variables to their associated controls on the active window. Can be called as DISPLAY or DISPLAY(). Useful for updating screen display without cycling the ACCEPT loop."
+        },
+        {
+          "params": ["control first"],
+          "returnType": "",
+          "description": "Displays a specific control's USE variable. Control can be field number or field equate label (e.g., ?MyControl)."
+        },
+        {
+          "params": ["control first", "control last"],
+          "returnType": "",
+          "description": "Displays USE variables for an inclusive range of controls. Both parameters can be field numbers or field equate labels."
+        }
+      ]
+    },
+    {
+      "name": "LOOP",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Initiates an iterative statement execution structure. Forms: LOOP (infinite), LOOP count TIMES, LOOP i=initial TO limit BY step, LOOP UNTIL expression, LOOP WHILE expression. Must end with END or UNTIL/WHILE terminator."
+        }
+      ]
+    }
+  ]
+}

@@ -7,11 +7,13 @@ import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 import { SolutionManager } from '../solution/solutionManager';
+import { DocumentStructure } from '../DocumentStructure';
+import { BuiltinFunctionService } from '../utils/BuiltinFunctionService';
 import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("SignatureHelpProvider");
-logger.setLevel("error"); // DEBUG: Enable for signature help debugging
+logger.setLevel("info"); // DEBUG: Enable for signature help debugging
 
 /**
  * Provides signature help (parameter hints) for method calls
@@ -20,6 +22,7 @@ export class SignatureHelpProvider {
     private tokenCache = TokenCache.getInstance();
     private overloadResolver = new MethodOverloadResolver();
     private memberResolver = new ClassMemberResolver();
+    private builtinService = BuiltinFunctionService.getInstance();
 
     /**
      * Provides signature help at a given position
@@ -239,7 +242,28 @@ export class SignatureHelpProvider {
     ): Promise<SignatureInformation[]> {
         logger.info(`Getting procedure signatures for ${methodName}`);
         
-        // Find procedure declarations in MAP
+        // Check if this is a built-in function FIRST
+        if (this.builtinService.isBuiltin(methodName)) {
+            logger.info(`Found built-in function: ${methodName}`);
+            const signatures = this.builtinService.getSignatures(methodName);
+            
+            // Check if this is a pure keyword (ALL signatures have 0 parameters)
+            // Pure keywords like MAP, PROGRAM, CODE should not show in signature help
+            const hasAnyParams = signatures.some(sig => 
+                sig.parameters && sig.parameters.length > 0
+            );
+            
+            if (hasAnyParams) {
+                // This is a function with parameters - show ALL signatures including 0-param overloads
+                logger.info(`Returning all ${signatures.length} signature(s) for ${methodName}`);
+                return signatures;
+            } else {
+                logger.info(`${methodName} is a pure keyword (no parameters) - skipping signature help`);
+                // Fall through to check for user-defined procedures
+            }
+        }
+        
+        // Otherwise, find procedure declarations in MAP
         const procedures = this.findProcedureInMap(methodName, tokens, document);
         
         return procedures.map(proc => this.createSignatureInformation(methodName, proc.signature, proc.paramCount));
@@ -406,36 +430,33 @@ export class SignatureHelpProvider {
     ): { signature: string; paramCount: number }[] {
         const procedures: { signature: string; paramCount: number }[] = [];
         
-        // Find MAP structures
-        const mapTokens = tokens.filter(t =>
-            t.type === TokenType.Structure &&
-            t.value.toUpperCase() === 'MAP'
-        );
-
-        for (const mapToken of mapTokens) {
-            // Search within MAP for procedure declarations
-            for (let i = mapToken.line + 1; i < tokens.length; i++) {
-                const lineTokens = tokens.filter(t => t.line === i);
-                const endToken = lineTokens.find(t => t.value.toUpperCase() === 'END' && t.start === 0);
-                if (endToken) break;
-
-                // Check if this line has our procedure name
-                const content = document.getText();
-                const lines = content.split('\n');
-                const line = lines[i];
-
-                // Match procedure name (indented or with PROCEDURE keyword)
-                const procMatch = line.match(new RegExp(`^\\s*${procName}\\s*\\(`, 'i')) ||
-                                line.match(new RegExp(`^${procName}\\s+PROCEDURE\\s*\\(`, 'i'));
-
-                if (procMatch) {
-                    const signature = line.trim();
-                    const paramCount = this.overloadResolver.countParametersInDeclaration(signature);
+        // Use DocumentStructure to get MAP declarations
+        const documentStructure = new DocumentStructure(tokens);
+        const mapDeclarations = documentStructure.findMapDeclarations(procName);
+        
+        // Get document content for extracting signatures
+        const content = document.getText();
+        const lines = content.split('\n');
+        
+        // Extract signatures from found declarations
+        for (const declToken of mapDeclarations) {
+            const line = lines[declToken.line];
+            if (line) {
+                const signature = line.trim();
+                const paramCount = this.overloadResolver.countParametersInDeclaration(signature);
+                
+                // Check for duplicates before adding
+                const isDuplicate = procedures.some(p => 
+                    p.signature === signature && p.paramCount === paramCount
+                );
+                
+                if (!isDuplicate) {
                     procedures.push({ signature, paramCount });
+                    logger.info(`Found MAP declaration: ${signature}`);
                 }
             }
         }
-
+        
         return procedures;
     }
 

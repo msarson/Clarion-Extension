@@ -8,6 +8,7 @@ import { Location, Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { ProcedureSignatureUtils } from './ProcedureSignatureUtils';
+import { DocumentStructure } from '../DocumentStructure';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("MapProcedureResolver");
@@ -167,21 +168,26 @@ export class MapProcedureResolver {
             return null;
         }
 
-        // Check if position is inside a MAP block
-        const mapStructures = tokens.filter(t =>
-            t.type === TokenType.Structure && 
-            t.value.toUpperCase() === 'MAP' &&
-            t.line < position.line &&
-            t.finishesAt !== undefined &&
-            t.finishesAt > position.line
-        );
-
-        if (mapStructures.length === 0) {
+        // Check if position is inside a MAP block using DocumentStructure
+        // Create DocumentStructure from provided tokens (works with test data and production)
+        const documentStructure = new DocumentStructure(tokens);
+        if (!documentStructure.isInMapBlock(position.line)) {
             logger.info(`Position ${position.line} is not inside a MAP block`);
             return null;
         }
 
-        const mapBlock = mapStructures[0];
+        // Get MAP blocks for MODULE lookup
+        const mapBlocks = documentStructure.getMapBlocks();
+        const mapBlock = mapBlocks.find(m =>
+            m.line < position.line &&
+            m.finishesAt !== undefined &&
+            m.finishesAt > position.line
+        );
+
+        if (!mapBlock) {
+            logger.info(`Could not find MAP block containing position ${position.line}`);
+            return null;
+        }
         
         // Find the MODULE block that contains the current position
         // MODULE blocks are Structure tokens with value='MODULE' or 'Module'
