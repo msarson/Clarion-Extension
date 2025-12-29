@@ -57,6 +57,7 @@ import { HoverProvider } from './providers/HoverProvider';
 import { DiagnosticProvider } from './providers/DiagnosticProvider';
 import { SignatureHelpProvider } from './providers/SignatureHelpProvider';
 import { ImplementationProvider } from './providers/ImplementationProvider';
+import { UnreachableCodeProvider } from './providers/UnreachableCodeProvider';
 import path = require('path');
 import { ClarionSolutionInfo } from 'common/types';
 
@@ -1345,6 +1346,22 @@ connection.onRequest('clarion/getPerformanceMetrics', () => {
         cpuUsage: process.cpuUsage(),
         uptime: process.uptime()
     };
+});
+
+// Add handler for unreachable code detection
+connection.onRequest('clarion/unreachableRanges', (params: { textDocument: { uri: string } }): Range[] => {
+    try {
+        const document = documents.get(params.textDocument.uri);
+        if (!document) {
+            logger.warn(`Document not found for unreachable code analysis: ${params.textDocument.uri}`);
+            return [];
+        }
+        
+        return UnreachableCodeProvider.provideUnreachableRanges(document);
+    } catch (error) {
+        logger.error(`Error providing unreachable ranges: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
+    }
 });
 
 logger.info("🟢  Clarion Language Server is now listening for requests.");

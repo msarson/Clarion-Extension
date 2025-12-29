@@ -6,6 +6,7 @@ import { ClarionHoverProvider } from './hoverProvider';
 // import { ClarionImplementationProvider } from './implementationProvider';
 import { ClarionDecorator } from '../ClarionDecorator';
 import { UnreachableCodeDecorator } from '../UnreachableCodeDecorator';
+import { LanguageClientManager } from '../LanguageClientManager';
 import { globalSettings } from '../globals';
 import LoggerManager from '../utils/LoggerManager';
 
@@ -100,13 +101,17 @@ export function registerLanguageFeatures(context: ExtensionContext, documentMana
     }
     
     logger.info("🔍 Registering Unreachable Code Decorator...");
-    const unreachableCodeDecorator = new UnreachableCodeDecorator();
-    unreachableCodeDecoratorDisposable = {
-        dispose: () => unreachableCodeDecorator.dispose()
-    };
-    context.subscriptions.push(unreachableCodeDecoratorDisposable);
-    
-    logger.info(`🔍 Registered Unreachable Code Decorator`);
+    const client = LanguageClientManager.getInstance().getClient();
+    if (client) {
+        const unreachableCodeDecorator = new UnreachableCodeDecorator(client);
+        unreachableCodeDecoratorDisposable = {
+            dispose: () => unreachableCodeDecorator.dispose()
+        };
+        context.subscriptions.push(unreachableCodeDecoratorDisposable);
+        logger.info(`🔍 Registered Unreachable Code Decorator`);
+    } else {
+        logger.warn("⚠️ Language client not available, unreachable code detection will be unavailable");
+    }
 }
 
 /**
