@@ -262,8 +262,18 @@ export class UnreachableCodeDecorator {
         
         // Handle single-line IF (IF condition THEN action)
         // This doesn't increase depth because it doesn't require END
+        // CRITICAL: Only compensate if there's an action AFTER THEN on the same line
+        // Multi-line IF like "IF x THEN" (with action on next line) should NOT be compensated
         if (/\bIF\b.*\bTHEN\b/.test(upperCode) && !/\bEND\b/.test(upperCode)) {
-            change--; // Compensate for the IF increment
+            // Check if there's actual code after THEN (not just whitespace/comment)
+            const thenMatch = /\bTHEN\b\s*(.*)/.exec(upperCode);
+            if (thenMatch && thenMatch[1]) {
+                const afterThen = thenMatch[1].replace(/!.*$/, '').trim(); // Remove comments
+                if (afterThen.length > 0) {
+                    // Single-line IF with action after THEN
+                    change--; // Compensate for the IF increment
+                }
+            }
         }
         
         return change;
