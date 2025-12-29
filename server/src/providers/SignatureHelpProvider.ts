@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("SignatureHelpProvider");
-logger.setLevel("info"); // DEBUG: Enable for signature help debugging
+logger.setLevel("error"); // DEBUG: Enable for signature help debugging
 
 /**
  * Provides signature help (parameter hints) for method calls

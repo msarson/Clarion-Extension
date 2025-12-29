@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("ImplementationCommands");
-logger.setLevel("info");
+logger.setLevel("error");
 
 /**
  * Information about a method declaration
