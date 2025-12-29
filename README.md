@@ -58,9 +58,12 @@ Settings are saved in `.vscode/settings.json` within the folder - commit them wi
 - **Team-friendly** - Settings stored with solution, not in workspace files
 
 ### Code Intelligence
-- **Go to Definition** (`F12`) - Navigate to includes, modules, methods
-- **Method overload support** - Correctly resolves overloaded methods based on parameters
-- **Hover tooltips** - Preview file contents, method signatures
+- **Smart IntelliSense** - 62 built-in functions with parameter hints, data types, and optional parameter support
+- **Go to Definition** (`F12`) - Navigate to includes, modules, methods, sections
+- **Go to Implementation** (`Ctrl+F12`) - Navigate from MAP declarations to implementations, MODULE to files
+- **Method overload support** - Correctly resolves overloaded methods based on parameter types
+- **Hover tooltips** - Preview file contents, method signatures, SECTION content, global variables
+- **MODULE/MEMBER navigation** - Cross-file navigation with global variable lookup
 - **Structure view** - Complete code outline with follow cursor
 - **Unreachable code detection** - Visual dimming of code after RETURN/EXIT/HALT statements
 - **Create New Class** - Interactive wizard creates both .inc and .clw files with proper formatting
@@ -88,15 +91,43 @@ Settings are saved in `.vscode/settings.json` within the folder - commit them wi
 
 ### Version 0.7.8 (Dec 2025)
 
-#### ✨ New Code Analysis Feature
-- **Unreachable Code Detection** - Visual dimming of code that is provably unreachable
+#### ✨ Smart IntelliSense for Built-in Functions
+- **62 Clarion built-in functions** with comprehensive IntelliSense support
+  - Parameter hints with data type information and descriptions
+  - Optional parameter support (e.g., `SUB(string, start, <length>)`)
+  - Smart attribute completion for `WHO()`, `WHAT()`, `WHERE()` with valid values
+  - Function categories: String, Numeric, Date/Time, File I/O, System, Memory, Conversion
+
+#### ✨ Unreachable Code Detection
+- **Visual dimming** of provably unreachable code in procedures, methods, and functions
   - Detects code after unconditional RETURN, EXIT, or HALT at top execution level
   - Respects Clarion semantics: ROUTINE blocks always reachable, STOP is not a terminator
   - Handles complex nested structures (ACCEPT, LOOP, CASE, IF, EXECUTE, BEGIN)
-  - Configurable via `clarion.unreachableCode.enabled` setting (default: enabled)
-  - Non-intrusive 40% opacity dimming for unreachable lines
-  - Zero false positives by design - only marks provably unreachable code
-  - Linear O(n) performance with no impact on editor responsiveness
+  - Supports PROCEDURE, METHOD, and FUNCTION declarations
+  - Configurable via `clarion.unreachableCode.enabled` (default: enabled)
+  - Non-intrusive 40% opacity dimming with zero false positives
+
+#### ✨ MODULE/MEMBER Cross-file Navigation
+- **Enhanced MODULE support** with bidirectional navigation
+  - F12 on CLASS MODULE attribute navigates to implementation file
+  - Ctrl+F12 from MAP MODULE navigates to source file
+  - Reverse lookup: From MEMBER file back to parent MAP declaration
+  - Global variable lookup in parent MODULE files with hover support
+
+#### ✨ SECTION Support in INCLUDE Files
+- **Enhanced INCLUDE with SECTION** navigation and tooltips
+  - Hover on `INCLUDE('file.inc', 'SectionName')` shows exact SECTION content
+  - F12 navigates directly to SECTION line, not just file top
+  - Preview SECTION content in hover tooltips
+
+#### 🔧 Major Improvements
+- **Method overload resolution** with parameter type matching
+  - Distinguishes `STRING`, `*STRING`, `&STRING`, `<STRING>` overloads
+  - Works in hover, F12, Ctrl+F12, and Add Method Implementation
+- **Provider refactoring** for better performance and maintainability
+  - Complete HoverProvider, ImplementationProvider, DefinitionProvider rewrites
+  - Eliminated duplicate code and improved caching
+- **Token system enhancements** with accurate positioning and file references
 
 ### Version 0.7.5 (Dec 2025)
 

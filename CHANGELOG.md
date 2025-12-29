@@ -6,31 +6,98 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 
 ---
 
-## [0.7.8] - 2025-12-26
+## [0.7.8] - 2025-12-29
 
-### ✨ Features
-- **Unreachable Code Detection (Phase 1)** - Visual dimming of provably unreachable code in procedures and methods
+### ✨ Major Features
+
+#### Smart IntelliSense for Built-in Functions
+- **62 Clarion built-in functions** with comprehensive IntelliSense support
+  - Parameter hints with data type information and descriptions
+  - Optional parameter support with `<>` notation
+  - Smart attribute completion for functions like `WHO()`, `WHAT()`, `WHERE()`
+  - **Data type system** - Complete type definitions for parameters and return values
+  - Function categories: String, Numeric, Date/Time, File I/O, System, Memory, Conversion, and more
+  - Examples: `CLIP()`, `SUB()`, `INSTRING()`, `FORMAT()`, `CHOOSE()`, `POINTER()`, `WHO()`, `WHAT()`, `WHERE()`
+
+#### Unreachable Code Detection (Phase 1)
+- **Visual dimming** of provably unreachable code in procedures, methods, and functions
   - Detects code after unconditional RETURN, EXIT, or HALT statements at top execution level
   - Respects Clarion semantics: ROUTINE blocks are always reachable, STOP is not a terminator
   - Handles complex nested structures: ACCEPT, LOOP, CASE, IF, EXECUTE, BEGIN
+  - **Now supports FUNCTION declarations** in addition to PROCEDURE and METHOD
   - Non-intrusive visual dimming with 40% opacity
   - Zero false positives by design - conservative detection only
   - Linear O(n) performance with no editor impact
   - Configurable via `clarion.unreachableCode.enabled` setting (default: enabled)
-  - Includes comprehensive documentation and test cases
 
-### 🔧 Improvements
-- **Structure depth tracking** - Enhanced tracking of nested control structures for accurate unreachable code detection
-  - Added support for ACCEPT, EXECUTE, and BEGIN blocks
-  - Fixed dot (.) detection to only treat standalone dots as structure enders
-  - Statement-terminating dots (e.g., `RETURN.`) no longer misinterpreted
-  - Improved depth bounds checking to prevent negative depth values
+#### MODULE/MEMBER Cross-file Navigation
+- **Enhanced MODULE file support** with bidirectional navigation
+  - Go to Definition (F12) from CLASS with MODULE attribute navigates to implementation file
+  - Go to Implementation (Ctrl+F12) from MAP MODULE declaration navigates to source file
+  - Reverse lookup: From MEMBER file, navigate back to parent MAP declaration
+  - **Global variable lookup** - Hover and definition support for variables declared in parent MODULE files
+  - Intelligent file path resolution supporting both absolute and redirection paths
+  - Hover tooltips show parent MAP declarations when in MEMBER files
+
+#### Enhanced SECTION Support in INCLUDE Files
+- **SECTION navigation and hover** improvements
+  - Hover on `INCLUDE('file.inc', 'SectionName')` shows exact SECTION content from file
+  - Go to Definition (F12) navigates directly to SECTION line, not just file top
+  - Skips comments when searching for SECTION declarations
+  - Visual preview of SECTION content in tooltips
+
+### 🔧 Major Improvements
+
+#### Method Overload Resolution with Parameter Type Matching
+- **Intelligent overload resolution** based on actual parameter types
+  - Distinguishes between `STRING`, `*STRING`, `&STRING`, `<STRING>` overloads
+  - Handles custom types and class references correctly
+  - Works across: Hover tooltips, Go to Definition (F12), Go to Implementation (Ctrl+F12)
+  - Example: `Str(STRING)` vs `Str(SystemStringClass)` now resolve to correct implementations
+  - **Add Method Implementation** now creates correct overload instead of duplicating
+
+#### Provider Refactoring and Performance
+- **HoverProvider refactoring** - Complete rewrite for maintainability and performance
+  - Eliminated duplicate code paths and legacy methods
+  - Server-side and client-side coordination to prevent duplicate tooltips
+  - Unified resolver pattern for consistent behavior
+  - Better caching with TokenCache system
+- **ImplementationProvider refactoring** - Enhanced cross-file navigation
+  - Uses DocumentStructure semantic APIs for accurate MAP block detection
+  - Improved MODULE and MEMBER file handling
+  - Better error handling and fallback mechanisms
+- **DefinitionProvider refactoring** - Extracted specialized resolvers for maintainability
+  - Dedicated resolvers for MAP procedures, includes, members, and more
+  - Better separation of concerns and code organization
+
+#### Token System Enhancements
+- **Token positioning improvements** - Accurate start positions for all tokens with leading whitespace
+- **finishesAt property** - Better tracking of structure boundaries to prevent hover overflow
+- **referencedFile property** - Unified file reference tracking for MODULE/LINK/INCLUDE tokens
+- **Structure lifecycle fixes** - Proper validation of unterminated structures with finishesAt
+
+### 🐛 Bug Fixes
+
+- **Fixed unreachable code detection for FUNCTION declarations** - FUNCTIONs were not recognized, causing incorrect dimming
+- **Fixed hover duplicates** - Eliminated duplicate hover information from client and server providers
+- **Fixed token start positions** - All tokens now have correct positions accounting for leading whitespace
+- **Fixed MAP procedure hover** - No longer triggers implementation check on declaration line
+- **Fixed FUNCTION keyword support** - FUNCTION declarations now properly recognized throughout extension
+- **Fixed structure keyword matching** - Structure keywords (REPORT, FILE, etc.) no longer match inside template parameters
+- **Fixed F12 behavior on declarations** - Returns null per LSP spec instead of staying in place
+- **Fixed MEMBER file resolution** - Proper support for local paths without full solution context
+- **Fixed method implementation preview length** - Shows appropriate number of lines in hovers
+- **Fixed nested MODULE handling** - Proper detection in MAP blocks for hover and navigation
+- **Fixed stale content issues** - Hover and navigation now read from workspace, not just disk
+- **Fixed MAP declaration formats** - Handles both indented and column 0 MAP declarations
+- **Fixed document link exclusions** - Test files properly excluded from .mocharc.json
 
 ### 📚 Documentation
 - Added `docs/UNREACHABLE_CODE_PHASE1.md` - Complete feature documentation
 - Added `IMPLEMENTATION_SUMMARY.md` - Implementation details and architecture
 - Added `TESTING_CHECKLIST.md` - Comprehensive testing guide
 - Added test files in `test-programs/unreachable-code/` directory
+- Updated hover provider and definition provider documentation
 
 ---
 
