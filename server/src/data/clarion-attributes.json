@@ -1,0 +1,993 @@
+{
+  "attributes": [
+    {
+      "name": "AT",
+      "applicableTo": [
+        "WINDOW",
+        "REPORT",
+        "CONTROL",
+        "APPLICATION"
+      ],
+      "signatures": [
+        {
+          "params": [
+            { "name": "LONG x", "optional": true },
+            { "name": "LONG y", "optional": true },
+            { "name": "LONG width", "optional": true },
+            { "name": "LONG height", "optional": true }
+          ],
+          "description": "Sets position and size. All parameters are optional and can be omitted (e.g., AT(,,width,height)). Runtime library provides defaults for omitted parameters.",
+          "syntax": "AT([x] [,y] [,width] [,height])"
+        }
+      ],
+      "description": "Defines the position and size of the structure or control. The x,y position is relative and dependent upon the statement on which the AT attribute is placed. Values are measured in dialog units for WINDOW/APPLICATION (one-quarter average character width by one-eighth average character height). All parameters are optional.",
+      "propertyEquate": "PROP:At"
+    },
+    {
+      "name": "USE",
+      "applicableTo": [
+        "WINDOW",
+        "REPORT",
+        "CONTROL"
+      ],
+      "signatures": [
+        {
+          "params": [
+            "label"
+          ],
+          "description": "Field equate label only"
+        },
+        {
+          "params": [
+            "variable"
+          ],
+          "description": "Variable to update"
+        },
+        {
+          "params": [
+            "variable",
+            "LONG number"
+          ],
+          "description": "Variable and field number"
+        },
+        {
+          "params": [
+            "variable",
+            "LONG number",
+            "label equate"
+          ],
+          "description": "Variable, field number, and equate label"
+        }
+      ],
+      "description": "Specifies a field equate label for the control or structure, or a variable for the control to update. With a variable parameter, supplies the control with a variable to update by operator entry (on window) or provide value to print (on report). All parameters after the first are optional.",
+      "propertyEquate": "PROP:Use"
+    },
+    {
+      "name": "COLOR",
+      "applicableTo": [
+        "WINDOW",
+        "REPORT",
+        "CONTROL",
+        "TOOLBAR"
+      ],
+      "signatures": [
+        {
+          "params": [
+            { "name": "LONG color", "optional": false },
+            { "name": "LONG selectedFore", "optional": true },
+            { "name": "LONG selectedBack", "optional": true }
+          ],
+          "description": "Specifies display or print colors. Color parameter is required, selectedFore and selectedBack are optional.",
+          "syntax": "COLOR(color [,selectedFore] [,selectedBack])"
+        }
+      ],
+      "description": "Specifies display or print color. The color parameter specifies background color (PROP:Background). The selectedFore and selectedBack parameters specify colors for selected text on controls that can receive focus. The last two parameters are optional and not valid in REPORT.",
+      "propertyEquate": "PROP:Color"
+    },
+    {
+      "name": "FONT",
+      "applicableTo": [
+        "WINDOW",
+        "REPORT",
+        "CONTROL",
+        "TOOLBAR"
+      ],
+      "signatures": [
+        {
+          "params": [
+            { "name": "STRING typeface", "optional": true },
+            { "name": "LONG size", "optional": true },
+            { "name": "LONG color", "optional": true },
+            { "name": "LONG style", "optional": true },
+            { "name": "LONG charset", "optional": true }
+          ],
+          "description": "Specifies the default display font. All parameters are optional and can be omitted (e.g., FONT(,size) or FONT('Arial',12,,FONT:bold)). Runtime library provides defaults for omitted parameters.",
+          "syntax": "FONT([typeface] [,size] [,color] [,style] [,charset])"
+        }
+      ],
+      "description": "Specifies the default display font. Typeface is font name, size in points, color as RGB LONG value, style for weight/italic/underline/strikeout, and charset for international character sets. All parameters are optional.",
+      "propertyEquate": "PROP:Font"
+    },
+    {
+      "name": "HIDE",
+      "applicableTo": [
+        "CONTROL"
+      ],
+      "description": "Specifies the control does not appear when the WINDOW or APPLICATION is first opened. UNHIDE must be used to display it. In a REPORT, the control does not print unless UNHIDE is used.",
+      "propertyEquate": "PROP:Hide",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "DISABLE",
+      "applicableTo": [
+        "CONTROL"
+      ],
+      "description": "Specifies the control is dimmed (grayed out) when the window is first opened. The control cannot receive focus and does not respond to user input. ENABLE must be used to activate it.",
+      "propertyEquate": "PROP:Disable",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "CENTER",
+      "applicableTo": [
+        "WINDOW"
+      ],
+      "description": "Sets the window to be centered on screen when first opened. The window is positioned at the center of the screen or MDI parent window client area.",
+      "propertyEquate": "PROP:Center",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "MODAL",
+      "applicableTo": [
+        "WINDOW"
+      ],
+      "description": "Sets the window as system modal. A modal window must be closed before the user can interact with any other window in the application or system.",
+      "propertyEquate": "PROP:Modal",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "MDI",
+      "applicableTo": [
+        "WINDOW"
+      ],
+      "description": "Sets the window as an MDI (Multiple Document Interface) child window. MDI child windows are contained within the client area of an APPLICATION structure.",
+      "propertyEquate": "PROP:MDI",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "SYSTEM",
+      "applicableTo": [
+        "WINDOW",
+        "APPLICATION"
+      ],
+      "description": "Adds a system menu to the window or application. The system menu appears as an icon in the upper left corner and provides minimize, maximize, restore, and close options.",
+      "propertyEquate": "PROP:System",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "MAX",
+      "applicableTo": [
+        "WINDOW",
+        "APPLICATION"
+      ],
+      "description": "Adds a maximize button to the window or application title bar, allowing the user to maximize the window to full screen.",
+      "propertyEquate": "PROP:Max",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "ICON",
+      "applicableTo": [
+        "WINDOW",
+        "APPLICATION",
+        "BUTTON"
+      ],
+      "description": "Sets the icon for the window, application, or button. The filename parameter specifies the .ICO file to use.",
+      "propertyEquate": "PROP:Icon",
+      "signatures": [
+        {
+          "params": [
+            "STRING filename"
+          ],
+          "description": "Sets filename"
+        }
+      ]
+    },
+    {
+      "name": "STATUS",
+      "applicableTo": [
+        "WINDOW",
+        "APPLICATION"
+      ],
+      "description": "Adds a status bar to the bottom of the window or application. The height parameter specifies the height in dialog units. The align parameter specifies text alignment.",
+      "propertyEquate": "PROP:Status",
+      "signatures": [
+        {
+          "params": [
+            "LONG height",
+            "LONG align"
+          ],
+          "description": "Sets height, align"
+        }
+      ]
+    },
+    {
+      "name": "IMM",
+      "applicableTo": [
+        "CONTROL"
+      ],
+      "description": "Sets immediate event notification for the control. Changes to the control generate an EVENT:Accepted immediately rather than waiting for the user to press Enter or Tab.",
+      "propertyEquate": "PROP:Immediate",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "READONLY",
+      "applicableTo": [
+        "CONTROL"
+      ],
+      "description": "Sets the control as display-only. The control can receive focus and be tabbed to, but the user cannot edit its contents.",
+      "propertyEquate": "PROP:ReadOnly",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "REQ",
+      "applicableTo": [
+        "CONTROL"
+      ],
+      "description": "Sets required entry for the control. The user must enter a value in the control before the window can be closed or focus moved to certain other controls.",
+      "propertyEquate": "PROP:Req",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "AUTO",
+      "applicableTo": [
+        "CONTROL"
+      ],
+      "description": "Sets the USE variable to automatically re-display when changed by program code. Normally, changes to the USE variable are only displayed when the window is opened or the field is updated.",
+      "propertyEquate": "PROP:Auto",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "SKIP",
+      "applicableTo": [
+        "CONTROL"
+      ],
+      "description": "Sets the control to be skipped when the user presses Tab. The control cannot receive focus through Tab key navigation, but can still receive focus through mouse clicks or SELECT statement.",
+      "propertyEquate": "PROP:Skip",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "GRAY",
+      "applicableTo": [
+        "WINDOW",
+        "CONTROL"
+      ],
+      "description": "Sets 3-D look background using the Windows button face color. Provides a raised 3-D appearance for the control or window background.",
+      "propertyEquate": "PROP:Gray",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "FROM",
+      "applicableTo": [
+        "LIST",
+        "COMBO"
+      ],
+      "description": "Sets the data source for a LIST or COMBO control. The queue parameter specifies the QUEUE structure containing the data to display.",
+      "propertyEquate": "PROP:From",
+      "signatures": [
+        {
+          "params": [
+            "QUEUE queue"
+          ],
+          "description": "Sets queue"
+        }
+      ]
+    },
+    {
+      "name": "FORMAT",
+      "applicableTo": [
+        "LIST",
+        "COMBO"
+      ],
+      "description": "Sets the layout for LIST or COMBO control. The format string specifies column widths, headers, and alignment for multi-column lists.",
+      "propertyEquate": "PROP:Format",
+      "signatures": [
+        {
+          "params": [
+            "STRING formatString"
+          ],
+          "description": "Sets formatString"
+        }
+      ]
+    },
+    {
+      "name": "RANGE",
+      "applicableTo": [
+        "CONTROL"
+      ],
+      "description": "Sets range limits for entry control. Validates that entered values fall within the specified low to high range. Generates EVENT:RangeHigh or EVENT:RangeLow if violated.",
+      "propertyEquate": "PROP:Range",
+      "signatures": [
+        {
+          "params": [
+            "expression low",
+            "expression high"
+          ],
+          "description": "Sets low, high"
+        }
+      ]
+    },
+    {
+      "name": "VALUE",
+      "applicableTo": [
+        "RADIO",
+        "CHECK"
+      ],
+      "description": "Sets the value assigned to the USE variable when a RADIO button or CHECK box is selected. Allows multiple radio buttons or check boxes to set different values to the same variable.",
+      "propertyEquate": "PROP:Value",
+      "signatures": [
+        {
+          "params": [
+            "expression value"
+          ],
+          "description": "Sets value"
+        }
+      ]
+    },
+    {
+      "name": "HSCROLL",
+      "applicableTo": [
+        "WINDOW",
+        "CONTROL"
+      ],
+      "description": "Adds a horizontal scroll bar to the window or control.",
+      "propertyEquate": "PROP:HScroll",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "VSCROLL",
+      "applicableTo": [
+        "WINDOW",
+        "CONTROL"
+      ],
+      "description": "Adds a vertical scroll bar to the window or control.",
+      "propertyEquate": "PROP:VScroll",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "HVSCROLL",
+      "applicableTo": [
+        "WINDOW",
+        "CONTROL"
+      ],
+      "description": "Adds both horizontal and vertical scroll bars to the window or control.",
+      "propertyEquate": "PROP:HVScroll",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "RESIZE",
+      "applicableTo": [
+        "WINDOW"
+      ],
+      "description": "Sets the window border to allow resizing. The user can drag the window edges to change the window size.",
+      "propertyEquate": "PROP:Resize",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "DOUBLE",
+      "applicableTo": [
+        "WINDOW"
+      ],
+      "description": "Sets a double-line window border. Cannot be combined with RESIZE.",
+      "propertyEquate": "PROP:Double",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "NOFRAME",
+      "applicableTo": [
+        "WINDOW"
+      ],
+      "description": "Sets the window to have no border frame. The window appears without a title bar or border.",
+      "propertyEquate": "PROP:NoFrame",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "TIP",
+      "applicableTo": [
+        "CONTROL"
+      ],
+      "description": "Sets 'balloon help' text that appears when the mouse hovers over the control. The text parameter specifies the tooltip message.",
+      "propertyEquate": "PROP:Tip",
+      "signatures": [
+        {
+          "params": [
+            "STRING text"
+          ],
+          "description": "Sets text"
+        }
+      ]
+    },
+    {
+      "name": "KEY",
+      "applicableTo": [
+        "CONTROL"
+      ],
+      "description": "Sets the execution keycode for the control. When the specified key is pressed, the control is selected and executes.",
+      "propertyEquate": "PROP:Key",
+      "signatures": [
+        {
+          "params": [
+            "keycode"
+          ],
+          "description": "Sets param1"
+        }
+      ]
+    },
+    {
+      "name": "DEFAULT",
+      "applicableTo": [
+        "BUTTON"
+      ],
+      "description": "Sets the button as the default button for the window. When the user presses Enter, this button executes unless focus is on another button.",
+      "propertyEquate": "PROP:Default",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "MSG",
+      "applicableTo": [
+        "CONTROL",
+        "MENU",
+        "ITEM"
+      ],
+      "description": "Sets the message to display in the status bar when the control has focus or menu item is highlighted.",
+      "propertyEquate": "PROP:Msg",
+      "signatures": [
+        {
+          "params": [
+            "STRING message"
+          ],
+          "description": "Sets message"
+        }
+      ]
+    },
+    {
+      "name": "HLP",
+      "applicableTo": [
+        "WINDOW",
+        "CONTROL"
+      ],
+      "description": "Sets the on-line help identifier for context-sensitive help. The helpID parameter specifies the help topic to display.",
+      "propertyEquate": "PROP:Hlp",
+      "signatures": [
+        {
+          "params": [
+            "STRING helpID"
+          ],
+          "description": "Sets helpID"
+        }
+      ]
+    },
+    {
+      "name": "ALRT",
+      "applicableTo": [
+        "WINDOW"
+      ],
+      "description": "Sets window 'hot' keys. Defines keys that generate an alert when pressed in the window.",
+      "propertyEquate": "PROP:Alrt",
+      "signatures": [
+        {
+          "params": [
+            "keycode"
+          ],
+          "description": "Sets param1"
+        }
+      ]
+    },
+    {
+      "name": "FILL",
+      "applicableTo": [
+        "BOX",
+        "ELLIPSE",
+        "REGION"
+      ],
+      "description": "Sets the fill color for BOX, ELLIPSE, or REGION controls. The color parameter specifies the interior fill color.",
+      "propertyEquate": "PROP:Fill",
+      "signatures": [
+        {
+          "params": [
+            "LONG color"
+          ],
+          "description": "Sets color"
+        }
+      ]
+    },
+    {
+      "name": "TIMER",
+      "applicableTo": [
+        "WINDOW"
+      ],
+      "description": "Sets periodic event generation. The interval parameter specifies time in hundredths of a second between EVENT:Timer events.",
+      "propertyEquate": "PROP:Timer",
+      "signatures": [
+        {
+          "params": [
+            "LONG interval"
+          ],
+          "description": "Sets interval"
+        }
+      ]
+    },
+    {
+      "name": "BEVEL",
+      "applicableTo": [
+        "CONTROL"
+      ],
+      "description": "Sets 3-D effect border for the control. The style parameter defines the bevel appearance (raised, inset, etc.).",
+      "propertyEquate": "PROP:Bevel",
+      "signatures": [
+        {
+          "params": [
+            "LONG style"
+          ],
+          "description": "Sets style"
+        }
+      ]
+    },
+    {
+      "name": "BOXED",
+      "applicableTo": [
+        "GROUP"
+      ],
+      "description": "Sets a border around a GROUP of controls. Draws a rectangular border encompassing all controls in the group.",
+      "propertyEquate": "PROP:Boxed",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "CAP",
+      "applicableTo": [
+        "CONTROL"
+      ],
+      "description": "Sets text entry to all capitals. Automatically converts all entered text to uppercase.",
+      "propertyEquate": "PROP:Cap",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "UPR",
+      "applicableTo": [
+        "CONTROL"
+      ],
+      "description": "Sets text entry to all uppercase. Similar to CAP, converts entered text to uppercase.",
+      "propertyEquate": "PROP:Upr",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "CENTERED",
+      "applicableTo": [
+        "IMAGE"
+      ],
+      "description": "Centers an image within its control area. The image is displayed centered rather than at top-left.",
+      "propertyEquate": "PROP:Centered",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "TILED",
+      "applicableTo": [
+        "IMAGE"
+      ],
+      "description": "Tiles an image to fill the control area. The image is repeated horizontally and vertically.",
+      "propertyEquate": "PROP:Tiled",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "WALLPAPER",
+      "applicableTo": [
+        "WINDOW"
+      ],
+      "description": "Sets a background image for the window. The filename parameter specifies the image file to use as wallpaper.",
+      "propertyEquate": "PROP:Wallpaper",
+      "signatures": [
+        {
+          "params": [
+            "STRING filename"
+          ],
+          "description": "Sets filename"
+        }
+      ]
+    },
+    {
+      "name": "CHECK",
+      "applicableTo": [
+        "ITEM"
+      ],
+      "description": "Creates an on/off menu item with a checkmark. Used in MENUs to show item selection state.",
+      "propertyEquate": "PROP:Check",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "RADIO",
+      "applicableTo": [
+        "ITEM"
+      ],
+      "description": "Creates a radio button menu item. Only one radio item in a group can be selected at a time.",
+      "propertyEquate": "PROP:Radio",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "SEPARATOR",
+      "applicableTo": [
+        "ITEM"
+      ],
+      "description": "Creates a separator line in a menu. Draws a horizontal line to visually separate menu items.",
+      "propertyEquate": "PROP:Separator",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "FLAT",
+      "applicableTo": [
+        "BUTTON",
+        "TOOLBAR"
+      ],
+      "description": "Sets buttons to have a flat appearance. Buttons appear flat until the mouse hovers over them.",
+      "propertyEquate": "PROP:Flat",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "MARK",
+      "applicableTo": [
+        "LIST"
+      ],
+      "description": "Enables multiple selection mode for LIST controls. Allows the user to select multiple items.",
+      "propertyEquate": "PROP:Mark",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "DROP",
+      "applicableTo": [
+        "LIST",
+        "COMBO"
+      ],
+      "description": "Sets list box behavior for COMBO or LIST controls. Creates a drop-down list.",
+      "propertyEquate": "PROP:Drop",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "COLUMN",
+      "applicableTo": [
+        "LIST"
+      ],
+      "description": "Sets list box to use column-based highlighting. The highlight bar extends across all columns.",
+      "propertyEquate": "PROP:Column",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "GRID",
+      "applicableTo": [
+        "LIST"
+      ],
+      "description": "Sets grid line display and color for LIST controls. Shows lines between rows and columns.",
+      "propertyEquate": "PROP:Grid",
+      "signatures": [
+        {
+          "params": [
+            "LONG color"
+          ],
+          "description": "Sets color"
+        }
+      ]
+    },
+    {
+      "name": "NOBAR",
+      "applicableTo": [
+        "LIST"
+      ],
+      "description": "Removes the highlight bar from LIST controls. Items can be selected but no visual highlight appears.",
+      "propertyEquate": "PROP:NoBar",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "MASK",
+      "applicableTo": [
+        "ENTRY"
+      ],
+      "description": "Sets pattern editing for data entry. The pattern parameter defines input format mask.",
+      "propertyEquate": "PROP:Mask",
+      "signatures": [
+        {
+          "params": [
+            "STRING pattern"
+          ],
+          "description": "Sets pattern"
+        }
+      ]
+    },
+    {
+      "name": "PASSWORD",
+      "applicableTo": [
+        "ENTRY"
+      ],
+      "description": "Hides data entry by displaying asterisks. Used for password entry fields.",
+      "propertyEquate": "PROP:Password",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "SINGLE",
+      "applicableTo": [
+        "TEXT"
+      ],
+      "description": "Sets TEXT control for single line entry. Limits text entry to one line only.",
+      "propertyEquate": "PROP:Single",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "SCROLL",
+      "applicableTo": [
+        "TEXT"
+      ],
+      "description": "Enables scrolling for TEXT control. Allows vertical scrolling through text content.",
+      "propertyEquate": "PROP:Scroll",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "MAXIMIZE",
+      "applicableTo": [
+        "WINDOW"
+      ],
+      "description": "Opens the window in maximized state. Window fills the entire screen or MDI parent area.",
+      "propertyEquate": "PROP:Maximize",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "ICONIZE",
+      "applicableTo": [
+        "WINDOW"
+      ],
+      "description": "Opens the window as an icon (minimized). Window appears minimized on first open.",
+      "propertyEquate": "PROP:Iconize",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "FULL",
+      "applicableTo": [
+        "WINDOW"
+      ],
+      "description": "Sets window to full-screen mode. Window occupies the entire display with no borders.",
+      "propertyEquate": "PROP:Full",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "TOOLBOX",
+      "applicableTo": [
+        "WINDOW"
+      ],
+      "description": "Sets window as a toolbox. Creates a floating tool palette window.",
+      "propertyEquate": "PROP:Toolbox",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "DOCK",
+      "applicableTo": [
+        "WINDOW"
+      ],
+      "description": "Enables window docking capability. Window can be docked to edges of parent window.",
+      "propertyEquate": "PROP:Dock",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    },
+    {
+      "name": "DOCKED",
+      "applicableTo": [
+        "WINDOW"
+      ],
+      "description": "Opens dockable window in docked state. Window appears docked at open rather than floating.",
+      "propertyEquate": "PROP:Docked",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ]
+    }
+  ]
+}

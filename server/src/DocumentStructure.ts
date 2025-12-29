@@ -64,6 +64,108 @@ export class DocumentStructure {
         });
     }
 
+    /**
+     * Gets the control and structure context at a specific position
+     * Used for context-aware IntelliSense features
+     */
+    public getControlContextAt(line: number, character: number): {
+        controlType: string | null;
+        controlToken: Token | null;
+        structureType: string | null;
+        structureToken: Token | null;
+        isInControlDeclaration: boolean;
+    } {
+        // Get tokens on this line
+        const lineTokens = this.tokensByLine.get(line) || [];
+        
+        // Walk backwards from character position to find control keyword
+        let controlToken: Token | null = null;
+        for (let i = lineTokens.length - 1; i >= 0; i--) {
+            const token = lineTokens[i];
+            
+            // If we're past our position, skip
+            if (token.start > character) continue;
+            
+            // If we hit the start of the line and it's not a control, we're done
+            if (token.start < character) {
+                // Check if this is a window element (control)
+                if (token.type === TokenType.WindowElement || 
+                    token.type === TokenType.Structure) {
+                    const upperValue = token.value.toUpperCase();
+                    
+                    // Check if it's a known control type
+                    if (this.isControlKeyword(upperValue)) {
+                        controlToken = token;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // If no control found on current line, check if we're in a multi-line control declaration
+        if (!controlToken) {
+            // Walk back through previous lines to find control start
+            for (let checkLine = line - 1; checkLine >= Math.max(0, line - 10); checkLine--) {
+                const prevLineTokens = this.tokensByLine.get(checkLine) || [];
+                
+                // Look for control keyword that hasn't been closed
+                for (const token of prevLineTokens) {
+                    if (token.type === TokenType.WindowElement || 
+                        token.type === TokenType.Structure) {
+                        const upperValue = token.value.toUpperCase();
+                        if (this.isControlKeyword(upperValue)) {
+                            // Check if this control declaration is still open (no END on its line)
+                            const hasEnd = prevLineTokens.some(t => 
+                                t.type === TokenType.EndStatement
+                            );
+                            if (!hasEnd) {
+                                controlToken = token;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (controlToken) break;
+            }
+        }
+        
+        // Get the parent structure (WINDOW, REPORT, etc.)
+        let structureToken: Token | null = null;
+        if (controlToken && controlToken.parent) {
+            structureToken = controlToken.parent;
+        } else {
+            // Walk up structure stack to find containing structure
+            for (let i = this.structureStack.length - 1; i >= 0; i--) {
+                const struct = this.structureStack[i];
+                if (struct.line <= line) {
+                    structureToken = struct;
+                    break;
+                }
+            }
+        }
+        
+        return {
+            controlType: controlToken?.value.toUpperCase() || null,
+            controlToken,
+            structureType: structureToken?.value.toUpperCase() || null,
+            structureToken,
+            isInControlDeclaration: controlToken !== null
+        };
+    }
+
+    /**
+     * Checks if a keyword is a known control type
+     */
+    private isControlKeyword(keyword: string): boolean {
+        const controls = [
+            'BUTTON', 'ENTRY', 'LIST', 'COMBO', 'CHECK', 'RADIO', 'OPTION',
+            'TEXT', 'STRING', 'PROMPT', 'IMAGE', 'BOX', 'LINE', 'ELLIPSE',
+            'REGION', 'GROUP', 'SHEET', 'TAB', 'SPIN', 'PANEL', 'PROGRESS',
+            'OLE', 'MENU', 'MENUBAR', 'ITEM', 'TOOLBAR'
+        ];
+        return controls.includes(keyword);
+    }
+
     public process(): void {
         for (let i = 0; i < this.tokens.length; i++) {
             const token = this.tokens[i];

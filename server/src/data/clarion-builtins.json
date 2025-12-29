@@ -66,24 +66,17 @@
       "name": "MESSAGE",
       "signatures": [
         {
-          "params": ["STRING text"],
+          "params": [
+            { "name": "STRING text", "optional": false },
+            { "name": "STRING caption", "optional": true },
+            { "name": "LONG icon", "optional": true },
+            { "name": "LONG buttons", "optional": true },
+            { "name": "LONG default", "optional": true },
+            { "name": "LONG style", "optional": true }
+          ],
           "returnType": "BYTE",
-          "description": "Displays a simple message box with the text and an OK button. Returns button code when dismissed (always 1 for OK)."
-        },
-        {
-          "params": ["STRING text", "STRING title"],
-          "returnType": "BYTE",
-          "description": "Displays a message box with custom title bar text and an OK button. Returns button code when dismissed."
-        },
-        {
-          "params": ["STRING text", "STRING title", "LONG icon"],
-          "returnType": "BYTE",
-          "description": "Displays a message box with custom title, icon/buttons (ICON:Asterisk, ICON:Hand, etc.). Returns button code indicating which button was clicked."
-        },
-        {
-          "params": ["STRING text", "STRING title", "LONG icon", "LONG button"],
-          "returnType": "BYTE",
-          "description": "Displays a message box with custom title, icon, and button configuration. Full control over appearance. Returns button code."
+          "description": "Displays a message box. Text is required, all other parameters optional (caption, icon, buttons, default button, and style/mode). Returns button code indicating which button was clicked. Use pipe character (|) in text for multi-line messages.",
+          "syntax": "MESSAGE(text [,caption] [,icon] [,buttons] [,default] [,style])"
         }
       ]
     },
@@ -446,14 +439,13 @@
       "name": "INCLUDE",
       "signatures": [
         {
-          "params": ["STRING filename"],
+          "params": [
+            { "name": "STRING filename", "optional": false },
+            { "name": "STRING section", "optional": true }
+          ],
           "returnType": "",
-          "description": "Compiler directive that includes source code from another file at this point. File is compiled as if it appeared inline. Extension .CLW assumed if omitted."
-        },
-        {
-          "params": ["STRING filename", "STRING section"],
-          "returnType": "",
-          "description": "Includes only a specific SECTION from the specified file. The section parameter matches the SECTION directive's string in the source file."
+          "description": "Compiler directive that includes source code from another file. Section parameter is optional - if omitted, includes entire file. If provided, includes only the specified SECTION. Extension .CLW assumed if omitted.",
+          "syntax": "INCLUDE(filename [,section])"
         }
       ]
     },
@@ -461,14 +453,12 @@
       "name": "MEMBER",
       "signatures": [
         {
-          "params": [],
+          "params": [
+            { "name": "STRING program", "optional": true }
+          ],
           "returnType": "",
-          "description": "Compiler directive that identifies this source file as a MEMBER module containing procedures. Must appear at top of file before any MAP."
-        },
-        {
-          "params": ["STRING program"],
-          "returnType": "",
-          "description": "Identifies this as a MEMBER module with a specific program name. Used in multi-program applications to associate members with programs."
+          "description": "Compiler directive that identifies this source file as a MEMBER module. Program parameter is optional - omit for single-program applications, specify for multi-program solutions. Must appear at top of file before any MAP.",
+          "syntax": "MEMBER([program])"
         }
       ]
     },
@@ -486,14 +476,13 @@
       "name": "LINK",
       "signatures": [
         {
-          "params": ["STRING linkfile"],
+          "params": [
+            { "name": "STRING linkfile", "optional": false },
+            { "name": "LONG flag", "optional": true }
+          ],
           "returnType": "",
-          "description": "CLASS attribute that adds a file (.OBJ, .LIB) to the linker's link list. Without extension, .OBJ is assumed. Used in CLASS declarations."
-        },
-        {
-          "params": ["STRING linkfile", "LONG flag"],
-          "returnType": "",
-          "description": "Conditionally links a file based on flag value. If flag is non-zero, file is linked; if zero, link is skipped. Useful with compile-time defines."
+          "description": "CLASS attribute that adds a file (.OBJ, .LIB) to the linker's link list. Flag parameter is optional - if omitted, file is always linked. If provided, links conditionally based on flag value (non-zero = link). Without extension, .OBJ is assumed.",
+          "syntax": "LINK(linkfile [,flag])"
         }
       ]
     },
@@ -501,14 +490,13 @@
       "name": "CLEAR",
       "signatures": [
         {
-          "params": ["variable label"],
+          "params": [
+            { "name": "variable label", "optional": false },
+            { "name": "LONG n", "optional": true }
+          ],
           "returnType": "",
-          "description": "Clears a variable, GROUP, RECORD, QUEUE, CLASS, or FILE to default values. Numeric fields become zero, STRINGs become spaces, PSTRING/CSTRING become zero length. Reference variables set to NULL. Arrays are cleared entirely."
-        },
-        {
-          "params": ["variable label", "LONG n"],
-          "returnType": "",
-          "description": "Clears with special values: n=1 sets to highest possible value (e.g., all ASCII 255 for STRING); n=-1 sets to lowest possible value (e.g., all ASCII zeroes for STRING, zero length for PSTRING/CSTRING)."
+          "description": "Clears a variable, GROUP, RECORD, QUEUE, CLASS, or FILE. N parameter is optional - if omitted, clears to default values (0, blank, etc.). If n=1, sets to highest possible value (all ASCII 255). If n=-1, sets to lowest value (all ASCII 0). Arrays are cleared entirely.",
+          "syntax": "CLEAR(variable [,n])"
         }
       ]
     },
@@ -536,14 +524,13 @@
       "name": "OMIT",
       "signatures": [
         {
-          "params": ["STRING terminator"],
+          "params": [
+            { "name": "STRING terminator", "optional": false },
+            { "name": "expression", "optional": true }
+          ],
           "returnType": "",
-          "description": "Compiler directive that omits a block of source code from compilation. Block ends at the line containing the terminator string. Used for commenting out large sections or conditional compilation."
-        },
-        {
-          "params": ["STRING terminator", "expression"],
-          "returnType": "",
-          "description": "Conditionally omits code based on expression (typically an EQUATE). If expression evaluates to true, the block is omitted. Supports operators: =, <>, <, >, <=, >=. Example: OMIT('!end',DEBUG=0)"
+          "description": "Compiler directive that omits a block of source code from compilation. Expression parameter is optional - if omitted, always omits code. If provided (typically an EQUATE), omits code conditionally when expression is TRUE. Block ends at the line containing the terminator string.",
+          "syntax": "OMIT(terminator [,expression])"
         }
       ]
     },
@@ -551,14 +538,13 @@
       "name": "COMPILE",
       "signatures": [
         {
-          "params": ["STRING terminator"],
+          "params": [
+            { "name": "STRING terminator", "optional": false },
+            { "name": "expression", "optional": true }
+          ],
           "returnType": "",
-          "description": "Compiler directive that includes a block of source code in compilation. Block ends at the line containing the terminator string. Opposite of OMIT - used for conditional compilation."
-        },
-        {
-          "params": ["STRING terminator", "expression"],
-          "returnType": "",
-          "description": "Conditionally compiles code based on expression (typically an EQUATE). If expression evaluates to true, the block is included. Supports operators: =, <>, <, >, <=, >=. Example: COMPILE('!end',DEBUG=1)"
+          "description": "Compiler directive that includes a block of source code in compilation. Expression parameter is optional - if omitted, always compiles code. If provided (typically an EQUATE), compiles code conditionally when expression is TRUE. Block ends at the line containing the terminator string.",
+          "syntax": "COMPILE(terminator [,expression])"
         }
       ]
     },
@@ -586,19 +572,13 @@
       "name": "DISPLAY",
       "signatures": [
         {
-          "params": [],
+          "params": [
+            { "name": "control first", "optional": true },
+            { "name": "control last", "optional": true }
+          ],
           "returnType": "",
-          "description": "Writes contents of all USE variables to their associated controls on the active window. Can be called as DISPLAY or DISPLAY(). Useful for updating screen display without cycling the ACCEPT loop."
-        },
-        {
-          "params": ["control first"],
-          "returnType": "",
-          "description": "Displays a specific control's USE variable. Control can be field number or field equate label (e.g., ?MyControl)."
-        },
-        {
-          "params": ["control first", "control last"],
-          "returnType": "",
-          "description": "Displays USE variables for an inclusive range of controls. Both parameters can be field numbers or field equate labels."
+          "description": "Writes contents of USE variables to their associated controls. All parameters optional - if omitted, displays all controls. If first only, displays that control. If both provided, displays range from first to last. Controls can be field numbers or field equate labels.",
+          "syntax": "DISPLAY([first] [,last])"
         }
       ]
     },

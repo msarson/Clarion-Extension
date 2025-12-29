@@ -17,15 +17,25 @@ import LoggerManager from '../logger';
 const logger = LoggerManager.getLogger("BuiltinFunctionService");
 
 /**
+ * Represents a parameter that can be required or optional
+ */
+export interface ParameterDefinition {
+    name: string;
+    optional?: boolean;  // If true, parameter can be omitted with comma placeholder
+}
+
+/**
  * Represents a single signature variant of a built-in function
  */
 export interface BuiltinSignature {
-    /** Parameter definitions, e.g. ["STRING text", "LONG icon"] */
-    params: string[];
+    /** Parameter definitions - supports both string and object format */
+    params: (string | ParameterDefinition)[];
     /** Return type, e.g. "BYTE", "STRING", "LONG" */
     returnType: string;
     /** Human-readable description of what this signature does */
     description: string;
+    /** Optional explicit syntax like "MESSAGE([text] [,caption])" */
+    syntax?: string;
 }
 
 /**
@@ -121,17 +131,29 @@ export class BuiltinFunctionService {
 
         return builtin.signatures.map(sig => {
             // Create parameter information for each parameter
-            const params = sig.params.map(p => ParameterInformation.create(p));
+            const params = sig.params.map(p => {
+                const paramName = typeof p === 'string' ? p : p.name;
+                return ParameterInformation.create(paramName);
+            });
             
             // Create the signature label: FUNCTIONNAME(param1, param2, ...) → ReturnType
-            const paramLabels = sig.params.join(', ');
+            const paramLabels = sig.params.map(p => {
+                if (typeof p === 'string') {
+                    return p;
+                }
+                return p.optional ? `[${p.name}]` : p.name;
+            }).join(', ');
+            
             const label = sig.returnType 
                 ? `${builtin.name}(${paramLabels}) → ${sig.returnType}`
                 : `${builtin.name}(${paramLabels})`;
             
             return {
                 label,
-                documentation: sig.description,
+                documentation: {
+                    kind: 'markdown' as const,
+                    value: sig.description
+                },
                 parameters: params
             };
         });

@@ -13,3 +13,7 @@ StringTheory.clw
 
 # Development/AI working files
 dev/
+ai/
+
+# PowerShell scripts
+*.ps1

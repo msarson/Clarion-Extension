@@ -1,0 +1,192 @@
+{
+  "windowControls": [
+    {
+      "name": "BUTTON",
+      "description": "Declares a pushbutton control that executes when clicked",
+      "syntax": "BUTTON([text])",
+      "commonAttributes": ["AT", "USE", "KEY", "DEFAULT", "ICON", "TIP", "FLAT", "HIDE", "DISABLE"]
+    },
+    {
+      "name": "ENTRY",
+      "description": "Declares a data entry control for single-line text input",
+      "syntax": "ENTRY([picture])",
+      "commonAttributes": ["AT", "USE", "IMM", "READONLY", "REQ", "AUTO", "CAP", "UPR", "MASK", "PASSWORD", "RANGE"]
+    },
+    {
+      "name": "LIST",
+      "description": "Declares a window list control for displaying data from a queue or file",
+      "syntax": "LIST()",
+      "commonAttributes": ["AT", "USE", "FROM", "FORMAT", "MARK", "DROP", "COLUMN", "GRID", "NOBAR", "HVSCROLL"]
+    },
+    {
+      "name": "COMBO",
+      "description": "Declares an entry list control combining entry field with dropdown list",
+      "syntax": "COMBO([picture])",
+      "commonAttributes": ["AT", "USE", "FROM", "FORMAT", "DROP"]
+    },
+    {
+      "name": "CHECK",
+      "description": "Declares a checkbox control for on/off selection",
+      "syntax": "CHECK([text])",
+      "commonAttributes": ["AT", "USE", "VALUE", "HIDE", "DISABLE"]
+    },
+    {
+      "name": "RADIO",
+      "description": "Declares a radio button control for mutually exclusive selection",
+      "syntax": "RADIO([text])",
+      "commonAttributes": ["AT", "USE", "VALUE", "HIDE", "DISABLE"]
+    },
+    {
+      "name": "OPTION",
+      "description": "Declares a set of radio button controls grouped together",
+      "syntax": "OPTION()",
+      "commonAttributes": ["AT", "USE"]
+    },
+    {
+      "name": "TEXT",
+      "description": "Declares a multi-line text control for text input/display",
+      "syntax": "TEXT()",
+      "commonAttributes": ["AT", "USE", "SCROLL", "SINGLE", "HVSCROLL", "READONLY"]
+    },
+    {
+      "name": "STRING",
+      "description": "Declares a string control for static text display",
+      "syntax": "STRING([text])",
+      "commonAttributes": ["AT", "USE", "COLOR", "FONT", "CENTER", "RIGHT", "LEFT"]
+    },
+    {
+      "name": "PROMPT",
+      "description": "Declares a prompt control for field labels",
+      "syntax": "PROMPT([text])",
+      "commonAttributes": ["AT", "COLOR", "FONT"]
+    },
+    {
+      "name": "IMAGE",
+      "description": "Declares a graphic image control for displaying bitmaps/icons",
+      "syntax": "IMAGE([filename])",
+      "commonAttributes": ["AT", "CENTERED", "TILED", "AUTOSIZE", "STRETCH"]
+    },
+    {
+      "name": "BOX",
+      "description": "Declares a box control for drawing rectangles",
+      "syntax": "BOX()",
+      "commonAttributes": ["AT", "COLOR", "FILL", "ROUND", "BEVEL"]
+    },
+    {
+      "name": "LINE",
+      "description": "Declares a line control for drawing lines",
+      "syntax": "LINE()",
+      "commonAttributes": ["AT", "COLOR", "LINEWIDTH"]
+    },
+    {
+      "name": "ELLIPSE",
+      "description": "Declares an ellipse control for drawing circles/ovals",
+      "syntax": "ELLIPSE()",
+      "commonAttributes": ["AT", "COLOR", "FILL"]
+    },
+    {
+      "name": "REGION",
+      "description": "Declares a window region control for grouping areas",
+      "syntax": "REGION()",
+      "commonAttributes": ["AT", "COLOR", "FILL"]
+    },
+    {
+      "name": "GROUP",
+      "description": "Declares a group of controls for logical organization",
+      "syntax": "GROUP()",
+      "commonAttributes": ["AT", "USE", "BOXED", "HIDE", "DISABLE"]
+    },
+    {
+      "name": "SHEET",
+      "description": "Declares a group of tab controls (tabbed interface)",
+      "syntax": "SHEET()",
+      "commonAttributes": ["AT", "USE"]
+    },
+    {
+      "name": "TAB",
+      "description": "Declares a page of a sheet control",
+      "syntax": "TAB([text])",
+      "commonAttributes": ["USE", "ICON", "LEFT", "RIGHT", "ABOVE", "BELOW"]
+    },
+    {
+      "name": "SPIN",
+      "description": "Declares a spinning list control with up/down buttons",
+      "syntax": "SPIN([picture])",
+      "commonAttributes": ["AT", "USE", "FROM", "STEP", "RANGE"]
+    },
+    {
+      "name": "PANEL",
+      "description": "Declares a panel control for containing other controls",
+      "syntax": "PANEL()",
+      "commonAttributes": ["AT", "USE", "HVSCROLL", "COLOR"]
+    },
+    {
+      "name": "PROGRESS",
+      "description": "Declares a progress control for showing completion status",
+      "syntax": "PROGRESS()",
+      "commonAttributes": ["AT", "USE", "VERTICAL"]
+    },
+    {
+      "name": "OLE",
+      "description": "Declares a window OLE or OCX container control",
+      "syntax": "OLE([classname])",
+      "commonAttributes": ["AT", "USE", "CREATE", "DOCUMENT", "LINK", "AUTOSIZE", "STRETCH", "ZOOM"]
+    },
+    {
+      "name": "MENU",
+      "description": "Declares a menu box",
+      "syntax": "MENU()",
+      "commonAttributes": ["USE"]
+    },
+    {
+      "name": "MENUBAR",
+      "description": "Declares a menu bar for the window",
+      "syntax": "MENUBAR()",
+      "commonAttributes": ["USE"]
+    },
+    {
+      "name": "ITEM",
+      "description": "Declares a menu item within a menu or toolbar",
+      "syntax": "ITEM([text])",
+      "commonAttributes": ["USE", "KEY", "MSG", "ICON", "CHECK", "RADIO", "SEPARATOR"]
+    },
+    {
+      "name": "TOOLBAR",
+      "description": "Declares a toolbar",
+      "syntax": "TOOLBAR()",
+      "commonAttributes": ["AT", "USE", "FLAT"]
+    }
+  ],
+  "reportControls": [
+    {
+      "name": "STRING",
+      "description": "Declares a string control for static text on reports",
+      "syntax": "STRING([text])",
+      "commonAttributes": ["AT", "COLOR", "FONT"]
+    },
+    {
+      "name": "BOX",
+      "description": "Declares a box control for drawing rectangles on reports",
+      "syntax": "BOX()",
+      "commonAttributes": ["AT", "COLOR", "FILL"]
+    },
+    {
+      "name": "LINE",
+      "description": "Declares a line control for drawing lines on reports",
+      "syntax": "LINE()",
+      "commonAttributes": ["AT", "COLOR", "LINEWIDTH"]
+    },
+    {
+      "name": "ELLIPSE",
+      "description": "Declares an ellipse control for drawing circles/ovals on reports",
+      "syntax": "ELLIPSE()",
+      "commonAttributes": ["AT", "COLOR", "FILL"]
+    },
+    {
+      "name": "IMAGE",
+      "description": "Declares an image control for displaying graphics on reports",
+      "syntax": "IMAGE([filename])",
+      "commonAttributes": ["AT", "CENTERED", "TILED"]
+    }
+  ]
+}

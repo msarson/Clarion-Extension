@@ -11,6 +11,8 @@ import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { MapProcedureResolver } from '../utils/MapProcedureResolver';
 import { CrossFileResolver } from '../utils/CrossFileResolver';
 import { BuiltinFunctionService } from '../utils/BuiltinFunctionService';
+import { AttributeService } from '../utils/AttributeService';
+import { ControlService } from '../utils/ControlService';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -27,6 +29,8 @@ export class HoverProvider {
     private mapResolver = new MapProcedureResolver();
     private crossFileResolver = new CrossFileResolver();
     private builtinService = BuiltinFunctionService.getInstance();
+    private attributeService = AttributeService.getInstance();
+    private controlService = ControlService.getInstance();
 
     /**
      * Provides hover information for a position in the document
@@ -53,6 +57,45 @@ export class HoverProvider {
                 start: { line: position.line, character: 0 },
                 end: { line: position.line, character: Number.MAX_VALUE }
             });
+
+            // Check if this word is a Clarion control type
+            if (this.controlService.isControl(word)) {
+                logger.info(`Found Clarion control: ${word}`);
+                const controlDoc = this.controlService.getControlDocumentation(word);
+                if (controlDoc) {
+                    return {
+                        contents: {
+                            kind: 'markdown',
+                            value: controlDoc
+                        }
+                    };
+                }
+            }
+
+            // Check if this word is a Clarion attribute
+            if (this.attributeService.isAttribute(word)) {
+                logger.info(`Found Clarion attribute: ${word}`);
+                
+                // Check if there's an opening paren after the word
+                const textAfterWord = document.getText({
+                    start: { line: position.line, character: wordRange.end.character },
+                    end: { line: position.line, character: Math.min(wordRange.end.character + 10, line.length) }
+                }).trimStart();
+                
+                let paramCount: number | null = null;
+                
+                if (textAfterWord.startsWith('(')) {
+                    // There's a paren, count the actual parameters
+                    paramCount = this.countParametersInCall(line, word);
+                    logger.info(`Attribute parameter count: ${paramCount}`);
+                } else {
+                    // No paren after word - assume no parameters
+                    paramCount = 0;
+                    logger.info(`No parentheses found for attribute - assuming 0 parameters`);
+                }
+                
+                return this.constructAttributeHover(word, paramCount);
+            }
 
             // Check if this word is a built-in function (but NOT a class method call)
             // Only show built-in hover if the word is standalone (not preceded by a dot)
@@ -1597,7 +1640,10 @@ export class HoverProvider {
             content += `\`\`\`clarion\n${sig.label}\n\`\`\`\n\n`;
             
             if (sig.documentation) {
-                content += `${sig.documentation}\n\n`;
+                const docValue = typeof sig.documentation === 'string' 
+                    ? sig.documentation 
+                    : sig.documentation.value;
+                content += `${docValue}\n\n`;
             }
             
             if (sig.parameters && sig.parameters.length > 0) {
@@ -1622,8 +1668,94 @@ export class HoverProvider {
     }
 
     /**
+     * Constructs hover information for a Clarion attribute with parameter count matching
+     */
+    private constructAttributeHover(attributeName: string, paramCount: number | null): Hover {
+        const attribute = this.attributeService.getAttribute(attributeName);
+        
+        if (!attribute) {
+            return {
+                contents: {
+                    kind: 'markdown',
+                    value: `**Attribute**\n\n\`${attributeName}\``
+                }
+            };
+        }
+
+        // If we have a parameter count, filter signatures to show only matching ones
+        let matchingSignatures = attribute.signatures;
+        if (paramCount !== null) {
+            matchingSignatures = attribute.signatures.filter(sig => 
+                sig.params.length === paramCount
+            );
+            
+            // If no exact match, show all signatures
+            if (matchingSignatures.length === 0) {
+                matchingSignatures = attribute.signatures;
+            }
+        }
+
+        // Format matching signatures
+        let content = `**Attribute: ${attribute.name}**\n\n`;
+        
+        content += `${attribute.description}\n\n`;
+        
+        if (paramCount !== null && matchingSignatures.length < attribute.signatures.length) {
+            content += `_Showing signature(s) matching ${paramCount} parameter(s)_\n\n`;
+        }
+        
+        content += `**Signatures:**\n\n`;
+        
+        matchingSignatures.forEach((sig, index) => {
+            if (matchingSignatures.length > 1) {
+                content += `**Overload ${index + 1}:**\n\n`;
+            }
+            
+            if (sig.params.length === 0) {
+                content += `\`\`\`clarion\n${attribute.name}\n\`\`\`\n\n`;
+            } else {
+                // Format parameters with optional brackets
+                const params = sig.params.map(p => {
+                    if (typeof p === 'string') {
+                        return p;
+                    }
+                    return p.optional ? `[${p.name}]` : p.name;
+                }).join(', ');
+                content += `\`\`\`clarion\n${attribute.name}(${params})\n\`\`\`\n\n`;
+            }
+            
+            content += `${sig.description}\n\n`;
+            
+            if (sig.params.length > 0) {
+                content += `**Parameters:**\n\n`;
+                sig.params.forEach(param => {
+                    const paramName = typeof param === 'string' ? param : param.name;
+                    const optionalTag = (typeof param === 'object' && param.optional) ? ' _(optional)_' : '';
+                    content += `- \`${paramName}\`${optionalTag}\n`;
+                });
+                content += `\n`;
+            }
+            
+            if (index < matchingSignatures.length - 1) {
+                content += `---\n\n`;
+            }
+        });
+
+        content += `**Applicable to:** ${attribute.applicableTo.join(', ')}\n\n`;
+        content += `**Property Equate:** ${attribute.propertyEquate}`;
+
+        return {
+            contents: {
+                kind: 'markdown',
+                value: content.trim()
+            }
+        };
+    }
+
+    /**
      * Counts parameters in a function call
      * Returns null if unable to parse
+     * Counts omitted parameters (e.g., AT(,,435,300) = 4 parameters)
      */
     private countParametersInCall(line: string, functionName: string): number | null {
         // Find the function call in the line
@@ -1635,36 +1767,38 @@ export class HoverProvider {
 
         const startPos = match.index + match[0].length;
         let depth = 1;
-        let paramCount = 0;
-        let hasContent = false;
+        let paramCount = 1; // Start at 1 - if there's any content, we have at least 1 parameter
+        let isEmpty = true; // Track if we've seen any content at all
 
         for (let i = startPos; i < line.length; i++) {
             const char = line[i];
 
             if (char === '(') {
                 depth++;
+                isEmpty = false;
             } else if (char === ')') {
                 depth--;
                 if (depth === 0) {
                     // Found closing paren
-                    if (hasContent) {
-                        paramCount++;
+                    // If completely empty parentheses, return 0
+                    if (isEmpty) {
+                        return 0;
                     }
                     return paramCount;
                 }
+                isEmpty = false;
             } else if (char === ',' && depth === 1) {
+                // Each comma at depth 1 means another parameter
                 paramCount++;
-                hasContent = false;
             } else if (char.trim() !== '') {
-                hasContent = true;
+                // Any non-whitespace character means we have content
+                isEmpty = false;
             }
         }
 
         // Unclosed parentheses - return what we have so far
-        if (hasContent) {
-            paramCount++;
-        }
-        return paramCount;
+        // If we saw any content, return the count
+        return isEmpty ? null : paramCount;
     }
 
 

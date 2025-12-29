@@ -9,6 +9,8 @@ import { TokenHelper } from '../utils/TokenHelper';
 import { SolutionManager } from '../solution/solutionManager';
 import { DocumentStructure } from '../DocumentStructure';
 import { BuiltinFunctionService } from '../utils/BuiltinFunctionService';
+import { AttributeService } from '../utils/AttributeService';
+import { ControlService } from '../utils/ControlService';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -23,6 +25,8 @@ export class SignatureHelpProvider {
     private overloadResolver = new MethodOverloadResolver();
     private memberResolver = new ClassMemberResolver();
     private builtinService = BuiltinFunctionService.getInstance();
+    private attributeService = AttributeService.getInstance();
+    private controlService = ControlService.getInstance();
 
     /**
      * Provides signature help at a given position
@@ -49,8 +53,16 @@ export class SignatureHelpProvider {
             const { methodName, prefix, parameterIndex, isClassMethod } = methodCallInfo;
             logger.info(`Method call detected: ${prefix ? prefix + '.' : ''}${methodName}, parameter index: ${parameterIndex}`);
 
-            // Get tokens for class resolution
+            // Get tokens for context detection
             const tokens = this.tokenCache.getTokens(document);
+
+            // Get control context for attribute validation
+            const docStructure = new DocumentStructure(tokens);
+            const controlContext = docStructure.getControlContextAt(position.line, position.character);
+            
+            if (controlContext.controlType) {
+                logger.info(`Control context: ${controlContext.controlType} in ${controlContext.structureType || 'unknown structure'}`);
+            }
 
             // Find all overloads for this method
             let signatures: SignatureInformation[] = [];
@@ -59,8 +71,20 @@ export class SignatureHelpProvider {
                 // This is a class method call (self.Method or variable.Method)
                 signatures = await this.getClassMethodSignatures(prefix, methodName, document, position.line, tokens);
             } else {
-                // Could be a regular procedure call
-                signatures = await this.getProcedureSignatures(methodName, document, tokens);
+                // Check if it's a built-in function with signatures
+                const builtinSigs = this.getBuiltinSignatures(methodName);
+                if (builtinSigs.length > 0) {
+                    signatures = builtinSigs;
+                } else {
+                    // Check if it's an attribute with signatures
+                    const attrSigs = this.getAttributeSignatures(methodName, controlContext);
+                    if (attrSigs.length > 0) {
+                        signatures = attrSigs;
+                    } else {
+                        // Could be a regular procedure call
+                        signatures = await this.getProcedureSignatures(methodName, document, tokens);
+                    }
+                }
             }
 
             if (signatures.length === 0) {
@@ -585,7 +609,7 @@ export class SignatureHelpProvider {
         for (let i = 0; i < signatures.length; i++) {
             const sig = signatures[i];
             const paramCount = sig.parameters?.length || 0;
-            
+
             // If this signature can accommodate the current parameter index
             if (paramCount > parameterIndex) {
                 return i;
@@ -594,5 +618,173 @@ export class SignatureHelpProvider {
 
         // Default to last signature (highest parameter count)
         return signatures.length - 1;
+    }
+
+    /**
+     * Gets signature information for built-in functions
+     */
+    private getBuiltinSignatures(name: string): SignatureInformation[] {
+        if (!this.builtinService.isBuiltin(name)) {
+            return [];
+        }
+
+        logger.info(`Getting built-in signatures for: ${name}`);
+        const signatures = this.builtinService.getSignatures(name);
+
+        // Check if this is a pure keyword (ALL signatures have 0 parameters)
+        const hasAnyParams = signatures.some(sig => 
+            sig.parameters && sig.parameters.length > 0
+        );
+
+        if (!hasAnyParams) {
+            logger.info(`${name} is a pure keyword - skipping signature help`);
+            return [];
+        }
+
+        return signatures;
+    }
+
+    /**
+     * Gets signature information for attributes
+     */
+    private getAttributeSignatures(
+        name: string,
+        context: {
+            controlType: string | null;
+            structureType: string | null;
+            isInControlDeclaration: boolean;
+        }
+    ): SignatureInformation[] {
+        if (!this.attributeService.isAttribute(name)) {
+            return [];
+        }
+
+        logger.info(`Getting attribute signatures for: ${name}`);
+        const attribute = this.attributeService.getAttribute(name);
+        if (!attribute || !attribute.signatures) {
+            return [];
+        }
+
+        // Check if attribute is valid for current control
+        const validation = this.validateAttributeForControl(name, context.controlType);
+
+        // Convert attribute signatures to SignatureInformation
+        return attribute.signatures.map(sig => {
+            // Handle both string and ParameterDefinition formats
+            const params = sig.params.map(p => {
+                const paramName = typeof p === 'string' ? p : p.name;
+                return ParameterInformation.create(paramName);
+            });
+            
+            // Format parameters with optional brackets
+            const paramStrings = sig.params.map(p => {
+                if (typeof p === 'string') {
+                    return p;
+                }
+                return p.optional ? `[${p.name}]` : p.name;
+            });
+            
+            const paramString = paramStrings.length > 0 ? paramStrings.join(', ') : '';
+            const label = paramString ? `${name}(${paramString})` : name;
+            
+            let documentation = sig.description;
+            
+            // Add context warning if invalid
+            if (!validation.isValid && context.controlType) {
+                const prefix = validation.reason 
+                    ? `⚠️ **${validation.reason}**\n\n`
+                    : `⚠️ **Not typically used with ${context.controlType}**\n\n`;
+                    
+                if (validation.validControls && validation.validControls.length > 0) {
+                    documentation = prefix +
+                        `**Commonly used with:** ${validation.validControls.join(', ')}\n\n` +
+                        `**Current context:** ${context.controlType}\n\n` +
+                        documentation;
+                } else {
+                    documentation = prefix + documentation;
+                }
+            }
+            // If valid, just show the normal signature description without extra text
+            
+            // Create SignatureInformation with MarkupContent for proper markdown rendering
+            return {
+                label,
+                documentation: {
+                    kind: 'markdown' as const,
+                    value: documentation
+                },
+                parameters: params
+            };
+        });
+    }
+
+    /**
+     * Validates if an attribute is appropriate for a control type
+     */
+    private validateAttributeForControl(
+        attributeName: string,
+        controlType: string | null
+    ): {
+        isValid: boolean;
+        reason?: string;
+        validControls?: string[];
+    } {
+        if (!controlType) {
+            return { isValid: true }; // Can't validate without context
+        }
+        
+        // Check against control's commonAttributes
+        const control = this.controlService.getControl(controlType);
+        if (control && control.commonAttributes) {
+            const isValid = control.commonAttributes.includes(attributeName);
+            
+            if (!isValid) {
+                // Get list of controls that DO support this attribute
+                const validControls = this.getValidControlsForAttribute(attributeName);
+                
+                return {
+                    isValid: false,
+                    reason: `${attributeName} is not commonly used with ${controlType}`,
+                    validControls: validControls.slice(0, 8) // Limit to first 8 for readability
+                };
+            }
+            
+            return { isValid: true };
+        }
+        
+        // Fallback to attribute's applicableTo
+        const attribute = this.attributeService.getAttribute(attributeName);
+        if (attribute) {
+            if (attribute.applicableTo.includes('CONTROL')) {
+                return { isValid: true }; // Generic control attribute
+            }
+            
+            // Check if it's structure-level only (WINDOW, REPORT, etc.)
+            if (!attribute.applicableTo.includes('CONTROL')) {
+                return {
+                    isValid: false,
+                    reason: `${attributeName} is only valid at structure level`,
+                    validControls: []
+                };
+            }
+        }
+        
+        return { isValid: true }; // Default to allow (let compiler catch errors)
+    }
+
+    /**
+     * Gets list of controls that commonly use this attribute
+     */
+    private getValidControlsForAttribute(attributeName: string): string[] {
+        const validControls: string[] = [];
+        
+        // Check window controls
+        for (const control of this.controlService.getAllWindowControls()) {
+            if (control.commonAttributes.includes(attributeName)) {
+                validControls.push(control.name);
+            }
+        }
+        
+        return validControls;
     }
 }
