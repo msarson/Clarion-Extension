@@ -19,6 +19,9 @@ export class ClarionTokenizer {
     private lines: string[];
     private tabSize: number;  // ✅ Store tabSize
     maxLabelWidth: number = 0;
+    
+    // 🚀 PERF: Cache analyzed procedures to avoid re-scanning in incremental updates
+    private static analyzedProcedures = new Map<string, Set<number>>();  // uri -> Set of procedure line numbers
 
     constructor(text: string, tabSize: number = 2) {  // ✅ Default to 2 if not provided
         this.text = text;
@@ -128,11 +131,17 @@ export class ClarionTokenizer {
             patternTests.set(type, 0);
         }
         
+        // 🚀 PERF: Track CODE context to skip Structure patterns in execution sections
+        let inCodeSection = false;
+        let tokensOnCurrentLine = 0;
+        
         for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
             const line = lines[lineNumber];
             if (line.trim() === "") continue; // ✅ Skip blank lines
 
             let position = 0;
+            tokensOnCurrentLine = 0; // Reset for new line
+            
             // 🚀 PERFORMANCE: Only expand tabs if line contains tabs
             let column = 0;
             if (line.includes('\t')) {
@@ -140,6 +149,13 @@ export class ClarionTokenizer {
                 column = expandedLine.match(/^(\s*)/)?.[0].length || 0;
             } else {
                 column = line.match(/^(\s*)/)?.[0].length || 0;
+            }
+            
+            // 🚀 PERF: Check if this line enters CODE section (structures are declarations, not execution)
+            if (line.match(/^\s*code\s*$/i)) {
+                inCodeSection = true;
+            } else if (line.match(/^\s*(DATA|ROUTINE)\b/i)) {
+                inCodeSection = false; // DATA/ROUTINE sections can have structures
             }
 
             while (position < line.length) {
@@ -169,6 +185,52 @@ export class ClarionTokenizer {
                 for (const tokenType of relevantTypes) {
                     // ✅ Special handling for Structure - test each pattern individually to preserve negative lookbehinds
                     if (tokenType === TokenType.Structure) {
+                        // 🚀 PERF: Early exit guards for Structure patterns
+                        // Structures are declarations, not execution statements
+                        if (inCodeSection) {
+                            // Skip Structure tests after CODE marker - we're in execution context
+                            continue;
+                        }
+                        
+                        if (tokensOnCurrentLine > 0) {
+                            // Skip if not first token on line - structures are typically at column 0 or after whitespace
+                            // Exception: structures can follow labels (e.g., "Label FILE,...")
+                            // But in that case, the label would be the first token
+                            continue;
+                        }
+                        
+                        if (column > 30) {
+                            // Skip if column > 30 - structures are declarations that start near left margin
+                            // No structure keyword should start this far right
+                            continue;
+                        }
+                        
+                        // 🚀 PERF: For common structures, check keyword first before regex
+                        // This avoids expensive regex for impossible matches
+                        const upperSubstring = substring.toUpperCase();
+                        const hasStructureKeyword = 
+                            upperSubstring.startsWith('FILE') ||
+                            upperSubstring.startsWith('QUEUE') ||
+                            upperSubstring.startsWith('GROUP') ||
+                            upperSubstring.startsWith('RECORD') ||
+                            upperSubstring.startsWith('CLASS') ||
+                            upperSubstring.startsWith('WINDOW') ||
+                            upperSubstring.startsWith('REPORT') ||
+                            upperSubstring.startsWith('MODULE') ||
+                            upperSubstring.startsWith('MAP') ||
+                            upperSubstring.startsWith('VIEW') ||
+                            upperSubstring.startsWith('CASE') ||
+                            upperSubstring.startsWith('LOOP') ||
+                            upperSubstring.startsWith('IF') ||
+                            upperSubstring.startsWith('ACCEPT') ||
+                            upperSubstring.startsWith('EXECUTE') ||
+                            upperSubstring.startsWith('BEGIN');
+                        
+                        if (!hasStructureKeyword) {
+                            // No structure keyword found at start, skip all structure pattern tests
+                            continue;
+                        }
+                        
                         // Test each structure pattern individually
                         for (const [structName, structPattern] of Object.entries(STRUCTURE_PATTERNS)) {
                             const testStart = performance.now();
@@ -220,6 +282,7 @@ export class ClarionTokenizer {
                                 position += match[0].length;
                                 column += match[0].length;
                                 matched = true;
+                                tokensOnCurrentLine++; // 🚀 PERF: Track tokens on line
                                 
                                 logger.info(`✅ Matched Structure '${structName}': ${tokenValue} at line ${lineNumber}`);
                                 break; // Found a match, stop testing other structure patterns
@@ -234,6 +297,30 @@ export class ClarionTokenizer {
                     if (!pattern) continue;
 
                     if (tokenType === TokenType.Label && column !== 0) continue; // ✅ Labels must be in column 0
+                    
+                    // 🚀 PERF: Context-based guards for low-hit patterns
+                    if (tokenType === TokenType.LineContinuation) {
+                        // Only test at end of line or after & character
+                        if (position < line.length - 2 && firstChar !== '&' && firstChar !== '|') {
+                            continue; // Skip expensive regex if not near end or continuation character
+                        }
+                    }
+                    
+                    if (tokenType === TokenType.ImplicitVariable) {
+                        // Only test if we've seen a potential suffix character recently
+                        const hasSuffix = substring.includes('$') || substring.includes('#') || substring.includes('"');
+                        if (!hasSuffix) {
+                            continue; // No implicit type suffix visible, skip test
+                        }
+                    }
+                    
+                    if (tokenType === TokenType.Class) {
+                        // Only test if dot follows (Class pattern matches identifier before .)
+                        const dotPos = substring.indexOf('.');
+                        if (dotPos === -1 || dotPos > 50) {
+                            continue; // No dot nearby, skip expensive test
+                        }
+                    }
 
                     // 🔬 PROFILING: Time each pattern test
                     const testStart = performance.now();
@@ -353,6 +440,7 @@ export class ClarionTokenizer {
                         position += match[0].length;
                         column += match[0].length;
                         matched = true;
+                        tokensOnCurrentLine++; // 🚀 PERF: Track tokens on line
                         break;
 
 
@@ -483,6 +571,11 @@ export class ClarionTokenizer {
             t.subType === TokenType.MethodImplementation
         );
 
+        // 🚀 PERF: Skip if no procedures found
+        if (procedures.length === 0) {
+            return;
+        }
+
         // 🚀 PERF: Build line-to-token index ONCE (O(n) instead of O(n²))
         const tokensByLine = new Map<number, Token[]>();
         for (const token of this.tokens) {
@@ -496,7 +589,20 @@ export class ClarionTokenizer {
         const newTokens: Token[] = [];
 
         for (const proc of procedures) {
+            // 🚀 PERF: Skip if procedure was already analyzed (marked)
+            if (proc.localVariablesAnalyzed) {
+                continue;
+            }
+            
             const procEnd = proc.finishesAt || this.lines.length - 1;
+            
+            // 🚀 PERF: Early exit if procedure has no local data section
+            // Procedures without local variables have CODE on the next non-blank line
+            const nextLine = this.lines[proc.line + 1]?.trim();
+            if (nextLine && nextLine.match(/^code\s*$/i)) {
+                proc.localVariablesAnalyzed = true;
+                continue; // No local variables, skip this procedure
+            }
             
             // Search from procedure declaration to CODE statement
             for (let lineNum = proc.line + 1; lineNum <= procEnd; lineNum++) {
@@ -535,6 +641,9 @@ export class ClarionTokenizer {
                     newTokens.push(varToken);
                 }
             }
+            
+            // 🚀 PERF: Mark procedure as analyzed
+            proc.localVariablesAnalyzed = true;
         }
 
         // 🚀 PERF: Batch insert and sort ONCE instead of repeated splice operations
