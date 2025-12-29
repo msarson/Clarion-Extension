@@ -69,21 +69,23 @@ export class UnreachableCodeProvider {
                     t.line <= procEnd
                 );
 
-                // Scan from CODE marker to procedure end
-                let terminated = false;
+                // Track termination at each nesting depth
+                // structureStack[i] = {structure: Token, terminated: boolean}
+                const structureStack: Array<{structure: Token, terminated: boolean}> = [];
 
+                // Scan from CODE marker to procedure end
                 for (let lineNum = codeToken.line + 1; lineNum <= procEnd; lineNum++) {
                     const lineTokens = tokensByLine.get(lineNum) || [];
 
                     // Check if this line starts a ROUTINE (ROUTINEs are always reachable)
                     const routineOnLine = routines.find(r => r.line === lineNum);
                     if (routineOnLine) {
-                        logger.info(`Line ${lineNum}: ROUTINE ${routineOnLine.value} - resetting terminated flag`);
-                        terminated = false;
+                        logger.info(`Line ${lineNum}: ROUTINE ${routineOnLine.value} - clearing all terminated flags`);
+                        structureStack.length = 0; // Clear stack - ROUTINE is new scope
                         continue;
                     }
 
-                    // Check if we're inside a ROUTINE block (ROUTINEs can have DATA/CODE sections)
+                    // Check if we're inside a ROUTINE block
                     const containingRoutine = routines.find(r => 
                         r.line < lineNum && 
                         r.finishesAt !== undefined && 
@@ -91,39 +93,63 @@ export class UnreachableCodeProvider {
                     );
 
                     if (containingRoutine) {
-                        // Inside ROUTINE - don't mark as unreachable
-                        // But check for DATA marker to reset terminated flag
+                        // Inside ROUTINE - check for DATA marker to reset
                         const hasDataMarker = lineTokens.some(t => 
                             t.type === TokenType.ExecutionMarker && 
                             t.value.toUpperCase() === 'DATA'
                         );
                         if (hasDataMarker) {
-                            terminated = false;
+                            structureStack.length = 0;
                         }
                         continue;
                     }
 
-                    // Check for top-level terminator (RETURN/EXIT/HALT at structure depth 0)
-                    if (!terminated) {
-                        const isTopLevel = this.isTopLevelTerminator(lineNum, lineTokens, tokens, proc);
-                        if (isTopLevel) {
-                            logger.info(`Line ${lineNum}: Top-level terminator found, marking subsequent code as unreachable`);
-                            terminated = true;
-                            continue;
-                        } else {
-                            // Debug: Log when we find a conditional terminator
-                            const hasTerminator = lineTokens.some(t => 
-                                t.type === TokenType.Keyword && 
-                                /^(RETURN|EXIT|HALT)$/i.test(t.value)
-                            );
-                            if (hasTerminator) {
-                                logger.info(`Line ${lineNum}: Conditional terminator found (inside structure), NOT marking code as unreachable`);
-                            }
-                        }
+                    // Check if any structures END on this line
+                    const endsOnLine = structureStack.filter(s => s.structure.finishesAt === lineNum);
+                    if (endsOnLine.length > 0) {
+                        logger.info(`Line ${lineNum}: ${endsOnLine.length} structure(s) end here, popping from stack`);
+                        // Remove structures that end on this line
+                        structureStack.splice(structureStack.findIndex(s => s.structure.finishesAt === lineNum), endsOnLine.length);
                     }
 
-                    // Mark unreachable code
-                    if (terminated && lines[lineNum]) {
+                    // Check if a structure STARTS on this line
+                    const structureOnLine = lineTokens.find(t => 
+                        t.type === TokenType.Structure &&
+                        t.finishesAt !== undefined &&
+                        t.finishesAt > lineNum && // Must end AFTER this line
+                        /^(IF|LOOP|CASE|ACCEPT|EXECUTE|BEGIN)$/i.test(t.value)
+                    );
+                    
+                    if (structureOnLine) {
+                        logger.info(`Line ${lineNum}: Structure ${structureOnLine.value} starts (ends at ${structureOnLine.finishesAt})`);
+                        structureStack.push({structure: structureOnLine, terminated: false});
+                    }
+
+                    // Check for terminators (RETURN/EXIT/HALT)
+                    const terminator = lineTokens.find(t => 
+                        t.type === TokenType.Keyword && 
+                        /^(RETURN|EXIT|HALT)$/i.test(t.value)
+                    );
+
+                    if (terminator) {
+                        if (structureStack.length > 0) {
+                            // Inside a structure - mark THAT level as terminated
+                            const currentLevel = structureStack[structureStack.length - 1];
+                            currentLevel.terminated = true;
+                            logger.info(`Line ${lineNum}: Terminator inside ${currentLevel.structure.value} - marking depth ${structureStack.length} as terminated`);
+                        } else {
+                            // Top-level terminator - mark procedure as terminated
+                            logger.info(`Line ${lineNum}: Top-level terminator found`);
+                            structureStack.push({structure: proc, terminated: true});
+                        }
+                        continue; // Don't mark the RETURN line itself
+                    }
+
+                    // Check if current line is unreachable
+                    const currentlyTerminated = structureStack.length > 0 && 
+                                               structureStack[structureStack.length - 1].terminated;
+
+                    if (currentlyTerminated && lines[lineNum]) {
                         const line = lines[lineNum];
                         const trimmed = line.trim();
                         
@@ -133,7 +159,7 @@ export class UnreachableCodeProvider {
                         }
 
                         ranges.push(Range.create(lineNum, 0, lineNum, line.length));
-                        logger.info(`Line ${lineNum}: Marked as unreachable`);
+                        logger.info(`Line ${lineNum}: Marked as unreachable (depth ${structureStack.length})`);
                     }
                 }
             }
@@ -145,62 +171,5 @@ export class UnreachableCodeProvider {
             logger.error(`Error in provideUnreachableRanges: ${error instanceof Error ? error.message : String(error)}`);
             return [];
         }
-    }
-
-    /**
-     * Determine if a line contains a top-level terminator (RETURN/EXIT/HALT)
-     * A terminator is top-level if it's NOT inside an IF/LOOP/CASE/etc structure
-     */
-    private static isTopLevelTerminator(
-        lineNum: number,
-        lineTokens: Token[],
-        allTokens: Token[],
-        procedure: Token
-    ): boolean {
-        // Find RETURN, EXIT, or HALT token on this line
-        const terminator = lineTokens.find(t => 
-            t.type === TokenType.Keyword && 
-            /^(RETURN|EXIT|HALT)$/i.test(t.value)
-        );
-
-        if (!terminator) {
-            return false;
-        }
-
-        // Check if this terminator is inside a control structure
-        // Find any structure token where:
-        // 1. It's a control structure (IF, LOOP, CASE, ACCEPT, EXECUTE, BEGIN)
-        // 2. Starts before this line
-        // 3. Ends after this line (finishesAt > lineNum)
-        const containingStructure = allTokens.find(t => {
-            // Must be a Structure token
-            if (t.type !== TokenType.Structure) {
-                return false;
-            }
-
-            // Must have finishesAt set
-            if (t.finishesAt === undefined) {
-                return false;
-            }
-
-            // Must be a control structure (not PROCEDURE/FUNCTION/ROUTINE/data structures)
-            const upperValue = t.value.toUpperCase();
-            const isControlStructure = /^(IF|LOOP|CASE|ACCEPT|EXECUTE|BEGIN)$/.test(upperValue);
-            if (!isControlStructure) {
-                return false;
-            }
-
-            // Must contain this line
-            const contains = t.line < lineNum && t.finishesAt > lineNum;
-            
-            if (contains) {
-                logger.info(`Line ${lineNum}: RETURN inside ${t.value} structure (line ${t.line}-${t.finishesAt})`);
-            }
-            
-            return contains;
-        });
-
-        // If inside a control structure, it's NOT a top-level terminator
-        return !containingStructure;
     }
 }
