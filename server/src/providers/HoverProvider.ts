@@ -18,7 +18,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("HoverProvider");
-logger.setLevel("error"); // PERF: Only log errors to reduce overhead
+logger.setLevel("info"); // PERF: Only log errors to reduce overhead
 
 /**
  * Provides hover information for local variables and parameters

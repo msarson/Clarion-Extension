@@ -3,7 +3,7 @@ import { DocumentManager } from '../documentManager';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("ImplementationProvider");
-logger.setLevel("error");
+logger.setLevel("info");
 
 /**
  * Provides "Go to Implementation" functionality for Clarion method declarations.

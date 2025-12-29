@@ -6,7 +6,7 @@ import * as path from 'path';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("MethodOverloadResolver");
-logger.setLevel("error");
+logger.setLevel("info");
 
 /**
  * Information about a method declaration with location details
