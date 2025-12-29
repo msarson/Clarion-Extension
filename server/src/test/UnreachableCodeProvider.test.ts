@@ -58,10 +58,15 @@ StateCalc:Kill_Called    BYTE,STATIC
             console.log(`  Line ${p.line}: ${p.value} (finishesAt: ${p.finishesAt})`);
         });
         
-        console.log('\nIF structure tokens:');
+        console.log('\nALL TOKENS:');
+        tokens.forEach((t: any, idx: number) => {
+            console.log(`  [${idx}] Line ${t.line}: "${t.value}" (type: ${t.type}, subType: ${t.subType}, finishesAt: ${t.finishesAt})`);
+        });
+        
+        console.log('\nIF structure tokens (value=IF):');
         const ifStructures = tokens.filter((t: any) => t.value && t.value.toUpperCase() === 'IF');
         ifStructures.forEach((s: any) => {
-            console.log(`  Line ${s.line}: ${s.value} (type: ${s.type}, finishesAt: ${s.finishesAt})`);
+            console.log(`  Line ${s.line}: ${s.value} (type: ${s.type}, subType: ${s.subType}, finishesAt: ${s.finishesAt})`);
         });
         
         console.log('\nRETURN tokens:');

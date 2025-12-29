@@ -3,7 +3,7 @@ import LoggerManager from "./logger";
 import { ProcedureUtils } from './utils/ProcedureUtils';
 
 const logger = LoggerManager.getLogger("DocumentStructure");
-logger.setLevel("error"); // Production: Only log errors
+logger.setLevel("error");// Production: Only log errors
 
 export class DocumentStructure {
     private structureStack: Token[] = [];

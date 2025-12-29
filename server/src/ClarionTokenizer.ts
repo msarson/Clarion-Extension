@@ -186,29 +186,19 @@ export class ClarionTokenizer {
                     // ✅ Special handling for Structure - test each pattern individually to preserve negative lookbehinds
                     if (tokenType === TokenType.Structure) {
                         // 🚀 PERF: Early exit guards for Structure patterns
-                        // Structures are declarations, not execution statements
-                        if (inCodeSection) {
-                            // Skip Structure tests after CODE marker - we're in execution context
-                            continue;
-                        }
-                        
-                        if (tokensOnCurrentLine > 0) {
-                            // Skip if not first token on line - structures are typically at column 0 or after whitespace
-                            // Exception: structures can follow labels (e.g., "Label FILE,...")
-                            // But in that case, the label would be the first token
-                            continue;
-                        }
-                        
-                        if (column > 30) {
-                            // Skip if column > 30 - structures are declarations that start near left margin
-                            // No structure keyword should start this far right
-                            continue;
-                        }
-                        
-                        // 🚀 PERF: For common structures, check keyword first before regex
-                        // This avoids expensive regex for impossible matches
+                        // Distinguish between declaration structures and execution structures
                         const upperSubstring = substring.toUpperCase();
-                        const hasStructureKeyword = 
+                        
+                        // Check what kind of structure this might be
+                        const isExecutionStructure = 
+                            upperSubstring.startsWith('IF') ||
+                            upperSubstring.startsWith('LOOP') ||
+                            upperSubstring.startsWith('CASE') ||
+                            upperSubstring.startsWith('ACCEPT') ||
+                            upperSubstring.startsWith('EXECUTE') ||
+                            upperSubstring.startsWith('BEGIN');
+                        
+                        const isDeclarationStructure =
                             upperSubstring.startsWith('FILE') ||
                             upperSubstring.startsWith('QUEUE') ||
                             upperSubstring.startsWith('GROUP') ||
@@ -218,13 +208,33 @@ export class ClarionTokenizer {
                             upperSubstring.startsWith('REPORT') ||
                             upperSubstring.startsWith('MODULE') ||
                             upperSubstring.startsWith('MAP') ||
-                            upperSubstring.startsWith('VIEW') ||
-                            upperSubstring.startsWith('CASE') ||
-                            upperSubstring.startsWith('LOOP') ||
-                            upperSubstring.startsWith('IF') ||
-                            upperSubstring.startsWith('ACCEPT') ||
-                            upperSubstring.startsWith('EXECUTE') ||
-                            upperSubstring.startsWith('BEGIN');
+                            upperSubstring.startsWith('VIEW');
+                        
+                        // Skip DECLARATION structures in CODE section (they're not valid there)
+                        // But ALLOW execution structures (IF/LOOP/CASE) - they're needed for control flow
+                        if (inCodeSection && isDeclarationStructure) {
+                            continue;
+                        }
+                        
+                        // Skip EXECUTION structures before CODE section (they're not valid there)
+                        if (!inCodeSection && isExecutionStructure) {
+                            continue;
+                        }
+                        
+                        if (tokensOnCurrentLine > 0 && !isExecutionStructure) {
+                            // Skip if not first token on line for DECLARATION structures
+                            // Execution structures (IF/LOOP) can appear indented after whitespace
+                            continue;
+                        }
+                        
+                        if (column > 30) {
+                            // Skip if column > 30 - structures are declarations that start near left margin
+                            // No structure keyword should start this far right
+                            continue;
+                        }
+                        
+                        // 🚀 PERF: Check if this looks like a structure keyword
+                        const hasStructureKeyword = isExecutionStructure || isDeclarationStructure;
                         
                         if (!hasStructureKeyword) {
                             // No structure keyword found at start, skip all structure pattern tests
