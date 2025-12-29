@@ -5,7 +5,7 @@ import { ClarionLocation } from './LocationProvider'; // Make sure this import i
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("HoverProvider");
-logger.setLevel("info");
+logger.setLevel("error");
 
 /**
  * Provides hover information for Clarion code elements.

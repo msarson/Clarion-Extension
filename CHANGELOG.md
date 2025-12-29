@@ -6,6 +6,64 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 
 ---
 
+## [0.7.9] - 2025-12-29
+
+### 🚀 Major Improvements
+
+#### Unreachable Code Detection - Refactored for Accuracy
+- **Complete architectural refactoring** - Uses server-side token analysis instead of client-side parsing
+  - Leverages proven `finishesAt` properties from DocumentStructure
+  - No more manual depth tracking or complex parsing
+  - Eliminates entire class of false positive bugs
+  - **57% code reduction** (322 → 138 lines) with improved accuracy
+  - Simple algorithm: Check if terminator is inside structure using finishesAt boundaries
+  - Automatically handles all edge cases (single-line IF, nested structures, etc.)
+
+#### Tokenizer Performance Optimizations
+- **40-50% faster tokenization** for typical Clarion files
+  - **Structure pattern early-exit guards** (~90% test reduction)
+    - Skip tests in CODE execution sections (structures are declarations)
+    - Skip if not first token on line
+    - Skip if column > 30 (structures near left margin)
+    - Keyword pre-check before expensive regex
+  - **Procedure analysis caching** (30-40% faster)
+    - Track analyzed procedures to avoid re-scanning
+    - Early exit for procedures without local variables
+  - **Context-based pattern gating** (5-10% reduction)
+    - LineContinuation: only test at line end or with & | characters
+    - ImplicitVariable: only test where suffix characters present
+    - Class: only test when dot follows
+  - See `TOKENIZER_PERF_IMPROVEMENTS.md` for detailed analysis
+
+### 🐛 Critical Bug Fixes
+
+- **Fixed false positives in unreachable code detection**
+  - Conditional RETURN inside IF/LOOP/CASE no longer marks following code as unreachable
+  - Example: `IF x THEN RETURN END` followed by reachable code now works correctly
+  - Root cause: Single-line IF detection was matching multi-line IFs
+  - **Impact**: Affects common early-return guard pattern used throughout Clarion code
+
+### 🏗️ Architecture Improvements
+
+- **Server-side unreachable code provider** (new)
+  - Uses token finishesAt to determine structure containment
+  - Simple logic: Is RETURN inside a structure? Check boundaries!
+  - If `structure.line < returnLine && structure.finishesAt > returnLine` → conditional
+  - Handles ROUTINE blocks, nested structures, all control flow automatically
+  
+- **Simplified client-side decorator**
+  - Requests ranges from server via LSP custom request
+  - Debounced updates (500ms) to reduce server load
+  - No parsing, no depth tracking, no edge case handling
+
+### 📚 Documentation
+
+- Added `TOKENIZER_PERF_IMPROVEMENTS.md` - Performance optimization details
+- Added `docs/UNREACHABLE_CODE_REFACTOR.md` - Architecture and algorithm explanation
+- Added test case: `test-programs/unreachable-code/test-conditional-return.clw`
+
+---
+
 ## [0.7.8] - 2025-12-29
 
 ### ✨ Major Features
