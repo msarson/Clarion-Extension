@@ -206,9 +206,9 @@ export class UnreachableCodeDecorator {
     }
     
     private isProcedureOrMethodDeclaration(upperCode: string): boolean {
-        // Match PROCEDURE or METHOD declarations
-        // Examples: "MyProc PROCEDURE()", "ThisWindow.Init PROCEDURE"
-        return /\bPROCEDURE\b/.test(upperCode) || /\bMETHOD\b/.test(upperCode);
+        // Match PROCEDURE, METHOD, or FUNCTION declarations
+        // Examples: "MyProc PROCEDURE()", "ThisWindow.Init PROCEDURE", "MyFunc FUNCTION"
+        return /\bPROCEDURE\b/.test(upperCode) || /\bMETHOD\b/.test(upperCode) || /\bFUNCTION\b/.test(upperCode);
     }
     
     private isRoutineDeclaration(upperCode: string): boolean {
