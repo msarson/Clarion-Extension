@@ -11,7 +11,7 @@ import { TokenCache } from '../TokenCache';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("UnreachableCodeProvider");
-logger.setLevel("error");
+logger.setLevel("info");
 
 export class UnreachableCodeProvider {
     /**
@@ -110,6 +110,15 @@ export class UnreachableCodeProvider {
                             logger.info(`Line ${lineNum}: Top-level terminator found, marking subsequent code as unreachable`);
                             terminated = true;
                             continue;
+                        } else {
+                            // Debug: Log when we find a conditional terminator
+                            const hasTerminator = lineTokens.some(t => 
+                                t.type === TokenType.Keyword && 
+                                /^(RETURN|EXIT|HALT)$/i.test(t.value)
+                            );
+                            if (hasTerminator) {
+                                logger.info(`Line ${lineNum}: Conditional terminator found (inside structure), NOT marking code as unreachable`);
+                            }
                         }
                     }
 
