@@ -1056,6 +1056,28 @@ export class DocumentStructure {
     }
 
     /**
+     * Check if a line is inside a WINDOW, REPORT, or APPLICATION structure
+     */
+    public isInWindowStructure(line: number): boolean {
+        // Check if line is within any WINDOW, REPORT, or APPLICATION structure
+        const windowStructures = ['WINDOW', 'REPORT', 'APPLICATION'];
+        
+        for (const structType of windowStructures) {
+            const structures = this.structuresByType.get(structType) || [];
+            for (const struct of structures) {
+                const start = struct.line;
+                const end = struct.finishesAt;
+                
+                if (end !== undefined && line > start && line < end) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+
+    /**
      * Gets all CLASS structure blocks in the document
      * @returns Array of CLASS tokens (empty if none found)
      */

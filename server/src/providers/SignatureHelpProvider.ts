@@ -11,6 +11,7 @@ import { DocumentStructure } from '../DocumentStructure';
 import { BuiltinFunctionService } from '../utils/BuiltinFunctionService';
 import { AttributeService } from '../utils/AttributeService';
 import { ControlService } from '../utils/ControlService';
+import { DataTypeService } from '../utils/DataTypeService';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -27,6 +28,7 @@ export class SignatureHelpProvider {
     private builtinService = BuiltinFunctionService.getInstance();
     private attributeService = AttributeService.getInstance();
     private controlService = ControlService.getInstance();
+    private dataTypeService = DataTypeService.getInstance();
 
     /**
      * Provides signature help at a given position
@@ -82,7 +84,7 @@ export class SignatureHelpProvider {
                         signatures = attrSigs;
                     } else {
                         // Could be a regular procedure call
-                        signatures = await this.getProcedureSignatures(methodName, document, tokens);
+                        signatures = await this.getProcedureSignatures(methodName, document, tokens, position);
                     }
                 }
             }
@@ -262,11 +264,65 @@ export class SignatureHelpProvider {
     private async getProcedureSignatures(
         methodName: string,
         document: TextDocument,
-        tokens: Token[]
+        tokens: Token[],
+        position: Position
     ): Promise<SignatureInformation[]> {
         logger.info(`Getting procedure signatures for ${methodName}`);
         
-        // Check if this is a built-in function FIRST
+        // ✅ CONTEXT-AWARE DETECTION: Determine context for MODULE and data types
+        // Get tokens to check for label before the method name
+        const lineTokens = tokens.filter(t => t.line === position.line);
+        
+        // Check if there's a Label token before the current word (indicates data declaration)
+        const hasLabelBefore = lineTokens.some(t => 
+            t.type === TokenType.Label && 
+            t.start < position.character
+        );
+        
+        // Check if we're in a MAP block
+        const docStructure = new DocumentStructure(tokens);
+        const isInMapBlock = docStructure.isInMapBlock(position.line);
+        
+        // Check if we're in a WINDOW/REPORT/APPLICATION structure
+        const isInWindowContext = docStructure.isInWindowStructure(position.line);
+        
+        logger.info(`Context detection for ${methodName}: hasLabelBefore=${hasLabelBefore}, isInMapBlock=${isInMapBlock}, isInWindowContext=${isInWindowContext}`);
+
+        // Handle MODULE keyword specially (can be keyword in MAP or attribute on CLASS)
+        if (methodName.toUpperCase() === 'MODULE') {
+            if (isInMapBlock) {
+                // MODULE in MAP context - it's a builtin keyword
+                logger.info(`MODULE in MAP context - using builtin`);
+                const signatures = this.builtinService.getSignatures(methodName);
+                if (signatures.length > 0) {
+                    return signatures;
+                }
+            } else {
+                // MODULE outside MAP - it's likely a CLASS attribute
+                logger.info(`MODULE outside MAP - using attribute`);
+                const attribute = this.attributeService.getAttribute(methodName);
+                if (attribute && attribute.signatures) {
+                    return attribute.signatures.map(sig => this.createAttributeSignatureInformation(methodName, sig));
+                }
+            }
+        }
+        
+        // Decide priority: data type vs control/builtin based on context
+        const checkDataTypeFirst = hasLabelBefore || !isInWindowContext;
+        
+        if (checkDataTypeFirst) {
+            // Data declaration context - check data type FIRST
+            if (this.dataTypeService.hasDataType(methodName)) {
+                logger.info(`Found Clarion data type: ${methodName} (data context)`);
+                const dataType = this.dataTypeService.getDataType(methodName);
+                if (dataType) {
+                    const sig = this.createDataTypeSignature(dataType);
+                    return [sig];
+                }
+            }
+        }
+        
+        // Check if this is a built-in function
         if (this.builtinService.isBuiltin(methodName)) {
             logger.info(`Found built-in function: ${methodName}`);
             const signatures = this.builtinService.getSignatures(methodName);
@@ -284,6 +340,16 @@ export class SignatureHelpProvider {
             } else {
                 logger.info(`${methodName} is a pure keyword (no parameters) - skipping signature help`);
                 // Fall through to check for user-defined procedures
+            }
+        }
+        
+        // If we didn't check data type first, check it now as fallback
+        if (!checkDataTypeFirst && this.dataTypeService.hasDataType(methodName)) {
+            logger.info(`Found Clarion data type: ${methodName} (window context fallback)`);
+            const dataType = this.dataTypeService.getDataType(methodName);
+            if (dataType) {
+                const sig = this.createDataTypeSignature(dataType);
+                return [sig];
             }
         }
         
@@ -558,6 +624,63 @@ export class SignatureHelpProvider {
             label,
             documentation: undefined,
             parameters
+        };
+    }
+
+    /**
+     * Creates a SignatureInformation object for a Clarion data type
+     */
+    private createDataTypeSignature(dataType: any): SignatureInformation {
+        const parameters: ParameterInformation[] = [];
+        
+        // Build parameter info from data type parameters
+        for (const param of dataType.parameters) {
+            const optionalTag = param.optional ? ' (optional)' : '';
+            parameters.push({
+                label: param.name + optionalTag,
+                documentation: param.description
+            });
+        }
+        
+        // Format the signature label
+        const paramLabels = dataType.parameters.map((p: any) => 
+            p.optional ? `[${p.name}]` : p.name
+        ).join(', ');
+        
+        const label = dataType.parameters.length > 0 
+            ? `${dataType.name}(${paramLabels})` 
+            : dataType.name;
+        
+        return {
+            label,
+            documentation: `${dataType.description}\n\nSize: ${dataType.size}${dataType.range ? `\nRange: ${dataType.range}` : ''}`,
+            parameters
+        };
+    }
+
+    /**
+     * Creates a SignatureInformation object for an attribute
+     */
+    private createAttributeSignatureInformation(name: string, sig: any): SignatureInformation {
+        const params = sig.params.map((p: any) => {
+            const paramName = typeof p === 'string' ? p : p.name;
+            return ParameterInformation.create(paramName);
+        });
+        
+        const paramStrings = sig.params.map((p: any) => {
+            if (typeof p === 'string') {
+                return p;
+            }
+            return p.optional ? `[${p.name}]` : p.name;
+        });
+        
+        const paramString = paramStrings.length > 0 ? paramStrings.join(', ') : '';
+        const label = paramString ? `${name}(${paramString})` : name;
+        
+        return {
+            label,
+            documentation: sig.description,
+            parameters: params
         };
     }
 

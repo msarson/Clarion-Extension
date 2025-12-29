@@ -3,6 +3,40 @@
   "description": "Clarion built-in function definitions for signature help and IntelliSense",
   "functions": [
     {
+      "name": "CHOOSE",
+      "signatures": [
+        {
+          "params": ["expression", "value", "value"],
+          "returnType": "varies",
+          "description": "Index-based selection: Returns the value parameter at position specified by expression. Expression must be a positive integer. If out of range, returns last value. Return type depends on value parameters (LONG if all LONG, DECIMAL if LONG/DECIMAL mix, STRING if any STRING, REAL otherwise)."
+        },
+        {
+          "params": [
+            { "name": "expression", "optional": false },
+            { "name": "value", "optional": false },
+            { "name": "value", "optional": false },
+            { "name": "value...", "optional": true }
+          ],
+          "returnType": "varies",
+          "description": "Index-based selection with variable values: Returns the value at position specified by expression (1-based index). Can have 2 or more value parameters. Return type depends on value types."
+        },
+        {
+          "params": ["condition"],
+          "returnType": "LONG",
+          "description": "Boolean evaluation: Evaluates condition and returns 1 (true) or 0 (false). Use when you only need to convert a boolean to numeric."
+        },
+        {
+          "params": [
+            { "name": "condition", "optional": false },
+            { "name": "truevalue", "optional": true },
+            { "name": "falsevalue", "optional": true }
+          ],
+          "returnType": "varies",
+          "description": "Boolean selection: Returns truevalue if condition is true, falsevalue if false. If values not provided, returns 1 (true) or 0 (false). Common use: CHOOSE(expression, 'Yes', 'No')."
+        }
+      ]
+    },
+    {
       "name": "CLIP",
       "signatures": [
         {
@@ -463,30 +497,6 @@
       ]
     },
     {
-      "name": "MODULE",
-      "signatures": [
-        {
-          "params": ["STRING sourcefile"],
-          "returnType": "",
-          "description": "Declares a module within a MAP structure. Names a MEMBER source file or external library containing procedure definitions. Used in MAP...END blocks."
-        }
-      ]
-    },
-    {
-      "name": "LINK",
-      "signatures": [
-        {
-          "params": [
-            { "name": "STRING linkfile", "optional": false },
-            { "name": "LONG flag", "optional": true }
-          ],
-          "returnType": "",
-          "description": "CLASS attribute that adds a file (.OBJ, .LIB) to the linker's link list. Flag parameter is optional - if omitted, file is always linked. If provided, links conditionally based on flag value (non-zero = link). Without extension, .OBJ is assumed.",
-          "syntax": "LINK(linkfile [,flag])"
-        }
-      ]
-    },
-    {
       "name": "CLEAR",
       "signatures": [
         {
@@ -555,6 +565,233 @@
           "params": [],
           "returnType": "",
           "description": "Declares a block of external procedure prototypes. Used in PROGRAM or MEMBER modules to declare procedures from other modules. Contains MODULE() sections and/or individual procedure prototypes. Ends with END."
+        }
+      ]
+    },
+    {
+      "name": "MODULE",
+      "signatures": [
+        {
+          "params": ["STRING sourcefile"],
+          "returnType": "",
+          "description": "Declares a module block within a MAP structure. Names a MEMBER source file or external library containing procedure definitions. Contains procedure prototypes and ends with END. Can only be used inside MAP...END blocks."
+        }
+      ]
+    },
+    {
+      "name": "IF",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Initiates a conditional execution structure. Executes statements based on logical expression evaluation. Zero or blank evaluates as false, anything else is true. Structure ends with END statement."
+        }
+      ]
+    },
+    {
+      "name": "THEN",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Optional keyword following IF or ELSIF. Statements after THEN execute when the preceding logical expression is true. Must appear on same line as IF or ELSIF if used."
+        }
+      ]
+    },
+    {
+      "name": "ELSIF",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Evaluates an alternate condition in an IF structure. Logical expression following ELSIF is evaluated only when all preceding IF or ELSIF conditions were false. Can have multiple ELSIF clauses."
+        }
+      ]
+    },
+    {
+      "name": "ELSE",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Executes statements when all preceding IF and ELSIF conditions evaluate as false. Optional but must be last option in IF structure if used. Provides default action when no conditions are true."
+        }
+      ]
+    },
+    {
+      "name": "TO",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Specifies the terminating value in a LOOP iteration. Used with counter syntax: i = initial TO limit. When counter exceeds limit (or is less than, if step is negative), loop terminates. Limit expression evaluated once at loop start."
+        }
+      ]
+    },
+    {
+      "name": "BY",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Specifies the increment/decrement step in a LOOP counter iteration. Used with TO: i = initial TO limit BY step. If omitted, counter increments by 1. Negative values cause decrement. Step expression evaluated once at loop start."
+        }
+      ]
+    },
+    {
+      "name": "UNTIL",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Evaluates condition to terminate LOOP. When on LOOP statement, tests before each iteration. When terminating LOOP structure (after statements), tests after each iteration. Loop terminates when expression evaluates to true."
+        }
+      ]
+    },
+    {
+      "name": "WHILE",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Evaluates condition to continue LOOP. When on LOOP statement, tests before each iteration. When terminating LOOP structure (after statements), tests after each iteration. Loop terminates when expression evaluates to false."
+        }
+      ]
+    },
+    {
+      "name": "VAL",
+      "signatures": [
+        {
+          "params": [
+            { "name": "STRING character", "optional": false }
+          ],
+          "returnType": "BYTE | USHORT | SIGNED",
+          "description": "Returns the numeric code of a character. Returns BYTE for ANSI strings, USHORT for Unicode strings, or SIGNED if type cannot be determined at compile time. Use TOANSI or TOUNICODE to force specific encoding."
+        }
+      ]
+    },
+    {
+      "name": "SIZE",
+      "signatures": [
+        {
+          "params": [
+            { "name": "variable | constant | picture", "optional": false }
+          ],
+          "returnType": "LONG",
+          "description": "Returns memory size in bytes of a variable, constant, or picture. Evaluated at compile time if size is known, otherwise at runtime. For reference variables, retrieves size from the variable. For arrays with variable dimensions, calculates based on element size and actual count."
+        }
+      ]
+    },
+    {
+      "name": "CASE",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Initiates selective execution structure based on condition evaluation. Executes first matching OF/OROF statement group. More efficient than IF/ELSIF for multiple equivalence tests. Terminates with END statement."
+        }
+      ]
+    },
+    {
+      "name": "OF",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Specifies an expression to compare with CASE condition. Statements following OF execute when expression equals CASE condition. Can use ranges with TO keyword. Multiple OF options allowed in CASE structure."
+        }
+      ]
+    },
+    {
+      "name": "OROF",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Adds alternative expression to preceding OF option. Statements execute when either OROF expression or preceding OF expression equals CASE condition. Can be on same line or separate line. Control falls into OROF statements from preceding statements."
+        }
+      ]
+    },
+    {
+      "name": "NEW",
+      "signatures": [
+        {
+          "params": [
+            { "name": "datatype", "optional": false }
+          ],
+          "returnType": "reference",
+          "description": "Allocates heap memory for a new instance of the specified data type. Used on source side of reference assignment (reference &= NEW(datatype)). Memory is automatically initialized to blank/zero and must be explicitly de-allocated with DISPOSE to prevent memory leaks. Parentheses around datatype are optional."
+        }
+      ]
+    },
+    {
+      "name": "DISPOSE",
+      "signatures": [
+        {
+          "params": [
+            { "name": "reference", "optional": false }
+          ],
+          "returnType": "",
+          "description": "De-allocates heap memory previously allocated by NEW statement. Failure to call DISPOSE creates memory leaks. Reference may be NULL with no ill effects. Warning: Disposing a reference still in use (e.g., QUEUE in LIST control) may cause GPF. DISPOSE(SELF) must be last statement in procedure."
+        }
+      ]
+    },
+    {
+      "name": "ACCEPT",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Initiates event processing loop for WINDOW or APPLICATION structures. Processes user input, mouse events, and control events. Loop cycles automatically when field-specific events occur. Use EVENT(), FIELD(), ACCEPTED() to determine what happened. Terminates with BREAK or implicit events like CloseWindow."
+        }
+      ]
+    },
+    {
+      "name": "CYCLE",
+      "signatures": [
+        {
+          "params": [
+            { "name": "label", "optional": true }
+          ],
+          "returnType": "",
+          "description": "Transfers control back to top of LOOP or ACCEPT structure. Optional label allows cycling to outer nested loops. In ACCEPT loop, terminates certain automatic actions before performed (Iconize, Maximize, Move, Size, Restore, CloseWindow events)."
+        }
+      ]
+    },
+    {
+      "name": "SORT",
+      "signatures": [
+        {
+          "params": [
+            { "name": "QUEUE queue", "optional": false },
+            { "name": "[+|-]key", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Reorders entries in a QUEUE by specified key fields. Supports up to 16 keys separated by commas. Leading +/- indicates ascending/descending order. Keys must include PRE prefix if QUEUE has one. Can use NAME attributes as string or comparison function. Entries with identical keys maintain relative position."
+        }
+      ]
+    },
+    {
+      "name": "RETURN",
+      "signatures": [
+        {
+          "params": [
+            { "name": "expression", "optional": true }
+          ],
+          "returnType": "",
+          "description": "Terminates PROGRAM or PROCEDURE and returns control to caller. Expression required for procedures returning values (may be NULL for reference returns). Automatically closes local APPLICATION/WINDOW/REPORT/VIEW/QUEUE structures. Implicit RETURN occurs at end if not specified. Closes program and files when used in PROGRAM."
+        }
+      ]
+    },
+    {
+      "name": "OMITTED",
+      "signatures": [
+        {
+          "params": [
+            { "name": "LONG parameter", "optional": false }
+          ],
+          "returnType": "LONG",
+          "description": "Tests whether a procedure parameter was actually passed when called. Returns 1 (true) if parameter was omitted, 0 (false) if passed. Parameter is ordinal position number (1, 2, 3, etc.) or parameter name. Used to detect optional parameters in called procedures. Can test any parameter type including SELF, references, arrays, structures."
         }
       ]
     },

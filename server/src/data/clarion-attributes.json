@@ -988,6 +988,355 @@
           "description": "No parameters"
         }
       ]
+    },
+    {
+      "name": "DIM",
+      "applicableTo": [
+        "DATA_TYPE",
+        "GROUP",
+        "QUEUE"
+      ],
+      "signatures": [
+        {
+          "params": [
+            { "name": "LONG dimension1", "optional": false },
+            { "name": "LONG dimension2", "optional": true },
+            { "name": "LONG dimension3", "optional": true }
+          ],
+          "description": "Dimensions the variable as an array. Up to 3 dimensions supported.",
+          "syntax": "DIM(dimension1 [,dimension2] [,dimension3])"
+        }
+      ],
+      "description": "Declares the variable as an array. The DIM attribute specifies the number of elements in each dimension (up to 3 dimensions). Array elements are accessed using subscripts: variable[index] or variable[row,col].",
+      "propertyEquate": ""
+    },
+    {
+      "name": "OVER",
+      "applicableTo": [
+        "DATA_TYPE"
+      ],
+      "signatures": [
+        {
+          "params": [
+            { "name": "label", "optional": false }
+          ],
+          "description": "Specifies the variable label to overlay in memory",
+          "syntax": "OVER(label)"
+        }
+      ],
+      "description": "Specifies that this variable occupies the same memory location as another variable. Both variables share the same memory, allowing different interpretations of the same data. Useful for type conversion or viewing data in different formats.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "NAME",
+      "applicableTo": [
+        "DATA_TYPE",
+        "FILE_FIELD"
+      ],
+      "signatures": [
+        {
+          "params": [
+            { "name": "STRING external_name", "optional": false }
+          ],
+          "description": "Specifies the external name for the field",
+          "syntax": "NAME('external_name')"
+        }
+      ],
+      "description": "Specifies an alternate 'external' name for the field. Used primarily in FILE declarations to map internal field names to external file field names. The external name is used when reading/writing to the file.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "EXTERNAL",
+      "applicableTo": [
+        "DATA_TYPE",
+        "PROCEDURE"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Specifies that the variable or procedure is defined in an external library (not in the current program). The variable's memory is allocated externally, not by the Clarion program. Cannot be used within FILE, QUEUE, or GROUP declarations.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "DLL",
+      "applicableTo": [
+        "DATA_TYPE",
+        "PROCEDURE"
+      ],
+      "signatures": [
+        {
+          "params": [
+            { "name": "STRING dll_name", "optional": true }
+          ],
+          "description": "Specifies the DLL containing the external definition",
+          "syntax": "DLL [('dll_name')]"
+        }
+      ],
+      "description": "Specifies that the variable or procedure is defined in a Dynamic Link Library (.DLL). Must be used in conjunction with the EXTERNAL attribute. The optional dll_name parameter specifies which DLL contains the definition.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "STATIC",
+      "applicableTo": [
+        "DATA_TYPE",
+        "QUEUE",
+        "GROUP"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Specifies static memory allocation for procedure-local variables. Static variables retain their values between procedure calls (not reinitialized). For QUEUE/GROUP in procedures, allocates fixed memory instead of stack allocation.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "THREAD",
+      "applicableTo": [
+        "DATA_TYPE",
+        "FILE",
+        "QUEUE",
+        "GROUP"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Declares thread-local storage. Each execution thread gets its own separate copy of the variable. Ensures thread-safe access in multi-threaded applications. Also implicitly adds STATIC attribute for procedure-local data.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "AUTO",
+      "applicableTo": [
+        "DATA_TYPE"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Specifies that the variable has no initial value and is not initialized. Without AUTO, numeric variables are initialized to zero and strings to blanks. AUTO variables contain whatever value was in memory at allocation time.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "PRIVATE",
+      "applicableTo": [
+        "DATA_TYPE",
+        "METHOD",
+        "PROPERTY"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Specifies that the variable, method, or property is not visible outside the module containing the CLASS methods. Only valid within a CLASS declaration. Provides encapsulation and information hiding.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "PROTECTED",
+      "applicableTo": [
+        "DATA_TYPE",
+        "METHOD",
+        "PROPERTY"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Specifies that the variable, method, or property is not visible outside the base CLASS and derived CLASS methods. Only valid within a CLASS declaration. Allows inheritance while preventing external access.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "TYPE",
+      "applicableTo": [
+        "GROUP",
+        "QUEUE",
+        "CLASS",
+        "INTERFACE"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Declares that this structure can be used as a data type for other variable declarations. Allows GROUP/QUEUE/CLASS to be reused as a template. Variables can then be declared using this type, inheriting all its fields and structure.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "PRE",
+      "applicableTo": [
+        "GROUP",
+        "QUEUE",
+        "FILE",
+        "RECORD"
+      ],
+      "signatures": [
+        {
+          "params": [
+            { "name": "STRING prefix", "optional": false }
+          ],
+          "description": "Specifies the prefix for field labels",
+          "syntax": "PRE(prefix)"
+        }
+      ],
+      "description": "Declares a field label prefix for the structure. All field labels within the structure are automatically prefixed with this value. Used for namespacing and avoiding label conflicts. Example: PRE(CUS) makes field 'Name' accessible as 'CUS:Name'.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "BINDABLE",
+      "applicableTo": [
+        "GROUP",
+        "QUEUE",
+        "FILE"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Allows dynamic expression evaluation on the structure using BIND() and EVALUATE(). Makes field names available at runtime for dynamic queries and calculations. Fields must have NAME attribute for BINDABLE to work.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "DRIVER",
+      "applicableTo": [
+        "FILE"
+      ],
+      "signatures": [
+        {
+          "params": [
+            { "name": "STRING driver_name", "optional": false }
+          ],
+          "description": "Specifies the file driver type",
+          "syntax": "DRIVER('driver_name')"
+        }
+      ],
+      "description": "Specifies the file driver type for the FILE declaration. Common drivers: 'TOPSPEED' (TPS), 'ASCII', 'DOS', 'BASIC', 'CLARION', 'BTRIEVE', 'MSSQL', 'ODBC'. Required attribute for FILE declarations.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "CREATE",
+      "applicableTo": [
+        "FILE"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Specifies that the file should be created if it doesn't exist when opened. Without CREATE, attempting to open a non-existent file will result in an error. Typically used with CREATE mode file operations.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "OWNER",
+      "applicableTo": [
+        "FILE"
+      ],
+      "signatures": [
+        {
+          "params": [
+            { "name": "STRING password", "optional": false }
+          ],
+          "description": "Specifies the owner password for encrypted files",
+          "syntax": "OWNER('password')"
+        }
+      ],
+      "description": "Specifies the owner password for encrypted TopSpeed files. Required when using ENCRYPT attribute. The owner has full access including ability to change encryption and structure. Used with TopSpeed driver only.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "ENCRYPT",
+      "applicableTo": [
+        "FILE"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Specifies that the file should be encrypted. Requires OWNER attribute to specify the encryption password. Provides data security by encrypting file contents. Used with TopSpeed driver only.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "RECLAIM",
+      "applicableTo": [
+        "FILE"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Specifies that deleted record space should be reclaimed and reused. Without RECLAIM, deleted records leave gaps in the file. RECLAIM compacts the file by reusing deleted space, reducing file size over time.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "IMPLEMENTS",
+      "applicableTo": [
+        "CLASS"
+      ],
+      "signatures": [
+        {
+          "params": [
+            { "name": "INTERFACE interface_name", "optional": false }
+          ],
+          "description": "Specifies the interface to implement",
+          "syntax": "IMPLEMENTS(interface_name)"
+        }
+      ],
+      "description": "Adds additional methods to a CLASS by implementing an INTERFACE. When a class implements an interface, it inherits all methods defined in the INTERFACE and must provide implementations for them. A class may implement multiple interfaces.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "LINK",
+      "applicableTo": [
+        "CLASS"
+      ],
+      "signatures": [
+        {
+          "params": [
+            { "name": "STRING linkfile", "optional": false },
+            { "name": "LONG flag", "optional": true }
+          ],
+          "description": "Names a file to add to the link list",
+          "syntax": "LINK(linkfile [,flag])"
+        }
+      ],
+      "description": "Names a file to add to the link list for the current project when using this CLASS. Typically names a .LIB or .OBJ file to be linked. Normally the same as the MODULE parameter but can explicitly name library or object files.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "MODULE",
+      "applicableTo": [
+        "CLASS"
+      ],
+      "signatures": [
+        {
+          "params": [
+            { "name": "STRING module_name", "optional": false }
+          ],
+          "description": "Specifies the source file containing CLASS method implementations",
+          "syntax": "MODULE('module_name')"
+        }
+      ],
+      "description": "CLASS attribute that specifies the source code file containing the CLASS method implementations. The module file must be included in the project. Used to separate class definition from implementation. Note: MODULE is also a keyword used in MAP blocks to declare procedure prototypes - see builtins.",
+      "propertyEquate": ""
     }
   ]
 }

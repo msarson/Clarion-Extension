@@ -13,6 +13,7 @@ import { CrossFileResolver } from '../utils/CrossFileResolver';
 import { BuiltinFunctionService } from '../utils/BuiltinFunctionService';
 import { AttributeService } from '../utils/AttributeService';
 import { ControlService } from '../utils/ControlService';
+import { DataTypeService } from '../utils/DataTypeService';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -31,6 +32,7 @@ export class HoverProvider {
     private builtinService = BuiltinFunctionService.getInstance();
     private attributeService = AttributeService.getInstance();
     private controlService = ControlService.getInstance();
+    private dataTypeService = DataTypeService.getInstance();
 
     /**
      * Provides hover information for a position in the document
@@ -58,17 +60,167 @@ export class HoverProvider {
                 end: { line: position.line, character: Number.MAX_VALUE }
             });
 
-            // Check if this word is a Clarion control type
-            if (this.controlService.isControl(word)) {
-                logger.info(`Found Clarion control: ${word}`);
-                const controlDoc = this.controlService.getControlDocumentation(word);
-                if (controlDoc) {
+            // ✅ CONTEXT-AWARE DETECTION: Determine if we should prioritize control or data type
+            // Get tokens to check for label before the word
+            const allTokens = this.tokenCache.getTokens(document);
+            const currentLineTokens = allTokens.filter(t => t.line === position.line);
+            
+            // Check if there's a Label token before the current word (indicates data declaration)
+            const hasLabelBefore = currentLineTokens.some(t => 
+                t.type === TokenType.Label && 
+                t.start < wordRange.start.character
+            );
+            
+            // Check if we're in a WINDOW/REPORT/APPLICATION structure (indicates control context)
+            const isInWindowContext = documentStructure.isInWindowStructure(position.line);
+            
+            // Check if we're in a MAP block (for MODULE keyword detection)
+            const isInMapBlock = documentStructure.isInMapBlock(position.line);
+            
+            logger.info(`Context detection: hasLabelBefore=${hasLabelBefore}, isInWindowContext=${isInWindowContext}, isInMapBlock=${isInMapBlock}`);
+
+            // Handle MODULE keyword specially (can be keyword in MAP or attribute on CLASS)
+            if (word.toUpperCase() === 'MODULE') {
+                if (isInMapBlock) {
+                    // MODULE in MAP context - it's a builtin keyword
+                    const signatures = this.builtinService.getSignatures('MODULE');
+                    if (signatures.length > 0) {
+                        const sig = signatures[0];
+                        // Extract documentation value (could be string or MarkupContent object)
+                        const docText = typeof sig.documentation === 'string' 
+                            ? sig.documentation 
+                            : (sig.documentation as any)?.value || '';
+                        const formattedDoc = `**MODULE** (Keyword)\n\n${docText}\n\n**Syntax:** \`${sig.label}\``;
+                        return {
+                            contents: {
+                                kind: 'markdown',
+                                value: formattedDoc
+                            }
+                        };
+                    }
+                } else {
+                    // MODULE outside MAP - it's likely a CLASS attribute
+                    if (this.attributeService.isAttribute(word)) {
+                        const attribute = this.attributeService.getAttribute(word);
+                        if (attribute) {
+                            const formattedDoc = `**${word}** (Attribute)\n\n${attribute.description}\n\n**Applies to:** ${attribute.applicableTo.join(', ')}`;
+                            return {
+                                contents: {
+                                    kind: 'markdown',
+                                    value: formattedDoc
+                                }
+                            };
+                        }
+                    }
+                }
+            }
+
+            // Handle ELSE keyword specially (can be in IF or CASE structure)
+            if (word.toUpperCase() === 'ELSE') {
+                // Search backwards for CASE or IF keyword to determine context
+                let foundCase = false;
+                let foundIf = false;
+                
+                for (let searchLine = position.line - 1; searchLine >= Math.max(0, position.line - 50); searchLine--) {
+                    const searchLineTokens = allTokens.filter(t => t.line === searchLine);
+                    
+                    // Look for CASE, IF, or END keywords
+                    for (const token of searchLineTokens) {
+                        const upperValue = token.value.toUpperCase();
+                        if (upperValue === 'CASE' && token.type === TokenType.Keyword) {
+                            foundCase = true;
+                            break;
+                        } else if (upperValue === 'IF' && token.type === TokenType.Keyword) {
+                            foundIf = true;
+                            break;
+                        } else if (upperValue === 'END' && token.type === TokenType.EndStatement) {
+                            // Hit an END, stop searching (structure ended)
+                            break;
+                        }
+                    }
+                    
+                    if (foundCase || foundIf) break;
+                }
+                
+                // Provide context-specific documentation
+                if (foundCase) {
                     return {
                         contents: {
                             kind: 'markdown',
-                            value: controlDoc
+                            value: `**ELSE** (Keyword - in CASE structure)\n\nStatements following ELSE execute when all preceding OF and OROF options have been evaluated as not equivalent. ELSE is optional but must be last option in CASE structure if used.`
                         }
                     };
+                } else if (foundIf) {
+                    return {
+                        contents: {
+                            kind: 'markdown',
+                            value: `**ELSE** (Keyword - in IF structure)\n\nStatements following ELSE execute when all preceding IF and ELSIF conditions evaluate as false. ELSE is optional but must be last option in IF structure if used.`
+                        }
+                    };
+                }
+                // If context unclear, show generic ELSE documentation
+            }
+
+            // Decide priority: data type vs control based on context
+            const checkDataTypeFirst = hasLabelBefore || !isInWindowContext;
+
+            if (checkDataTypeFirst) {
+                // Data declaration context - check data type first
+                if (this.dataTypeService.hasDataType(word)) {
+                    logger.info(`Found Clarion data type: ${word}`);
+                    const dataType = this.dataTypeService.getDataType(word);
+                    if (dataType) {
+                        const formattedDoc = this.dataTypeService.getFormattedDescription(dataType);
+                        return {
+                            contents: {
+                                kind: 'markdown',
+                                value: formattedDoc
+                            }
+                        };
+                    }
+                }
+                
+                // Then check control as fallback
+                if (this.controlService.isControl(word)) {
+                    logger.info(`Found Clarion control: ${word}`);
+                    const controlDoc = this.controlService.getControlDocumentation(word);
+                    if (controlDoc) {
+                        return {
+                            contents: {
+                                kind: 'markdown',
+                                value: controlDoc
+                            }
+                        };
+                    }
+                }
+            } else {
+                // Window/control context - check control first
+                if (this.controlService.isControl(word)) {
+                    logger.info(`Found Clarion control: ${word}`);
+                    const controlDoc = this.controlService.getControlDocumentation(word);
+                    if (controlDoc) {
+                        return {
+                            contents: {
+                                kind: 'markdown',
+                                value: controlDoc
+                            }
+                        };
+                    }
+                }
+                
+                // Then check data type as fallback
+                if (this.dataTypeService.hasDataType(word)) {
+                    logger.info(`Found Clarion data type: ${word}`);
+                    const dataType = this.dataTypeService.getDataType(word);
+                    if (dataType) {
+                        const formattedDoc = this.dataTypeService.getFormattedDescription(dataType);
+                        return {
+                            contents: {
+                                kind: 'markdown',
+                                value: formattedDoc
+                            }
+                        };
+                    }
                 }
             }
 
@@ -1626,7 +1778,14 @@ export class HoverProvider {
         }
 
         // Format matching signatures
-        let content = `**Built-in Function: ${functionName}**\n\n`;
+        // Determine if this is a pure keyword (no parameters)
+        const isKeyword = matchingSignatures.every(sig => 
+            !sig.parameters || sig.parameters.length === 0
+        );
+        
+        let content = isKeyword 
+            ? `**Keyword: ${functionName}**\n\n`
+            : `**Built-in Function: ${functionName}**\n\n`;
         
         if (paramCount !== null && matchingSignatures.length < signatures.length) {
             content += `_Showing signature(s) matching ${paramCount} parameter(s)_\n\n`;
@@ -1637,7 +1796,10 @@ export class HoverProvider {
                 content += `**Overload ${index + 1}:**\n\n`;
             }
             
-            content += `\`\`\`clarion\n${sig.label}\n\`\`\`\n\n`;
+            // Only show syntax for functions with parameters
+            if (sig.parameters && sig.parameters.length > 0) {
+                content += `\`\`\`clarion\n${sig.label}\n\`\`\`\n\n`;
+            }
             
             if (sig.documentation) {
                 const docValue = typeof sig.documentation === 'string' 

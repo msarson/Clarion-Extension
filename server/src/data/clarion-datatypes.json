@@ -1,0 +1,437 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Clarion data type definitions for signature help and IntelliSense",
+  "dataTypes": [
+    {
+      "name": "BYTE",
+      "category": "numeric",
+      "description": "One-byte unsigned integer (0-255)",
+      "syntax": "label BYTE[(initial_value)] [,attributes...]",
+      "parameters": [
+        {
+          "name": "initial_value",
+          "type": "numeric",
+          "optional": true,
+          "description": "The initial value of the BYTE variable"
+        }
+      ],
+      "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "1 byte",
+      "range": "0 to 255"
+    },
+    {
+      "name": "SHORT",
+      "category": "numeric",
+      "description": "Two-byte signed integer",
+      "syntax": "label SHORT[(initial_value)] [,attributes...]",
+      "parameters": [
+        {
+          "name": "initial_value",
+          "type": "numeric",
+          "optional": true,
+          "description": "The initial value of the SHORT variable"
+        }
+      ],
+      "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "2 bytes",
+      "range": "-32,768 to 32,767"
+    },
+    {
+      "name": "USHORT",
+      "category": "numeric",
+      "description": "Two-byte unsigned integer",
+      "syntax": "label USHORT[(initial_value)] [,attributes...]",
+      "parameters": [
+        {
+          "name": "initial_value",
+          "type": "numeric",
+          "optional": true,
+          "description": "The initial value of the USHORT variable"
+        }
+      ],
+      "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "2 bytes",
+      "range": "0 to 65,535"
+    },
+    {
+      "name": "LONG",
+      "category": "numeric",
+      "description": "Four-byte signed integer",
+      "syntax": "label LONG[(initial_value)] [,attributes...]",
+      "parameters": [
+        {
+          "name": "initial_value",
+          "type": "numeric",
+          "optional": true,
+          "description": "The initial value of the LONG variable"
+        }
+      ],
+      "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "4 bytes",
+      "range": "-2,147,483,648 to 2,147,483,647"
+    },
+    {
+      "name": "ULONG",
+      "category": "numeric",
+      "description": "Four-byte unsigned integer",
+      "syntax": "label ULONG[(initial_value)] [,attributes...]",
+      "parameters": [
+        {
+          "name": "initial_value",
+          "type": "numeric",
+          "optional": true,
+          "description": "The initial value of the ULONG variable"
+        }
+      ],
+      "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "4 bytes",
+      "range": "0 to 4,294,967,295"
+    },
+    {
+      "name": "SREAL",
+      "category": "numeric",
+      "description": "Four-byte signed floating point",
+      "syntax": "label SREAL[(initial_value)] [,attributes...]",
+      "parameters": [
+        {
+          "name": "initial_value",
+          "type": "numeric",
+          "optional": true,
+          "description": "The initial value of the SREAL variable"
+        }
+      ],
+      "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "4 bytes",
+      "range": "±3.4E±38 (7 digits precision)"
+    },
+    {
+      "name": "REAL",
+      "category": "numeric",
+      "description": "Eight-byte signed floating point",
+      "syntax": "label REAL[(initial_value)] [,attributes...]",
+      "parameters": [
+        {
+          "name": "initial_value",
+          "type": "numeric",
+          "optional": true,
+          "description": "The initial value of the REAL variable"
+        }
+      ],
+      "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "8 bytes",
+      "range": "±1.7E±308 (15 digits precision)"
+    },
+    {
+      "name": "DECIMAL",
+      "category": "numeric",
+      "description": "Signed packed decimal",
+      "syntax": "label DECIMAL(length [,places] [,initial_value]) [,attributes...]",
+      "parameters": [
+        {
+          "name": "length",
+          "type": "numeric",
+          "optional": false,
+          "description": "Total number of decimal digits (max 31)"
+        },
+        {
+          "name": "places",
+          "type": "numeric",
+          "optional": true,
+          "description": "Number of decimal digits in fractional portion. If omitted, variable is declared as math-based integer"
+        },
+        {
+          "name": "initial_value",
+          "type": "numeric",
+          "optional": true,
+          "description": "The initial value of the DECIMAL variable"
+        }
+      ],
+      "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "Variable (each byte holds 2 digits)",
+      "range": "Depends on length parameter"
+    },
+    {
+      "name": "PDECIMAL",
+      "category": "numeric",
+      "description": "Signed packed decimal (synonym for DECIMAL)",
+      "syntax": "label PDECIMAL(length [,places] [,initial_value]) [,attributes...]",
+      "parameters": [
+        {
+          "name": "length",
+          "type": "numeric",
+          "optional": false,
+          "description": "Total number of decimal digits (max 31)"
+        },
+        {
+          "name": "places",
+          "type": "numeric",
+          "optional": true,
+          "description": "Number of decimal digits in fractional portion"
+        },
+        {
+          "name": "initial_value",
+          "type": "numeric",
+          "optional": true,
+          "description": "The initial value of the PDECIMAL variable"
+        }
+      ],
+      "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "Variable (each byte holds 2 digits)",
+      "range": "Depends on length parameter"
+    },
+    {
+      "name": "STRING",
+      "category": "string",
+      "description": "Fixed-length character string",
+      "syntax": "label STRING(length | string_constant | @picture) [,attributes...]",
+      "parameters": [
+        {
+          "name": "length",
+          "type": "numeric | string | picture",
+          "optional": false,
+          "description": "Number of bytes in string, or string constant, or picture token for formatting. Can be a variable-sized expression in local scope"
+        }
+      ],
+      "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "Fixed-length",
+      "notes": "Implicitly declared as STRING(1),DIM(length) for character-level access. Supports string slicing [start:end]"
+    },
+    {
+      "name": "CSTRING",
+      "category": "string",
+      "description": "Fixed-length null-terminated string",
+      "syntax": "label CSTRING(length | string_constant | @picture) [,attributes...]",
+      "parameters": [
+        {
+          "name": "length",
+          "type": "numeric | string | picture",
+          "optional": false,
+          "description": "Number of bytes including null terminator, or string constant, or picture token"
+        }
+      ],
+      "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "Fixed-length (includes null terminator)",
+      "notes": "Compatible with C language strings and Btrieve ZSTRING. Implicitly supports array-style access"
+    },
+    {
+      "name": "PSTRING",
+      "category": "string",
+      "description": "Pascal-style string with embedded length byte",
+      "syntax": "label PSTRING(length | string_constant | @picture) [,attributes...]",
+      "parameters": [
+        {
+          "name": "length",
+          "type": "numeric | string | picture",
+          "optional": false,
+          "description": "Number of bytes (max 255), or string constant, or picture token. First byte stores length"
+        }
+      ],
+      "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "Fixed-length (includes length byte)",
+      "notes": "Compatible with Pascal strings. First byte contains string length"
+    },
+    {
+      "name": "ASTRING",
+      "category": "string",
+      "description": "Atomic string (reference-counted variable-length string)",
+      "syntax": "label ASTRING [,attributes...]",
+      "parameters": [],
+      "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "Variable-length (dynamically allocated)",
+      "notes": "Reference-counted, automatically manages memory. Thread-safe for multiple references"
+    },
+    {
+      "name": "DATE",
+      "category": "date_time",
+      "description": "Four-byte date value (standard date)",
+      "syntax": "label DATE[(initial_value)] [,attributes...]",
+      "parameters": [
+        {
+          "name": "initial_value",
+          "type": "numeric",
+          "optional": true,
+          "description": "The initial value of the DATE variable (Clarion standard date)"
+        }
+      ],
+      "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "4 bytes",
+      "notes": "Standard Clarion date (days since December 28, 1800). Use DATE() function to get current date"
+    },
+    {
+      "name": "TIME",
+      "category": "date_time",
+      "description": "Four-byte time value (centiseconds since midnight)",
+      "syntax": "label TIME[(initial_value)] [,attributes...]",
+      "parameters": [
+        {
+          "name": "initial_value",
+          "type": "numeric",
+          "optional": true,
+          "description": "The initial value of the TIME variable (centiseconds since midnight)"
+        }
+      ],
+      "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "4 bytes",
+      "notes": "Centiseconds since midnight (0-8639999). Use CLOCK() function to get current time"
+    },
+    {
+      "name": "MEMO",
+      "category": "special",
+      "description": "Variable-length text field for large text data",
+      "syntax": "label MEMO[(max_length)] [,attributes...]",
+      "parameters": [
+        {
+          "name": "max_length",
+          "type": "numeric",
+          "optional": true,
+          "description": "Maximum length in bytes. If omitted, defaults to 64K"
+        }
+      ],
+      "attributes": ["NAME", "EXTERNAL", "DLL"],
+      "size": "Variable-length (up to max_length)",
+      "notes": "Used for large text fields. Must be last field in RECORD if over 64K. File driver support required"
+    },
+    {
+      "name": "BLOB",
+      "category": "special",
+      "description": "Binary Large Object for variable-length binary data",
+      "syntax": "label BLOB [(max_length)] [,attributes...]",
+      "parameters": [
+        {
+          "name": "max_length",
+          "type": "numeric",
+          "optional": true,
+          "description": "Maximum length in bytes. Can exceed 64K if supported by file driver"
+        }
+      ],
+      "attributes": ["NAME", "EXTERNAL", "DLL"],
+      "size": "Variable-length (up to max_length)",
+      "notes": "Used for large binary data (images, documents). Must be last field in RECORD if over 64K"
+    },
+    {
+      "name": "ANY",
+      "category": "special",
+      "description": "Generic data type placeholder",
+      "syntax": "label ANY [,attributes...]",
+      "parameters": [],
+      "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "4 bytes",
+      "notes": "Can hold reference to any data type. Typically used for polymorphic parameters"
+    },
+    {
+      "name": "GROUP",
+      "category": "complex",
+      "description": "Declares a group of related fields (structure)",
+      "syntax": "label GROUP([group]) [,attributes...]",
+      "parameters": [
+        {
+          "name": "group",
+          "type": "group_label",
+          "optional": true,
+          "description": "The label of a previously declared GROUP or QUEUE from which to inherit structure. Can reference a GROUP or QUEUE with TYPE attribute."
+        }
+      ],
+      "attributes": ["PRE", "TYPE", "OVER", "DIM", "EXTERNAL", "STATIC", "THREAD", "BINDABLE", "NAME", "DLL"],
+      "size": "Variable (sum of member field sizes)",
+      "notes": "Groups fields into a structure. Can inherit from another GROUP using GROUP(basegroup). Fields declared between GROUP and END. Can be used as a data type when TYPE attribute is present. Supports nested groups."
+    },
+    {
+      "name": "QUEUE",
+      "category": "complex",
+      "description": "Declares a dynamic array/table structure",
+      "syntax": "label QUEUE([group]) [,attributes...]",
+      "parameters": [
+        {
+          "name": "group",
+          "type": "group_label",
+          "optional": true,
+          "description": "The label of a previously declared GROUP, QUEUE, or RECORD from which to inherit structure. Can have or not have TYPE attribute."
+        }
+      ],
+      "attributes": ["PRE", "TYPE", "DIM", "STATIC", "THREAD", "BINDABLE", "EXTERNAL", "DLL"],
+      "size": "Variable (dynamically allocated)",
+      "notes": "Dynamic table structure with ADD/DELETE operations. Can inherit from GROUP using QUEUE(basegroup). Fields declared between QUEUE and END. Memory is dynamically allocated/freed. Can be used as a data type when TYPE attribute is present."
+    },
+    {
+      "name": "CLASS",
+      "category": "complex",
+      "description": "Declares an object-oriented class",
+      "syntax": "label CLASS([parentclass]) [,attributes...]",
+      "parameters": [
+        {
+          "name": "parentclass",
+          "type": "class_label",
+          "optional": true,
+          "description": "The label of a parent CLASS from which to inherit structure and methods. Derived class inherits all data members and methods from parent."
+        }
+      ],
+      "attributes": ["TYPE", "MODULE", "LINK", "DLL", "IMPLEMENTS", "THREAD", "PRIVATE", "PROTECTED", "EXTERNAL", "STATIC", "BINDABLE", "DIM", "NETCLASS", "PARTIAL"],
+      "size": "Variable (object instance)",
+      "notes": "Object-oriented class declaration. Can inherit from base class using CLASS(baseclass). Contains properties (data) and methods (procedures). Supports PRIVATE, PROTECTED, and PUBLIC visibility. Must end with END statement."
+    },
+    {
+      "name": "FILE",
+      "category": "complex",
+      "description": "Declares a file structure for data storage",
+      "syntax": "label FILE [,DRIVER('driver')] [,PRE(prefix)] [,attributes...]",
+      "parameters": [],
+      "attributes": ["DRIVER", "PRE", "NAME", "CREATE", "OWNER", "ENCRYPT", "RECLAIM", "BINDABLE", "EXTERNAL", "THREAD"],
+      "size": "N/A (file structure)",
+      "notes": "File declaration with DRIVER, RECORD, and KEY sections. DRIVER specifies file type (TOPSPEED, ASCII, BASIC, DOS, etc.). Contains RECORD for fields and KEY for indexes. Must specify DRIVER attribute."
+    },
+    {
+      "name": "RECORD",
+      "category": "complex",
+      "description": "Declares a record structure within a FILE",
+      "syntax": "RECORD [,PRE(prefix)]",
+      "parameters": [],
+      "attributes": ["PRE"],
+      "size": "Variable (sum of field sizes)",
+      "notes": "Defines the record layout within a FILE declaration. Contains field definitions between RECORD and END. Typically follows KEY declarations in FILE structure."
+    },
+    {
+      "name": "VIEW",
+      "category": "complex",
+      "description": "Declares a multi-file view (relational join)",
+      "syntax": "label VIEW(primary_file) [,FILTER(...)] [,ORDER(...)]",
+      "parameters": [
+        {
+          "name": "primary_file",
+          "type": "file_label",
+          "optional": false,
+          "description": "The primary file for the view"
+        }
+      ],
+      "attributes": ["FILTER", "ORDER", "PROJECT", "JOIN"],
+      "size": "N/A (view structure)",
+      "notes": "Declares a relational view joining multiple files. Contains PROJECT for field selection and JOIN for related files. Provides SQL-like relational queries in Clarion."
+    },
+    {
+      "name": "INTERFACE",
+      "category": "complex",
+      "description": "Declares an interface definition (contract)",
+      "syntax": "label INTERFACE [,TYPE]",
+      "parameters": [],
+      "attributes": ["TYPE"],
+      "size": "N/A (interface definition)",
+      "notes": "Defines an interface that classes can implement. Contains method prototypes without implementation. Classes implementing the interface must provide all method implementations."
+    },
+    {
+      "name": "MODULE",
+      "category": "complex",
+      "description": "Declares external module reference",
+      "syntax": "label MODULE('module_name')",
+      "parameters": [
+        {
+          "name": "module_name",
+          "type": "string",
+          "optional": false,
+          "description": "The name of the external module"
+        }
+      ],
+      "attributes": [],
+      "size": "N/A (reference)",
+      "notes": "References an external compiled module. Used with CLASS to specify implementation location. The module must be linked at compile/link time."
+    }
+  ]
+}

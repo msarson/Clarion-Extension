@@ -908,7 +908,7 @@
         "vscode:prepublish": "npm run compile && npm run copy-data",
         "compile": "tsc -b",
         "compile:release": "cross-env VSCODE_RELEASE_MODE=true npm run compile",
-        "copy-data": "node -e \"const fs=require('fs'),path=require('path'); fs.mkdirSync('out/server/src/data',{recursive:true}); fs.copyFileSync('server/src/data/clarion-builtins.json','out/server/src/data/clarion-builtins.json'); fs.copyFileSync('server/src/data/clarion-attributes.json','out/server/src/data/clarion-attributes.json'); fs.copyFileSync('server/src/data/clarion-controls.json','out/server/src/data/clarion-controls.json');\"",
+        "copy-data": "node -e \"const fs=require('fs'),path=require('path'); fs.mkdirSync('out/server/src/data',{recursive:true}); fs.copyFileSync('server/src/data/clarion-builtins.json','out/server/src/data/clarion-builtins.json'); fs.copyFileSync('server/src/data/clarion-attributes.json','out/server/src/data/clarion-attributes.json'); fs.copyFileSync('server/src/data/clarion-controls.json','out/server/src/data/clarion-controls.json'); fs.copyFileSync('server/src/data/clarion-datatypes.json','out/server/src/data/clarion-datatypes.json');\"",
         "package": "vsce package",
         "package:release": "cross-env VSCODE_RELEASE_MODE=true vsce package",
         "watch": "tsc -b -w",
