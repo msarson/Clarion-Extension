@@ -33,6 +33,76 @@ MyProc PROCEDURE()
         assert.ok(isLineUnreachable(ranges, 4), 'Line after RETURN should be unreachable');
     });
 
+    test('DEBUG: User case - nested IF with RETURN', () => {
+        const code = `CBCodeParseClass.FindCommaOrParen   PROCEDURE(STRING CodeTxt, <*STRING OutCharFound>)!,LONG
+Comma1    LONG    
+Paren1    LONG 
+    CODE
+    Comma1=INSTRING(',',CodeTxt,1)       !LINE,AT(0
+    Paren1=INSTRING('(',CodeTxt,1)       !STRING(@D1),
+    IF Paren1 AND Paren1 < Comma1 THEN 
+       Comma1 = Paren1
+       
+    END
+    IF ~OMITTED(OutCharFound) THEN
+       OutCharFound = SUB(Codetxt,Comma1,1)
+       return
+       a=1
+    END
+    RETURN Comma1
+`;
+        console.log('\n=== DEBUG: User Case - Nested IF with RETURN ===');
+        console.log('Code with line numbers:');
+        code.split('\n').forEach((line, idx) => console.log(`  ${idx}: ${line}`));
+        
+        const doc = createDocument(code);
+        const { TokenCache } = require('../TokenCache');
+        const tokens = TokenCache.getInstance().getTokens(doc);
+        
+        console.log('\nPROCEDURE tokens:');
+        const procedures = tokens.filter((t: any) => t.type === 1 || t.subType === 1);
+        procedures.forEach((p: any) => {
+            console.log(`  Line ${p.line}: ${p.value} (finishesAt: ${p.finishesAt})`);
+        });
+        
+        console.log('\nIF structure tokens:');
+        const ifStructures = tokens.filter((t: any) => t.value && t.value.toUpperCase() === 'IF');
+        ifStructures.forEach((s: any) => {
+            console.log(`  Line ${s.line}: ${s.value} (type: ${s.type}, subType: ${s.subType}, finishesAt: ${s.finishesAt})`);
+        });
+        
+        console.log('\nRETURN tokens:');
+        const returns = tokens.filter((t: any) => t.value && t.value.toUpperCase() === 'RETURN');
+        returns.forEach((r: any) => {
+            console.log(`  Line ${r.line}: ${r.value} (type: ${r.type})`);
+        });
+        
+        const ranges = UnreachableCodeProvider.provideUnreachableRanges(doc);
+        console.log('\nUnreachable ranges:');
+        ranges.forEach(r => {
+            const line = code.split('\n')[r.start.line];
+            console.log(`  Line ${r.start.line}: "${line.trim()}"`);
+        });
+        
+        console.log('\nExpected behavior (Phase 1):');
+        console.log('  Line 13 (return) - conditional, inside IF at line 11');
+        console.log('  Line 14 (a=1) - Technically unreachable, but Phase 1 does NOT track within structures');
+        console.log('  Line 16 (RETURN Comma1) - top-level, marks nothing (at procedure end)');
+        console.log('  Phase 1: Conservative detection, only top-level terminators');
+        
+        // Phase 1 does NOT mark code unreachable within structures
+        // Only marks code unreachable after top-level RETURN/EXIT/HALT
+        const line14Unreachable = isLineUnreachable(ranges, 14);
+        console.log(`\nLine 14 marked unreachable: ${line14Unreachable}`);
+        console.log('Phase 1 limitation: Does not analyze unreachable code within IF/LOOP blocks');
+        
+        // The IMPORTANT test: code after the outer IF...END should NOT be marked
+        const line16Unreachable = isLineUnreachable(ranges, 16);
+        console.log(`Line 16 marked unreachable: ${line16Unreachable} (should be false)`);
+        
+        assert.ok(!line16Unreachable, 'Line 16 should be reachable - it is after the IF...END block');
+    });
+
     test('DEBUG: Check tokenizer output for IF...ELSE...END structure', () => {
         const code = `StateCalc:Kill PROCEDURE
 StateCalc:Kill_Called    BYTE,STATIC
