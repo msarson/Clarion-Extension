@@ -233,6 +233,10 @@ export class TokenCache {
     private buildLineTokenMap(document: TextDocument, tokens: Token[]): Map<number, LineTokenData> {
         const lineTokens = new Map<number, LineTokenData>();
         
+        // 🚀 PERF: Split text ONCE instead of calling document.getText() for each line
+        const allText = document.getText();
+        const lines = allText.split(/\r?\n/);
+        
         // Group tokens by line
         const tokensByLine = new Map<number, Token[]>();
         for (const token of tokens) {
@@ -242,16 +246,11 @@ export class TokenCache {
             tokensByLine.get(token.line)!.push(token);
         }
         
-        // Build line data
-        for (let lineNum = 0; lineNum < document.lineCount; lineNum++) {
-            const lineText = document.getText({
-                start: { line: lineNum, character: 0 },
-                end: { line: lineNum, character: Number.MAX_SAFE_INTEGER }
-            });
-            
+        // Build line data using pre-split lines
+        for (let lineNum = 0; lineNum < lines.length; lineNum++) {
             lineTokens.set(lineNum, {
                 lineNumber: lineNum,
-                lineText,
+                lineText: lines[lineNum],
                 tokens: tokensByLine.get(lineNum) || []
             });
         }
