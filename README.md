@@ -89,6 +89,30 @@ Settings are saved in `.vscode/settings.json` within the folder - commit them wi
 
 ## What's New
 
+### Version 0.8.2 (Dec 2025)
+
+#### ⚡ **58x Faster Performance for Large Files**
+- **Massive speed improvement** - Keystroke response time reduced from 820-880ms to 10-15ms
+  - IntelliSense, signature help, and hover now appear almost instantly
+  - Optimized token cache to build document structure only when needed
+  - Large files (13K+ lines) now feel as responsive as small files
+- **Enhanced folding** - Fixed crashes with extremely large files by limiting folding ranges
+
+#### 📚 **Expanded Language Support**
+- **40+ new keywords and functions** with full IntelliSense support
+  - Data types: `UNSIGNED`, `INT64`, `UINT64`
+  - Keywords: `PRAGMA`, `EQUATE`, `PROCEDURE`, `FUNCTION`, `EXECUTE`, `BEGIN`, `ASSERT`, `SELF`, `PARENT`, and more
+  - Logical operators: `BAND`, `BOR`, `BXOR`, `BNOT`, `BSHIFT`
+  - Built-in functions: `INT`, `ROUND`, `VAL`, `CHR`, `INSTRING`, `CLOCK`, `TODAY`, `DAY`, `MONTH`, `YEAR`
+  - Procedure attributes: `RAW`, `PASCAL`, `PROC`, `NAME`, `DLL`, and more
+- **Context-aware help** - Keywords like `TO` show different documentation based on usage context
+
+### Version 0.8.0 (Dec 2025)
+
+#### 🐛 **Critical Bug Fix: Unreachable Code Detection**
+- **Eliminated false positives** in branching structures (IF/ELSE, CASE/OF, EXECUTE/BEGIN)
+- **Proper Clarion semantics** - Terminators now correctly scoped to branches vs entire procedure
+
 ### Version 0.7.8 (Dec 2025)
 
 #### ✨ Smart IntelliSense for Built-in Functions

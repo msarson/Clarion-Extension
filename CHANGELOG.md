@@ -6,6 +6,36 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 
 ---
 
+## [0.8.2] - 2025-12-30
+
+### ⚡ Performance Improvements
+
+#### Massive Performance Boost for Large Files
+- **58x faster incremental updates** - Keystroke response time reduced from 820-880ms to 10-15ms
+  - **Root cause**: Token cache was rebuilding DocumentStructure indexes on every keystroke
+  - **Fix**: DocumentStructure now built on-demand only when providers need it
+  - **Impact**: Signature help, hover, and completions now appear almost instantly in large files (13K+ lines)
+  
+- **Optimized folding provider**
+  - Fixed crash when folding ranges exceeded string serialization limits
+  - Added range limit of 10,000 to prevent excessive memory usage
+  - Large files now fold smoothly without crashes
+
+### 📚 Language Support Expansion
+
+#### New Keywords & Built-in Functions Added
+- **Data Types**: `UNSIGNED`, `INT64`, `UINT64`
+- **Keywords**: `PRAGMA`, `EQUATE`, `ONCE`, `PROCEDURE`, `FUNCTION`, `EXECUTE`, `BEGIN`, `ASSERT`, `SELF`, `PARENT`, `ALL`, `TIMES`, `NULL`, `BREAK`, `PEEK`, `ADDRESS`, `END`, `NOT`, `?` (debug marker)
+- **Logical Operators**: `BAND`, `BOR`, `BXOR`, `BNOT`, `BSHIFT`
+- **Built-in Functions**: `INT`, `ROUND`, `VAL`, `CHR`, `INSTRING`, `CLOCK`, `TODAY`, `DAY`, `MONTH`, `YEAR`
+- **Procedure Attributes**: `RAW`, `PASCAL`, `PROC`, `NAME`, `DLL`, `C`, `STDCALL`, `PRIVATE`, `PROTECTED`, `VIRTUAL`, `DERIVED`
+
+#### Context-Aware Documentation
+- `TO` keyword now shows different help based on context (LOOP vs CASE OF)
+- Enhanced hover documentation for procedures with multiple usage contexts
+
+---
+
 ## [0.8.0] - 2025-12-30
 
 ### 🐛 Critical Bug Fixes
