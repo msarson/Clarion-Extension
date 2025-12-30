@@ -8,6 +8,8 @@ class ClarionFoldingProvider {
     private tokens: Token[];
     private foldingRanges: FoldingRange[];
     private inferenceUsedCount: number = 0;
+    private readonly MAX_FOLDING_RANGES = 10000; // Safety limit
+    private processedTokens: Set<Token> = new Set(); // Prevent circular references
 
     constructor(tokens: Token[]) {
         this.tokens = tokens;
@@ -18,6 +20,7 @@ class ClarionFoldingProvider {
         const perfStart = performance.now();
         this.foldingRanges = [];
         this.inferenceUsedCount = 0; // Reset counter for this computation
+        this.processedTokens.clear(); // Reset processed tokens set
     
         // 🚀 PERFORMANCE: Filter once and collect regions in same pass
         const foldableTokens: Token[] = [];
@@ -106,6 +109,19 @@ class ClarionFoldingProvider {
     
 
     private processFolding(token: Token): void {
+        // Prevent circular references and excessive ranges
+        if (this.processedTokens.has(token)) {
+            logger.warn(`⚠️ [FoldingProvider] Circular reference detected for token: ${token.value} at line ${token.line}`);
+            return;
+        }
+        
+        if (this.foldingRanges.length >= this.MAX_FOLDING_RANGES) {
+            logger.warn(`⚠️ [FoldingProvider] Maximum folding ranges (${this.MAX_FOLDING_RANGES}) reached, stopping processing`);
+            return;
+        }
+        
+        this.processedTokens.add(token);
+        
         if (!token.finishesAt || token.line >= token.finishesAt) {
             return; // Skip invalid or single-line elements
         }
@@ -177,8 +193,13 @@ class ClarionFoldingProvider {
             logger.info(`✅ [FoldingProvider] ROUTINE '${token.value}' with inferred CODE folded from Line ${token.line} to ${token.finishesAt}`);
         }
     
-        // ✅ Recursively process children
+        // ✅ Recursively process children (with safety checks)
         if (token.children && token.children.length > 0) {
+            if (token.children.length > 1000) {
+                logger.warn(`⚠️ [FoldingProvider] Token '${token.value}' has ${token.children.length} children - skipping to prevent explosion`);
+                return;
+            }
+            
             for (const child of token.children) {
                 this.processFolding(child);
             }

@@ -55,8 +55,13 @@ export class SignatureHelpProvider {
             const { methodName, prefix, parameterIndex, isClassMethod } = methodCallInfo;
             logger.info(`Method call detected: ${prefix ? prefix + '.' : ''}${methodName}, parameter index: ${parameterIndex}`);
 
-            // Get tokens for context detection
-            const tokens = this.tokenCache.getTokens(document);
+            // 🚀 FAST PATH: Get cached tokens for instant signature help
+            // Don't trigger re-tokenization as it blocks the UI
+            const tokens = this.tokenCache.getCachedTokens(document);
+            if (tokens.length === 0) {
+                logger.info('No cached tokens available for signature help');
+                return null;
+            }
 
             // Get control context for attribute validation
             const docStructure = new DocumentStructure(tokens);

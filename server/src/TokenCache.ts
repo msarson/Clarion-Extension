@@ -49,6 +49,22 @@ export class TokenCache {
     }
 
     /**
+     * 🚀 FAST PATH: Get cached tokens WITHOUT triggering re-tokenization
+     * Use this for interactive features like signature help that need to be instant
+     * @param document Document to get tokens for
+     * @returns Cached tokens or empty array if not cached
+     */
+    public getCachedTokens(document: TextDocument): Token[] {
+        const cached = this.cache.get(document.uri);
+        if (cached) {
+            logger.debug(`⚡ Fast path: returning ${cached.tokens.length} cached tokens for ${document.uri}`);
+            return cached.tokens;
+        }
+        logger.debug(`⚡ Fast path: no cached tokens for ${document.uri}, returning empty array`);
+        return [];
+    }
+
+    /**
      * Get tokens for a document, using cached tokens if available
      * Implements incremental line-based re-tokenization for performance
      * @param document The text document

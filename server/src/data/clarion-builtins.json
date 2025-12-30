@@ -1267,6 +1267,148 @@
           "syntax": "YEAR(date)"
         }
       ]
+    },
+    {
+      "name": "WHAT",
+      "signatures": [
+        {
+          "params": [
+            { "name": "group", "optional": false },
+            { "name": "number", "optional": false },
+            { "name": "dimension", "optional": true }
+          ],
+          "returnType": "ANY",
+          "description": "Returns reference to field at ordinal position in GROUP/RECORD/CLASS/QUEUE. Used for runtime introspection. Assign to ANY variable. For dimensioned fields, dimension parameter specifies array element. Returns NULL if invalid position.",
+          "syntax": "WHAT(group, number [,dimension])"
+        }
+      ]
+    },
+    {
+      "name": "WHO",
+      "signatures": [
+        {
+          "params": [
+            { "name": "group", "optional": false },
+            { "name": "number", "optional": false }
+          ],
+          "returnType": "STRING",
+          "description": "Returns field name at ordinal position in GROUP/RECORD/CLASS/QUEUE. Returns NAME attribute value if specified, otherwise returns field label. Used for runtime introspection and serialization. Group must have BINDABLE attribute.",
+          "syntax": "WHO(group, number)"
+        }
+      ]
+    },
+    {
+      "name": "POINTER",
+      "signatures": [
+        {
+          "params": [
+            { "name": "queue", "optional": false }
+          ],
+          "returnType": "LONG",
+          "description": "Returns entry number of last QUEUE entry accessed by ADD, GET, or PUT. Only valid if operation succeeded. Used to track current position in queue or pass position between routines.",
+          "syntax": "POINTER(queue)"
+        }
+      ]
+    },
+    {
+      "name": "ISGROUP",
+      "signatures": [
+        {
+          "params": [
+            { "name": "label", "optional": false },
+            { "name": "element", "optional": false }
+          ],
+          "returnType": "SIGNED",
+          "description": "Returns true if element at ordinal position in GROUP/QUEUE is a GROUP data type. Returns false otherwise. Used for runtime type checking and generic serialization routines.",
+          "syntax": "ISGROUP(label, element)"
+        }
+      ]
+    },
+    {
+      "name": "GETGROUP",
+      "signatures": [
+        {
+          "params": [
+            { "name": "group", "optional": false },
+            { "name": "number", "optional": false },
+            { "name": "dimension", "optional": true }
+          ],
+          "returnType": "STRING",
+          "description": "Returns GROUP reference to field at ordinal position in GROUP/QUEUE. For dimensioned groups, dimension parameter required. Returns NULL if not a GROUP or if dimensioned group without dimension specified. Used for nested structure access.",
+          "syntax": "GETGROUP(group, number [,dimension])"
+        }
+      ]
+    },
+    {
+      "name": "HOWMANY",
+      "signatures": [
+        {
+          "params": [
+            { "name": "label", "optional": false },
+            { "name": "element", "optional": false }
+          ],
+          "returnType": "LONG",
+          "description": "Returns number of dimensions for field at ordinal position in GROUP/QUEUE/RECORD. Multi-dimensional arrays are flattened (e.g., DIM(3,3) returns 9). Returns 0 for non-dimensioned fields or fields within dimensioned groups.",
+          "syntax": "HOWMANY(label, element)"
+        }
+      ]
+    },
+    {
+      "name": "STOP",
+      "signatures": [
+        {
+          "params": [
+            { "name": "message", "optional": true }
+          ],
+          "returnType": "",
+          "description": "Suspends program execution and displays message window. Offers option to continue or exit. On exit, closes all files and frees memory. Used for debugging and error handling. Message can be up to 64K.",
+          "syntax": "STOP([message])"
+        }
+      ]
+    },
+    {
+      "name": "STRPOS",
+      "signatures": [
+        {
+          "params": [
+            { "name": "first", "optional": false },
+            { "name": "second", "optional": false },
+            { "name": "mode", "optional": true }
+          ],
+          "returnType": "LONG",
+          "description": "Returns starting position of substring match using regular expression. Second parameter contains regex pattern. Mode parameter: 0=case sensitive (default), 1=case insensitive. Uses Match:Regular mode. Returns 0 if no match found.",
+          "syntax": "STRPOS(first, second [,mode])"
+        }
+      ]
+    },
+    {
+      "name": "LEFT",
+      "signatures": [
+        {
+          "params": [
+            { "name": "string", "optional": false },
+            { "name": "length", "optional": true }
+          ],
+          "returnType": "STRING",
+          "description": "Returns left-justified string. Removes leading spaces, pads trailing spaces to specified length. If length omitted, uses string length. Use CLIP(LEFT()) to remove both leading and trailing spaces.",
+          "syntax": "LEFT(string [,length])"
+        }
+      ]
+    },
+    {
+      "name": "MATCH",
+      "signatures": [
+        {
+          "params": [
+            { "name": "first", "optional": false },
+            { "name": "second", "optional": false },
+            { "name": "mode", "optional": true }
+          ],
+          "returnType": "SIGNED",
+          "description": "Returns true/false based on pattern match. Modes: Match:Simple (exact match), Match:Wild (wildcards * and ?), Match:Regular (regex). Default is Match:Wild. Can combine with Match:NoCase for case-insensitive matching.",
+          "syntax": "MATCH(first, second [,mode])"
+        }
+      ]
     }
   ]
 }
