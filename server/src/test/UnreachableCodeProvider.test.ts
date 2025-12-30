@@ -283,4 +283,148 @@ TestProc PROCEDURE()
         
         assert.strictEqual(ranges.length, 0, 'Procedure without CODE should have no unreachable ranges');
     });
+
+    test('Comprehensive test: All control structures and semantics', () => {
+        const code = `    PROGRAM
+    MAP
+TestUnreachable PROCEDURE()
+TestIfELSE PROCEDURE()
+TestLOOP PROCEDURE()
+TestCASE PROCEDURE()
+TestEXECUTEBEGIN PROCEDURE()
+    END
+    CODE
+TestUnreachable     PROCEDURE()
+
+    CODE
+
+    a = 1                     ! reachable
+
+    RETURN                    ! reachable
+    a = 2                     ! unreachable (after top-level RETURN) works (x)
+
+TestIfELSE PROCEDURE()
+ CODE
+    ! ---------------- IF / ELSE ----------------
+    IF a = 1
+        b = 1                   ! reachable
+        RETURN                  ! reachable
+        b = 2                   ! unreachable (after RETURN in IF branch)
+    ELSE
+        b = 3                   ! reachable
+    END
+    b = 4                     ! reachable
+
+    ! ---------------- IF / ELSIF / ELSE ----------------
+    IF a = 1
+        c = 1                   ! reachable
+    ELSIF a = 2
+        RETURN                  ! reachable
+        c = 2                   ! unreachable (after RETURN in ELSIF branch)
+    ELSE
+        c = 3                   ! reachable
+    END
+    c = 4                     ! reachable
+
+TestLOOP PROCEDURE()
+ CODE
+    ! ---------------- LOOP ----------------
+    LOOP
+        d = 1                   ! reachable
+        RETURN                  ! reachable
+        d = 2                   ! unreachable (after RETURN inside LOOP)
+    END
+    d = 3                     ! unreachable (procedure terminated by LOOP RETURN)
+
+TestCASE PROCEDURE()
+ CODE
+    ! ---------------- CASE ----------------
+    CASE a
+    OF 1
+        e = 1                   ! reachable
+        RETURN                  ! reachable
+        e = 2                   ! unreachable (after RETURN in CASE branch)
+    OF 2
+        e = 3                   ! reachable
+    ELSE
+        e = 4                   ! reachable
+    END
+    e = 5                     ! reachable
+TestEXECUTEBEGIN PROCEDURE()
+ CODE
+    ! ---------------- EXECUTE + BEGIN ----------------
+    EXECUTE a
+        BEGIN
+            f = 1                   ! reachable
+            RETURN                  ! reachable
+            f = 2                   ! unreachable (after RETURN in EXECUTE branch)  (x)
+        END
+        f = 3                     ! reachable  (x)
+    END
+    f = 4                     ! reachable
+
+    ! ---------------- ROUTINE ----------------
+TestRoutine     ROUTINE 
+    g = 1                   ! reachable
+    RETURN                  ! reachable
+    g = 2                   ! unreachable (after RETURN in ROUTINE)
+
+    g = 3                     ! reachable (ROUTINE does not terminate procedure)
+
+    RETURN                    ! reachable
+    g = 4                     ! unreachable (after final RETURN)  (x)
+`;
+
+        const doc = createDocument(code);
+        const ranges = UnreachableCodeProvider.provideUnreachableRanges(doc);
+        
+        // Parse expected unreachable lines from comments
+        const lines = code.split('\n');
+        const expectedUnreachable: number[] = [];
+        const expectedReachable: number[] = [];
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+            
+            // Skip empty lines, comments-only lines, labels, and END statements
+            if (!trimmed || trimmed.startsWith('!') || !line.startsWith(' ') || trimmed.toUpperCase() === 'END') {
+                continue;
+            }
+            
+            if (line.includes('! unreachable')) {
+                expectedUnreachable.push(i);
+            } else if (line.includes('! reachable')) {
+                expectedReachable.push(i);
+            }
+        }
+        
+        // Get actual unreachable lines
+        const actualUnreachable = ranges.map(r => r.start.line).sort((a, b) => a - b);
+        
+        // Check for missing unreachable detections
+        const missing = expectedUnreachable.filter(line => !actualUnreachable.includes(line));
+        if (missing.length > 0) {
+            const details = missing.map(line => `  Line ${line}: ${lines[line].trim()}`).join('\n');
+            assert.fail(`Missing unreachable detections:\n${details}`);
+        }
+        
+        // Check for false positives (lines marked unreachable but should be reachable)
+        const falsePositives = actualUnreachable.filter(line => expectedReachable.includes(line));
+        if (falsePositives.length > 0) {
+            const details = falsePositives.map(line => `  Line ${line}: ${lines[line].trim()}`).join('\n');
+            assert.fail(`False positives (should be reachable):\n${details}`);
+        }
+        
+        // Check for unexpected unreachable lines (not in either expected list)
+        const unexpected = actualUnreachable.filter(line => 
+            !expectedUnreachable.includes(line) && !expectedReachable.includes(line)
+        );
+        if (unexpected.length > 0) {
+            const details = unexpected.map(line => `  Line ${line}: ${lines[line].trim()}`).join('\n');
+            assert.fail(`Unexpected unreachable lines:\n${details}`);
+        }
+        
+        console.log(`\n✅ Comprehensive test passed: ${expectedUnreachable.length} unreachable lines correctly detected`);
+    });
 });

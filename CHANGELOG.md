@@ -6,6 +6,73 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 
 ---
 
+## [0.8.0] - 2025-12-30
+
+### 🐛 Critical Bug Fixes
+
+#### Unreachable Code Detection - Complete Fix for Branching Structures
+- **Fixed incorrect unreachable detection in branching control flow**
+  - ELSE/ELSIF branches now correctly reset termination flags
+  - CASE OF/OROF/ELSE branches now properly handled
+  - EXECUTE/BEGIN blocks now correctly scoped
+  - ROUTINE with EXIT now properly terminates only the routine
+  - **Impact**: Eliminates false positives where reachable code was incorrectly dimmed
+  
+- **Root causes identified and fixed**:
+  1. ELSE was tokenized as `ConditionalContinuation` but code checked for `Keyword` type
+  2. OROF was missing from tokenizer pattern entirely
+  3. BEGIN was treated as "grouping only" causing parent EXECUTE to be incorrectly terminated
+  4. ROUTINE didn't push itself onto structure stack, so EXIT had no context
+  5. END statements were being marked unreachable (now correctly excluded)
+
+- **Clarion semantics now properly implemented**:
+  - **Branching structures**: IF/ELSIF/ELSE, CASE/OF/OROF/ELSE, EXECUTE/BEGIN, ROUTINE
+    - Terminator (RETURN/EXIT/HALT) only affects that branch
+  - **Looping structures**: LOOP, ACCEPT
+    - Terminator affects entire procedure
+  - **Branch keywords**: ELSE, ELSIF, OF, OROF
+    - Reset terminated flag when entering new branch
+
+- **Example cases now working**:
+  ```clarion
+  IF condition
+    RETURN TRUE
+  ELSE
+    DO Something    ! ✓ No longer incorrectly marked unreachable
+  END
+  RETURN FALSE      ! ✓ Correctly reachable
+  
+  EXECUTE a
+    BEGIN
+      RETURN
+      x = 1         ! ✓ Correctly unreachable (inside BEGIN)
+    END
+    x = 2           ! ✓ Correctly reachable (different EXECUTE branch)
+  END
+  
+  TestRoutine ROUTINE
+    EXIT
+    x = 1           ! ✓ Correctly unreachable (after EXIT)
+  x = 2             ! ✓ Correctly reachable (procedure code after ROUTINE)
+  ```
+
+### 🔧 Technical Improvements
+
+- **Added OROF to tokenizer pattern** (`server/src/tokenizer/TokenPatterns.ts`)
+  - Now recognized as ConditionalContinuation alongside OF
+- **Enhanced branch detection logic** (`server/src/providers/UnreachableCodeProvider.ts`)
+  - Checks both Keyword and ConditionalContinuation token types
+  - Properly resets termination flags for ELSE/ELSIF/OF/OROF/ELSE
+- **Fixed BEGIN scoping** 
+  - Now treated as branching structure (like IF/CASE)
+  - RETURN inside BEGIN only terminates that BEGIN block
+- **Fixed ROUTINE handling**
+  - ROUTINE now pushed onto structure stack
+  - EXIT properly terminates ROUTINE but not procedure
+  - ROUTINE code now analyzed for unreachability
+
+---
+
 ## [0.7.9] - 2025-12-29
 
 ### 🚀 Major Improvements

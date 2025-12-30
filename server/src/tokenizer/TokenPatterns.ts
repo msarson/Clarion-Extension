@@ -56,8 +56,8 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.PointerParameter]: /\*\s*\b[A-Za-z_][A-Za-z0-9_]*\b/i,
     [TokenType.FieldEquateLabel]: /\?[A-Za-z_][A-Za-z0-9_]*/i,
     [TokenType.ClarionDocument]: /\b(?:PROGRAM|MEMBER)\b/i,
-    // ✅ ELSE, ELSIF, OF should not match after : or . (though unlikely, be safe)
-    [TokenType.ConditionalContinuation]: /(?<![:\w.])\b(?:ELSE|ELSIF|OF)\b/i,  // ✅ New type for ELSE and ELSIF
+    // ✅ ELSE, ELSIF, OF, OROF should not match after : or . (though unlikely, be safe)
+    [TokenType.ConditionalContinuation]: /(?<![:\w.])\b(?:ELSE|ELSIF|OROF|OF)\b/i,  // ✅ OROF must come before OF to match correctly
     [TokenType.Keyword]: /(?<![:\w.])\b(?:RETURN|THEN|UNTIL|WHILE|EXIT|NEW|PROCEDURE|FUNCTION|ROUTINE|PROC|BREAK|KEY)\b/i, // ✅ Added negative lookbehind and FUNCTION
     [TokenType.PictureFormat]: /(@N[^\s,]*|@[Ee][^\s,]*|@S\d+|@D\d{1,2}[.\-_'`<>]?\d{0,2}B?|@T\d{1,2}[.\-_'`]?[B]?|@[Pp][^Pp\n]+[Pp]B?|@[Kk][^Kk\n]+[Kk]B?)/i,
     [TokenType.ExecutionMarker]: /\b(?:CODE|DATA)\b/i,
