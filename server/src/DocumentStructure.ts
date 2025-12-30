@@ -3,7 +3,7 @@ import LoggerManager from "./logger";
 import { ProcedureUtils } from './utils/ProcedureUtils';
 
 const logger = LoggerManager.getLogger("DocumentStructure");
-logger.setLevel("error"); // Production: Only log errors
+logger.setLevel("error");// Production: Only log errors
 
 export class DocumentStructure {
     private structureStack: Token[] = [];
@@ -249,7 +249,7 @@ export class DocumentStructure {
                 logger.info(`🚀 CODE execution marker set for ROUTINE '${currentRoutine.value}' at Line ${token.line}`);
             } else if (currentProcedure) {
                 currentProcedure.executionMarker = token;
-                logger.info(`🚀 CODE execution marker set for PROCEDURE '${currentProcedure.value}' at Line ${token.line}`);
+                logger.info(`🚀 CODE execution marker set for PROCEDURE '${currentProcedure.label}' (line ${currentProcedure.line}) at Line ${token.line}. Stack depth: ${this.procedureStack.length}`);
             } else {
                 logger.warn(`⚠️ CODE statement found at Line ${token.line}, but no valid procedure or routine to assign it to.`);
             }
