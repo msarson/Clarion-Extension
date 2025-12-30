@@ -119,7 +119,7 @@ export class UnreachableCodeProvider {
                     const structureOnLine = lineTokens.find(t => 
                         t.type === TokenType.Structure &&
                         t.finishesAt !== undefined &&
-                        t.finishesAt > lineNum && // Must end AFTER this line
+                        t.finishesAt >= lineNum && // Must end on or after this line (includes single-line structures)
                         /^(IF|LOOP|CASE|ACCEPT|EXECUTE|BEGIN)$/i.test(t.value)
                     );
                     
@@ -231,10 +231,11 @@ export class UnreachableCodeProvider {
                             // Branch-level termination (inside IF/CASE/EXECUTE)
                             structureStack[terminationLevel].terminated = true;
                         }
-                        continue; // Don't mark the RETURN line itself
+                        // Don't mark the terminator line itself as unreachable - fall through to structure popping
                     }
 
-                    // Check if any structures END on this line (do this AFTER checking unreachable)
+                    // Check if any structures END on this line
+                    // This must happen after terminator processing so single-line structures can be properly cleaned up
                     const endsOnLine = structureStack.filter(s => s.structure.finishesAt === lineNum);
                     if (endsOnLine.length > 0) {
                         logger.info(`Line ${lineNum}: ${endsOnLine.length} structure(s) end here, popping from stack`);
