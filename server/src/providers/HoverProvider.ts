@@ -115,6 +115,61 @@ export class HoverProvider {
                 }
             }
 
+            // Handle TO keyword specially (can be in LOOP or CASE structure)
+            if (word.toUpperCase() === 'TO') {
+                // Search backwards and on current line for LOOP, CASE, or OF keywords
+                let foundLoop = false;
+                let foundCaseOf = false;
+                
+                // Check current line first for OF (CASE OF...TO pattern)
+                const currentLineText = line.toUpperCase();
+                if (currentLineText.includes('OF') && currentLineText.includes('TO')) {
+                    foundCaseOf = true;
+                }
+                
+                // If not found on current line, search backwards
+                if (!foundCaseOf) {
+                    for (let searchLine = position.line; searchLine >= Math.max(0, position.line - 50); searchLine--) {
+                        const searchLineTokens = allTokens.filter(t => t.line === searchLine);
+                        
+                        // Look for LOOP, CASE, OF, or END keywords
+                        for (const token of searchLineTokens) {
+                            const upperValue = token.value.toUpperCase();
+                            if (upperValue === 'LOOP' && token.type === TokenType.Keyword) {
+                                foundLoop = true;
+                                break;
+                            } else if ((upperValue === 'OF' || upperValue === 'OROF') && token.type === TokenType.Keyword) {
+                                foundCaseOf = true;
+                                break;
+                            } else if (upperValue === 'END' && token.type === TokenType.EndStatement) {
+                                // Hit an END, stop searching (structure ended)
+                                break;
+                            }
+                        }
+                        
+                        if (foundLoop || foundCaseOf) break;
+                    }
+                }
+                
+                // Provide context-specific documentation
+                if (foundLoop) {
+                    return {
+                        contents: {
+                            kind: 'markdown',
+                            value: `**TO** (Keyword - in LOOP structure)\n\n**Syntax:** \`i = initial TO limit [BY step]\`\n\nSpecifies the terminating value in a LOOP iteration. When counter exceeds limit (or is less than, if step is negative), loop terminates. The limit expression is evaluated once at loop start.`
+                        }
+                    };
+                } else if (foundCaseOf) {
+                    return {
+                        contents: {
+                            kind: 'markdown',
+                            value: `**TO** (Keyword - in CASE structure)\n\n**Syntax:** \`OF expression TO expression\`\n\nAllows a range of values in an OF or OROF statement. Statements execute if the CASE condition falls within the inclusive range specified. Both expressions are evaluated even if the condition is less than the lower boundary.`
+                        }
+                    };
+                }
+                // If context unclear, fall through to show generic TO documentation
+            }
+
             // Handle ELSE keyword specially (can be in IF or CASE structure)
             if (word.toUpperCase() === 'ELSE') {
                 // Search backwards for CASE or IF keyword to determine context
@@ -159,6 +214,51 @@ export class HoverProvider {
                     };
                 }
                 // If context unclear, show generic ELSE documentation
+            }
+
+            // Handle PROCEDURE keyword specially (different contexts: MAP prototype, CLASS method, implementation)
+            if (word.toUpperCase() === 'PROCEDURE') {
+                const isInClass = documentStructure.isInClassBlock(position.line);
+                
+                // Check if this looks like an implementation (has label before PROCEDURE on same line)
+                const isImplementation = line.trim().match(/^\w+(\.\w+)?\s+PROCEDURE/i) !== null;
+                
+                if (isImplementation) {
+                    // This is a procedure implementation
+                    const hasClassPrefix = line.includes('.');
+                    if (hasClassPrefix) {
+                        return {
+                            contents: {
+                                kind: 'markdown',
+                                value: `**PROCEDURE** (CLASS Method Implementation)\n\n**Syntax:** \`ClassName.MethodName PROCEDURE[(params)]\`\n\nDefines the implementation of a CLASS method. Must match a prototype declared in the CLASS definition.\n\n\`\`\`clarion\nMyClass.MyMethod PROCEDURE(LONG param)\n  CODE\n  ! implementation\n  RETURN\n\`\`\``
+                            }
+                        };
+                    } else {
+                        return {
+                            contents: {
+                                kind: 'markdown',
+                                value: `**PROCEDURE** (Implementation)\n\n**Syntax:** \`ProcName PROCEDURE[(params)]\`\n\nDefines a procedure implementation. Must match a prototype declared in MAP.\n\n\`\`\`clarion\nMyProc PROCEDURE(LONG param)\n  CODE\n  ! implementation\n  RETURN\n\`\`\``
+                            }
+                        };
+                    }
+                } else if (isInMapBlock) {
+                    // This is a MAP prototype
+                    return {
+                        contents: {
+                            kind: 'markdown',
+                            value: `**PROCEDURE** (MAP Prototype)\n\n**Syntax:** \`ProcName PROCEDURE[(params)] [,returnType] [,attributes]\`\n\nDeclares a procedure prototype in MAP block. Specifies the procedure signature, optional return type, and calling conventions.\n\n\`\`\`clarion\nMAP\n  MyProc PROCEDURE(LONG),STRING  ! Returns STRING\n  WinAPI PROCEDURE(*CSTRING),LONG,PASCAL,RAW\nEND\n\`\`\``
+                        }
+                    };
+                } else if (isInClass) {
+                    // This is a CLASS method prototype
+                    return {
+                        contents: {
+                            kind: 'markdown',
+                            value: `**PROCEDURE** (CLASS Method Prototype)\n\n**Syntax:** \`MethodName PROCEDURE[(params)] [,returnType] [,attributes]\`\n\nDeclares a CLASS method prototype. Can include VIRTUAL, PRIVATE, PROTECTED attributes.\n\n\`\`\`clarion\nMyClass CLASS\n  MyMethod PROCEDURE(LONG),STRING,VIRTUAL\n  Init     PROCEDURE(),PROTECTED\nEND\n\`\`\``
+                        }
+                    };
+                }
+                // Fall through to generic PROCEDURE documentation
             }
 
             // Decide priority: data type vs control based on context

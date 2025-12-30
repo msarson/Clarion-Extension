@@ -1078,6 +1078,24 @@ export class DocumentStructure {
     }
 
     /**
+     * Check if a line is inside a CLASS structure
+     */
+    public isInClassBlock(line: number): boolean {
+        const classStructures = this.structuresByType.get('CLASS') || [];
+        
+        for (const struct of classStructures) {
+            const start = struct.line;
+            const end = struct.finishesAt;
+            
+            if (end !== undefined && line > start && line < end) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+
+    /**
      * Gets all CLASS structure blocks in the document
      * @returns Array of CLASS tokens (empty if none found)
      */

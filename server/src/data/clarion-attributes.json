@@ -1337,6 +1337,118 @@
       ],
       "description": "CLASS attribute that specifies the source code file containing the CLASS method implementations. The module file must be included in the project. Used to separate class definition from implementation. Note: MODULE is also a keyword used in MAP blocks to declare procedure prototypes - see builtins.",
       "propertyEquate": ""
+    },
+    {
+      "name": "RAW",
+      "applicableTo": [
+        "PROCEDURE"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "PROCEDURE attribute. Specifies that STRING or GROUP parameters pass only the memory address without passing the length. Also alters behavior of ? and *? parameters. Used in MAP or CLASS procedure prototypes for 3GL language compatibility.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "PASCAL",
+      "applicableTo": [
+        "PROCEDURE"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "PROCEDURE attribute. Specifies PASCAL calling convention (left to right stack-based parameter passing). Windows-standard calling convention for 32-bit applications. Used in MAP or CLASS procedure prototypes for compatibility with third-party libraries and Windows API.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "C",
+      "applicableTo": [
+        "PROCEDURE"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "PROCEDURE attribute. Specifies C calling convention (right to left stack-based parameter passing). Used in MAP or CLASS procedure prototypes for compatibility with third-party C libraries not compiled with TopSpeed compiler.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "PROC",
+      "applicableTo": [
+        "PROCEDURE"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "PROCEDURE attribute. Specifies that a PROCEDURE with a return type may be called without using the return value, without generating a compiler warning. Can be used in MAP or CLASS procedure prototypes.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "VIRTUAL",
+      "applicableTo": [
+        "METHOD"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "CLASS method attribute. Specifies the PROCEDURE is a virtual method of a CLASS structure. Virtual methods can be overridden in derived classes using late binding (polymorphism).",
+      "propertyEquate": ""
+    },
+    {
+      "name": "REPLACE",
+      "applicableTo": [
+        "METHOD"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "CLASS method attribute. Specifies that the 'Construct' or 'Destruct' PROCEDURE in the derived CLASS completely replaces the constructor or destructor of its parent CLASS (does not call parent constructor/destructor).",
+      "propertyEquate": ""
+    },
+    {
+      "name": "DERIVED",
+      "applicableTo": [
+        "METHOD"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "CLASS method attribute. Specifies the PROCEDURE is a derived method of a CLASS structure. There must be a matching prototype in the parent class that this method overrides.",
+      "propertyEquate": ""
+    },
+    {
+      "name": "ONCE",
+      "applicableTo": [
+        "INCLUDE"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "INCLUDE attribute. Prevents data contained in the INCLUDE file from being compiled more than once. Eliminates duplicate definition compile warnings or errors when the same include file is referenced multiple times.",
+      "propertyEquate": ""
     }
   ]
 }

@@ -624,7 +624,7 @@
         {
           "params": [],
           "returnType": "",
-          "description": "Specifies the terminating value in a LOOP iteration. Used with counter syntax: i = initial TO limit. When counter exceeds limit (or is less than, if step is negative), loop terminates. Limit expression evaluated once at loop start."
+          "description": "Specifies a range in LOOP iterations or CASE OF statements.\n\nIn LOOP: i = initial TO limit [BY step] - Specifies terminating value. When counter exceeds limit (or is less than, if step is negative), loop terminates. Limit expression evaluated once at loop start.\n\nIn CASE: OF expression TO expression - Allows a range of values. Statements execute if condition falls within the inclusive range. Both expressions are evaluated even if condition is less than lower boundary."
         }
       ]
     },
@@ -826,6 +826,384 @@
           "params": [],
           "returnType": "",
           "description": "Initiates an iterative statement execution structure. Forms: LOOP (infinite), LOOP count TIMES, LOOP i=initial TO limit BY step, LOOP UNTIL expression, LOOP WHILE expression. Must end with END or UNTIL/WHILE terminator."
+        }
+      ]
+    },
+    {
+      "name": "PRAGMA",
+      "signatures": [
+        {
+          "params": [
+            { "name": "string", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Compiler directive that sends project system statements from source code. Format: PRAGMA('project(statement)'), PRAGMA('compile(options)'), or PRAGMA('link(options)'). Dynamically adds pragma settings to project. Commonly used to control compilation, linking, and optimization settings from within code.",
+          "syntax": "PRAGMA(string)"
+        }
+      ]
+    },
+    {
+      "name": "EQUATE",
+      "signatures": [
+        {
+          "params": [
+            { "name": "value", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Assigns a label to a constant value, picture token, data type, or another label. Creates compile-time constant that uses no runtime memory. Used for readability and maintainability (e.g., TRUE EQUATE(1), PI EQUATE(3.1415927)). Cannot equate to itself. In ITEMIZE structure, value parameter is optional.",
+          "syntax": "label EQUATE([constant] | picture | type | label)"
+        }
+      ]
+    },
+    {
+      "name": "PROCEDURE",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Defines executable code section that can be called from within a PROGRAM.\n\nPrototype (in MAP/CLASS): Declares procedure signature with optional parameters and return type.\nSyntax: label PROCEDURE[(params)] [,returnType] [,attributes]\n\nImplementation: Defines the actual executable code.\nSyntax: label PROCEDURE[(params)]\n       [local data]\n       CODE\n       statements\n       [RETURN(value)]\n\nFor CLASS methods, use ClassName.MethodName PROCEDURE format. Can return values when prototyped with return type. Must have matching prototype in MAP or CLASS."
+        }
+      ]
+    },
+    {
+      "name": "FUNCTION",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Legacy synonym for PROCEDURE. In modern Clarion, PROCEDURE and FUNCTION are identical - both can return values when prototyped with a return type. FUNCTION keyword retained for backward compatibility with older DOS-era code where FUNCTION returned values and PROCEDURE did not."
+        }
+      ]
+    },
+    {
+      "name": "BAND",
+      "signatures": [
+        {
+          "params": [
+            { "name": "value", "optional": false },
+            { "name": "mask", "optional": false }
+          ],
+          "returnType": "LONG",
+          "description": "Performs bitwise AND operation. Returns LONG with 1 in bit positions where both value and mask contain 1, zeroes elsewhere. Used to test if specific bits are on/off. Both parameters converted to LONG if necessary.",
+          "syntax": "BAND(value, mask)"
+        }
+      ]
+    },
+    {
+      "name": "BOR",
+      "signatures": [
+        {
+          "params": [
+            { "name": "value", "optional": false },
+            { "name": "mask", "optional": false }
+          ],
+          "returnType": "LONG",
+          "description": "Performs bitwise OR operation. Returns LONG with 1 in bit positions where value, mask, or both contain 1, zeroes elsewhere. Used to unconditionally turn on (set to 1) specific bits. Both parameters converted to LONG if necessary.",
+          "syntax": "BOR(value, mask)"
+        }
+      ]
+    },
+    {
+      "name": "BXOR",
+      "signatures": [
+        {
+          "params": [
+            { "name": "value", "optional": false },
+            { "name": "mask", "optional": false }
+          ],
+          "returnType": "LONG",
+          "description": "Performs bitwise exclusive OR operation. Returns LONG with 1 in bit positions where value and mask differ, 0 where they match. Used to toggle bits or compare bit patterns. Both parameters converted to LONG if necessary.",
+          "syntax": "BXOR(value, mask)"
+        }
+      ]
+    },
+    {
+      "name": "BSHIFT",
+      "signatures": [
+        {
+          "params": [
+            { "name": "value", "optional": false },
+            { "name": "count", "optional": false }
+          ],
+          "returnType": "LONG",
+          "description": "Performs bit shift operation. Positive count shifts left (toward high order), negative shifts right (toward low order). Zero bits fill vacated positions. Returns shifted LONG value. Shifting left by N multiplies by 2^N, right divides by 2^N.",
+          "syntax": "BSHIFT(value, count)"
+        }
+      ]
+    },
+    {
+      "name": "ADDRESS",
+      "signatures": [
+        {
+          "params": [
+            { "name": "variable", "optional": false }
+          ],
+          "returnType": "LONG",
+          "description": "Returns the memory address of a variable or PROCEDURE. Used to pass addresses to external libraries written in other languages, or for reference assignment. Parameter can be any data item label or PROCEDURE name.",
+          "syntax": "ADDRESS(variable)"
+        }
+      ]
+    },
+    {
+      "name": "NOT",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Boolean logical NOT operator. Reverses the logical value of an expression - returns TRUE (1) if expression is FALSE (0), returns FALSE (0) if expression is TRUE. Can also use tilde (~) as synonym. Example: IF NOT Condition or IF ~Flag.",
+          "syntax": "NOT expression"
+        }
+      ]
+    },
+    {
+      "name": "END",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Terminates a data declaration structure (GROUP, CLASS, FILE, RECORD, etc.) or compound executable statement (IF, LOOP, CASE, ACCEPT, etc.). Functionally equivalent to period (.). By convention, END aligns with structure start and is used for multi-line structures. Multiple periods on one line can replace multiple END statements.",
+          "syntax": "END"
+        }
+      ]
+    },
+    {
+      "name": "ASSERT",
+      "signatures": [
+        {
+          "params": [
+            { "name": "expression", "optional": false },
+            { "name": "message", "optional": true }
+          ],
+          "returnType": "",
+          "description": "Debugging statement that evaluates an expression that should always be TRUE. If FALSE and debug is on, displays error message with line number and source file. Optional message parameter (up to 64K) shown in dialog. Use to catch erroneous assumptions. Enable in release builds with project define: asserts=>on",
+          "syntax": "ASSERT(expression [,message])"
+        }
+      ]
+    },
+    {
+      "name": "?",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Multi-purpose symbol with context-dependent meaning:\n\n1. Field Equate Label: Prefix for auto-generated control labels (e.g., ?Button1, ?String1)\n2. Generic Label: Used alone as a label for controls without specific names\n3. Debug-Only Statement: When placed in column 0 (first character) before a statement in CODE section, that statement only executes in DEBUG mode (ignored in release builds)\n\nExample: ?MyButton BUTTON('OK') or ?STOP('Debug point')",
+          "syntax": "?[label] or ?statement (column 0)"
+        }
+      ]
+    },
+    {
+      "name": "SELF",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Implicit reference to current CLASS instance within CLASS methods. Automatically passed as first parameter to non-static methods. Used to access current object's properties and methods. In method implementation, can be explicit parameter or implicit. Example: SELF.PropertyName or SELF.MethodName()",
+          "syntax": "SELF.member"
+        }
+      ]
+    },
+    {
+      "name": "PARENT",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Reference to parent CLASS in derived CLASS methods. Used to call parent class implementation of overridden methods or access parent class members. Enables calling base class functionality from derived class. Example: PARENT.MethodName() calls parent's version of method.",
+          "syntax": "PARENT.member"
+        }
+      ]
+    },
+    {
+      "name": "INT",
+      "signatures": [
+        {
+          "params": [
+            { "name": "expression", "optional": false }
+          ],
+          "returnType": "REAL or DECIMAL",
+          "description": "Returns the integer portion of a numeric expression. No rounding is performed - simply truncates the fractional part. Sign remains unchanged. Example: INT(8.5) returns 8, INT(-5.9) returns -5.",
+          "syntax": "INT(expression)"
+        }
+      ]
+    },
+    {
+      "name": "ROUND",
+      "signatures": [
+        {
+          "params": [
+            { "name": "expression", "optional": false },
+            { "name": "order", "optional": false }
+          ],
+          "returnType": "DECIMAL or REAL",
+          "description": "Returns value rounded to a power of ten. Order specifies rounding precision (1, 10, 100, 0.1, 0.01, etc.). If order not exact power of 10, uses next lowest. Efficient as BCD operation when order is LONG or DECIMAL. Example: ROUND(5163,100) returns 5200, ROUND(51.64,.01) returns 51.64",
+          "syntax": "ROUND(expression, order)"
+        }
+      ]
+    },
+    {
+      "name": "VAL",
+      "signatures": [
+        {
+          "params": [
+            { "name": "character", "optional": false }
+          ],
+          "returnType": "BYTE, USHORT or SIGNED",
+          "description": "Returns the numeric code of a character. Returns BYTE for ANSI strings, USHORT for Unicode strings, or SIGNED if type can't be determined. Use TOANSI or TOUNICODE to force specific encoding. Example: VAL('A') returns 65, VAL('Ж') returns 1046",
+          "syntax": "VAL(character)"
+        }
+      ]
+    },
+    {
+      "name": "CHR",
+      "signatures": [
+        {
+          "params": [
+            { "name": "code", "optional": false },
+            { "name": "unicode", "optional": true }
+          ],
+          "returnType": "STRING (ANSI or Unicode character)",
+          "description": "Returns single ANSI or Unicode character for given numeric code. If unicode parameter omitted or zero, returns ANSI character. If unicode is non-zero, returns Unicode character. Example: CHR(65) returns 'A', CHR(1046,1) returns Cyrillic 'Ж'",
+          "syntax": "CHR(code [,unicode])"
+        }
+      ]
+    },
+    {
+      "name": "DO",
+      "signatures": [
+        {
+          "params": [
+            { "name": "label", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Executes a ROUTINE local to PROGRAM or PROCEDURE. When ROUTINE completes, control returns to statement following DO. ROUTINE can only be called within CODE section containing it. Use EXIT to leave ROUTINE early, or let it complete naturally.",
+          "syntax": "DO label"
+        }
+      ]
+    },
+    {
+      "name": "EXIT",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Immediately leaves a ROUTINE and returns control to statement following the DO that called it. Different from RETURN which exits entire PROCEDURE. EXIT not required - ROUTINE terminates automatically when statements complete.",
+          "syntax": "EXIT"
+        }
+      ]
+    },
+    {
+      "name": "ROUTINE",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Declares a local subroutine within PROCEDURE. Can have optional DATA/CODE sections for local variables. Called with DO statement. Cannot duplicate PROCEDURE label. Useful for organizing code within procedures without overhead of separate procedure calls.",
+          "syntax": "label ROUTINE\n[DATA\n  local data\nCODE]\n  statements"
+        }
+      ]
+    },
+    {
+      "name": "EXECUTE",
+      "signatures": [
+        {
+          "params": [
+            { "name": "expression", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Single statement execution structure. Executes statement at position based on expression value (1=first, 2=second, etc.). Can use BEGIN/END for multi-statement blocks. Optional ELSE clause for out-of-range values. More efficient than IF/ELSIF or CASE for numeric selection. Must terminate with END.",
+          "syntax": "EXECUTE expression\n  statement1\n  statement2\n  [BEGIN...END]\n  [ELSE statement]\nEND"
+        }
+      ]
+    },
+    {
+      "name": "BEGIN",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Groups multiple statements into single executable structure. Primarily used within EXECUTE to treat several statements as one. Must be terminated by END or period. Allows multiple lines of code where single statement is expected.",
+          "syntax": "BEGIN\n  statements\nEND"
+        }
+      ]
+    },
+    {
+      "name": "ALL",
+      "signatures": [
+        {
+          "params": [
+            { "name": "string", "optional": false },
+            { "name": "length", "optional": true }
+          ],
+          "returnType": "STRING",
+          "description": "Returns string containing repetitions of character sequence. If length omitted, returns 255 characters. Useful for creating padding, separators, or initialized strings. Example: ALL('*',25) returns 25 asterisks, ALL('.') returns 255 dots.",
+          "syntax": "ALL(string [,length])"
+        }
+      ]
+    },
+    {
+      "name": "INSTRING",
+      "signatures": [
+        {
+          "params": [
+            { "name": "substring", "optional": false },
+            { "name": "string", "optional": false },
+            { "name": "step", "optional": true },
+            { "name": "start", "optional": true }
+          ],
+          "returnType": "UNSIGNED",
+          "description": "Searches for substring in string. Returns position (0 if not found). Step controls search interval (1=every char, 2=every other char, -1=right-to-left). Start specifies starting position. Returns step number when found, not character position if step > 1. Should CLIP variable substring to avoid trailing space matches.",
+          "syntax": "INSTRING(substring, string [,step] [,start])"
+        }
+      ]
+    },
+    {
+      "name": "BREAK",
+      "signatures": [
+        {
+          "params": [
+            { "name": "label", "optional": true }
+          ],
+          "returnType": "",
+          "description": "Immediately exits LOOP or ACCEPT structure and transfers control to first statement after terminator (END/WHILE/UNTIL). Optional label allows breaking out of nested loops by specifying which loop to exit. Only valid within LOOP or ACCEPT structures.",
+          "syntax": "BREAK [label]"
+        }
+      ]
+    },
+    {
+      "name": "TIMES",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Used with LOOP to execute count number of iterations. Syntax: LOOP count TIMES. Executes the loop statements exactly count times. Simpler alternative to LOOP variable = 1 TO count when you don't need the counter variable.",
+          "syntax": "LOOP count TIMES\n  statements\nEND"
+        }
+      ]
+    },
+    {
+      "name": "PEEK",
+      "signatures": [
+        {
+          "params": [
+            { "name": "address", "optional": false },
+            { "name": "destination", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Reads data from memory address into destination variable. Reads as many bytes as needed to fill destination. Use ADDRESS() to get correct address. DANGEROUS: Can cause GPF if reading invalid address. Use Windows API procedures instead when possible.",
+          "syntax": "PEEK(address, destination)"
+        }
+      ]
+    },
+    {
+      "name": "NULL",
+      "signatures": [
+        {
+          "params": [
+            { "name": "field", "optional": false }
+          ],
+          "returnType": "LONG",
+          "description": "Tests if database field contains null value. Returns non-zero (true) if field is null, zero (false) if field has known value (including blank/zero). For GROUP/RECORD, all components must be null to return true. Also used as constant for null reference assignment (e.g., variable &= NULL).",
+          "syntax": "NULL(field) or NULL(file, field) or variable &= NULL"
         }
       ]
     }

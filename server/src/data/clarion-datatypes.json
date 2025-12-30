@@ -88,6 +88,42 @@
       "range": "0 to 4,294,967,295"
     },
     {
+      "name": "SIGNED",
+      "category": "numeric",
+      "description": "Signed integer (EQUATE for LONG). Useful for prototyping Windows API calls",
+      "syntax": "label SIGNED[(initial_value)] [,attributes...]",
+      "parameters": [
+        {
+          "name": "initial_value",
+          "type": "numeric",
+          "optional": true,
+          "description": "The initial value of the SIGNED variable"
+        }
+      ],
+      "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "4 bytes",
+      "range": "-2,147,483,648 to 2,147,483,647",
+      "notes": "Not actually a data type but an EQUATE defined in EQUATES.CLW that maps to LONG"
+    },
+    {
+      "name": "UNSIGNED",
+      "category": "numeric",
+      "description": "Unsigned integer (EQUATE for LONG). Useful for prototyping Windows API calls that take LONG or ULONG parameters",
+      "syntax": "label UNSIGNED[(initial_value)] [,attributes...]",
+      "parameters": [
+        {
+          "name": "initial_value",
+          "type": "numeric",
+          "optional": true,
+          "description": "The initial value of the UNSIGNED variable"
+        }
+      ],
+      "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "4 bytes",
+      "range": "0 to 4,294,967,295",
+      "notes": "Not actually a data type but an EQUATE defined in EQUATES.CLW that maps to LONG"
+    },
+    {
       "name": "SREAL",
       "category": "numeric",
       "description": "Four-byte signed floating point",
@@ -229,6 +265,16 @@
       "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
       "size": "Fixed-length (includes length byte)",
       "notes": "Compatible with Pascal strings. First byte contains string length"
+    },
+    {
+      "name": "BSTRING",
+      "category": "string",
+      "description": "OLE API BSTR data type (Unicode string pointer)",
+      "syntax": "label BSTRING [,attributes...]",
+      "parameters": [],
+      "attributes": ["DIM", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "Variable-length (dynamically allocated)",
+      "notes": "Pointer to Unicode (wide) character string. Equivalent to OLE API BSTR. May contain embedded null characters and NULL terminator. Designed for API functions; not suitable for USE variables. Size allocated when value is assigned"
     },
     {
       "name": "ASTRING",
@@ -432,6 +478,40 @@
       "attributes": [],
       "size": "N/A (reference)",
       "notes": "References an external compiled module. Used with CLASS to specify implementation location. The module must be linked at compile/link time."
+    },
+    {
+      "name": "INT64",
+      "category": "numeric",
+      "description": "64-bit signed integer (native support in Clarion 11+)",
+      "syntax": "label INT64[(initial_value)] [,attributes...]",
+      "parameters": [
+        {
+          "name": "initial_value",
+          "type": "numeric",
+          "optional": true,
+          "description": "Initial value for the variable. If omitted, defaults to zero unless AUTO attribute is present"
+        }
+      ],
+      "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "8 bytes",
+      "range": "-9,223,372,036,854,775,808 to 9,223,372,036,854,775,807"
+    },
+    {
+      "name": "UINT64",
+      "category": "numeric",
+      "description": "64-bit unsigned integer (native support in Clarion 11+)",
+      "syntax": "label UINT64[(initial_value)] [,attributes...]",
+      "parameters": [
+        {
+          "name": "initial_value",
+          "type": "numeric",
+          "optional": true,
+          "description": "Initial value for the variable. If omitted, defaults to zero unless AUTO attribute is present"
+        }
+      ],
+      "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "8 bytes",
+      "range": "0 to 18,446,744,073,709,551,615"
     }
   ]
 }
