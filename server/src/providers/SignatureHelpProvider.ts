@@ -64,7 +64,7 @@ export class SignatureHelpProvider {
             }
 
             // Get control context for attribute validation
-            const docStructure = new DocumentStructure(tokens);
+            const docStructure = this.tokenCache.getStructure(document);
             const controlContext = docStructure.getControlContextAt(position.line, position.character);
             
             if (controlContext.controlType) {
@@ -285,7 +285,7 @@ export class SignatureHelpProvider {
         );
         
         // Check if we're in a MAP block
-        const docStructure = new DocumentStructure(tokens);
+        const docStructure = this.tokenCache.getStructure(document);
         const isInMapBlock = docStructure.isInMapBlock(position.line);
         
         // Check if we're in a WINDOW/REPORT/APPLICATION structure
@@ -526,7 +526,7 @@ export class SignatureHelpProvider {
         const procedures: { signature: string; paramCount: number }[] = [];
         
         // Use DocumentStructure to get MAP declarations
-        const documentStructure = new DocumentStructure(tokens);
+        const documentStructure = this.tokenCache.getStructure(document);
         const mapDeclarations = documentStructure.findMapDeclarations(procName);
         
         // Get document content for extracting signatures

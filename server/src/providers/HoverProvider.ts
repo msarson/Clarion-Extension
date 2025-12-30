@@ -505,7 +505,8 @@ export class HoverProvider {
                             tokens, 
                             document, 
                             position, 
-                            line  // Pass declaration signature for overload matching
+                            line,  // Pass declaration signature for overload matching
+                            documentStructure  // Pass cached structure for performance
                         );
                         
                         if (implLocation) {

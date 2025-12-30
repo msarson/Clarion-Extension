@@ -138,13 +138,15 @@ export class MapProcedureResolver {
      * @param document Text document
      * @param position Position in MAP declaration
      * @param declarationSignature Optional declaration signature for overload matching
+     * @param documentStructure Optional pre-built DocumentStructure (for performance)
      */
     public async findProcedureImplementation(
         procName: string, 
         tokens: Token[], 
         document: TextDocument, 
         position: Position,
-        declarationSignature?: string
+        declarationSignature?: string,
+        documentStructure?: DocumentStructure
     ): Promise<Location | null> {
         logger.info(`Looking for implementation of ${procName} from position ${position.line}`);
 
@@ -169,15 +171,15 @@ export class MapProcedureResolver {
         }
 
         // Check if position is inside a MAP block using DocumentStructure
-        // Create DocumentStructure from provided tokens (works with test data and production)
-        const documentStructure = new DocumentStructure(tokens);
-        if (!documentStructure.isInMapBlock(position.line)) {
+        // Use provided structure or create new one (for tests)
+        const docStructure = documentStructure || new DocumentStructure(tokens);
+        if (!docStructure.isInMapBlock(position.line)) {
             logger.info(`Position ${position.line} is not inside a MAP block`);
             return null;
         }
 
         // Get MAP blocks for MODULE lookup
-        const mapBlocks = documentStructure.getMapBlocks();
+        const mapBlocks = docStructure.getMapBlocks();
         const mapBlock = mapBlocks.find(m =>
             m.line < position.line &&
             m.finishesAt !== undefined &&
