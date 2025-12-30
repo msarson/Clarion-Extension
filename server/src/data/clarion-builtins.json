@@ -1206,6 +1206,67 @@
           "syntax": "NULL(field) or NULL(file, field) or variable &= NULL"
         }
       ]
+    },
+    {
+      "name": "CLOCK",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "LONG",
+          "description": "Returns system time as hundredths of a second since midnight, plus one. Standard time format. Resolution limited to ~5.5 hundredths of a second (18.2 updates/sec) or 10-15ms on Windows NT systems. Range: 1 to 8,640,000.",
+          "syntax": "CLOCK()"
+        }
+      ]
+    },
+    {
+      "name": "TODAY",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "LONG",
+          "description": "Returns operating system date as standard date. Standard date is number of days since December 28, 1800. Range: January 1, 1801 (standard date 4) to December 31, 2099 (standard date 109,211).",
+          "syntax": "TODAY()"
+        }
+      ]
+    },
+    {
+      "name": "DAY",
+      "signatures": [
+        {
+          "params": [
+            { "name": "date", "optional": false }
+          ],
+          "returnType": "LONG",
+          "description": "Returns day of month (1-31) from standard date. Date parameter can be numeric, variable, expression, or STRING with date picture token. Automatically converts date picture to standard date.",
+          "syntax": "DAY(date)"
+        }
+      ]
+    },
+    {
+      "name": "MONTH",
+      "signatures": [
+        {
+          "params": [
+            { "name": "date", "optional": false }
+          ],
+          "returnType": "LONG",
+          "description": "Returns month of year (1-12) from standard date. Date parameter can be numeric, variable, expression, or STRING with date picture token. Automatically converts date picture to standard date.",
+          "syntax": "MONTH(date)"
+        }
+      ]
+    },
+    {
+      "name": "YEAR",
+      "signatures": [
+        {
+          "params": [
+            { "name": "date", "optional": false }
+          ],
+          "returnType": "LONG",
+          "description": "Returns four-digit year (1801-9999) from standard date. Date parameter can be numeric, variable, expression, or STRING with date picture token. Automatically converts date picture to standard date.",
+          "syntax": "YEAR(date)"
+        }
+      ]
     }
   ]
 }
