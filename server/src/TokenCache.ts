@@ -21,7 +21,6 @@ interface LineTokenData {
 interface CachedTokenData {
     version: number;
     tokens: Token[];
-    structure: DocumentStructure; // 🚀 PERFORMANCE: Cache DocumentStructure too
     lineTokens: Map<number, LineTokenData>; // 🚀 PERFORMANCE: Line-based cache
     documentText: string; // Track full text for change detection
 }
@@ -135,17 +134,11 @@ export class TokenCache {
                 // 🚀 PERFORMANCE: Build line-based cache
                 const cacheStart = performance.now();
                 const lineTokens = this.buildLineTokenMap(document, tokens);
-                
-                // 🚀 PERFORMANCE: Create and cache DocumentStructure
-                const structure = new DocumentStructure(tokens);
-                structure.process();
-                
                 const cacheTime = performance.now() - cacheStart;
                 
                 this.cache.set(document.uri, { 
                     version: document.version, 
                     tokens,
-                    structure,
                     lineTokens,
                     documentText: currentText
                 });
@@ -173,20 +166,12 @@ export class TokenCache {
     }
 
     /**
-     * Get DocumentStructure for a document, using cached structure if available
+     * Get DocumentStructure for a document
+     * DocumentStructure is built on-demand and not cached to avoid performance bottlenecks
      * @param document The text document
      * @returns DocumentStructure
      */
     public getStructure(document: TextDocument): DocumentStructure {
-        // Ensure tokens are cached (which also caches structure)
-        this.getTokens(document);
-        
-        const cached = this.cache.get(document.uri);
-        if (cached && cached.structure) {
-            return cached.structure;
-        }
-        
-        // Fallback: create new structure (shouldn't happen if getTokens worked)
         const tokens = this.getTokens(document);
         const structure = new DocumentStructure(tokens);
         structure.process();
@@ -459,19 +444,14 @@ export class TokenCache {
         // Update cache
         const cacheStart = performance.now();
         const lineTokens = this.buildLineTokenMap(document, mergedTokens);
-        
-        // 🚀 PERFORMANCE: Create and cache DocumentStructure
-        const structure = new DocumentStructure(mergedTokens);
-        structure.process();
+        const cacheTime = performance.now() - cacheStart;
         
         this.cache.set(document.uri, {
             version: document.version,
             tokens: mergedTokens,
-            structure,
             lineTokens,
             documentText: newText
         });
-        const cacheTime = performance.now() - cacheStart;
         
         const totalTime = performance.now() - perfStart;
         const reusedTokens = cached.tokens.length - (cached.tokens.length - mergedTokens.length + newTokens.length);
