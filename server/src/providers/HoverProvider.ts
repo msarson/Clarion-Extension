@@ -28,7 +28,7 @@ export class HoverProvider {
     private memberResolver = new ClassMemberResolver();
     private overloadResolver = new MethodOverloadResolver();
     private mapResolver = new MapProcedureResolver();
-    private crossFileResolver = new CrossFileResolver();
+    private crossFileResolver = new CrossFileResolver(this.tokenCache);
     private builtinService = BuiltinFunctionService.getInstance();
     private attributeService = AttributeService.getInstance();
     private controlService = ControlService.getInstance();

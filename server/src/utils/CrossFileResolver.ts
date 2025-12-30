@@ -10,6 +10,7 @@ import { Token, TokenType } from '../ClarionTokenizer';
 import { SolutionManager } from '../solution/solutionManager';
 import { DocumentStructure } from '../DocumentStructure';
 import { ProcedureSignatureUtils } from './ProcedureSignatureUtils';
+import { TokenCache } from '../TokenCache';
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -32,9 +33,11 @@ export interface GlobalVariableResult {
 
 export class CrossFileResolver {
     private solutionManager: SolutionManager | null;
+    private tokenCache: TokenCache;
 
-    constructor() {
+    constructor(tokenCache: TokenCache) {
         this.solutionManager = SolutionManager.getInstance();
+        this.tokenCache = tokenCache;
     }
 
     /**
@@ -102,14 +105,13 @@ export class CrossFileResolver {
             const currentFileName = path.basename(currentDocument.uri);
             logger.info(`Searching for MAP MODULE('${currentFileName}') in ${resolvedPath}`);
 
-            // Read and tokenize parent file
+            // Read parent file and get cached tokens/structure
             const content = fs.readFileSync(resolvedPath, 'utf8');
-            const ClarionTokenizer = (await import('../ClarionTokenizer')).ClarionTokenizer;
-            const tokenizer = new ClarionTokenizer(content);
-            const parentTokens = tokenizer.tokenize();
+            const parentDoc = TextDocument.create(resolvedPath, 'clarion', 1, content);
+            const parentTokens = await this.tokenCache.getTokens(parentDoc);
 
-            // Use DocumentStructure to find MAP blocks
-            const documentStructure = new DocumentStructure(parentTokens);
+            // Use cached DocumentStructure to find MAP blocks
+            const documentStructure = this.tokenCache.getStructure(parentDoc);
             const mapBlocks = documentStructure.getMapBlocks();
 
             if (mapBlocks.length === 0) {
@@ -255,14 +257,13 @@ export class CrossFileResolver {
                 return null;
             }
 
-            // Read and tokenize parent file
+            // Read parent file and get cached tokens/structure
             const content = fs.readFileSync(resolvedPath, 'utf8');
-            const ClarionTokenizer = (await import('../ClarionTokenizer')).ClarionTokenizer;
-            const tokenizer = new ClarionTokenizer(content);
-            const parentTokens = tokenizer.tokenize();
+            const parentDoc = TextDocument.create(resolvedPath, 'clarion', 1, content);
+            const parentTokens = await this.tokenCache.getTokens(parentDoc);
 
-            // Use DocumentStructure to find global variables
-            const documentStructure = new DocumentStructure(parentTokens);
+            // Use cached DocumentStructure to find global variables
+            const documentStructure = this.tokenCache.getStructure(parentDoc);
             const firstCodeMarker = documentStructure.getFirstCodeMarker();
             const globalScopeEndLine = firstCodeMarker ? firstCodeMarker.line : Number.MAX_SAFE_INTEGER;
 

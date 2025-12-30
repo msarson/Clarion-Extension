@@ -31,7 +31,7 @@ export class DefinitionProvider {
     private mapResolver = new MapProcedureResolver();
     private symbolResolver = new SymbolDefinitionResolver();
     private fileResolver = new FileDefinitionResolver();
-    private crossFileResolver = new CrossFileResolver();
+    private crossFileResolver = new CrossFileResolver(this.tokenCache);
     /**
      * Provides definition locations for a given position in a document
      * @param document The text document

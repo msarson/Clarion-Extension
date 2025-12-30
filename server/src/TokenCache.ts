@@ -4,7 +4,7 @@ import { DocumentStructure } from './DocumentStructure';
 import LoggerManager from './logger';
 
 const logger = LoggerManager.getLogger("TokenCache");
-logger.setLevel("error");
+logger.setLevel("info"); // Temporarily enable info logging to debug structure caching
 
 /**
  * Line-based token data for incremental updates
@@ -173,15 +173,19 @@ export class TokenCache {
      * @returns DocumentStructure
      */
     public getStructure(document: TextDocument): DocumentStructure {
+        const perfStart = performance.now();
         const uri = document.uri;
         const cached = this.cache.get(uri);
         
         // Return cached structure if available and up-to-date
         if (cached && cached.structure && cached.version === document.version) {
+            const perfEnd = performance.now();
+            logger.perf(`getStructure`, { result: 'cached', time_ms: (perfEnd - perfStart).toFixed(2) });
             return cached.structure;
         }
         
         // Build and cache new structure
+        logger.info(`Building new DocumentStructure for ${uri} (cached=${!!cached}, hasStructure=${!!(cached?.structure)}, version match=${cached?.version === document.version})`);
         const tokens = this.getTokens(document);
         const structure = new DocumentStructure(tokens);
         structure.process();
@@ -189,6 +193,9 @@ export class TokenCache {
         if (cached) {
             cached.structure = structure;
         }
+        
+        const perfEnd = performance.now();
+        logger.perf(`getStructure`, { result: 'built_new', time_ms: (perfEnd - perfStart).toFixed(2), tokens: tokens.length });
         
         return structure;
     }
