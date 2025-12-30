@@ -23,6 +23,7 @@ interface CachedTokenData {
     tokens: Token[];
     lineTokens: Map<number, LineTokenData>; // 🚀 PERFORMANCE: Line-based cache
     documentText: string; // Track full text for change detection
+    structure?: DocumentStructure; // 🚀 PERFORMANCE: Cached structure
 }
 
 /**
@@ -172,9 +173,23 @@ export class TokenCache {
      * @returns DocumentStructure
      */
     public getStructure(document: TextDocument): DocumentStructure {
+        const uri = document.uri;
+        const cached = this.cache.get(uri);
+        
+        // Return cached structure if available and up-to-date
+        if (cached && cached.structure && cached.version === document.version) {
+            return cached.structure;
+        }
+        
+        // Build and cache new structure
         const tokens = this.getTokens(document);
         const structure = new DocumentStructure(tokens);
         structure.process();
+        
+        if (cached) {
+            cached.structure = structure;
+        }
+        
         return structure;
     }
 
