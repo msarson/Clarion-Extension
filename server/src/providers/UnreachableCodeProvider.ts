@@ -18,7 +18,7 @@ import { TokenCache } from '../TokenCache';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("UnreachableCodeProvider");
-logger.setLevel("info");
+logger.setLevel("error"); // Production: Only log errors
 
 export class UnreachableCodeProvider {
     /**
