@@ -156,18 +156,18 @@ export class MapProcedureResolver {
             return null;
         }
 
-        // Check if we're inside a PROCEDURE/ROUTINE block - if so, skip MAP logic
+        // Check if we're inside a PROCEDURE/ROUTINE/PROGRAM block - if so, skip MAP logic
         // (we're in actual code, not in a MAP declaration section)
         const procedureBlocks = tokens.filter(t =>
-            t.subType === TokenType.GlobalProcedure &&
+            (t.subType === TokenType.GlobalProcedure || t.type === TokenType.ClarionDocument) &&
             t.line < position.line &&
             t.finishesAt !== undefined &&
             t.finishesAt >= position.line
         );
 
-        logger.info(`Checking if position ${position.line} is inside PROCEDURE block. Found ${procedureBlocks.length} procedure blocks containing this position`);
+        logger.info(`Checking if position ${position.line} is inside PROCEDURE/PROGRAM block. Found ${procedureBlocks.length} blocks containing this position`);
         if (procedureBlocks.length > 0) {
-            logger.info(`Position ${position.line} is inside a PROCEDURE/ROUTINE block (line ${procedureBlocks[0].line}-${procedureBlocks[0].finishesAt}), not a MAP declaration`);
+            logger.info(`Position ${position.line} is inside a PROCEDURE/ROUTINE/PROGRAM block (line ${procedureBlocks[0].line}-${procedureBlocks[0].finishesAt}), not a MAP declaration`);
             return null;
         }
 
