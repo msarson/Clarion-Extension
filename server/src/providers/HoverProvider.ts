@@ -2125,22 +2125,55 @@ export class HoverProvider {
             }
         }
         
-        // Show PROCEDURE implementation signature
+        // Show PROCEDURE implementation (signature + first few lines)
         if (procImpl) {
             try {
                 // Properly decode file URI
                 const implUri = decodeURIComponent(procImpl.uri.replace('file:///', ''));
                 const implContent = fs.readFileSync(implUri, 'utf-8');
                 const implLines = implContent.split('\n');
-                const implLine = implLines[procImpl.range.start.line];
+                const startLine = procImpl.range.start.line;
                 
-                if (implLine) {
-                    const trimmedImplLine = implLine.trim();
-                    parts.push(`\n**Implementation:**\n\`\`\`clarion\n${trimmedImplLine}\n\`\`\``);
+                // Show up to 10 lines (signature + beginning of implementation)
+                const maxLines = 10;
+                const endLine = Math.min(startLine + maxLines, implLines.length);
+                const codeLines: string[] = [];
+                
+                for (let i = startLine; i < endLine; i++) {
+                    const line = implLines[i];
+                    if (!line) continue;
+                    
+                    // Stop at RETURN or next procedure/routine
+                    const trimmed = line.trim().toUpperCase();
+                    if (i > startLine && (trimmed.startsWith('RETURN') || 
+                        trimmed.match(/^\w+\s+(PROCEDURE|ROUTINE|FUNCTION)/))) {
+                        break;
+                    }
+                    
+                    codeLines.push(line);
+                    
+                    // Stop after CODE section is found
+                    if (trimmed === 'CODE') {
+                        // Add one more line after CODE to show first statement
+                        if (i + 1 < endLine && implLines[i + 1]) {
+                            codeLines.push(implLines[i + 1]);
+                        }
+                        codeLines.push('  ! ...');
+                        break;
+                    }
+                }
+                
+                if (codeLines.length > 0) {
+                    parts.push(`\n**Implementation:**\n\`\`\`clarion\n${codeLines.join('\n')}\n\`\`\``);
                 }
             } catch (error) {
                 logger.error(`Error reading PROCEDURE implementation: ${error}`);
             }
+        }
+        
+        // Add navigation hint
+        if (mapDecl || procImpl) {
+            parts.push(`\n*(F12 to declaration | Ctrl+F12 to implementation)*`);
         }
         
         if (parts.length > 1) {
