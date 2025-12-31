@@ -2,7 +2,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Position } from 'vscode-languageserver';
 import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
-import { Token } from '../Token';
+import { Token, TokenType } from '../tokenizer/TokenTypes';
 
 export type ScopeLevel = 'global' | 'module' | 'procedure' | 'routine';
 export type ScopeType = 'global' | 'module-local' | 'procedure-local' | 'routine-local';
@@ -33,7 +33,36 @@ export class ScopeAnalyzer {
      * @returns Scope information or null if not determinable
      */
     getTokenScope(document: TextDocument, position: Position): ScopeInfo | null {
-        return null;
+        const tokens = this.tokenCache.getTokens(document);
+        if (!tokens || tokens.length === 0) {
+            return null;
+        }
+
+        const isProgramFile = this.isProgramFile(tokens);
+        const memberModuleName = this.getMemberModuleName(tokens);
+        const containingProcedure = this.findContainingProcedure(tokens, position.line);
+        const containingRoutine = this.findContainingRoutine(tokens, position.line);
+
+        // Determine scope level
+        let scopeLevel: ScopeLevel;
+        if (containingRoutine) {
+            scopeLevel = 'routine';
+        } else if (containingProcedure) {
+            scopeLevel = 'procedure';
+        } else if (memberModuleName) {
+            scopeLevel = 'module';
+        } else {
+            scopeLevel = 'global';
+        }
+
+        return {
+            type: scopeLevel,
+            containingProcedure,
+            containingRoutine,
+            memberModuleName,
+            isProgramFile,
+            currentFile: document.uri
+        };
     }
 
     /**
@@ -71,5 +100,46 @@ export class ScopeAnalyzer {
      */
     async getVisibleFiles(symbol: Token, declaringFile: string): Promise<string[]> {
         return [];
+    }
+
+    private isProgramFile(tokens: Token[]): boolean {
+        // PROGRAM at column 0 is tokenized as Label, not ClarionDocument
+        return tokens.some(token => 
+            (token.type === TokenType.Label || token.type === TokenType.ClarionDocument) && 
+            token.value.toUpperCase() === 'PROGRAM'
+        );
+    }
+
+    private getMemberModuleName(tokens: Token[]): string | undefined {
+        // MEMBER at column 0 is tokenized as Label, not ClarionDocument
+        const memberToken = tokens.find(token =>
+            (token.type === TokenType.Label || token.type === TokenType.ClarionDocument) &&
+            token.value.toUpperCase().startsWith('MEMBER')
+        );
+
+        if (memberToken) {
+            const match = memberToken.value.match(/MEMBER\s*\(\s*'([^']+)'\s*\)/i);
+            return match ? match[1] : undefined;
+        }
+
+        return undefined;
+    }
+
+    private findContainingProcedure(tokens: Token[], line: number): Token | undefined {
+        return tokens.find(token =>
+            (token.subType === TokenType.Procedure ||
+             token.subType === TokenType.GlobalProcedure ||
+             token.subType === TokenType.MethodImplementation) &&
+            token.line <= line &&
+            (token.finishesAt === undefined || token.finishesAt >= line)
+        );
+    }
+
+    private findContainingRoutine(tokens: Token[], line: number): Token | undefined {
+        return tokens.find(token =>
+            token.subType === TokenType.Routine &&
+            token.line <= line &&
+            (token.finishesAt === undefined || token.finishesAt >= line)
+        );
     }
 }
