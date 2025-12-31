@@ -15,30 +15,30 @@
 ! TEST 1: Cross-file F12 Navigation (MEMBER → PROGRAM Global)
 ! ------------------------------------------------------------
 ! - Open utils.clw
-! - Line 31: Put cursor on 'GlobalCounter'
+! - Line 36: Put cursor on 'GlobalCounter'
 ! - Press F12 (Go to Definition)
-! - Expected: Should jump to main.clw line 30 (global declaration)
+! - Expected: Should jump to main.clw line 67 (global declaration)
 ! - Validates: Cross-file access to global symbols works
 !
 ! TEST 2: Cross-file F12 Navigation (PROGRAM → MEMBER Implementation)
 ! --------------------------------------------------------------------
 ! - Open main.clw
-! - Line 38: Put cursor on 'IncrementCounter'
+! - Line 71: Put cursor on 'IncrementCounter'
 ! - Press F12 (Go to Definition)
-! - Expected: Should jump to utils.clw line 27 (implementation)
+! - Expected: Should jump to utils.clw line 34 (implementation)
 ! - Validates: Cross-file navigation to implementations works
 !
 ! TEST 3: Cross-file F12 with Return Types
 ! -----------------------------------------
 ! - Open main.clw
-! - Line 40: Put cursor on 'GetCounter'
+! - Line 73: Put cursor on 'GetCounter'
 ! - Press F12 (Go to Definition)
-! - Expected: Should jump to utils.clw line 34 (implementation)
+! - Expected: Should jump to utils.clw line 39 (implementation)
 ! - Validates: MAP declarations with return types work
 !
 ! TEST 4: Module-Local Scope Boundaries (Should FAIL)
 ! ----------------------------------------------------
-! - Uncomment line 42 below: ModuleData = 999
+! - Uncomment line 74 below: ModuleData = 999
 ! - Put cursor on 'ModuleData'
 ! - Press F12 (Go to Definition)
 ! - Expected: Should NOT find definition (or find wrong one)
@@ -68,7 +68,7 @@ GlobalCounter LONG      ! Global variable - accessible in utils.clw (TEST 1)
 
    CODE
    GlobalCounter = 0
-   IncrementCounter()    ! TEST 2: F12 should jump to utils.clw line 27
+   IncrementCounter()    ! TEST 2: F12 should jump to utils.clw line 34
    IncrementCounter()
-   MESSAGE('Counter: ' & GetCounter())  ! TEST 3: F12 should jump to utils.clw line 34
+   MESSAGE('Counter: ' & GetCounter())  ! TEST 3: F12 should jump to utils.clw line 39
    !ModuleData = 999     ! TEST 4: Uncomment and F12 should fail (module-local in utils.clw)
