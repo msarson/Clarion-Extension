@@ -18,29 +18,42 @@
 
 ## Optimizations Applied
 
-### 1. .vscodeignore Improvements (This Release)
+### 1. .vscodeignore Improvements (v0.8.3)
 Added exclusions for:
 - `**/node_modules/**/*.d.ts` - TypeScript definitions not needed at runtime
 - `**/node_modules/**/*.tsbuildinfo` - Build artifacts
 - `**/node_modules/**/*.js.map` - Source maps from dependencies
 - `**/node_modules/**/src/**/*.ts` - Source TypeScript files
 
-**Expected savings**: 5-10 MB (reduces to ~30-35 MB)
+**Savings**: ~2-3 MB
 
-### 2. Package Script Enhancement
+### 2. Package Deduplication (v0.8.3)
+Ran `npm dedupe` to remove duplicate packages:
+- xml2js was installed 3 times (root, client, server) → now installed once in root
+- Other duplicate dependencies also consolidated
+- Client and server share dependencies via npm hoisting
+
+**Savings**: ~3-5 MB
+
+### 3. Package Script Enhancement
 Added `--allow-star-activation` flag to release packaging to suppress vsce warnings.
+
+### 4. Removed Extraneous Packages
+Ran `npm prune` to remove packages not in dependency tree (e.g., leftover tree-sitter-cli).
+
+**Total savings achieved**: 5.39 MB (37.90 MB → 32.51 MB = 14.2% reduction)
 
 ## Further Optimization Options
 
-### Option A: Deduplicate Dependencies (Medium effort, 5-10 MB savings)
+### Option A: Keep Dependencies Deduplicated (Recommended - APPLIED)
 ```bash
 npm dedupe
-npm prune --production
 ```
-This will:
-- Remove duplicate packages across node_modules
-- Remove devDependencies before packaging
-- **Note**: May require reinstalling dev dependencies after packaging
+✅ **Applied in v0.8.3**
+- Removes duplicate packages across node_modules
+- xml2js consolidated from 3 copies to 1
+- Client and server share dependencies via hoisting
+- **Savings**: ~3-5 MB
 
 ### Option B: Webpack/ESBuild Bundling (High effort, 50%+ savings)
 Bundle all JavaScript into fewer files:
