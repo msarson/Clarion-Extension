@@ -710,9 +710,18 @@ export class HoverProvider {
                     // Extract signature from the line
                     const signature = line.trim();
                     
-                    // Get scope info for the procedure
-                    const procPos: Position = { line: position.line, character: 0 };
-                    const scopeInfo = this.scopeAnalyzer.getTokenScope(document, procPos);
+                    // Determine if this procedure is global (PROGRAM file) or module-local (MEMBER file)
+                    const allTokens = this.tokenCache.getTokens(document);
+                    const isProgramFile = allTokens.some(t => 
+                        t.type === TokenType.Label && 
+                        t.value.toUpperCase() === 'PROGRAM' && 
+                        t.line < 5
+                    );
+                    const isMemberFile = allTokens.some(t => 
+                        t.type === TokenType.Label && 
+                        t.value.toUpperCase() === 'MEMBER' && 
+                        t.line < 5
+                    );
                     
                     const markdown = [
                         `**PROCEDURE:** \`${currentToken.label}\``,
@@ -723,17 +732,16 @@ export class HoverProvider {
                         ``
                     ];
                     
-                    // Add scope information
-                    if (scopeInfo) {
-                        const scopeIcon = scopeInfo.type === 'global' ? '🌍' : '📦';
-                        markdown.push(`**Scope:** ${scopeIcon} ${scopeInfo.type.charAt(0).toUpperCase() + scopeInfo.type.slice(1)}`);
+                    // Add scope information based on file type
+                    if (isProgramFile) {
+                        markdown.push(`**Scope:** 🌍 Global`);
                         markdown.push(``);
-                        
-                        if (scopeInfo.type === 'global') {
-                            markdown.push(`**Visibility:** Accessible from all files in the solution`);
-                        } else {
-                            markdown.push(`**Visibility:** Accessible only within this file (module-local)`);
-                        }
+                        markdown.push(`**Visibility:** Accessible from all files in the solution`);
+                        markdown.push(``);
+                    } else if (isMemberFile) {
+                        markdown.push(`**Scope:** 📦 Module`);
+                        markdown.push(``);
+                        markdown.push(`**Visibility:** Accessible only within this file (module-local)`);
                         markdown.push(``);
                     }
                     
