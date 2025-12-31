@@ -20,7 +20,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("HoverProvider");
-logger.setLevel("error"); // Production: Only log errors
+logger.setLevel("info"); // TEMPORARY: Debug hover for global variables
 
 /**
  * Provides hover information for local variables and parameters
@@ -787,9 +787,73 @@ export class HoverProvider {
             const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, position.line);
 
             if (!currentScope) {
-                logger.info('No scope found - checking for global variable in MEMBER parent file');
+                logger.info('No scope found - checking for global variables');
                 
-                // 🔗 Check for global variable in MEMBER parent file
+                // First, check for global variable in CURRENT file (PROGRAM)
+                const firstCodeToken = tokens.find(t => 
+                    t.type === TokenType.Keyword && 
+                    t.value.toUpperCase() === 'CODE'
+                );
+                const globalScopeEndLine = firstCodeToken ? firstCodeToken.line : Number.MAX_SAFE_INTEGER;
+                
+                // Search for global variable (Label at column 0, before first CODE)
+                const globalVar = tokens.find(t =>
+                    t.type === TokenType.Label &&
+                    t.start === 0 &&
+                    t.line < globalScopeEndLine &&
+                    t.value.toLowerCase() === word.toLowerCase()
+                );
+                
+                if (globalVar) {
+                    logger.info(`✅ Found global variable in current file: ${globalVar.value} at line ${globalVar.line}`);
+                    
+                    // Find the type by looking at the next token
+                    const globalIndex = tokens.indexOf(globalVar);
+                    let typeInfo = 'UNKNOWN';
+                    if (globalIndex + 1 < tokens.length) {
+                        const nextToken = tokens[globalIndex + 1];
+                        if (nextToken.line === globalVar.line && nextToken.type === TokenType.Type) {
+                            typeInfo = nextToken.value;
+                        }
+                    }
+                    
+                    // Get scope info for the global variable
+                    const globalPos: Position = { line: globalVar.line, character: 0 };
+                    const scopeInfo = this.scopeAnalyzer.getTokenScope(document, globalPos);
+                    
+                    const markdown = [
+                        `**Global Variable:** \`${globalVar.value}\``,
+                        ``,
+                        `**Type:** \`${typeInfo}\``,
+                        ``
+                    ];
+                    
+                    if (scopeInfo) {
+                        const scopeIcon = scopeInfo.type === 'global' ? '🌍' : '📦';
+                        markdown.push(`**Scope:** ${scopeIcon} ${scopeInfo.type.charAt(0).toUpperCase() + scopeInfo.type.slice(1)}`);
+                        markdown.push(``);
+                        
+                        if (scopeInfo.type === 'global') {
+                            markdown.push(`**Visibility:** Visible everywhere`);
+                        } else {
+                            markdown.push(`**Visibility:** Visible only within this file (module-local)`);
+                        }
+                        markdown.push(``);
+                    }
+                    
+                    markdown.push(`**Declared at:** line ${globalVar.line + 1}`);
+                    markdown.push(``);
+                    markdown.push(`*Press F12 to go to declaration*`);
+                    
+                    return {
+                        contents: {
+                            kind: 'markdown',
+                            value: markdown.join('\n')
+                        }
+                    };
+                }
+                
+                // If not found in current file, check for global variable in MEMBER parent file
                 const memberToken = tokens.find(t => 
                     t.value && t.value.toUpperCase() === 'MEMBER' && 
                     t.line < 5 && 
@@ -851,7 +915,7 @@ export class HoverProvider {
                     }
                 }
                 
-                logger.info('No scope found and no global variable in MEMBER parent - cannot provide hover');
+                logger.info('No scope found and no global variable found - cannot provide hover');
                 return null;
             }
 
