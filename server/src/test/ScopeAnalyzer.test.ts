@@ -107,5 +107,56 @@ CODE
             
             assert.strictEqual(scope, 'global');
         });
+
+        test('should identify module-local data scope', () => {
+            const document = createTestDocument(`MEMBER('Main')
+
+ModuleVar LONG
+
+MyProc PROCEDURE
+`);
+            
+            const tokens = tokenCache.getTokens(document);
+            const moduleVarToken = tokens.find(t => t.value === 'ModuleVar');
+            
+            assert.ok(moduleVarToken, 'Should find ModuleVar token');
+            const scope = analyzer.getSymbolScope(moduleVarToken!, document);
+            
+            assert.strictEqual(scope, 'module-local');
+        });
+
+        test('should identify procedure-local data scope', () => {
+            const document = createTestDocument(`MyProc PROCEDURE
+LocalVar LONG
+  CODE
+`);
+            
+            const tokens = tokenCache.getTokens(document);
+            const localVarToken = tokens.find(t => t.value === 'LocalVar');
+            
+            assert.ok(localVarToken, 'Should find LocalVar token');
+            const scope = analyzer.getSymbolScope(localVarToken!, document);
+            
+            assert.strictEqual(scope, 'procedure-local');
+        });
+
+        test('should identify routine-local data scope', () => {
+            const document = createTestDocument(`MyProc PROCEDURE
+  CODE
+  
+MyRoutine ROUTINE
+  DATA
+RoutineVar LONG
+  CODE
+`);
+            
+            const tokens = tokenCache.getTokens(document);
+            const routineVarToken = tokens.find(t => t.value === 'RoutineVar');
+            
+            assert.ok(routineVarToken, 'Should find RoutineVar token');
+            const scope = analyzer.getSymbolScope(routineVarToken!, document);
+            
+            assert.strictEqual(scope, 'routine-local');
+        });
     });
 });

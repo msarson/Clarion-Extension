@@ -72,7 +72,24 @@ export class ScopeAnalyzer {
      * @returns The scope type of the symbol
      */
     getSymbolScope(symbol: Token, document: TextDocument): ScopeType {
-        return 'global';
+        const scopeInfo = this.getTokenScope(document, { line: symbol.line, character: symbol.start });
+        
+        if (!scopeInfo) {
+            return 'global';
+        }
+
+        // Map ScopeLevel to ScopeType
+        switch (scopeInfo.type) {
+            case 'routine':
+                return 'routine-local';
+            case 'procedure':
+                return 'procedure-local';
+            case 'module':
+                return 'module-local';
+            case 'global':
+            default:
+                return 'global';
+        }
     }
 
     /**
