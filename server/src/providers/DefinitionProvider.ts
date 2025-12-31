@@ -18,7 +18,7 @@ import { CrossFileResolver } from '../utils/CrossFileResolver';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
-logger.setLevel("error"); // Production: Only log errors
+logger.setLevel("info"); // TEMPORARY: Debug TEST 4 regression
 
 /**
  * Provides goto definition functionality for Clarion files
@@ -1036,7 +1036,8 @@ export class DefinitionProvider {
                         return globalLocation;
                     } else {
                         logger.info(`❌ SCOPE-CHECK: Cannot access this symbol cross-file (scope boundaries violated)`);
-                        // Don't return - continue to other fallbacks
+                        // Return null - scope violation should block access, not continue to fallbacks
+                        return null;
                     }
                 }
             } else {
