@@ -948,7 +948,70 @@ export class HoverProvider {
                 logger.info(`✅ HOVER-RETURN: Found variable info for ${searchWord}: type=${variableInfo.type}, line=${variableInfo.line}`);
                 return this.constructVariableHover(word, variableInfo, currentScope, document);
             }
-            logger.info(`${searchWord} is not a local variable - checking MEMBER parent file for global variable`);
+            logger.info(`${searchWord} is not a local variable`);
+            
+            // 🔗 Check for module-local variable in current file (Label at column 0, before first PROCEDURE)
+            logger.info(`Checking for module-local variable in current file...`);
+            const firstProcToken = tokens.find(t => 
+                t.type === TokenType.Label &&
+                t.subType === TokenType.Procedure &&
+                t.start === 0
+            );
+            const moduleScopeEndLine = firstProcToken ? firstProcToken.line : Number.MAX_SAFE_INTEGER;
+            
+            // Search for module-local variable (Label at column 0, before first PROCEDURE)
+            const moduleVar = tokens.find(t =>
+                t.type === TokenType.Label &&
+                t.start === 0 &&
+                t.line < moduleScopeEndLine &&
+                t.value.toLowerCase() === searchWord.toLowerCase()
+            );
+            
+            if (moduleVar) {
+                logger.info(`✅ Found module-local variable in current file: ${moduleVar.value} at line ${moduleVar.line}`);
+                
+                // Find the type by looking at the next token
+                const moduleIndex = tokens.indexOf(moduleVar);
+                let typeInfo = 'UNKNOWN';
+                if (moduleIndex + 1 < tokens.length) {
+                    const nextToken = tokens[moduleIndex + 1];
+                    if (nextToken.line === moduleVar.line && nextToken.type === TokenType.Type) {
+                        typeInfo = nextToken.value;
+                    }
+                }
+                
+                // Get scope info for the module-local variable
+                const modulePos: Position = { line: moduleVar.line, character: 0 };
+                const scopeInfo = this.scopeAnalyzer.getTokenScope(document, modulePos);
+                
+                const markdown = [
+                    `**Module-Local Variable:** \`${moduleVar.value}\``,
+                    ``,
+                    `**Type:** \`${typeInfo}\``,
+                    ``
+                ];
+                
+                if (scopeInfo) {
+                    const scopeIcon = '📦';
+                    markdown.push(`**Scope:** ${scopeIcon} Module`);
+                    markdown.push(``);
+                    markdown.push(`**Visibility:** Visible only within this file (module-local)`);
+                    markdown.push(``);
+                }
+                
+                markdown.push(`**Declared at:** line ${moduleVar.line + 1}`);
+                markdown.push(``);
+                markdown.push(`*Press F12 to go to declaration*`);
+                
+                return {
+                    contents: {
+                        kind: 'markdown',
+                        value: markdown.join('\n')
+                    }
+                };
+            }
+            
+            logger.info(`${searchWord} is not a module-local variable - checking MEMBER parent file for global variable`);
             
             // 🔗 Not found locally - check for global variable in MEMBER parent file
             const memberToken = tokens.find(t => 
