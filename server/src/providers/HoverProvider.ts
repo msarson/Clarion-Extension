@@ -710,10 +710,39 @@ export class HoverProvider {
                     // Extract signature from the line
                     const signature = line.trim();
                     
+                    // Get scope info for the procedure
+                    const procPos: Position = { line: position.line, character: 0 };
+                    const scopeInfo = this.scopeAnalyzer.getTokenScope(document, procPos);
+                    
+                    const markdown = [
+                        `**PROCEDURE:** \`${currentToken.label}\``,
+                        ``,
+                        `\`\`\`clarion`,
+                        signature,
+                        `\`\`\``,
+                        ``
+                    ];
+                    
+                    // Add scope information
+                    if (scopeInfo) {
+                        const scopeIcon = scopeInfo.type === 'global' ? '🌍' : '📦';
+                        markdown.push(`**Scope:** ${scopeIcon} ${scopeInfo.type.charAt(0).toUpperCase() + scopeInfo.type.slice(1)}`);
+                        markdown.push(``);
+                        
+                        if (scopeInfo.type === 'global') {
+                            markdown.push(`**Visibility:** Accessible from all files in the solution`);
+                        } else {
+                            markdown.push(`**Visibility:** Accessible only within this file (module-local)`);
+                        }
+                        markdown.push(``);
+                    }
+                    
+                    markdown.push(`*Press F12 to see MAP declaration | Ctrl+F12 to see implementation*`);
+                    
                     return {
                         contents: {
                             kind: 'markdown',
-                            value: `**PROCEDURE:** \`${currentToken.label}\`\n\n\`\`\`clarion\n${signature}\n\`\`\`\n\n*Press F12 to see MAP declaration | Ctrl+F12 to see implementation*`
+                            value: markdown.join('\n')
                         }
                     };
                 }
