@@ -7,7 +7,7 @@ const logger = LoggerManager.getLogger("CwprojParser");
 
 // Create a specialized debug logger for file resolution issues
 const fileResolutionLogger = LoggerManager.getLogger("FileResolution");
-fileResolutionLogger.setLevel("debug");
+fileResolutionLogger.setLevel("error");
 
 /**
  * Represents a parsed file from a .cwproj file

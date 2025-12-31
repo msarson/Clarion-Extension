@@ -9,7 +9,7 @@ logger.setLevel("error");
 
 // Create a specialized debug logger for file resolution issues
 const fileResolutionLogger = LoggerManager.getLogger("FileResolution");
-fileResolutionLogger.setLevel("debug");
+fileResolutionLogger.setLevel("error");
 
 /**
  * SolutionParser is a utility class that parses a .sln file locally
