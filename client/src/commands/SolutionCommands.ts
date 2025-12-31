@@ -112,25 +112,24 @@ export function registerSolutionOpeningCommands(
         }),
         
         commands.registerCommand('clarion.openDetectedSolution', async (solutionPath: string) => {
-            console.log(`🔄🔄🔄 COMMAND clarion.openDetectedSolution TRIGGERED for ${solutionPath}`);
-            logger.info(`🔄 Executing clarion.openDetectedSolution command for ${solutionPath}`);
+            logger.info(`Executing clarion.openDetectedSolution command for ${solutionPath}`);
             
             try {
                 const success = await SmartSolutionOpener.openDetectedSolution(solutionPath);
                 
-                console.log(`🎯🎯🎯 SmartSolutionOpener returned: ${success}`);
+                logger.debug(`SmartSolutionOpener returned: ${success}`);
                 
                 if (success) {
                     // Global variables are already set by SmartSolutionOpener, no need to reload
-                    console.log(`✅✅✅ Solution opened successfully. Current globals:
+                    logger.debug(`Solution opened successfully. Current globals:
                         - globalSolutionFile: ${globalSolutionFile || 'not set'}
                         - globalClarionPropertiesFile: ${globalSolutionFile || 'not set'}
                         - globalClarionVersion: ${globalSolutionFile || 'not set'}`);
                     
                     // Initialize the solution
-                    console.log("🚀🚀🚀 About to call initializeSolution");
+                    logger.debug("About to call initializeSolution");
                     await initializeSolution(context, true);
-                    console.log("✅✅✅ initializeSolution completed");
+                    logger.debug("initializeSolution completed");
                     
                     // Explicitly refresh the tree view to show projects/apps
                     if (solutionTreeDataProvider) {

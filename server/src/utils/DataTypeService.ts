@@ -1,5 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import LoggerManager from '../logger';
+
+const logger = LoggerManager.getLogger("DataTypeService");
 
 export interface DataTypeParameter {
     name: string;
@@ -48,8 +51,8 @@ export class DataTypeService {
             for (const dataType of data.dataTypes) {
                 this.dataTypes.set(dataType.name.toUpperCase(), dataType);
             }
-
-            console.log(`Loaded ${this.dataTypes.size} Clarion data types`);
+
+            logger.info(`Loaded ${this.dataTypes.size} Clarion data types`);
         } catch (error) {
             console.error('Error loading Clarion data types:', error);
         }

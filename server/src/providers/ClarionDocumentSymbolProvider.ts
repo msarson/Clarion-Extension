@@ -111,8 +111,8 @@ export class ClarionDocumentSymbolProvider {
             
             const flagStr = flags.length > 0 ? ` [${flags.join(", ")}]` : "";
             
-            console.log(`[TREE-DUMP] ${indent}├─ ${symbol.name}`);
-            console.log(`[TREE-DUMP] ${indent}│  kind=${kindName}, detail="${symbol.detail}", line=${line}${flagStr}`);
+            logger.debug(`[TREE-DUMP] ${indent}├─ ${symbol.name}`);
+            logger.debug(`[TREE-DUMP] ${indent}│  kind=${kindName}, detail="${symbol.detail}", line=${line}${flagStr}`);
             
             // Recurse into children
             if (symbol.children && symbol.children.length > 0) {
@@ -134,7 +134,7 @@ export class ClarionDocumentSymbolProvider {
             const detail = symbol.detail ? ` "${symbol.detail}"` : "";
             const kindName = this.getSymbolKindName(symbol.kind);
             
-            console.log(`[TREE-COMPACT] ${indent}├─ ${symbol.name}${detail} @L${line} [${kindName}] (${childCount} children)`);
+            logger.debug(`[TREE-COMPACT] ${indent}├─ ${symbol.name}${detail} @L${line} [${kindName}] (${childCount} children)`);
             
             if (symbol.children && symbol.children.length > 0) {
                 this.dumpSymbolTreeCompact(symbol.children, depth + 1);

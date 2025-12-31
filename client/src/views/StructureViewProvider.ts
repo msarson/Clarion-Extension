@@ -456,8 +456,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             element.name === "Data";
         
         if (isContainerNode) {
-            console.log(`🚫 HOTFIX: Container node detected: ${element.name} (kind=${element.kind}, detail='${element.detail}'), skipping navigation command`);
-            logger.debug(`🚫 Container node detected: ${element.name}, skipping navigation command`);
+            logger.debug(`Container node detected: ${element.name} (kind=${element.kind}, detail='${element.detail}'), skipping navigation command`);
         }
         
         if (this.activeEditor && !isContainerNode) {
