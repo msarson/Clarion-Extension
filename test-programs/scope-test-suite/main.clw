@@ -77,3 +77,15 @@ GlobalCounter LONG      ! Global variable - accessible in utils.clw (TEST 1)
    IncrementCounter()
    MESSAGE('Counter: ' & GetCounter())  ! TEST 3: F12 → line 58 MAP, Ctrl+F12 → utils.clw line 39
    ModuleData = 999     ! TEST 4: Uncomment and F12 should fail (module-local in utils.clw)
+
+!═══════════════════════════════════════════════════════════════════════
+! GlobalHelper - GLOBAL PROCEDURE
+!═══════════════════════════════════════════════════════════════════════
+! TEST 5: Hover on 'GlobalHelper' below should show:
+!         **Scope:** 🌍 Global
+!         **Visibility:** Accessible from all files in the solution
+!
+GlobalHelper PROCEDURE()
+   CODE
+   MESSAGE('This is a global procedure!')
+   RETURN
