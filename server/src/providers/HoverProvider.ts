@@ -703,6 +703,19 @@ export class HoverProvider {
                             }
                         };
                     }
+                } else {
+                    // This is a standalone PROCEDURE (not a CLASS method)
+                    logger.info(`Standalone PROCEDURE detected: ${currentToken.label}`);
+                    
+                    // Extract signature from the line
+                    const signature = line.trim();
+                    
+                    return {
+                        contents: {
+                            kind: 'markdown',
+                            value: `**PROCEDURE:** \`${currentToken.label}\`\n\n\`\`\`clarion\n${signature}\n\`\`\`\n\n*Press F12 to see MAP declaration | Ctrl+F12 to see implementation*`
+                        }
+                    };
                 }
             }
 
