@@ -105,6 +105,8 @@ export class DefinitionProvider {
             // Check if this is a procedure call in CODE (e.g., "MyProcedure()" or "ProcessOrder(param)")
             // Navigate to the MAP declaration or PROCEDURE implementation
             const hasParenthesesAfter = line.substring(position.character).trimStart().startsWith('(');
+            logger.info(`🔍 Checking for procedure call: word="${word}", hasParenthesesAfter=${hasParenthesesAfter}, line="${line.trim()}"`);
+            
             if (hasParenthesesAfter) {
                 logger.info(`🔍 Detected potential procedure call: ${word}()`);
                 
@@ -140,6 +142,8 @@ export class DefinitionProvider {
                         return memberResult.location;
                     }
                 }
+                
+                logger.info(`❌ No MAP declaration found for procedure call: ${word}`);
             }
 
             // Check if this is a method implementation line (e.g., "StringTheory.Construct PROCEDURE")
