@@ -8,24 +8,24 @@
 ## Size Analysis (v0.8.3)
 
 ### Largest Components
-1. **tree-sitter-cli** - 14.4 MB (CLI binary, not needed at runtime)
-2. **xml2js (duplicated 3x)** - ~10 MB total (in root, client, server)
-3. **@azure/msal-browser** - ~3 MB (authentication for telemetry)
-4. **@opentelemetry libraries** - ~5-10 MB (many duplicates)
+1. **xml2js (duplicated 3x)** - ~10 MB total (in root, client, server)
+2. **@azure/msal-browser** - ~3 MB (authentication for telemetry)
+3. **@opentelemetry libraries** - ~5-10 MB (many duplicates)
 
-### Total: ~135 MB uncompressed → 37.9 MB compressed VSIX
+### Total: ~120 MB uncompressed → 37.9 MB compressed VSIX
+
+**Note**: tree-sitter-cli was removed in earlier development and is no longer a dependency.
 
 ## Optimizations Applied
 
 ### 1. .vscodeignore Improvements (This Release)
 Added exclusions for:
-- `**/node_modules/tree-sitter-cli/**` - Saves ~14 MB
 - `**/node_modules/**/*.d.ts` - TypeScript definitions not needed at runtime
 - `**/node_modules/**/*.tsbuildinfo` - Build artifacts
 - `**/node_modules/**/*.js.map` - Source maps from dependencies
 - `**/node_modules/**/src/**/*.ts` - Source TypeScript files
 
-**Expected savings**: 15-20 MB (reduces to ~25-30 MB)
+**Expected savings**: 5-10 MB (reduces to ~30-35 MB)
 
 ### 2. Package Script Enhancement
 Added `--allow-star-activation` flag to release packaging to suppress vsce warnings.
@@ -134,9 +134,9 @@ du -sh temp-analysis/*
   - Language Server dependencies
   - Solution file parsing (xml2js)
   - Optional telemetry (Application Insights)
-  - Tree-sitter CLI (now excluded)
 
 ---
 
 **Last Updated**: 2025-12-31
 **Current Version**: 0.8.3
+**Note**: tree-sitter was evaluated during development but removed before release.
