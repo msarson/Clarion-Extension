@@ -17,7 +17,7 @@ import { FileDefinitionResolver } from '../utils/FileDefinitionResolver';
 import { CrossFileResolver } from '../utils/CrossFileResolver';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
-logger.setLevel("info"); // Temporarily set to info for debugging
+logger.setLevel("error"); // Production: Only log errors
 
 /**
  * Provides goto definition functionality for Clarion files
