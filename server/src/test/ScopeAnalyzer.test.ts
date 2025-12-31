@@ -265,4 +265,80 @@ RoutineVar LONG
             assert.strictEqual(canAccess, false);
         });
     });
+
+    suite('getVisibleFiles', () => {
+        test('should return declaring file for global symbol', async () => {
+            const document = createTestDocument(`PROGRAM
+MAP
+END
+
+GlobalVar LONG
+
+CODE
+`, 'file:///test/main.clw');
+            
+            const tokens = tokenCache.getTokens(document);
+            const globalVarToken = tokens.find(t => t.value === 'GlobalVar');
+            
+            assert.ok(globalVarToken, 'Should find GlobalVar token');
+            const files = await analyzer.getVisibleFiles(globalVarToken!, 'file:///test/main.clw');
+            
+            // For now, should at least include declaring file
+            // Full cross-file visibility would require solution manager
+            assert.ok(files.length > 0, 'Should return at least one file');
+            assert.ok(files.includes('file:///test/main.clw'), 'Should include declaring file');
+        });
+
+        test('should return only declaring file for module-local symbol', async () => {
+            const document = createTestDocument(`MEMBER('Main')
+
+ModuleVar LONG
+`, 'file:///test/utils.clw');
+            
+            const tokens = tokenCache.getTokens(document);
+            const moduleVarToken = tokens.find(t => t.value === 'ModuleVar');
+            
+            assert.ok(moduleVarToken, 'Should find ModuleVar token');
+            const files = await analyzer.getVisibleFiles(moduleVarToken!, 'file:///test/utils.clw');
+            
+            assert.strictEqual(files.length, 1, 'Module-local should only be visible in one file');
+            assert.strictEqual(files[0], 'file:///test/utils.clw');
+        });
+
+        test('should return only declaring file for procedure-local symbol', async () => {
+            const document = createTestDocument(`MyProc PROCEDURE
+LocalVar LONG
+  CODE
+`, 'file:///test/proc.clw');
+            
+            const tokens = tokenCache.getTokens(document);
+            const localVarToken = tokens.find(t => t.value === 'LocalVar');
+            
+            assert.ok(localVarToken, 'Should find LocalVar token');
+            const files = await analyzer.getVisibleFiles(localVarToken!, 'file:///test/proc.clw');
+            
+            assert.strictEqual(files.length, 1, 'Procedure-local should only be visible in one file');
+            assert.strictEqual(files[0], 'file:///test/proc.clw');
+        });
+
+        test('should return only declaring file for routine-local symbol', async () => {
+            const document = createTestDocument(`MyProc PROCEDURE
+  CODE
+  
+MyRoutine ROUTINE
+  DATA
+RoutineVar LONG
+  CODE
+`, 'file:///test/routine.clw');
+            
+            const tokens = tokenCache.getTokens(document);
+            const routineVarToken = tokens.find(t => t.value === 'RoutineVar');
+            
+            assert.ok(routineVarToken, 'Should find RoutineVar token');
+            const files = await analyzer.getVisibleFiles(routineVarToken!, 'file:///test/routine.clw');
+            
+            assert.strictEqual(files.length, 1, 'Routine-local should only be visible in one file');
+            assert.strictEqual(files[0], 'file:///test/routine.clw');
+        });
+    });
 });

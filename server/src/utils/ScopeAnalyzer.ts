@@ -158,7 +158,42 @@ export class ScopeAnalyzer {
      * @returns Array of file paths that can access this symbol
      */
     async getVisibleFiles(symbol: Token, declaringFile: string): Promise<string[]> {
-        return [];
+        // We need to determine the symbol's scope type
+        // Since we don't have the document here, we'll need to look at the token's parent chain
+        // or check if it has scope markers
+        
+        // For a more complete implementation, we'd need the document parameter
+        // For now, implement a basic version that returns the declaring file
+        // and can be enhanced later with solution manager integration
+        
+        // Check token properties to infer scope
+        // This is a simplified version - in practice we'd need the full document
+        
+        // If the token is inside a routine or procedure (check parent chain)
+        let currentToken: Token | undefined = symbol.parent;
+        let inProcedure = false;
+        let inRoutine = false;
+        
+        while (currentToken) {
+            if (currentToken.subType === TokenType.Routine) {
+                inRoutine = true;
+            }
+            if (currentToken.subType === TokenType.Procedure || 
+                currentToken.subType === TokenType.GlobalProcedure ||
+                currentToken.subType === TokenType.MethodImplementation) {
+                inProcedure = true;
+            }
+            currentToken = currentToken.parent;
+        }
+        
+        // Routine-local and procedure-local are only in declaring file
+        if (inRoutine || inProcedure) {
+            return [declaringFile];
+        }
+        
+        // For global and module-local, also only declaring file for now
+        // TODO: When solution manager integration is added, expand this for global symbols
+        return [declaringFile];
     }
 
     private isProgramFile(tokens: Token[]): boolean {
