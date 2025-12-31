@@ -341,4 +341,203 @@ RoutineVar LONG
             assert.strictEqual(files[0], 'file:///test/routine.clw');
         });
     });
+
+    suite('Edge Cases', () => {
+        test('should handle ROUTINE without DATA section', () => {
+            const document = createTestDocument(`MyProc PROCEDURE
+  CODE
+  DO MyRoutine
+  
+MyRoutine ROUTINE
+  CODE
+  ! No DATA section
+  ProcVar = 1
+`);
+            
+            const scope = analyzer.getTokenScope(document, { line: 6, character: 2 });
+            
+            assert.ok(scope !== null, 'Scope should not be null');
+            assert.strictEqual(scope?.type, 'routine', 'Should still be routine scope even without DATA');
+        });
+
+        test('should handle empty PROGRAM file', () => {
+            const document = createTestDocument(`PROGRAM
+CODE
+`);
+            
+            const scope = analyzer.getTokenScope(document, { line: 1, character: 0 });
+            
+            assert.ok(scope !== null, 'Scope should not be null');
+            assert.strictEqual(scope?.type, 'global');
+            assert.strictEqual(scope?.isProgramFile, true);
+        });
+
+        test('should handle MEMBER without module name', () => {
+            const document = createTestDocument(`MEMBER
+
+SomeVar LONG
+`);
+            
+            const scope = analyzer.getTokenScope(document, { line: 2, character: 0 });
+            
+            assert.ok(scope !== null, 'Scope should not be null');
+            // Without module name, should default to global
+            assert.strictEqual(scope?.type, 'global');
+        });
+
+        test('should handle file with no PROGRAM or MEMBER', () => {
+            const document = createTestDocument(`SomeVar LONG
+
+MyProc PROCEDURE
+  CODE
+`);
+            
+            const scope = analyzer.getTokenScope(document, { line: 0, character: 0 });
+            
+            assert.ok(scope !== null, 'Scope should not be null');
+            assert.strictEqual(scope?.type, 'global');
+            assert.strictEqual(scope?.isProgramFile, false);
+        });
+
+        test('should handle nested procedure attempt (invalid Clarion)', () => {
+            const document = createTestDocument(`Outer PROCEDURE
+  CODE
+  
+Inner PROCEDURE
+  CODE
+`);
+            
+            const outerScope = analyzer.getTokenScope(document, { line: 1, character: 2 });
+            const innerScope = analyzer.getTokenScope(document, { line: 4, character: 2 });
+            
+            // Both should be identified as procedures
+            assert.strictEqual(outerScope?.type, 'procedure');
+            assert.strictEqual(innerScope?.type, 'procedure');
+            
+            // They should be different procedures
+            assert.notStrictEqual(outerScope?.containingProcedure?.line, 
+                                innerScope?.containingProcedure?.line);
+        });
+
+        test('should handle ROUTINE at global level (invalid but should not crash)', () => {
+            const document = createTestDocument(`PROGRAM
+MAP
+END
+
+GlobalRoutine ROUTINE
+  DATA
+Var LONG
+  CODE
+`);
+            
+            const scope = analyzer.getTokenScope(document, { line: 6, character: 0 });
+            
+            assert.ok(scope !== null, 'Should not crash');
+            // ROUTINE at global level without containing procedure is treated as global
+            assert.strictEqual(scope?.type, 'global');
+        });
+
+        test('should handle multiple MEMBER statements (invalid but should handle first)', () => {
+            const document = createTestDocument(`MEMBER('First')
+MEMBER('Second')
+
+Var LONG
+`);
+            
+            const scope = analyzer.getTokenScope(document, { line: 3, character: 0 });
+            
+            assert.ok(scope !== null);
+            // Should use first MEMBER
+            assert.strictEqual(scope?.memberModuleName, 'First');
+        });
+
+        test('should handle very deep routine nesting in same procedure', () => {
+            const document = createTestDocument(`MyProc PROCEDURE
+ProcVar LONG
+  CODE
+  
+Routine1 ROUTINE
+  CODE
+  DO Routine2
+  
+Routine2 ROUTINE
+  DATA
+Routine2Var LONG
+  CODE
+  Routine2Var = 1
+`);
+            
+            const routine2Scope = analyzer.getTokenScope(document, { line: 11, character: 2 });
+            
+            assert.ok(routine2Scope !== null);
+            assert.strictEqual(routine2Scope?.type, 'routine');
+            assert.ok(routine2Scope?.containingProcedure !== undefined, 'Should have containing procedure');
+            assert.ok(routine2Scope?.containingRoutine !== undefined, 'Should have containing routine');
+        });
+
+        test('should handle PROCEDURE with only CODE, no DATA', () => {
+            const document = createTestDocument(`MyProc PROCEDURE
+  CODE
+  RETURN
+`);
+            
+            const scope = analyzer.getTokenScope(document, { line: 1, character: 2 });
+            
+            assert.ok(scope !== null);
+            assert.strictEqual(scope?.type, 'procedure');
+        });
+
+        test('should handle symbol at line 0', () => {
+            const document = createTestDocument(`PROGRAM
+GlobalVar LONG
+`);
+            
+            const scope = analyzer.getTokenScope(document, { line: 0, character: 0 });
+            
+            assert.ok(scope !== null);
+            // Line 0 should be PROGRAM line, which is global
+            assert.strictEqual(scope?.type, 'global');
+        });
+
+        test('should handle access check with out-of-bounds line numbers', () => {
+            const document = createTestDocument(`PROGRAM
+GlobalVar LONG
+CODE
+`);
+            
+            // Check access where reference is way out of bounds
+            // but declaration is valid
+            const canAccess = analyzer.canAccess(
+                { line: 999, character: 0 },  // Out of bounds reference
+                { line: 1, character: 0 },    // Valid global declaration
+                document,
+                document
+            );
+            
+            // Out of bounds reference is treated as global scope
+            // and can access global declarations
+            assert.strictEqual(canAccess, true);
+        });
+
+        test('should handle cross-file access check gracefully', () => {
+            const doc1 = createTestDocument(`PROGRAM
+GlobalVar LONG
+CODE
+`, 'file:///test/main.clw');
+            
+            const doc2 = createTestDocument(`MEMBER('Utils')
+LocalVar LONG
+`, 'file:///test/utils.clw');
+            
+            const canAccess = analyzer.canAccess(
+                { line: 1, character: 0 },
+                { line: 1, character: 0 },
+                doc2,
+                doc1
+            );
+            
+            // Cross-file access returns false for now (not implemented)
+            assert.strictEqual(canAccess, false);
+        });
+    });
 });
