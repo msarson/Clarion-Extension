@@ -17,11 +17,12 @@
 !    → TEST 4: F12 from main.clw should fail
 !
 ! 3. IncrementCounter (line 34) - PROCEDURE implementation
-!    → Declared in main.clw MAP, implemented here
-!    → TEST 2: F12 from main.clw should jump here
+!    → Declared in main.clw MAP (line 57)
+!    → TEST 2: From main.clw - F12 → MAP line 57, Ctrl+F12 → here (line 34)
 !
 ! 4. GetCounter (line 39) - PROCEDURE with return type
-!    → TEST 3: F12 from main.clw should jump here
+!    → Declared in main.clw MAP (line 58)
+!    → TEST 3: From main.clw - F12 → MAP line 58, Ctrl+F12 → here (line 39)
 !
 !═══════════════════════════════════════════════════════════════════════
 

@@ -20,21 +20,25 @@
 ! - Expected: Should jump to main.clw line 67 (global declaration)
 ! - Validates: Cross-file access to global symbols works
 !
-! TEST 2: Cross-file F12 Navigation (PROGRAM → MEMBER Implementation)
-! --------------------------------------------------------------------
+! TEST 2: F12 vs Ctrl+F12 for Procedures (Definition vs Implementation)
+! ----------------------------------------------------------------------
 ! - Open main.clw
 ! - Line 71: Put cursor on 'IncrementCounter'
 ! - Press F12 (Go to Definition)
+! - Expected: Should jump to line 57 (MAP declaration in same file)
+! - Then press Ctrl+F12 (Go to Implementation)
 ! - Expected: Should jump to utils.clw line 34 (implementation)
-! - Validates: Cross-file navigation to implementations works
+! - Validates: F12 → MAP declaration, Ctrl+F12 → implementation
 !
-! TEST 3: Cross-file F12 with Return Types
-! -----------------------------------------
+! TEST 3: Cross-file Procedure with Return Types
+! -----------------------------------------------
 ! - Open main.clw
 ! - Line 73: Put cursor on 'GetCounter'
 ! - Press F12 (Go to Definition)
+! - Expected: Should jump to line 58 (MAP declaration)
+! - Press Ctrl+F12 (Go to Implementation)
 ! - Expected: Should jump to utils.clw line 39 (implementation)
-! - Validates: MAP declarations with return types work
+! - Validates: MAP declarations with return types work correctly
 !
 ! TEST 4: Module-Local Scope Boundaries (Should FAIL)
 ! ----------------------------------------------------
@@ -68,7 +72,7 @@ GlobalCounter LONG      ! Global variable - accessible in utils.clw (TEST 1)
 
    CODE
    GlobalCounter = 0
-   IncrementCounter()    ! TEST 2: F12 should jump to utils.clw line 34
+   IncrementCounter()    ! TEST 2: F12 → line 57 MAP, Ctrl+F12 → utils.clw line 34
    IncrementCounter()
-   MESSAGE('Counter: ' & GetCounter())  ! TEST 3: F12 should jump to utils.clw line 39
+   MESSAGE('Counter: ' & GetCounter())  ! TEST 3: F12 → line 58 MAP, Ctrl+F12 → utils.clw line 39
    !ModuleData = 999     ! TEST 4: Uncomment and F12 should fail (module-local in utils.clw)
