@@ -112,14 +112,22 @@ export class ScopeAnalyzer {
 
     private getMemberModuleName(tokens: Token[]): string | undefined {
         // MEMBER at column 0 is tokenized as Label, not ClarionDocument
-        const memberToken = tokens.find(token =>
+        // and is tokenized as separate tokens: MEMBER ( 'ModuleName' )
+        const memberIndex = tokens.findIndex(token =>
             (token.type === TokenType.Label || token.type === TokenType.ClarionDocument) &&
-            token.value.toUpperCase().startsWith('MEMBER')
+            token.value.toUpperCase() === 'MEMBER'
         );
 
-        if (memberToken) {
-            const match = memberToken.value.match(/MEMBER\s*\(\s*'([^']+)'\s*\)/i);
-            return match ? match[1] : undefined;
+        if (memberIndex >= 0 && memberIndex + 2 < tokens.length) {
+            // Check if next token is ( and token after that is the string
+            const parenToken = tokens[memberIndex + 1];
+            const stringToken = tokens[memberIndex + 2];
+            
+            if (parenToken && parenToken.value === '(' && 
+                stringToken && stringToken.type === TokenType.String) {
+                // String token value includes the quotes, remove them
+                return stringToken.value.replace(/^['"]|['"]$/g, '');
+            }
         }
 
         return undefined;

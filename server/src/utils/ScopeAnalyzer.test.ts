@@ -13,6 +13,7 @@ suite('ScopeAnalyzer', () => {
     
     setup(() => {
         tokenCache = TokenCache.getInstance();
+        tokenCache.clearAllTokens(); // Clear cache between tests
         analyzer = new ScopeAnalyzer(tokenCache, null);
     });
     
@@ -27,24 +28,28 @@ GlobalVar LONG
 CODE
 `);
             
-            // First check we have tokens
-            const tokens = tokenCache.getTokens(document);
-            assert.ok(tokens && tokens.length > 0, 'Should have tokens');
-            
-            // Debug: print tokens
-            console.log(`\n=== Tokens (${tokens.length}) ===`);
-            tokens.forEach((t, i) => {
-                console.log(`${i}: line=${t.line}, type=${t.type}, subType=${t.subType}, value='${t.value}'`);
-            });
-            
-            // Position on 'GlobalVar' line
             const scope = analyzer.getTokenScope(document, { line: 4, character: 0 });
             
             assert.ok(scope !== null, 'Scope should not be null');
-            console.log(`\nScope result:`, scope);
-            assert.strictEqual(scope?.type, 'global', `Expected 'global' but got '${scope?.type}'`);
-            assert.strictEqual(scope?.isProgramFile, true, `Expected isProgramFile=true but got ${scope?.isProgramFile}`);
+            assert.strictEqual(scope?.type, 'global');
+            assert.strictEqual(scope?.isProgramFile, true);
             assert.strictEqual(scope?.memberModuleName, undefined);
+        });
+
+        test('should identify module scope in MEMBER file', () => {
+            const document = createTestDocument(`MEMBER('Main')
+
+ModuleVar LONG
+
+MyProc PROCEDURE
+`);
+            
+            const scope = analyzer.getTokenScope(document, { line: 2, character: 0 });
+            
+            assert.ok(scope !== null, 'Scope should not be null');
+            assert.strictEqual(scope?.type, 'module');
+            assert.strictEqual(scope?.isProgramFile, false);
+            assert.strictEqual(scope?.memberModuleName, 'Main');
         });
     });
 });
