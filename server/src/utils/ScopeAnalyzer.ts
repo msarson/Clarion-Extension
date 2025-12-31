@@ -106,6 +106,48 @@ export class ScopeAnalyzer {
         referenceDocument: TextDocument,
         declarationDocument: TextDocument
     ): boolean {
+        // Different files - need to check cross-file visibility rules
+        if (referenceDocument.uri !== declarationDocument.uri) {
+            // TODO: Implement cross-file access rules
+            return false;
+        }
+
+        // Same file - check scope hierarchy
+        const refScope = this.getTokenScope(referenceDocument, referenceLocation);
+        const declScope = this.getTokenScope(declarationDocument, declarationLocation);
+
+        if (!refScope || !declScope) {
+            return false;
+        }
+
+        // Global scope is accessible from anywhere
+        if (declScope.type === 'global') {
+            return true;
+        }
+
+        // Module-local is accessible within the same module (file)
+        if (declScope.type === 'module') {
+            return true; // Same file, so same module
+        }
+
+        // Procedure-local: accessible from same procedure and its routines
+        if (declScope.type === 'procedure') {
+            // Check if reference is in same procedure or a routine within it
+            if (refScope.containingProcedure?.line === declScope.containingProcedure?.line) {
+                return true;
+            }
+            return false;
+        }
+
+        // Routine-local: only accessible within that routine
+        if (declScope.type === 'routine') {
+            // Must be in the exact same routine
+            if (refScope.containingRoutine?.line === declScope.containingRoutine?.line) {
+                return true;
+            }
+            return false;
+        }
+
         return false;
     }
 

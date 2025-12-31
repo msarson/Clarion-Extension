@@ -159,4 +159,110 @@ RoutineVar LONG
             assert.strictEqual(scope, 'routine-local');
         });
     });
+
+    suite('canAccess', () => {
+        test('should allow access within same procedure', () => {
+            const document = createTestDocument(`MyProc PROCEDURE
+LocalVar LONG
+  CODE
+  LocalVar = 5
+`);
+            
+            const canAccess = analyzer.canAccess(
+                { line: 3, character: 2 },  // Reference
+                { line: 1, character: 0 },  // Declaration
+                document,
+                document
+            );
+            
+            assert.strictEqual(canAccess, true);
+        });
+
+        test('should deny access to procedure-local var from different procedure', () => {
+            const document = createTestDocument(`Proc1 PROCEDURE
+LocalVar LONG
+  CODE
+
+Proc2 PROCEDURE
+  CODE
+  LocalVar = 5
+`);
+            
+            const canAccess = analyzer.canAccess(
+                { line: 6, character: 2 },  // Reference in Proc2
+                { line: 1, character: 0 },  // Declaration in Proc1
+                document,
+                document
+            );
+            
+            assert.strictEqual(canAccess, false);
+        });
+
+        test('should allow procedure to access global data', () => {
+            const document = createTestDocument(`PROGRAM
+MAP
+END
+
+GlobalVar LONG
+
+CODE
+
+MyProc PROCEDURE
+  CODE
+  GlobalVar = 5
+`);
+            
+            const canAccess = analyzer.canAccess(
+                { line: 10, character: 2 },  // Reference in MyProc
+                { line: 4, character: 0 },   // Global declaration
+                document,
+                document
+            );
+            
+            assert.strictEqual(canAccess, true);
+        });
+
+        test('should allow routine to access procedure data', () => {
+            const document = createTestDocument(`MyProc PROCEDURE
+ProcVar LONG
+  CODE
+  DO MyRoutine
+  
+MyRoutine ROUTINE
+  CODE
+  ProcVar = 5
+`);
+            
+            const canAccess = analyzer.canAccess(
+                { line: 7, character: 2 },  // Reference in routine
+                { line: 1, character: 0 },  // Declaration in procedure
+                document,
+                document
+            );
+            
+            assert.strictEqual(canAccess, true);
+        });
+
+        test('should deny procedure access to routine-local data', () => {
+            const document = createTestDocument(`MyProc PROCEDURE
+  CODE
+  DO MyRoutine
+  RoutineVar = 5
+  
+MyRoutine ROUTINE
+  DATA
+RoutineVar LONG
+  CODE
+`);
+            
+            const canAccess = analyzer.canAccess(
+                { line: 3, character: 2 },  // Reference in procedure
+                { line: 7, character: 0 },  // Declaration in routine
+                document,
+                document
+            );
+            
+            assert.strictEqual(canAccess, false);
+        });
+    });
 });
