@@ -939,8 +939,22 @@ export class DefinitionProvider {
                     if (scopedVariables.length > 0) {
                         logger.info(`✅ Found ${scopedVariables.length} variables in scope ${scope.value}`);
                         
-                        // Iterate through all scoped variables to find one that passes validation
-                        for (const token of scopedVariables) {
+                        // Apply scope filtering before prefix validation
+                        const accessibleVariables = this.filterByScope(
+                            scopedVariables,
+                            document,
+                            position
+                        );
+                        
+                        if (accessibleVariables.length === 0) {
+                            logger.info(`⚠️ No accessible variables in scope ${scope.value} after filtering`);
+                            continue; // Try next scope
+                        }
+                        
+                        logger.info(`✅ ${accessibleVariables.length} accessible variables after scope filtering`);
+                        
+                        // Iterate through accessible variables to find one that passes validation
+                        for (const token of accessibleVariables) {
                             // CRITICAL FIX: Check if this is a structure field that requires a prefix
                             // First check: token properties set during tokenization
                             if ((token as any).isStructureField || (token as any).structurePrefix) {
