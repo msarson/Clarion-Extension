@@ -12,6 +12,7 @@ import { DocumentStructure } from '../DocumentStructure';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("MapProcedureResolver");
+logger.setLevel("info"); // TEMPORARY: Debug cross-file implementation navigation
 
 export class MapProcedureResolver {
     /**
