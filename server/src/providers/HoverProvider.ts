@@ -18,7 +18,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("HoverProvider");
-logger.setLevel("error"); // PERF: Only log errors to reduce overhead
+logger.setLevel("error"); // Production: Only log errors
 
 /**
  * Provides hover information for local variables and parameters
@@ -259,6 +259,25 @@ export class HoverProvider {
                     };
                 }
                 // Fall through to generic PROCEDURE documentation
+            }
+
+            // Check if this is a procedure call (e.g., "MyProcedure()")
+            const afterWord = line.substring(wordRange.end.character).trimStart();
+            if (afterWord.startsWith('(')) {
+                logger.info(`Detected procedure call: ${word}()`);
+                
+                // Get tokens for parameter counting
+                const tokens = this.tokenCache.getTokens(document);
+                
+                // Find MAP declaration
+                const mapDecl = this.mapResolver.findMapDeclaration(word, tokens, document, line);
+                
+                // Find PROCEDURE implementation  
+                const procImpl = await this.mapResolver.findProcedureImplementation(word, tokens, document, position, line);
+                
+                if (mapDecl || procImpl) {
+                    return this.constructProcedureHover(word, mapDecl, procImpl, document);
+                }
             }
 
             // Decide priority: data type vs control based on context
@@ -2062,6 +2081,66 @@ export class HoverProvider {
         // Unclosed parentheses - return what we have so far
         // If we saw any content, return the count
         return isEmpty ? null : paramCount;
+    }
+
+    /**
+     * Construct hover information for procedure calls
+     * Shows both MAP declaration and PROCEDURE implementation
+     */
+    private async constructProcedureHover(
+        procName: string,
+        mapDecl: Location | null,
+        procImpl: Location | null,
+        currentDocument: TextDocument
+    ): Promise<Hover | null> {
+        const parts: string[] = [];
+        
+        parts.push(`**${procName}** (Procedure)\n`);
+        
+        // Show MAP declaration
+        if (mapDecl) {
+            try {
+                const mapUri = mapDecl.uri.replace('file:///', '');
+                const mapContent = fs.readFileSync(mapUri, 'utf-8');
+                const mapLines = mapContent.split('\n');
+                const mapLine = mapLines[mapDecl.range.start.line];
+                
+                if (mapLine) {
+                    const trimmedMapLine = mapLine.trim();
+                    parts.push(`**MAP Declaration:**\n\`\`\`clarion\n${trimmedMapLine}\n\`\`\``);
+                }
+            } catch (error) {
+                logger.error(`Error reading MAP declaration: ${error}`);
+            }
+        }
+        
+        // Show PROCEDURE implementation signature
+        if (procImpl) {
+            try {
+                const implUri = procImpl.uri.replace('file:///', '');
+                const implContent = fs.readFileSync(implUri, 'utf-8');
+                const implLines = implContent.split('\n');
+                const implLine = implLines[procImpl.range.start.line];
+                
+                if (implLine) {
+                    const trimmedImplLine = implLine.trim();
+                    parts.push(`\n**Implementation:**\n\`\`\`clarion\n${trimmedImplLine}\n\`\`\``);
+                }
+            } catch (error) {
+                logger.error(`Error reading PROCEDURE implementation: ${error}`);
+            }
+        }
+        
+        if (parts.length > 1) {
+            return {
+                contents: {
+                    kind: 'markdown',
+                    value: parts.join('\n')
+                }
+            };
+        }
+        
+        return null;
     }
 
 
