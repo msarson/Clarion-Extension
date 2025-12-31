@@ -219,8 +219,9 @@ export class RedirectionFileParserServer {
       const includeEntries: RedirectionEntry[] = [];
 
       if (isFirst) {
-        entries.push({ redFile: redFileToParse, section: "Common", extension: "*.*", paths: ["."] });
-        logger.info(`Added default *.* = '.' entry for ${redFileToParse}`);
+        // Store the actual directory path, not just "."
+        entries.push({ redFile: redFileToParse, section: "Common", extension: "*.*", paths: [redPath] });
+        logger.info(`Added default *.* = '${redPath}' entry for ${redFileToParse}`);
       }
 
       // Use a more efficient approach to process the file
@@ -333,8 +334,9 @@ export class RedirectionFileParserServer {
       const includeEntries: RedirectionEntry[] = [];
 
       if (isFirst) {
-        entries.push({ redFile: redFileToParse, section: "Common", extension: "*.*", paths: ["."] });
-        logger.info(`Added default *.* = '.' entry for ${redFileToParse}`);
+        // Store the actual directory path, not just "."
+        entries.push({ redFile: redFileToParse, section: "Common", extension: "*.*", paths: [redPath] });
+        logger.info(`Added default *.* = '${redPath}' entry for ${redFileToParse}`);
       }
 
       // Process the file line by line
