@@ -1829,4 +1829,77 @@ export class DefinitionProvider {
         return false;
     }
 
+    /**
+     * Filters a list of candidate tokens by scope accessibility
+     * Returns tokens that are accessible from the reference location
+     * Prioritizes closer scopes over distant scopes
+     * 
+     * @param candidates Array of tokens representing possible definitions
+     * @param referenceDoc Document where the reference occurs
+     * @param referencePos Position of the reference
+     * @returns Filtered and sorted array of tokens (closest scope first)
+     */
+    private filterByScope(
+        candidates: Token[],
+        referenceDoc: TextDocument,
+        referencePos: Position
+    ): Token[] {
+        if (candidates.length === 0) {
+            return [];
+        }
+
+        logger.info(`🔍 SCOPE-FILTER: Filtering ${candidates.length} candidates at ref position ${referencePos.line}:${referencePos.character}`);
+
+        // Check which candidates are accessible
+        const accessible = candidates.filter(candidate => {
+            // Create a position for the declaration (use token's line and start position)
+            const declPos: Position = { line: candidate.line, character: candidate.start };
+            
+            // Check if reference can access this declaration
+            const canAccess = this.scopeAnalyzer.canAccess(
+                referencePos,
+                declPos,
+                referenceDoc,
+                referenceDoc  // Same document for now (Phase 1)
+            );
+
+            logger.info(`  ${canAccess ? '✅' : '❌'} Token at line ${candidate.line}: ${candidate.value} (type: ${candidate.type})`);
+            
+            return canAccess;
+        });
+
+        if (accessible.length === 0) {
+            logger.info(`⚠️ SCOPE-FILTER: No accessible candidates found, returning all candidates as fallback`);
+            return candidates; // Fallback: if nothing is accessible, return all (preserve existing behavior)
+        }
+
+        logger.info(`✅ SCOPE-FILTER: Filtered to ${accessible.length} accessible candidates`);
+
+        // Sort by scope distance (closest scope first)
+        accessible.sort((a, b) => {
+            const aScopeInfo = this.scopeAnalyzer.getTokenScope(referenceDoc, { line: a.line, character: a.start });
+            const bScopeInfo = this.scopeAnalyzer.getTokenScope(referenceDoc, { line: b.line, character: b.start });
+            
+            // Scope priority: routine (4) > procedure (3) > module (2) > global (1)
+            const scopePriority = (scope: string) => {
+                switch (scope) {
+                    case 'routine': return 4;
+                    case 'procedure': return 3;
+                    case 'module': return 2;
+                    case 'global': return 1;
+                    default: return 0;
+                }
+            };
+            
+            const aPriority = scopePriority(aScopeInfo?.type || '');
+            const bPriority = scopePriority(bScopeInfo?.type || '');
+            
+            // Higher priority (narrower scope) comes first
+            return bPriority - aPriority;
+        });
+
+        logger.info(`📋 SCOPE-FILTER: Returning ${accessible.length} candidates (sorted by scope distance)`);
+        return accessible;
+    }
+
 }
