@@ -57,18 +57,24 @@ export class ImplementationProvider {
             if (afterWord.startsWith('(')) {
                 logger.info(`Detected procedure call: ${word}()`);
                 
-                // Find the PROCEDURE implementation
-                const implLocation = await this.mapResolver.findProcedureImplementation(
-                    word,
-                    tokens,
-                    document,
-                    position,
-                    line
-                );
+                // Find the MAP declaration first
+                const mapDecl = this.mapResolver.findMapDeclaration(word, tokens, document, line);
                 
-                if (implLocation) {
-                    logger.info(`✅ Found procedure implementation for call: ${word}`);
-                    return implLocation;
+                if (mapDecl) {
+                    // Now find implementation using the MAP declaration position
+                    const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
+                    const implLocation = await this.mapResolver.findProcedureImplementation(
+                        word,
+                        tokens,
+                        document,
+                        mapPosition, // Use MAP position, not call position
+                        line
+                    );
+                    
+                    if (implLocation) {
+                        logger.info(`✅ Found procedure implementation for call: ${word}`);
+                        return implLocation;
+                    }
                 }
             }
         }

@@ -269,11 +269,21 @@ export class HoverProvider {
                 // Get tokens for parameter counting
                 const tokens = this.tokenCache.getTokens(document);
                 
-                // Find MAP declaration
+                // Find MAP declaration first
                 const mapDecl = this.mapResolver.findMapDeclaration(word, tokens, document, line);
                 
-                // Find PROCEDURE implementation  
-                const procImpl = await this.mapResolver.findProcedureImplementation(word, tokens, document, position, line);
+                let procImpl = null;
+                if (mapDecl) {
+                    // Find implementation using MAP declaration position
+                    const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
+                    procImpl = await this.mapResolver.findProcedureImplementation(
+                        word,
+                        tokens,
+                        document,
+                        mapPosition, // Use MAP position, not call position
+                        line
+                    );
+                }
                 
                 if (mapDecl || procImpl) {
                     return this.constructProcedureHover(word, mapDecl, procImpl, document);
