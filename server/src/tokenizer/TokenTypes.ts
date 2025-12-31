@@ -71,4 +71,5 @@ export interface Token {
     nestedLabel?: string;     // ✅ Store the label of the nesting structure (e.g., "Queue:Browse:1" for fields inside it)
     referencedFile?: string;  // ✅ Resolved path for any file reference (MODULE/INCLUDE/LINK/MEMBER/etc)
     localVariablesAnalyzed?: boolean;  // 🚀 PERF: Track if procedure's local variables were already analyzed
+    isSingleLineWithContinuation?: boolean; // ✅ True if structure is single-line but spans multiple lines due to |
 }

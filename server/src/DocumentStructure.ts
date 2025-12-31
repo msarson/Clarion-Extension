@@ -442,40 +442,56 @@ export class DocumentStructure {
 
         // ✅ Check if structure ends on the same line (single-line declaration)
         // Examples: "AnswerDateTime GROUP(DateTimeType)." or "MyGroup GROUP;END"
+        // Also applies to single-line control flow: "IF condition THEN statement." or "IF x THEN y END"
+        // Handles line continuation: "IF x THEN | \n statement."
         const sameLine = this.tokensByLine.get(token.line) || [];
         const structureIndex = sameLine.indexOf(token);
         let endsOnSameLine = false;
+        let continuationLine = token.line;
         
-        // Check source text for period (since periods may not be tokenized)
-        if (this.lines && token.line >= 0 && token.line < this.lines.length) {
-            const lineText = this.lines[token.line];
+        // Follow line continuations to find the actual end
+        while (continuationLine < this.tokens[this.tokens.length - 1].line) {
+            const lineTokens = this.tokensByLine.get(continuationLine) || [];
             
-            // Check if line ends with period (after trimming whitespace)
-            if (lineText.trim().endsWith('.')) {
+            // Find the last non-comment token on this line
+            let lastSignificantToken: Token | undefined;
+            for (let i = lineTokens.length - 1; i >= 0; i--) {
+                const t = lineTokens[i];
+                if (t.type !== TokenType.Comment) {
+                    lastSignificantToken = t;
+                    break;
+                }
+            }
+            
+            if (!lastSignificantToken) {
+                break; // Empty line or only comments
+            }
+            
+            // Check if this line has a continuation character
+            const hasContinuation = lastSignificantToken.type === TokenType.LineContinuation || 
+                                   lastSignificantToken.value === '|';
+            
+            if (hasContinuation) {
+                // Statement continues on next line
+                continuationLine++;
+                continue;
+            }
+            
+            // No continuation - check if this line ends with a terminator
+            const isEnd = lastSignificantToken.type === TokenType.EndStatement || 
+                         lastSignificantToken.value.toUpperCase() === 'END';
+            const isPeriod = lastSignificantToken.value === '.';
+            
+            if (isEnd || isPeriod) {
                 endsOnSameLine = true;
-                token.finishesAt = token.line;
-            }
-        }
-        
-        // Also check tokens for period or END (fallback if source text not available)
-        if (!endsOnSameLine) {
-            for (let i = structureIndex + 1; i < sameLine.length; i++) {
-                const t = sameLine[i];
-                
-                // Found period terminator
-                if (t.value === '.') {
-                    endsOnSameLine = true;
-                    token.finishesAt = token.line;
-                    break;
-                }
-                
-                // Found END keyword
-                if (t.type === TokenType.EndStatement || t.value.toUpperCase() === 'END') {
-                    endsOnSameLine = true;
-                    token.finishesAt = token.line;
-                    break;
+                token.finishesAt = continuationLine;
+                // Mark if this spans multiple lines due to continuation
+                if (continuationLine > token.line) {
+                    token.isSingleLineWithContinuation = true;
                 }
             }
+            
+            break; // Found the end of the statement
         }
         
         // If structure ends on same line, don't push to stack (no folding needed)
@@ -714,12 +730,68 @@ export class DocumentStructure {
             return;
         }
         
+        // ✅ Check if this period is part of a continued statement (line with | before this line)
+        // If the previous line has a line continuation, this period is a statement terminator, not a structure terminator
+        if (token.value === '.') {
+            const prevLine = this.tokensByLine.get(token.line - 1) || [];
+            let lastTokenOnPrevLine: Token | undefined;
+            for (let i = prevLine.length - 1; i >= 0; i--) {
+                const t = prevLine[i];
+                if (t.type !== TokenType.Comment) {
+                    lastTokenOnPrevLine = t;
+                    break;
+                }
+            }
+            
+            if (lastTokenOnPrevLine) {
+                const hasContinuation = lastTokenOnPrevLine.type === TokenType.LineContinuation || 
+                                       lastTokenOnPrevLine.value === '|';
+                if (hasContinuation) {
+                    // This period ends a continued statement, not a structure
+                    logger.info(`🔚 Period at Line ${token.line} ends continued statement from Line ${token.line - 1} (not popping stack)`);
+                    return;
+                }
+            }
+        }
+        
+        // Look ahead to find the next non-comment token
+        const currentIndex = this.tokens.indexOf(token);
+        let nextSignificantToken: Token | undefined;
+        
+        for (let i = currentIndex + 1; i < this.tokens.length; i++) {
+            const t = this.tokens[i];
+            // Skip comments and continue to next line
+            if (t.type === TokenType.Comment) continue;
+            // Found a token on a different line
+            if (t.line > token.line) {
+                nextSignificantToken = t;
+                break;
+            }
+        }
+        
+        const nextValue = nextSignificantToken?.value.toUpperCase();
+        const isElseOrElsif = nextValue === 'ELSE' || nextValue === 'ELSIF';
+        const isOf = nextValue === 'OF';
+        
         // This END/period terminates a structure from the stack
         const lastStructure = this.structureStack.pop();
         if (lastStructure) {
             lastStructure.finishesAt = token.line;
-            // Don't overwrite END token's start position - it's already correct from tokenizer
             logger.info(`🔚 Closed ${lastStructure.value} at Line ${token.line}`);
+            
+            // ✅ Special handling: Check if the structure that's NOW on top of the stack
+            // (after popping) is an IF/CASE that continues with ELSE/ELSIF/OF
+            if (this.structureStack.length > 0) {
+                const parentStructure = this.structureStack[this.structureStack.length - 1];
+                const parentType = parentStructure.value.toUpperCase();
+                
+                if ((parentType === 'IF' && isElseOrElsif) || (parentType === 'CASE' && isOf)) {
+                    // The END closed a nested structure/branch, but the parent IF/CASE continues
+                    logger.info(`🔄 ${parentType} at Line ${parentStructure.line} continues with ${nextValue} at Line ${nextSignificantToken!.line}`);
+                    // Parent IF/CASE stays on stack, will be closed by a later END
+                }
+            }
+            
             if (["CLASS", "MAP", "INTERFACE", "MODULE"].includes(lastStructure.value.toUpperCase())) {
                 this.insideClassOrInterfaceOrMapDepth = Math.max(0, this.insideClassOrInterfaceOrMapDepth - 1);
                 logger.info(`Exiting ${lastStructure.value.toUpperCase()} structure, depth: ${this.insideClassOrInterfaceOrMapDepth}`);

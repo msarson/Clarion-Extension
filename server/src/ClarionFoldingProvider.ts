@@ -125,6 +125,12 @@ class ClarionFoldingProvider {
         if (!token.finishesAt || token.line >= token.finishesAt) {
             return; // Skip invalid or single-line elements
         }
+        
+        // Skip single-line control flow with continuation (e.g., IF x THEN | \n statement.)
+        // These can span many physical lines but are logically single-line
+        if (token.isSingleLineWithContinuation) {
+            return; // Skip single-line with continuation
+        }
     
         // Only fold these subtypes:
         const foldableSubTypes = [

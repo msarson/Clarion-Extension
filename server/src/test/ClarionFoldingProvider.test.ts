@@ -285,4 +285,129 @@ ThisWindow.Kill PROCEDURE()
             assert.ok(ranges.length >= 2, 'Should have ranges for both method implementations');
         });
     });
+
+    suite('computeFoldingRanges - Control Flow (IF/ELSE/ELSIF)', () => {
+        
+        test('Should fold IF with ELSE correctly', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+  If condition
+    statement1
+  Else
+    statement2
+  End
+  END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            // Should have a fold for the IF that includes the ELSE block
+            const ifRange = ranges.find(r => r.startLine === 2 && r.endLine === 6);
+            assert.ok(ifRange, 'Should fold IF from line 2 to 6 (including ELSE)');
+        });
+
+        test('Should fold nested IF structures correctly', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+  If outerCondition
+    statement1
+    If innerCondition
+      statement2
+    End
+  Else
+    statement3
+  End
+  END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            // Should have a fold for outer IF (including ELSE)
+            const outerIfRange = ranges.find(r => r.startLine === 2 && r.endLine === 9);
+            assert.ok(outerIfRange, 'Should fold outer IF from line 2 to 9 (including ELSE)');
+            
+            // Should have a fold for inner IF
+            const innerIfRange = ranges.find(r => r.startLine === 4 && r.endLine === 6);
+            assert.ok(innerIfRange, 'Should fold inner IF from line 4 to 6');
+        });
+
+        test('Should fold IF with ELSIF correctly', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+  If condition1
+    statement1
+  ElsIf condition2
+    statement2
+  Else
+    statement3
+  End
+  END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            // Should have a fold for the entire IF structure
+            const ifRange = ranges.find(r => r.startLine === 2 && r.endLine === 8);
+            assert.ok(ifRange, 'Should fold IF from line 2 to 8 (including ELSIF and ELSE)');
+        });
+
+        test('Should fold IF without ELSE correctly', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+  If condition
+    statement1
+    statement2
+  End
+  END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            // Should have a fold for the IF
+            const ifRange = ranges.find(r => r.startLine === 2 && r.endLine === 5);
+            assert.ok(ifRange, 'Should fold IF from line 2 to 5');
+        });
+
+        test('Should NOT fold single-line IF with period terminator', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+  IF Cfg:SortByXYCU THEN SORT(SortQ,SortQ:ATSort,SortQ:LineNo).
+  statement2
+  END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            // Should NOT have a fold for the single-line IF
+            const ifRange = ranges.find(r => r.startLine === 2);
+            assert.strictEqual(ifRange, undefined, 'Should NOT fold single-line IF');
+        });
+
+        test('Should NOT fold single-line IF with END terminator', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+  IF x THEN y := 1 END
+  statement2
+  END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            // Should NOT have a fold for the single-line IF
+            const ifRange = ranges.find(r => r.startLine === 2);
+            assert.strictEqual(ifRange, undefined, 'Should NOT fold single-line IF with END');
+        });
+    });
 });
