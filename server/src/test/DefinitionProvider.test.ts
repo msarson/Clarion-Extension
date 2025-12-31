@@ -4,6 +4,7 @@ import { Position, Location, Range } from 'vscode-languageserver-protocol';
 import { TokenHelper } from '../utils/TokenHelper';
 import { ClarionTokenizer, TokenType } from '../ClarionTokenizer';
 import { DefinitionProvider } from '../providers/DefinitionProvider';
+import { TokenCache } from '../TokenCache';
 
 suite('DefinitionProvider Behavior Tests', () => {
     
@@ -791,6 +792,15 @@ MyWindow WINDOW,AT(0,0,100,100)
 
     suite('Scope-Aware Definition Tests', () => {
         const definitionProvider = new DefinitionProvider();
+        const tokenCache = TokenCache.getInstance();
+
+        teardown(() => {
+            // Clear cached test documents to ensure fresh tokenization
+            tokenCache.clearTokens('test://test-prioritize.clw');
+            tokenCache.clearTokens('test://test-routine-access.clw');
+            tokenCache.clearTokens('test://test-member-scope.clw');
+            tokenCache.clearTokens('test://test-shadowing.clw');
+        });
 
         test('Should prioritize procedure-local over global with same name', async () => {
             const code = `
