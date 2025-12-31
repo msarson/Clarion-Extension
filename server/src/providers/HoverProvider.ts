@@ -711,17 +711,16 @@ export class HoverProvider {
                     const signature = line.trim();
                     
                     // Determine if this procedure is global (PROGRAM file) or module-local (MEMBER file)
+                    // Look for PROGRAM or MEMBER as the first non-comment token in the file
                     const allTokens = this.tokenCache.getTokens(document);
-                    const isProgramFile = allTokens.some(t => 
-                        t.type === TokenType.Label && 
-                        t.value.toUpperCase() === 'PROGRAM' && 
-                        t.line < 5
-                    );
-                    const isMemberFile = allTokens.some(t => 
-                        t.type === TokenType.Label && 
-                        t.value.toUpperCase() === 'MEMBER' && 
-                        t.line < 5
-                    );
+                    const firstNonCommentToken = allTokens.find(t => t.type !== TokenType.Comment);
+                    
+                    const isProgramFile = firstNonCommentToken?.type === TokenType.Label && 
+                                         firstNonCommentToken.value.toUpperCase() === 'PROGRAM';
+                    const isMemberFile = firstNonCommentToken?.type === TokenType.Label && 
+                                        firstNonCommentToken.value.toUpperCase().startsWith('MEMBER');
+                    
+                    logger.info(`File type detection: firstToken="${firstNonCommentToken?.value}", isProgramFile=${isProgramFile}, isMemberFile=${isMemberFile}`);
                     
                     const markdown = [
                         `**PROCEDURE:** \`${currentToken.label}\``,
