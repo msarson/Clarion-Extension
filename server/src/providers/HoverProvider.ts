@@ -715,12 +715,11 @@ export class HoverProvider {
                     const allTokens = this.tokenCache.getTokens(document);
                     const firstNonCommentToken = allTokens.find(t => t.type !== TokenType.Comment);
                     
-                    const isProgramFile = firstNonCommentToken?.type === TokenType.Label && 
+                    const isProgramFile = firstNonCommentToken?.type === TokenType.ClarionDocument && 
                                          firstNonCommentToken.value.toUpperCase() === 'PROGRAM';
-                    const isMemberFile = firstNonCommentToken?.type === TokenType.Label && 
-                                        firstNonCommentToken.value.toUpperCase().startsWith('MEMBER');
-                    
-                    logger.info(`File type detection: firstToken="${firstNonCommentToken?.value}", isProgramFile=${isProgramFile}, isMemberFile=${isMemberFile}`);
+                    const isMemberFile = firstNonCommentToken?.type === TokenType.ClarionDocument && 
+                                        (firstNonCommentToken.value.toUpperCase() === 'MEMBER' || 
+                                         firstNonCommentToken.value.toUpperCase().startsWith('MEMBER('));
                     
                     const markdown = [
                         `**PROCEDURE:** \`${currentToken.label}\``,
