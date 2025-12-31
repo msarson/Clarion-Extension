@@ -51,7 +51,7 @@ export async function startLanguageServer(
 
     const serverOptions: ServerOptions = {
         run: { module: serverModule, transport: TransportKind.ipc },
-        debug: { module: serverModule, transport: TransportKind.ipc, options: debugOptions }
+        debug: { module: serverModule, transport: TransportKind.stdio, options: debugOptions }
     };
 
     // Get the default lookup extensions from settings
