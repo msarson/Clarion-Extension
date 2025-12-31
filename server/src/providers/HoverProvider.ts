@@ -2100,7 +2100,8 @@ export class HoverProvider {
         // Show MAP declaration
         if (mapDecl) {
             try {
-                const mapUri = mapDecl.uri.replace('file:///', '');
+                // Properly decode file URI
+                const mapUri = decodeURIComponent(mapDecl.uri.replace('file:///', ''));
                 const mapContent = fs.readFileSync(mapUri, 'utf-8');
                 const mapLines = mapContent.split('\n');
                 const mapLine = mapLines[mapDecl.range.start.line];
@@ -2117,7 +2118,8 @@ export class HoverProvider {
         // Show PROCEDURE implementation signature
         if (procImpl) {
             try {
-                const implUri = procImpl.uri.replace('file:///', '');
+                // Properly decode file URI
+                const implUri = decodeURIComponent(procImpl.uri.replace('file:///', ''));
                 const implContent = fs.readFileSync(implUri, 'utf-8');
                 const implLines = implContent.split('\n');
                 const implLine = implLines[procImpl.range.start.line];
