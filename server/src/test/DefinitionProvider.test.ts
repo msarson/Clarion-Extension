@@ -797,13 +797,13 @@ MyWindow WINDOW,AT(0,0,100,100)
 GlobalVar   LONG
 
 MyProc      PROCEDURE()
-LocalVar      LONG
+ProcLocal     LONG
   CODE
-  LocalVar = 123
+  ProcLocal = 123
   END`.trim();
 
-            const document = createDocument(code);
-            const position: Position = { line: 5, character: 4 }; // On "LocalVar = 123"
+            const document = createDocument(code, 'test://test-prioritize.clw');
+            const position: Position = { line: 5, character: 4 }; // On "ProcLocal = 123"
 
             const result = await definitionProvider.provideDefinition(document, position);
 
@@ -851,7 +851,7 @@ MyRoutine ROUTINE
   ProcVar = 5
   END`.trim();
 
-            const document = createDocument(code);
+            const document = createDocument(code, 'test://test-routine-access.clw');
             const position: Position = { line: 7, character: 4 }; // On "ProcVar = 5" in routine
 
             const result = await definitionProvider.provideDefinition(document, position);
@@ -891,7 +891,7 @@ Proc1         PROCEDURE()
   ModuleVar = 5
   END`.trim();
 
-            const document = createDocument(code);
+            const document = createDocument(code, 'test://test-member-scope.clw');
             const position: Position = { line: 6, character: 4 }; // On "ModuleVar = 5"
 
             const result = await definitionProvider.provideDefinition(document, position);
@@ -917,7 +917,7 @@ Counter           LONG
   Counter = 100
   END`.trim();
 
-            const document = createDocument(code);
+            const document = createDocument(code, 'test://test-shadowing.clw');
             const position: Position = { line: 11, character: 4 }; // On "Counter = 100" in routine
 
             const result = await definitionProvider.provideDefinition(document, position);
