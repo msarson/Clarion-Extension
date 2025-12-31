@@ -102,6 +102,46 @@ export class DefinitionProvider {
                 }
             }
 
+            // Check if this is a procedure call in CODE (e.g., "MyProcedure()" or "ProcessOrder(param)")
+            // Navigate to the MAP declaration or PROCEDURE implementation
+            const hasParenthesesAfter = line.substring(position.character).trimStart().startsWith('(');
+            if (hasParenthesesAfter) {
+                logger.info(`🔍 Detected potential procedure call: ${word}()`);
+                
+                // Count parameters for overload resolution
+                const paramCount = this.memberResolver.countParametersInCall(line, word);
+                logger.info(`Procedure call has ${paramCount} parameters`);
+                
+                // First, try to find MAP declaration in current file
+                const mapDecl = this.mapResolver.findMapDeclaration(word, tokens, document, line);
+                if (mapDecl) {
+                    logger.info(`✅ Found MAP declaration for procedure call: ${word}`);
+                    return mapDecl;
+                }
+                
+                // If not found locally and file has MEMBER, check parent file's MAP
+                const memberToken = tokens.find(t => 
+                    t.line < 5 && // MEMBER should be at top of file
+                    t.value.toUpperCase() === 'MEMBER' &&
+                    t.referencedFile
+                );
+                
+                if (memberToken?.referencedFile) {
+                    logger.info(`File has MEMBER('${memberToken.referencedFile}'), checking parent MAP for ${word}`);
+                    
+                    const memberResult = await this.crossFileResolver.findMapDeclarationInMemberFile(
+                        word,
+                        memberToken.referencedFile,
+                        document,
+                        line
+                    );
+                    if (memberResult) {
+                        logger.info(`✅ Found MAP declaration in MEMBER file for procedure call: ${word}`);
+                        return memberResult.location;
+                    }
+                }
+            }
+
             // Check if this is a method implementation line (e.g., "StringTheory.Construct PROCEDURE")
             // and navigate to the declaration in the CLASS
             const methodImplMatch = line.match(/^(\w+)\.(\w+)\s+PROCEDURE\s*\((.*?)\)/i);
