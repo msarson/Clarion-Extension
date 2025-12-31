@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { ScopeAnalyzer } from './ScopeAnalyzer';
+import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { TokenCache } from '../TokenCache';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
@@ -85,6 +85,27 @@ RoutineVar LONG
             assert.strictEqual(scope?.type, 'routine');
             assert.ok(scope?.containingRoutine !== undefined, 'Should have containing routine');
             assert.ok(scope?.containingProcedure !== undefined, 'Should have containing procedure');
+        });
+    });
+
+    suite('getSymbolScope', () => {
+        test('should identify global data scope', () => {
+            const document = createTestDocument(`PROGRAM
+MAP
+END
+
+GlobalVar LONG
+
+CODE
+`);
+            
+            const tokens = tokenCache.getTokens(document);
+            const globalVarToken = tokens.find(t => t.value === 'GlobalVar');
+            
+            assert.ok(globalVarToken, 'Should find GlobalVar token');
+            const scope = analyzer.getSymbolScope(globalVarToken!, document);
+            
+            assert.strictEqual(scope, 'global');
         });
     });
 });
