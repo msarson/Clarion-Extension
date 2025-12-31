@@ -104,8 +104,10 @@ export class DefinitionProvider {
 
             // Check if this is a procedure call in CODE (e.g., "MyProcedure()" or "ProcessOrder(param)")
             // Navigate to the MAP declaration or PROCEDURE implementation
-            const hasParenthesesAfter = line.substring(position.character).trimStart().startsWith('(');
-            logger.info(`🔍 Checking for procedure call: word="${word}", hasParenthesesAfter=${hasParenthesesAfter}, line="${line.trim()}"`);
+            // Check after the word range, not just position.character
+            const afterWord = line.substring(wordRange.end.character).trimStart();
+            const hasParenthesesAfter = afterWord.startsWith('(');
+            logger.info(`🔍 Checking for procedure call: word="${word}", hasParenthesesAfter=${hasParenthesesAfter}, afterWord="${afterWord.substring(0, 10)}", line="${line.trim()}"`);
             
             if (hasParenthesesAfter) {
                 logger.info(`🔍 Detected potential procedure call: ${word}()`);
