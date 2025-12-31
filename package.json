@@ -911,7 +911,7 @@
         "compile:release": "cross-env VSCODE_RELEASE_MODE=true tsc -b && npm run copy-data",
         "copy-data": "node -e \"const fs=require('fs'),path=require('path'); fs.mkdirSync('out/server/src/data',{recursive:true}); fs.copyFileSync('server/src/data/clarion-builtins.json','out/server/src/data/clarion-builtins.json'); fs.copyFileSync('server/src/data/clarion-attributes.json','out/server/src/data/clarion-attributes.json'); fs.copyFileSync('server/src/data/clarion-controls.json','out/server/src/data/clarion-controls.json'); fs.copyFileSync('server/src/data/clarion-datatypes.json','out/server/src/data/clarion-datatypes.json');\"",
         "package": "npm run compile:dev && vsce package",
-        "package:release": "npm run compile:release && vsce package",
+        "package:release": "npm run compile:release && vsce package --allow-star-activation",
         "watch": "tsc -b -w",
         "test": "npm run compile:dev && mocha out/server/src/test/**/*.test.js out/client/src/test/**/*.test.js --exclude 'out/client/src/test/UnreachableCodeDecorator.test.js' --exclude 'out/client/src/test/TextEditingCommands.test.js'"
     },

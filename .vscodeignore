@@ -72,6 +72,15 @@ Clarion-Extension.code-workspace
 **/node_modules/**/.github/**
 **/node_modules/**/README*
 
+# Exclude large unnecessary dependencies
+**/node_modules/tree-sitter-cli/**
+**/node_modules/**/*.d.ts
+**/node_modules/**/*.tsbuildinfo
+
+# Exclude source maps and debugging files from dependencies
+**/node_modules/**/*.js.map
+**/node_modules/**/src/**/*.ts
+
 # Log files
 *.log
 server.log
