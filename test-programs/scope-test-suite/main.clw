@@ -67,7 +67,7 @@ IncrementCounter  PROCEDURE()
 GetCounter        PROCEDURE(),LONG       
        !***
      END
-     GlobalHelper PROCEDURE()  ! Declare the global procedure so it can be called from utils.clw
+GlobalHelper PROCEDURE()  ! Declare the global procedure so it can be called from utils.clw
    END
 
 GlobalCounter LONG      ! Global variable - accessible in utils.clw (TEST 1)
