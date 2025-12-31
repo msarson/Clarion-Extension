@@ -15,6 +15,7 @@ import { MapProcedureResolver } from '../utils/MapProcedureResolver';
 import { SymbolDefinitionResolver } from '../utils/SymbolDefinitionResolver';
 import { FileDefinitionResolver } from '../utils/FileDefinitionResolver';
 import { CrossFileResolver } from '../utils/CrossFileResolver';
+import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
 logger.setLevel("error"); // Production: Only log errors
@@ -32,6 +33,13 @@ export class DefinitionProvider {
     private symbolResolver = new SymbolDefinitionResolver();
     private fileResolver = new FileDefinitionResolver();
     private crossFileResolver = new CrossFileResolver(this.tokenCache);
+    private scopeAnalyzer: ScopeAnalyzer;
+
+    constructor() {
+        const solutionManager = SolutionManager.getInstance();
+        this.scopeAnalyzer = new ScopeAnalyzer(this.tokenCache, solutionManager);
+    }
+
     /**
      * Provides definition locations for a given position in a document
      * @param document The text document
