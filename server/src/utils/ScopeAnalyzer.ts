@@ -219,8 +219,9 @@ export class ScopeAnalyzer {
             
             if (parenToken && parenToken.value === '(' && 
                 stringToken && stringToken.type === TokenType.String) {
-                // String token value includes the quotes, remove them
-                return stringToken.value.replace(/^['"]|['"]$/g, '');
+                // String token value includes the single quotes, remove them
+                // Clarion only uses single quotes for strings
+                return stringToken.value.replace(/^'|'$/g, '');
             }
         }
 
