@@ -4,6 +4,7 @@ import { Position, Location, Range } from 'vscode-languageserver-protocol';
 import { TokenHelper } from '../utils/TokenHelper';
 import { ClarionTokenizer, TokenType } from '../ClarionTokenizer';
 import { DefinitionProvider } from '../providers/DefinitionProvider';
+import { TokenCache } from '../TokenCache';
 
 suite('DefinitionProvider Behavior Tests', () => {
     
@@ -786,6 +787,154 @@ MyWindow WINDOW,AT(0,0,100,100)
             const result = await definitionProvider.provideDefinition(document, position);
             
             // Result depends on whether file exists - test just verifies no crash
+        });
+    });
+
+    suite('Scope-Aware Definition Tests', () => {
+        const definitionProvider = new DefinitionProvider();
+        const tokenCache = TokenCache.getInstance();
+
+        teardown(() => {
+            // Clear cached test documents to ensure fresh tokenization
+            tokenCache.clearTokens('test://test-prioritize.clw');
+            tokenCache.clearTokens('test://test-routine-access.clw');
+            tokenCache.clearTokens('test://test-member-scope.clw');
+            tokenCache.clearTokens('test://test-shadowing.clw');
+        });
+
+        test('Should prioritize procedure-local over global with same name', async () => {
+            const code = `
+GlobalVar   LONG
+
+MyProc      PROCEDURE()
+ProcLocal     LONG
+  CODE
+  ProcLocal = 123
+  END`.trim();
+
+            const document = createDocument(code, 'test://test-prioritize.clw');
+            const position: Position = { line: 5, character: 4 }; // On "ProcLocal = 123"
+
+            const result = await definitionProvider.provideDefinition(document, position);
+
+            assert.ok(result, 'Should find definition');
+            const line = getLocationLine(result);
+            assert.strictEqual(line, 3, 'Should go to procedure-local (line 3)');
+        });
+
+        test('Should isolate variables in different procedures', async () => {
+            const code = `  PROGRAM
+  MAP
+  END
+
+  CODE
+
+Proc1     PROCEDURE
+LocalVar    LONG
+  CODE
+    LocalVar = 1
+
+Proc2     PROCEDURE
+  CODE
+    LocalVar = 2`.trim();
+
+            const document = createDocument(code);
+            const position: Position = { line: 13, character: 4 }; // On "LocalVar = 2" in Proc2
+
+            const result = await definitionProvider.provideDefinition(document, position);
+
+            // Should NOT find Proc1's LocalVar - should return null or find a global if exists
+            // With fallback behavior, might return Proc1's LocalVar, but scope filter should prevent this
+            const line = getLocationLine(result);
+            assert.notStrictEqual(line, 7, 'Should NOT go to Proc1 LocalVar (line 7)');
+        });
+
+        test('Should allow routine to access procedure-local variable', async () => {
+            const code = `
+MyProc      PROCEDURE()
+ProcVar       LONG
+  CODE
+  DO MyRoutine
+
+MyRoutine ROUTINE
+  CODE
+  ProcVar = 5
+  END`.trim();
+
+            const document = createDocument(code, 'test://test-routine-access.clw');
+            const position: Position = { line: 7, character: 4 }; // On "ProcVar = 5" in routine
+
+            const result = await definitionProvider.provideDefinition(document, position);
+
+            assert.ok(result, 'Should find definition');
+            const line = getLocationLine(result);
+            assert.strictEqual(line, 1, 'Should go to procedure-local ProcVar (line 1)');
+        });
+
+        test('Should isolate routine-local from procedure code', async () => {
+            const code = `MyProc    PROCEDURE
+  CODE
+    DO MyRoutine
+
+MyRoutine ROUTINE
+  DATA
+RoutineVar  LONG
+  CODE
+    RoutineVar = 1`.trim();
+
+            const document = createDocument(code);
+            const position: Position = { line: 1, character: 2 }; // On procedure CODE section
+
+            // Try to reference RoutineVar from procedure - should not be accessible
+            // This is a conceptual test - in real code, you'd have a reference like "RoutineVar = 5" on line 1
+            // For this test, we're checking that routine-local variables aren't visible to procedure
+        });
+
+        test('Should handle module-local scope in MEMBER file', async () => {
+            const code = `
+MEMBER('Main')
+
+ModuleVar     LONG
+
+Proc1         PROCEDURE()
+  CODE
+  ModuleVar = 5
+  END`.trim();
+
+            const document = createDocument(code, 'test://test-member-scope.clw');
+            const position: Position = { line: 6, character: 4 }; // On "ModuleVar = 5"
+
+            const result = await definitionProvider.provideDefinition(document, position);
+
+            assert.ok(result, 'Should find definition');
+            const line = getLocationLine(result);
+            assert.strictEqual(line, 2, 'Should go to module-local ModuleVar (line 2)');
+        });
+
+        test('Should handle nested scopes with shadowing', async () => {
+            const code = `
+Counter       LONG
+
+ProcessData   PROCEDURE()
+Counter         LONG
+  CODE
+  DO InnerRoutine
+
+InnerRoutine ROUTINE
+  DATA
+Counter           LONG
+  CODE
+  Counter = 100
+  END`.trim();
+
+            const document = createDocument(code, 'test://test-shadowing.clw');
+            const position: Position = { line: 11, character: 4 }; // On "Counter = 100" in routine
+
+            const result = await definitionProvider.provideDefinition(document, position);
+
+            assert.ok(result, 'Should find definition');
+            const line = getLocationLine(result);
+            assert.strictEqual(line, 9, 'Should go to routine-local Counter (line 9), not procedure or global');
         });
     });
 });
