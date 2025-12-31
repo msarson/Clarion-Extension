@@ -19,7 +19,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("ImplementationProvider");
-logger.setLevel("info"); // TEMPORARY: Debug cross-file implementation navigation
+logger.setLevel("error"); // Production: Only log errors
 
 export class ImplementationProvider {
     private tokenCache: TokenCache;

@@ -40,13 +40,14 @@
 ! - Expected: Should jump to utils.clw line 39 (implementation)
 ! - Validates: MAP declarations with return types work correctly
 !
-! TEST 4: Module-Local Scope Boundaries (Should FAIL)
+! TEST 4: Module-Local Scope Boundaries (Should PASS)
 ! ----------------------------------------------------
-! - Uncomment line 74 below: ModuleData = 999
+! - Uncomment line 77 below: ModuleData = 999
 ! - Put cursor on 'ModuleData'
 ! - Press F12 (Go to Definition)
-! - Expected: Should NOT find definition (or find wrong one)
+! - Expected: Should show "No definition found"
 ! - Validates: Module-local symbols NOT accessible cross-file
+! - ✅ PASSING: Scope validation blocks cross-file access to module-local vars
 !
 ! FUTURE TESTS (Phase 4+):
 ! -------------------------
