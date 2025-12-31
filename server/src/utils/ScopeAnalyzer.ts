@@ -106,13 +106,7 @@ export class ScopeAnalyzer {
         referenceDocument: TextDocument,
         declarationDocument: TextDocument
     ): boolean {
-        // Different files - need to check cross-file visibility rules
-        if (referenceDocument.uri !== declarationDocument.uri) {
-            // TODO: Implement cross-file access rules
-            return false;
-        }
-
-        // Same file - check scope hierarchy
+        // Get scope info for both locations
         const refScope = this.getTokenScope(referenceDocument, referenceLocation);
         const declScope = this.getTokenScope(declarationDocument, declarationLocation);
 
@@ -120,6 +114,28 @@ export class ScopeAnalyzer {
             return false;
         }
 
+        // Different files - check cross-file visibility rules
+        if (referenceDocument.uri !== declarationDocument.uri) {
+            // Rule 1: Global symbols in PROGRAM file are accessible everywhere
+            if (declScope.type === 'global' && declScope.isProgramFile) {
+                return true;
+            }
+            
+            // Rule 2: Module-local symbols are NOT visible cross-file
+            if (declScope.type === 'module') {
+                return false;
+            }
+            
+            // Rule 3: Procedure-local and routine-local are NEVER visible cross-file
+            if (declScope.type === 'procedure' || declScope.type === 'routine') {
+                return false;
+            }
+            
+            // Default: deny cross-file access
+            return false;
+        }
+
+        // Same file - check scope hierarchy
         // Global scope is accessible from anywhere
         if (declScope.type === 'global') {
             return true;

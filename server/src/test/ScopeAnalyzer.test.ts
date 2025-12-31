@@ -536,8 +536,132 @@ LocalVar LONG
                 doc1
             );
             
-            // Cross-file access returns false for now (not implemented)
-            assert.strictEqual(canAccess, false);
+            // GlobalVar is global in PROGRAM - should be accessible cross-file
+            assert.strictEqual(canAccess, true);
+        });
+    });
+
+    suite('Cross-File Access (Phase 3)', () => {
+        test('should allow cross-file access to global symbols', () => {
+            const programDoc = createTestDocument(`  PROGRAM
+  MAP
+  END
+
+GlobalVar LONG
+
+  CODE
+`, 'file:///test/main.clw');
+            
+            const memberDoc = createTestDocument(`MEMBER('Main')
+
+UtilProc PROCEDURE
+  CODE
+  GlobalVar = 5
+`, 'file:///test/utils.clw');
+            
+            const canAccess = analyzer.canAccess(
+                { line: 4, character: 2 },  // Reference to GlobalVar in MEMBER
+                { line: 4, character: 0 },  // Declaration in PROGRAM (global)
+                memberDoc,
+                programDoc
+            );
+            
+            assert.strictEqual(canAccess, true, 'Should allow access to global symbol from MEMBER');
+        });
+
+        test('should deny cross-file access to module-local symbols', () => {
+            const utilsDoc = createTestDocument(`MEMBER('Main')
+
+ModuleVar LONG
+
+UtilProc PROCEDURE
+  CODE
+`, 'file:///test/utils.clw');
+            
+            const otherDoc = createTestDocument(`MEMBER('Main')
+
+OtherProc PROCEDURE
+  CODE
+  ModuleVar = 5
+`, 'file:///test/other.clw');
+            
+            const canAccess = analyzer.canAccess(
+                { line: 4, character: 2 },  // Reference in other.clw
+                { line: 2, character: 0 },  // Declaration in utils.clw (module-local)
+                otherDoc,
+                utilsDoc
+            );
+            
+            assert.strictEqual(canAccess, false, 'Should deny access to module-local symbol from different file');
+        });
+
+        test('should deny cross-file access to procedure-local symbols', () => {
+            const file1Doc = createTestDocument(`MyProc PROCEDURE
+LocalVar LONG
+  CODE
+`, 'file:///test/file1.clw');
+            
+            const file2Doc = createTestDocument(`OtherProc PROCEDURE
+  CODE
+  LocalVar = 5
+`, 'file:///test/file2.clw');
+            
+            const canAccess = analyzer.canAccess(
+                { line: 2, character: 2 },  // Reference in file2
+                { line: 1, character: 0 },  // Declaration in file1 (procedure-local)
+                file2Doc,
+                file1Doc
+            );
+            
+            assert.strictEqual(canAccess, false, 'Should deny access to procedure-local symbol from different file');
+        });
+
+        test('should deny cross-file access to routine-local symbols', () => {
+            const file1Doc = createTestDocument(`MyProc PROCEDURE
+  CODE
+  
+MyRoutine ROUTINE
+  DATA
+RoutineVar LONG
+  CODE
+`, 'file:///test/file1.clw');
+            
+            const file2Doc = createTestDocument(`OtherProc PROCEDURE
+  CODE
+  RoutineVar = 5
+`, 'file:///test/file2.clw');
+            
+            const canAccess = analyzer.canAccess(
+                { line: 2, character: 2 },  // Reference in file2
+                { line: 5, character: 0 },  // Declaration in file1 (routine-local)
+                file2Doc,
+                file1Doc
+            );
+            
+            assert.strictEqual(canAccess, false, 'Should deny access to routine-local symbol from different file');
+        });
+
+        test('should allow cross-file access from PROGRAM to global in PROGRAM', () => {
+            const programDoc = createTestDocument(`  PROGRAM
+  MAP
+  END
+
+GlobalVar LONG
+
+MyProc PROCEDURE
+  CODE
+  GlobalVar = 10
+`, 'file:///test/main.clw');
+            
+            const canAccess = analyzer.canAccess(
+                { line: 8, character: 2 },  // Reference in procedure
+                { line: 4, character: 0 },  // Declaration at global scope
+                programDoc,
+                programDoc
+            );
+            
+            // This is same-file access, should work (already passing)
+            assert.strictEqual(canAccess, true, 'Should allow access to global within same file');
         });
     });
 });
