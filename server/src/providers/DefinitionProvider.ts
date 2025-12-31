@@ -1011,7 +1011,39 @@ export class DefinitionProvider {
     
         // 🌍 Global fallback
         const globalLocation = await this.findGlobalDefinition(searchWord, document.uri);
-        if (globalLocation) return globalLocation;
+        if (globalLocation) {
+            // Validate scope accessibility before returning cross-file results
+            const globalUri = globalLocation.uri;
+            if (globalUri !== document.uri) {
+                // This is a cross-file result - validate scope
+                logger.info(`🔍 SCOPE-CHECK: Found global definition in different file, validating access`);
+                
+                // Read the declaring document
+                const declPath = decodeURIComponent(globalUri.replace('file:///', '')).replace(/\//g, '\\');
+                if (fs.existsSync(declPath)) {
+                    const declContents = fs.readFileSync(declPath, 'utf-8');
+                    const declDoc = TextDocument.create(globalUri, 'clarion', 1, declContents);
+                    
+                    const canAccess = this.scopeAnalyzer.canAccess(
+                        position,
+                        globalLocation.range.start,
+                        document,
+                        declDoc
+                    );
+                    
+                    if (canAccess) {
+                        logger.info(`✅ SCOPE-CHECK: Can access global definition cross-file`);
+                        return globalLocation;
+                    } else {
+                        logger.info(`❌ SCOPE-CHECK: Cannot access this symbol cross-file (scope boundaries violated)`);
+                        // Don't return - continue to other fallbacks
+                    }
+                }
+            } else {
+                // Same file - no cross-file validation needed
+                return globalLocation;
+            }
+        }
     
         // 🔗 MEMBER file parent search fallback
         logger.info(`🔍 Checking for MEMBER parent file for global variable lookup`);
@@ -1087,10 +1119,24 @@ export class DefinitionProvider {
                     
                     if (globalVar) {
                         logger.info(`✅ Found global variable in MEMBER parent: ${globalVar.value} at line ${globalVar.line}`);
-                        return Location.create(parentDoc.uri, {
-                            start: { line: globalVar.line, character: globalVar.start },
-                            end: { line: globalVar.line, character: globalVar.start + globalVar.value.length }
-                        });
+                        
+                        // Check scope accessibility before returning
+                        const canAccess = this.scopeAnalyzer.canAccess(
+                            position,
+                            { line: globalVar.line, character: globalVar.start },
+                            document,      // reference document (current MEMBER file)
+                            parentDoc      // declaration document (parent PROGRAM file)
+                        );
+                        
+                        if (canAccess) {
+                            logger.info(`✅ SCOPE-CHECK: Can access global variable from MEMBER file`);
+                            return Location.create(parentDoc.uri, {
+                                start: { line: globalVar.line, character: globalVar.start },
+                                end: { line: globalVar.line, character: globalVar.start + globalVar.value.length }
+                            });
+                        } else {
+                            logger.info(`❌ SCOPE-CHECK: Cannot access this variable cross-file (scope boundaries violated)`);
+                        }
                     }
                 } catch (err) {
                     logger.error(`Error reading MEMBER parent file: ${err}`);
@@ -1327,6 +1373,13 @@ export class DefinitionProvider {
 
         if (labelToken) {
             logger.info(`Found label definition for '${word}' in ${fromPath} at line ${labelToken.line}`);
+            
+            // NOTE: We cannot perform scope checking here because we don't have:
+            // 1. The reference document (where F12 was pressed)
+            // 2. The reference position
+            // This recursive function only searches files, it doesn't validate scope.
+            // Scope checking needs to happen at the call site where we have the reference context.
+            
             return Location.create(document.uri, {
                 start: { line: labelToken.line, character: 0 },
                 end: { line: labelToken.line, character: labelToken.value.length }

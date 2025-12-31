@@ -12,6 +12,7 @@ import { DocumentStructure } from '../DocumentStructure';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("MapProcedureResolver");
+logger.setLevel("error"); // Production: Only log errors
 
 export class MapProcedureResolver {
     /**
@@ -329,9 +330,11 @@ export class MapProcedureResolver {
                 for (const project of solutionManager.solution.projects) {
                     const redirectionParser = project.getRedirectionParser();
                     const resolved = redirectionParser.findFile(moduleFile);
+                    logger.info(`RedirectionParser.findFile('${moduleFile}') returned:`, resolved);
                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {
                         resolvedPath = resolved.path;
                         logger.info(`✅ Resolved MODULE file via redirection: ${resolvedPath}`);
+                        logger.info(`   fs.existsSync check: ${fs.existsSync(resolvedPath)}`);
                         break;
                     }
                 }
