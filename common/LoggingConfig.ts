@@ -7,24 +7,35 @@
  * IMPORTANT FOR PUBLISHING:
  * - Development mode: More verbose logging (warn level) for debugging
  * - Release mode: Minimal logging (error level only) for end users
- * - Mode is controlled by VSCODE_RELEASE_MODE environment variable
- * - Set VSCODE_RELEASE_MODE=true when building for marketplace publish
+ * - Mode is determined by checking if we're in production (no source files available)
+ * - When packaged for marketplace, source files are excluded, triggering release mode
  */
 
 export class LoggingConfig {
     /**
-     * Detects if we're building in release mode for publishing.
+     * Detects if we're running in release mode (packaged extension).
      * 
-     * Release mode is activated when:
-     * - VSCODE_RELEASE_MODE environment variable is set to 'true'
+     * Release mode is detected when:
+     * - Running from a packaged VSIX (no TypeScript source files present)
      * 
-     * This should be set ONLY when packaging for marketplace publish.
-     * 
-     * Note: This is a getter function so it checks the environment variable
-     * at runtime (not compile time), allowing testing with F5 debugging.
+     * During development with F5, source files exist so this returns false.
+     * In packaged extension distributed via marketplace, source files are
+     * excluded by .vscodeignore, so this returns true.
      */
     private static get IS_RELEASE_MODE(): boolean {
-        return process.env.VSCODE_RELEASE_MODE === 'true';
+        // Check if we're running from compiled code without source files
+        // In development, __dirname might be like: .../out/common
+        // In production (packaged), source files won't exist
+        try {
+            const fs = require('fs');
+            const path = require('path');
+            // Try to find the common source directory
+            const sourceCheck = path.join(__dirname, '..', '..', 'common', 'LoggingConfig.ts');
+            return !fs.existsSync(sourceCheck);
+        } catch {
+            // If we can't check, assume release mode (safer default)
+            return true;
+        }
     }
     
     /**
@@ -49,7 +60,7 @@ export class LoggingConfig {
     
     /**
      * Check if we're currently in release mode
-     * @returns true if building for release/publish, false for development
+     * @returns true if running from packaged extension, false for development
      */
     static isReleaseMode(): boolean {
         return this.IS_RELEASE_MODE;
@@ -63,7 +74,6 @@ export class LoggingConfig {
         const mode = this.IS_RELEASE_MODE 
             ? `Release Mode (log level: ${this.RELEASE_LOG_LEVEL})`
             : `Development Mode (log level: ${this.DEV_LOG_LEVEL})`;
-        const envValue = process.env.VSCODE_RELEASE_MODE;
-        return `${mode} [env: ${envValue || 'not set'}]`;
+        return mode;
     }
 }
