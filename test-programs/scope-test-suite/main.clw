@@ -75,4 +75,4 @@ GlobalCounter LONG      ! Global variable - accessible in utils.clw (TEST 1)
    IncrementCounter()    ! TEST 2: F12 → line 57 MAP, Ctrl+F12 → utils.clw line 34
    IncrementCounter()
    MESSAGE('Counter: ' & GetCounter())  ! TEST 3: F12 → line 58 MAP, Ctrl+F12 → utils.clw line 39
-   !ModuleData = 999     ! TEST 4: Uncomment and F12 should fail (module-local in utils.clw)
+   ModuleData = 999     ! TEST 4: Uncomment and F12 should fail (module-local in utils.clw)

@@ -1087,10 +1087,24 @@ export class DefinitionProvider {
                     
                     if (globalVar) {
                         logger.info(`✅ Found global variable in MEMBER parent: ${globalVar.value} at line ${globalVar.line}`);
-                        return Location.create(parentDoc.uri, {
-                            start: { line: globalVar.line, character: globalVar.start },
-                            end: { line: globalVar.line, character: globalVar.start + globalVar.value.length }
-                        });
+                        
+                        // Check scope accessibility before returning
+                        const canAccess = this.scopeAnalyzer.canAccess(
+                            position,
+                            { line: globalVar.line, character: globalVar.start },
+                            document,      // reference document (current MEMBER file)
+                            parentDoc      // declaration document (parent PROGRAM file)
+                        );
+                        
+                        if (canAccess) {
+                            logger.info(`✅ SCOPE-CHECK: Can access global variable from MEMBER file`);
+                            return Location.create(parentDoc.uri, {
+                                start: { line: globalVar.line, character: globalVar.start },
+                                end: { line: globalVar.line, character: globalVar.start + globalVar.value.length }
+                            });
+                        } else {
+                            logger.info(`❌ SCOPE-CHECK: Cannot access this variable cross-file (scope boundaries violated)`);
+                        }
                     }
                 } catch (err) {
                     logger.error(`Error reading MEMBER parent file: ${err}`);
