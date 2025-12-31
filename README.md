@@ -58,11 +58,12 @@ Settings are saved in `.vscode/settings.json` within the folder - commit them wi
 - **Team-friendly** - Settings stored with solution, not in workspace files
 
 ### Code Intelligence
-- **Smart IntelliSense** - 261 documented items (107 built-in functions, 92 attributes, 31 controls, 31 data types) with parameter hints and optional parameter support
-- **Go to Definition** (`F12`) - Navigate to includes, modules, methods, sections
-- **Go to Implementation** (`Ctrl+F12`) - Navigate from MAP declarations to implementations, MODULE to files
+- **Smart IntelliSense** - 261 documented items (148 built-in functions, 82 attributes, 31 controls) with parameter hints and optional parameter support
+- **Go to Definition** (`F12`) - Navigate to includes, modules, methods, procedures, sections
+- **Go to Implementation** (`Ctrl+F12`) - Navigate from MAP declarations to implementations, MODULE to files, procedure calls to implementations
+- **Procedure call navigation** - Full F12/Ctrl+F12/Hover support matching class method workflow
 - **Method overload support** - Correctly resolves overloaded methods based on parameter types
-- **Hover tooltips** - Preview file contents, method signatures, SECTION content, global variables
+- **Hover tooltips** - Preview file contents, method signatures, procedure implementations, SECTION content, global variables
 - **MODULE/MEMBER navigation** - Cross-file navigation with global variable lookup
 - **Structure view** - Complete code outline with follow cursor
 - **Unreachable code detection** - Visual dimming of code after RETURN/EXIT/HALT statements
@@ -89,15 +90,27 @@ Settings are saved in `.vscode/settings.json` within the folder - commit them wi
 
 ## What's New
 
-### Version 0.8.3 (Dec 2025)
+### Version 0.8.3 (December 31, 2025)
 
-#### ⚡ **Additional Performance Optimizations**
-- **Eliminated redundant DocumentStructure rebuilds** on hover operations
-  - Hover, signature help, and navigation now use cached structures
-  - Reduced hover lag by 3-9ms per operation
-  - All providers now consistently use cached DocumentStructure for optimal performance
+#### 🎉 **Package Size Reduced by 50%!**
+- **18.84 MB** (down from 37.9 MB) - Faster downloads and installation
+- Removed 217 packages including telemetry infrastructure
+- 46% fewer files, 95% fewer node_modules files
 
-### Version 0.8.2 (Dec 2025)
+#### 🚀 **Procedure Call Navigation (New Feature!)**
+- **F12 on procedure calls** → Navigate to MAP declaration
+- **Ctrl+F12 on procedure calls** → Navigate to PROCEDURE implementation  
+- **Enhanced hover** → Shows both MAP declaration and implementation with context
+- Full feature parity with class method navigation
+- Works across MEMBER files automatically
+
+#### ✨ **Quality Improvements**
+- Replaced debug console.log with proper logging framework
+- Fixed release mode detection for packaged extensions
+- Cleaned up obsolete debug configurations
+- Enhanced procedure hover to show up to 10 lines of implementation context
+
+### Version 0.8.2 (December 30, 2025)
 
 #### ⚡ **58x Faster Performance for Large Files**
 - **Massive speed improvement** - Keystroke response time reduced from 820-880ms to 10-15ms

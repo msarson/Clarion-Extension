@@ -6,21 +6,54 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 
 ---
 
-## [0.8.3] - 2025-12-30
+## [0.8.3] - 2025-12-31
 
-### ⚡ Performance Improvements
+### 🎉 Major Improvements
 
-#### Eliminated Repeated DocumentStructure Builds on Hover
-- **Fixed hover lag** - DocumentStructure no longer rebuilt on every hover operation
-  - **Root cause**: Providers were creating new DocumentStructure instances instead of using cache
-  - **Fix**: All providers now use `tokenCache.getStructure()` for cached DocumentStructure access
-  - **Impact**: Hover response time reduced by 3-9ms per operation
-  - **Affected providers**: SignatureHelpProvider, HoverProvider, MapProcedureResolver
+#### Package Size Optimization (50% Reduction!)
+- **Reduced from 37.9 MB to 18.84 MB** - 19.06 MB savings
+- **File count reduced by 46%** - From 20,651 to 11,082 files
+- **Node modules reduced by 95%** - From 10,118 to 549 files
+- Removed telemetry infrastructure (215 packages: applicationinsights, @azure/*, @opentelemetry/*)
+- Removed unused tree-sitter dependencies (2 packages)
+- Consolidated xml2js duplicates using npm dedupe
 
-### 🔧 Technical Improvements
-- Added optional `DocumentStructure` parameter to `MapProcedureResolver.findProcedureImplementation()`
-- Improved performance documentation in `TokenCache.getStructure()`
-- All providers now consistently use cached structures for better performance
+#### Procedure Call Navigation (New Feature!)
+- **F12 (Go to Definition)** on procedure calls navigates to MAP declaration
+- **Ctrl+F12 (Go to Implementation)** on procedure calls navigates to PROCEDURE implementation
+- **Enhanced Hover** shows both MAP declaration and implementation (up to 10 lines of context)
+- Works with MEMBER files (automatically checks parent file's MAP)
+- Respects parameter overloading for correct resolution
+- Includes navigation hints in hover tooltips
+
+### ✨ Features
+- Complete navigation support for procedure calls matching class method workflow
+- Enhanced procedure hover to show implementation context (signature, LOCAL DATA, CODE, first statement)
+- Smart stopping in hover display (at RETURN, next procedure, or max 10 lines)
+
+### 🐛 Bug Fixes
+- Fixed release mode detection to check source file existence instead of runtime environment variable
+- Fixed procedure call detection to check after word range end, not cursor position  
+- Fixed URI decoding in hover provider (properly decode %3A to colon in file paths)
+- Fixed implementation finding by using MAP declaration position instead of call position
+- Fixed Debug Console logging configuration in launch.json
+
+### 🧹 Cleanup & Quality
+- Replaced all debug console.log statements with proper logger calls
+- Removed all telemetry tracking code and related imports
+- Cleaned up obsolete debug configurations (Launch Server, Attach to Server, etc.)
+- Simplified launch.json to single Launch Client configuration
+- Updated logging to respect production/development mode automatically
+
+### 📝 Documentation
+- Added explicit copy-data scripts for JSON file deployment  
+- Documented syntax support (261 items: 148 builtins, 82 attributes, 31 controls)
+- Updated build process documentation
+
+### 🔧 Technical Improvements  
+- Release mode auto-detected in packaged VSIX (checks if source files excluded)
+- Logger levels properly configured (error-only in production, warn in development)
+- Build scripts explicitly copy data files (builtins, attributes, controls, datatypes JSON)
 
 ---
 
