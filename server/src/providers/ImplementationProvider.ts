@@ -19,6 +19,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("ImplementationProvider");
+logger.setLevel("info"); // Temporarily set to info for debugging
 
 export class ImplementationProvider {
     private tokenCache: TokenCache;
