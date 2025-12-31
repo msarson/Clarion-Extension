@@ -46,14 +46,40 @@ export class ImplementationProvider {
             end: { line: position.line, character: Number.MAX_SAFE_INTEGER }
         });
 
-        // 1. Check if this is a routine reference (DO statements)
+        // Get word at position for procedure call detection
+        const wordRange = this.getWordRangeAtPosition(document, position);
+        const word = wordRange ? document.getText(wordRange) : '';
+
+        // 1. Check if this is a procedure call (e.g., "MyProcedure()")
+        if (word && wordRange) {
+            const afterWord = line.substring(wordRange.end.character).trimStart();
+            if (afterWord.startsWith('(')) {
+                logger.info(`Detected procedure call: ${word}()`);
+                
+                // Find the PROCEDURE implementation
+                const implLocation = await this.mapResolver.findProcedureImplementation(
+                    word,
+                    tokens,
+                    document,
+                    position,
+                    line
+                );
+                
+                if (implLocation) {
+                    logger.info(`✅ Found procedure implementation for call: ${word}`);
+                    return implLocation;
+                }
+            }
+        }
+
+        // 2. Check if this is a routine reference (DO statements)
         const routineLocation = this.findRoutineImplementation(document, position, line);
         if (routineLocation) {
             logger.info(`Found routine implementation`);
             return routineLocation;
         }
 
-        // 2. Check if this is a MAP procedure declaration (inside MAP block)
+        // 3. Check if this is a MAP procedure declaration (inside MAP block)
         if (documentStructure.isInMapBlock(position.line)) {
             const mapProcMatch = line.match(/^\s*(\w+)\s*(?:PROCEDURE\s*)?\(/i);
             if (mapProcMatch) {
@@ -82,7 +108,7 @@ export class ImplementationProvider {
             }
         }
 
-        // 3. Check if this is a method call or reference
+        // 4. Check if this is a method call or reference
         const methodLocation = await this.findMethodImplementation(document, position, line);
         if (methodLocation) {
             logger.info(`Found method implementation`);
@@ -90,6 +116,30 @@ export class ImplementationProvider {
         }
 
         logger.info(`No implementation found at this position`);
+        return null;
+    }
+
+    /**
+     * Get word range at position (helper method)
+     */
+    private getWordRangeAtPosition(document: TextDocument, position: Position): { start: Position; end: Position } | null {
+        const line = document.getText({
+            start: { line: position.line, character: 0 },
+            end: { line: position.line, character: Number.MAX_SAFE_INTEGER }
+        });
+
+        const wordPattern = /[a-zA-Z_]\w*/g;
+        let match;
+        while ((match = wordPattern.exec(line)) !== null) {
+            const start = match.index;
+            const end = start + match[0].length;
+            if (position.character >= start && position.character <= end) {
+                return {
+                    start: { line: position.line, character: start },
+                    end: { line: position.line, character: end }
+                };
+            }
+        }
         return null;
     }
 
