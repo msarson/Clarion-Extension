@@ -58,7 +58,7 @@ Settings are saved in `.vscode/settings.json` within the folder - commit them wi
 - **Team-friendly** - Settings stored with solution, not in workspace files
 
 ### Code Intelligence
-- **Smart IntelliSense** - 62 built-in functions with parameter hints, data types, and optional parameter support
+- **Smart IntelliSense** - 261 documented items (107 built-in functions, 92 attributes, 31 controls, 31 data types) with parameter hints and optional parameter support
 - **Go to Definition** (`F12`) - Navigate to includes, modules, methods, sections
 - **Go to Implementation** (`Ctrl+F12`) - Navigate from MAP declarations to implementations, MODULE to files
 - **Method overload support** - Correctly resolves overloaded methods based on parameter types
@@ -89,6 +89,14 @@ Settings are saved in `.vscode/settings.json` within the folder - commit them wi
 
 ## What's New
 
+### Version 0.8.3 (Dec 2025)
+
+#### ⚡ **Additional Performance Optimizations**
+- **Eliminated redundant DocumentStructure rebuilds** on hover operations
+  - Hover, signature help, and navigation now use cached structures
+  - Reduced hover lag by 3-9ms per operation
+  - All providers now consistently use cached DocumentStructure for optimal performance
+
 ### Version 0.8.2 (Dec 2025)
 
 #### ⚡ **58x Faster Performance for Large Files**
@@ -99,12 +107,13 @@ Settings are saved in `.vscode/settings.json` within the folder - commit them wi
 - **Enhanced folding** - Fixed crashes with extremely large files by limiting folding ranges
 
 #### 📚 **Expanded Language Support**
-- **40+ new keywords and functions** with full IntelliSense support
+- **Updated syntax documentation** for 40+ keywords and functions with full IntelliSense support
   - Data types: `UNSIGNED`, `INT64`, `UINT64`
   - Keywords: `PRAGMA`, `EQUATE`, `PROCEDURE`, `FUNCTION`, `EXECUTE`, `BEGIN`, `ASSERT`, `SELF`, `PARENT`, and more
   - Logical operators: `BAND`, `BOR`, `BXOR`, `BNOT`, `BSHIFT`
   - Built-in functions: `INT`, `ROUND`, `VAL`, `CHR`, `INSTRING`, `CLOCK`, `TODAY`, `DAY`, `MONTH`, `YEAR`
   - Procedure attributes: `RAW`, `PASCAL`, `PROC`, `NAME`, `DLL`, and more
+  - Total of 261 documented items (107 built-in functions, 92 attributes, 31 controls, 31 data types)
 - **Context-aware help** - Keywords like `TO` show different documentation based on usage context
 
 ### Version 0.8.0 (Dec 2025)
