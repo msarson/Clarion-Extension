@@ -6,7 +6,6 @@ import { ClarionProjectInfo } from 'common/types';
 import * as buildTasks from '../buildTasks';
 import * as clarionClHelper from '../clarionClHelper';
 import LoggerManager from '../utils/LoggerManager';
-import { trackPerformance } from '../telemetry';
 
 const logger = LoggerManager.getLogger("BuildCommands");
 
@@ -133,7 +132,6 @@ export function registerBuildCommands(
                     
                     if (result) {
                         logger.info(`✅ Solution cache force refreshed successfully in ${(endTime - startTime).toFixed(2)}ms`);
-                        trackPerformance('SolutionCacheForceRefresh', endTime - startTime, { triggered: 'command' });
                         
                         // Refresh the solution tree view
                         if (solutionTreeDataProvider) {
