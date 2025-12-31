@@ -460,8 +460,19 @@ export class HoverProvider {
                 
                 // Check if cursor is on the procedure name
                 if (position.character >= mapProcMatch.index! && position.character <= procNameEnd) {
-                    // Find the MAP declaration for this procedure using resolver
+                    // Determine scope for this procedure implementation
                     const tokens = this.tokenCache.getTokens(document);
+                    const firstNonCommentToken = tokens.find(t => t.type !== TokenType.Comment);
+                    const isProgramFile = firstNonCommentToken?.type === TokenType.ClarionDocument && 
+                                         firstNonCommentToken.value.toUpperCase() === 'PROGRAM';
+                    const isMemberFile = firstNonCommentToken?.type === TokenType.ClarionDocument && 
+                                        (firstNonCommentToken.value.toUpperCase() === 'MEMBER' || 
+                                         firstNonCommentToken.value.toUpperCase().startsWith('MEMBER('));
+                    
+                    const scopeIcon = isProgramFile ? '🌍' : (isMemberFile ? '📦' : '');
+                    const scopeText = isProgramFile ? 'Global' : (isMemberFile ? 'Module' : '');
+                    
+                    // Find the MAP declaration for this procedure using resolver
                     // Pass implementation signature for overload resolution
                     const mapLocation = this.mapResolver.findMapDeclaration(procName, tokens, document, line);
                     if (mapLocation) {
@@ -470,10 +481,13 @@ export class HoverProvider {
                             start: { line: mapLocation.range.start.line, character: 0 },
                             end: { line: mapLocation.range.start.line + 1, character: 0 }
                         }).trim();
+                        
+                        const header = scopeText ? `**PROCEDURE (Implementation)** ${scopeIcon} ${scopeText}` : `**PROCEDURE (Implementation)**`;
+                        
                         return {
                             contents: {
                                 kind: 'markdown',
-                                value: `**MAP Declaration** _(Press F12 to navigate)_\n\n\`\`\`clarion\n${mapLine}\n\`\`\``
+                                value: `${header}\n\n\`\`\`clarion\n${line.trim()}\n\`\`\`\n\n*Press F12 to see MAP declaration*`
                             }
                         };
                     } else {
@@ -573,11 +587,25 @@ export class HoverProvider {
                             // Get preview of implementation
                             const implInfo = this.findProcedureImplementationPreview(implDocument, procName, implLocation.range.start.line);
                             if (implInfo) {
+                                // Determine scope for the MAP declaration
+                                const tokens = this.tokenCache.getTokens(document);
+                                const firstNonCommentToken = tokens.find(t => t.type !== TokenType.Comment);
+                                const isProgramFile = firstNonCommentToken?.type === TokenType.ClarionDocument && 
+                                                     firstNonCommentToken.value.toUpperCase() === 'PROGRAM';
+                                const isMemberFile = firstNonCommentToken?.type === TokenType.ClarionDocument && 
+                                                    (firstNonCommentToken.value.toUpperCase() === 'MEMBER' || 
+                                                     firstNonCommentToken.value.toUpperCase().startsWith('MEMBER('));
+                                
+                                const scopeIcon = isProgramFile ? '🌍' : (isMemberFile ? '📦' : '');
+                                const scopeText = isProgramFile ? 'Global' : (isMemberFile ? 'Module' : '');
+                                
                                 const fileInfo = implUri !== currentUri ? ` in ${implUri.split('/').pop()}` : '';
+                                const header = scopeText ? `**MAP Declaration** ${scopeIcon} ${scopeText}` : `**MAP Declaration**`;
+                                
                                 return {
                                     contents: {
                                         kind: 'markdown',
-                                        value: `**Implementation${fileInfo}** _(Press Ctrl+F12 to navigate)_ — line ${implInfo.line + 1}\n\n\`\`\`clarion\n${implInfo.preview}\n\`\`\``
+                                        value: `${header}\n\n\`\`\`clarion\n${line.trim()}\n\`\`\`\n\n*Press Ctrl+F12 to navigate to implementation${fileInfo}*`
                                     }
                                 };
                             }
@@ -721,34 +749,14 @@ export class HoverProvider {
                                         (firstNonCommentToken.value.toUpperCase() === 'MEMBER' || 
                                          firstNonCommentToken.value.toUpperCase().startsWith('MEMBER('));
                     
-                    const markdown = [
-                        `**PROCEDURE:** \`${currentToken.label}\``,
-                        ``,
-                        `\`\`\`clarion`,
-                        signature,
-                        `\`\`\``,
-                        ``
-                    ];
-                    
-                    // Add scope information based on file type
-                    if (isProgramFile) {
-                        markdown.push(`**Scope:** 🌍 Global`);
-                        markdown.push(``);
-                        markdown.push(`**Visibility:** Accessible from all files in the solution`);
-                        markdown.push(``);
-                    } else if (isMemberFile) {
-                        markdown.push(`**Scope:** 📦 Module`);
-                        markdown.push(``);
-                        markdown.push(`**Visibility:** Accessible only within this file (module-local)`);
-                        markdown.push(``);
-                    }
-                    
-                    markdown.push(`*Press F12 to see MAP declaration | Ctrl+F12 to see implementation*`);
+                    const scopeIcon = isProgramFile ? '🌍' : (isMemberFile ? '📦' : '');
+                    const scopeText = isProgramFile ? 'Global' : (isMemberFile ? 'Module' : '');
+                    const header = scopeText ? `**PROCEDURE** ${scopeIcon} ${scopeText}` : `**PROCEDURE**`;
                     
                     return {
                         contents: {
                             kind: 'markdown',
-                            value: markdown.join('\n')
+                            value: `${header}\n\n\`\`\`clarion\n${signature}\n\`\`\`\n\n*Press F12 to see MAP declaration | Ctrl+F12 to see implementation*`
                         }
                     };
                 }
