@@ -14,6 +14,8 @@ import { BuiltinFunctionService } from '../utils/BuiltinFunctionService';
 import { AttributeService } from '../utils/AttributeService';
 import { ControlService } from '../utils/ControlService';
 import { DataTypeService } from '../utils/DataTypeService';
+import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
+import { SolutionManager } from '../solution/solutionManager';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -33,6 +35,12 @@ export class HoverProvider {
     private attributeService = AttributeService.getInstance();
     private controlService = ControlService.getInstance();
     private dataTypeService = DataTypeService.getInstance();
+    private scopeAnalyzer: ScopeAnalyzer;
+
+    constructor() {
+        const solutionManager = SolutionManager.getInstance();
+        this.scopeAnalyzer = new ScopeAnalyzer(this.tokenCache, solutionManager);
+    }
 
     /**
      * Provides hover information for a position in the document
@@ -714,7 +722,7 @@ export class HoverProvider {
                     const structureInfo = this.findLocalVariableInfo(word, tokens, currentScope, document, word);
                     if (structureInfo) {
                         logger.info(`✅ HOVER-RETURN: Found structure info for ${word}`);
-                        return this.constructVariableHover(word, structureInfo, currentScope);
+                        return this.constructVariableHover(word, structureInfo, currentScope, document);
                     } else {
                         logger.info(`❌ HOVER-MISS: Could not find structure info for ${word}`);
                     }
@@ -766,7 +774,7 @@ export class HoverProvider {
                                 const variableInfo = this.findLocalVariableInfo(word, tokens, currentScope, document, fullReference);
                                 if (variableInfo) {
                                     logger.info(`✅ HOVER-RETURN: Found structure field info for ${fullReference}`);
-                                    return this.constructVariableHover(fullReference, variableInfo, currentScope);
+                                    return this.constructVariableHover(fullReference, variableInfo, currentScope, document);
                                 }
                             }
                         }
@@ -874,7 +882,7 @@ export class HoverProvider {
             const variableInfo = this.findLocalVariableInfo(searchWord, tokens, currentScope, document, word);
             if (variableInfo) {
                 logger.info(`✅ HOVER-RETURN: Found variable info for ${searchWord}: type=${variableInfo.type}, line=${variableInfo.line}`);
-                return this.constructVariableHover(word, variableInfo, currentScope);
+                return this.constructVariableHover(word, variableInfo, currentScope, document);
             }
             logger.info(`${searchWord} is not a local variable - checking MEMBER parent file for global variable`);
             
@@ -1360,7 +1368,7 @@ export class HoverProvider {
     /**
      * Constructs hover for a local variable
      */
-    private constructVariableHover(name: string, info: { type: string; line: number }, scope: Token): Hover {
+    private constructVariableHover(name: string, info: { type: string; line: number }, scope: Token, document?: TextDocument): Hover {
         const isRoutine = scope.subType === TokenType.Routine;
         const variableType = isRoutine ? 'Routine Variable' : 'Local Variable';
         
@@ -1368,22 +1376,68 @@ export class HoverProvider {
         // Don't strip the prefix - it's part of the variable's identity
         const displayName = name;
         
+        // Get scope information using ScopeAnalyzer
+        let scopeInfo = '';
+        let visibilityInfo = '';
+        if (document) {
+            const position: Position = { line: info.line, character: 0 };
+            const detailedScope = this.scopeAnalyzer.getTokenScope(document, position);
+            
+            if (detailedScope) {
+                // Format scope type with icon
+                const scopeIcon = detailedScope.type === 'routine' ? '🔹' : 
+                                  detailedScope.type === 'procedure' ? '🔸' : 
+                                  detailedScope.type === 'module' ? '📦' : '🌍';
+                
+                scopeInfo = `**Scope:** ${scopeIcon} ${detailedScope.type.charAt(0).toUpperCase() + detailedScope.type.slice(1)}`;
+                
+                // Add scope name if available
+                if (detailedScope.type === 'routine' && detailedScope.containingRoutine) {
+                    scopeInfo += ` (${detailedScope.containingRoutine.value})`;
+                } else if (detailedScope.type === 'procedure' && detailedScope.containingProcedure) {
+                    scopeInfo += ` (${detailedScope.containingProcedure.value})`;
+                }
+                
+                // Add visibility information
+                if (detailedScope.type === 'routine') {
+                    visibilityInfo = `**Visibility:** Only visible within this routine`;
+                } else if (detailedScope.type === 'procedure') {
+                    visibilityInfo = `**Visibility:** Visible throughout this procedure and its routines`;
+                } else if (detailedScope.type === 'module') {
+                    visibilityInfo = `**Visibility:** Visible only within this file (module-local)`;
+                } else {
+                    visibilityInfo = `**Visibility:** Visible everywhere (global)`;
+                }
+            }
+        }
+        
         const markdown = [
             `**${variableType}:** \`${displayName}\``,
             ``,
             `**Type:** \`${info.type}\``,
-            ``,
-            `**Scope:** ${isRoutine ? 'Routine' : 'Procedure'}`,
-            ``,
-            `**Declared at:** line ${info.line + 1}`,
-            ``,
-            `*Press F12 to go to declaration*`
-        ].join('\n');
+            ``
+        ];
+        
+        // Add scope info if available
+        if (scopeInfo) {
+            markdown.push(scopeInfo);
+            markdown.push(``);
+        }
+        
+        // Add visibility info if available
+        if (visibilityInfo) {
+            markdown.push(visibilityInfo);
+            markdown.push(``);
+        }
+        
+        markdown.push(`**Declared at:** line ${info.line + 1}`);
+        markdown.push(``);
+        markdown.push(`*Press F12 to go to declaration*`);
 
         return {
             contents: {
                 kind: 'markdown',
-                value: markdown
+                value: markdown.join('\n')
             }
         };
     }
