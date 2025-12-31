@@ -8,7 +8,6 @@ import { TreeNode } from './TreeNode';
 import { globalSolutionFile } from './globals';
 import LoggerManager from './utils/LoggerManager';
 
-import { trackPerformance } from './telemetry';
 import { registerNavigationCommands } from './commands/NavigationCommands';
 import { registerBuildCommands } from './commands/BuildCommands';
 import { registerSolutionManagementCommands, registerSolutionOpeningCommands, registerMiscSolutionCommands } from './commands/SolutionCommands';
@@ -59,7 +58,6 @@ export async function activate(context: ExtensionContext): Promise<void> {
     
     // Phase 1-5: Core initialization
     await ActivationManager.initializeGlobalState(context);
-    await ActivationManager.initializeTelemetryTracking(context);
     await ActivationManager.checkConflictingExtensions(context);
     ActivationManager.registerEventListeners(context);
     const xmlFileCount = ActivationManager.checkForOpenXmlFiles();
@@ -162,7 +160,6 @@ export async function activate(context: ExtensionContext): Promise<void> {
     
     const activationDuration = Date.now() - activationStartTime;
     logger.info(`✅ Extension activation completed in ${activationDuration}ms`);
-    trackPerformance('ExtensionActivation', activationDuration);
 }
 
 

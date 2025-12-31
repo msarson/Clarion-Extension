@@ -9,7 +9,6 @@ import { refreshSolutionTreeView } from '../views/ViewManager';
 import { registerLanguageFeatures } from '../providers/LanguageFeatureManager';
 import { createSolutionFileWatchers } from '../providers/FileWatcherManager';
 import { isClientReady, getClientReadyPromise } from '../LanguageClientManager';
-import { trackPerformance } from '../telemetry';
 import { refreshOpenDocuments } from '../document/DocumentRefreshManager';
 import LoggerManager from '../utils/LoggerManager';
 import * as path from 'path';
@@ -255,7 +254,6 @@ export async function initializeSolution(
     
     const endTime = performance.now();
     logger.info(`✅ Solution initialization completed in ${(endTime - startTime).toFixed(2)}ms`);
-    trackPerformance('SolutionInitialization', endTime - startTime);
     
     vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(globalSolutionFile)}`);
 }
@@ -291,7 +289,7 @@ export async function reinitializeEnvironment(
         const result = await solutionCache.initialize(globalSolutionFile);
         const cacheEndTime = performance.now();
         logger.info(`✅ SolutionCache initialized in ${(cacheEndTime - cacheStartTime).toFixed(2)}ms (${result ? 'success' : 'failed'})`);
-        trackPerformance('SolutionCacheInit', cacheEndTime - cacheStartTime, { success: result ? 'true' : 'false' });        
+        
         // If initialization failed or returned empty solution, force a refresh from server
         if (!result) {
             logger.warn("⚠️ Solution cache initialization failed. Forcing refresh from server...");
@@ -299,7 +297,7 @@ export async function reinitializeEnvironment(
             const refreshResult = await solutionCache.refresh(true);
             const refreshEndTime = performance.now();
             logger.info(`✅ SolutionCache force refreshed in ${(refreshEndTime - refreshStartTime).toFixed(2)}ms (${refreshResult ? 'success' : 'failed'})`);
-            trackPerformance('SolutionCacheRefresh', refreshEndTime - refreshStartTime, { success: refreshResult ? 'true' : 'false', forced: 'true' });            
+            
             if (!refreshResult) {
                 logger.error("❌ Failed to refresh solution cache from server. Solution features may not work correctly.");
             }
@@ -323,7 +321,6 @@ export async function reinitializeEnvironment(
     documentManager = await DocumentManager.create();
     const dmEndTime = performance.now();
     logger.info(`✅ DocumentManager created in ${(dmEndTime - dmStartTime).toFixed(2)}ms`);
-    trackPerformance('DocumentManagerCreation', dmEndTime - dmStartTime);
 
     if (refreshDocs) {
         logger.info("🔄 Refreshing open documents...");
@@ -332,6 +329,6 @@ export async function reinitializeEnvironment(
 
     const endTime = performance.now();
     logger.info(`✅ Environment reinitialized in ${(endTime - startTime).toFixed(2)}ms`);
-    trackPerformance('EnvironmentReinitialization', endTime - startTime, { refreshDocs: refreshDocs ? 'true' : 'false' });
+    
     return documentManager;
 }

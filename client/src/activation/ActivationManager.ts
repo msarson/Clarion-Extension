@@ -10,7 +10,6 @@ import { globalClarionPropertiesFile, globalClarionVersion, globalSolutionFile }
 import LoggerManager from '../utils/LoggerManager';
 import { isClientReady, getClientReadyPromise } from '../LanguageClientManager';
 
-import { initializeTelemetry, trackPerformance } from '../telemetry';
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
 import { updateBuildProjectStatusBar } from '../statusbar/StatusBarManager';
 import { createSolutionFileWatchers, handleSettingsChange } from '../providers/FileWatcherManager';
@@ -33,15 +32,6 @@ export async function initializeGlobalState(context: ExtensionContext): Promise<
     logger.info("🔄 Phase 1: Extension activation begin...");
     GlobalSolutionHistory.initialize(context);
     logger.info("✅ Global solution history initialized");
-}
-
-export async function initializeTelemetryTracking(context: ExtensionContext): Promise<void> {
-    logger.info("🔄 Phase 2: Initializing telemetry...");
-    const telemetryInitStart = Date.now();
-    await initializeTelemetry(context);
-    const telemetryInitDuration = Date.now() - telemetryInitStart;
-    trackPerformance('TelemetryInitialization', telemetryInitDuration);
-    logger.info(`✅ Phase 2 complete: Telemetry initialized in ${telemetryInitDuration}ms`);
 }
 
 export async function checkConflictingExtensions(context: ExtensionContext): Promise<void> {

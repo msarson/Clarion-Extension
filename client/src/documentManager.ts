@@ -1119,9 +1119,8 @@ export class DocumentManager implements Disposable {
             const lineCount = document.lineCount;
             const fileExtension = path.extname(document.uri.fsPath).toLowerCase();
             
-            // Track document parse performance
-            const { trackPerformance } = await import('./telemetry');
-            trackPerformance('DocumentParse', parseDuration, { 
+            // Log document parse performance
+            logger.debug(`Document parsed in ${parseDuration}ms`, { 
                 lineCount: lineCount.toString(), 
                 fileExtension,
                 statementCount: statementLocations.length.toString()
