@@ -174,42 +174,84 @@ export class ScopeAnalyzer {
      * @returns Array of file paths that can access this symbol
      */
     async getVisibleFiles(symbol: Token, declaringFile: string): Promise<string[]> {
-        // We need to determine the symbol's scope type
-        // Since we don't have the document here, we'll need to look at the token's parent chain
-        // or check if it has scope markers
-        
-        // For a more complete implementation, we'd need the document parameter
-        // For now, implement a basic version that returns the declaring file
-        // and can be enhanced later with solution manager integration
-        
-        // Check token properties to infer scope
-        // This is a simplified version - in practice we'd need the full document
-        
-        // If the token is inside a routine or procedure (check parent chain)
-        let currentToken: Token | undefined = symbol.parent;
-        let inProcedure = false;
-        let inRoutine = false;
-        
-        while (currentToken) {
-            if (currentToken.subType === TokenType.Routine) {
-                inRoutine = true;
-            }
-            if (currentToken.subType === TokenType.Procedure || 
-                currentToken.subType === TokenType.GlobalProcedure ||
-                currentToken.subType === TokenType.MethodImplementation) {
-                inProcedure = true;
-            }
-            currentToken = currentToken.parent;
-        }
-        
-        // Routine-local and procedure-local are only in declaring file
-        if (inRoutine || inProcedure) {
+        // Try to get document for the declaring file to determine scope
+        const document = await this.getDocumentFromUri(declaringFile);
+        if (!document) {
+            // Can't determine scope without document - return declaring file only
             return [declaringFile];
         }
         
-        // For global and module-local, also only declaring file for now
-        // TODO: When solution manager integration is added, expand this for global symbols
+        // Determine symbol scope
+        const symbolScope = this.getSymbolScope(symbol, document);
+        
+        // Case 1: Global symbol in PROGRAM file
+        if (symbolScope === 'global') {
+            const scopeInfo = this.getTokenScope(document, { 
+                line: symbol.line, 
+                character: symbol.start 
+            });
+            
+            if (scopeInfo?.isProgramFile) {
+                // Global in PROGRAM - visible in ALL files
+                if (this.solutionManager) {
+                    return this.getAllProjectFiles();
+                } else {
+                    // No solution loaded - just declaring file
+                    return [declaringFile];
+                }
+            }
+        }
+        
+        // Case 2: Module-local, procedure-local, routine-local
+        // These are ONLY visible in declaring file
         return [declaringFile];
+    }
+
+    /**
+     * Get document from URI - attempts to use SolutionManager
+     * @param uri Document URI
+     * @returns TextDocument or null if not found
+     */
+    private async getDocumentFromUri(uri: string): Promise<TextDocument | null> {
+        // Check if SolutionManager has the document
+        if (this.solutionManager) {
+            for (const project of this.solutionManager.solution.projects) {
+                // Convert URI to file path for lookup
+                const filePath = uri.replace('file:///', '').replace(/\//g, '\\');
+                const doc = project.getTextDocumentByPath?.(filePath);
+                if (doc) {
+                    return doc;
+                }
+            }
+        }
+        
+        // Without SolutionManager, we can't get documents for unopened files
+        return null;
+    }
+
+    /**
+     * Get all project source files from SolutionManager
+     * @returns Array of file URIs
+     */
+    private getAllProjectFiles(): string[] {
+        if (!this.solutionManager) {
+            return [];
+        }
+        
+        const allFiles: string[] = [];
+        
+        for (const project of this.solutionManager.solution.projects) {
+            for (const sourceFile of project.sourceFiles) {
+                // sourceFile.relativePath is relative to project.path
+                // Need to construct full URI
+                const fullPath = `${project.path}\\${sourceFile.relativePath}`;
+                // Convert to URI format
+                const uri = `file:///${fullPath.replace(/\\/g, '/')}`;
+                allFiles.push(uri);
+            }
+        }
+        
+        return allFiles;
     }
 
     private isProgramFile(tokens: Token[]): boolean {
