@@ -1,4 +1,9 @@
-MEMBER('main')
+          MEMBER('main.clw') !Can be written as MEMBER('main')
+
+
+          MAP
+          END
+
 
 ModuleData LONG         ! Module-local - should NOT be accessible from other files
 

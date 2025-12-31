@@ -1,9 +1,14 @@
    PROGRAM
 
    MAP
-     MODULE('utils')
-       IncrementCounter PROCEDURE
-       GetCounter       PROCEDURE,LONG
+     MODULE('utils.clw')  !Can be written as MODULE('utils')
+       IncrementCounter()  !can be written without parentheses
+       GetCounter(),LONG
+       omit('***')
+       !Could be written as
+IncrementCounter  PROCEDURE()
+GetCounter        PROCEDURE(),LONG       
+       !***
      END
    END
 
