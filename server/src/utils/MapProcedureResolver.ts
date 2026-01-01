@@ -308,7 +308,7 @@ export class MapProcedureResolver {
                      t.value.toLowerCase() === procName.toLowerCase())
                 );
                 
-                if (proceduresInModule.length > 0) {
+                if (proceduresInModule.length > 0 && moduleToken.referencedFile) {
                     logger.info(`   Found procedure ${procName} in MODULE block, searching external file`);
                     const externalImpl = await this.findImplementationInModuleFile(
                         procName, 
