@@ -146,15 +146,43 @@ export class HoverProvider {
                 
                 let procImpl = null;
                 if (mapDecl) {
-                    // Find implementation using MAP declaration position
-                    const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
-                    procImpl = await this.mapResolver.findProcedureImplementation(
-                        word,
-                        tokens,
-                        document,
-                        mapPosition, // Use MAP position, not call position
-                        line
-                    );
+                    // Check if MAP declaration is from an INCLUDE file
+                    const mapDeclUri = mapDecl.uri;
+                    const isFromInclude = mapDeclUri !== document.uri;
+                    
+                    if (isFromInclude) {
+                        logger.info(`MAP declaration is from INCLUDE file: ${mapDeclUri}`);
+                        // Load the INCLUDE file and its tokens
+                        try {
+                            const fs = require('fs');
+                            const decodedPath = decodeURIComponent(mapDeclUri.replace('file:///', ''));
+                            const includeContent = fs.readFileSync(decodedPath, 'utf-8');
+                            const includeDoc = TextDocument.create(mapDeclUri, 'clarion', 1, includeContent);
+                            const includeTokens = this.tokenCache.getTokens(includeDoc);
+                            
+                            // Find implementation using INCLUDE file's document and tokens
+                            const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
+                            procImpl = await this.mapResolver.findProcedureImplementation(
+                                word,
+                                includeTokens,
+                                includeDoc,
+                                mapPosition,
+                                line
+                            );
+                        } catch (error) {
+                            logger.info(`Error loading INCLUDE file: ${error}`);
+                        }
+                    } else {
+                        // Find implementation using MAP declaration position in current document
+                        const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
+                        procImpl = await this.mapResolver.findProcedureImplementation(
+                            word,
+                            tokens,
+                            document,
+                            mapPosition, // Use MAP position, not call position
+                            line
+                        );
+                    }
                 }
                 
                 if (mapDecl || procImpl) {

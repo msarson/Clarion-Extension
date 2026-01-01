@@ -61,15 +61,45 @@ export class ImplementationProvider {
                 const mapDecl = this.mapResolver.findMapDeclaration(word, tokens, document, line);
                 
                 if (mapDecl) {
-                    // Now find implementation using the MAP declaration position
-                    const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
-                    const implLocation = await this.mapResolver.findProcedureImplementation(
-                        word,
-                        tokens,
-                        document,
-                        mapPosition, // Use MAP position, not call position
-                        line
-                    );
+                    // Check if MAP declaration is from an INCLUDE file
+                    const mapDeclUri = mapDecl.uri;
+                    const isFromInclude = mapDeclUri !== document.uri;
+                    
+                    let implLocation: Location | null = null;
+                    
+                    if (isFromInclude) {
+                        logger.info(`MAP declaration is from INCLUDE file: ${mapDeclUri}`);
+                        // Load the INCLUDE file and its tokens
+                        try {
+                            const fs = require('fs');
+                            const decodedPath = decodeURIComponent(mapDeclUri.replace('file:///', ''));
+                            const includeContent = fs.readFileSync(decodedPath, 'utf-8');
+                            const includeDoc = TextDocument.create(mapDeclUri, 'clarion', 1, includeContent);
+                            const includeTokens = this.tokenCache.getTokens(includeDoc);
+                            
+                            // Find implementation using INCLUDE file's document and tokens
+                            const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
+                            implLocation = await this.mapResolver.findProcedureImplementation(
+                                word,
+                                includeTokens,
+                                includeDoc,
+                                mapPosition,
+                                line
+                            );
+                        } catch (error) {
+                            logger.info(`Error loading INCLUDE file: ${error}`);
+                        }
+                    } else {
+                        // Now find implementation using the MAP declaration position
+                        const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
+                        implLocation = await this.mapResolver.findProcedureImplementation(
+                            word,
+                            tokens,
+                            document,
+                            mapPosition, // Use MAP position, not call position
+                            line
+                        );
+                    }
                     
                     // Check if we're already AT the implementation - if so, don't navigate to itself
                     if (implLocation && 
