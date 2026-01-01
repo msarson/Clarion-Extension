@@ -71,6 +71,14 @@ export class ImplementationProvider {
                         line
                     );
                     
+                    // Check if we're already AT the implementation - if so, don't navigate to itself
+                    if (implLocation && 
+                        implLocation.uri === document.uri && 
+                        implLocation.range.start.line === position.line) {
+                        logger.info(`❌ Already at implementation for ${word} - returning null to prevent self-navigation`);
+                        return null;
+                    }
+                    
                     if (implLocation) {
                         logger.info(`✅ Found procedure implementation for call: ${word}`);
                         return implLocation;

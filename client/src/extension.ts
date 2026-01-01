@@ -222,10 +222,41 @@ export { showClarionQuickOpen } from './navigation/QuickOpenProvider';
 
 
 export function deactivate(): Thenable<void> | undefined {
+    // Set to info level to capture shutdown process
+    logger.setLevel("info");
+    logger.info("🛑 DEACTIVATE: Starting extension deactivation");
+    console.log("🛑 DEACTIVATE: Starting extension deactivation at " + new Date().toISOString());
+    
     if (!client) {
+        logger.info("🛑 DEACTIVATE: No client to stop");
+        console.log("🛑 DEACTIVATE: No client to stop");
         return undefined;
     }
-    return client.stop();
+    
+    logger.info("🛑 DEACTIVATE: Stopping language client...");
+    console.log("🛑 DEACTIVATE: Stopping language client at " + new Date().toISOString());
+    
+    const stopPromise = client.stop();
+    
+    // Add timeout monitoring
+    const timeoutId = setTimeout(() => {
+        logger.info("🛑 DEACTIVATE: Client stop() taking longer than 5 seconds...");
+        console.log("🛑 DEACTIVATE: Client stop() taking longer than 5 seconds at " + new Date().toISOString());
+    }, 5000);
+    
+    if (stopPromise) {
+        return stopPromise.then(() => {
+            clearTimeout(timeoutId);
+            logger.info("🛑 DEACTIVATE: Language client stopped successfully");
+            console.log("🛑 DEACTIVATE: Language client stopped successfully at " + new Date().toISOString());
+        }).catch((error) => {
+            clearTimeout(timeoutId);
+            logger.info(`🛑 DEACTIVATE: Error stopping client: ${error}`);
+            console.log(`🛑 DEACTIVATE: Error stopping client: ${error} at ` + new Date().toISOString());
+        });
+    }
+    
+    return undefined;
 }
 
 

@@ -10,6 +10,7 @@ import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { MapProcedureResolver } from '../utils/MapProcedureResolver';
 import { CrossFileResolver } from '../utils/CrossFileResolver';
+import { OmitCompileDetector } from '../utils/OmitCompileDetector';
 import { BuiltinFunctionService } from '../utils/BuiltinFunctionService';
 import { AttributeService } from '../utils/AttributeService';
 import { ControlService } from '../utils/ControlService';
@@ -49,6 +50,15 @@ export class HoverProvider {
         logger.info(`Providing hover for position ${position.line}:${position.character} in ${document.uri}`);
 
         try {
+            // Get tokens first for OMIT/COMPILE detection
+            const allTokens = this.tokenCache.getTokens(document);
+            
+            // Check if the line is inside an OMIT or COMPILE block
+            if (OmitCompileDetector.isLineOmitted(position.line, allTokens, document)) {
+                logger.info(`Line ${position.line} is inside OMIT/COMPILE block - skipping hover`);
+                return null;
+            }
+            
             // Get DocumentStructure for MAP block detection
             const documentStructure = this.tokenCache.getStructure(document);
             
@@ -70,7 +80,6 @@ export class HoverProvider {
 
             // ✅ CONTEXT-AWARE DETECTION: Determine if we should prioritize control or data type
             // Get tokens to check for label before the word
-            const allTokens = this.tokenCache.getTokens(document);
             const currentLineTokens = allTokens.filter(t => t.line === position.line);
             
             // Check if there's a Label token before the current word (indicates data declaration)
@@ -294,7 +303,7 @@ export class HoverProvider {
                 }
                 
                 if (mapDecl || procImpl) {
-                    return this.constructProcedureHover(word, mapDecl, procImpl, document);
+                    return this.constructProcedureHover(word, mapDecl, procImpl, document, position);
                 }
             }
 
@@ -475,22 +484,8 @@ export class HoverProvider {
                     // Find the MAP declaration for this procedure using resolver
                     // Pass implementation signature for overload resolution
                     const mapLocation = this.mapResolver.findMapDeclaration(procName, tokens, document, line);
-                    if (mapLocation) {
-                        // Get the full line where the MAP declaration occurs
-                        const mapLine = document.getText({
-                            start: { line: mapLocation.range.start.line, character: 0 },
-                            end: { line: mapLocation.range.start.line + 1, character: 0 }
-                        }).trim();
-                        
-                        const header = scopeText ? `**PROCEDURE (Implementation)** ${scopeIcon} ${scopeText}` : `**PROCEDURE (Implementation)**`;
-                        
-                        return {
-                            contents: {
-                                kind: 'markdown',
-                                value: `${header}\n\n\`\`\`clarion\n${line.trim()}\n\`\`\`\n\n*Press F12 to see MAP declaration*`
-                            }
-                        };
-                    } else {
+                    
+                    if (!mapLocation) {
                         // Not found in current file, check for MEMBER
                         logger.info(`MAP declaration not found in current file, checking for MEMBER...`);
                         const memberToken = tokens.find(t => 
@@ -511,21 +506,29 @@ export class HoverProvider {
                             );
                             
                             if (memberMapResult) {
-                                // Read the declaration line from external file
-                                if (fs.existsSync(memberMapResult.file)) {
-                                    const content = fs.readFileSync(memberMapResult.file, 'utf8');
-                                    const lines = content.split('\n');
-                                    const mapLine = lines[memberMapResult.line]?.trim() || '';
-                                    const fileName = memberToken.referencedFile;
-                                    return {
-                                        contents: {
-                                            kind: 'markdown',
-                                            value: `**MAP Declaration in ${fileName}** _(Press F12 to navigate)_\n\n\`\`\`clarion\n${mapLine}\n\`\`\``
-                                        }
-                                    };
-                                }
+                                // Found MAP in parent file - use it
+                                const implLocation: Location = {
+                                    uri: document.uri,
+                                    range: {
+                                        start: { line: position.line, character: mapProcMatch.index! },
+                                        end: { line: position.line, character: procNameEnd }
+                                    }
+                                };
+                                
+                                return this.constructProcedureHover(procName, memberMapResult.location, implLocation, document, position);
                             }
                         }
+                    } else {
+                        // Found MAP in current file
+                        const implLocation: Location = {
+                            uri: document.uri,
+                            range: {
+                                start: { line: position.line, character: mapProcMatch.index! },
+                                end: { line: position.line, character: procNameEnd }
+                            }
+                        };
+                        
+                        return this.constructProcedureHover(procName, mapLocation, implLocation, document, position);
                     }
                 }
             }
@@ -560,58 +563,16 @@ export class HoverProvider {
                             documentStructure  // Pass cached structure for performance
                         );
                         
-                        if (implLocation) {
-                            logger.info(`✅ Found implementation with overload resolution at line ${implLocation.range.start.line}`);
-                            
-                            // Check if implementation is in a different file
-                            const implUri = implLocation.uri;
-                            const currentUri = document.uri;
-                            
-                            let implDocument = document;
-                            if (implUri !== currentUri) {
-                                // Load the external file
-                                logger.info(`Implementation is in external file: ${implUri}`);
-                                const fs = await import('fs');
-                                const filePath = decodeURIComponent(implUri.replace('file:///', '')).replace(/\//g, '\\');
-                                
-                                if (fs.existsSync(filePath)) {
-                                    const content = fs.readFileSync(filePath, 'utf8');
-                                    const TextDocument = (await import('vscode-languageserver-textdocument')).TextDocument;
-                                    implDocument = TextDocument.create(implUri, 'clarion', 1, content);
-                                    logger.info(`Loaded external document for preview`);
-                                } else {
-                                    logger.error(`External file not found: ${filePath}`);
-                                }
+                        // Use the standard procedure hover construction
+                        const mapDecl: Location = {
+                            uri: document.uri,
+                            range: {
+                                start: { line: position.line, character: procNameStart },
+                                end: { line: position.line, character: procNameEnd }
                             }
-                            
-                            // Get preview of implementation
-                            const implInfo = this.findProcedureImplementationPreview(implDocument, procName, implLocation.range.start.line);
-                            if (implInfo) {
-                                // Determine scope for the MAP declaration
-                                const tokens = this.tokenCache.getTokens(document);
-                                const firstNonCommentToken = tokens.find(t => t.type !== TokenType.Comment);
-                                const isProgramFile = firstNonCommentToken?.type === TokenType.ClarionDocument && 
-                                                     firstNonCommentToken.value.toUpperCase() === 'PROGRAM';
-                                const isMemberFile = firstNonCommentToken?.type === TokenType.ClarionDocument && 
-                                                    (firstNonCommentToken.value.toUpperCase() === 'MEMBER' || 
-                                                     firstNonCommentToken.value.toUpperCase().startsWith('MEMBER('));
-                                
-                                const scopeIcon = isProgramFile ? '🌍' : (isMemberFile ? '📦' : '');
-                                const scopeText = isProgramFile ? 'Global' : (isMemberFile ? 'Module' : '');
-                                
-                                const fileInfo = implUri !== currentUri ? ` in ${implUri.split('/').pop()}` : '';
-                                const header = scopeText ? `**MAP Declaration** ${scopeIcon} ${scopeText}` : `**MAP Declaration**`;
-                                
-                                return {
-                                    contents: {
-                                        kind: 'markdown',
-                                        value: `${header}\n\n\`\`\`clarion\n${line.trim()}\n\`\`\`\n\n*Press Ctrl+F12 to navigate to implementation${fileInfo}*`
-                                    }
-                                };
-                            }
-                        } else {
-                            logger.info(`❌ No implementation found for ${procName}`);
-                        }
+                        };
+                        
+                        return this.constructProcedureHover(procName, mapDecl, implLocation, document, position);
                     } else {
                         logger.info(`Cursor NOT on procedure name (cursor at ${position.character}, name range ${procNameStart}-${procNameEnd})`);
                     }
@@ -753,10 +714,59 @@ export class HoverProvider {
                     const scopeText = isProgramFile ? 'Global' : (isMemberFile ? 'Module' : '');
                     const header = scopeText ? `**PROCEDURE** ${scopeIcon} ${scopeText}` : `**PROCEDURE**`;
                     
+                    // We're at the implementation - try to find and show the MAP declaration
+                    // First try local MAP
+                    let mapDecl = this.mapResolver.findMapDeclaration(currentToken.label || word, allTokens, document, line);
+                    
+                    // If not found locally and we're in a MEMBER file, check parent file's MAP
+                    if (!mapDecl && isMemberFile) {
+                        const memberToken = allTokens.find(t => 
+                            t.line < 5 && // MEMBER should be at top of file
+                            t.value.toUpperCase() === 'MEMBER' &&
+                            t.referencedFile
+                        );
+                        
+                        if (memberToken?.referencedFile) {
+                            logger.info(`Checking parent file ${memberToken.referencedFile} for MAP declaration of ${currentToken.label || word}`);
+                            const memberResult = await this.crossFileResolver.findMapDeclarationInMemberFile(
+                                currentToken.label || word,
+                                memberToken.referencedFile,
+                                document,
+                                line
+                            );
+                            if (memberResult) {
+                                mapDecl = memberResult.location;
+                            }
+                        }
+                    }
+                    
+                    let displaySignature = signature;
+                    let fileInfo = '';
+                    if (mapDecl) {
+                        try {
+                            // Read the MAP declaration line
+                            const mapUri = decodeURIComponent(mapDecl.uri.replace('file:///', ''));
+                            const mapContent = fs.readFileSync(mapUri, 'utf-8');
+                            const mapLines = mapContent.split('\n');
+                            const mapLine = mapLines[mapDecl.range.start.line];
+                            
+                            if (mapLine) {
+                                const trimmedMapLine = mapLine.trim();
+                                displaySignature = trimmedMapLine;
+                                const fileName = path.basename(mapUri);
+                                const lineNumber = mapDecl.range.start.line + 1; // Convert to 1-based
+                                fileInfo = `\n\n**Defined in** \`${fileName}\` @ line ${lineNumber}`;
+                                logger.info(`Found MAP declaration: ${trimmedMapLine}`);
+                            }
+                        } catch (error) {
+                            logger.error(`Error reading MAP declaration: ${error}`);
+                        }
+                    }
+                    
                     return {
                         contents: {
                             kind: 'markdown',
-                            value: `${header}\n\n\`\`\`clarion\n${signature}\n\`\`\`\n\n*Press F12 to see MAP declaration | Ctrl+F12 to see implementation*`
+                            value: `${header}\n\n\`\`\`clarion\n${displaySignature}\n\`\`\`${fileInfo}\n\n*Press F12 to navigate to definition*`
                         }
                     };
                 }
@@ -897,7 +907,10 @@ export class HoverProvider {
                         markdown.push(``);
                     }
                     
-                    markdown.push(`**Declared at:** line ${globalVar.line + 1}`);
+                    // Show file and line info similar to procedures
+                    const fileName = path.basename(document.uri.replace('file:///', ''));
+                    const lineNumber = globalVar.line + 1; // Convert to 1-based
+                    markdown.push(`**Declared in** \`${fileName}\` @ line ${lineNumber}`);
                     markdown.push(``);
                     markdown.push(`*Press F12 to go to declaration*`);
                     
@@ -958,10 +971,41 @@ export class HoverProvider {
                                     }
                                 }
                                 
+                                // Use ScopeAnalyzer to get detailed scope info
+                                const globalPos: Position = { line: globalVar.line, character: globalVar.start };
+                                const scopeInfo = this.scopeAnalyzer.getTokenScope(parentDoc, globalPos);
+                                
+                                const markdown = [
+                                    `**Global Variable:** \`${globalVar.value}\``,
+                                    ``,
+                                    `**Type:** \`${typeInfo}\``,
+                                    ``
+                                ];
+                                
+                                if (scopeInfo) {
+                                    const scopeIcon = scopeInfo.type === 'global' ? '🌍' : '📦';
+                                    markdown.push(`**Scope:** ${scopeIcon} ${scopeInfo.type.charAt(0).toUpperCase() + scopeInfo.type.slice(1)}`);
+                                    markdown.push(``);
+                                    
+                                    if (scopeInfo.type === 'global') {
+                                        markdown.push(`**Visibility:** Visible everywhere`);
+                                    } else {
+                                        markdown.push(`**Visibility:** Visible only within this file (module-local)`);
+                                    }
+                                    markdown.push(``);
+                                }
+                                
+                                // Show file and line info similar to procedures
+                                const fileName = path.basename(memberToken.referencedFile);
+                                const lineNumber = globalVar.line + 1; // Convert to 1-based
+                                markdown.push(`**Declared in** \`${fileName}\` @ line ${lineNumber}`);
+                                markdown.push(``);
+                                markdown.push(`*Press F12 to go to declaration*`);
+                                
                                 return {
                                     contents: {
                                         kind: 'markdown',
-                                        value: `**Global Variable**: \`${globalVar.value}\`\n\n**Type**: \`${typeInfo}\`\n\n**Defined in**: ${path.basename(memberToken.referencedFile)}`
+                                        value: markdown.join('\n')
                                     }
                                 };
                             }
@@ -1055,7 +1099,10 @@ export class HoverProvider {
                     markdown.push(``);
                 }
                 
-                markdown.push(`**Declared at:** line ${moduleVar.line + 1}`);
+                // Show file and line info similar to procedures
+                const fileName = path.basename(document.uri.replace('file:///', ''));
+                const lineNumber = moduleVar.line + 1; // Convert to 1-based
+                markdown.push(`**Declared in** \`${fileName}\` @ line ${lineNumber}`);
                 markdown.push(``);
                 markdown.push(`*Press F12 to go to declaration*`);
                 
@@ -1067,10 +1114,11 @@ export class HoverProvider {
                 };
             }
             
-            logger.info(`${searchWord} is not a module-local variable - checking MEMBER parent file for global variable`);
+            logger.info(`${searchWord} is not a module-local variable - checking MEMBER parent file`);
             
-            // 🔗 Not found locally - check for global variable in MEMBER parent file
-            const memberToken = tokens.find(t => 
+            // 🔗 Check if MEMBER file exists
+            const mapTokens = this.tokenCache.getTokens(document);
+            const memberToken = mapTokens.find(t =>
                 t.value && t.value.toUpperCase() === 'MEMBER' && 
                 t.line < 5 && 
                 t.referencedFile
@@ -1079,23 +1127,56 @@ export class HoverProvider {
             if (memberToken && memberToken.referencedFile) {
                 logger.info(`Found MEMBER reference to: ${memberToken.referencedFile}`);
                 
-                if (fs.existsSync(memberToken.referencedFile)) {
+                // Resolve the referenced file path relative to the current document
+                // Decode URI first to get proper file path
+                const currentFilePath = decodeURIComponent(document.uri.replace('file:///', ''));
+                const currentFileDir = path.dirname(currentFilePath);
+                const resolvedPath = path.resolve(currentFileDir, memberToken.referencedFile);
+                logger.info(`Resolved MEMBER path: ${resolvedPath}`);
+                logger.info(`Checking if file exists: ${fs.existsSync(resolvedPath)}`);
+                
+                if (fs.existsSync(resolvedPath)) {
                     try {
-                        const parentContents = await fs.promises.readFile(memberToken.referencedFile, 'utf-8');
+                        logger.info(`Reading MEMBER parent file: ${resolvedPath}`);
+                        const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
                         const parentDoc = TextDocument.create(
-                            `file:///${memberToken.referencedFile.replace(/\\/g, '/')}`,
+                            `file:///${resolvedPath.replace(/\\/g, '/')}`,
                             'clarion',
                             1,
                             parentContents
                         );
                         const parentTokens = this.tokenCache.getTokens(parentDoc);
+                        logger.info(`Tokenized parent file, found ${parentTokens.length} tokens`);
                         
+                        // First check if this is a procedure in the MAP (before treating as variable)
+                        // Look for MAP declaration of the procedure
+                        const parentStructure = this.tokenCache.getStructure(parentDoc);
+                        const mapDecl = this.mapResolver.findMapDeclaration(searchWord, parentTokens, parentDoc, line);
+                        
+                        if (mapDecl) {
+                            logger.info(`✅ Found MAP declaration for ${searchWord} in parent - treating as procedure call`);
+                            
+                            // Find implementation
+                            const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
+                            const procImpl = await this.mapResolver.findProcedureImplementation(
+                                searchWord,
+                                parentTokens,
+                                parentDoc,
+                                mapPosition,
+                                line
+                            );
+                            
+                            return this.constructProcedureHover(searchWord, mapDecl, procImpl, document, position);
+                        }
+                        
+                        // Not a procedure - check for global variable
                         // Find first CODE token to establish boundary for global scope
                         const firstCodeToken = parentTokens.find(t => 
                             t.type === TokenType.Keyword && 
                             t.value.toUpperCase() === 'CODE'
                         );
                         const globalScopeEndLine = firstCodeToken ? firstCodeToken.line : Number.MAX_SAFE_INTEGER;
+                        logger.info(`Global scope ends at line ${globalScopeEndLine}`);
                         
                         // Search for global variable (Label at column 0, before first CODE)
                         const globalVar = parentTokens.find(t =>
@@ -1104,6 +1185,8 @@ export class HoverProvider {
                             t.line < globalScopeEndLine &&
                             t.value.toLowerCase() === searchWord.toLowerCase()
                         );
+                        
+                        logger.info(`Searched for ${searchWord}, found: ${globalVar ? `YES at line ${globalVar.line}` : 'NO'}`);
                         
                         if (globalVar) {
                             logger.info(`✅ Found global variable in MEMBER parent: ${globalVar.value} at line ${globalVar.line}`);
@@ -1118,10 +1201,41 @@ export class HoverProvider {
                                 }
                             }
                             
+                            // Use ScopeAnalyzer to get detailed scope info
+                            const globalPos: Position = { line: globalVar.line, character: globalVar.start };
+                            const scopeInfo = this.scopeAnalyzer.getTokenScope(parentDoc, globalPos);
+                            
+                            const markdown = [
+                                `**Global Variable:** \`${globalVar.value}\``,
+                                ``,
+                                `**Type:** \`${typeInfo}\``,
+                                ``
+                            ];
+                            
+                            if (scopeInfo) {
+                                const scopeIcon = scopeInfo.type === 'global' ? '🌍' : '📦';
+                                markdown.push(`**Scope:** ${scopeIcon} ${scopeInfo.type.charAt(0).toUpperCase() + scopeInfo.type.slice(1)}`);
+                                markdown.push(``);
+                                
+                                if (scopeInfo.type === 'global') {
+                                    markdown.push(`**Visibility:** Visible everywhere`);
+                                } else {
+                                    markdown.push(`**Visibility:** Visible only within this file (module-local)`);
+                                }
+                                markdown.push(``);
+                            }
+                            
+                            // Show file and line info similar to procedures
+                            const fileName = path.basename(resolvedPath);
+                            const lineNumber = globalVar.line + 1; // Convert to 1-based
+                            markdown.push(`**Declared in** \`${fileName}\` @ line ${lineNumber}`);
+                            markdown.push(``);
+                            markdown.push(`*Press F12 to go to declaration*`);
+                            
                             return {
                                 contents: {
                                     kind: 'markdown',
-                                    value: `**Global Variable**: \`${globalVar.value}\`\n\n**Type**: \`${typeInfo}\`\n\n**Defined in**: ${path.basename(memberToken.referencedFile)}`
+                                    value: markdown.join('\n')
                                 }
                             };
                         }
@@ -1613,7 +1727,14 @@ export class HoverProvider {
             markdown.push(``);
         }
         
-        markdown.push(`**Declared at:** line ${info.line + 1}`);
+        // Show file and line info similar to procedures
+        if (document) {
+            const fileName = path.basename(document.uri.replace('file:///', ''));
+            const lineNumber = info.line + 1; // Convert to 1-based
+            markdown.push(`**Declared in** \`${fileName}\` @ line ${lineNumber}`);
+        } else {
+            markdown.push(`**Declared at:** line ${info.line + 1}`);
+        }
         markdown.push(``);
         markdown.push(`*Press F12 to go to declaration*`);
 
@@ -2333,19 +2454,73 @@ export class HoverProvider {
     /**
      * Construct hover information for procedure calls
      * Shows both MAP declaration and PROCEDURE implementation
+     * @param currentDocument The document where hover is requested
+     * @param currentPosition The position in the document
      */
     private async constructProcedureHover(
         procName: string,
         mapDecl: Location | null,
         procImpl: Location | null,
-        currentDocument: TextDocument
+        currentDocument: TextDocument,
+        currentPosition?: Position
     ): Promise<Hover | null> {
         const parts: string[] = [];
         
-        parts.push(`**${procName}** (Procedure)\n`);
+        // We'll set the header after we know where we are
+        let header = `**${procName}** (Procedure)\n`;
         
-        // Show MAP declaration
-        if (mapDecl) {
+        // Determine where we are: at MAP, at implementation, or at call site
+        let isAtMapDeclaration = false;
+        let isAtImplementation = false;
+        
+        if (currentPosition && mapDecl) {
+            const mapUri = mapDecl.uri.replace(/^file:\/\/\//, '');
+            const currentUri = currentDocument.uri.replace(/^file:\/\/\//, '');
+            if (mapUri.toLowerCase() === currentUri.toLowerCase() && 
+                mapDecl.range.start.line === currentPosition.line) {
+                isAtMapDeclaration = true;
+            }
+        }
+        
+        if (currentPosition && procImpl) {
+            const implUri = procImpl.uri.replace(/^file:\/\/\//, '');
+            const currentUri = currentDocument.uri.replace(/^file:\/\/\//, '');
+            if (implUri.toLowerCase() === currentUri.toLowerCase() && 
+                procImpl.range.start.line === currentPosition.line) {
+                isAtImplementation = true;
+            }
+        }
+        
+        // Add scope information if available
+        if (procImpl || mapDecl) {
+            try {
+                // Determine scope from the implementation or MAP location
+                const checkLocation = procImpl || mapDecl;
+                if (checkLocation) {
+                    const uri = decodeURIComponent(checkLocation.uri.replace('file:///', ''));
+                    const content = fs.readFileSync(uri, 'utf-8');
+                    const lines = content.split('\n');
+                    const firstNonCommentLine = lines.find(l => l.trim() && !l.trim().startsWith('!'));
+                    
+                    if (firstNonCommentLine) {
+                        const trimmed = firstNonCommentLine.trim().toUpperCase();
+                        if (trimmed.startsWith('PROGRAM')) {
+                            header = `**${procName}** 🌍 Global Procedure\n`;
+                        } else if (trimmed.startsWith('MEMBER')) {
+                            header = `**${procName}** 📦 Module Procedure\n`;
+                        }
+                    }
+                }
+            } catch (error) {
+                // Silently fail scope detection
+            }
+        }
+        
+        // Add the header now that we know the scope
+        parts.push(header);
+        
+        // Show MAP declaration - but NOT if we're hovering at the MAP declaration itself
+        if (mapDecl && !isAtMapDeclaration) {
             try {
                 // Properly decode file URI
                 const mapUri = decodeURIComponent(mapDecl.uri.replace('file:///', ''));
@@ -2355,21 +2530,27 @@ export class HoverProvider {
                 
                 if (mapLine) {
                     const trimmedMapLine = mapLine.trim();
-                    parts.push(`**MAP Declaration:**\n\`\`\`clarion\n${trimmedMapLine}\n\`\`\``);
+                    const fileName = path.basename(mapUri);
+                    const lineNumber = mapDecl.range.start.line + 1; // Convert to 1-based
+                    parts.push(`**Declared in** \`${fileName}\` @ line ${lineNumber}:\n\`\`\`clarion\n${trimmedMapLine}\n\`\`\``);
                 }
             } catch (error) {
                 logger.error(`Error reading MAP declaration: ${error}`);
             }
         }
         
-        // Show PROCEDURE implementation (signature + first few lines)
-        if (procImpl) {
+        // Show PROCEDURE implementation (signature + first few lines) - but NOT if we're hovering at the implementation itself
+        if (procImpl && !isAtImplementation) {
             try {
                 // Properly decode file URI
                 const implUri = decodeURIComponent(procImpl.uri.replace('file:///', ''));
                 const implContent = fs.readFileSync(implUri, 'utf-8');
                 const implLines = implContent.split('\n');
                 const startLine = procImpl.range.start.line;
+                
+                // Get file name and line number
+                const fileName = path.basename(implUri);
+                const lineNumber = startLine + 1; // Convert to 1-based
                 
                 // Show up to 10 lines (signature + beginning of implementation)
                 const maxLines = 10;
@@ -2401,16 +2582,29 @@ export class HoverProvider {
                 }
                 
                 if (codeLines.length > 0) {
-                    parts.push(`\n**Implementation:**\n\`\`\`clarion\n${codeLines.join('\n')}\n\`\`\``);
+                    parts.push(`\n**Implemented in** \`${fileName}\` @ line ${lineNumber}:\n\`\`\`clarion\n${codeLines.join('\n')}\n\`\`\``);
                 }
             } catch (error) {
                 logger.error(`Error reading PROCEDURE implementation: ${error}`);
             }
         }
         
-        // Add navigation hint
+        // Add context-aware navigation hint
         if (mapDecl || procImpl) {
-            parts.push(`\n*(F12 to declaration | Ctrl+F12 to implementation)*`);
+            if (isAtMapDeclaration) {
+                // At MAP declaration - can only go to implementation
+                if (procImpl) {
+                    parts.push(`\n*Press Ctrl+F12 to navigate to implementation*`);
+                }
+            } else if (isAtImplementation) {
+                // At implementation - can only go to MAP declaration
+                if (mapDecl) {
+                    parts.push(`\n*Press F12 to navigate to MAP declaration*`);
+                }
+            } else {
+                // At call site - can go to both
+                parts.push(`\n*(F12 to MAP declaration | Ctrl+F12 to implementation)*`);
+            }
         }
         
         if (parts.length > 1) {

@@ -18,7 +18,7 @@ import { CrossFileResolver } from '../utils/CrossFileResolver';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
-logger.setLevel("info"); // TEMPORARY: Debug TEST 4 regression
+logger.setLevel("error"); // Phase 4 complete - debug logging disabled
 
 /**
  * Provides goto definition functionality for Clarion files
@@ -126,6 +126,15 @@ export class DefinitionProvider {
                 
                 // First, try to find MAP declaration in current file
                 const mapDecl = this.mapResolver.findMapDeclaration(word, tokens, document, line);
+                
+                // Check if we're already AT the MAP declaration - if so, don't navigate to itself
+                if (mapDecl && 
+                    mapDecl.uri === document.uri && 
+                    mapDecl.range.start.line === position.line) {
+                    logger.info(`❌ Already at MAP declaration for ${word} - returning null to prevent self-navigation`);
+                    return null;
+                }
+                
                 if (mapDecl) {
                     logger.info(`✅ Found MAP declaration for procedure call: ${word}`);
                     return mapDecl;
@@ -274,6 +283,16 @@ export class DefinitionProvider {
             if (symbolDefinition) {
                 logger.info(`Found symbol definition for ${word} in the current document`);
                 return symbolDefinition;
+            }
+
+            // Check if this looks like a variable (has a label token somewhere) to prevent
+            // mistaking variables for procedures. Do a quick global check.
+            const globalVarExists = await this.findGlobalDefinition(word, document.uri);
+            if (globalVarExists) {
+                logger.info(`${word} is a variable (found globally), not searching for procedure implementation`);
+                // This is a variable that we couldn't resolve (blocked by scope or other reason)
+                // Don't continue to procedure search
+                return null;
             }
 
             // Check if we're inside a MAP block and the word is a procedure declaration

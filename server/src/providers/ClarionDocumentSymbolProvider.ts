@@ -9,6 +9,8 @@ import { HierarchyManager, ParentStackEntry } from './utils/HierarchyManager';
 import { SymbolFinder } from './utils/SymbolFinder';
 import { isAttributeKeyword, isDataType } from '../utils/AttributeKeywords';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
+import { OmitCompileDetector } from '../utils/OmitCompileDetector';
+import { TextDocument } from 'vscode-languageserver-textdocument';
 
 /**
  * Extended DocumentSymbol with Clarion-specific metadata
@@ -266,7 +268,7 @@ export class ClarionDocumentSymbolProvider {
         return { value: "", nextIndex: j };
     }
 
-    public provideDocumentSymbols(tokens: Token[], documentUri: string): ClarionDocumentSymbol[] {
+    public provideDocumentSymbols(tokens: Token[], documentUri: string, document?: TextDocument): ClarionDocumentSymbol[] {
         if (!serverInitialized) {
             logger.warn(`⚠️ Server not initialized, skipping document symbols for: ${documentUri}`);
             return [];
@@ -715,6 +717,11 @@ export class ClarionDocumentSymbolProvider {
         // These create circular references and shouldn't be sent to the client
         this.cleanupInternalProperties(symbols);
 
+        // Filter out symbols in OMIT/COMPILE blocks if document is provided
+        if (document) {
+            this.filterOmittedSymbols(symbols, tokens, document);
+        }
+
         return symbols;
     }
     
@@ -732,6 +739,25 @@ export class ClarionDocumentSymbolProvider {
             // Recursively clean children
             if (symbol.children && symbol.children.length > 0) {
                 this.cleanupInternalProperties(symbol.children);
+            }
+        }
+    }
+    
+    /**
+     * Filter out symbols that are within OMIT/COMPILE blocks
+     */
+    private filterOmittedSymbols(symbols: ClarionDocumentSymbol[], tokens: Token[], document: TextDocument): void {
+        for (let i = symbols.length - 1; i >= 0; i--) {
+            const symbol = symbols[i];
+            const symbolLine = symbol.range.start.line;
+            
+            // Check if this symbol is in an omitted region
+            if (OmitCompileDetector.isLineOmitted(symbolLine, tokens, document)) {
+                // Remove this symbol
+                symbols.splice(i, 1);
+            } else if (symbol.children && symbol.children.length > 0) {
+                // Recursively filter children
+                this.filterOmittedSymbols(symbol.children, tokens, document);
             }
         }
     }

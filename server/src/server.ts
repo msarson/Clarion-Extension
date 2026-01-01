@@ -58,12 +58,11 @@ import { DiagnosticProvider } from './providers/DiagnosticProvider';
 import { SignatureHelpProvider } from './providers/SignatureHelpProvider';
 import { ImplementationProvider } from './providers/ImplementationProvider';
 import { UnreachableCodeProvider } from './providers/UnreachableCodeProvider';
-import path = require('path');
 import { ClarionSolutionInfo } from 'common/types';
-
-import * as fs from 'fs';
 import { URI } from 'vscode-languageserver';
 import { setServerInitialized, serverInitialized } from './serverState';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const logger = LoggerManager.getLogger("Server");
 logger.setLevel("error");
@@ -630,7 +629,7 @@ connection.onDocumentSymbol((params: DocumentSymbolParams) => {
         logger.perf('Symbols: getTokens', { time_ms: tokenTime.toFixed(2), tokens: tokens.length });
         
         const symbolStart = performance.now();
-        const symbols = clarionDocumentSymbolProvider.provideDocumentSymbols(tokens, uri);
+        const symbols = clarionDocumentSymbolProvider.provideDocumentSymbols(tokens, uri, document);
         const symbolTime = performance.now() - symbolStart;
         
         // Cache the symbols for quick retrieval during typing
@@ -1200,7 +1199,7 @@ connection.onRequest('clarion/documentSymbols', async (params: { uri: string }) 
 
     logger.info(`📜 [Server] Handling documentSymbols request for ${params.uri}`);
     const tokens = getTokens(document);
-    const symbols = clarionDocumentSymbolProvider.provideDocumentSymbols(tokens, params.uri);
+    const symbols = clarionDocumentSymbolProvider.provideDocumentSymbols(tokens, params.uri, document);
     logger.info(`✅ [Server] Returning ${symbols.length} symbols`);
     return symbols;
 });
@@ -1337,6 +1336,50 @@ connection.onSignatureHelp(async (params) => {
 
 // ✅ Start Listening
 documents.listen(connection);
+
+// Add shutdown handlers
+connection.onShutdown(() => {
+    logger.setLevel("info");
+    const shutdownLogPath = path.join(__dirname, '..', '..', 'shutdown.log');
+    const logMessage = (msg: string) => {
+        const timestamp = new Date().toISOString();
+        const fullMsg = `[${timestamp}] ${msg}\n`;
+        logger.info(msg);
+        console.log(`🛑 ${msg}`);
+        try {
+            fs.appendFileSync(shutdownLogPath, fullMsg);
+        } catch (e) {
+            console.error("Failed to write to shutdown log:", e);
+        }
+    };
+    
+    logMessage("SERVER SHUTDOWN: onShutdown handler called");
+    logMessage(`SERVER SHUTDOWN: Active documents: ${documents.all().length}`);
+    logMessage("SERVER SHUTDOWN: Clearing caches...");
+    
+    return new Promise((resolve) => {
+        setTimeout(() => {
+            logMessage("SERVER SHUTDOWN: Shutdown handler complete");
+            resolve();
+        }, 100);
+    });
+});
+
+connection.onExit(() => {
+    const timestamp = new Date().toISOString();
+    logger.info("SERVER EXIT: onExit handler called");
+    console.log(`🛑 SERVER EXIT: onExit handler called at ${timestamp}`);
+    const shutdownLogPath = path.join(__dirname, '..', '..', 'shutdown.log');
+    try {
+        fs.appendFileSync(shutdownLogPath, `[${timestamp}] SERVER EXIT: onExit handler called\n`);
+    } catch (e) {
+        // Ignore - server is exiting anyway
+    }
+});
+
+// Listen on the connection
+logger.info("🚀 SERVER: Starting to listen on connection");
+console.log("🚀 SERVER: Starting to listen on connection at " + new Date().toISOString());
 connection.listen();
 
 // Add a handler for getting performance metrics
