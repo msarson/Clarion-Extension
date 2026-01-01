@@ -134,9 +134,15 @@ export class HoverProvider {
             }
 
             // Check if this is a procedure call (e.g., "MyProcedure()")
+            // OR if this is inside a START() call (e.g., "START(ProcName, ...)")
             const afterWord = line.substring(wordRange.end.character).trimStart();
-            if (afterWord.startsWith('(')) {
-                logger.info(`Detected procedure call: ${word}()`);
+            const beforeWord = line.substring(0, wordRange.start.character);
+            
+            // Check if we're inside a START() call
+            const isInStartCall = beforeWord.match(/\bSTART\s*\(\s*$/i);
+            
+            if (afterWord.startsWith('(') || isInStartCall) {
+                logger.info(`Detected procedure ${isInStartCall ? 'reference in START()' : 'call'}: ${word}()`);
                 
                 // Get tokens for parameter counting
                 const tokens = this.tokenCache.getTokens(document);

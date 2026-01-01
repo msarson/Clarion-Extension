@@ -38,6 +38,7 @@ IncrementCounter PROCEDURE
   GlobalCounter += 1    ! TEST 1: F12 here should jump to main.clw line 67
   ModuleData = 99       ! Should work - same module
   GlobalHelper()        ! TEST 6: F12 should jump to main.clw line 87 (global procedure accessible here)
+  START(StartProc, 25000)   ! TEST 7: START() with procedure name - should recognize StartProc
   
 GetCounter PROCEDURE
 Counter LONG

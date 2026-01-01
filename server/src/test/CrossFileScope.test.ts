@@ -363,5 +363,39 @@ CODE
             
             assert.ok(result, 'Should find implementation via MODULE reference in INCLUDE file');
         });
+
+        test('Hover on StartProc inside START() call should work', async () => {
+            // Load real files
+            const utilsContent = fs.readFileSync(utilsPath, 'utf-8');
+            const utilsDoc = TextDocument.create(`file:///${utilsPath.replace(/\\/g, '/')}`, 'clarion', 1, utilsContent);
+            
+            // Pre-cache the document
+            tokenCache.getTokens(utilsDoc);
+            
+            // Find line with "START(StartProc," 
+            const lines = utilsContent.split('\n');
+            let startLine = -1;
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].includes('START') && lines[i].includes('StartProc')) {
+                    startLine = i;
+                    break;
+                }
+            }
+            
+            assert.ok(startLine >= 0, 'Should find START(StartProc,...) call in utils.clw');
+            
+            // Position cursor on "StartProc" inside START()
+            const position: Position = { line: startLine, character: lines[startLine].indexOf('StartProc') + 2 };
+            const result = await hoverProvider.provideHover(utilsDoc, position);
+            
+            // Note: This tests if hover recognizes procedure names inside START() calls
+            if (result) {
+                console.log('✅ Hover worked for START(StartProc)! Content:', result.contents.toString().substring(0, 100));
+            } else {
+                console.log('❌ Hover returned null - START() procedure name not recognized');
+            }
+            
+            assert.ok(result, 'Should provide hover for StartProc inside START() call');
+        });
     });
 });
