@@ -500,6 +500,13 @@ export class MapProcedureResolver {
                 return null;
             }
             
+            // Check if this is a DLL/LIB file (compiled binary)
+            const ext = path.extname(resolvedPath).toLowerCase();
+            if (ext === '.dll' || ext === '.lib') {
+                logger.info(`⚠️ MODULE file is a compiled binary (${ext}), cannot search for implementation: ${resolvedPath}`);
+                return null;
+            }
+            
             // Read and tokenize the MODULE file
             const content = fs.readFileSync(resolvedPath, 'utf8');
             const ClarionTokenizer = (await import('../ClarionTokenizer')).ClarionTokenizer;
