@@ -47,11 +47,12 @@ class Logger {
     }
 
     /**
-     * 📊 Log performance metrics - ALWAYS logs regardless of level setting
+     * 📊 Log performance metrics - only logs at DEBUG level to reduce console noise
      * Search for "PERF:" in debug console to see all performance metrics
      */
     perf(message: string, metrics?: Record<string, number | string>) {
-        if (!Logger.enabled) return;
+        // Only log performance metrics if logger is at DEBUG level
+        if (!this.shouldLog("debug")) return;
         
         const timestamp = this.getTimestamp();
         if (metrics) {
