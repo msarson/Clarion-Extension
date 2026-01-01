@@ -17,6 +17,7 @@ import { ControlService } from '../utils/ControlService';
 import { DataTypeService } from '../utils/DataTypeService';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { SolutionManager } from '../solution/solutionManager';
+import { HoverFormatter } from './hover/HoverFormatter';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -37,10 +38,12 @@ export class HoverProvider {
     private controlService = ControlService.getInstance();
     private dataTypeService = DataTypeService.getInstance();
     private scopeAnalyzer: ScopeAnalyzer;
+    private formatter: HoverFormatter;
 
     constructor() {
         const solutionManager = SolutionManager.getInstance();
         this.scopeAnalyzer = new ScopeAnalyzer(this.tokenCache, solutionManager);
+        this.formatter = new HoverFormatter(this.scopeAnalyzer);
     }
 
     /**
@@ -303,7 +306,7 @@ export class HoverProvider {
                 }
                 
                 if (mapDecl || procImpl) {
-                    return this.constructProcedureHover(word, mapDecl, procImpl, document, position);
+                    return this.formatter.formatProcedure(word, mapDecl, procImpl, document, position);
                 }
             }
 
@@ -374,6 +377,8 @@ export class HoverProvider {
             if (this.attributeService.isAttribute(word)) {
                 logger.info(`Found Clarion attribute: ${word}`);
                 
+                const attribute = this.attributeService.getAttribute(word);
+                
                 // Check if there's an opening paren after the word
                 const textAfterWord = document.getText({
                     start: { line: position.line, character: wordRange.end.character },
@@ -392,7 +397,7 @@ export class HoverProvider {
                     logger.info(`No parentheses found for attribute - assuming 0 parameters`);
                 }
                 
-                return this.constructAttributeHover(word, paramCount);
+                return this.formatter.formatAttribute(word, attribute, paramCount);
             }
 
             // Check if this word is a built-in function (but NOT a class method call)
@@ -407,6 +412,8 @@ export class HoverProvider {
                 // If there's a dot immediately before the word, it's a class method, not a built-in
                 if (!textBeforeWord.trimEnd().endsWith('.')) {
                     logger.info(`Found built-in function: ${word}`);
+                    
+                    const signatures = this.builtinService.getSignatures(word);
                     
                     // Check if there's an opening paren after the word
                     const textAfterWord = document.getText({
@@ -426,7 +433,7 @@ export class HoverProvider {
                         logger.info(`No parentheses found - assuming 0 parameters`);
                     }
                     
-                    return this.constructBuiltinFunctionHover(word, paramCount);
+                    return this.formatter.formatBuiltin(word, signatures, paramCount);
                 } else {
                     logger.info(`Word ${word} is preceded by dot - treating as class method, not built-in`);
                 }
@@ -454,7 +461,7 @@ export class HoverProvider {
                     // Pass the full line as implementation signature for type matching
                     const declInfo = this.overloadResolver.findMethodDeclaration(className, methodName, document, tokens, paramCount, line);
                     if (declInfo) {
-                        return this.constructMethodImplementationHover(methodName, className, declInfo);
+                        return this.formatter.formatMethodImplementation(methodName, className, declInfo);
                     }
                 }
             }
@@ -515,7 +522,7 @@ export class HoverProvider {
                                     }
                                 };
                                 
-                                return this.constructProcedureHover(procName, memberMapResult.location, implLocation, document, position);
+                                return this.formatter.formatProcedure(procName, memberMapResult.location, implLocation, document, position);
                             }
                         }
                     } else {
@@ -528,7 +535,7 @@ export class HoverProvider {
                             }
                         };
                         
-                        return this.constructProcedureHover(procName, mapLocation, implLocation, document, position);
+                        return this.formatter.formatProcedure(procName, mapLocation, implLocation, document, position);
                     }
                 }
             }
@@ -572,7 +579,7 @@ export class HoverProvider {
                             }
                         };
                         
-                        return this.constructProcedureHover(procName, mapDecl, implLocation, document, position);
+                        return this.formatter.formatProcedure(procName, mapDecl, implLocation, document, position);
                     } else {
                         logger.info(`Cursor NOT on procedure name (cursor at ${position.character}, name range ${procNameStart}-${procNameEnd})`);
                     }
@@ -788,7 +795,7 @@ export class HoverProvider {
                     const structureInfo = this.findLocalVariableInfo(word, tokens, currentScope, document, word);
                     if (structureInfo) {
                         logger.info(`✅ HOVER-RETURN: Found structure info for ${word}`);
-                        return this.constructVariableHover(word, structureInfo, currentScope, document);
+                        return this.formatter.formatVariable(word, structureInfo, currentScope, document);
                     } else {
                         logger.info(`❌ HOVER-MISS: Could not find structure info for ${word}`);
                     }
@@ -823,7 +830,7 @@ export class HoverProvider {
                         
                         const memberInfo = this.memberResolver.findClassMemberInfo(fieldName, document, position.line, tokens, paramCount);
                         if (memberInfo) {
-                            return this.constructClassMemberHover(fieldName, memberInfo);
+                            return this.formatter.formatClassMember(fieldName, memberInfo);
                         }
                     } else {
                         // variable.member - structure field access (e.g., MyGroup.MyVar)
@@ -840,7 +847,7 @@ export class HoverProvider {
                                 const variableInfo = this.findLocalVariableInfo(word, tokens, currentScope, document, fullReference);
                                 if (variableInfo) {
                                     logger.info(`✅ HOVER-RETURN: Found structure field info for ${fullReference}`);
-                                    return this.constructVariableHover(fullReference, variableInfo, currentScope, document);
+                                    return this.formatter.formatVariable(fullReference, variableInfo, currentScope, document);
                                 }
                             }
                         }
@@ -1037,7 +1044,7 @@ export class HoverProvider {
             const parameterInfo = this.findParameterInfo(searchWord, document, currentScope);
             if (parameterInfo) {
                 logger.info(`Found parameter info for ${searchWord}`);
-                return this.constructParameterHover(searchWord, parameterInfo, currentScope);
+                return this.formatter.formatParameter(searchWord, parameterInfo, currentScope);
             }
             logger.info(`${searchWord} is not a parameter`);
 
@@ -1046,7 +1053,7 @@ export class HoverProvider {
             const variableInfo = this.findLocalVariableInfo(searchWord, tokens, currentScope, document, word);
             if (variableInfo) {
                 logger.info(`✅ HOVER-RETURN: Found variable info for ${searchWord}: type=${variableInfo.type}, line=${variableInfo.line}`);
-                return this.constructVariableHover(word, variableInfo, currentScope, document);
+                return this.formatter.formatVariable(word, variableInfo, currentScope, document);
             }
             logger.info(`${searchWord} is not a local variable`);
             
@@ -1166,7 +1173,7 @@ export class HoverProvider {
                                 line
                             );
                             
-                            return this.constructProcedureHover(searchWord, mapDecl, procImpl, document, position);
+                            return this.formatter.formatProcedure(searchWord, mapDecl, procImpl, document, position);
                         }
                         
                         // Not a procedure - check for global variable
@@ -1641,348 +1648,52 @@ export class HoverProvider {
     }
 
     /**
-     * Constructs hover for a parameter
+     * Counts parameters in a function call
+     * Returns null if unable to parse
+     * Counts omitted parameters (e.g., AT(,,435,300) = 4 parameters)
      */
-    private constructParameterHover(name: string, info: { type: string; line: number }, scope: Token): Hover {
-        const markdown = [
-            `**Parameter:** \`${name}\``,
-            ``,
-            `**Type:** \`${info.type}\``,
-            ``,
-            `**Declared in:** ${scope.value} (line ${info.line + 1})`,
-            ``,
-            `*Press F12 to go to declaration*`
-        ].join('\n');
-
-        return {
-            contents: {
-                kind: 'markdown',
-                value: markdown
-            }
-        };
-    }
-
-    /**
-     * Constructs hover for a local variable
-     */
-    private constructVariableHover(name: string, info: { type: string; line: number }, scope: Token, document?: TextDocument): Hover {
-        const isRoutine = scope.subType === TokenType.Routine;
-        const variableType = isRoutine ? 'Routine Variable' : 'Local Variable';
-        
-        // CRITICAL FIX: Keep the full variable name including prefix (e.g., LOC:SMTPbccAddress)
-        // Don't strip the prefix - it's part of the variable's identity
-        const displayName = name;
-        
-        // Get scope information using ScopeAnalyzer
-        let scopeInfo = '';
-        let visibilityInfo = '';
-        if (document) {
-            const position: Position = { line: info.line, character: 0 };
-            const detailedScope = this.scopeAnalyzer.getTokenScope(document, position);
-            
-            if (detailedScope) {
-                // Format scope type with icon
-                const scopeIcon = detailedScope.type === 'routine' ? '🔹' : 
-                                  detailedScope.type === 'procedure' ? '🔸' : 
-                                  detailedScope.type === 'module' ? '📦' : '🌍';
-                
-                scopeInfo = `**Scope:** ${scopeIcon} ${detailedScope.type.charAt(0).toUpperCase() + detailedScope.type.slice(1)}`;
-                
-                // Add scope name if available
-                if (detailedScope.type === 'routine' && detailedScope.containingRoutine) {
-                    scopeInfo += ` (${detailedScope.containingRoutine.value})`;
-                } else if (detailedScope.type === 'procedure' && detailedScope.containingProcedure) {
-                    scopeInfo += ` (${detailedScope.containingProcedure.value})`;
-                }
-                
-                // Add visibility information
-                if (detailedScope.type === 'routine') {
-                    visibilityInfo = `**Visibility:** Only visible within this routine`;
-                } else if (detailedScope.type === 'procedure') {
-                    visibilityInfo = `**Visibility:** Visible throughout this procedure and its routines`;
-                } else if (detailedScope.type === 'module') {
-                    visibilityInfo = `**Visibility:** Visible only within this file (module-local)`;
-                } else {
-                    visibilityInfo = `**Visibility:** Visible everywhere (global)`;
-                }
-            }
-        }
-        
-        const markdown = [
-            `**${variableType}:** \`${displayName}\``,
-            ``,
-            `**Type:** \`${info.type}\``,
-            ``
-        ];
-        
-        // Add scope info if available
-        if (scopeInfo) {
-            markdown.push(scopeInfo);
-            markdown.push(``);
-        }
-        
-        // Add visibility info if available
-        if (visibilityInfo) {
-            markdown.push(visibilityInfo);
-            markdown.push(``);
-        }
-        
-        // Show file and line info similar to procedures
-        if (document) {
-            const fileName = path.basename(document.uri.replace('file:///', ''));
-            const lineNumber = info.line + 1; // Convert to 1-based
-            markdown.push(`**Declared in** \`${fileName}\` @ line ${lineNumber}`);
-        } else {
-            markdown.push(`**Declared at:** line ${info.line + 1}`);
-        }
-        markdown.push(``);
-        markdown.push(`*Press F12 to go to declaration*`);
-
-        return {
-            contents: {
-                kind: 'markdown',
-                value: markdown.join('\n')
-            }
-        };
-    }
-
-
-    
-    /**
-     * Constructs hover for a class member
-     */
-    private constructClassMemberHover(name: string, info: { type: string; className: string; line: number; file: string }): Hover {
-        // Determine if it's a property or method based on type
-        const isMethod = info.type.toUpperCase().includes('PROCEDURE') || info.type.toUpperCase().includes('FUNCTION');
-        const memberType = isMethod ? 'Method' : 'Property';
-        
-        const markdown = [
-            `**Class ${memberType}:** \`${name}\``,
-            ``
-        ];
-        
-        // Format type - if it's long, put it on its own line with code block for wrapping
-        if (info.type.length > 50) {
-            markdown.push(`**Type:**`);
-            markdown.push('```clarion');
-            markdown.push(info.type);
-            markdown.push('```');
-        } else {
-            markdown.push(`**Type:** \`${info.type}\``);
-        }
-        
-        markdown.push(``);
-        markdown.push(`**Class:** ${info.className}`);
-        
-        if (info.line >= 0) {
-            // Extract just the filename from the path
-            const fileName = info.file.split(/[\/\\]/).pop() || info.file;
-            markdown.push(``);
-            markdown.push(`**Declared in:** \`${fileName}\` at line **${info.line + 1}**`);
-            markdown.push(``);
-            
-            // Add navigation hints - F12 for definition, Ctrl+F12 for implementation (methods only)
-            if (isMethod) {
-                markdown.push(`*(F12 to definition | Ctrl+F12 to implementation)*`);
-            } else {
-                markdown.push(`*(F12 will navigate to the definition)*`);
-            }
-        } else {
-            markdown.push(``);
-            markdown.push(`**Declared in:** ${info.file}`);
-            markdown.push(``);
-            
-            if (isMethod) {
-                markdown.push(`*(F12 to definition | Ctrl+F12 to implementation)*`);
-            } else {
-                markdown.push(`*Press F12 to go to definition*`);
-            }
-        }
-        
-        return {
-            contents: {
-                kind: 'markdown',
-                value: markdown.join('\n')
-            }
-        };
-    }
-
-    /**
-     * Constructs hover for method implementation showing declaration
-     */
-    private constructMethodImplementationHover(methodName: string, className: string, declInfo: { signature: string; file: string; line: number }): Hover {
-        const fileName = declInfo.file.split(/[\/\\]/).pop() || declInfo.file;
-        
-        const markdown = [
-            `**Method Implementation:** \`${className}.${methodName}\``,
-            ``,
-            `**Declaration:**`,
-            '```clarion',
-            declInfo.signature,
-            '```',
-            ``,
-            `**Declared in:** \`${fileName}\` at line **${declInfo.line + 1}**`,
-            ``,
-            `*(Press F12 to go to declaration)*`
-        ];
-
-        return {
-            contents: {
-                kind: 'markdown',
-                value: markdown.join('\n')
-            }
-        };
-    }
-        
-    /**
-     * Check if a line is inside a MAP block
-     */
-    /**
-     * Find implementation of a MAP procedure
-     */
-    private findProcedureImplementation(document: TextDocument, procName: string): { line: number, signature: string, preview: string } | null {
-        logger.info(`🔍 findProcedureImplementation searching for: "${procName}"`);
-        const text = document.getText();
-        const lines = text.split(/\r?\n/);
-        const tokens = this.tokenCache.getTokens(document);
-        
-        let inMap = false;
-        let checkedLines = 0;
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
-            
-            // Track MAP blocks to skip declarations
-            if (/^\s*MAP\s*$/i.test(trimmed)) {
-                inMap = true;
-                logger.info(`Entering MAP block at line ${i}`);
-                continue;
-            }
-            if (inMap && /^\s*END\s*$/i.test(trimmed)) {
-                inMap = false;
-                logger.info(`Exiting MAP block at line ${i}`);
-                continue;
-            }
-            
-            // Skip lines inside MAP blocks (those are declarations, not implementations)
-            if (inMap) {
-                continue;
-            }
-            
-            // Match: ProcName PROCEDURE(...) at start of line (implementation)
-            const implMatch = line.match(/^(\w+)\s+PROCEDURE\s*\(/i);
-            if (implMatch) {
-                checkedLines++;
-                if (checkedLines <= 5) {
-                    logger.info(`Line ${i}: Found PROCEDURE "${implMatch[1]}" (looking for "${procName}")`);
-                }
-            }
-            if (implMatch && implMatch[1].toLowerCase() === procName.toLowerCase()) {
-                logger.info(`✅ Found matching implementation at line ${i}: "${implMatch[1]}"`);
-                return this.findProcedureImplementationPreview(document, procName, i);
-            }
-        }
-        
-        logger.info(`❌ No implementation found for "${procName}"`);
-        return null;
-    }
-
-    /**
-     * Get preview for a procedure implementation at a specific line
-     * Shows either the full implementation if short, or first N lines if long
-     */
-    private findProcedureImplementationPreview(document: TextDocument, procName: string, lineNumber: number): { line: number, signature: string, preview: string } | null {
-        const text = document.getText();
-        const lines = text.split(/\r?\n/);
-        const tokens = this.tokenCache.getTokens(document);
-        
-        if (lineNumber >= lines.length) {
+    private countParametersInCall(line: string, functionName: string): number | null {
+        // Find the function call in the line
+        const funcPattern = new RegExp(`\\b${functionName}\\s*\\(`, 'i');
+        const match = line.match(funcPattern);
+        if (!match || match.index === undefined) {
             return null;
         }
-        
-        const line = lines[lineNumber];
-        
-        // Find the procedure token to get finishesAt
-        const procToken = tokens.find(t => 
-            (t.subType === TokenType.Procedure || t.subType === TokenType.GlobalProcedure || 
-             t.subType === TokenType.MethodImplementation) &&
-            t.line === lineNumber &&
-            t.value.toLowerCase() === procName.toLowerCase()
-        );
-        
-        const previewLines: string[] = [line.trim()];
-        const maxPreviewLines = 15; // Show up to 15 lines for long procedures
-        
-        // Determine the actual end of the procedure
-        let procedureEndLine: number;
-        if (procToken && procToken.finishesAt !== undefined) {
-            // Use token's finishesAt to know exactly where procedure ends
-            procedureEndLine = procToken.finishesAt;
-            logger.info(`Procedure ${procName} ends at line ${procedureEndLine} (finishesAt)`);
-        } else {
-            // Fallback: estimate by searching for next procedure or end of file
-            procedureEndLine = this.findProcedureEnd(lines, lineNumber);
-            logger.info(`Procedure ${procName} estimated end at line ${procedureEndLine} (heuristic)`);
-        }
-        
-        // Calculate total lines in procedure (excluding signature)
-        const totalProcedureLines = procedureEndLine - lineNumber;
-        
-        // Decide whether to show full implementation or truncated preview
-        let showFullImplementation = false;
-        let linesToShow = maxPreviewLines;
-        
-        if (totalProcedureLines <= maxPreviewLines) {
-            // Short procedure - show everything
-            showFullImplementation = true;
-            linesToShow = totalProcedureLines;
-            logger.info(`Short procedure (${totalProcedureLines} lines) - showing full implementation`);
-        } else {
-            // Long procedure - show first maxPreviewLines
-            logger.info(`Long procedure (${totalProcedureLines} lines) - showing first ${maxPreviewLines} lines`);
-        }
-        
-        // Collect the preview lines
-        let linesAdded = 0;
-        for (let j = lineNumber + 1; j <= procedureEndLine && j < lines.length && linesAdded < linesToShow; j++) {
-            const previewLine = lines[j];
-            previewLines.push(previewLine);
-            linesAdded++;
-        }
-        
-        // Add ellipsis if we truncated
-        if (!showFullImplementation && linesAdded === maxPreviewLines && totalProcedureLines > maxPreviewLines) {
-            previewLines.push('  ...');
-            previewLines.push(`  ! ${totalProcedureLines - maxPreviewLines} more lines`);
-        }
-        
-        return {
-            line: lineNumber,
-            signature: line.trim(),
-            preview: previewLines.join('\n')
-        };
-    }
-    
-    /**
-     * Estimate where a procedure ends by looking for the next procedure or END
-     */
-    private findProcedureEnd(lines: string[], startLine: number): number {
-        for (let i = startLine + 1; i < lines.length; i++) {
-            const trimmed = lines[i].trim();
-            
-            // Check for next procedure/function at column 0 or minimal indent
-            if (/^(\w+\.)?(\w+)\s+(PROCEDURE|FUNCTION)/i.test(lines[i])) {
-                return i - 1;
-            }
-            
-            // Check for END at column 0 or standalone END
-            if (/^\s*END\s*$/i.test(trimmed)) {
-                return i;
+
+        const startPos = match.index + match[0].length;
+        let depth = 1;
+        let paramCount = 1; // Start at 1 - if there's any content, we have at least 1 parameter
+        let isEmpty = true; // Track if we've seen any content at all
+
+        for (let i = startPos; i < line.length; i++) {
+            const char = line[i];
+
+            if (char === '(') {
+                depth++;
+                isEmpty = false;
+            } else if (char === ')') {
+                depth--;
+                if (depth === 0) {
+                    // Found closing paren
+                    // If completely empty parentheses, return 0
+                    if (isEmpty) {
+                        return 0;
+                    }
+                    return paramCount;
+                }
+                isEmpty = false;
+            } else if (char === ',' && depth === 1) {
+                // Each comma at depth 1 means another parameter
+                paramCount++;
+            } else if (char.trim() !== '') {
+                // Any non-whitespace character means we have content
+                isEmpty = false;
             }
         }
-        
-        // Default: 50 lines or end of file
-        return Math.min(startLine + 50, lines.length - 1);
+
+        // Unclosed parentheses - return what we have so far
+        // If we saw any content, return the count
+        return isEmpty ? null : paramCount;
     }
 
     /**
@@ -2235,220 +1946,6 @@ export class HoverProvider {
             logger.error(`Error reading implementation preview: ${error instanceof Error ? error.message : String(error)}`);
             return null;
         }
-    }
-
-    /**
-     * Constructs hover information for built-in Clarion functions
-     */
-    private constructBuiltinFunctionHover(functionName: string, paramCount: number | null): Hover {
-        const signatures = this.builtinService.getSignatures(functionName);
-        
-        if (signatures.length === 0) {
-            return {
-                contents: {
-                    kind: 'markdown',
-                    value: `**Built-in Function**\n\n\`${functionName}\``
-                }
-            };
-        }
-
-        // If we have a parameter count, filter signatures to show only matching ones
-        let matchingSignatures = signatures;
-        if (paramCount !== null) {
-            matchingSignatures = signatures.filter(sig => 
-                sig.parameters && sig.parameters.length === paramCount
-            );
-            
-            // If no exact match, show all signatures
-            if (matchingSignatures.length === 0) {
-                matchingSignatures = signatures;
-            }
-        }
-
-        // Format matching signatures
-        // Determine if this is a pure keyword (no parameters)
-        const isKeyword = matchingSignatures.every(sig => 
-            !sig.parameters || sig.parameters.length === 0
-        );
-        
-        let content = isKeyword 
-            ? `**Keyword: ${functionName}**\n\n`
-            : `**Built-in Function: ${functionName}**\n\n`;
-        
-        if (paramCount !== null && matchingSignatures.length < signatures.length) {
-            content += `_Showing signature(s) matching ${paramCount} parameter(s)_\n\n`;
-        }
-        
-        matchingSignatures.forEach((sig, index) => {
-            if (matchingSignatures.length > 1) {
-                content += `**Overload ${index + 1}:**\n\n`;
-            }
-            
-            // Only show syntax for functions with parameters
-            if (sig.parameters && sig.parameters.length > 0) {
-                content += `\`\`\`clarion\n${sig.label}\n\`\`\`\n\n`;
-            }
-            
-            if (sig.documentation) {
-                const docValue = typeof sig.documentation === 'string' 
-                    ? sig.documentation 
-                    : sig.documentation.value;
-                content += `${docValue}\n\n`;
-            }
-            
-            if (sig.parameters && sig.parameters.length > 0) {
-                content += `**Parameters:**\n\n`;
-                sig.parameters.forEach(param => {
-                    content += `- \`${param.label}\`\n`;
-                });
-                content += `\n`;
-            }
-            
-            if (index < matchingSignatures.length - 1) {
-                content += `---\n\n`;
-            }
-        });
-
-        return {
-            contents: {
-                kind: 'markdown',
-                value: content.trim()
-            }
-        };
-    }
-
-    /**
-     * Constructs hover information for a Clarion attribute with parameter count matching
-     */
-    private constructAttributeHover(attributeName: string, paramCount: number | null): Hover {
-        const attribute = this.attributeService.getAttribute(attributeName);
-        
-        if (!attribute) {
-            return {
-                contents: {
-                    kind: 'markdown',
-                    value: `**Attribute**\n\n\`${attributeName}\``
-                }
-            };
-        }
-
-        // If we have a parameter count, filter signatures to show only matching ones
-        let matchingSignatures = attribute.signatures;
-        if (paramCount !== null) {
-            matchingSignatures = attribute.signatures.filter(sig => 
-                sig.params.length === paramCount
-            );
-            
-            // If no exact match, show all signatures
-            if (matchingSignatures.length === 0) {
-                matchingSignatures = attribute.signatures;
-            }
-        }
-
-        // Format matching signatures
-        let content = `**Attribute: ${attribute.name}**\n\n`;
-        
-        content += `${attribute.description}\n\n`;
-        
-        if (paramCount !== null && matchingSignatures.length < attribute.signatures.length) {
-            content += `_Showing signature(s) matching ${paramCount} parameter(s)_\n\n`;
-        }
-        
-        content += `**Signatures:**\n\n`;
-        
-        matchingSignatures.forEach((sig, index) => {
-            if (matchingSignatures.length > 1) {
-                content += `**Overload ${index + 1}:**\n\n`;
-            }
-            
-            if (sig.params.length === 0) {
-                content += `\`\`\`clarion\n${attribute.name}\n\`\`\`\n\n`;
-            } else {
-                // Format parameters with optional brackets
-                const params = sig.params.map(p => {
-                    if (typeof p === 'string') {
-                        return p;
-                    }
-                    return p.optional ? `[${p.name}]` : p.name;
-                }).join(', ');
-                content += `\`\`\`clarion\n${attribute.name}(${params})\n\`\`\`\n\n`;
-            }
-            
-            content += `${sig.description}\n\n`;
-            
-            if (sig.params.length > 0) {
-                content += `**Parameters:**\n\n`;
-                sig.params.forEach(param => {
-                    const paramName = typeof param === 'string' ? param : param.name;
-                    const optionalTag = (typeof param === 'object' && param.optional) ? ' _(optional)_' : '';
-                    content += `- \`${paramName}\`${optionalTag}\n`;
-                });
-                content += `\n`;
-            }
-            
-            if (index < matchingSignatures.length - 1) {
-                content += `---\n\n`;
-            }
-        });
-
-        content += `**Applicable to:** ${attribute.applicableTo.join(', ')}\n\n`;
-        content += `**Property Equate:** ${attribute.propertyEquate}`;
-
-        return {
-            contents: {
-                kind: 'markdown',
-                value: content.trim()
-            }
-        };
-    }
-
-    /**
-     * Counts parameters in a function call
-     * Returns null if unable to parse
-     * Counts omitted parameters (e.g., AT(,,435,300) = 4 parameters)
-     */
-    private countParametersInCall(line: string, functionName: string): number | null {
-        // Find the function call in the line
-        const funcPattern = new RegExp(`\\b${functionName}\\s*\\(`, 'i');
-        const match = line.match(funcPattern);
-        if (!match || match.index === undefined) {
-            return null;
-        }
-
-        const startPos = match.index + match[0].length;
-        let depth = 1;
-        let paramCount = 1; // Start at 1 - if there's any content, we have at least 1 parameter
-        let isEmpty = true; // Track if we've seen any content at all
-
-        for (let i = startPos; i < line.length; i++) {
-            const char = line[i];
-
-            if (char === '(') {
-                depth++;
-                isEmpty = false;
-            } else if (char === ')') {
-                depth--;
-                if (depth === 0) {
-                    // Found closing paren
-                    // If completely empty parentheses, return 0
-                    if (isEmpty) {
-                        return 0;
-                    }
-                    return paramCount;
-                }
-                isEmpty = false;
-            } else if (char === ',' && depth === 1) {
-                // Each comma at depth 1 means another parameter
-                paramCount++;
-            } else if (char.trim() !== '') {
-                // Any non-whitespace character means we have content
-                isEmpty = false;
-            }
-        }
-
-        // Unclosed parentheses - return what we have so far
-        // If we saw any content, return the count
-        return isEmpty ? null : paramCount;
     }
 
     /**
