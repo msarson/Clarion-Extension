@@ -503,11 +503,47 @@ export class MapProcedureResolver {
             // Check if this is a DLL/LIB file (compiled binary)
             const ext = path.extname(resolvedPath).toLowerCase();
             if (ext === '.dll' || ext === '.lib') {
-                logger.info(`⚠️ MODULE file is a compiled binary (${ext}), cannot search for implementation: ${resolvedPath}`);
-                return null;
+                logger.info(`⚠️ MODULE file is a compiled binary (${ext}), attempting to find source in solution projects`);
+                
+                // Try to find the source file in other projects
+                // Extract base name without extension (e.g., "IBSCOMMON" from "IBSCOMMON.DLL")
+                const baseName = path.basename(moduleFile, ext);
+                
+                // Search for .CLW file with same base name in solution projects
+                if (solutionManager && solutionManager.solution) {
+                    for (const project of solutionManager.solution.projects) {
+                        // Get all source files from project
+                        const sourceFiles = project.sourceFiles || [];
+                        
+                        // Look for .clw file matching the base name
+                        const sourceFile = sourceFiles.find(sf => {
+                            if (!sf || !sf.name) return false;
+                            const sfBase = path.basename(sf.name, path.extname(sf.name)).toLowerCase();
+                            return sfBase === baseName.toLowerCase() && sf.name.toLowerCase().endsWith('.clw');
+                        });
+                        
+                        if (sourceFile) {
+                            // Build full path from project path + relative path
+                            const fullPath = path.join(project.path, sourceFile.relativePath);
+                            
+                            // Check if file exists
+                            if (fs.existsSync(fullPath)) {
+                                logger.info(`✅ Found source file for DLL in project ${project.name}: ${fullPath}`);
+                                resolvedPath = fullPath;
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                // If still pointing to DLL, return null (cannot search implementation in DLL)
+                if (ext === path.extname(resolvedPath).toLowerCase()) {
+                    logger.info(`❌ No source file found for ${baseName}, cannot search implementation in compiled binary`);
+                    return null;
+                }
             }
             
-            // Read and tokenize the MODULE file
+            // Read and tokenize the MODULE file (now guaranteed to be source code)
             const content = fs.readFileSync(resolvedPath, 'utf8');
             const ClarionTokenizer = (await import('../ClarionTokenizer')).ClarionTokenizer;
             const tokenizer = new ClarionTokenizer(content);
