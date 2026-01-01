@@ -111,14 +111,20 @@ export class DefinitionProvider {
             }
 
             // Check if this is a procedure call in CODE (e.g., "MyProcedure()" or "ProcessOrder(param)")
+            // OR if this is inside a START() call (e.g., "START(ProcName, ...)")
             // Navigate to the MAP declaration or PROCEDURE implementation
             // Check after the word range, not just position.character
             const afterWord = line.substring(wordRange.end.character).trimStart();
-            const hasParenthesesAfter = afterWord.startsWith('(');
-            logger.info(`🔍 Checking for procedure call: word="${word}", hasParenthesesAfter=${hasParenthesesAfter}, afterWord="${afterWord.substring(0, 10)}", line="${line.trim()}"`);
+            const beforeWord = line.substring(0, wordRange.start.character);
             
-            if (hasParenthesesAfter) {
-                logger.info(`🔍 Detected potential procedure call: ${word}()`);
+            // Check if we're inside a START() call
+            const isInStartCall = beforeWord.match(/\bSTART\s*\(\s*$/i);
+            
+            const hasParenthesesAfter = afterWord.startsWith('(');
+            logger.info(`🔍 Checking for procedure call: word="${word}", hasParenthesesAfter=${hasParenthesesAfter}, isInStartCall=${!!isInStartCall}, afterWord="${afterWord.substring(0, 10)}", line="${line.trim()}"`);
+            
+            if (hasParenthesesAfter || isInStartCall) {
+                logger.info(`🔍 Detected potential procedure ${isInStartCall ? 'reference in START()' : 'call'}: ${word}()`);
                 
                 // Count parameters for overload resolution
                 const paramCount = this.memberResolver.countParametersInCall(line, word);

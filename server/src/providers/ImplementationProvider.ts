@@ -52,10 +52,16 @@ export class ImplementationProvider {
         const word = wordRange ? document.getText(wordRange) : '';
 
         // 1. Check if this is a procedure call (e.g., "MyProcedure()")
+        //    OR if this is inside a START() call (e.g., "START(ProcName, ...)")
         if (word && wordRange) {
             const afterWord = line.substring(wordRange.end.character).trimStart();
-            if (afterWord.startsWith('(')) {
-                logger.info(`Detected procedure call: ${word}()`);
+            const beforeWord = line.substring(0, wordRange.start.character);
+            
+            // Check if we're inside a START() call
+            const isInStartCall = beforeWord.match(/\bSTART\s*\(\s*$/i);
+            
+            if (afterWord.startsWith('(') || isInStartCall) {
+                logger.info(`Detected procedure ${isInStartCall ? 'reference in START()' : 'call'}: ${word}()`);
                 
                 // Find the MAP declaration first
                 const mapDecl = this.mapResolver.findMapDeclaration(word, tokens, document, line);

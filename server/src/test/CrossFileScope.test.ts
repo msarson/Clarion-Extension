@@ -397,5 +397,75 @@ CODE
             
             assert.ok(result, 'Should provide hover for StartProc inside START() call');
         });
+
+        test('F12 on StartProc inside START() call should go to definition', async () => {
+            // Load real files
+            const utilsContent = fs.readFileSync(utilsPath, 'utf-8');
+            const utilsDoc = TextDocument.create(`file:///${utilsPath.replace(/\\/g, '/')}`, 'clarion', 1, utilsContent);
+            
+            // Pre-cache the document
+            tokenCache.getTokens(utilsDoc);
+            
+            // Find line with "START(StartProc," 
+            const lines = utilsContent.split('\n');
+            let startLine = -1;
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].includes('START') && lines[i].includes('StartProc')) {
+                    startLine = i;
+                    break;
+                }
+            }
+            
+            assert.ok(startLine >= 0, 'Should find START(StartProc,...) call in utils.clw');
+            
+            // Position cursor on "StartProc" inside START()
+            const position: Position = { line: startLine, character: lines[startLine].indexOf('StartProc') + 2 };
+            const result = await definitionProvider.provideDefinition(utilsDoc, position);
+            
+            if (result) {
+                const locations = Array.isArray(result) ? result : [result];
+                console.log('✅ F12 worked for START(StartProc)! Found definition at:', locations[0].uri);
+                assert.ok(locations[0].uri.toUpperCase().includes('STARTPROC.INC'), 'Should find MAP declaration in startproc.inc');
+            } else {
+                console.log('❌ F12 returned null - START() procedure name not recognized for go-to-definition');
+            }
+            
+            assert.ok(result, 'Should provide definition for StartProc inside START() call');
+        });
+
+        test('Ctrl+F12 on StartProc inside START() call should go to implementation', async () => {
+            // Load real files
+            const utilsContent = fs.readFileSync(utilsPath, 'utf-8');
+            const utilsDoc = TextDocument.create(`file:///${utilsPath.replace(/\\/g, '/')}`, 'clarion', 1, utilsContent);
+            
+            // Pre-cache the document
+            tokenCache.getTokens(utilsDoc);
+            
+            // Find line with "START(StartProc," 
+            const lines = utilsContent.split('\n');
+            let startLine = -1;
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].includes('START') && lines[i].includes('StartProc')) {
+                    startLine = i;
+                    break;
+                }
+            }
+            
+            assert.ok(startLine >= 0, 'Should find START(StartProc,...) call in utils.clw');
+            
+            // Position cursor on "StartProc" inside START()
+            const position: Position = { line: startLine, character: lines[startLine].indexOf('StartProc') + 2 };
+            const result = await implementationProvider.provideImplementation(utilsDoc, position);
+            
+            if (result) {
+                const locations = Array.isArray(result) ? result : [result];
+                console.log('✅ Ctrl+F12 worked for START(StartProc)! Found implementation at:', locations[0].uri);
+                assert.ok(locations[0].uri.toUpperCase().includes('STARTPROC.CLW'), 'Should find implementation in StartProc.clw');
+            } else {
+                console.log('❌ Ctrl+F12 returned null - START() procedure name not recognized for go-to-implementation');
+            }
+            
+            assert.ok(result, 'Should provide implementation for StartProc inside START() call');
+        });
     });
 });
