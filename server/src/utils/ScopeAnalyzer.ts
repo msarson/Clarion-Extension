@@ -522,10 +522,14 @@ export class ScopeAnalyzer {
         logger.info(`      📂 Source file: ${sourceFilePath}`);
         logger.info(`      📂 Source dir: ${sourceDir}`);
         
+        // Get fresh solution manager instance at runtime (not constructor time)
+        // This ensures we have the latest loaded solution
+        const solutionManager = this.solutionManager || SolutionManager.getInstance();
+        
         // Initialize redirection parser with project path if available
-        if (this.solutionManager && this.solutionManager.solution) {
+        if (solutionManager && solutionManager.solution) {
             // Try each project's redirection parser (like other resolvers do)
-            for (const project of this.solutionManager.solution.projects) {
+            for (const project of solutionManager.solution.projects) {
                 logger.info(`      🏗️ Trying project: ${project.name}`);
                 const redirectionParser = project.getRedirectionParser();
                 const resolved = redirectionParser.findFile(filename, sourceFilePath);
@@ -572,10 +576,14 @@ export class ScopeAnalyzer {
         logger.info(`      📂 Source file: ${sourceFilePath}`);
         logger.info(`      📂 Source dir: ${sourceDir}`);
         
+        // Get fresh solution manager instance at runtime (not constructor time)
+        // This ensures we have the latest loaded solution
+        const solutionManager = this.solutionManager || SolutionManager.getInstance();
+        
         // Initialize redirection parser with project path if available
-        if (this.solutionManager && this.solutionManager.solution) {
+        if (solutionManager && solutionManager.solution) {
             // Try each project's redirection parser (like other resolvers do)
-            for (const project of this.solutionManager.solution.projects) {
+            for (const project of solutionManager.solution.projects) {
                 logger.info(`      🏗️ Trying project: ${project.name}`);
                 const redirectionParser = project.getRedirectionParser();
                 const resolved = redirectionParser.findFile(filename, sourceFilePath);
