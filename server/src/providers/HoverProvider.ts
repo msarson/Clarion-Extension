@@ -20,6 +20,7 @@ import { SolutionManager } from '../solution/solutionManager';
 import { HoverFormatter } from './hover/HoverFormatter';
 import { ContextualHoverHandler } from './hover/ContextualHoverHandler';
 import { SymbolHoverResolver } from './hover/SymbolHoverResolver';
+import { VariableHoverResolver } from './hover/VariableHoverResolver';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -43,6 +44,7 @@ export class HoverProvider {
     private formatter: HoverFormatter;
     private contextHandler: ContextualHoverHandler;
     private symbolResolver: SymbolHoverResolver;
+    private variableResolver: VariableHoverResolver;
 
     constructor() {
         const solutionManager = SolutionManager.getInstance();
@@ -50,6 +52,7 @@ export class HoverProvider {
         this.formatter = new HoverFormatter(this.scopeAnalyzer);
         this.contextHandler = new ContextualHoverHandler(this.builtinService, this.attributeService);
         this.symbolResolver = new SymbolHoverResolver(this.dataTypeService, this.controlService);
+        this.variableResolver = new VariableHoverResolver(this.formatter, this.scopeAnalyzer, this.tokenCache);
     }
 
     /**
@@ -834,20 +837,14 @@ export class HoverProvider {
 
             // Check if this is a parameter
             logger.info(`Checking if ${searchWord} is a parameter...`);
-            const parameterInfo = this.findParameterInfo(searchWord, document, currentScope);
-            if (parameterInfo) {
-                logger.info(`Found parameter info for ${searchWord}`);
-                return this.formatter.formatParameter(searchWord, parameterInfo, currentScope);
-            }
+            const parameterHover = this.variableResolver.findParameterHover(searchWord, document, currentScope);
+            if (parameterHover) return parameterHover;
             logger.info(`${searchWord} is not a parameter`);
 
             // Check if this is a local variable
             logger.info(`Checking if ${searchWord} is a local variable...`);
-            const variableInfo = this.findLocalVariableInfo(searchWord, tokens, currentScope, document, word);
-            if (variableInfo) {
-                logger.info(`✅ HOVER-RETURN: Found variable info for ${searchWord}: type=${variableInfo.type}, line=${variableInfo.line}`);
-                return this.formatter.formatVariable(word, variableInfo, currentScope, document);
-            }
+            const variableHover = this.variableResolver.findLocalVariableHover(searchWord, tokens, currentScope, document, word);
+            if (variableHover) return variableHover;
             logger.info(`${searchWord} is not a local variable`);
             
             // 🔗 Check for module-local variable in current file (Label at column 0, before first PROCEDURE)
