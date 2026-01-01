@@ -523,37 +523,35 @@ export class ScopeAnalyzer {
         logger.info(`      📂 Source dir: ${sourceDir}`);
         
         // Initialize redirection parser with project path if available
-        if (this.solutionManager?.solution?.projects?.length) {
-            const project = this.solutionManager.solution.projects[0];
-            logger.info(`      🏗️ Parsing redirection file for project: ${project.path}`);
-            this.redirectionParser.parseRedFile(project.path);
+        if (this.solutionManager && this.solutionManager.solution) {
+            // Try each project's redirection parser (like other resolvers do)
+            for (const project of this.solutionManager.solution.projects) {
+                logger.info(`      🏗️ Trying project: ${project.name}`);
+                const redirectionParser = project.getRedirectionParser();
+                const resolved = redirectionParser.findFile(filename, sourceFilePath);
+                if (resolved && resolved.path) {
+                    logger.info(`      ✅ Resolved via project redirection: ${resolved.path}`);
+                    const tokens = this.loadTokensFromFile(resolved.path);
+                    return tokens ? { tokens, resolvedPath: resolved.path } : null;
+                }
+            }
+            logger.info(`      ⚠️ Could not resolve via any project's redirection parser`);
         } else {
             logger.info(`      ⚠️ No solution manager/projects available`);
         }
         
-        // Resolve the include file path
-        const resolvedFile = this.redirectionParser.findFile(filename, sourceFilePath);
+        // Try relative to source file directory as fallback
+        const fallbackPath = path.join(sourceDir, filename);
+        logger.info(`      🔄 Trying fallback path: ${fallbackPath}`);
         
-        if (!resolvedFile || !resolvedFile.path) {
-            logger.info(`      ❌ Redirection parser could not resolve "${filename}"`);
-            
-            // Try relative to source file directory as fallback
-            const fallbackPath = path.join(sourceDir, filename);
-            logger.info(`      🔄 Trying fallback path: ${fallbackPath}`);
-            
-            if (fs.existsSync(fallbackPath)) {
-                logger.info(`      ✅ Found file at fallback path`);
-                const tokens = this.loadTokensFromFile(fallbackPath);
-                return tokens ? { tokens, resolvedPath: fallbackPath } : null;
-            }
-            
-            logger.info(`      ❌ File not found at fallback path either`);
-            return null;
+        if (fs.existsSync(fallbackPath)) {
+            logger.info(`      ✅ Found file at fallback path`);
+            const tokens = this.loadTokensFromFile(fallbackPath);
+            return tokens ? { tokens, resolvedPath: fallbackPath } : null;
         }
         
-        logger.info(`      ✅ Resolved file path: ${resolvedFile.path}`);
-        const tokens = this.loadTokensFromFile(resolvedFile.path);
-        return tokens ? { tokens, resolvedPath: resolvedFile.path } : null;
+        logger.info(`      ❌ File not found at fallback path either`);
+        return null;
     }
 
     /**
@@ -575,35 +573,33 @@ export class ScopeAnalyzer {
         logger.info(`      📂 Source dir: ${sourceDir}`);
         
         // Initialize redirection parser with project path if available
-        if (this.solutionManager?.solution?.projects?.length) {
-            const project = this.solutionManager.solution.projects[0];
-            logger.info(`      🏗️ Parsing redirection file for project: ${project.path}`);
-            this.redirectionParser.parseRedFile(project.path);
+        if (this.solutionManager && this.solutionManager.solution) {
+            // Try each project's redirection parser (like other resolvers do)
+            for (const project of this.solutionManager.solution.projects) {
+                logger.info(`      🏗️ Trying project: ${project.name}`);
+                const redirectionParser = project.getRedirectionParser();
+                const resolved = redirectionParser.findFile(filename, sourceFilePath);
+                if (resolved && resolved.path) {
+                    logger.info(`      ✅ Resolved via project redirection: ${resolved.path}`);
+                    return this.loadTokensFromFile(resolved.path);
+                }
+            }
+            logger.info(`      ⚠️ Could not resolve via any project's redirection parser`);
         } else {
             logger.info(`      ⚠️ No solution manager/projects available`);
         }
         
-        // Resolve the include file path
-        const resolvedFile = this.redirectionParser.findFile(filename, sourceFilePath);
+        // Try relative to source file directory as fallback
+        const fallbackPath = path.join(sourceDir, filename);
+        logger.info(`      🔄 Trying fallback path: ${fallbackPath}`);
         
-        if (!resolvedFile || !resolvedFile.path) {
-            logger.info(`      ❌ Redirection parser could not resolve "${filename}"`);
-            
-            // Try relative to source file directory as fallback
-            const fallbackPath = path.join(sourceDir, filename);
-            logger.info(`      🔄 Trying fallback path: ${fallbackPath}`);
-            
-            if (fs.existsSync(fallbackPath)) {
-                logger.info(`      ✅ Found file at fallback path`);
-                return this.loadTokensFromFile(fallbackPath);
-            }
-            
-            logger.info(`      ❌ File not found at fallback path either`);
-            return null;
+        if (fs.existsSync(fallbackPath)) {
+            logger.info(`      ✅ Found file at fallback path`);
+            return this.loadTokensFromFile(fallbackPath);
         }
         
-        logger.info(`      ✅ Resolved file path: ${resolvedFile.path}`);
-        return this.loadTokensFromFile(resolvedFile.path);
+        logger.info(`      ❌ File not found at fallback path either`);
+        return null;
     }
 
     /**
