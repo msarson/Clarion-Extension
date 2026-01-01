@@ -16,6 +16,7 @@ import { SymbolDefinitionResolver } from '../utils/SymbolDefinitionResolver';
 import { FileDefinitionResolver } from '../utils/FileDefinitionResolver';
 import { CrossFileResolver } from '../utils/CrossFileResolver';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
+import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
 logger.setLevel("error"); // Phase 4 complete - debug logging disabled
@@ -113,18 +114,12 @@ export class DefinitionProvider {
             // Check if this is a procedure call in CODE (e.g., "MyProcedure()" or "ProcessOrder(param)")
             // OR if this is inside a START() call (e.g., "START(ProcName, ...)")
             // Navigate to the MAP declaration or PROCEDURE implementation
-            // Check after the word range, not just position.character
-            const afterWord = line.substring(wordRange.end.character).trimStart();
-            const beforeWord = line.substring(0, wordRange.start.character);
+            const detection = ProcedureCallDetector.isProcedureCallOrReference(document, position, wordRange);
             
-            // Check if we're inside a START() call
-            const isInStartCall = beforeWord.match(/\bSTART\s*\(\s*$/i);
+            logger.info(`🔍 Checking for procedure call: word="${word}", isProcedure=${detection.isProcedure}, isStartCall=${detection.isStartCall}, line="${line.trim()}"`);
             
-            const hasParenthesesAfter = afterWord.startsWith('(');
-            logger.info(`🔍 Checking for procedure call: word="${word}", hasParenthesesAfter=${hasParenthesesAfter}, isInStartCall=${!!isInStartCall}, afterWord="${afterWord.substring(0, 10)}", line="${line.trim()}"`);
-            
-            if (hasParenthesesAfter || isInStartCall) {
-                logger.info(`🔍 Detected potential procedure ${isInStartCall ? 'reference in START()' : 'call'}: ${word}()`);
+            if (detection.isProcedure) {
+                logger.info(`🔍 Detected potential procedure ${ProcedureCallDetector.getDetectionMessage(word, detection.isStartCall)}`);
                 
                 // Count parameters for overload resolution
                 const paramCount = this.memberResolver.countParametersInCall(line, word);

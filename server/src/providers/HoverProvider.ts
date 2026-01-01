@@ -18,6 +18,7 @@ import { DataTypeService } from '../utils/DataTypeService';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { SolutionManager } from '../solution/solutionManager';
 import { HoverFormatter } from './hover/HoverFormatter';
+import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { ContextualHoverHandler } from './hover/ContextualHoverHandler';
 import { SymbolHoverResolver } from './hover/SymbolHoverResolver';
 import { VariableHoverResolver } from './hover/VariableHoverResolver';
@@ -135,14 +136,10 @@ export class HoverProvider {
 
             // Check if this is a procedure call (e.g., "MyProcedure()")
             // OR if this is inside a START() call (e.g., "START(ProcName, ...)")
-            const afterWord = line.substring(wordRange.end.character).trimStart();
-            const beforeWord = line.substring(0, wordRange.start.character);
+            const detection = ProcedureCallDetector.isProcedureCallOrReference(document, position, wordRange);
             
-            // Check if we're inside a START() call
-            const isInStartCall = beforeWord.match(/\bSTART\s*\(\s*$/i);
-            
-            if (afterWord.startsWith('(') || isInStartCall) {
-                logger.info(`Detected procedure ${isInStartCall ? 'reference in START()' : 'call'}: ${word}()`);
+            if (detection.isProcedure) {
+                logger.info(`Detected procedure ${ProcedureCallDetector.getDetectionMessage(word, detection.isStartCall)}`);
                 
                 // Get tokens for parameter counting
                 const tokens = this.tokenCache.getTokens(document);

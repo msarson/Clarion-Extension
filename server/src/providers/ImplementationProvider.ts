@@ -15,6 +15,7 @@ import { TokenCache } from '../TokenCache';
 import { MapProcedureResolver } from '../utils/MapProcedureResolver';
 import { SolutionManager } from '../solution/solutionManager';
 import LoggerManager from '../logger';
+import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -48,20 +49,16 @@ export class ImplementationProvider {
         });
 
         // Get word at position for procedure call detection
-        const wordRange = this.getWordRangeAtPosition(document, position);
+        const wordRange = ProcedureCallDetector.getWordRangeAtPosition(document, position);
         const word = wordRange ? document.getText(wordRange) : '';
 
         // 1. Check if this is a procedure call (e.g., "MyProcedure()")
         //    OR if this is inside a START() call (e.g., "START(ProcName, ...)")
         if (word && wordRange) {
-            const afterWord = line.substring(wordRange.end.character).trimStart();
-            const beforeWord = line.substring(0, wordRange.start.character);
+            const detection = ProcedureCallDetector.isProcedureCallOrReference(document, position, wordRange);
             
-            // Check if we're inside a START() call
-            const isInStartCall = beforeWord.match(/\bSTART\s*\(\s*$/i);
-            
-            if (afterWord.startsWith('(') || isInStartCall) {
-                logger.info(`Detected procedure ${isInStartCall ? 'reference in START()' : 'call'}: ${word}()`);
+            if (detection.isProcedure) {
+                logger.info(`Detected procedure ${ProcedureCallDetector.getDetectionMessage(word, detection.isStartCall)}`);
                 
                 // Find the MAP declaration first
                 const mapDecl = this.mapResolver.findMapDeclaration(word, tokens, document, line);
@@ -177,27 +174,6 @@ export class ImplementationProvider {
     /**
      * Get word range at position (helper method)
      */
-    private getWordRangeAtPosition(document: TextDocument, position: Position): { start: Position; end: Position } | null {
-        const line = document.getText({
-            start: { line: position.line, character: 0 },
-            end: { line: position.line, character: Number.MAX_SAFE_INTEGER }
-        });
-
-        const wordPattern = /[a-zA-Z_]\w*/g;
-        let match;
-        while ((match = wordPattern.exec(line)) !== null) {
-            const start = match.index;
-            const end = start + match[0].length;
-            if (position.character >= start && position.character <= end) {
-                return {
-                    start: { line: position.line, character: start },
-                    end: { line: position.line, character: end }
-                };
-            }
-        }
-        return null;
-    }
-
     /**
      * Check if a line is inside a MAP block
      */
