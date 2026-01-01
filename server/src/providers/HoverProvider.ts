@@ -17,6 +17,10 @@ import { ControlService } from '../utils/ControlService';
 import { DataTypeService } from '../utils/DataTypeService';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { SolutionManager } from '../solution/solutionManager';
+import { HoverFormatter } from './hover/HoverFormatter';
+import { ContextualHoverHandler } from './hover/ContextualHoverHandler';
+import { SymbolHoverResolver } from './hover/SymbolHoverResolver';
+import { VariableHoverResolver } from './hover/VariableHoverResolver';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -37,10 +41,18 @@ export class HoverProvider {
     private controlService = ControlService.getInstance();
     private dataTypeService = DataTypeService.getInstance();
     private scopeAnalyzer: ScopeAnalyzer;
+    private formatter: HoverFormatter;
+    private contextHandler: ContextualHoverHandler;
+    private symbolResolver: SymbolHoverResolver;
+    private variableResolver: VariableHoverResolver;
 
     constructor() {
         const solutionManager = SolutionManager.getInstance();
         this.scopeAnalyzer = new ScopeAnalyzer(this.tokenCache, solutionManager);
+        this.formatter = new HoverFormatter(this.scopeAnalyzer);
+        this.contextHandler = new ContextualHoverHandler(this.builtinService, this.attributeService);
+        this.symbolResolver = new SymbolHoverResolver(this.dataTypeService, this.controlService);
+        this.variableResolver = new VariableHoverResolver(this.formatter, this.scopeAnalyzer, this.tokenCache);
     }
 
     /**
@@ -98,184 +110,27 @@ export class HoverProvider {
 
             // Handle MODULE keyword specially (can be keyword in MAP or attribute on CLASS)
             if (word.toUpperCase() === 'MODULE') {
-                if (isInMapBlock) {
-                    // MODULE in MAP context - it's a builtin keyword
-                    const signatures = this.builtinService.getSignatures('MODULE');
-                    if (signatures.length > 0) {
-                        const sig = signatures[0];
-                        // Extract documentation value (could be string or MarkupContent object)
-                        const docText = typeof sig.documentation === 'string' 
-                            ? sig.documentation 
-                            : (sig.documentation as any)?.value || '';
-                        const formattedDoc = `**MODULE** (Keyword)\n\n${docText}\n\n**Syntax:** \`${sig.label}\``;
-                        return {
-                            contents: {
-                                kind: 'markdown',
-                                value: formattedDoc
-                            }
-                        };
-                    }
-                } else {
-                    // MODULE outside MAP - it's likely a CLASS attribute
-                    if (this.attributeService.isAttribute(word)) {
-                        const attribute = this.attributeService.getAttribute(word);
-                        if (attribute) {
-                            const formattedDoc = `**${word}** (Attribute)\n\n${attribute.description}\n\n**Applies to:** ${attribute.applicableTo.join(', ')}`;
-                            return {
-                                contents: {
-                                    kind: 'markdown',
-                                    value: formattedDoc
-                                }
-                            };
-                        }
-                    }
-                }
+                const moduleHover = this.contextHandler.handleModuleKeyword(isInMapBlock);
+                if (moduleHover) return moduleHover;
             }
 
             // Handle TO keyword specially (can be in LOOP or CASE structure)
             if (word.toUpperCase() === 'TO') {
-                // Search backwards and on current line for LOOP, CASE, or OF keywords
-                let foundLoop = false;
-                let foundCaseOf = false;
-                
-                // Check current line first for OF (CASE OF...TO pattern)
-                const currentLineText = line.toUpperCase();
-                if (currentLineText.includes('OF') && currentLineText.includes('TO')) {
-                    foundCaseOf = true;
-                }
-                
-                // If not found on current line, search backwards
-                if (!foundCaseOf) {
-                    for (let searchLine = position.line; searchLine >= Math.max(0, position.line - 50); searchLine--) {
-                        const searchLineTokens = allTokens.filter(t => t.line === searchLine);
-                        
-                        // Look for LOOP, CASE, OF, or END keywords
-                        for (const token of searchLineTokens) {
-                            const upperValue = token.value.toUpperCase();
-                            if (upperValue === 'LOOP' && token.type === TokenType.Keyword) {
-                                foundLoop = true;
-                                break;
-                            } else if ((upperValue === 'OF' || upperValue === 'OROF') && token.type === TokenType.Keyword) {
-                                foundCaseOf = true;
-                                break;
-                            } else if (upperValue === 'END' && token.type === TokenType.EndStatement) {
-                                // Hit an END, stop searching (structure ended)
-                                break;
-                            }
-                        }
-                        
-                        if (foundLoop || foundCaseOf) break;
-                    }
-                }
-                
-                // Provide context-specific documentation
-                if (foundLoop) {
-                    return {
-                        contents: {
-                            kind: 'markdown',
-                            value: `**TO** (Keyword - in LOOP structure)\n\n**Syntax:** \`i = initial TO limit [BY step]\`\n\nSpecifies the terminating value in a LOOP iteration. When counter exceeds limit (or is less than, if step is negative), loop terminates. The limit expression is evaluated once at loop start.`
-                        }
-                    };
-                } else if (foundCaseOf) {
-                    return {
-                        contents: {
-                            kind: 'markdown',
-                            value: `**TO** (Keyword - in CASE structure)\n\n**Syntax:** \`OF expression TO expression\`\n\nAllows a range of values in an OF or OROF statement. Statements execute if the CASE condition falls within the inclusive range specified. Both expressions are evaluated even if the condition is less than the lower boundary.`
-                        }
-                    };
-                }
-                // If context unclear, fall through to show generic TO documentation
+                const toHover = this.contextHandler.handleToKeyword(allTokens, position, line);
+                if (toHover) return toHover;
             }
 
             // Handle ELSE keyword specially (can be in IF or CASE structure)
             if (word.toUpperCase() === 'ELSE') {
-                // Search backwards for CASE or IF keyword to determine context
-                let foundCase = false;
-                let foundIf = false;
-                
-                for (let searchLine = position.line - 1; searchLine >= Math.max(0, position.line - 50); searchLine--) {
-                    const searchLineTokens = allTokens.filter(t => t.line === searchLine);
-                    
-                    // Look for CASE, IF, or END keywords
-                    for (const token of searchLineTokens) {
-                        const upperValue = token.value.toUpperCase();
-                        if (upperValue === 'CASE' && token.type === TokenType.Keyword) {
-                            foundCase = true;
-                            break;
-                        } else if (upperValue === 'IF' && token.type === TokenType.Keyword) {
-                            foundIf = true;
-                            break;
-                        } else if (upperValue === 'END' && token.type === TokenType.EndStatement) {
-                            // Hit an END, stop searching (structure ended)
-                            break;
-                        }
-                    }
-                    
-                    if (foundCase || foundIf) break;
-                }
-                
-                // Provide context-specific documentation
-                if (foundCase) {
-                    return {
-                        contents: {
-                            kind: 'markdown',
-                            value: `**ELSE** (Keyword - in CASE structure)\n\nStatements following ELSE execute when all preceding OF and OROF options have been evaluated as not equivalent. ELSE is optional but must be last option in CASE structure if used.`
-                        }
-                    };
-                } else if (foundIf) {
-                    return {
-                        contents: {
-                            kind: 'markdown',
-                            value: `**ELSE** (Keyword - in IF structure)\n\nStatements following ELSE execute when all preceding IF and ELSIF conditions evaluate as false. ELSE is optional but must be last option in IF structure if used.`
-                        }
-                    };
-                }
-                // If context unclear, show generic ELSE documentation
+                const elseHover = this.contextHandler.handleElseKeyword(allTokens, position);
+                if (elseHover) return elseHover;
             }
 
             // Handle PROCEDURE keyword specially (different contexts: MAP prototype, CLASS method, implementation)
             if (word.toUpperCase() === 'PROCEDURE') {
                 const isInClass = documentStructure.isInClassBlock(position.line);
-                
-                // Check if this looks like an implementation (has label before PROCEDURE on same line)
-                const isImplementation = line.trim().match(/^\w+(\.\w+)?\s+PROCEDURE/i) !== null;
-                
-                if (isImplementation) {
-                    // This is a procedure implementation
-                    const hasClassPrefix = line.includes('.');
-                    if (hasClassPrefix) {
-                        return {
-                            contents: {
-                                kind: 'markdown',
-                                value: `**PROCEDURE** (CLASS Method Implementation)\n\n**Syntax:** \`ClassName.MethodName PROCEDURE[(params)]\`\n\nDefines the implementation of a CLASS method. Must match a prototype declared in the CLASS definition.\n\n\`\`\`clarion\nMyClass.MyMethod PROCEDURE(LONG param)\n  CODE\n  ! implementation\n  RETURN\n\`\`\``
-                            }
-                        };
-                    } else {
-                        return {
-                            contents: {
-                                kind: 'markdown',
-                                value: `**PROCEDURE** (Implementation)\n\n**Syntax:** \`ProcName PROCEDURE[(params)]\`\n\nDefines a procedure implementation. Must match a prototype declared in MAP.\n\n\`\`\`clarion\nMyProc PROCEDURE(LONG param)\n  CODE\n  ! implementation\n  RETURN\n\`\`\``
-                            }
-                        };
-                    }
-                } else if (isInMapBlock) {
-                    // This is a MAP prototype
-                    return {
-                        contents: {
-                            kind: 'markdown',
-                            value: `**PROCEDURE** (MAP Prototype)\n\n**Syntax:** \`ProcName PROCEDURE[(params)] [,returnType] [,attributes]\`\n\nDeclares a procedure prototype in MAP block. Specifies the procedure signature, optional return type, and calling conventions.\n\n\`\`\`clarion\nMAP\n  MyProc PROCEDURE(LONG),STRING  ! Returns STRING\n  WinAPI PROCEDURE(*CSTRING),LONG,PASCAL,RAW\nEND\n\`\`\``
-                        }
-                    };
-                } else if (isInClass) {
-                    // This is a CLASS method prototype
-                    return {
-                        contents: {
-                            kind: 'markdown',
-                            value: `**PROCEDURE** (CLASS Method Prototype)\n\n**Syntax:** \`MethodName PROCEDURE[(params)] [,returnType] [,attributes]\`\n\nDeclares a CLASS method prototype. Can include VIRTUAL, PRIVATE, PROTECTED attributes.\n\n\`\`\`clarion\nMyClass CLASS\n  MyMethod PROCEDURE(LONG),STRING,VIRTUAL\n  Init     PROCEDURE(),PROTECTED\nEND\n\`\`\``
-                        }
-                    };
-                }
-                // Fall through to generic PROCEDURE documentation
+                const procedureHover = this.contextHandler.handleProcedureKeyword(line, isInMapBlock, isInClass);
+                if (procedureHover) return procedureHover;
             }
 
             // Check if this is a procedure call (e.g., "MyProcedure()")
@@ -303,76 +158,22 @@ export class HoverProvider {
                 }
                 
                 if (mapDecl || procImpl) {
-                    return this.constructProcedureHover(word, mapDecl, procImpl, document, position);
+                    return this.formatter.formatProcedure(word, mapDecl, procImpl, document, position);
                 }
             }
 
-            // Decide priority: data type vs control based on context
-            const checkDataTypeFirst = hasLabelBefore || !isInWindowContext;
-
-            if (checkDataTypeFirst) {
-                // Data declaration context - check data type first
-                if (this.dataTypeService.hasDataType(word)) {
-                    logger.info(`Found Clarion data type: ${word}`);
-                    const dataType = this.dataTypeService.getDataType(word);
-                    if (dataType) {
-                        const formattedDoc = this.dataTypeService.getFormattedDescription(dataType);
-                        return {
-                            contents: {
-                                kind: 'markdown',
-                                value: formattedDoc
-                            }
-                        };
-                    }
-                }
-                
-                // Then check control as fallback
-                if (this.controlService.isControl(word)) {
-                    logger.info(`Found Clarion control: ${word}`);
-                    const controlDoc = this.controlService.getControlDocumentation(word);
-                    if (controlDoc) {
-                        return {
-                            contents: {
-                                kind: 'markdown',
-                                value: controlDoc
-                            }
-                        };
-                    }
-                }
-            } else {
-                // Window/control context - check control first
-                if (this.controlService.isControl(word)) {
-                    logger.info(`Found Clarion control: ${word}`);
-                    const controlDoc = this.controlService.getControlDocumentation(word);
-                    if (controlDoc) {
-                        return {
-                            contents: {
-                                kind: 'markdown',
-                                value: controlDoc
-                            }
-                        };
-                    }
-                }
-                
-                // Then check data type as fallback
-                if (this.dataTypeService.hasDataType(word)) {
-                    logger.info(`Found Clarion data type: ${word}`);
-                    const dataType = this.dataTypeService.getDataType(word);
-                    if (dataType) {
-                        const formattedDoc = this.dataTypeService.getFormattedDescription(dataType);
-                        return {
-                            contents: {
-                                kind: 'markdown',
-                                value: formattedDoc
-                            }
-                        };
-                    }
-                }
-            }
+            // Check for data types and controls using context-aware resolver
+            const symbolHover = this.symbolResolver.resolve(word, {
+                hasLabelBefore,
+                isInWindowContext
+            });
+            if (symbolHover) return symbolHover;
 
             // Check if this word is a Clarion attribute
             if (this.attributeService.isAttribute(word)) {
                 logger.info(`Found Clarion attribute: ${word}`);
+                
+                const attribute = this.attributeService.getAttribute(word);
                 
                 // Check if there's an opening paren after the word
                 const textAfterWord = document.getText({
@@ -392,7 +193,7 @@ export class HoverProvider {
                     logger.info(`No parentheses found for attribute - assuming 0 parameters`);
                 }
                 
-                return this.constructAttributeHover(word, paramCount);
+                return this.formatter.formatAttribute(word, attribute, paramCount);
             }
 
             // Check if this word is a built-in function (but NOT a class method call)
@@ -407,6 +208,8 @@ export class HoverProvider {
                 // If there's a dot immediately before the word, it's a class method, not a built-in
                 if (!textBeforeWord.trimEnd().endsWith('.')) {
                     logger.info(`Found built-in function: ${word}`);
+                    
+                    const signatures = this.builtinService.getSignatures(word);
                     
                     // Check if there's an opening paren after the word
                     const textAfterWord = document.getText({
@@ -426,7 +229,7 @@ export class HoverProvider {
                         logger.info(`No parentheses found - assuming 0 parameters`);
                     }
                     
-                    return this.constructBuiltinFunctionHover(word, paramCount);
+                    return this.formatter.formatBuiltin(word, signatures, paramCount);
                 } else {
                     logger.info(`Word ${word} is preceded by dot - treating as class method, not built-in`);
                 }
@@ -454,7 +257,7 @@ export class HoverProvider {
                     // Pass the full line as implementation signature for type matching
                     const declInfo = this.overloadResolver.findMethodDeclaration(className, methodName, document, tokens, paramCount, line);
                     if (declInfo) {
-                        return this.constructMethodImplementationHover(methodName, className, declInfo);
+                        return this.formatter.formatMethodImplementation(methodName, className, declInfo);
                     }
                 }
             }
@@ -515,7 +318,7 @@ export class HoverProvider {
                                     }
                                 };
                                 
-                                return this.constructProcedureHover(procName, memberMapResult.location, implLocation, document, position);
+                                return this.formatter.formatProcedure(procName, memberMapResult.location, implLocation, document, position);
                             }
                         }
                     } else {
@@ -528,7 +331,7 @@ export class HoverProvider {
                             }
                         };
                         
-                        return this.constructProcedureHover(procName, mapLocation, implLocation, document, position);
+                        return this.formatter.formatProcedure(procName, mapLocation, implLocation, document, position);
                     }
                 }
             }
@@ -572,7 +375,7 @@ export class HoverProvider {
                             }
                         };
                         
-                        return this.constructProcedureHover(procName, mapDecl, implLocation, document, position);
+                        return this.formatter.formatProcedure(procName, mapDecl, implLocation, document, position);
                     } else {
                         logger.info(`Cursor NOT on procedure name (cursor at ${position.character}, name range ${procNameStart}-${procNameEnd})`);
                     }
@@ -788,7 +591,7 @@ export class HoverProvider {
                     const structureInfo = this.findLocalVariableInfo(word, tokens, currentScope, document, word);
                     if (structureInfo) {
                         logger.info(`✅ HOVER-RETURN: Found structure info for ${word}`);
-                        return this.constructVariableHover(word, structureInfo, currentScope, document);
+                        return this.formatter.formatVariable(word, structureInfo, currentScope, document);
                     } else {
                         logger.info(`❌ HOVER-MISS: Could not find structure info for ${word}`);
                     }
@@ -823,7 +626,7 @@ export class HoverProvider {
                         
                         const memberInfo = this.memberResolver.findClassMemberInfo(fieldName, document, position.line, tokens, paramCount);
                         if (memberInfo) {
-                            return this.constructClassMemberHover(fieldName, memberInfo);
+                            return this.formatter.formatClassMember(fieldName, memberInfo);
                         }
                     } else {
                         // variable.member - structure field access (e.g., MyGroup.MyVar)
@@ -840,7 +643,7 @@ export class HoverProvider {
                                 const variableInfo = this.findLocalVariableInfo(word, tokens, currentScope, document, fullReference);
                                 if (variableInfo) {
                                     logger.info(`✅ HOVER-RETURN: Found structure field info for ${fullReference}`);
-                                    return this.constructVariableHover(fullReference, variableInfo, currentScope, document);
+                                    return this.formatter.formatVariable(fullReference, variableInfo, currentScope, document);
                                 }
                             }
                         }
@@ -1034,20 +837,14 @@ export class HoverProvider {
 
             // Check if this is a parameter
             logger.info(`Checking if ${searchWord} is a parameter...`);
-            const parameterInfo = this.findParameterInfo(searchWord, document, currentScope);
-            if (parameterInfo) {
-                logger.info(`Found parameter info for ${searchWord}`);
-                return this.constructParameterHover(searchWord, parameterInfo, currentScope);
-            }
+            const parameterHover = this.variableResolver.findParameterHover(searchWord, document, currentScope);
+            if (parameterHover) return parameterHover;
             logger.info(`${searchWord} is not a parameter`);
 
             // Check if this is a local variable
             logger.info(`Checking if ${searchWord} is a local variable...`);
-            const variableInfo = this.findLocalVariableInfo(searchWord, tokens, currentScope, document, word);
-            if (variableInfo) {
-                logger.info(`✅ HOVER-RETURN: Found variable info for ${searchWord}: type=${variableInfo.type}, line=${variableInfo.line}`);
-                return this.constructVariableHover(word, variableInfo, currentScope, document);
-            }
+            const variableHover = this.variableResolver.findLocalVariableHover(searchWord, tokens, currentScope, document, word);
+            if (variableHover) return variableHover;
             logger.info(`${searchWord} is not a local variable`);
             
             // 🔗 Check for module-local variable in current file (Label at column 0, before first PROCEDURE)
@@ -1166,7 +963,7 @@ export class HoverProvider {
                                 line
                             );
                             
-                            return this.constructProcedureHover(searchWord, mapDecl, procImpl, document, position);
+                            return this.formatter.formatProcedure(searchWord, mapDecl, procImpl, document, position);
                         }
                         
                         // Not a procedure - check for global variable
@@ -1641,348 +1438,52 @@ export class HoverProvider {
     }
 
     /**
-     * Constructs hover for a parameter
+     * Counts parameters in a function call
+     * Returns null if unable to parse
+     * Counts omitted parameters (e.g., AT(,,435,300) = 4 parameters)
      */
-    private constructParameterHover(name: string, info: { type: string; line: number }, scope: Token): Hover {
-        const markdown = [
-            `**Parameter:** \`${name}\``,
-            ``,
-            `**Type:** \`${info.type}\``,
-            ``,
-            `**Declared in:** ${scope.value} (line ${info.line + 1})`,
-            ``,
-            `*Press F12 to go to declaration*`
-        ].join('\n');
-
-        return {
-            contents: {
-                kind: 'markdown',
-                value: markdown
-            }
-        };
-    }
-
-    /**
-     * Constructs hover for a local variable
-     */
-    private constructVariableHover(name: string, info: { type: string; line: number }, scope: Token, document?: TextDocument): Hover {
-        const isRoutine = scope.subType === TokenType.Routine;
-        const variableType = isRoutine ? 'Routine Variable' : 'Local Variable';
-        
-        // CRITICAL FIX: Keep the full variable name including prefix (e.g., LOC:SMTPbccAddress)
-        // Don't strip the prefix - it's part of the variable's identity
-        const displayName = name;
-        
-        // Get scope information using ScopeAnalyzer
-        let scopeInfo = '';
-        let visibilityInfo = '';
-        if (document) {
-            const position: Position = { line: info.line, character: 0 };
-            const detailedScope = this.scopeAnalyzer.getTokenScope(document, position);
-            
-            if (detailedScope) {
-                // Format scope type with icon
-                const scopeIcon = detailedScope.type === 'routine' ? '🔹' : 
-                                  detailedScope.type === 'procedure' ? '🔸' : 
-                                  detailedScope.type === 'module' ? '📦' : '🌍';
-                
-                scopeInfo = `**Scope:** ${scopeIcon} ${detailedScope.type.charAt(0).toUpperCase() + detailedScope.type.slice(1)}`;
-                
-                // Add scope name if available
-                if (detailedScope.type === 'routine' && detailedScope.containingRoutine) {
-                    scopeInfo += ` (${detailedScope.containingRoutine.value})`;
-                } else if (detailedScope.type === 'procedure' && detailedScope.containingProcedure) {
-                    scopeInfo += ` (${detailedScope.containingProcedure.value})`;
-                }
-                
-                // Add visibility information
-                if (detailedScope.type === 'routine') {
-                    visibilityInfo = `**Visibility:** Only visible within this routine`;
-                } else if (detailedScope.type === 'procedure') {
-                    visibilityInfo = `**Visibility:** Visible throughout this procedure and its routines`;
-                } else if (detailedScope.type === 'module') {
-                    visibilityInfo = `**Visibility:** Visible only within this file (module-local)`;
-                } else {
-                    visibilityInfo = `**Visibility:** Visible everywhere (global)`;
-                }
-            }
-        }
-        
-        const markdown = [
-            `**${variableType}:** \`${displayName}\``,
-            ``,
-            `**Type:** \`${info.type}\``,
-            ``
-        ];
-        
-        // Add scope info if available
-        if (scopeInfo) {
-            markdown.push(scopeInfo);
-            markdown.push(``);
-        }
-        
-        // Add visibility info if available
-        if (visibilityInfo) {
-            markdown.push(visibilityInfo);
-            markdown.push(``);
-        }
-        
-        // Show file and line info similar to procedures
-        if (document) {
-            const fileName = path.basename(document.uri.replace('file:///', ''));
-            const lineNumber = info.line + 1; // Convert to 1-based
-            markdown.push(`**Declared in** \`${fileName}\` @ line ${lineNumber}`);
-        } else {
-            markdown.push(`**Declared at:** line ${info.line + 1}`);
-        }
-        markdown.push(``);
-        markdown.push(`*Press F12 to go to declaration*`);
-
-        return {
-            contents: {
-                kind: 'markdown',
-                value: markdown.join('\n')
-            }
-        };
-    }
-
-
-    
-    /**
-     * Constructs hover for a class member
-     */
-    private constructClassMemberHover(name: string, info: { type: string; className: string; line: number; file: string }): Hover {
-        // Determine if it's a property or method based on type
-        const isMethod = info.type.toUpperCase().includes('PROCEDURE') || info.type.toUpperCase().includes('FUNCTION');
-        const memberType = isMethod ? 'Method' : 'Property';
-        
-        const markdown = [
-            `**Class ${memberType}:** \`${name}\``,
-            ``
-        ];
-        
-        // Format type - if it's long, put it on its own line with code block for wrapping
-        if (info.type.length > 50) {
-            markdown.push(`**Type:**`);
-            markdown.push('```clarion');
-            markdown.push(info.type);
-            markdown.push('```');
-        } else {
-            markdown.push(`**Type:** \`${info.type}\``);
-        }
-        
-        markdown.push(``);
-        markdown.push(`**Class:** ${info.className}`);
-        
-        if (info.line >= 0) {
-            // Extract just the filename from the path
-            const fileName = info.file.split(/[\/\\]/).pop() || info.file;
-            markdown.push(``);
-            markdown.push(`**Declared in:** \`${fileName}\` at line **${info.line + 1}**`);
-            markdown.push(``);
-            
-            // Add navigation hints - F12 for definition, Ctrl+F12 for implementation (methods only)
-            if (isMethod) {
-                markdown.push(`*(F12 to definition | Ctrl+F12 to implementation)*`);
-            } else {
-                markdown.push(`*(F12 will navigate to the definition)*`);
-            }
-        } else {
-            markdown.push(``);
-            markdown.push(`**Declared in:** ${info.file}`);
-            markdown.push(``);
-            
-            if (isMethod) {
-                markdown.push(`*(F12 to definition | Ctrl+F12 to implementation)*`);
-            } else {
-                markdown.push(`*Press F12 to go to definition*`);
-            }
-        }
-        
-        return {
-            contents: {
-                kind: 'markdown',
-                value: markdown.join('\n')
-            }
-        };
-    }
-
-    /**
-     * Constructs hover for method implementation showing declaration
-     */
-    private constructMethodImplementationHover(methodName: string, className: string, declInfo: { signature: string; file: string; line: number }): Hover {
-        const fileName = declInfo.file.split(/[\/\\]/).pop() || declInfo.file;
-        
-        const markdown = [
-            `**Method Implementation:** \`${className}.${methodName}\``,
-            ``,
-            `**Declaration:**`,
-            '```clarion',
-            declInfo.signature,
-            '```',
-            ``,
-            `**Declared in:** \`${fileName}\` at line **${declInfo.line + 1}**`,
-            ``,
-            `*(Press F12 to go to declaration)*`
-        ];
-
-        return {
-            contents: {
-                kind: 'markdown',
-                value: markdown.join('\n')
-            }
-        };
-    }
-        
-    /**
-     * Check if a line is inside a MAP block
-     */
-    /**
-     * Find implementation of a MAP procedure
-     */
-    private findProcedureImplementation(document: TextDocument, procName: string): { line: number, signature: string, preview: string } | null {
-        logger.info(`🔍 findProcedureImplementation searching for: "${procName}"`);
-        const text = document.getText();
-        const lines = text.split(/\r?\n/);
-        const tokens = this.tokenCache.getTokens(document);
-        
-        let inMap = false;
-        let checkedLines = 0;
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
-            
-            // Track MAP blocks to skip declarations
-            if (/^\s*MAP\s*$/i.test(trimmed)) {
-                inMap = true;
-                logger.info(`Entering MAP block at line ${i}`);
-                continue;
-            }
-            if (inMap && /^\s*END\s*$/i.test(trimmed)) {
-                inMap = false;
-                logger.info(`Exiting MAP block at line ${i}`);
-                continue;
-            }
-            
-            // Skip lines inside MAP blocks (those are declarations, not implementations)
-            if (inMap) {
-                continue;
-            }
-            
-            // Match: ProcName PROCEDURE(...) at start of line (implementation)
-            const implMatch = line.match(/^(\w+)\s+PROCEDURE\s*\(/i);
-            if (implMatch) {
-                checkedLines++;
-                if (checkedLines <= 5) {
-                    logger.info(`Line ${i}: Found PROCEDURE "${implMatch[1]}" (looking for "${procName}")`);
-                }
-            }
-            if (implMatch && implMatch[1].toLowerCase() === procName.toLowerCase()) {
-                logger.info(`✅ Found matching implementation at line ${i}: "${implMatch[1]}"`);
-                return this.findProcedureImplementationPreview(document, procName, i);
-            }
-        }
-        
-        logger.info(`❌ No implementation found for "${procName}"`);
-        return null;
-    }
-
-    /**
-     * Get preview for a procedure implementation at a specific line
-     * Shows either the full implementation if short, or first N lines if long
-     */
-    private findProcedureImplementationPreview(document: TextDocument, procName: string, lineNumber: number): { line: number, signature: string, preview: string } | null {
-        const text = document.getText();
-        const lines = text.split(/\r?\n/);
-        const tokens = this.tokenCache.getTokens(document);
-        
-        if (lineNumber >= lines.length) {
+    private countParametersInCall(line: string, functionName: string): number | null {
+        // Find the function call in the line
+        const funcPattern = new RegExp(`\\b${functionName}\\s*\\(`, 'i');
+        const match = line.match(funcPattern);
+        if (!match || match.index === undefined) {
             return null;
         }
-        
-        const line = lines[lineNumber];
-        
-        // Find the procedure token to get finishesAt
-        const procToken = tokens.find(t => 
-            (t.subType === TokenType.Procedure || t.subType === TokenType.GlobalProcedure || 
-             t.subType === TokenType.MethodImplementation) &&
-            t.line === lineNumber &&
-            t.value.toLowerCase() === procName.toLowerCase()
-        );
-        
-        const previewLines: string[] = [line.trim()];
-        const maxPreviewLines = 15; // Show up to 15 lines for long procedures
-        
-        // Determine the actual end of the procedure
-        let procedureEndLine: number;
-        if (procToken && procToken.finishesAt !== undefined) {
-            // Use token's finishesAt to know exactly where procedure ends
-            procedureEndLine = procToken.finishesAt;
-            logger.info(`Procedure ${procName} ends at line ${procedureEndLine} (finishesAt)`);
-        } else {
-            // Fallback: estimate by searching for next procedure or end of file
-            procedureEndLine = this.findProcedureEnd(lines, lineNumber);
-            logger.info(`Procedure ${procName} estimated end at line ${procedureEndLine} (heuristic)`);
-        }
-        
-        // Calculate total lines in procedure (excluding signature)
-        const totalProcedureLines = procedureEndLine - lineNumber;
-        
-        // Decide whether to show full implementation or truncated preview
-        let showFullImplementation = false;
-        let linesToShow = maxPreviewLines;
-        
-        if (totalProcedureLines <= maxPreviewLines) {
-            // Short procedure - show everything
-            showFullImplementation = true;
-            linesToShow = totalProcedureLines;
-            logger.info(`Short procedure (${totalProcedureLines} lines) - showing full implementation`);
-        } else {
-            // Long procedure - show first maxPreviewLines
-            logger.info(`Long procedure (${totalProcedureLines} lines) - showing first ${maxPreviewLines} lines`);
-        }
-        
-        // Collect the preview lines
-        let linesAdded = 0;
-        for (let j = lineNumber + 1; j <= procedureEndLine && j < lines.length && linesAdded < linesToShow; j++) {
-            const previewLine = lines[j];
-            previewLines.push(previewLine);
-            linesAdded++;
-        }
-        
-        // Add ellipsis if we truncated
-        if (!showFullImplementation && linesAdded === maxPreviewLines && totalProcedureLines > maxPreviewLines) {
-            previewLines.push('  ...');
-            previewLines.push(`  ! ${totalProcedureLines - maxPreviewLines} more lines`);
-        }
-        
-        return {
-            line: lineNumber,
-            signature: line.trim(),
-            preview: previewLines.join('\n')
-        };
-    }
-    
-    /**
-     * Estimate where a procedure ends by looking for the next procedure or END
-     */
-    private findProcedureEnd(lines: string[], startLine: number): number {
-        for (let i = startLine + 1; i < lines.length; i++) {
-            const trimmed = lines[i].trim();
-            
-            // Check for next procedure/function at column 0 or minimal indent
-            if (/^(\w+\.)?(\w+)\s+(PROCEDURE|FUNCTION)/i.test(lines[i])) {
-                return i - 1;
-            }
-            
-            // Check for END at column 0 or standalone END
-            if (/^\s*END\s*$/i.test(trimmed)) {
-                return i;
+
+        const startPos = match.index + match[0].length;
+        let depth = 1;
+        let paramCount = 1; // Start at 1 - if there's any content, we have at least 1 parameter
+        let isEmpty = true; // Track if we've seen any content at all
+
+        for (let i = startPos; i < line.length; i++) {
+            const char = line[i];
+
+            if (char === '(') {
+                depth++;
+                isEmpty = false;
+            } else if (char === ')') {
+                depth--;
+                if (depth === 0) {
+                    // Found closing paren
+                    // If completely empty parentheses, return 0
+                    if (isEmpty) {
+                        return 0;
+                    }
+                    return paramCount;
+                }
+                isEmpty = false;
+            } else if (char === ',' && depth === 1) {
+                // Each comma at depth 1 means another parameter
+                paramCount++;
+            } else if (char.trim() !== '') {
+                // Any non-whitespace character means we have content
+                isEmpty = false;
             }
         }
-        
-        // Default: 50 lines or end of file
-        return Math.min(startLine + 50, lines.length - 1);
+
+        // Unclosed parentheses - return what we have so far
+        // If we saw any content, return the count
+        return isEmpty ? null : paramCount;
     }
 
     /**
@@ -2237,387 +1738,6 @@ export class HoverProvider {
         }
     }
 
-    /**
-     * Constructs hover information for built-in Clarion functions
-     */
-    private constructBuiltinFunctionHover(functionName: string, paramCount: number | null): Hover {
-        const signatures = this.builtinService.getSignatures(functionName);
-        
-        if (signatures.length === 0) {
-            return {
-                contents: {
-                    kind: 'markdown',
-                    value: `**Built-in Function**\n\n\`${functionName}\``
-                }
-            };
-        }
-
-        // If we have a parameter count, filter signatures to show only matching ones
-        let matchingSignatures = signatures;
-        if (paramCount !== null) {
-            matchingSignatures = signatures.filter(sig => 
-                sig.parameters && sig.parameters.length === paramCount
-            );
-            
-            // If no exact match, show all signatures
-            if (matchingSignatures.length === 0) {
-                matchingSignatures = signatures;
-            }
-        }
-
-        // Format matching signatures
-        // Determine if this is a pure keyword (no parameters)
-        const isKeyword = matchingSignatures.every(sig => 
-            !sig.parameters || sig.parameters.length === 0
-        );
-        
-        let content = isKeyword 
-            ? `**Keyword: ${functionName}**\n\n`
-            : `**Built-in Function: ${functionName}**\n\n`;
-        
-        if (paramCount !== null && matchingSignatures.length < signatures.length) {
-            content += `_Showing signature(s) matching ${paramCount} parameter(s)_\n\n`;
-        }
-        
-        matchingSignatures.forEach((sig, index) => {
-            if (matchingSignatures.length > 1) {
-                content += `**Overload ${index + 1}:**\n\n`;
-            }
-            
-            // Only show syntax for functions with parameters
-            if (sig.parameters && sig.parameters.length > 0) {
-                content += `\`\`\`clarion\n${sig.label}\n\`\`\`\n\n`;
-            }
-            
-            if (sig.documentation) {
-                const docValue = typeof sig.documentation === 'string' 
-                    ? sig.documentation 
-                    : sig.documentation.value;
-                content += `${docValue}\n\n`;
-            }
-            
-            if (sig.parameters && sig.parameters.length > 0) {
-                content += `**Parameters:**\n\n`;
-                sig.parameters.forEach(param => {
-                    content += `- \`${param.label}\`\n`;
-                });
-                content += `\n`;
-            }
-            
-            if (index < matchingSignatures.length - 1) {
-                content += `---\n\n`;
-            }
-        });
-
-        return {
-            contents: {
-                kind: 'markdown',
-                value: content.trim()
-            }
-        };
-    }
-
-    /**
-     * Constructs hover information for a Clarion attribute with parameter count matching
-     */
-    private constructAttributeHover(attributeName: string, paramCount: number | null): Hover {
-        const attribute = this.attributeService.getAttribute(attributeName);
-        
-        if (!attribute) {
-            return {
-                contents: {
-                    kind: 'markdown',
-                    value: `**Attribute**\n\n\`${attributeName}\``
-                }
-            };
-        }
-
-        // If we have a parameter count, filter signatures to show only matching ones
-        let matchingSignatures = attribute.signatures;
-        if (paramCount !== null) {
-            matchingSignatures = attribute.signatures.filter(sig => 
-                sig.params.length === paramCount
-            );
-            
-            // If no exact match, show all signatures
-            if (matchingSignatures.length === 0) {
-                matchingSignatures = attribute.signatures;
-            }
-        }
-
-        // Format matching signatures
-        let content = `**Attribute: ${attribute.name}**\n\n`;
-        
-        content += `${attribute.description}\n\n`;
-        
-        if (paramCount !== null && matchingSignatures.length < attribute.signatures.length) {
-            content += `_Showing signature(s) matching ${paramCount} parameter(s)_\n\n`;
-        }
-        
-        content += `**Signatures:**\n\n`;
-        
-        matchingSignatures.forEach((sig, index) => {
-            if (matchingSignatures.length > 1) {
-                content += `**Overload ${index + 1}:**\n\n`;
-            }
-            
-            if (sig.params.length === 0) {
-                content += `\`\`\`clarion\n${attribute.name}\n\`\`\`\n\n`;
-            } else {
-                // Format parameters with optional brackets
-                const params = sig.params.map(p => {
-                    if (typeof p === 'string') {
-                        return p;
-                    }
-                    return p.optional ? `[${p.name}]` : p.name;
-                }).join(', ');
-                content += `\`\`\`clarion\n${attribute.name}(${params})\n\`\`\`\n\n`;
-            }
-            
-            content += `${sig.description}\n\n`;
-            
-            if (sig.params.length > 0) {
-                content += `**Parameters:**\n\n`;
-                sig.params.forEach(param => {
-                    const paramName = typeof param === 'string' ? param : param.name;
-                    const optionalTag = (typeof param === 'object' && param.optional) ? ' _(optional)_' : '';
-                    content += `- \`${paramName}\`${optionalTag}\n`;
-                });
-                content += `\n`;
-            }
-            
-            if (index < matchingSignatures.length - 1) {
-                content += `---\n\n`;
-            }
-        });
-
-        content += `**Applicable to:** ${attribute.applicableTo.join(', ')}\n\n`;
-        content += `**Property Equate:** ${attribute.propertyEquate}`;
-
-        return {
-            contents: {
-                kind: 'markdown',
-                value: content.trim()
-            }
-        };
-    }
-
-    /**
-     * Counts parameters in a function call
-     * Returns null if unable to parse
-     * Counts omitted parameters (e.g., AT(,,435,300) = 4 parameters)
-     */
-    private countParametersInCall(line: string, functionName: string): number | null {
-        // Find the function call in the line
-        const funcPattern = new RegExp(`\\b${functionName}\\s*\\(`, 'i');
-        const match = line.match(funcPattern);
-        if (!match || match.index === undefined) {
-            return null;
-        }
-
-        const startPos = match.index + match[0].length;
-        let depth = 1;
-        let paramCount = 1; // Start at 1 - if there's any content, we have at least 1 parameter
-        let isEmpty = true; // Track if we've seen any content at all
-
-        for (let i = startPos; i < line.length; i++) {
-            const char = line[i];
-
-            if (char === '(') {
-                depth++;
-                isEmpty = false;
-            } else if (char === ')') {
-                depth--;
-                if (depth === 0) {
-                    // Found closing paren
-                    // If completely empty parentheses, return 0
-                    if (isEmpty) {
-                        return 0;
-                    }
-                    return paramCount;
-                }
-                isEmpty = false;
-            } else if (char === ',' && depth === 1) {
-                // Each comma at depth 1 means another parameter
-                paramCount++;
-            } else if (char.trim() !== '') {
-                // Any non-whitespace character means we have content
-                isEmpty = false;
-            }
-        }
-
-        // Unclosed parentheses - return what we have so far
-        // If we saw any content, return the count
-        return isEmpty ? null : paramCount;
-    }
-
-    /**
-     * Construct hover information for procedure calls
-     * Shows both MAP declaration and PROCEDURE implementation
-     * @param currentDocument The document where hover is requested
-     * @param currentPosition The position in the document
-     */
-    private async constructProcedureHover(
-        procName: string,
-        mapDecl: Location | null,
-        procImpl: Location | null,
-        currentDocument: TextDocument,
-        currentPosition?: Position
-    ): Promise<Hover | null> {
-        const parts: string[] = [];
-        
-        // We'll set the header after we know where we are
-        let header = `**${procName}** (Procedure)\n`;
-        
-        // Determine where we are: at MAP, at implementation, or at call site
-        let isAtMapDeclaration = false;
-        let isAtImplementation = false;
-        
-        if (currentPosition && mapDecl) {
-            const mapUri = mapDecl.uri.replace(/^file:\/\/\//, '');
-            const currentUri = currentDocument.uri.replace(/^file:\/\/\//, '');
-            if (mapUri.toLowerCase() === currentUri.toLowerCase() && 
-                mapDecl.range.start.line === currentPosition.line) {
-                isAtMapDeclaration = true;
-            }
-        }
-        
-        if (currentPosition && procImpl) {
-            const implUri = procImpl.uri.replace(/^file:\/\/\//, '');
-            const currentUri = currentDocument.uri.replace(/^file:\/\/\//, '');
-            if (implUri.toLowerCase() === currentUri.toLowerCase() && 
-                procImpl.range.start.line === currentPosition.line) {
-                isAtImplementation = true;
-            }
-        }
-        
-        // Add scope information if available
-        if (procImpl || mapDecl) {
-            try {
-                // Determine scope from the implementation or MAP location
-                const checkLocation = procImpl || mapDecl;
-                if (checkLocation) {
-                    const uri = decodeURIComponent(checkLocation.uri.replace('file:///', ''));
-                    const content = fs.readFileSync(uri, 'utf-8');
-                    const lines = content.split('\n');
-                    const firstNonCommentLine = lines.find(l => l.trim() && !l.trim().startsWith('!'));
-                    
-                    if (firstNonCommentLine) {
-                        const trimmed = firstNonCommentLine.trim().toUpperCase();
-                        if (trimmed.startsWith('PROGRAM')) {
-                            header = `**${procName}** 🌍 Global Procedure\n`;
-                        } else if (trimmed.startsWith('MEMBER')) {
-                            header = `**${procName}** 📦 Module Procedure\n`;
-                        }
-                    }
-                }
-            } catch (error) {
-                // Silently fail scope detection
-            }
-        }
-        
-        // Add the header now that we know the scope
-        parts.push(header);
-        
-        // Show MAP declaration - but NOT if we're hovering at the MAP declaration itself
-        if (mapDecl && !isAtMapDeclaration) {
-            try {
-                // Properly decode file URI
-                const mapUri = decodeURIComponent(mapDecl.uri.replace('file:///', ''));
-                const mapContent = fs.readFileSync(mapUri, 'utf-8');
-                const mapLines = mapContent.split('\n');
-                const mapLine = mapLines[mapDecl.range.start.line];
-                
-                if (mapLine) {
-                    const trimmedMapLine = mapLine.trim();
-                    const fileName = path.basename(mapUri);
-                    const lineNumber = mapDecl.range.start.line + 1; // Convert to 1-based
-                    parts.push(`**Declared in** \`${fileName}\` @ line ${lineNumber}:\n\`\`\`clarion\n${trimmedMapLine}\n\`\`\``);
-                }
-            } catch (error) {
-                logger.error(`Error reading MAP declaration: ${error}`);
-            }
-        }
-        
-        // Show PROCEDURE implementation (signature + first few lines) - but NOT if we're hovering at the implementation itself
-        if (procImpl && !isAtImplementation) {
-            try {
-                // Properly decode file URI
-                const implUri = decodeURIComponent(procImpl.uri.replace('file:///', ''));
-                const implContent = fs.readFileSync(implUri, 'utf-8');
-                const implLines = implContent.split('\n');
-                const startLine = procImpl.range.start.line;
-                
-                // Get file name and line number
-                const fileName = path.basename(implUri);
-                const lineNumber = startLine + 1; // Convert to 1-based
-                
-                // Show up to 10 lines (signature + beginning of implementation)
-                const maxLines = 10;
-                const endLine = Math.min(startLine + maxLines, implLines.length);
-                const codeLines: string[] = [];
-                
-                for (let i = startLine; i < endLine; i++) {
-                    const line = implLines[i];
-                    if (!line) continue;
-                    
-                    // Stop at RETURN or next procedure/routine
-                    const trimmed = line.trim().toUpperCase();
-                    if (i > startLine && (trimmed.startsWith('RETURN') || 
-                        trimmed.match(/^\w+\s+(PROCEDURE|ROUTINE|FUNCTION)/))) {
-                        break;
-                    }
-                    
-                    codeLines.push(line);
-                    
-                    // Stop after CODE section is found
-                    if (trimmed === 'CODE') {
-                        // Add one more line after CODE to show first statement
-                        if (i + 1 < endLine && implLines[i + 1]) {
-                            codeLines.push(implLines[i + 1]);
-                        }
-                        codeLines.push('  ! ...');
-                        break;
-                    }
-                }
-                
-                if (codeLines.length > 0) {
-                    parts.push(`\n**Implemented in** \`${fileName}\` @ line ${lineNumber}:\n\`\`\`clarion\n${codeLines.join('\n')}\n\`\`\``);
-                }
-            } catch (error) {
-                logger.error(`Error reading PROCEDURE implementation: ${error}`);
-            }
-        }
-        
-        // Add context-aware navigation hint
-        if (mapDecl || procImpl) {
-            if (isAtMapDeclaration) {
-                // At MAP declaration - can only go to implementation
-                if (procImpl) {
-                    parts.push(`\n*Press Ctrl+F12 to navigate to implementation*`);
-                }
-            } else if (isAtImplementation) {
-                // At implementation - can only go to MAP declaration
-                if (mapDecl) {
-                    parts.push(`\n*Press F12 to navigate to MAP declaration*`);
-                }
-            } else {
-                // At call site - can go to both
-                parts.push(`\n*(F12 to MAP declaration | Ctrl+F12 to implementation)*`);
-            }
-        }
-        
-        if (parts.length > 1) {
-            return {
-                contents: {
-                    kind: 'markdown',
-                    value: parts.join('\n')
-                }
-            };
-        }
-        
-        return null;
-    }
 
 
 }
