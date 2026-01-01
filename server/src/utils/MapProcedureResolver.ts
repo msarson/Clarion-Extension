@@ -9,15 +9,27 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { ProcedureSignatureUtils } from './ProcedureSignatureUtils';
 import { DocumentStructure } from '../DocumentStructure';
+import { ScopeAnalyzer } from './ScopeAnalyzer';
+import { TokenCache } from '../TokenCache';
+import { SolutionManager } from '../solution/solutionManager';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("MapProcedureResolver");
-logger.setLevel("error"); // Production: Only log errors
+logger.setLevel("info"); // Enable logging to debug MAP INCLUDE
 
 export class MapProcedureResolver {
+    private scopeAnalyzer: ScopeAnalyzer;
+
+    constructor() {
+        const tokenCache = TokenCache.getInstance();
+        const solutionManager = SolutionManager.getInstance();
+        this.scopeAnalyzer = new ScopeAnalyzer(tokenCache, solutionManager);
+    }
+
     /**
      * Finds MAP procedure declaration for a PROCEDURE implementation
      * Searches for MapProcedure tokens or Function tokens inside MAP blocks
+     * NOW INCLUDES tokens from MAP INCLUDE files
      * Supports overload resolution based on parameter types
      * @param procName Procedure name
      * @param tokens Document tokens
@@ -31,6 +43,16 @@ export class MapProcedureResolver {
         implementationSignature?: string
     ): Location | null {
         logger.info(`Looking for MAP declaration for procedure: ${procName}`);
+        logger.info(`📊 Total tokens in document: ${tokens.length}`);
+
+        // Debug: Find any tokens with value 'MAP' regardless of type
+        const anyMapTokens = tokens.filter(t => t.value.toUpperCase() === 'MAP');
+        logger.info(`🔍 Found ${anyMapTokens.length} token(s) with value 'MAP' (any type)`);
+        if (anyMapTokens.length > 0) {
+            anyMapTokens.forEach((t, i) => {
+                logger.info(`   MAP token #${i + 1}: line ${t.line}, type=${t.type}, subType=${t.subType}, value="${t.value}"`);
+            });
+        }
 
         if (!tokens || tokens.length === 0) {
             logger.info(`No tokens available`);
@@ -42,6 +64,13 @@ export class MapProcedureResolver {
             t.type === TokenType.Structure && 
             t.value.toUpperCase() === 'MAP'
         );
+
+        logger.info(`📋 Found ${mapStructures.length} MAP structure(s) in document "${document.uri.split('/').pop()}"`);
+        if (mapStructures.length > 0) {
+            mapStructures.forEach((map, i) => {
+                logger.info(`   MAP #${i + 1}: line ${map.line}, finishesAt ${map.finishesAt}`);
+            });
+        }
 
         if (mapStructures.length === 0) {
             logger.info(`No MAP blocks found`);
@@ -58,10 +87,10 @@ export class MapProcedureResolver {
             
             if (mapEndLine === undefined) continue;
 
-            // Find all tokens between MAP and END
-            const tokensInMap = tokens.filter(t =>
-                t.line > mapStartLine && t.line < mapEndLine
-            );
+            // ✨ NEW: Get tokens from MAP including INCLUDEs using ScopeAnalyzer
+            logger.info(`🗺️ Searching MAP at line ${mapStartLine} (including INCLUDEs)...`);
+            const tokensInMap = this.scopeAnalyzer.getMapTokensWithIncludes(mapToken, document, tokens);
+            logger.info(`📋 Found ${tokensInMap.length} total tokens in MAP (with INCLUDEs)`);
 
             // Look for MapProcedure tokens or Function tokens matching our procedure name
             for (const t of tokensInMap) {
@@ -73,12 +102,38 @@ export class MapProcedureResolver {
                 
                 if (isMatch) {
                     // Get the full line as signature
-                    const content = document.getText();
-                    const lines = content.split('\n');
-                    const signature = lines[t.line].trim();
+                    // If token is from an INCLUDE, get content from the INCLUDE file
+                    let signature: string;
+                    let sourceUri: string;
+                    
+                    if (t.sourceFile && t.sourceContext?.isFromInclude) {
+                        // Token is from an INCLUDE file
+                        logger.info(`   Token found in INCLUDE file: ${t.sourceFile}`);
+                        sourceUri = 'file:///' + t.sourceFile.replace(/\\/g, '/');
+                        
+                        // Read the INCLUDE file to get the signature
+                        try {
+                            const fs = require('fs');
+                            const content = fs.readFileSync(t.sourceFile, 'utf8');
+                            const lines = content.split('\n');
+                            signature = lines[t.line]?.trim() || '';
+                        } catch (error) {
+                            logger.info(`   ⚠️ Could not read INCLUDE file: ${error}`);
+                            signature = t.value;
+                        }
+                    } else {
+                        // Token is from the current document
+                        sourceUri = document.uri;
+                        const content = document.getText();
+                        const lines = content.split('\n');
+                        signature = lines[t.line].trim();
+                    }
                     
                     candidates.push({ token: t, signature });
-                    logger.info(`Found MAP declaration candidate at line ${t.line}: ${signature}`);
+                    logger.info(`✅ Found MAP declaration candidate at line ${t.line}: ${signature}`);
+                    if (t.sourceFile) {
+                        logger.info(`   📁 Source: ${t.sourceFile}`);
+                    }
                 }
             }
         }
@@ -90,10 +145,19 @@ export class MapProcedureResolver {
 
         // If only one candidate, return it
         if (candidates.length === 1) {
-            logger.info(`Found single MAP declaration for ${procName} at line ${candidates[0].token.line}`);
-            return Location.create(document.uri, {
-                start: { line: candidates[0].token.line, character: 0 },
-                end: { line: candidates[0].token.line, character: candidates[0].token.value.length }
+            const candidate = candidates[0];
+            const targetUri = candidate.token.sourceFile && candidate.token.sourceContext?.isFromInclude
+                ? 'file:///' + candidate.token.sourceFile.replace(/\\/g, '/')
+                : document.uri;
+            
+            logger.info(`Found single MAP declaration for ${procName} at line ${candidate.token.line}`);
+            if (candidate.token.sourceFile) {
+                logger.info(`   📁 Location: ${targetUri}`);
+            }
+            
+            return Location.create(targetUri, {
+                start: { line: candidate.token.line, character: 0 },
+                end: { line: candidate.token.line, character: candidate.token.value.length }
             });
         }
 
@@ -110,8 +174,16 @@ export class MapProcedureResolver {
                 logger.info(`Declaration at line ${candidate.token.line} parameter types: [${declParams.join(', ')}]`);
                 
                 if (ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
+                    const targetUri = candidate.token.sourceFile && candidate.token.sourceContext?.isFromInclude
+                        ? 'file:///' + candidate.token.sourceFile.replace(/\\/g, '/')
+                        : document.uri;
+                    
                     logger.info(`✅ Found exact type match at line ${candidate.token.line}`);
-                    return Location.create(document.uri, {
+                    if (candidate.token.sourceFile) {
+                        logger.info(`   📁 Location: ${targetUri}`);
+                    }
+                    
+                    return Location.create(targetUri, {
                         start: { line: candidate.token.line, character: 0 },
                         end: { line: candidate.token.line, character: candidate.token.value.length }
                     });
@@ -123,8 +195,16 @@ export class MapProcedureResolver {
 
         // Fallback to first candidate
         const firstCandidate = candidates[0];
+        const targetUri = firstCandidate.token.sourceFile && firstCandidate.token.sourceContext?.isFromInclude
+            ? 'file:///' + firstCandidate.token.sourceFile.replace(/\\/g, '/')
+            : document.uri;
+        
         logger.info(`Returning first MAP declaration at line ${firstCandidate.token.line}`);
-        return Location.create(document.uri, {
+        if (firstCandidate.token.sourceFile) {
+            logger.info(`   📁 Location: ${targetUri}`);
+        }
+        
+        return Location.create(targetUri, {
             start: { line: firstCandidate.token.line, character: 0 },
             end: { line: firstCandidate.token.line, character: firstCandidate.token.value.length }
         });
@@ -192,48 +272,59 @@ export class MapProcedureResolver {
             return null;
         }
         
+        // Get all tokens from MAP including INCLUDEs to find MODULE references
+        const tokensInMap = this.scopeAnalyzer.getMapTokensWithIncludes(mapBlock, document, tokens);
+        logger.info(`   📋 Got ${tokensInMap.length} tokens from MAP (including INCLUDEs)`);
+        
         // Find the MODULE block that contains the current position
-        // MODULE blocks are Structure tokens with value='MODULE' or 'Module'
-        const moduleBlocks = tokens.filter(t =>
+        // When checking tokens from INCLUDE files, we need to look for MODULE tokens
+        // that might reference the implementation file
+        const moduleBlocks = tokensInMap.filter(t =>
             t.type === TokenType.Structure &&
-            t.value.toUpperCase() === 'MODULE' &&
-            t.line > mapBlock.line &&
-            t.line < (mapBlock.finishesAt || Infinity) &&
-            t.line < position.line &&  // MODULE must be before position
-            t.finishesAt !== undefined &&
-            t.finishesAt > position.line  // MODULE must extend past position
+            t.value.toUpperCase() === 'MODULE'
         );
         
-        // If position is inside a MODULE block, find the MODULE token with referencedFile
-        if (moduleBlocks.length > 0) {
-            const containingModule = moduleBlocks[0];
-            logger.info(`Position is inside MODULE block at line ${containingModule.line}`);
-            
-            // Find the MODULE keyword token (with referencedFile) on that line
-            const moduleToken = tokens.find(t =>
-                t.line === containingModule.line &&
+        logger.info(`   Found ${moduleBlocks.length} MODULE blocks in MAP`);
+        
+        // Look for MODULE with referencedFile that matches our procedure
+        for (const moduleBlock of moduleBlocks) {
+            // Find the MODULE keyword token (with referencedFile) 
+            const moduleTokens = tokensInMap.filter(t =>
+                t.line === moduleBlock.line &&
                 t.value.toUpperCase() === 'MODULE' &&
                 t.referencedFile
             );
             
-            if (moduleToken?.referencedFile) {
-                logger.info(`MAP contains MODULE('${moduleToken.referencedFile}'), searching external file`);
-                const externalImpl = await this.findImplementationInModuleFile(
-                    procName, 
-                    moduleToken.referencedFile,
-                    document,
-                    declarationSignature
+            if (moduleTokens.length > 0) {
+                const moduleToken = moduleTokens[0];
+                logger.info(`   MODULE('${moduleToken.referencedFile}') found at line ${moduleToken.line}`);
+                
+                // Check if the procedure we're looking for is declared within this MODULE block
+                const proceduresInModule = tokensInMap.filter(t =>
+                    t.line > moduleBlock.line &&
+                    t.line < (moduleBlock.finishesAt || Infinity) &&
+                    (t.subType === TokenType.MapProcedure || t.type === TokenType.Function) &&
+                    (t.label?.toLowerCase() === procName.toLowerCase() || 
+                     t.value.toLowerCase() === procName.toLowerCase())
                 );
-                if (externalImpl) {
-                    return externalImpl;
+                
+                if (proceduresInModule.length > 0) {
+                    logger.info(`   Found procedure ${procName} in MODULE block, searching external file`);
+                    const externalImpl = await this.findImplementationInModuleFile(
+                        procName, 
+                        moduleToken.referencedFile,
+                        document,
+                        declarationSignature
+                    );
+                    if (externalImpl) {
+                        return externalImpl;
+                    }
+                    logger.info(`   No implementation found in MODULE file`);
                 }
-                logger.info(`No implementation found in MODULE file, searching current file`);
-            } else {
-                logger.info(`MODULE block found but no referencedFile (probably Windows API)`);
             }
-        } else {
-            logger.info(`Position not inside any MODULE block, procedure is in MAP without MODULE`);
         }
+        
+        logger.info(`   No MODULE reference found for procedure, searching current file`);
 
         // Find all GlobalProcedure implementations with matching name in current file
         const candidates: Array<{ token: Token, signature: string }> = [];

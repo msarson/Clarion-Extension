@@ -27,6 +27,7 @@
 !═══════════════════════════════════════════════════════════════════════
 
           MAP
+          INCLUDE('startproc.inc'),ONCE  ! Standard start procedure
           END
 
 
@@ -41,5 +42,6 @@ IncrementCounter PROCEDURE
 GetCounter PROCEDURE
 Counter LONG
   CODE
+  StartProc(1)              ! Standard start procedure call
   Counter = GlobalCounter  ! TEST 1: F12 here should also jump to main.clw line 67
   RETURN Counter

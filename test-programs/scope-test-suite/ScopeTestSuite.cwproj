@@ -1,4 +1,5 @@
-﻿<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <ProjectGuid>{8B8D458E-C672-4EA6-B6DC-B9645FAE5E5B}</ProjectGuid>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
@@ -23,8 +24,11 @@
     <check_index>False</check_index>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="main.clw" />
-    <Compile Include="utils.clw" />
+    <Compile Include="main.clw"/>
+    <Compile Include="utils.clw"/>
+    <Compile Include="StartProc.clw">
+      <Generated>true</Generated>
+    </Compile>
   </ItemGroup>
-  <Import Project="$(ClarionBinPath)\SoftVelocity.Build.Clarion.targets" />
+  <Import Project="$(ClarionBinPath)\SoftVelocity.Build.Clarion.targets"/>
 </Project>
