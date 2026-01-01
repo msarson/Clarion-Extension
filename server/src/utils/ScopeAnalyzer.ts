@@ -634,10 +634,16 @@ export class ScopeAnalyzer {
             if (tokens) {
                 logger.info(`         ✅ Tokenized file: ${tokens.length} tokens`);
                 
+                // Process tokens through DocumentStructure to set referencedFile on MODULE/INCLUDE/LINK tokens
+                // This is critical for MODULE resolution to work from INCLUDE files
+                const DocumentStructure = require('../DocumentStructure').DocumentStructure;
+                const docStructure = new DocumentStructure(tokens);
+                logger.info(`         ✅ Processed tokens through DocumentStructure to set referencedFile properties`);
+                
                 // Log first few tokens for debugging
                 const firstFew = tokens.slice(0, 5);
                 firstFew.forEach((t, i) => {
-                    logger.info(`            Token ${i}: type=${t.type}, subType=${t.subType}, value="${t.value}", line=${t.line}`);
+                    logger.info(`            Token ${i}: type=${t.type}, subType=${t.subType}, value="${t.value}", line=${t.line}${t.referencedFile ? `, referencedFile="${t.referencedFile}"` : ''}`);
                 });
             } else {
                 logger.info(`         ❌ Tokenization returned null`);

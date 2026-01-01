@@ -329,5 +329,39 @@ CODE
             
             assert.ok(result, 'Should provide hover for StartProc from MAP INCLUDE');
         });
+
+        test('Ctrl+F12 on StartProc declaration in startproc.inc should find implementation', async () => {
+            // Load the INCLUDE file
+            const startprocContent = fs.readFileSync(startprocIncPath, 'utf-8');
+            const startprocDoc = TextDocument.create(`file:///${startprocIncPath.replace(/\\/g, '/')}`, 'clarion', 1, startprocContent);
+            
+            // Pre-cache the document
+            tokenCache.getTokens(startprocDoc);
+            
+            // Find line with "StartProc PROCEDURE" declaration
+            const lines = startprocContent.split('\n');
+            let declLine = -1;
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].includes('StartProc') && lines[i].includes('PROCEDURE')) {
+                    declLine = i;
+                    break;
+                }
+            }
+            
+            assert.ok(declLine >= 0, 'Should find StartProc PROCEDURE declaration in startproc.inc');
+            
+            const position: Position = { line: declLine, character: lines[declLine].indexOf('StartProc') + 2 };
+            const result = await implementationProvider.provideImplementation(startprocDoc, position);
+            
+            if (result) {
+                const locations = Array.isArray(result) ? result : [result];
+                console.log('✅ Implementation found at:', locations[0].uri);
+                assert.ok(locations[0].uri.toUpperCase().includes('STARTPROC.CLW'), 'Should find implementation in StartProc.clw');
+            } else {
+                console.log('❌ Implementation not found - MODULE resolution from INCLUDE not working');
+            }
+            
+            assert.ok(result, 'Should find implementation via MODULE reference in INCLUDE file');
+        });
     });
 });

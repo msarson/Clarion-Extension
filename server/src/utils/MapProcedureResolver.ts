@@ -254,8 +254,62 @@ export class MapProcedureResolver {
         // Check if position is inside a MAP block using DocumentStructure
         // Use provided structure or create new one (for tests)
         const docStructure = documentStructure || new DocumentStructure(tokens);
-        if (!docStructure.isInMapBlock(position.line)) {
-            logger.info(`Position ${position.line} is not inside a MAP block`);
+        
+        // Special case: If the document is an INCLUDE file (has MODULE at top level without MAP)
+        // and position is on a procedure declaration, find implementation via MODULE
+        const isIncludeFile = !docStructure.isInMapBlock(position.line);
+        
+        if (isIncludeFile) {
+            logger.info(`Position ${position.line} is not inside a MAP block - checking if this is an INCLUDE file`);
+            
+            // Look for MODULE blocks in this file
+            const moduleBlocks = tokens.filter(t =>
+                t.type === TokenType.Structure &&
+                t.value.toUpperCase() === 'MODULE' &&
+                t.referencedFile
+            );
+            
+            if (moduleBlocks.length > 0) {
+                logger.info(`   Found ${moduleBlocks.length} MODULE block(s) with referencedFile in this file`);
+                
+                // Check if the position is within any MODULE block (position could be on declaration inside MODULE)
+                for (const moduleBlock of moduleBlocks) {
+                    const moduleToken = moduleBlock;
+                    logger.info(`   Checking MODULE('${moduleToken.referencedFile}') at line ${moduleToken.line}, finishesAt ${moduleToken.finishesAt}`);
+                    
+                    // Check if position is within this MODULE block
+                    if (position.line >= moduleToken.line && 
+                        moduleToken.finishesAt !== undefined && 
+                        position.line <= moduleToken.finishesAt) {
+                        
+                        logger.info(`   Position ${position.line} is within MODULE block - this is an INCLUDE file`);
+                        
+                        // Find if the position is on a procedure declaration in this MODULE block
+                        const procAtPosition = tokens.find(t =>
+                            t.line === position.line &&
+                            (t.subType === TokenType.MapProcedure || t.type === TokenType.Function) &&
+                            (t.label?.toLowerCase() === procName.toLowerCase() || 
+                             t.value.toLowerCase() === procName.toLowerCase())
+                        );
+                        
+                        if (procAtPosition && moduleToken.referencedFile) {
+                            logger.info(`   Position is on procedure declaration ${procName}, searching in MODULE file ${moduleToken.referencedFile}`);
+                            const externalImpl = await this.findImplementationInModuleFile(
+                                procName,
+                                moduleToken.referencedFile,
+                                document,
+                                declarationSignature
+                            );
+                            if (externalImpl) {
+                                return externalImpl;
+                            }
+                            logger.info(`   No implementation found in MODULE file`);
+                        }
+                    }
+                }
+            }
+            
+            logger.info(`Position ${position.line} is not inside a MAP block and not a MODULE INCLUDE file`);
             return null;
         }
 

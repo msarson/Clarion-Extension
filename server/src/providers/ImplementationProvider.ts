@@ -95,7 +95,11 @@ export class ImplementationProvider {
         }
 
         // 3. Check if this is a MAP procedure declaration (inside MAP block)
-        if (documentStructure.isInMapBlock(position.line)) {
+        // OR a MODULE procedure declaration (inside MODULE block in INCLUDE file)
+        const isInMap = documentStructure.isInMapBlock(position.line);
+        const isInModule = !isInMap && this.isInModuleBlock(position.line, tokens);
+        
+        if (isInMap || isInModule) {
             const mapProcMatch = line.match(/^\s*(\w+)\s*(?:PROCEDURE\s*)?\(/i);
             if (mapProcMatch) {
                 const procName = mapProcMatch[1];
@@ -104,7 +108,7 @@ export class ImplementationProvider {
 
                 // Check if cursor is on the procedure name
                 if (position.character >= procNameStart && position.character <= procNameEnd) {
-                    logger.info(`Found MAP procedure declaration: ${procName}`);
+                    logger.info(`Found ${isInMap ? 'MAP' : 'MODULE'} procedure declaration: ${procName}`);
                     
                     // Use MapProcedureResolver for overload resolution
                     const implLocation = await this.mapResolver.findProcedureImplementation(
@@ -211,6 +215,20 @@ export class ImplementationProvider {
         }
 
         return null;
+    }
+
+    /**
+     * Check if a line is inside a MODULE block
+     */
+    private isInModuleBlock(line: number, tokens: Token[]): boolean {
+        const moduleBlocks = tokens.filter(t =>
+            t.type === TokenType.Structure &&
+            t.value.toUpperCase() === 'MODULE' &&
+            t.line <= line &&
+            t.finishesAt !== undefined &&
+            t.finishesAt >= line
+        );
+        return moduleBlocks.length > 0;
     }
 
     /**
