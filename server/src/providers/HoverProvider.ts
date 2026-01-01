@@ -18,6 +18,8 @@ import { DataTypeService } from '../utils/DataTypeService';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { SolutionManager } from '../solution/solutionManager';
 import { HoverFormatter } from './hover/HoverFormatter';
+import { ContextualHoverHandler } from './hover/ContextualHoverHandler';
+import { SymbolHoverResolver } from './hover/SymbolHoverResolver';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -39,11 +41,15 @@ export class HoverProvider {
     private dataTypeService = DataTypeService.getInstance();
     private scopeAnalyzer: ScopeAnalyzer;
     private formatter: HoverFormatter;
+    private contextHandler: ContextualHoverHandler;
+    private symbolResolver: SymbolHoverResolver;
 
     constructor() {
         const solutionManager = SolutionManager.getInstance();
         this.scopeAnalyzer = new ScopeAnalyzer(this.tokenCache, solutionManager);
         this.formatter = new HoverFormatter(this.scopeAnalyzer);
+        this.contextHandler = new ContextualHoverHandler(this.builtinService, this.attributeService);
+        this.symbolResolver = new SymbolHoverResolver(this.dataTypeService, this.controlService);
     }
 
     /**
@@ -101,184 +107,27 @@ export class HoverProvider {
 
             // Handle MODULE keyword specially (can be keyword in MAP or attribute on CLASS)
             if (word.toUpperCase() === 'MODULE') {
-                if (isInMapBlock) {
-                    // MODULE in MAP context - it's a builtin keyword
-                    const signatures = this.builtinService.getSignatures('MODULE');
-                    if (signatures.length > 0) {
-                        const sig = signatures[0];
-                        // Extract documentation value (could be string or MarkupContent object)
-                        const docText = typeof sig.documentation === 'string' 
-                            ? sig.documentation 
-                            : (sig.documentation as any)?.value || '';
-                        const formattedDoc = `**MODULE** (Keyword)\n\n${docText}\n\n**Syntax:** \`${sig.label}\``;
-                        return {
-                            contents: {
-                                kind: 'markdown',
-                                value: formattedDoc
-                            }
-                        };
-                    }
-                } else {
-                    // MODULE outside MAP - it's likely a CLASS attribute
-                    if (this.attributeService.isAttribute(word)) {
-                        const attribute = this.attributeService.getAttribute(word);
-                        if (attribute) {
-                            const formattedDoc = `**${word}** (Attribute)\n\n${attribute.description}\n\n**Applies to:** ${attribute.applicableTo.join(', ')}`;
-                            return {
-                                contents: {
-                                    kind: 'markdown',
-                                    value: formattedDoc
-                                }
-                            };
-                        }
-                    }
-                }
+                const moduleHover = this.contextHandler.handleModuleKeyword(isInMapBlock);
+                if (moduleHover) return moduleHover;
             }
 
             // Handle TO keyword specially (can be in LOOP or CASE structure)
             if (word.toUpperCase() === 'TO') {
-                // Search backwards and on current line for LOOP, CASE, or OF keywords
-                let foundLoop = false;
-                let foundCaseOf = false;
-                
-                // Check current line first for OF (CASE OF...TO pattern)
-                const currentLineText = line.toUpperCase();
-                if (currentLineText.includes('OF') && currentLineText.includes('TO')) {
-                    foundCaseOf = true;
-                }
-                
-                // If not found on current line, search backwards
-                if (!foundCaseOf) {
-                    for (let searchLine = position.line; searchLine >= Math.max(0, position.line - 50); searchLine--) {
-                        const searchLineTokens = allTokens.filter(t => t.line === searchLine);
-                        
-                        // Look for LOOP, CASE, OF, or END keywords
-                        for (const token of searchLineTokens) {
-                            const upperValue = token.value.toUpperCase();
-                            if (upperValue === 'LOOP' && token.type === TokenType.Keyword) {
-                                foundLoop = true;
-                                break;
-                            } else if ((upperValue === 'OF' || upperValue === 'OROF') && token.type === TokenType.Keyword) {
-                                foundCaseOf = true;
-                                break;
-                            } else if (upperValue === 'END' && token.type === TokenType.EndStatement) {
-                                // Hit an END, stop searching (structure ended)
-                                break;
-                            }
-                        }
-                        
-                        if (foundLoop || foundCaseOf) break;
-                    }
-                }
-                
-                // Provide context-specific documentation
-                if (foundLoop) {
-                    return {
-                        contents: {
-                            kind: 'markdown',
-                            value: `**TO** (Keyword - in LOOP structure)\n\n**Syntax:** \`i = initial TO limit [BY step]\`\n\nSpecifies the terminating value in a LOOP iteration. When counter exceeds limit (or is less than, if step is negative), loop terminates. The limit expression is evaluated once at loop start.`
-                        }
-                    };
-                } else if (foundCaseOf) {
-                    return {
-                        contents: {
-                            kind: 'markdown',
-                            value: `**TO** (Keyword - in CASE structure)\n\n**Syntax:** \`OF expression TO expression\`\n\nAllows a range of values in an OF or OROF statement. Statements execute if the CASE condition falls within the inclusive range specified. Both expressions are evaluated even if the condition is less than the lower boundary.`
-                        }
-                    };
-                }
-                // If context unclear, fall through to show generic TO documentation
+                const toHover = this.contextHandler.handleToKeyword(allTokens, position, line);
+                if (toHover) return toHover;
             }
 
             // Handle ELSE keyword specially (can be in IF or CASE structure)
             if (word.toUpperCase() === 'ELSE') {
-                // Search backwards for CASE or IF keyword to determine context
-                let foundCase = false;
-                let foundIf = false;
-                
-                for (let searchLine = position.line - 1; searchLine >= Math.max(0, position.line - 50); searchLine--) {
-                    const searchLineTokens = allTokens.filter(t => t.line === searchLine);
-                    
-                    // Look for CASE, IF, or END keywords
-                    for (const token of searchLineTokens) {
-                        const upperValue = token.value.toUpperCase();
-                        if (upperValue === 'CASE' && token.type === TokenType.Keyword) {
-                            foundCase = true;
-                            break;
-                        } else if (upperValue === 'IF' && token.type === TokenType.Keyword) {
-                            foundIf = true;
-                            break;
-                        } else if (upperValue === 'END' && token.type === TokenType.EndStatement) {
-                            // Hit an END, stop searching (structure ended)
-                            break;
-                        }
-                    }
-                    
-                    if (foundCase || foundIf) break;
-                }
-                
-                // Provide context-specific documentation
-                if (foundCase) {
-                    return {
-                        contents: {
-                            kind: 'markdown',
-                            value: `**ELSE** (Keyword - in CASE structure)\n\nStatements following ELSE execute when all preceding OF and OROF options have been evaluated as not equivalent. ELSE is optional but must be last option in CASE structure if used.`
-                        }
-                    };
-                } else if (foundIf) {
-                    return {
-                        contents: {
-                            kind: 'markdown',
-                            value: `**ELSE** (Keyword - in IF structure)\n\nStatements following ELSE execute when all preceding IF and ELSIF conditions evaluate as false. ELSE is optional but must be last option in IF structure if used.`
-                        }
-                    };
-                }
-                // If context unclear, show generic ELSE documentation
+                const elseHover = this.contextHandler.handleElseKeyword(allTokens, position);
+                if (elseHover) return elseHover;
             }
 
             // Handle PROCEDURE keyword specially (different contexts: MAP prototype, CLASS method, implementation)
             if (word.toUpperCase() === 'PROCEDURE') {
                 const isInClass = documentStructure.isInClassBlock(position.line);
-                
-                // Check if this looks like an implementation (has label before PROCEDURE on same line)
-                const isImplementation = line.trim().match(/^\w+(\.\w+)?\s+PROCEDURE/i) !== null;
-                
-                if (isImplementation) {
-                    // This is a procedure implementation
-                    const hasClassPrefix = line.includes('.');
-                    if (hasClassPrefix) {
-                        return {
-                            contents: {
-                                kind: 'markdown',
-                                value: `**PROCEDURE** (CLASS Method Implementation)\n\n**Syntax:** \`ClassName.MethodName PROCEDURE[(params)]\`\n\nDefines the implementation of a CLASS method. Must match a prototype declared in the CLASS definition.\n\n\`\`\`clarion\nMyClass.MyMethod PROCEDURE(LONG param)\n  CODE\n  ! implementation\n  RETURN\n\`\`\``
-                            }
-                        };
-                    } else {
-                        return {
-                            contents: {
-                                kind: 'markdown',
-                                value: `**PROCEDURE** (Implementation)\n\n**Syntax:** \`ProcName PROCEDURE[(params)]\`\n\nDefines a procedure implementation. Must match a prototype declared in MAP.\n\n\`\`\`clarion\nMyProc PROCEDURE(LONG param)\n  CODE\n  ! implementation\n  RETURN\n\`\`\``
-                            }
-                        };
-                    }
-                } else if (isInMapBlock) {
-                    // This is a MAP prototype
-                    return {
-                        contents: {
-                            kind: 'markdown',
-                            value: `**PROCEDURE** (MAP Prototype)\n\n**Syntax:** \`ProcName PROCEDURE[(params)] [,returnType] [,attributes]\`\n\nDeclares a procedure prototype in MAP block. Specifies the procedure signature, optional return type, and calling conventions.\n\n\`\`\`clarion\nMAP\n  MyProc PROCEDURE(LONG),STRING  ! Returns STRING\n  WinAPI PROCEDURE(*CSTRING),LONG,PASCAL,RAW\nEND\n\`\`\``
-                        }
-                    };
-                } else if (isInClass) {
-                    // This is a CLASS method prototype
-                    return {
-                        contents: {
-                            kind: 'markdown',
-                            value: `**PROCEDURE** (CLASS Method Prototype)\n\n**Syntax:** \`MethodName PROCEDURE[(params)] [,returnType] [,attributes]\`\n\nDeclares a CLASS method prototype. Can include VIRTUAL, PRIVATE, PROTECTED attributes.\n\n\`\`\`clarion\nMyClass CLASS\n  MyMethod PROCEDURE(LONG),STRING,VIRTUAL\n  Init     PROCEDURE(),PROTECTED\nEND\n\`\`\``
-                        }
-                    };
-                }
-                // Fall through to generic PROCEDURE documentation
+                const procedureHover = this.contextHandler.handleProcedureKeyword(line, isInMapBlock, isInClass);
+                if (procedureHover) return procedureHover;
             }
 
             // Check if this is a procedure call (e.g., "MyProcedure()")
@@ -310,68 +159,12 @@ export class HoverProvider {
                 }
             }
 
-            // Decide priority: data type vs control based on context
-            const checkDataTypeFirst = hasLabelBefore || !isInWindowContext;
-
-            if (checkDataTypeFirst) {
-                // Data declaration context - check data type first
-                if (this.dataTypeService.hasDataType(word)) {
-                    logger.info(`Found Clarion data type: ${word}`);
-                    const dataType = this.dataTypeService.getDataType(word);
-                    if (dataType) {
-                        const formattedDoc = this.dataTypeService.getFormattedDescription(dataType);
-                        return {
-                            contents: {
-                                kind: 'markdown',
-                                value: formattedDoc
-                            }
-                        };
-                    }
-                }
-                
-                // Then check control as fallback
-                if (this.controlService.isControl(word)) {
-                    logger.info(`Found Clarion control: ${word}`);
-                    const controlDoc = this.controlService.getControlDocumentation(word);
-                    if (controlDoc) {
-                        return {
-                            contents: {
-                                kind: 'markdown',
-                                value: controlDoc
-                            }
-                        };
-                    }
-                }
-            } else {
-                // Window/control context - check control first
-                if (this.controlService.isControl(word)) {
-                    logger.info(`Found Clarion control: ${word}`);
-                    const controlDoc = this.controlService.getControlDocumentation(word);
-                    if (controlDoc) {
-                        return {
-                            contents: {
-                                kind: 'markdown',
-                                value: controlDoc
-                            }
-                        };
-                    }
-                }
-                
-                // Then check data type as fallback
-                if (this.dataTypeService.hasDataType(word)) {
-                    logger.info(`Found Clarion data type: ${word}`);
-                    const dataType = this.dataTypeService.getDataType(word);
-                    if (dataType) {
-                        const formattedDoc = this.dataTypeService.getFormattedDescription(dataType);
-                        return {
-                            contents: {
-                                kind: 'markdown',
-                                value: formattedDoc
-                            }
-                        };
-                    }
-                }
-            }
+            // Check for data types and controls using context-aware resolver
+            const symbolHover = this.symbolResolver.resolve(word, {
+                hasLabelBefore,
+                isInWindowContext
+            });
+            if (symbolHover) return symbolHover;
 
             // Check if this word is a Clarion attribute
             if (this.attributeService.isAttribute(word)) {
