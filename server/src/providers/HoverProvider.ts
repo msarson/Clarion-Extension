@@ -910,6 +910,8 @@ export class HoverProvider {
                 // Find the type by looking at the next token
                 const moduleIndex = tokens.indexOf(moduleVar);
                 let typeInfo = 'UNKNOWN';
+                let isStructureDefinition = false;
+                
                 if (moduleIndex + 1 < tokens.length) {
                     const nextToken = tokens[moduleIndex + 1];
                     if (nextToken.line === moduleVar.line) {
@@ -920,6 +922,7 @@ export class HoverProvider {
                         // Check if it's a CLASS/GROUP/QUEUE declaration
                         else if (nextToken.type === TokenType.Structure) {
                             typeInfo = nextToken.value.toUpperCase(); // CLASS, GROUP, QUEUE, etc.
+                            isStructureDefinition = true; // This IS the definition
                         }
                     }
                 }
@@ -928,12 +931,21 @@ export class HoverProvider {
                 const modulePos: Position = { line: moduleVar.line, character: 0 };
                 const scopeInfo = this.scopeAnalyzer.getTokenScope(document, modulePos);
                 
+                // Choose appropriate title based on whether this is a structure definition
+                const title = isStructureDefinition 
+                    ? `**Module-Local ${typeInfo}:** \`${moduleVar.value}\``
+                    : `**Module-Local Variable:** \`${moduleVar.value}\``;
+                
                 const markdown = [
-                    `**Module-Local Variable:** \`${moduleVar.value}\``,
-                    ``,
-                    `**Type:** \`${typeInfo}\``,
+                    title,
                     ``
                 ];
+                
+                // Only show "Type:" for regular variables, not structure definitions
+                if (!isStructureDefinition) {
+                    markdown.push(`**Type:** \`${typeInfo}\``);
+                    markdown.push(``);
+                }
                 
                 if (scopeInfo) {
                     const scopeIcon = '📦';
@@ -946,9 +958,7 @@ export class HoverProvider {
                 // Show file and line info similar to procedures
                 const fileName = path.basename(document.uri.replace('file:///', ''));
                 const lineNumber = moduleVar.line + 1; // Convert to 1-based
-                markdown.push(`**Declared in** \`${fileName}\` @ line ${lineNumber}`);
-                markdown.push(``);
-                markdown.push(`*Press F12 to go to declaration*`);
+                markdown.push(`**Defined in** \`${fileName}\` @ line ${lineNumber}`);
                 
                 return {
                     contents: {
