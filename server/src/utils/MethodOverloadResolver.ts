@@ -1,6 +1,7 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { SolutionManager } from '../solution/solutionManager';
+import { ClarionPatterns } from './ClarionPatterns';
 import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../logger';
@@ -63,25 +64,33 @@ export class MethodOverloadResolver {
             if (labelToken) {
                 logger.info(`Found class ${className} at line ${labelToken.line}`);
                 
-                // Search for all method overloads in class
-                for (let i = labelToken.line + 1; i < tokens.length; i++) {
-                    const lineTokens = tokens.filter(t => t.line === i);
-                    const endToken = lineTokens.find(t => t.value.toUpperCase() === 'END' && t.start === 0);
-                    if (endToken) break;
+                // Get file content once
+                const content = document.getText();
+                const lines = content.split('\n');
+                
+                // Search for all method overloads in class by iterating through tokens
+                // This is O(n) instead of O(n²) with repeated filter calls
+                for (const token of tokens) {
+                    // Only process tokens after the class start
+                    if (token.line <= labelToken.line) continue;
                     
-                    const methodToken = lineTokens.find(t =>
-                        t.value.toLowerCase() === methodName.toLowerCase() &&
-                        t.start === 0
-                    );
+                    // Stop at END token at column 0
+                    if (token.type === TokenType.Keyword && 
+                        token.value.toUpperCase() === 'END' && 
+                        token.start === 0) {
+                        break;
+                    }
                     
-                    if (methodToken) {
-                        // Get the full line as signature
-                        const content = document.getText();
-                        const lines = content.split('\n');
+                    // Check if this is a method declaration at start of line
+                    if (token.type === TokenType.Label &&
+                        token.value.toLowerCase() === methodName.toLowerCase() &&
+                        token.start === 0) {
+                        
+                        const i = token.line;
                         const signature = lines[i].trim();
                         
-                        // Count parameters in the declaration
-                        const declParamCount = this.countParametersInDeclaration(signature);
+                        // Count parameters in the declaration using centralized method
+                        const declParamCount = ClarionPatterns.countParameters(signature);
                         
                         candidates.push({
                             signature,
@@ -182,7 +191,7 @@ export class MethodOverloadResolver {
                             const methodMatch = methodLine.match(new RegExp(`^\\s*(${methodName})\\s+PROCEDURE`, 'i'));
                             if (methodMatch) {
                                 const signature = methodLine.trim();
-                                const declParamCount = this.countParametersInDeclaration(signature);
+                                const declParamCount = ClarionPatterns.countParameters(signature);
                                 const fileUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
                                 
                                 candidates.push({
@@ -376,34 +385,11 @@ export class MethodOverloadResolver {
      * Extracts parameter list from PROCEDURE(...) 
      * Handles omittable parameters like <LONG SomeVar> and default values LONG SomeVar=1
      */
+    /**
+     * Counts parameters in a procedure declaration
+     * @deprecated Use ClarionPatterns.countParameters() instead
+     */
     public countParametersInDeclaration(line: string): number {
-        const match = line.match(/PROCEDURE\s*\(([^)]*)\)/i);
-        if (!match) return 0;
-        
-        const paramList = match[1].trim();
-        if (paramList === '') return 0;
-        
-        // Count commas at depth 0, accounting for nested parentheses
-        let depth = 0;
-        let commaCount = 0;
-        let angleDepth = 0; // For omittable parameters <LONG Var>
-        
-        for (let i = 0; i < paramList.length; i++) {
-            const char = paramList[i];
-            
-            if (char === '(') {
-                depth++;
-            } else if (char === ')') {
-                depth--;
-            } else if (char === '<') {
-                angleDepth++;
-            } else if (char === '>') {
-                angleDepth--;
-            } else if (char === ',' && depth === 0 && angleDepth === 0) {
-                commaCount++;
-            }
-        }
-        
-        return commaCount + 1;
+        return ClarionPatterns.countParameters(line);
     }
 }

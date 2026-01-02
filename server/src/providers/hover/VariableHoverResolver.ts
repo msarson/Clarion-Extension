@@ -70,22 +70,41 @@ export class VariableHoverResolver {
             
             const moduleIndex = tokens.indexOf(moduleVar);
             let typeInfo = 'UNKNOWN';
+            let isStructureDefinition = false;
+            
             if (moduleIndex + 1 < tokens.length) {
                 const nextToken = tokens[moduleIndex + 1];
-                if (nextToken.line === moduleVar.line && nextToken.type === TokenType.Type) {
-                    typeInfo = nextToken.value;
+                if (nextToken.line === moduleVar.line) {
+                    // Check if it's a regular type token
+                    if (nextToken.type === TokenType.Type) {
+                        typeInfo = nextToken.value;
+                    }
+                    // Check if it's a CLASS/GROUP/QUEUE declaration
+                    else if (nextToken.type === TokenType.Structure) {
+                        typeInfo = nextToken.value.toUpperCase(); // CLASS, GROUP, QUEUE, etc.
+                        isStructureDefinition = true; // This IS the definition
+                    }
                 }
             }
             
             const modulePos: Position = { line: moduleVar.line, character: 0 };
             const scopeInfo = this.scopeAnalyzer.getTokenScope(document, modulePos);
             
+            // Choose appropriate title based on whether this is a structure definition
+            const title = isStructureDefinition 
+                ? `**Module-Local ${typeInfo}:** \`${moduleVar.value}\``
+                : `**Module-Local Variable:** \`${moduleVar.value}\``;
+            
             const markdown = [
-                `**Module-Local Variable:** \`${moduleVar.value}\``,
-                ``,
-                `**Type:** \`${typeInfo}\``,
+                title,
                 ``
             ];
+            
+            // Only show "Type:" for regular variables, not structure definitions
+            if (!isStructureDefinition) {
+                markdown.push(`**Type:** \`${typeInfo}\``);
+                markdown.push(``);
+            }
             
             if (scopeInfo) {
                 const scopeIcon = '📦';
@@ -97,9 +116,7 @@ export class VariableHoverResolver {
             
             const fileName = path.basename(document.uri.replace('file:///', ''));
             const lineNumber = moduleVar.line + 1;
-            markdown.push(`**Declared in** \`${fileName}\` @ line ${lineNumber}`);
-            markdown.push(``);
-            markdown.push(`*Press F12 to go to declaration*`);
+            markdown.push(`**Defined in** \`${fileName}\` @ line ${lineNumber}`);
             
             return {
                 contents: {
@@ -304,8 +321,12 @@ export class VariableHoverResolver {
         let typeInfo = 'UNKNOWN';
         if (globalIndex + 1 < tokens.length) {
             const nextToken = tokens[globalIndex + 1];
-            if (nextToken.line === globalVar.line && nextToken.type === TokenType.Type) {
-                typeInfo = nextToken.value;
+            if (nextToken.line === globalVar.line) {
+                if (nextToken.type === TokenType.Type) {
+                    typeInfo = nextToken.value;
+                } else if (nextToken.type === TokenType.Structure) {
+                    typeInfo = nextToken.value.toUpperCase();
+                }
             }
         }
         

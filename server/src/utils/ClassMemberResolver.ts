@@ -97,30 +97,42 @@ export class ClassMemberResolver {
                 // Collect all matching members (for overload resolution)
                 const candidates: { type: string; line: number; paramCount: number }[] = [];
                 
-                // Search for member in this class
-                for (let i = labelToken.line + 1; i < tokens.length; i++) {
-                    const lineTokens = tokens.filter(t => t.line === i);
-                    const endToken = lineTokens.find(t => t.value.toUpperCase() === 'END' && t.start === 0);
-                    if (endToken) break;
+                // Get file content once
+                const content = document.getText();
+                const lines = content.split('\n');
+                
+                // Search for member in this class by iterating through tokens
+                // This is O(n) instead of O(n²) with repeated filter calls
+                for (const token of tokens) {
+                    // Only process tokens after the class start
+                    if (token.line <= labelToken.line) continue;
                     
-                    const memberToken = lineTokens.find(t => 
-                        t.value.toLowerCase() === memberName.toLowerCase() && 
-                        t.start === 0
-                    );
+                    // Stop at END token at column 0
+                    if (token.type === TokenType.Keyword &&
+                        token.value.toUpperCase() === 'END' && 
+                        token.start === 0) {
+                        break;
+                    }
                     
-                    if (memberToken) {
+                    // Check if this is a member at start of line
+                    if (token.type === TokenType.Label &&
+                        token.value.toLowerCase() === memberName.toLowerCase() && 
+                        token.start === 0) {
+                        
+                        const i = token.line;
                         logger.info(`Found member ${memberName} at line ${i} in current file`);
                         
-                        // Get the type signature
-                        const memberEnd = memberToken.start + memberToken.value.length;
-                        const typeTokens = lineTokens.filter(t => t.start > memberEnd);
-                        const type = typeTokens.length > 0 ? typeTokens[0].value : 'Unknown';
+                        // Get the type signature - find the next token on the same line
+                        const memberEnd = token.start + token.value.length;
+                        const typeToken = tokens.find(t => 
+                            t.line === i && 
+                            t.start > memberEnd
+                        );
+                        const type = typeToken ? typeToken.value : 'Unknown';
                         
                         // Count parameters in declaration if it's a PROCEDURE
                         let declParamCount = 0;
                         if (type.toUpperCase() === 'PROCEDURE') {
-                            const content = document.getText();
-                            const lines = content.split('\n');
                             const fullLine = lines[i];
                             declParamCount = this.countParametersInDeclaration(fullLine);
                         }

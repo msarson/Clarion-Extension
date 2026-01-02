@@ -78,22 +78,37 @@ export class HoverFormatter {
             const detailedScope = this.scopeAnalyzer.getTokenScope(document, position);
             
             if (detailedScope) {
+                // Check if this is a method (procedure with ClassName.MethodName pattern)
+                const procedureName = detailedScope.containingProcedure?.label || detailedScope.containingProcedure?.value;
+                const isMethod = procedureName?.includes('.');
+                
                 const scopeIcon = detailedScope.type === 'routine' ? '🔐' : 
                                   detailedScope.type === 'procedure' ? '🔒' : 
                                   detailedScope.type === 'module' ? '📦' : '🌍';
                 
-                scopeInfo = `**Scope:** ${scopeIcon} ${detailedScope.type.charAt(0).toUpperCase() + detailedScope.type.slice(1)}`;
+                // Use "Method" instead of "Procedure" for methods
+                let scopeTypeLabel = detailedScope.type.charAt(0).toUpperCase() + detailedScope.type.slice(1);
+                if (detailedScope.type === 'procedure' && isMethod) {
+                    scopeTypeLabel = 'Method';
+                }
+                
+                scopeInfo = `**Scope:** ${scopeIcon} ${scopeTypeLabel}`;
                 
                 if (detailedScope.type === 'routine' && detailedScope.containingRoutine) {
-                    scopeInfo += ` (${detailedScope.containingRoutine.value})`;
+                    const routineName = detailedScope.containingRoutine.label || detailedScope.containingRoutine.value;
+                    scopeInfo += ` (${routineName})`;
                 } else if (detailedScope.type === 'procedure' && detailedScope.containingProcedure) {
-                    scopeInfo += ` (${detailedScope.containingProcedure.value})`;
+                    scopeInfo += ` (${procedureName})`;
                 }
                 
                 if (detailedScope.type === 'routine') {
                     visibilityInfo = `**Visibility:** Only visible within this routine`;
                 } else if (detailedScope.type === 'procedure') {
-                    visibilityInfo = `**Visibility:** Visible throughout this procedure and its routines`;
+                    if (isMethod) {
+                        visibilityInfo = `**Visibility:** Visible throughout this method and its routines`;
+                    } else {
+                        visibilityInfo = `**Visibility:** Visible throughout this procedure and its routines`;
+                    }
                 } else if (detailedScope.type === 'module') {
                     visibilityInfo = `**Visibility:** Visible only within this file (module-local)`;
                 } else {
@@ -183,7 +198,99 @@ export class HoverFormatter {
                 markdown.push(`*Press F12 to go to definition*`);
             }
         }
+
+        return {
+            contents: {
+                kind: 'markdown',
+                value: markdown.join('\n')
+            }
+        };
+    }
+
+    /**
+     * Constructs hover for a method call (SELF.method) with both declaration and implementation
+     */
+    formatMethodCall(name: string, declarationInfo: ClassMemberInfo, implementationLocation: string): Hover {
+        const markdown = [
+            `**${name}** (Class Method)`,
+            ``,
+            `**Class:** ${declarationInfo.className}`,
+            ``
+        ];
         
+        // Show declaration from CLASS
+        try {
+            const declUri = decodeURIComponent(declarationInfo.file.replace('file:///', ''));
+            const declContent = fs.readFileSync(declUri, 'utf-8');
+            const declLines = declContent.split('\n');
+            const declLine = declLines[declarationInfo.line];
+            
+            if (declLine) {
+                const trimmedDeclLine = declLine.trim();
+                const declFileName = path.basename(declUri);
+                const declLineNumber = declarationInfo.line + 1;
+                markdown.push(`**Declaration in** \`${declFileName}\` @ line ${declLineNumber}:`);
+                markdown.push('```clarion');
+                markdown.push(trimmedDeclLine);
+                markdown.push('```');
+                markdown.push('');
+            }
+        } catch (error) {
+            // Fallback if can't read file
+            const declFileName = declarationInfo.file.split(/[\/\\]/).pop() || declarationInfo.file;
+            markdown.push(`**Declaration:** \`${declFileName}\` @ line **${declarationInfo.line + 1}**`);
+            markdown.push('');
+        }
+        
+        // Show implementation
+        try {
+            const lastColonIndex = implementationLocation.lastIndexOf(':');
+            const implFilePath = implementationLocation.substring(0, lastColonIndex).replace('file:///', '');
+            const implLine = parseInt(implementationLocation.substring(lastColonIndex + 1));
+            
+            const implUri = decodeURIComponent(implFilePath);
+            const implContent = fs.readFileSync(implUri, 'utf-8');
+            const implLines = implContent.split('\n');
+            
+            const implFileName = path.basename(implUri);
+            const implLineNumber = implLine + 1;
+            
+            // Show up to 10 lines of implementation
+            const maxLines = 10;
+            const endLine = Math.min(implLine + maxLines, implLines.length);
+            const codeLines: string[] = [];
+            
+            for (let i = implLine; i < endLine; i++) {
+                const line = implLines[i];
+                if (!line) continue;
+                
+                const trimmed = line.trim().toUpperCase();
+                codeLines.push(implLines[i]);
+                
+                // Stop at CODE or first END
+                if (trimmed === 'CODE' || trimmed.match(/^END\b/)) {
+                    break;
+                }
+            }
+            
+            if (codeLines.length > 0) {
+                markdown.push(`**Implementation in** \`${implFileName}\` @ line ${implLineNumber}:`);
+                markdown.push('```clarion');
+                markdown.push(codeLines.join('\n'));
+                markdown.push('```');
+            }
+        } catch (error) {
+            // Fallback if can't read file
+            const lastColonIndex = implementationLocation.lastIndexOf(':');
+            const implFilePath = implementationLocation.substring(0, lastColonIndex);
+            const implLine = parseInt(implementationLocation.substring(lastColonIndex + 1)) + 1;
+            const implFile = implFilePath.split(/[\/\\]/).pop() || implFilePath;
+            markdown.push(`**Implementation:** \`${implFile}\` @ line **${implLine}**`);
+        }
+        
+        markdown.push('');
+        markdown.push(`*(F12 to definition | Ctrl+F12 to implementation)*`);
+
         return {
             contents: {
                 kind: 'markdown',

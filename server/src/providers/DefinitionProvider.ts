@@ -17,6 +17,7 @@ import { FileDefinitionResolver } from '../utils/FileDefinitionResolver';
 import { CrossFileResolver } from '../utils/CrossFileResolver';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
+import { ClarionPatterns } from '../utils/ClarionPatterns';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
 logger.setLevel("error"); // Production: Only log errors
@@ -168,7 +169,7 @@ export class DefinitionProvider {
 
             // Check if this is a method implementation line (e.g., "StringTheory.Construct PROCEDURE")
             // and navigate to the declaration in the CLASS
-            const methodImplMatch = line.match(/^(\w+)\.(\w+)\s+PROCEDURE\s*\((.*?)\)/i);
+            const methodImplMatch = line.match(ClarionPatterns.METHOD_IMPLEMENTATION_STRICT);
             if (methodImplMatch) {
                 const className = methodImplMatch[1];
                 const methodName = methodImplMatch[2];
@@ -188,7 +189,7 @@ export class DefinitionProvider {
                     logger.info(`F12 on method implementation: ${className}.${methodName}`);
                     
                     // Count parameters from the implementation signature
-                    const paramCount = this.overloadResolver.countParametersInDeclaration(line);
+                    const paramCount = ClarionPatterns.countParameters(line);
                     logger.info(`Method implementation has ${paramCount} parameters`);
                     
                     const declInfo = this.overloadResolver.findMethodDeclaration(className, methodName, document, tokens, paramCount, line);

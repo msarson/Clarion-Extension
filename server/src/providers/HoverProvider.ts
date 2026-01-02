@@ -22,11 +22,12 @@ import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { ContextualHoverHandler } from './hover/ContextualHoverHandler';
 import { SymbolHoverResolver } from './hover/SymbolHoverResolver';
 import { VariableHoverResolver } from './hover/VariableHoverResolver';
+import { ClarionPatterns } from '../utils/ClarionPatterns';
 import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("HoverProvider");
-logger.setLevel("error"); // Production: Only log errors
+logger.setLevel("info"); // Production: Only log errors
 
 /**
  * Provides hover information for local variables and parameters
@@ -136,9 +137,12 @@ export class HoverProvider {
 
             // Check if this is a procedure call (e.g., "MyProcedure()")
             // OR if this is inside a START() call (e.g., "START(ProcName, ...)")
+            // BUT: Skip if it's SELF.member (class method call)
+            // NOTE: PARENT.member NOT supported yet - needs parent class resolution
             const detection = ProcedureCallDetector.isProcedureCallOrReference(document, position, wordRange);
+            const isSelfMethodCall = word.toUpperCase().includes('SELF.') && /\w+\.\w+/.test(word);
             
-            if (detection.isProcedure) {
+            if (detection.isProcedure && !isSelfMethodCall) {
                 logger.info(`Detected procedure ${ProcedureCallDetector.getDetectionMessage(word, detection.isStartCall)}`);
                 
                 // Get tokens for parameter counting
@@ -268,13 +272,13 @@ export class HoverProvider {
             
             // Check if this is a method implementation line and show declaration hover
             
-            const methodImplMatch = line.match(/^(\w+)\.(\w+)\s+PROCEDURE\s*\((.*?)\)/i);
+            const methodImplMatch = line.match(ClarionPatterns.METHOD_IMPLEMENTATION_STRICT);
             if (methodImplMatch) {
                 const className = methodImplMatch[1];
                 const methodName = methodImplMatch[2];
                 
                 // Count parameters from the implementation signature
-                const paramCount = this.overloadResolver.countParametersInDeclaration(line);
+                const paramCount = ClarionPatterns.countParameters(line);
                 
                 // Check if cursor is on the class or method name
                 const classStart = line.indexOf(className);
@@ -607,11 +611,15 @@ export class HoverProvider {
             }
 
             // Check if this is a structure/group name followed by a dot (e.g., hovering over "MyGroup" in "MyGroup.MyVar")
+            // BUT: Skip SELF.member - those are class method calls handled below
+            // NOTE: PARENT.member NOT supported yet - requires parent class lookup
             // Search for a dot starting from the word's position in the line
             const wordStartInLine = line.indexOf(word, Math.max(0, position.character - word.length));
             const dotIndex = line.indexOf('.', wordStartInLine);
             
-            if (dotIndex > wordStartInLine && dotIndex < wordStartInLine + word.length + 5) {
+            const isSelfMember = word.toUpperCase().startsWith('SELF.');
+            
+            if (dotIndex > wordStartInLine && dotIndex < wordStartInLine + word.length + 5 && !isSelfMember) {
                 // There's a dot right after the word - this looks like structure.field notation
                 logger.info(`Detected dot notation for word: ${word}, dotIndex: ${dotIndex}`);
                 
@@ -644,7 +652,7 @@ export class HoverProvider {
                     const hasParentheses = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
                     
                     // This is a member access (hovering over the field after the dot)
-                    if (beforeDot.toLowerCase() === 'self' || beforeDot.endsWith('self')) {
+                    if (beforeDot.toLowerCase() === 'self' || beforeDot.toLowerCase().endsWith(' self')) {
                         // self.member - class member
                         const tokens = this.tokenCache.getTokens(document);
                         
@@ -657,7 +665,27 @@ export class HoverProvider {
                         
                         const memberInfo = this.memberResolver.findClassMemberInfo(fieldName, document, position.line, tokens, paramCount);
                         if (memberInfo) {
+                            // For methods, also find the implementation
+                            const isMethod = memberInfo.type.toUpperCase().includes('PROCEDURE') || memberInfo.type.toUpperCase().includes('FUNCTION');
+                            if (isMethod) {
+                                const implLocation = await this.findMethodImplementationCrossFile(
+                                    memberInfo.className,
+                                    fieldName,
+                                    document,
+                                    paramCount,
+                                    null // No MODULE hint for local class
+                                );
+                                
+                                if (implLocation) {
+                                    return this.formatter.formatMethodCall(fieldName, memberInfo, implLocation);
+                                }
+                            }
+                            
                             return this.formatter.formatClassMember(fieldName, memberInfo);
+                        } else {
+                            logger.info(`❌ findClassMemberInfo returned null for ${fieldName} in SELF context`);
+                            // Log additional context for debugging
+                            logger.info(`   Line ${position.line}, hasParentheses: ${hasParentheses}, paramCount: ${paramCount}`);
                         }
                     } else {
                         // variable.member - structure field access (e.g., MyGroup.MyVar)
@@ -712,8 +740,12 @@ export class HoverProvider {
                     let typeInfo = 'UNKNOWN';
                     if (globalIndex + 1 < tokens.length) {
                         const nextToken = tokens[globalIndex + 1];
-                        if (nextToken.line === globalVar.line && nextToken.type === TokenType.Type) {
-                            typeInfo = nextToken.value;
+                        if (nextToken.line === globalVar.line) {
+                            if (nextToken.type === TokenType.Type) {
+                                typeInfo = nextToken.value;
+                            } else if (nextToken.type === TokenType.Structure) {
+                                typeInfo = nextToken.value.toUpperCase();
+                            }
                         }
                     }
                     
@@ -800,8 +832,12 @@ export class HoverProvider {
                                 let typeInfo = 'UNKNOWN';
                                 if (globalIndex + 1 < parentTokens.length) {
                                     const nextToken = parentTokens[globalIndex + 1];
-                                    if (nextToken.line === globalVar.line && nextToken.type === TokenType.Type) {
-                                        typeInfo = nextToken.value;
+                                    if (nextToken.line === globalVar.line) {
+                                        if (nextToken.type === TokenType.Type) {
+                                            typeInfo = nextToken.value;
+                                        } else if (nextToken.type === TokenType.Structure) {
+                                            typeInfo = nextToken.value.toUpperCase();
+                                        }
                                     }
                                 }
                                 
@@ -901,10 +937,20 @@ export class HoverProvider {
                 // Find the type by looking at the next token
                 const moduleIndex = tokens.indexOf(moduleVar);
                 let typeInfo = 'UNKNOWN';
+                let isStructureDefinition = false;
+                
                 if (moduleIndex + 1 < tokens.length) {
                     const nextToken = tokens[moduleIndex + 1];
-                    if (nextToken.line === moduleVar.line && nextToken.type === TokenType.Type) {
-                        typeInfo = nextToken.value;
+                    if (nextToken.line === moduleVar.line) {
+                        // Check if it's a regular type token
+                        if (nextToken.type === TokenType.Type) {
+                            typeInfo = nextToken.value;
+                        }
+                        // Check if it's a CLASS/GROUP/QUEUE declaration
+                        else if (nextToken.type === TokenType.Structure) {
+                            typeInfo = nextToken.value.toUpperCase(); // CLASS, GROUP, QUEUE, etc.
+                            isStructureDefinition = true; // This IS the definition
+                        }
                     }
                 }
                 
@@ -912,12 +958,21 @@ export class HoverProvider {
                 const modulePos: Position = { line: moduleVar.line, character: 0 };
                 const scopeInfo = this.scopeAnalyzer.getTokenScope(document, modulePos);
                 
+                // Choose appropriate title based on whether this is a structure definition
+                const title = isStructureDefinition 
+                    ? `**Module-Local ${typeInfo}:** \`${moduleVar.value}\``
+                    : `**Module-Local Variable:** \`${moduleVar.value}\``;
+                
                 const markdown = [
-                    `**Module-Local Variable:** \`${moduleVar.value}\``,
-                    ``,
-                    `**Type:** \`${typeInfo}\``,
+                    title,
                     ``
                 ];
+                
+                // Only show "Type:" for regular variables, not structure definitions
+                if (!isStructureDefinition) {
+                    markdown.push(`**Type:** \`${typeInfo}\``);
+                    markdown.push(``);
+                }
                 
                 if (scopeInfo) {
                     const scopeIcon = '📦';
@@ -930,9 +985,7 @@ export class HoverProvider {
                 // Show file and line info similar to procedures
                 const fileName = path.basename(document.uri.replace('file:///', ''));
                 const lineNumber = moduleVar.line + 1; // Convert to 1-based
-                markdown.push(`**Declared in** \`${fileName}\` @ line ${lineNumber}`);
-                markdown.push(``);
-                markdown.push(`*Press F12 to go to declaration*`);
+                markdown.push(`**Defined in** \`${fileName}\` @ line ${lineNumber}`);
                 
                 return {
                     contents: {
@@ -1024,8 +1077,12 @@ export class HoverProvider {
                             let typeInfo = 'UNKNOWN';
                             if (globalIndex + 1 < parentTokens.length) {
                                 const nextToken = parentTokens[globalIndex + 1];
-                                if (nextToken.line === globalVar.line && nextToken.type === TokenType.Type) {
-                                    typeInfo = nextToken.value;
+                                if (nextToken.line === globalVar.line) {
+                                    if (nextToken.type === TokenType.Type) {
+                                        typeInfo = nextToken.value;
+                                    } else if (nextToken.type === TokenType.Structure) {
+                                        typeInfo = nextToken.value.toUpperCase();
+                                    }
                                 }
                             }
                             
@@ -1570,7 +1627,17 @@ export class HoverProvider {
         
         logger.info(`Searching for ${className}.${methodName} implementation cross-file`);
         
-        // If we have a module file hint, try to find it first
+        // FIRST: Search the current file (local implementation)
+        const currentPath = decodeURIComponent(currentDocument.uri.replace('file:///', '')).replace(/\//g, '\\');
+        logger.info(`Searching current file first: ${currentPath}`);
+        const localImplLine = this.searchFileForImplementation(currentPath, className, methodName, paramCount);
+        if (localImplLine !== null) {
+            const fileUri = `file:///${currentPath.replace(/\\/g, '/')}`;
+            logger.info(`✅ Found implementation in current file at line ${localImplLine}`);
+            return `${fileUri}:${localImplLine}`;
+        }
+        
+        // If we have a module file hint, try to find it
         if (moduleFile) {
             logger.info(`Looking for module file: ${moduleFile}`);
             
@@ -1608,7 +1675,7 @@ export class HoverProvider {
             }
         }
         
-        // Fallback: Search all solution files
+        // Fallback: Search all solution files (skip current file - already searched)
         const solutionManager = SolutionManager.getInstance();
         if (!solutionManager || !solutionManager.solution) {
             logger.info(`No solution manager available for cross-file search`);
@@ -1621,6 +1688,11 @@ export class HoverProvider {
         for (const project of solutionManager.solution.projects) {
             for (const sourceFile of project.sourceFiles) {
                 const fullPath = path.join(project.path, sourceFile.relativePath);
+                
+                // Skip current file - already searched
+                if (path.resolve(fullPath) === path.resolve(currentPath)) {
+                    continue;
+                }
                 
                 // Only search .clw files
                 if (!fullPath.toLowerCase().endsWith('.clw')) {
@@ -1662,7 +1734,7 @@ export class HoverProvider {
             // Search for method implementation: ClassName.MethodName PROCEDURE
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
-                const implMatch = line.match(/^\s*(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i);
+                const implMatch = line.match(ClarionPatterns.METHOD_IMPLEMENTATION);
                 
                 if (implMatch && 
                     implMatch[1].toUpperCase() === className.toUpperCase() &&
@@ -1670,7 +1742,7 @@ export class HoverProvider {
                     
                     // Found a potential match - check parameter count if specified
                     if (paramCount !== undefined) {
-                        const params = implMatch[3].trim();
+                        const params = implMatch[3] ? implMatch[3].trim() : '';
                         const implParamCount = params === '' ? 0 : params.split(',').length;
                         
                         if (implParamCount !== paramCount) {
