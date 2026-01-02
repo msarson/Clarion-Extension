@@ -659,6 +659,10 @@ export class HoverProvider {
                         const memberInfo = this.memberResolver.findClassMemberInfo(fieldName, document, position.line, tokens, paramCount);
                         if (memberInfo) {
                             return this.formatter.formatClassMember(fieldName, memberInfo);
+                        } else {
+                            logger.info(`❌ findClassMemberInfo returned null for ${fieldName} in SELF context`);
+                            // Log additional context for debugging
+                            logger.info(`   Line ${position.line}, hasParentheses: ${hasParentheses}, paramCount: ${paramCount}`);
                         }
                     } else {
                         // variable.member - structure field access (e.g., MyGroup.MyVar)
