@@ -1570,7 +1570,17 @@ export class HoverProvider {
         
         logger.info(`Searching for ${className}.${methodName} implementation cross-file`);
         
-        // If we have a module file hint, try to find it first
+        // FIRST: Search the current file (local implementation)
+        const currentPath = decodeURIComponent(currentDocument.uri.replace('file:///', '')).replace(/\//g, '\\');
+        logger.info(`Searching current file first: ${currentPath}`);
+        const localImplLine = this.searchFileForImplementation(currentPath, className, methodName, paramCount);
+        if (localImplLine !== null) {
+            const fileUri = `file:///${currentPath.replace(/\\/g, '/')}`;
+            logger.info(`✅ Found implementation in current file at line ${localImplLine}`);
+            return `${fileUri}:${localImplLine}`;
+        }
+        
+        // If we have a module file hint, try to find it
         if (moduleFile) {
             logger.info(`Looking for module file: ${moduleFile}`);
             
@@ -1608,7 +1618,7 @@ export class HoverProvider {
             }
         }
         
-        // Fallback: Search all solution files
+        // Fallback: Search all solution files (skip current file - already searched)
         const solutionManager = SolutionManager.getInstance();
         if (!solutionManager || !solutionManager.solution) {
             logger.info(`No solution manager available for cross-file search`);
@@ -1621,6 +1631,11 @@ export class HoverProvider {
         for (const project of solutionManager.solution.projects) {
             for (const sourceFile of project.sourceFiles) {
                 const fullPath = path.join(project.path, sourceFile.relativePath);
+                
+                // Skip current file - already searched
+                if (path.resolve(fullPath) === path.resolve(currentPath)) {
+                    continue;
+                }
                 
                 // Only search .clw files
                 if (!fullPath.toLowerCase().endsWith('.clw')) {
