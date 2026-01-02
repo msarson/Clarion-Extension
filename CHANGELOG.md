@@ -6,6 +6,77 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 
 ---
 
+## [0.8.4] - Unreleased
+
+### 🎯 Major Performance Improvements
+
+#### MAP Resolution & Navigation Performance
+- **Eliminated scanning hundreds of MEMBER files** during procedure lookups
+- **Fast direct MODULE resolution** - Detects `MODULE('xxx.CLW')` references and resolves immediately
+- **Smart fallback search** - Parent MAP searched directly when MODULE reference not found
+- All three navigation features (Hover, F12, Ctrl+F12) now blazing fast
+
+#### Cross-File Navigation Enhancements
+- Enhanced **ScopeAnalyzer** with MAP INCLUDE token tracking for accurate cross-file scope analysis
+- Added support for **START() procedure references** - Hover, F12, and Ctrl+F12 now work on procedure names inside START() calls
+- Improved **DLL/LIB MODULE handling** - Automatically finds source files for compiled modules across projects
+
+### ✨ Features
+
+#### Build System Improvements
+- **Fixed build configuration persistence** - Status bar changes now save correctly
+- **Fixed MSBuild parameter handling** - Proper Configuration|Platform splitting (e.g., Debug|Win32)
+- **Fixed PowerShell command escaping** - Semicolons and pipes in parameters no longer cause errors
+- **Terminal reuse** - Build tasks now reuse terminal instead of creating new ones
+- **Separate keyboard shortcuts** - Different behavior for keyboard (Ctrl+Shift+B) vs context menu builds
+- **Auto-migration** - Old-style configurations (e.g., "Debug") automatically upgraded to "Debug|Win32"
+
+#### Navigation & IntelliSense
+- **ProcedureCallDetector utility** - Centralized procedure call detection logic
+- **Consistent CrossFileResolver usage** - All providers (Hover, Definition, Implementation) now use same service pattern
+- **Enhanced MAP procedure lookup** - Handles both PROCEDURE and FUNCTION keywords interchangeably
+- **Better MODULE extraction** - Upward search algorithm handles nested structures and indented declarations
+
+### 🐛 Bug Fixes
+
+#### Critical MAP Resolution Fixes
+- Fixed **CrossFileResolver token filter** - Was checking `type` instead of `subType` for FUNCTION tokens
+- Fixed **ImplementationProvider MEMBER support** - Now checks parent files like other providers
+- Fixed **MAP INCLUDE source tracking** - Tokens from INCLUDE files now properly attributed
+- Fixed **DLL reference hanging** - Immediate DLL check after redirection prevents infinite loops
+- Fixed **heavily indented MAP structures** - Generated code with deep indentation now parsed correctly
+
+#### Build System Fixes  
+- Fixed configuration not persisting when changed via status bar
+- Fixed MSBuild configuration/platform separation (Debug|Win32 split)
+- Fixed PowerShell command parameter escaping (semicolons/pipes)
+- Fixed terminal reuse for build tasks
+- Fixed build completion messages showing when log file missing
+- Fixed timing issue where configuration change event read stale data
+
+### 🏗️ Architecture & Code Quality
+
+#### Service Pattern Improvements
+- Eliminated code duplication - All providers use **CrossFileResolver** service consistently
+- Followed established service architecture from December refactoring
+- **ProcedureCallDetector** utility class extracts reusable call detection logic
+
+#### Logging
+- **All loggers set to error level** for production (minimal overhead)
+- Logging only enabled during shutdown/deactivation for troubleshooting
+- Removed 11 temporary debug logging statements from performance work
+
+### 📝 Documentation
+- Added comprehensive MAP INCLUDE testing documentation
+- Updated scope test suite with START() procedure examples
+
+### 🧪 Testing
+- Added **MapTokenType.test.ts** - Validates FUNCTION tokens have correct type/subType
+- Added **CrossFileScope.test.ts** - Tests for START() procedure references
+- Enhanced scope test suite with MODULE resolution examples
+
+---
+
 ## [0.8.3] - 2025-12-31
 
 ### 🎉 Major Improvements

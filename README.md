@@ -59,11 +59,14 @@ Settings are saved in `.vscode/settings.json` within the folder - commit them wi
 
 ### Code Intelligence
 - **Smart IntelliSense** - 261 documented items (148 built-in functions, 82 attributes, 31 controls) with parameter hints and optional parameter support
-- **Go to Definition** (`F12`) - Navigate to includes, modules, methods, procedures, sections
+- **Go to Definition** (`F12`) - Navigate to includes, modules, methods, procedures, sections, and procedure calls (to MAP declarations)
 - **Go to Implementation** (`Ctrl+F12`) - Navigate from MAP declarations to implementations, MODULE to files, procedure calls to implementations
-- **Procedure call navigation** - Full F12/Ctrl+F12/Hover support matching class method workflow
+- **START() procedure support** - Full F12/Ctrl+F12/Hover support for procedure names in START() calls
+- **Blazing fast navigation** - Optimized MAP resolution eliminates scanning hundreds of files
+- **Cross-project DLL resolution** - Automatically finds source files for DLL/LIB modules across solution
 - **Method overload support** - Correctly resolves overloaded methods based on parameter types
 - **Hover tooltips** - Preview file contents, method signatures, procedure implementations, SECTION content, global variables
+- **Enhanced scope analysis** - MAP INCLUDE tracking for accurate cross-file symbol resolution
 - **MODULE/MEMBER navigation** - Cross-file navigation with global variable lookup
 - **Structure view** - Complete code outline with follow cursor
 - **Unreachable code detection** - Visual dimming of code after RETURN/EXIT/HALT statements
@@ -89,6 +92,41 @@ Settings are saved in `.vscode/settings.json` within the folder - commit them wi
 ---
 
 ## What's New
+
+### Version 0.8.4 (Unreleased)
+
+#### ⚡ **Massive Performance Boost for Navigation**
+- **Eliminated scanning hundreds of files** - MAP resolution now instant instead of taking several seconds
+- **Smart MODULE resolution** - Direct CLW file lookup when `MODULE('xxx.CLW')` detected
+- **Fast fallback search** - Parent MAP searched directly when needed, no more brute-force scanning
+- All navigation features (Hover, F12, Ctrl+F12) now blazingly fast even in large codebases
+
+#### 🚀 **Enhanced Navigation Features**
+- **START() procedure support** - Hover, F12, and Ctrl+F12 now work on procedure names inside START() calls
+- **DLL/LIB source file lookup** - Automatically finds source files for compiled modules across solution projects
+- **Improved MAP INCLUDE tracking** - Tokens from INCLUDE files properly attributed for accurate scope analysis
+- **Better cross-file resolution** - ImplementationProvider now checks parent MEMBER files like other providers
+
+#### 🔧 **Build System Fixes**
+- **Fixed configuration persistence** - Changes via status bar now save correctly (was reading stale data)
+- **Fixed MSBuild parameters** - Proper Configuration|Platform splitting (e.g., "Debug|Win32")
+- **Fixed PowerShell escaping** - Semicolons and pipes in build parameters no longer cause errors
+- **Terminal reuse** - Build tasks now reuse terminal instead of creating new ones each time
+- **Auto-migration** - Old configurations automatically upgraded (e.g., "Debug" → "Debug|Win32")
+- **Separate keyboard behavior** - Ctrl+Shift+B and context menu builds now work independently
+
+#### 🐛 **Critical Bug Fixes**
+- Fixed MAP token type detection (FUNCTION tokens now correctly identified)
+- Fixed infinite loops when MODULE references DLL/LIB files
+- Fixed heavily indented MAP structures in generated code not being parsed
+- Fixed build configuration timing issues causing lost settings
+- Fixed redundant build prompts from solution context menu
+
+#### 🏗️ **Architecture Improvements**
+- Consistent **CrossFileResolver** service usage across all providers
+- New **ProcedureCallDetector** utility for centralized call detection
+- Eliminated code duplication following established service patterns
+- Production-ready logging configuration (error-level only)
 
 ### Version 0.8.3 (December 31, 2025)
 
