@@ -212,35 +212,83 @@ export class HoverFormatter {
      */
     formatMethodCall(name: string, declarationInfo: ClassMemberInfo, implementationLocation: string): Hover {
         const markdown = [
-            `**Class Method:** \`${name}\``,
+            `**${name}** (Class Method)`,
+            ``,
+            `**Class:** ${declarationInfo.className}`,
             ``
         ];
         
-        if (declarationInfo.type.length > 50) {
-            markdown.push(`**Type:**`);
-            markdown.push('```clarion');
-            markdown.push(declarationInfo.type);
-            markdown.push('```');
-        } else {
-            markdown.push(`**Type:** \`${declarationInfo.type}\``);
+        // Show declaration from CLASS
+        try {
+            const declUri = decodeURIComponent(declarationInfo.file.replace('file:///', ''));
+            const declContent = fs.readFileSync(declUri, 'utf-8');
+            const declLines = declContent.split('\n');
+            const declLine = declLines[declarationInfo.line];
+            
+            if (declLine) {
+                const trimmedDeclLine = declLine.trim();
+                const declFileName = path.basename(declUri);
+                const declLineNumber = declarationInfo.line + 1;
+                markdown.push(`**Declaration in** \`${declFileName}\` @ line ${declLineNumber}:`);
+                markdown.push('```clarion');
+                markdown.push(trimmedDeclLine);
+                markdown.push('```');
+                markdown.push('');
+            }
+        } catch (error) {
+            // Fallback if can't read file
+            const declFileName = declarationInfo.file.split(/[\/\\]/).pop() || declarationInfo.file;
+            markdown.push(`**Declaration:** \`${declFileName}\` @ line **${declarationInfo.line + 1}**`);
+            markdown.push('');
         }
         
-        markdown.push(``);
-        markdown.push(`**Class:** ${declarationInfo.className}`);
-        markdown.push(``);
+        // Show implementation
+        try {
+            const lastColonIndex = implementationLocation.lastIndexOf(':');
+            const implFilePath = implementationLocation.substring(0, lastColonIndex).replace('file:///', '');
+            const implLine = parseInt(implementationLocation.substring(lastColonIndex + 1));
+            
+            const implUri = decodeURIComponent(implFilePath);
+            const implContent = fs.readFileSync(implUri, 'utf-8');
+            const implLines = implContent.split('\n');
+            
+            const implFileName = path.basename(implUri);
+            const implLineNumber = implLine + 1;
+            
+            // Show up to 10 lines of implementation
+            const maxLines = 10;
+            const endLine = Math.min(implLine + maxLines, implLines.length);
+            const codeLines: string[] = [];
+            
+            for (let i = implLine; i < endLine; i++) {
+                const line = implLines[i];
+                if (!line) continue;
+                
+                const trimmed = line.trim().toUpperCase();
+                codeLines.push(implLines[i]);
+                
+                // Stop at CODE or first END
+                if (trimmed === 'CODE' || trimmed.match(/^END\b/)) {
+                    break;
+                }
+            }
+            
+            if (codeLines.length > 0) {
+                markdown.push(`**Implementation in** \`${implFileName}\` @ line ${implLineNumber}:`);
+                markdown.push('```clarion');
+                markdown.push(codeLines.join('\n'));
+                markdown.push('```');
+            }
+        } catch (error) {
+            // Fallback if can't read file
+            const lastColonIndex = implementationLocation.lastIndexOf(':');
+            const implFilePath = implementationLocation.substring(0, lastColonIndex);
+            const implLine = parseInt(implementationLocation.substring(lastColonIndex + 1)) + 1;
+            const implFile = implFilePath.split(/[\/\\]/).pop() || implFilePath;
+            markdown.push(`**Implementation:** \`${implFile}\` @ line **${implLine}**`);
+        }
         
-        // Declaration location
-        const declFileName = declarationInfo.file.split(/[\/\\]/).pop() || declarationInfo.file;
-        markdown.push(`**Declaration:** \`${declFileName}\` @ line **${declarationInfo.line + 1}**`);
-        
-        // Implementation location - format is "file:///path:lineNumber"
-        const lastColonIndex = implementationLocation.lastIndexOf(':');
-        const implFilePath = implementationLocation.substring(0, lastColonIndex);
-        const implLine = parseInt(implementationLocation.substring(lastColonIndex + 1)) + 1;
-        const implFile = implFilePath.split(/[\/\\]/).pop() || implFilePath;
-        markdown.push(`**Implementation:** \`${implFile}\` @ line **${implLine}**`);
-        
-        markdown.push(``);
+        markdown.push('');
         markdown.push(`*(F12 to definition | Ctrl+F12 to implementation)*`);
 
         return {
