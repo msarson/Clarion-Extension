@@ -613,11 +613,14 @@ export class HoverProvider {
             }
 
             // Check if this is a structure/group name followed by a dot (e.g., hovering over "MyGroup" in "MyGroup.MyVar")
+            // BUT: Skip SELF.member and PARENT.member - those are class method calls handled below
             // Search for a dot starting from the word's position in the line
             const wordStartInLine = line.indexOf(word, Math.max(0, position.character - word.length));
             const dotIndex = line.indexOf('.', wordStartInLine);
             
-            if (dotIndex > wordStartInLine && dotIndex < wordStartInLine + word.length + 5) {
+            const isSelfOrParent = word.toUpperCase().startsWith('SELF.') || word.toUpperCase().startsWith('PARENT.');
+            
+            if (dotIndex > wordStartInLine && dotIndex < wordStartInLine + word.length + 5 && !isSelfOrParent) {
                 // There's a dot right after the word - this looks like structure.field notation
                 logger.info(`Detected dot notation for word: ${word}, dotIndex: ${dotIndex}`);
                 
