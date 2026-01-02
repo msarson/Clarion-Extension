@@ -72,8 +72,15 @@ export class VariableHoverResolver {
             let typeInfo = 'UNKNOWN';
             if (moduleIndex + 1 < tokens.length) {
                 const nextToken = tokens[moduleIndex + 1];
-                if (nextToken.line === moduleVar.line && nextToken.type === TokenType.Type) {
-                    typeInfo = nextToken.value;
+                if (nextToken.line === moduleVar.line) {
+                    // Check if it's a regular type token
+                    if (nextToken.type === TokenType.Type) {
+                        typeInfo = nextToken.value;
+                    }
+                    // Check if it's a CLASS/GROUP/QUEUE declaration
+                    else if (nextToken.type === TokenType.Structure) {
+                        typeInfo = nextToken.value.toUpperCase(); // CLASS, GROUP, QUEUE, etc.
+                    }
                 }
             }
             
@@ -304,8 +311,12 @@ export class VariableHoverResolver {
         let typeInfo = 'UNKNOWN';
         if (globalIndex + 1 < tokens.length) {
             const nextToken = tokens[globalIndex + 1];
-            if (nextToken.line === globalVar.line && nextToken.type === TokenType.Type) {
-                typeInfo = nextToken.value;
+            if (nextToken.line === globalVar.line) {
+                if (nextToken.type === TokenType.Type) {
+                    typeInfo = nextToken.value;
+                } else if (nextToken.type === TokenType.Structure) {
+                    typeInfo = nextToken.value.toUpperCase();
+                }
             }
         }
         
