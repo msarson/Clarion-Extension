@@ -78,11 +78,20 @@ export class HoverFormatter {
             const detailedScope = this.scopeAnalyzer.getTokenScope(document, position);
             
             if (detailedScope) {
+                // Check if this is a method (procedure with ClassName.MethodName pattern)
+                const isMethod = detailedScope.containingProcedure?.value.includes('.');
+                
                 const scopeIcon = detailedScope.type === 'routine' ? '🔐' : 
                                   detailedScope.type === 'procedure' ? '🔒' : 
                                   detailedScope.type === 'module' ? '📦' : '🌍';
                 
-                scopeInfo = `**Scope:** ${scopeIcon} ${detailedScope.type.charAt(0).toUpperCase() + detailedScope.type.slice(1)}`;
+                // Use "Method" instead of "Procedure" for methods
+                let scopeTypeLabel = detailedScope.type.charAt(0).toUpperCase() + detailedScope.type.slice(1);
+                if (detailedScope.type === 'procedure' && isMethod) {
+                    scopeTypeLabel = 'Method';
+                }
+                
+                scopeInfo = `**Scope:** ${scopeIcon} ${scopeTypeLabel}`;
                 
                 if (detailedScope.type === 'routine' && detailedScope.containingRoutine) {
                     scopeInfo += ` (${detailedScope.containingRoutine.value})`;
@@ -93,7 +102,11 @@ export class HoverFormatter {
                 if (detailedScope.type === 'routine') {
                     visibilityInfo = `**Visibility:** Only visible within this routine`;
                 } else if (detailedScope.type === 'procedure') {
-                    visibilityInfo = `**Visibility:** Visible throughout this procedure and its routines`;
+                    if (isMethod) {
+                        visibilityInfo = `**Visibility:** Visible throughout this method and its routines`;
+                    } else {
+                        visibilityInfo = `**Visibility:** Visible throughout this procedure and its routines`;
+                    }
                 } else if (detailedScope.type === 'module') {
                     visibilityInfo = `**Visibility:** Visible only within this file (module-local)`;
                 } else {
