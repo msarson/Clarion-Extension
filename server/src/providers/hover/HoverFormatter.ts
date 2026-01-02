@@ -79,7 +79,8 @@ export class HoverFormatter {
             
             if (detailedScope) {
                 // Check if this is a method (procedure with ClassName.MethodName pattern)
-                const isMethod = detailedScope.containingProcedure?.value.includes('.');
+                const procedureName = detailedScope.containingProcedure?.label || detailedScope.containingProcedure?.value;
+                const isMethod = procedureName?.includes('.');
                 
                 const scopeIcon = detailedScope.type === 'routine' ? '🔐' : 
                                   detailedScope.type === 'procedure' ? '🔒' : 
@@ -94,9 +95,10 @@ export class HoverFormatter {
                 scopeInfo = `**Scope:** ${scopeIcon} ${scopeTypeLabel}`;
                 
                 if (detailedScope.type === 'routine' && detailedScope.containingRoutine) {
-                    scopeInfo += ` (${detailedScope.containingRoutine.value})`;
+                    const routineName = detailedScope.containingRoutine.label || detailedScope.containingRoutine.value;
+                    scopeInfo += ` (${routineName})`;
                 } else if (detailedScope.type === 'procedure' && detailedScope.containingProcedure) {
-                    scopeInfo += ` (${detailedScope.containingProcedure.value})`;
+                    scopeInfo += ` (${procedureName})`;
                 }
                 
                 if (detailedScope.type === 'routine') {
