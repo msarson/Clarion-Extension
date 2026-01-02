@@ -22,7 +22,8 @@ export function registerBuildCommands(
     return [
         // Add solution build command
         commands.registerCommand("clarion.buildSolution", async () => {
-            await buildTasks.runClarionBuild();
+            // User explicitly chose to build the solution from context menu, don't prompt
+            await buildTasks.buildSolutionOrProject("Solution", undefined, diagnosticCollection, solutionTreeDataProvider);
         }),
 
         // Add project build command
