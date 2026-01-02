@@ -233,10 +233,11 @@ export class HoverFormatter {
         const declFileName = declarationInfo.file.split(/[\/\\]/).pop() || declarationInfo.file;
         markdown.push(`**Declaration:** \`${declFileName}\` @ line **${declarationInfo.line + 1}**`);
         
-        // Implementation location
-        const implParts = implementationLocation.split(':');
-        const implFile = implParts[0].split(/[\/\\]/).pop() || implParts[0];
-        const implLine = parseInt(implParts[1]) + 1;
+        // Implementation location - format is "file:///path:lineNumber"
+        const lastColonIndex = implementationLocation.lastIndexOf(':');
+        const implFilePath = implementationLocation.substring(0, lastColonIndex);
+        const implLine = parseInt(implementationLocation.substring(lastColonIndex + 1)) + 1;
+        const implFile = implFilePath.split(/[\/\\]/).pop() || implFilePath;
         markdown.push(`**Implementation:** \`${implFile}\` @ line **${implLine}**`);
         
         markdown.push(``);
