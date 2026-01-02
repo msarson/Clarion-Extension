@@ -22,6 +22,7 @@ import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { ContextualHoverHandler } from './hover/ContextualHoverHandler';
 import { SymbolHoverResolver } from './hover/SymbolHoverResolver';
 import { VariableHoverResolver } from './hover/VariableHoverResolver';
+import { ClarionPatterns } from '../utils/ClarionPatterns';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -268,7 +269,7 @@ export class HoverProvider {
             
             // Check if this is a method implementation line and show declaration hover
             
-            const methodImplMatch = line.match(/^(\w+)\.(\w+)\s+PROCEDURE\s*\((.*?)\)/i);
+            const methodImplMatch = line.match(ClarionPatterns.METHOD_IMPLEMENTATION_LEGACY);
             if (methodImplMatch) {
                 const className = methodImplMatch[1];
                 const methodName = methodImplMatch[2];
@@ -1677,8 +1678,7 @@ export class HoverProvider {
             // Search for method implementation: ClassName.MethodName PROCEDURE
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
-                // Match with or without parentheses: ThisWindow.Ask PROCEDURE or ThisWindow.Ask PROCEDURE()
-                const implMatch = line.match(/^\s*(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)\s*(?:\(([^)]*)\))?/i);
+                const implMatch = line.match(ClarionPatterns.METHOD_IMPLEMENTATION);
                 
                 if (implMatch && 
                     implMatch[1].toUpperCase() === className.toUpperCase() &&

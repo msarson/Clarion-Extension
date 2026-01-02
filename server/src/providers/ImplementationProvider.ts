@@ -15,6 +15,7 @@ import { TokenCache } from '../TokenCache';
 import { MapProcedureResolver } from '../utils/MapProcedureResolver';
 import { CrossFileResolver } from '../utils/CrossFileResolver';
 import { SolutionManager } from '../solution/solutionManager';
+import { ClarionPatterns } from '../utils/ClarionPatterns';
 import LoggerManager from '../logger';
 import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import * as fs from 'fs';
@@ -458,8 +459,7 @@ export class ImplementationProvider {
             }
 
             const line = lines[i];
-            // Match with or without parentheses: ThisWindow.Ask PROCEDURE or ThisWindow.Ask PROCEDURE()
-            const implMatch = line.match(/(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)\s*(?:\(([^)]*)\))?/i);
+            const implMatch = line.match(ClarionPatterns.METHOD_IMPLEMENTATION);
 
             if (implMatch && implMatch[2].toUpperCase() === methodName.toUpperCase()) {
                 // Found a matching method name
@@ -687,8 +687,7 @@ export class ImplementationProvider {
             // Search for method implementation: ClassName.MethodName PROCEDURE
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
-                // Match with or without parentheses: ThisWindow.Ask PROCEDURE or ThisWindow.Ask PROCEDURE()
-                const implMatch = line.match(/^\s*(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)\s*(?:\(([^)]*)\))?/i);
+                const implMatch = line.match(ClarionPatterns.METHOD_IMPLEMENTATION);
                 
                 if (implMatch && 
                     implMatch[1].toUpperCase() === className.toUpperCase() &&
