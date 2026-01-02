@@ -60,13 +60,17 @@ Settings are saved in `.vscode/settings.json` within the folder - commit them wi
 ### Code Intelligence
 - **Smart IntelliSense** - 261 documented items (148 built-in functions, 82 attributes, 31 controls) with parameter hints and optional parameter support
 - **Go to Definition** (`F12`) - Navigate to includes, modules, methods, procedures, sections, and procedure calls (to MAP declarations)
+  - **Scope-aware navigation** - Correctly prioritizes procedure-local variables over globals with same name
+  - **Variable shadowing support** - Handles local variables hiding global variables
+  - **Routine variable access** - Variables in routines accessible from parent procedure
 - **Go to Implementation** (`Ctrl+F12`) - Navigate from MAP declarations to implementations, MODULE to files, procedure calls to implementations
 - **START() procedure support** - Full F12/Ctrl+F12/Hover support for procedure names in START() calls
 - **Blazing fast navigation** - Optimized MAP resolution eliminates scanning hundreds of files
 - **Cross-project DLL resolution** - Automatically finds source files for DLL/LIB modules across solution
 - **Method overload support** - Correctly resolves overloaded methods based on parameter types
 - **Hover tooltips** - Preview file contents, method signatures, procedure implementations, SECTION content, global variables
-- **Enhanced scope analysis** - MAP INCLUDE tracking for accurate cross-file symbol resolution
+- **Comprehensive scope analysis** - ScopeAnalyzer distinguishes global, module-local, procedure-local, and routine-local scope
+- **MAP INCLUDE tracking** - Tokens from INCLUDE files properly attributed for accurate cross-file navigation
 - **MODULE/MEMBER navigation** - Cross-file navigation with global variable lookup
 - **Structure view** - Complete code outline with follow cursor
 - **Unreachable code detection** - Visual dimming of code after RETURN/EXIT/HALT statements
@@ -95,16 +99,24 @@ Settings are saved in `.vscode/settings.json` within the folder - commit them wi
 
 ### Version 0.8.4 (Unreleased)
 
-#### ⚡ **Massive Performance Boost for Navigation**
+#### 🎯 **Scope-Aware Navigation (New Feature!)** - December 2025
+- **ScopeAnalyzer service** - New comprehensive scope analysis for Clarion code
+- **Scope-aware F12** - Go to Definition correctly prioritizes procedure-local variables over globals with same name
+- **Accurate scope rules** - Distinguishes global, module-local, procedure-local, and routine-local scope
+- **Routine variable access** - Variables in routines accessible from parent procedure  
+- **Module-local scope** - MEMBER files have correct isolated scope
+- **Variable shadowing** - Handles local variables hiding global variables correctly
+
+#### ⚡ **MAP Resolution Performance Boost** - January 2026
 - **Eliminated scanning hundreds of files** - MAP resolution now instant instead of taking several seconds
 - **Smart MODULE resolution** - Direct CLW file lookup when `MODULE('xxx.CLW')` detected
 - **Fast fallback search** - Parent MAP searched directly when needed, no more brute-force scanning
 - All navigation features (Hover, F12, Ctrl+F12) now blazingly fast even in large codebases
 
-#### 🚀 **Enhanced Navigation Features**
+#### 🚀 **Enhanced Navigation Features** - January 2026
 - **START() procedure support** - Hover, F12, and Ctrl+F12 now work on procedure names inside START() calls
 - **DLL/LIB source file lookup** - Automatically finds source files for compiled modules across solution projects
-- **Improved MAP INCLUDE tracking** - Tokens from INCLUDE files properly attributed for accurate scope analysis
+- **MAP INCLUDE tracking** - Tokens from INCLUDE files properly attributed for accurate cross-file navigation
 - **Better cross-file resolution** - ImplementationProvider now checks parent MEMBER files like other providers
 
 #### 🔧 **Build System Fixes**

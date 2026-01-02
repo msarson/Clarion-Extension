@@ -10,20 +10,28 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 
 ### 🎯 Major Performance Improvements
 
-#### MAP Resolution & Navigation Performance
+#### MAP Resolution & Navigation Performance (January 2026)
 - **Eliminated scanning hundreds of MEMBER files** during procedure lookups
 - **Fast direct MODULE resolution** - Detects `MODULE('xxx.CLW')` references and resolves immediately
 - **Smart fallback search** - Parent MAP searched directly when MODULE reference not found
 - All three navigation features (Hover, F12, Ctrl+F12) now blazing fast
 
-#### Cross-File Navigation Enhancements
-- Enhanced **ScopeAnalyzer** with MAP INCLUDE token tracking for accurate cross-file scope analysis
+#### Cross-File Navigation Enhancements (January 2026)
+- **MAP INCLUDE source tracking** - Tokens from INCLUDE files now properly attributed for accurate navigation
 - Added support for **START() procedure references** - Hover, F12, and Ctrl+F12 now work on procedure names inside START() calls
 - Improved **DLL/LIB MODULE handling** - Automatically finds source files for compiled modules across projects
 
 ### ✨ Features
 
-#### Build System Improvements
+#### Scope-Aware Navigation (December 2025)
+- **New ScopeAnalyzer service** - Comprehensive scope analysis for Clarion code
+- **Scope-aware F12 (Go to Definition)** - Correctly prioritizes procedure-local variables over globals with same name
+- **Accurate scope determination** - Distinguishes global, module-local, procedure-local, and routine-local scope
+- **Routine variable access** - Variables in routines accessible from parent procedure
+- **Module-local scope** - MEMBER files have correct isolated scope
+- **Variable shadowing** - Handles local variables hiding global variables correctly
+
+#### Build System Improvements (January 2026)
 - **Fixed build configuration persistence** - Status bar changes now save correctly
 - **Fixed MSBuild parameter handling** - Proper Configuration|Platform splitting (e.g., Debug|Win32)
 - **Fixed PowerShell command escaping** - Semicolons and pipes in parameters no longer cause errors
@@ -31,7 +39,7 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 - **Separate keyboard shortcuts** - Different behavior for keyboard (Ctrl+Shift+B) vs context menu builds
 - **Auto-migration** - Old-style configurations (e.g., "Debug") automatically upgraded to "Debug|Win32"
 
-#### Navigation & IntelliSense
+#### Navigation & IntelliSense (January 2026)
 - **ProcedureCallDetector utility** - Centralized procedure call detection logic
 - **Consistent CrossFileResolver usage** - All providers (Hover, Definition, Implementation) now use same service pattern
 - **Enhanced MAP procedure lookup** - Handles both PROCEDURE and FUNCTION keywords interchangeably
@@ -39,14 +47,14 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 
 ### 🐛 Bug Fixes
 
-#### Critical MAP Resolution Fixes
+#### Critical MAP Resolution Fixes (January 2026)
 - Fixed **CrossFileResolver token filter** - Was checking `type` instead of `subType` for FUNCTION tokens
 - Fixed **ImplementationProvider MEMBER support** - Now checks parent files like other providers
 - Fixed **MAP INCLUDE source tracking** - Tokens from INCLUDE files now properly attributed
 - Fixed **DLL reference hanging** - Immediate DLL check after redirection prevents infinite loops
 - Fixed **heavily indented MAP structures** - Generated code with deep indentation now parsed correctly
 
-#### Build System Fixes  
+#### Build System Fixes (January 2026)
 - Fixed configuration not persisting when changed via status bar
 - Fixed MSBuild configuration/platform separation (Debug|Win32 split)
 - Fixed PowerShell command parameter escaping (semicolons/pipes)
@@ -56,7 +64,8 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 
 ### 🏗️ Architecture & Code Quality
 
-#### Service Pattern Improvements
+#### Service Pattern Improvements (December 2025 - January 2026)
+- **ScopeAnalyzer service** - New scope analysis infrastructure (248 lines, 29 tests)
 - Eliminated code duplication - All providers use **CrossFileResolver** service consistently
 - Followed established service architecture from December refactoring
 - **ProcedureCallDetector** utility class extracts reusable call detection logic
@@ -69,10 +78,13 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 ### 📝 Documentation
 - Added comprehensive MAP INCLUDE testing documentation
 - Updated scope test suite with START() procedure examples
+- Added scope analysis implementation documentation
 
 ### 🧪 Testing
-- Added **MapTokenType.test.ts** - Validates FUNCTION tokens have correct type/subType
-- Added **CrossFileScope.test.ts** - Tests for START() procedure references
+- **ScopeAnalyzer.test.ts** - 29 tests for scope analysis (December 2025)
+- **DefinitionProvider integration tests** - 6 tests for scope-aware navigation (December 2025)
+- **MapTokenType.test.ts** - Validates FUNCTION tokens have correct type/subType (January 2026)
+- **CrossFileScope.test.ts** - Tests for START() procedure references (January 2026)
 - Enhanced scope test suite with MODULE resolution examples
 
 ---
