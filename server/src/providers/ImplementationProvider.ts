@@ -458,7 +458,8 @@ export class ImplementationProvider {
             }
 
             const line = lines[i];
-            const implMatch = line.match(/(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i);
+            // Match with or without parentheses: ThisWindow.Ask PROCEDURE or ThisWindow.Ask PROCEDURE()
+            const implMatch = line.match(/(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)\s*(?:\(([^)]*)\))?/i);
 
             if (implMatch && implMatch[2].toUpperCase() === methodName.toUpperCase()) {
                 // Found a matching method name
@@ -475,7 +476,7 @@ export class ImplementationProvider {
                 }
 
                 // Count parameters to find best match
-                const params = implMatch[3].trim();
+                const params = implMatch[3] ? implMatch[3].trim() : '';
                 const implParamCount = params === '' ? 0 : params.split(',').length;
                 const distance = Math.abs(implParamCount - paramCount);
 
