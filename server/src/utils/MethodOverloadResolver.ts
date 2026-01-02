@@ -63,21 +63,29 @@ export class MethodOverloadResolver {
             if (labelToken) {
                 logger.info(`Found class ${className} at line ${labelToken.line}`);
                 
-                // Search for all method overloads in class
-                for (let i = labelToken.line + 1; i < tokens.length; i++) {
-                    const lineTokens = tokens.filter(t => t.line === i);
-                    const endToken = lineTokens.find(t => t.value.toUpperCase() === 'END' && t.start === 0);
-                    if (endToken) break;
+                // Get file content once
+                const content = document.getText();
+                const lines = content.split('\n');
+                
+                // Search for all method overloads in class by iterating through tokens
+                // This is O(n) instead of O(n²) with repeated filter calls
+                for (const token of tokens) {
+                    // Only process tokens after the class start
+                    if (token.line <= labelToken.line) continue;
                     
-                    const methodToken = lineTokens.find(t =>
-                        t.value.toLowerCase() === methodName.toLowerCase() &&
-                        t.start === 0
-                    );
+                    // Stop at END token at column 0
+                    if (token.type === TokenType.Keyword && 
+                        token.value.toUpperCase() === 'END' && 
+                        token.start === 0) {
+                        break;
+                    }
                     
-                    if (methodToken) {
-                        // Get the full line as signature
-                        const content = document.getText();
-                        const lines = content.split('\n');
+                    // Check if this is a method declaration at start of line
+                    if (token.type === TokenType.Label &&
+                        token.value.toLowerCase() === methodName.toLowerCase() &&
+                        token.start === 0) {
+                        
+                        const i = token.line;
                         const signature = lines[i].trim();
                         
                         // Count parameters in the declaration
