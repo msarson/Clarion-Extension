@@ -162,7 +162,33 @@ export async function initializeSolution(
     const availableConfigs = extractConfigurationsFromSolution(solutionFileContent);
 
     // ✅ Step 2: Validate the stored configuration
-    if (!availableConfigs.includes(globalSettings.configuration)) {
+    let needsConfigUpdate = !availableConfigs.includes(globalSettings.configuration);
+    
+    // Try to auto-migrate old-style configuration (e.g., "Debug" -> "Debug|Win32")
+    if (needsConfigUpdate && globalSettings.configuration) {
+        const matchingConfig = availableConfigs.find(config => 
+            config.startsWith(globalSettings.configuration + '|')
+        );
+        
+        if (matchingConfig) {
+            logger.info(`🔄 Auto-migrating configuration: ${globalSettings.configuration} -> ${matchingConfig}`);
+            globalSettings.configuration = matchingConfig;
+            needsConfigUpdate = false; // We found a match, update but don't prompt user
+            
+            // Save the migrated configuration
+            await setGlobalClarionSelection(
+                globalSolutionFile,
+                globalClarionPropertiesFile,
+                globalClarionVersion,
+                globalSettings.configuration
+            );
+            updateConfigurationStatusBar(globalSettings.configuration);
+            logger.info(`✅ Auto-migrated to configuration: ${globalSettings.configuration}`);
+        }
+    }
+    
+    // If still invalid after migration attempt, prompt user
+    if (needsConfigUpdate) {
         logger.warn(`⚠️ Invalid configuration detected: ${globalSettings.configuration}. Asking user to select a valid one.`);
 
         // ✅ Step 3: Prompt user to select a valid configuration
@@ -171,19 +197,23 @@ export async function initializeSolution(
         });
 
         if (!selectedConfig) {
-            vscodeWindow.showWarningMessage("No valid configuration selected. Using 'Debug' as a fallback.");
-            globalSettings.configuration = "Debug"; // ⬅️ Safe fallback
+            vscodeWindow.showWarningMessage("No valid configuration selected. Using first available configuration as fallback.");
+            globalSettings.configuration = availableConfigs[0] || "Debug|Win32"; // ⬅️ Safe fallback with platform
         } else {
             globalSettings.configuration = selectedConfig;
         }
 
-        // ✅ Save the new selection
-        const target = getClarionConfigTarget();
-        if (target && workspace.workspaceFolders) {
-            const config = workspace.getConfiguration("clarion", workspace.workspaceFolders[0].uri);
-            await config.update("configuration", globalSettings.configuration, target);
-            logger.info(`✅ Updated configuration: ${globalSettings.configuration}`);
-        }
+        // ✅ Save the new selection using setGlobalClarionSelection to update solutions array
+        await setGlobalClarionSelection(
+            globalSolutionFile,
+            globalClarionPropertiesFile,
+            globalClarionVersion,
+            globalSettings.configuration
+        );
+        
+        // ✅ Update the status bar
+        updateConfigurationStatusBar(globalSettings.configuration);
+        logger.info(`✅ Updated configuration: ${globalSettings.configuration}`);
     }
     // ✅ Wait for the language client to be ready before proceeding
     if (client) {

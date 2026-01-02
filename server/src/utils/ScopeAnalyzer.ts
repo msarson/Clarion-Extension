@@ -9,7 +9,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("ScopeAnalyzer");
-logger.setLevel("info"); // Enable info logging to debug MAP INCLUDE
+logger.setLevel("error");
 
 export type ScopeLevel = 'global' | 'module' | 'procedure' | 'routine';
 export type ScopeType = 'global' | 'module-local' | 'procedure-local' | 'routine-local';
@@ -29,6 +29,8 @@ export interface ScopeInfo {
  */
 export class ScopeAnalyzer {
     private redirectionParser: RedirectionFileParserServer;
+    // Cache for INCLUDE file tokens with modification time tracking
+    private includeFileCache: Map<string, { tokens: Token[], mtime: number }> = new Map();
 
     constructor(
         private tokenCache: TokenCache,
@@ -624,6 +626,17 @@ export class ScopeAnalyzer {
                 return null;
             }
             
+            // Check file modification time for cache invalidation
+            const stats = fs.statSync(filePath);
+            const mtime = stats.mtimeMs;
+            
+            // Check if we have a valid cached version
+            const cached = this.includeFileCache.get(filePath);
+            if (cached && cached.mtime === mtime) {
+                logger.info(`         ✅ Using cached tokens: ${cached.tokens.length} tokens`);
+                return cached.tokens;
+            }
+            
             // Read file content
             const content = fs.readFileSync(filePath, 'utf-8');
             logger.info(`         📖 Read ${content.length} characters from file`);
@@ -643,6 +656,9 @@ export class ScopeAnalyzer {
                 const DocumentStructure = require('../DocumentStructure').DocumentStructure;
                 const docStructure = new DocumentStructure(tokens);
                 logger.info(`         ✅ Processed tokens through DocumentStructure to set referencedFile properties`);
+                
+                // Cache the tokens with modification time
+                this.includeFileCache.set(filePath, { tokens, mtime });
                 
                 // Log first few tokens for debugging
                 const firstFew = tokens.slice(0, 5);

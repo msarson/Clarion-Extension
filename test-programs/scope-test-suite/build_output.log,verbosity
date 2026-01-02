@@ -1,0 +1,90 @@
+Build started 02/01/2026 11:58:35.
+Project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln" on node 1 (build target(s)).
+Building with tools version "4.0".
+Target "ValidateSolutionConfiguration" in file "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln.metaproj" from project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln" (entry point):
+Task "Error" skipped, due to false condition; (('$(CurrentSolutionConfigurationContents)' == '') and ('$(SkipInvalidConfigurations)' != 'true')) was evaluated as (('<SolutionConfiguration>
+  <ProjectConfiguration Project="{8B8D458E-C672-4EA6-B6DC-B9645FAE5E5B}" AbsolutePath="f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj" BuildProjectInSolution="True">Debug|Win32</ProjectConfiguration>
+</SolutionConfiguration>' == '') and ('' != 'true')).
+Task "Warning" skipped, due to false condition; (('$(CurrentSolutionConfigurationContents)' == '') and ('$(SkipInvalidConfigurations)' == 'true')) was evaluated as (('<SolutionConfiguration>
+  <ProjectConfiguration Project="{8B8D458E-C672-4EA6-B6DC-B9645FAE5E5B}" AbsolutePath="f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj" BuildProjectInSolution="True">Debug|Win32</ProjectConfiguration>
+</SolutionConfiguration>' == '') and ('' == 'true')).
+Using "Message" task from assembly "Microsoft.Build.Tasks.v4.0, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a".
+Task "Message"
+  Building solution configuration "Debug|Win32".
+Done executing task "Message".
+Done building target "ValidateSolutionConfiguration" in project "ScopeTestSuite.sln".
+Target "ValidateToolsVersions" in file "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln.metaproj" from project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln" (entry point):
+Task "Error" skipped, due to false condition; ('$(MSBuildToolsVersion)' == '2.0' and ('$(ProjectToolsVersion)' != '2.0' and '$(ProjectToolsVersion)' != '')) was evaluated as ('4.0' == '2.0' and ('' != '2.0' and '' != '')).
+Done building target "ValidateToolsVersions" in project "ScopeTestSuite.sln".
+Target "ValidateProjects" in file "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln.metaproj" from project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln" (entry point):
+Done building target "ValidateProjects" in project "ScopeTestSuite.sln".
+Target "Build" in file "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln.metaproj" from project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln" (entry point):
+Using "MSBuild" task from assembly "Microsoft.Build.Tasks.v4.0, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a".
+Task "MSBuild"
+  Global Properties:
+    BuildingSolutionFile=true
+    CurrentSolutionConfigurationContents=<SolutionConfiguration>
+    <ProjectConfiguration Project="{8B8D458E-C672-4EA6-B6DC-B9645FAE5E5B}" AbsolutePath="f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj" BuildProjectInSolution="True">Debug|Win32</ProjectConfiguration>
+  </SolutionConfiguration>
+    SolutionDir=f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite
+    SolutionExt=.sln
+    SolutionFileName=ScopeTestSuite.sln
+    SolutionName=ScopeTestSuite
+    SolutionPath=f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln
+  Additional Properties for project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj":
+    Configuration=Debug
+    Platform=Win32
+    VisualStudioVersion=11.0
+Project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln" (1) is building "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj" (2) on node 1 (default targets).
+Building with tools version "4.0".
+Target "PreBuildEvent" skipped, due to false condition; ('$(PreBuildEvent)'!='') was evaluated as (''!='').
+Target "_TimeStampBeforeCompile" skipped, due to false condition; ('$(RunPostBuildEvent)'=='OnOutputUpdated') was evaluated as (''=='OnOutputUpdated').
+Target "CoreCompile" in file "C:\Clarion\Clarion11.1\bin\SoftVelocity.Build.Clarion.targets" from project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj" (target "Build" depends on it):
+Using "CW" task from assembly "C:\Clarion\Clarion11.1\bin\SoftVelocity.CW.Build.Tasks.dll".
+Task "CW"
+  Making ScopeTestSuite.exe
+  Linking iexe32.obj
+  Linking main.obj
+  Linking utils.obj
+  Linking StartProc.obj
+  Linking ClaRUN.lib
+  Linking WIN32.lib
+  Building Line Number Tables
+  Building Debug Tables
+  Writing Debug Tables
+Done executing task "CW".
+Done building target "CoreCompile" in project "ScopeTestSuite.cwproj".
+Target "_TimeStampAfterCompile" skipped, due to false condition; ('$(RunPostBuildEvent)'=='OnOutputUpdated') was evaluated as (''=='OnOutputUpdated').
+Target "PostBuildEvent" skipped, due to false condition; (
+			            '$(PostBuildEvent)'!=''
+			            and
+			            (
+			                '$(RunPostBuildEvent)'!='OnOutputUpdated'
+			                or 
+			                '$(_BinaryTimestampBeforeCompile)'!='$(_BinaryTimestampAfterCompile)'
+			            )
+			        ) was evaluated as (
+			            ''!=''
+			            and
+			            (
+			                ''!='OnOutputUpdated'
+			                or 
+			                ''!=''
+			            )
+			        ).
+Target "Build" in file "C:\Clarion\Clarion11.1\bin\SoftVelocity.Build.Clarion.targets" from project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj" (entry point):
+Building target "Build" completely.
+No input files were specified.
+Done building target "Build" in project "ScopeTestSuite.cwproj".
+Done Building Project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj" (default targets).
+
+Done executing task "MSBuild".
+Done building target "Build" in project "ScopeTestSuite.sln".
+Done Building Project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln" (build target(s)).
+
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:00.13

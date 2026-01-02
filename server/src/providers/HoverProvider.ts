@@ -26,7 +26,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("HoverProvider");
-logger.setLevel("info"); // TEMPORARY: Debug TEST 4 regression
+logger.setLevel("error");
 
 /**
  * Provides hover information for local variables and parameters

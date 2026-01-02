@@ -16,7 +16,7 @@ import { PlatformUtils } from "./platformUtils";
 import { SolutionCache } from "./SolutionCache";
 import { ClarionProjectInfo } from "../../common/types";
 const logger = LoggerManager.getLogger("BuildTasks");
-logger.setLevel("error");
+logger.setLevel("info");
 /**
  * Main entry point for the Clarion build process
  */
@@ -253,19 +253,38 @@ export function prepareBuildParameters(buildConfig: {
     }
 
     const selectedConfig = globalSettings.configuration || "Debug"; // Ensure a fallback
+    
+    logger.info(`🔍 Reading configuration from globalSettings: ${selectedConfig}`);
+    logger.info(`🔍 globalSettings.configuration value: ${globalSettings.configuration}`);
+    
+    // Split configuration into configuration and platform parts for MSBuild
+    // MSBuild expects /p:Configuration=Debug /p:Platform=Win32, not /p:Configuration=Debug|Win32
+    let configPart = selectedConfig;
+    let platformPart = "";
+    
+    if (selectedConfig.includes('|')) {
+        const parts = selectedConfig.split('|');
+        configPart = parts[0];
+        platformPart = parts[1];
+    }
 
     const buildArgs = [
         "/property:GenerateFullPaths=true",
         "/t:build",
-        `/property:Configuration=${selectedConfig}`,
-        `/property:clarion_Sections=${selectedConfig}`,
+        `/property:Configuration=${configPart}`,
+        `/property:clarion_Sections=${configPart}`,
         `/property:ClarionBinPath="${clarionBinPath}"`,
         "/property:NoDependency=true",
         "/verbosity:normal",
         "/nologo",
-        `/fileLogger`,
-        `/fileLoggerParameters:LogFile="${buildLogPath}";verbosity=detailed;encoding=utf-8`
+        "/fileLogger",
+        `/fileLoggerParameters:LogFile="${buildLogPath}",verbosity=detailed,encoding=utf-8`
     ];
+    
+    // Add platform property if we have one
+    if (platformPart) {
+        buildArgs.splice(3, 0, `/property:Platform=${platformPart}`);
+    }
 
     // Log the build configuration
     logger.info(`🔄 Preparing build for ${buildConfig.buildTarget === "Solution" ? "solution" : "project"}: ${targetName}`);
@@ -321,9 +340,12 @@ export async function executeBuildTask(params: {
     logger.info(`🔹 MSBuild path: ${msBuildPath}`);
     logger.info(`🔹 Build log path: ${buildLogPath}`);
 
-    // Create the shell execution - MSBuild will handle logging via /fileLogger
+    // Create the shell execution
+    const commandLine = `${msBuildPath} ${buildArgs.join(' ')}`;
+    logger.info(`✅ Executing build task: ${commandLine}`);
+    
     const execution = new ShellExecution(
-        `${msBuildPath} ${buildArgs.join(" ")}`,
+        commandLine,
         { cwd: solutionDir }
     );
 
@@ -346,7 +368,6 @@ export async function executeBuildTask(params: {
             diagnosticCollection   // ✅ pass through
         );
 
-        logger.info(`✅ Executing build task: ${execution.commandLine}`);
         await tasks.executeTask(task);
     } catch (error) {
         window.showErrorMessage("❌ Failed to start Clarion build task.");
@@ -394,7 +415,8 @@ function createBuildTask(execution: ShellExecution): Task {
         reveal: revealKind,
         echo: revealKind !== TaskRevealKind.Never,
         focus: false,
-        panel: TaskPanelKind.Dedicated
+        panel: TaskPanelKind.Shared,  // Reuse the same terminal
+        clear: true                     // Clear terminal before each run
     };
 
     return task;
@@ -436,73 +458,90 @@ function processTaskCompletion(
     fs.readFile(buildLogPath, "utf8", (err, data) => {
         if (err) {
             logger.info("Error reading build log:", err);
-        } else {
-            logger.info("Captured Build Output");
-            logger.info(data);
-
-            // Check if we should also show in Output panel
-            const showInOutputPanel = workspace.getConfiguration("clarion.build").get<boolean>("showInOutputPanel", false);
-            if (showInOutputPanel) {
-                const outputChannel = window.createOutputChannel("Clarion Build");
-                outputChannel.clear();
-                outputChannel.append(data);
-                outputChannel.show(true);
-            }
-
-            if (event.exitCode !== 0) {
-                // ❌ Non-zero exit code: parse diagnostics to check for actual errors
-                const { errorCount, warningCount, diagnostics } = processBuildErrors(data);
-                const msbuildErrors = processGeneralMSBuildErrors(data);
-
-                // ✅ clear + set diagnostics here
+            
+            // Show completion message even if log file is missing
+            if (event.exitCode === 0) {
                 diagnosticCollection.clear();
-                diagnostics.forEach((arr, file) =>
-                    diagnosticCollection.set(Uri.file(file), arr)
-                );
-
-                const totalErrors = errorCount; // + (msbuildErrors ? 1 : 0);
-                const targetInfo =
+                const successMessage =
                     buildTarget === "Solution"
-                        ? `Solution: ${targetName}`
-                        : `Project: ${targetName}`;
-
-                // Only show error message if we actually found errors or warnings
-                if (totalErrors > 0 || warningCount > 0) {
-                    let message = `❌ Build Failed (${targetInfo}): `;
-
-                    if (totalErrors > 0) {
-                        message += `${totalErrors} error${totalErrors !== 1 ? "s" : ""}`;
-                        if (warningCount > 0) {
-                            message += ` and ${warningCount} warning${warningCount !== 1 ? "s" : ""}`;
-                        }
-                        message += ` found. Check the Problems Panel!`;
-                    } else if (warningCount > 0) {
-                        message += `${warningCount} warning${warningCount !== 1 ? "s" : ""} found. Check the Problems Panel!`;
-                    }
-
-                    window.showErrorMessage(message);
-                } else {
-                    // Exit code was non-zero but no errors/warnings found
-                    // This can happen with some MSBuild configurations - treat as success
-                    logger.info("⚠️ Build returned non-zero exit code but no errors were found. Treating as successful build.");
-                    diagnosticCollection.clear();
-                    
-                    const successMessage =
-                        buildTarget === "Solution"
-                            ? `✅ Building Clarion Solution Complete: ${targetName}`
-                            : `✅ Building Clarion Project Complete: ${targetName}`;
-                    window.showInformationMessage(successMessage);
-                }
+                        ? `✅ Building Clarion Solution Complete: ${targetName}`
+                        : `✅ Building Clarion Project Complete: ${targetName}`;
+                window.showInformationMessage(successMessage);
             } else {
-                // ✅ Success: clear old diagnostics
-                diagnosticCollection.clear();
+                const failureMessage =
+                    buildTarget === "Solution"
+                        ? `❌ Build Failed (Solution: ${targetName}) - Check terminal output for details`
+                        : `❌ Build Failed (Project: ${targetName}) - Check terminal output for details`;
+                window.showErrorMessage(failureMessage);
+            }
+            return; // Exit early since we don't have log data
+        }
+        
+        logger.info("Captured Build Output");
+        logger.info(data);
 
+        // Check if we should also show in Output panel
+        const showInOutputPanel = workspace.getConfiguration("clarion.build").get<boolean>("showInOutputPanel", false);
+        if (showInOutputPanel) {
+            const outputChannel = window.createOutputChannel("Clarion Build");
+            outputChannel.clear();
+            outputChannel.append(data);
+            outputChannel.show(true);
+        }
+
+        if (event.exitCode !== 0) {
+            // ❌ Non-zero exit code: parse diagnostics to check for actual errors
+            const { errorCount, warningCount, diagnostics } = processBuildErrors(data);
+            const msbuildErrors = processGeneralMSBuildErrors(data);
+
+            // ✅ clear + set diagnostics here
+            diagnosticCollection.clear();
+            diagnostics.forEach((arr, file) =>
+                diagnosticCollection.set(Uri.file(file), arr)
+            );
+
+            const totalErrors = errorCount; // + (msbuildErrors ? 1 : 0);
+            const targetInfo =
+                buildTarget === "Solution"
+                    ? `Solution: ${targetName}`
+                    : `Project: ${targetName}`;
+
+            // Only show error message if we actually found errors or warnings
+            if (totalErrors > 0 || warningCount > 0) {
+                let message = `❌ Build Failed (${targetInfo}): `;
+
+                if (totalErrors > 0) {
+                    message += `${totalErrors} error${totalErrors !== 1 ? "s" : ""}`;
+                    if (warningCount > 0) {
+                        message += ` and ${warningCount} warning${warningCount !== 1 ? "s" : ""}`;
+                    }
+                    message += ` found. Check the Problems Panel!`;
+                } else if (warningCount > 0) {
+                    message += `${warningCount} warning${warningCount !== 1 ? "s" : ""} found. Check the Problems Panel!`;
+                }
+
+                window.showErrorMessage(message);
+            } else {
+                // Exit code was non-zero but no errors/warnings found
+                // This can happen with some MSBuild configurations - treat as success
+                logger.info("⚠️ Build returned non-zero exit code but no errors were found. Treating as successful build.");
+                diagnosticCollection.clear();
+                
                 const successMessage =
                     buildTarget === "Solution"
                         ? `✅ Building Clarion Solution Complete: ${targetName}`
                         : `✅ Building Clarion Project Complete: ${targetName}`;
                 window.showInformationMessage(successMessage);
             }
+        } else {
+            // ✅ Success: clear old diagnostics
+            diagnosticCollection.clear();
+
+            const successMessage =
+                buildTarget === "Solution"
+                    ? `✅ Building Clarion Solution Complete: ${targetName}`
+                    : `✅ Building Clarion Project Complete: ${targetName}`;
+            window.showInformationMessage(successMessage);
         }
 
         // Check if we should preserve the log file

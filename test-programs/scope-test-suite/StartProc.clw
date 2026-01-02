@@ -4,5 +4,5 @@
    INCLUDE('startproc.inc'),ONCE  ! Standard start procedure
    END
 
-StartProc        PROCEDURE(Byte pProcNumber) 
+StartProc        PROCEDURE(string pProcNumber) 
     CODE
