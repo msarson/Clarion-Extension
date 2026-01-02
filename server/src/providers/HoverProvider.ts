@@ -137,14 +137,12 @@ export class HoverProvider {
 
             // Check if this is a procedure call (e.g., "MyProcedure()")
             // OR if this is inside a START() call (e.g., "START(ProcName, ...)")
-            // BUT: Skip if it's SELF.member or object.member (class method call)
+            // BUT: Skip if it's SELF.member (class method call)
+            // NOTE: PARENT.member NOT supported yet - needs parent class resolution
             const detection = ProcedureCallDetector.isProcedureCallOrReference(document, position, wordRange);
-            const isClassMethodCall = word.includes('.') && (
-                line.substring(0, position.character).toLowerCase().includes('self.') ||
-                /\w+\.\w+/.test(word)
-            );
+            const isSelfMethodCall = word.toUpperCase().includes('SELF.') && /\w+\.\w+/.test(word);
             
-            if (detection.isProcedure && !isClassMethodCall) {
+            if (detection.isProcedure && !isSelfMethodCall) {
                 logger.info(`Detected procedure ${ProcedureCallDetector.getDetectionMessage(word, detection.isStartCall)}`);
                 
                 // Get tokens for parameter counting
@@ -613,14 +611,15 @@ export class HoverProvider {
             }
 
             // Check if this is a structure/group name followed by a dot (e.g., hovering over "MyGroup" in "MyGroup.MyVar")
-            // BUT: Skip SELF.member and PARENT.member - those are class method calls handled below
+            // BUT: Skip SELF.member - those are class method calls handled below
+            // NOTE: PARENT.member NOT supported yet - requires parent class lookup
             // Search for a dot starting from the word's position in the line
             const wordStartInLine = line.indexOf(word, Math.max(0, position.character - word.length));
             const dotIndex = line.indexOf('.', wordStartInLine);
             
-            const isSelfOrParent = word.toUpperCase().startsWith('SELF.') || word.toUpperCase().startsWith('PARENT.');
+            const isSelfMember = word.toUpperCase().startsWith('SELF.');
             
-            if (dotIndex > wordStartInLine && dotIndex < wordStartInLine + word.length + 5 && !isSelfOrParent) {
+            if (dotIndex > wordStartInLine && dotIndex < wordStartInLine + word.length + 5 && !isSelfMember) {
                 // There's a dot right after the word - this looks like structure.field notation
                 logger.info(`Detected dot notation for word: ${word}, dotIndex: ${dotIndex}`);
                 
