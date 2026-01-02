@@ -15,7 +15,7 @@ import { SolutionManager } from '../solution/solutionManager';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("MapProcedureResolver");
-logger.setLevel("error");
+logger.setLevel("error"); // Production: Only log errors
 
 export class MapProcedureResolver {
     private scopeAnalyzer: ScopeAnalyzer;
@@ -33,85 +33,153 @@ export class MapProcedureResolver {
      * @param procName Procedure name to search for
      * @returns Object with extracted text and line range, or null if not found
      */
+    /**
+     * 🚀 PERFORMANCE: Extract MODULE block containing a specific procedure declaration
+     * Strategy: Find procedure declaration line, then search UPWARD to find enclosing MODULE
+     * This handles multiple procedures in one MODULE and nested MODULEs correctly
+     * 
+     * @param content File content to search
+     * @param procName Procedure name to find
+     * @returns Extracted MODULE block with adjusted line numbers, or null if not found
+     */
     private extractModuleBlockForProcedure(content: string, procName: string): { text: string; startLine: number; endLine: number } | null {
         const lines = content.split(/\r?\n/);
-        const procNameLower = procName.toLowerCase();
         
-        // Search for lines containing the procedure name (case-insensitive, word boundary)
-        const regex = new RegExp(`\\b${procName}\\b`, 'i');
+        // Step 1: Find the procedure IMPLEMENTATION (not DLL declaration)
+        // Matches both formats:
+        //   ProcedureName    PROCEDURE(params)     (column 0)
+        //                    ProcedureName PROCEDURE(params)  (indented)
+        //   ProcedureName    FUNCTION(params)      (both are valid in Clarion)
+        // BUT excludes DLL declarations like: ProcedureName FUNCTION(...),DLL
+        const procPattern = new RegExp(
+            `^\\s*${procName}\\s+(?:PROCEDURE|FUNCTION)`,
+            'im'
+        );
         
+        let procLineNum = -1;
         for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
+            const trimmed = lines[i].trim();
             
-            // Skip comments and strings (simple heuristic)
-            if (trimmed.startsWith('!') || trimmed.startsWith("'") || trimmed.startsWith('"')) {
+            // Skip comments
+            if (trimmed.startsWith('!')) {
                 continue;
             }
             
-            // Check if this line contains the procedure name
-            if (!regex.test(line)) {
-                continue;
-            }
-            
-            // Found a potential match - check if it looks like a procedure declaration
-            // Look for FUNCTION or PROCEDURE keyword on same line
-            const lineUpper = line.toUpperCase();
-            if (!lineUpper.includes('FUNCTION') && !lineUpper.includes('PROCEDURE')) {
-                continue;
-            }
-            
-            // Scan backwards to find MODULE or MAP
-            let moduleStart = -1;
-            for (let j = i - 1; j >= 0; j--) {
-                const prevLine = lines[j].trim().toUpperCase();
-                if (prevLine.startsWith('MODULE(')) {
-                    moduleStart = j;
-                    break;
-                }
-                // Stop if we hit another structure
-                if (prevLine.startsWith('MAP') || prevLine.startsWith('PROCEDURE') || prevLine.startsWith('PROGRAM')) {
-                    break;
-                }
-            }
-            
-            if (moduleStart === -1) {
-                continue; // Not inside a MODULE block
-            }
-            
-            // Scan forwards to find matching END
-            let nestLevel = 1;
-            let moduleEnd = -1;
-            for (let j = moduleStart + 1; j < lines.length; j++) {
-                const nextLine = lines[j].trim().toUpperCase();
+            // Check if line matches procedure pattern
+            if (procPattern.test(lines[i])) {
+                const upperLine = lines[i].toUpperCase();
                 
-                // Track nesting
-                if (nextLine.startsWith('MODULE(') || nextLine.startsWith('MAP') || 
-                    nextLine.startsWith('GROUP') || nextLine.startsWith('QUEUE')) {
-                    nestLevel++;
-                } else if (nextLine === 'END' || nextLine.startsWith('END ') || nextLine.startsWith('END!')) {
-                    nestLevel--;
-                    if (nestLevel === 0) {
-                        moduleEnd = j;
-                        break;
-                    }
+                // Skip if this is a DLL declaration (has ,DLL attribute)
+                if (upperLine.includes(',DLL')) {
+                    logger.info(`⏭️ Skipping DLL declaration at line ${i}: ${lines[i].trim()}`);
+                    continue;
                 }
+                
+                procLineNum = i;
+                logger.info(`🎯 Found procedure ${procName} implementation at line ${i}`);
+                break;
             }
-            
-            if (moduleEnd === -1) {
-                continue; // Couldn't find matching END
-            }
-            
-            // Extract the MODULE block
-            const extractedLines = lines.slice(moduleStart, moduleEnd + 1);
-            return {
-                text: extractedLines.join('\n'),
-                startLine: moduleStart,
-                endLine: moduleEnd
-            };
         }
         
-        return null;
+        if (procLineNum === -1) {
+            logger.info(`⚠️ Procedure ${procName} implementation not found in file (may only have DLL declaration)`);
+            return null;
+        }
+        
+        // Step 2: Search UPWARD from procLineNum to find enclosing MODULE
+        let moduleStartLine = -1;
+        let depth = 0; // Track structure nesting depth
+        
+        for (let i = procLineNum - 1; i >= 0; i--) {
+            const trimmed = lines[i].trim();
+            const upperLine = trimmed.toUpperCase();
+            
+            // Skip comments and empty lines
+            if (upperLine.startsWith('!') || trimmed === '') {
+                continue;
+            }
+            
+            // Look for structure closings (END or .)
+            if (upperLine === 'END' || upperLine.startsWith('END ') || upperLine.startsWith('END!') || upperLine === '.') {
+                depth++;
+            }
+            
+            // Look for MODULE opening
+            if (upperLine.startsWith('MODULE(')) {
+                if (depth === 0) {
+                    // Found our MODULE! (at the correct nesting level)
+                    moduleStartLine = i;
+                    logger.info(`✅ Found enclosing MODULE at line ${i}`);
+                    break;
+                } else {
+                    // This MODULE belongs to an outer structure
+                    depth--;
+                }
+            }
+            
+            // Look for other structure openings that increase depth
+            if (upperLine.startsWith('MAP') || upperLine.startsWith('GROUP') || 
+                upperLine.startsWith('QUEUE') || upperLine.startsWith('RECORD') ||
+                upperLine.startsWith('CLASS') || upperLine.startsWith('INTERFACE')) {
+                if (depth > 0) {
+                    depth--;
+                }
+            }
+        }
+        
+        if (moduleStartLine === -1) {
+            logger.info(`⚠️ No enclosing MODULE found for procedure ${procName}`);
+            return null;
+        }
+        
+        // Step 3: Find MODULE end (search DOWN from moduleStart)
+        let moduleEndLine = -1;
+        depth = 1; // We're inside the MODULE
+        
+        for (let i = moduleStartLine + 1; i < lines.length; i++) {
+            const trimmed = lines[i].trim();
+            const upperLine = trimmed.toUpperCase();
+            
+            // Skip comments
+            if (upperLine.startsWith('!')) {
+                continue;
+            }
+            
+            // Look for structure openings
+            if (upperLine.startsWith('MODULE(') || upperLine.startsWith('MAP') || 
+                upperLine.startsWith('GROUP') || upperLine.startsWith('QUEUE') ||
+                upperLine.startsWith('RECORD') || upperLine.startsWith('CLASS') ||
+                upperLine.startsWith('INTERFACE')) {
+                depth++;
+            }
+            
+            // Look for structure closings
+            if (upperLine === 'END' || upperLine.startsWith('END ') || upperLine.startsWith('END!') || upperLine === '.') {
+                depth--;
+                if (depth === 0) {
+                    moduleEndLine = i;
+                    logger.info(`✅ Found MODULE end at line ${i}`);
+                    break;
+                }
+            }
+        }
+        
+        if (moduleEndLine === -1) {
+            logger.info(`⚠️ Could not find MODULE end for procedure ${procName}`);
+            return null;
+        }
+        
+        // Step 4: Extract the MODULE block
+        const extractedLines = lines.slice(moduleStartLine, moduleEndLine + 1);
+        const extractedText = extractedLines.join('\n');
+        
+        logger.info(`🚀 Extracted MODULE block: ${extractedLines.length} lines (${extractedText.length} chars)`);
+        
+        return {
+            text: extractedText,
+            startLine: moduleStartLine,
+            endLine: moduleEndLine
+        };
     }
 
     /**
@@ -641,8 +709,55 @@ export class MapProcedureResolver {
             const extracted = this.extractModuleBlockForProcedure(content, procName);
             
             if (extracted) {
-                logger.debug(`🚀 Fast extraction: Found MODULE block (${extracted.text.length} chars) at lines ${extracted.startLine}-${extracted.endLine}`);
-                // Tokenize only the extracted block
+                logger.info(`🚀 Fast extraction: Found MODULE block (${extracted.text.length} chars) at lines ${extracted.startLine}-${extracted.endLine}`);
+                
+                // Check if the extracted block starts with MODULE('xxx.CLW')
+                const firstLine = extracted.text.split(/\r?\n/)[0];
+                const moduleMatch = firstLine.match(/MODULE\s*\(\s*'([^']+\.CLW)'\s*\)/i);
+                
+                if (moduleMatch) {
+                    // Direct MODULE reference to a CLW file - resolve and search for implementation
+                    const clwFile = moduleMatch[1];
+                    logger.info(`🎯 Extracted MODULE references CLW file: ${clwFile}`);
+                    
+                    const solutionManager = SolutionManager.getInstance();
+                    if (solutionManager && solutionManager.solution) {
+                        for (const proj of solutionManager.solution.projects) {
+                            const redirectionParser = proj.getRedirectionParser();
+                            const resolved = redirectionParser.findFile(clwFile);
+                            if (resolved && resolved.path && fs.existsSync(resolved.path)) {
+                                logger.info(`✅ Resolved CLW file: ${resolved.path}`);
+                                const clwContent = fs.readFileSync(resolved.path, 'utf8');
+                                const clwUri = `file:///${resolved.path.replace(/\\/g, '/')}`;
+                                const clwDocument = TextDocument.create(clwUri, 'clarion', 1, clwContent);
+                                const tokenCache = TokenCache.getInstance();
+                                const clwTokens = tokenCache.getTokens(clwDocument);
+                                
+                                // Find the procedure implementation
+                                const impl = clwTokens.find(t =>
+                                    t.subType === TokenType.GlobalProcedure &&
+                                    t.label?.toLowerCase() === procName.toLowerCase()
+                                );
+                                
+                                if (impl) {
+                                    logger.info(`✅ Found implementation in ${path.basename(resolved.path)} at line ${impl.line}`);
+                                    return Location.create(`file:///${resolved.path.replace(/\\/g, '/')}`, {
+                                        start: { line: impl.line, character: 0 },
+                                        end: { line: impl.line, character: impl.value.length }
+                                    });
+                                }
+                                
+                                logger.info(`⚠️ Implementation not found in ${path.basename(resolved.path)}`);
+                                break;
+                            }
+                        }
+                    }
+                    
+                    logger.info(`⚠️ Could not resolve or find implementation in ${clwFile}`);
+                    return null;
+                }
+                
+                // Otherwise, tokenize the extracted block and look for MAP structure
                 const ClarionTokenizer = (await import('../ClarionTokenizer')).ClarionTokenizer;
                 const tokenizer = new ClarionTokenizer(extracted.text);
                 const moduleTokens = tokenizer.tokenize();
@@ -685,8 +800,8 @@ export class MapProcedureResolver {
                         );
                         
                         if (moduleTokenInMap?.referencedFile) {
-                            logger.debug(`🎯 Procedure is in MODULE('${moduleTokenInMap.referencedFile}')`);
-                            logger.debug(`📄 MODULE references a CLW file, searching for direct implementation`);
+                            logger.info(`🎯 Procedure is in MODULE('${moduleTokenInMap.referencedFile}')`);
+                            logger.info(`📄 MODULE references a CLW file, searching for direct implementation`);
                             
                             // Resolve the CLW file
                             const solutionManager = SolutionManager.getInstance();
@@ -695,7 +810,7 @@ export class MapProcedureResolver {
                                     const redirectionParser = proj.getRedirectionParser();
                                     const resolved = redirectionParser.findFile(moduleTokenInMap.referencedFile);
                                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {
-                                        logger.debug(`✅ Resolved CLW file: ${resolved.path}`);
+                                        logger.info(`✅ Resolved CLW file: ${resolved.path}`);
                                         const clwContent = fs.readFileSync(resolved.path, 'utf8');
                                         const clwUri = `file:///${resolved.path.replace(/\\/g, '/')}`;
                                         const clwDocument = TextDocument.create(clwUri, 'clarion', 1, clwContent);
@@ -716,7 +831,7 @@ export class MapProcedureResolver {
                                             });
                                         }
                                         
-                                        logger.debug(`⚠️ Implementation not found in ${path.basename(resolved.path)}`);
+                                        logger.info(`⚠️ Implementation not found in ${path.basename(resolved.path)}`);
                                         break;
                                     }
                                 }
@@ -726,12 +841,12 @@ export class MapProcedureResolver {
                 }
                 
                 // Fast extraction didn't find the implementation - return null instead of falling through
-                logger.debug(`⚠️ Fast extraction found MAP but no implementation for ${procName}`);
+                logger.info(`⚠️ Fast extraction found MAP but no implementation for ${procName}`);
                 return null;
             }
             
             // Fallback: Use full tokenization if fast extraction failed
-            logger.debug(`⚠️ Fast extraction failed, falling back to full tokenization`);
+            logger.info(`⚠️ Fast extraction failed, falling back to full tokenization`);
             const fileUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
             const moduleDocument = TextDocument.create(fileUri, 'clarion', 1, content);
             const tokenCache = TokenCache.getInstance();

@@ -6,7 +6,7 @@ import { updateConfigurationStatusBar } from '../statusbar/StatusBarManager';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("ConfigurationManager");
-logger.setLevel("info");
+logger.setLevel("error"); // Production: Only log errors
 
 /**
  * Opens the configuration picker and allows the user to select a configuration

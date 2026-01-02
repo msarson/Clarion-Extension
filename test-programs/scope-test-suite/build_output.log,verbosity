@@ -1,4 +1,4 @@
-Build started 02/01/2026 12:04:33.
+Build started 02/01/2026 12:07:43.
 Project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln" on node 1 (build target(s)).
 Building with tools version "4.0".
 Target "ValidateSolutionConfiguration" in file "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln.metaproj" from project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln" (entry point):
@@ -42,7 +42,31 @@ Target "_TimeStampBeforeCompile" skipped, due to false condition; ('$(RunPostBui
 Target "CoreCompile" in file "C:\Clarion\Clarion11.1\bin\SoftVelocity.Build.Clarion.targets" from project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj" (target "Build" depends on it):
 Using "CW" task from assembly "C:\Clarion\Clarion11.1\bin\SoftVelocity.CW.Build.Tasks.dll".
 Task "CW"
+  Making utils.obj : utils.clw changed
+  Including: main.clw
+  Including: *EQUATES.CLW
+  Including: **property.clw
+  Including: *EQUATES.CLW
+  Including: main.clw
+  Including: *BUILTINS.CLW
+  Including: main.clw
+  Including:  
+  Including: startproc.inc
+  Including:  
+  Optimizing __thunk.STARTPROC$STARTPROC@Fsb
+  Optimizing 
+  Optimizing GETCOUNTER@F
+  Optimizing 
+  Optimizing INCREMENTCOUNTER@F
+  Optimizing 
+  made utils.obj
   Making ScopeTestSuite.exe
+  Linking iexe32.obj
+  Linking main.obj
+  Linking utils.obj
+  Linking StartProc.obj
+  Linking ClaRUN.lib
+  Linking WIN32.lib
 Done executing task "CW".
 Done building target "CoreCompile" in project "ScopeTestSuite.cwproj".
 Target "_TimeStampAfterCompile" skipped, due to false condition; ('$(RunPostBuildEvent)'=='OnOutputUpdated') was evaluated as (''=='OnOutputUpdated').
@@ -78,4 +102,4 @@ Build succeeded.
     0 Warning(s)
     0 Error(s)
 
-Time Elapsed 00:00:00.13
+Time Elapsed 00:00:00.15

@@ -9,7 +9,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("ScopeAnalyzer");
-logger.setLevel("error");
+logger.setLevel("error"); // Production: Only log errors
 
 export type ScopeLevel = 'global' | 'module' | 'procedure' | 'routine';
 export type ScopeType = 'global' | 'module-local' | 'procedure-local' | 'routine-local';

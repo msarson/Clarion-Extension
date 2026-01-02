@@ -13,6 +13,7 @@ import { Location, Position } from 'vscode-languageserver-protocol';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { MapProcedureResolver } from '../utils/MapProcedureResolver';
+import { CrossFileResolver } from '../utils/CrossFileResolver';
 import { SolutionManager } from '../solution/solutionManager';
 import LoggerManager from '../logger';
 import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
@@ -25,10 +26,12 @@ logger.setLevel("error"); // Production: Only log errors
 export class ImplementationProvider {
     private tokenCache: TokenCache;
     private mapResolver: MapProcedureResolver;
+    private crossFileResolver: CrossFileResolver;
 
     constructor() {
         this.tokenCache = TokenCache.getInstance();
         this.mapResolver = new MapProcedureResolver();
+        this.crossFileResolver = new CrossFileResolver(this.tokenCache);
     }
 
     /**
@@ -115,6 +118,56 @@ export class ImplementationProvider {
                     if (implLocation) {
                         logger.info(`✅ Found procedure implementation for call: ${word}`);
                         return implLocation;
+                    }
+                }
+                
+                // If no MAP declaration found in current file, check if this file has MEMBER
+                // and search the parent file
+                logger.info(`No MAP declaration found in current file, checking for MEMBER parent`);
+                const memberToken = tokens.find(t => 
+                    t.line < 5 && // MEMBER should be at top of file
+                    t.value.toUpperCase() === 'MEMBER' &&
+                    t.referencedFile
+                );
+                
+                if (memberToken?.referencedFile) {
+                    logger.info(`File has MEMBER('${memberToken.referencedFile}'), checking parent for ${word}`);
+                    
+                    // Use CrossFileResolver to find MAP declaration in parent file
+                    const memberResult = await this.crossFileResolver.findMapDeclarationInMemberFile(
+                        word,
+                        memberToken.referencedFile,
+                        document,
+                        line
+                    );
+                    
+                    if (memberResult) {
+                        logger.info(`✅ Found MAP declaration in parent file at line ${memberResult.line}`);
+                        
+                        // Now find implementation from the parent MAP declaration
+                        try {
+                            const fs = require('fs');
+                            const parentPath = memberResult.file;
+                            const parentContent = fs.readFileSync(parentPath, 'utf-8');
+                            const parentDoc = TextDocument.create(`file:///${parentPath.replace(/\\/g, '/')}`, 'clarion', 1, parentContent);
+                            const parentTokens = this.tokenCache.getTokens(parentDoc);
+                            
+                            const mapPosition: Position = { line: memberResult.line, character: 0 };
+                            const implLocation = await this.mapResolver.findProcedureImplementation(
+                                word,
+                                parentTokens,
+                                parentDoc,
+                                mapPosition,
+                                line
+                            );
+                            
+                            if (implLocation) {
+                                logger.info(`✅ Found implementation via parent MAP: ${word}`);
+                                return implLocation;
+                            }
+                        } catch (error) {
+                            logger.info(`Error loading parent file: ${error}`);
+                        }
                     }
                 }
             }

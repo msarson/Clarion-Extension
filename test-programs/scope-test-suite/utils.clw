@@ -26,7 +26,7 @@
 !
 !═══════════════════════════════════════════════════════════════════════
 
-          ;MAP
+          MAP
           INCLUDE('startproc.inc'),ONCE  ! Standard start procedure
           END
 

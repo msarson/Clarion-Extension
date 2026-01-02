@@ -19,7 +19,7 @@ import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
-logger.setLevel("error"); // Phase 4 complete - debug logging disabled
+logger.setLevel("error"); // Production: Only log errors
 
 /**
  * Provides goto definition functionality for Clarion files

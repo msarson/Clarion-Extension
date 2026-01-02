@@ -4,7 +4,7 @@ import { ClarionSolutionSettings } from '../globals';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("SettingsStorageManager");
-logger.setLevel("info");
+logger.setLevel("error"); // Production: Only log errors
 
 export class SettingsStorageManager {
     /**
