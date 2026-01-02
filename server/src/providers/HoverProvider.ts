@@ -27,7 +27,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("HoverProvider");
-logger.setLevel("error"); // Production: Only log errors
+logger.setLevel("info"); // Production: Only log errors
 
 /**
  * Provides hover information for local variables and parameters
@@ -137,9 +137,14 @@ export class HoverProvider {
 
             // Check if this is a procedure call (e.g., "MyProcedure()")
             // OR if this is inside a START() call (e.g., "START(ProcName, ...)")
+            // BUT: Skip if it's SELF.member or object.member (class method call)
             const detection = ProcedureCallDetector.isProcedureCallOrReference(document, position, wordRange);
+            const isClassMethodCall = word.includes('.') && (
+                line.substring(0, position.character).toLowerCase().includes('self.') ||
+                /\w+\.\w+/.test(word)
+            );
             
-            if (detection.isProcedure) {
+            if (detection.isProcedure && !isClassMethodCall) {
                 logger.info(`Detected procedure ${ProcedureCallDetector.getDetectionMessage(word, detection.isStartCall)}`);
                 
                 // Get tokens for parameter counting
