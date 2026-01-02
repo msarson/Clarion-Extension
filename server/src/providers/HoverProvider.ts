@@ -1677,7 +1677,8 @@ export class HoverProvider {
             // Search for method implementation: ClassName.MethodName PROCEDURE
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
-                const implMatch = line.match(/^\s*(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i);
+                // Match with or without parentheses: ThisWindow.Ask PROCEDURE or ThisWindow.Ask PROCEDURE()
+                const implMatch = line.match(/^\s*(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)\s*(?:\(([^)]*)\))?/i);
                 
                 if (implMatch && 
                     implMatch[1].toUpperCase() === className.toUpperCase() &&
@@ -1685,7 +1686,7 @@ export class HoverProvider {
                     
                     // Found a potential match - check parameter count if specified
                     if (paramCount !== undefined) {
-                        const params = implMatch[3].trim();
+                        const params = implMatch[3] ? implMatch[3].trim() : '';
                         const implParamCount = params === '' ? 0 : params.split(',').length;
                         
                         if (implParamCount !== paramCount) {
