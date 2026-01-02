@@ -652,7 +652,7 @@ export class HoverProvider {
                     const hasParentheses = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
                     
                     // This is a member access (hovering over the field after the dot)
-                    if (beforeDot.toLowerCase() === 'self' || beforeDot.endsWith('self')) {
+                    if (beforeDot.toLowerCase() === 'self' || beforeDot.toLowerCase().endsWith(' self')) {
                         // self.member - class member
                         const tokens = this.tokenCache.getTokens(document);
                         
