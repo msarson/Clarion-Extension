@@ -198,7 +198,50 @@ export class HoverFormatter {
                 markdown.push(`*Press F12 to go to definition*`);
             }
         }
+
+        return {
+            contents: {
+                kind: 'markdown',
+                value: markdown.join('\n')
+            }
+        };
+    }
+
+    /**
+     * Constructs hover for a method call (SELF.method) with both declaration and implementation
+     */
+    formatMethodCall(name: string, declarationInfo: ClassMemberInfo, implementationLocation: string): Hover {
+        const markdown = [
+            `**Class Method:** \`${name}\``,
+            ``
+        ];
         
+        if (declarationInfo.type.length > 50) {
+            markdown.push(`**Type:**`);
+            markdown.push('```clarion');
+            markdown.push(declarationInfo.type);
+            markdown.push('```');
+        } else {
+            markdown.push(`**Type:** \`${declarationInfo.type}\``);
+        }
+        
+        markdown.push(``);
+        markdown.push(`**Class:** ${declarationInfo.className}`);
+        markdown.push(``);
+        
+        // Declaration location
+        const declFileName = declarationInfo.file.split(/[\/\\]/).pop() || declarationInfo.file;
+        markdown.push(`**Declaration:** \`${declFileName}\` @ line **${declarationInfo.line + 1}**`);
+        
+        // Implementation location
+        const implParts = implementationLocation.split(':');
+        const implFile = implParts[0].split(/[\/\\]/).pop() || implParts[0];
+        const implLine = parseInt(implParts[1]) + 1;
+        markdown.push(`**Implementation:** \`${implFile}\` @ line **${implLine}**`);
+        
+        markdown.push(``);
+        markdown.push(`*(F12 to definition | Ctrl+F12 to implementation)*`);
+
         return {
             contents: {
                 kind: 'markdown',

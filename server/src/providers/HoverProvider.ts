@@ -665,6 +665,22 @@ export class HoverProvider {
                         
                         const memberInfo = this.memberResolver.findClassMemberInfo(fieldName, document, position.line, tokens, paramCount);
                         if (memberInfo) {
+                            // For methods, also find the implementation
+                            const isMethod = memberInfo.type.toUpperCase().includes('PROCEDURE') || memberInfo.type.toUpperCase().includes('FUNCTION');
+                            if (isMethod) {
+                                const implLocation = await this.findMethodImplementationCrossFile(
+                                    memberInfo.className,
+                                    fieldName,
+                                    document,
+                                    paramCount,
+                                    null // No MODULE hint for local class
+                                );
+                                
+                                if (implLocation) {
+                                    return this.formatter.formatMethodCall(fieldName, memberInfo, implLocation);
+                                }
+                            }
+                            
                             return this.formatter.formatClassMember(fieldName, memberInfo);
                         } else {
                             logger.info(`❌ findClassMemberInfo returned null for ${fieldName} in SELF context`);
