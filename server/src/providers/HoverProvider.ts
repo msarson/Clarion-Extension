@@ -269,13 +269,13 @@ export class HoverProvider {
             
             // Check if this is a method implementation line and show declaration hover
             
-            const methodImplMatch = line.match(ClarionPatterns.METHOD_IMPLEMENTATION_LEGACY);
+            const methodImplMatch = line.match(ClarionPatterns.METHOD_IMPLEMENTATION_STRICT);
             if (methodImplMatch) {
                 const className = methodImplMatch[1];
                 const methodName = methodImplMatch[2];
                 
                 // Count parameters from the implementation signature
-                const paramCount = this.overloadResolver.countParametersInDeclaration(line);
+                const paramCount = ClarionPatterns.countParameters(line);
                 
                 // Check if cursor is on the class or method name
                 const classStart = line.indexOf(className);
