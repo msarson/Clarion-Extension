@@ -16,9 +16,10 @@ import { SymbolDefinitionResolver } from '../utils/SymbolDefinitionResolver';
 import { FileDefinitionResolver } from '../utils/FileDefinitionResolver';
 import { CrossFileResolver } from '../utils/CrossFileResolver';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
+import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
-logger.setLevel("error"); // Phase 4 complete - debug logging disabled
+logger.setLevel("error"); // Production: Only log errors
 
 /**
  * Provides goto definition functionality for Clarion files
@@ -111,14 +112,14 @@ export class DefinitionProvider {
             }
 
             // Check if this is a procedure call in CODE (e.g., "MyProcedure()" or "ProcessOrder(param)")
+            // OR if this is inside a START() call (e.g., "START(ProcName, ...)")
             // Navigate to the MAP declaration or PROCEDURE implementation
-            // Check after the word range, not just position.character
-            const afterWord = line.substring(wordRange.end.character).trimStart();
-            const hasParenthesesAfter = afterWord.startsWith('(');
-            logger.info(`🔍 Checking for procedure call: word="${word}", hasParenthesesAfter=${hasParenthesesAfter}, afterWord="${afterWord.substring(0, 10)}", line="${line.trim()}"`);
+            const detection = ProcedureCallDetector.isProcedureCallOrReference(document, position, wordRange);
             
-            if (hasParenthesesAfter) {
-                logger.info(`🔍 Detected potential procedure call: ${word}()`);
+            logger.info(`🔍 Checking for procedure call: word="${word}", isProcedure=${detection.isProcedure}, isStartCall=${detection.isStartCall}, line="${line.trim()}"`);
+            
+            if (detection.isProcedure) {
+                logger.info(`🔍 Detected potential procedure ${ProcedureCallDetector.getDetectionMessage(word, detection.isStartCall)}`);
                 
                 // Count parameters for overload resolution
                 const paramCount = this.memberResolver.countParametersInCall(line, word);

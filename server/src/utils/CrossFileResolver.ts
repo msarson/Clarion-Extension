@@ -157,7 +157,7 @@ export class CrossFileResolver {
                         const procedureDecls = parentTokens.filter(t =>
                             t.line > moduleStart &&
                             t.line < moduleEnd &&
-                            (t.subType === TokenType.MapProcedure || t.type === TokenType.Function) &&
+                            (t.subType === TokenType.MapProcedure || t.subType === TokenType.Function) &&
                             (t.label?.toLowerCase() === procName.toLowerCase() ||
                                 t.value.toLowerCase() === procName.toLowerCase())
                         );
@@ -227,6 +227,36 @@ export class CrossFileResolver {
             }
 
             logger.info(`❌ No MAP MODULE('${currentFileName}') found in ${memberFile}`);
+            logger.info(`🔄 Fallback: Searching parent file MAP directly for ${procName}`);
+            
+            // Fallback: Search parent file MAP directly (not just MODULE references)
+            const parentMapBlocks = documentStructure.getMapBlocks();
+            for (const mapBlock of parentMapBlocks) {
+                const mapTokens = parentTokens.filter(t =>
+                    t.line >= mapBlock.line &&
+                    t.line <= (mapBlock.finishesAt || mapBlock.line) &&
+                    (t.subType === TokenType.MapProcedure || t.subType === TokenType.Function) &&
+                    (t.label?.toLowerCase() === procName.toLowerCase() ||
+                        t.value.toLowerCase() === procName.toLowerCase())
+                );
+                
+                if (mapTokens.length > 0) {
+                    const token = mapTokens[0];
+                    logger.info(`✅ Found ${procName} in parent MAP at line ${token.line}`);
+                    const location = Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
+                        start: { line: token.line, character: 0 },
+                        end: { line: token.line, character: token.value.length }
+                    });
+                    return {
+                        token,
+                        file: resolvedPath,
+                        line: token.line,
+                        location
+                    };
+                }
+            }
+            
+            logger.info(`❌ Procedure ${procName} not found in parent MAP either`);
             return null;
 
         } catch (error) {

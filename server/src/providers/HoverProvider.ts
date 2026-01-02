@@ -18,6 +18,7 @@ import { DataTypeService } from '../utils/DataTypeService';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { SolutionManager } from '../solution/solutionManager';
 import { HoverFormatter } from './hover/HoverFormatter';
+import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { ContextualHoverHandler } from './hover/ContextualHoverHandler';
 import { SymbolHoverResolver } from './hover/SymbolHoverResolver';
 import { VariableHoverResolver } from './hover/VariableHoverResolver';
@@ -25,7 +26,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("HoverProvider");
-logger.setLevel("info"); // TEMPORARY: Debug TEST 4 regression
+logger.setLevel("error"); // Production: Only log errors
 
 /**
  * Provides hover information for local variables and parameters
@@ -134,9 +135,11 @@ export class HoverProvider {
             }
 
             // Check if this is a procedure call (e.g., "MyProcedure()")
-            const afterWord = line.substring(wordRange.end.character).trimStart();
-            if (afterWord.startsWith('(')) {
-                logger.info(`Detected procedure call: ${word}()`);
+            // OR if this is inside a START() call (e.g., "START(ProcName, ...)")
+            const detection = ProcedureCallDetector.isProcedureCallOrReference(document, position, wordRange);
+            
+            if (detection.isProcedure) {
+                logger.info(`Detected procedure ${ProcedureCallDetector.getDetectionMessage(word, detection.isStartCall)}`);
                 
                 // Get tokens for parameter counting
                 const tokens = this.tokenCache.getTokens(document);
@@ -146,15 +149,43 @@ export class HoverProvider {
                 
                 let procImpl = null;
                 if (mapDecl) {
-                    // Find implementation using MAP declaration position
-                    const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
-                    procImpl = await this.mapResolver.findProcedureImplementation(
-                        word,
-                        tokens,
-                        document,
-                        mapPosition, // Use MAP position, not call position
-                        line
-                    );
+                    // Check if MAP declaration is from an INCLUDE file
+                    const mapDeclUri = mapDecl.uri;
+                    const isFromInclude = mapDeclUri !== document.uri;
+                    
+                    if (isFromInclude) {
+                        logger.info(`MAP declaration is from INCLUDE file: ${mapDeclUri}`);
+                        // Load the INCLUDE file and its tokens
+                        try {
+                            const fs = require('fs');
+                            const decodedPath = decodeURIComponent(mapDeclUri.replace('file:///', ''));
+                            const includeContent = fs.readFileSync(decodedPath, 'utf-8');
+                            const includeDoc = TextDocument.create(mapDeclUri, 'clarion', 1, includeContent);
+                            const includeTokens = this.tokenCache.getTokens(includeDoc);
+                            
+                            // Find implementation using INCLUDE file's document and tokens
+                            const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
+                            procImpl = await this.mapResolver.findProcedureImplementation(
+                                word,
+                                includeTokens,
+                                includeDoc,
+                                mapPosition,
+                                line
+                            );
+                        } catch (error) {
+                            logger.info(`Error loading INCLUDE file: ${error}`);
+                        }
+                    } else {
+                        // Find implementation using MAP declaration position in current document
+                        const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
+                        procImpl = await this.mapResolver.findProcedureImplementation(
+                            word,
+                            tokens,
+                            document,
+                            mapPosition, // Use MAP position, not call position
+                            line
+                        );
+                    }
                 }
                 
                 if (mapDecl || procImpl) {

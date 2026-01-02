@@ -13,8 +13,10 @@ import { Location, Position } from 'vscode-languageserver-protocol';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { MapProcedureResolver } from '../utils/MapProcedureResolver';
+import { CrossFileResolver } from '../utils/CrossFileResolver';
 import { SolutionManager } from '../solution/solutionManager';
 import LoggerManager from '../logger';
+import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -24,10 +26,12 @@ logger.setLevel("error"); // Production: Only log errors
 export class ImplementationProvider {
     private tokenCache: TokenCache;
     private mapResolver: MapProcedureResolver;
+    private crossFileResolver: CrossFileResolver;
 
     constructor() {
         this.tokenCache = TokenCache.getInstance();
         this.mapResolver = new MapProcedureResolver();
+        this.crossFileResolver = new CrossFileResolver(this.tokenCache);
     }
 
     /**
@@ -48,28 +52,60 @@ export class ImplementationProvider {
         });
 
         // Get word at position for procedure call detection
-        const wordRange = this.getWordRangeAtPosition(document, position);
+        const wordRange = ProcedureCallDetector.getWordRangeAtPosition(document, position);
         const word = wordRange ? document.getText(wordRange) : '';
 
         // 1. Check if this is a procedure call (e.g., "MyProcedure()")
+        //    OR if this is inside a START() call (e.g., "START(ProcName, ...)")
         if (word && wordRange) {
-            const afterWord = line.substring(wordRange.end.character).trimStart();
-            if (afterWord.startsWith('(')) {
-                logger.info(`Detected procedure call: ${word}()`);
+            const detection = ProcedureCallDetector.isProcedureCallOrReference(document, position, wordRange);
+            
+            if (detection.isProcedure) {
+                logger.info(`Detected procedure ${ProcedureCallDetector.getDetectionMessage(word, detection.isStartCall)}`);
                 
                 // Find the MAP declaration first
                 const mapDecl = this.mapResolver.findMapDeclaration(word, tokens, document, line);
                 
                 if (mapDecl) {
-                    // Now find implementation using the MAP declaration position
-                    const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
-                    const implLocation = await this.mapResolver.findProcedureImplementation(
-                        word,
-                        tokens,
-                        document,
-                        mapPosition, // Use MAP position, not call position
-                        line
-                    );
+                    // Check if MAP declaration is from an INCLUDE file
+                    const mapDeclUri = mapDecl.uri;
+                    const isFromInclude = mapDeclUri !== document.uri;
+                    
+                    let implLocation: Location | null = null;
+                    
+                    if (isFromInclude) {
+                        logger.info(`MAP declaration is from INCLUDE file: ${mapDeclUri}`);
+                        // Load the INCLUDE file and its tokens
+                        try {
+                            const fs = require('fs');
+                            const decodedPath = decodeURIComponent(mapDeclUri.replace('file:///', ''));
+                            const includeContent = fs.readFileSync(decodedPath, 'utf-8');
+                            const includeDoc = TextDocument.create(mapDeclUri, 'clarion', 1, includeContent);
+                            const includeTokens = this.tokenCache.getTokens(includeDoc);
+                            
+                            // Find implementation using INCLUDE file's document and tokens
+                            const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
+                            implLocation = await this.mapResolver.findProcedureImplementation(
+                                word,
+                                includeTokens,
+                                includeDoc,
+                                mapPosition,
+                                line
+                            );
+                        } catch (error) {
+                            logger.info(`Error loading INCLUDE file: ${error}`);
+                        }
+                    } else {
+                        // Now find implementation using the MAP declaration position
+                        const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
+                        implLocation = await this.mapResolver.findProcedureImplementation(
+                            word,
+                            tokens,
+                            document,
+                            mapPosition, // Use MAP position, not call position
+                            line
+                        );
+                    }
                     
                     // Check if we're already AT the implementation - if so, don't navigate to itself
                     if (implLocation && 
@@ -84,6 +120,56 @@ export class ImplementationProvider {
                         return implLocation;
                     }
                 }
+                
+                // If no MAP declaration found in current file, check if this file has MEMBER
+                // and search the parent file
+                logger.info(`No MAP declaration found in current file, checking for MEMBER parent`);
+                const memberToken = tokens.find(t => 
+                    t.line < 5 && // MEMBER should be at top of file
+                    t.value.toUpperCase() === 'MEMBER' &&
+                    t.referencedFile
+                );
+                
+                if (memberToken?.referencedFile) {
+                    logger.info(`File has MEMBER('${memberToken.referencedFile}'), checking parent for ${word}`);
+                    
+                    // Use CrossFileResolver to find MAP declaration in parent file
+                    const memberResult = await this.crossFileResolver.findMapDeclarationInMemberFile(
+                        word,
+                        memberToken.referencedFile,
+                        document,
+                        line
+                    );
+                    
+                    if (memberResult) {
+                        logger.info(`✅ Found MAP declaration in parent file at line ${memberResult.line}`);
+                        
+                        // Now find implementation from the parent MAP declaration
+                        try {
+                            const fs = require('fs');
+                            const parentPath = memberResult.file;
+                            const parentContent = fs.readFileSync(parentPath, 'utf-8');
+                            const parentDoc = TextDocument.create(`file:///${parentPath.replace(/\\/g, '/')}`, 'clarion', 1, parentContent);
+                            const parentTokens = this.tokenCache.getTokens(parentDoc);
+                            
+                            const mapPosition: Position = { line: memberResult.line, character: 0 };
+                            const implLocation = await this.mapResolver.findProcedureImplementation(
+                                word,
+                                parentTokens,
+                                parentDoc,
+                                mapPosition,
+                                line
+                            );
+                            
+                            if (implLocation) {
+                                logger.info(`✅ Found implementation via parent MAP: ${word}`);
+                                return implLocation;
+                            }
+                        } catch (error) {
+                            logger.info(`Error loading parent file: ${error}`);
+                        }
+                    }
+                }
             }
         }
 
@@ -95,7 +181,11 @@ export class ImplementationProvider {
         }
 
         // 3. Check if this is a MAP procedure declaration (inside MAP block)
-        if (documentStructure.isInMapBlock(position.line)) {
+        // OR a MODULE procedure declaration (inside MODULE block in INCLUDE file)
+        const isInMap = documentStructure.isInMapBlock(position.line);
+        const isInModule = !isInMap && this.isInModuleBlock(position.line, tokens);
+        
+        if (isInMap || isInModule) {
             const mapProcMatch = line.match(/^\s*(\w+)\s*(?:PROCEDURE\s*)?\(/i);
             if (mapProcMatch) {
                 const procName = mapProcMatch[1];
@@ -104,7 +194,7 @@ export class ImplementationProvider {
 
                 // Check if cursor is on the procedure name
                 if (position.character >= procNameStart && position.character <= procNameEnd) {
-                    logger.info(`Found MAP procedure declaration: ${procName}`);
+                    logger.info(`Found ${isInMap ? 'MAP' : 'MODULE'} procedure declaration: ${procName}`);
                     
                     // Use MapProcedureResolver for overload resolution
                     const implLocation = await this.mapResolver.findProcedureImplementation(
@@ -137,27 +227,6 @@ export class ImplementationProvider {
     /**
      * Get word range at position (helper method)
      */
-    private getWordRangeAtPosition(document: TextDocument, position: Position): { start: Position; end: Position } | null {
-        const line = document.getText({
-            start: { line: position.line, character: 0 },
-            end: { line: position.line, character: Number.MAX_SAFE_INTEGER }
-        });
-
-        const wordPattern = /[a-zA-Z_]\w*/g;
-        let match;
-        while ((match = wordPattern.exec(line)) !== null) {
-            const start = match.index;
-            const end = start + match[0].length;
-            if (position.character >= start && position.character <= end) {
-                return {
-                    start: { line: position.line, character: start },
-                    end: { line: position.line, character: end }
-                };
-            }
-        }
-        return null;
-    }
-
     /**
      * Check if a line is inside a MAP block
      */
@@ -211,6 +280,20 @@ export class ImplementationProvider {
         }
 
         return null;
+    }
+
+    /**
+     * Check if a line is inside a MODULE block
+     */
+    private isInModuleBlock(line: number, tokens: Token[]): boolean {
+        const moduleBlocks = tokens.filter(t =>
+            t.type === TokenType.Structure &&
+            t.value.toUpperCase() === 'MODULE' &&
+            t.line <= line &&
+            t.finishesAt !== undefined &&
+            t.finishesAt >= line
+        );
+        return moduleBlocks.length > 0;
     }
 
     /**

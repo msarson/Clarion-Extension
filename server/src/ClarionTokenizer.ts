@@ -6,7 +6,7 @@ import { StructureProcessor } from './tokenizer/StructureProcessor';
 import { STRUCTURE_PATTERNS } from './tokenizer/TokenPatterns';
 
 const logger = LoggerManager.getLogger("Tokenizer");
-logger.setLevel("error"); // Only show errors and PERF (PERF logs directly to console)
+logger.setLevel("error"); // Only show errors and PERF
 
 // Re-export types for backward compatibility
 export { TokenType, Token } from './tokenizer/TokenTypes';
@@ -221,15 +221,15 @@ export class ClarionTokenizer {
                             continue;
                         }
                         
-                        if (tokensOnCurrentLine > 0 && !isExecutionStructure) {
-                            // Skip if not first token on line for DECLARATION structures
-                            // Execution structures (IF/LOOP) can appear indented after whitespace
-                            continue;
-                        }
+                        // Note: Removed tokensOnCurrentLine check - declaration structures CAN be indented
+                        // The original check was meant to prevent "Label FILE..." patterns,
+                        // but it incorrectly blocked legitimately indented structures in generated code
                         
-                        if (column > 30) {
-                            // Skip if column > 30 - structures are declarations that start near left margin
-                            // No structure keyword should start this far right
+                        // Allow reasonable indentation (up to 50 columns) for generated code
+                        // Most hand-written Clarion code has structures near left margin,
+                        // but generated code (like from Clarion IDE templates) can have deep indentation
+                        if (column > 50) {
+                            // Skip if column > 50 - extreme indentation is likely not a structure declaration
                             continue;
                         }
                         

@@ -1,14 +1,20 @@
 import { workspace, window as vscodeWindow } from 'vscode';
-import { globalSolutionFile, globalSettings, getClarionConfigTarget } from '../globals';
+import { globalSolutionFile, globalSettings, getClarionConfigTarget, setGlobalClarionSelection, globalClarionPropertiesFile, globalClarionVersion } from '../globals';
 import { SolutionCache } from '../SolutionCache';
 import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { updateConfigurationStatusBar } from '../statusbar/StatusBarManager';
+import LoggerManager from '../utils/LoggerManager';
+
+const logger = LoggerManager.getLogger("ConfigurationManager");
+logger.setLevel("error"); // Production: Only log errors
 
 /**
  * Opens the configuration picker and allows the user to select a configuration
  * @param solutionTreeDataProvider - Optional solution tree provider to refresh if no solution is open
  */
 export async function setConfiguration(solutionTreeDataProvider?: SolutionTreeDataProvider): Promise<void> {
+    logger.info("🔧 setConfiguration called");
+    
     if (!globalSolutionFile) {
         // Refresh the solution tree view to show the "Open Solution" button
         if (solutionTreeDataProvider) {
@@ -39,13 +45,26 @@ export async function setConfiguration(solutionTreeDataProvider?: SolutionTreeDa
     });
 
     if (selectedConfig) {
-        globalSettings.configuration = selectedConfig;
-        const target = getClarionConfigTarget();
-        if (target && workspace.workspaceFolders) {
-            const config = workspace.getConfiguration("clarion", workspace.workspaceFolders[0].uri);
-            await config.update("configuration", selectedConfig, target);
-        }
-        updateConfigurationStatusBar(selectedConfig);
+        logger.info(`✅ User selected configuration: ${selectedConfig}`);
+        logger.info(`📊 Current globalSettings.configuration BEFORE update: ${globalSettings.configuration}`);
+        
         vscodeWindow.showInformationMessage(`Configuration set to: ${selectedConfig}`);
+        
+        // Update global settings and save to workspace
+        globalSettings.configuration = selectedConfig;
+        logger.info(`📊 Updated globalSettings.configuration TO: ${globalSettings.configuration}`);
+        
+        await setGlobalClarionSelection(
+            globalSolutionFile,
+            globalClarionPropertiesFile,
+            globalClarionVersion,
+            selectedConfig
+        );
+        logger.info(`💾 Called setGlobalClarionSelection with config: ${selectedConfig}`);
+        
+        updateConfigurationStatusBar(selectedConfig);
+        logger.info(`🔄 Updated status bar to: ${selectedConfig}`);
+    } else {
+        logger.info("❌ User cancelled configuration selection");
     }
 }

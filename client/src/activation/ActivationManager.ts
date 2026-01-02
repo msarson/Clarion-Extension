@@ -6,7 +6,7 @@ import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { StructureViewProvider } from '../views/StructureViewProvider';
 import { StatusViewProvider } from '../StatusViewProvider';
 import { TreeNode } from '../TreeNode';
-import { globalClarionPropertiesFile, globalClarionVersion, globalSolutionFile } from '../globals';
+import { globalClarionPropertiesFile, globalClarionVersion, globalSolutionFile, globalSettings } from '../globals';
 import LoggerManager from '../utils/LoggerManager';
 import { isClientReady, getClientReadyPromise } from '../LanguageClientManager';
 
@@ -17,6 +17,7 @@ import { startLanguageServer } from '../server/LanguageServerManager';
 import { refreshOpenDocuments } from '../document/DocumentRefreshManager';
 
 const logger = LoggerManager.getLogger("ActivationManager");
+logger.setLevel("error"); // Production: Only log errors
 
 export interface ActivationState {
     client?: LanguageClient;
@@ -176,6 +177,36 @@ export async function setupFolderDependentFeatures(
             workspace.onDidChangeConfiguration(async (event) => {
                 if (event.affectsConfiguration("clarion.defaultLookupExtensions") || event.affectsConfiguration("clarion.configuration")) {
                     logger.info("🔄 Clarion configuration changed. Refreshing the solution cache...");
+                    
+                    // Reload the configuration from workspace settings
+                    if (event.affectsConfiguration("clarion.configuration")) {
+                        // Only try to read from workspace settings if we have a folder open
+                        if (workspace.workspaceFolders && workspace.workspaceFolders.length > 0) {
+                            // Get configuration scoped to the workspace folder
+                            const workspaceFolder = workspace.workspaceFolders[0];
+                            const config = workspace.getConfiguration("clarion", workspaceFolder.uri);
+                            
+                            const currentSolution = config.get<string>("currentSolution", "");
+                            if (currentSolution) {
+                                const solutions = config.get<any[]>("solutions", []);
+                                const solution = solutions.find(s => s.solutionFile === currentSolution);
+                                if (solution) {
+                                    globalSettings.configuration = solution.configuration;
+                                    logger.info(`✅ Updated globalSettings.configuration to: ${solution.configuration} from solutions array`);
+                                }
+                            } else {
+                                const configValue = config.get<string>("configuration", "");
+                                if (configValue) {
+                                    globalSettings.configuration = configValue;
+                                    logger.info(`✅ Updated globalSettings.configuration to: ${configValue} from direct setting`);
+                                }
+                            }
+                        } else {
+                            // No folder open - globalSettings.configuration is already updated by setGlobalClarionSelection
+                            logger.info(`ℹ️ No workspace folder open - using in-memory configuration: ${globalSettings.configuration}`);
+                        }
+                    }
+                    
                     await handleSettingsChange(context, reinitializeEnvironment, state.documentManager);
                 }
             })

@@ -4,7 +4,7 @@ import { DocumentStructure } from './DocumentStructure';
 import LoggerManager from './logger';
 
 const logger = LoggerManager.getLogger("TokenCache");
-logger.setLevel("error"); // Temporarily enable info logging to debug structure caching
+logger.setLevel("error"); // Production: Only log errors
 
 /**
  * Line-based token data for incremental updates

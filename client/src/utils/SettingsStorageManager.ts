@@ -4,7 +4,7 @@ import { ClarionSolutionSettings } from '../globals';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("SettingsStorageManager");
-logger.setLevel("error");
+logger.setLevel("error"); // Production: Only log errors
 
 export class SettingsStorageManager {
     /**
@@ -45,6 +45,10 @@ export class SettingsStorageManager {
                 - version: ${version}
                 - configuration: ${configuration}`);
 
+            // Update solutions array FIRST before saving individual settings
+            // This prevents the configuration change event from reading stale data
+            await this.updateSolutionsArray(solutionFile, propertiesFile, version, configuration);
+
             // Save individual settings
             await config.update('solutionFile', solutionFile, target);
             logger.info(`✅ Saved solutionFile`);
@@ -56,9 +60,6 @@ export class SettingsStorageManager {
             logger.info(`✅ Saved configuration`);
             await config.update('currentSolution', solutionFile, target);
             logger.info(`✅ Saved currentSolution`);
-
-            // Update solutions array
-            await this.updateSolutionsArray(solutionFile, propertiesFile, version, configuration);
 
             logger.info(`✅ Saved settings successfully:
                 - solutionFile: ${solutionFile}

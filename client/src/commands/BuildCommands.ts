@@ -20,9 +20,15 @@ export function registerBuildCommands(
     solutionTreeDataProvider: SolutionTreeDataProvider | undefined
 ): Disposable[] {
     return [
-        // Add solution build command
+        // Add solution build command (used by keyboard shortcut - shows prompt)
         commands.registerCommand("clarion.buildSolution", async () => {
             await buildTasks.runClarionBuild();
+        }),
+        
+        // Add solution build command for context menu (no prompt)
+        commands.registerCommand("clarion.buildSolutionDirect", async () => {
+            // User explicitly chose to build the solution from context menu, don't prompt
+            await buildTasks.buildSolutionOrProject("Solution", undefined, diagnosticCollection, solutionTreeDataProvider);
         }),
 
         // Add project build command
