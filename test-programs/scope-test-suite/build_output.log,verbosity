@@ -1,4 +1,4 @@
-Build started 03/01/2026 15:25:21.
+Build started 03/01/2026 15:51:33.
 Project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln" on node 1 (build target(s)).
 Building with tools version "4.0".
 Target "ValidateSolutionConfiguration" in file "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln.metaproj" from project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln" (entry point):
@@ -42,7 +42,7 @@ Target "_TimeStampBeforeCompile" skipped, due to false condition; ('$(RunPostBui
 Target "CoreCompile" in file "C:\Clarion\Clarion11.1\bin\SoftVelocity.Build.Clarion.targets" from project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj" (target "Build" depends on it):
 Using "CW" task from assembly "C:\Clarion\Clarion11.1\bin\SoftVelocity.CW.Build.Tasks.dll".
 Task "CW"
-  Making main.obj : pragma changed
+  Making main.obj : main.clw changed
   Including: EQUATES.CLW
   Including: *property.clw
   Including: EQUATES.CLW
@@ -91,8 +91,12 @@ Task "CW"
   Optimizing 
   Optimizing GLOBALHELPER@F
   Optimizing 
+  Optimizing 
+  Optimizing 
+  Optimizing 
+  Optimizing 
   made main.obj
-  Making utils.obj : pragma changed
+  Making utils.obj : main.clw changed
   Including: main.clw
   Including: *EQUATES.CLW
   Including: **property.clw
@@ -141,9 +145,14 @@ Task "CW"
   Including:  
   Including: startproc.inc
   Including:  
-f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\utils.clw(52,1): error : No matching prototype available [f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj]
+  Optimizing __thunk.STARTPROC$STARTPROC@Fsb
+  Optimizing 
+  Optimizing GETCOUNTER@F
+  Optimizing 
+  Optimizing INCREMENTCOUNTER@F
+  Optimizing 
   made utils.obj
-  Making StartProc.obj : pragma changed
+  Making StartProc.obj : main.clw changed
   Including: main.clw
   Including: *EQUATES.CLW
   Including: **property.clw
@@ -195,23 +204,77 @@ f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\uti
   Optimizing STARTPROC@Fsb
   Optimizing 
   made StartProc.obj
-Done executing task "CW" -- FAILED.
-Done building target "CoreCompile" in project "ScopeTestSuite.cwproj" -- FAILED.
-Done Building Project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj" (default targets) -- FAILED.
+  Making ScopeTestSuite.exe
+  Linking iexe32.obj
+  Linking main.obj
+  Linking utils.obj
+  Linking StartProc.obj
+  Linking StringTheory.obj
+  Linking ABWINDOW.obj
+  Linking ABRESIZE.obj
+  Linking ABFILE.obj
+  Linking ABERROR.obj
+  Linking ABERROR.RSC
+  Linking ABUTIL.obj
+  Linking VCRFIRST.ICO
+  Linking VCRPRIOR.ICO
+  Linking VCRUP.ICO
+  Linking VCRDOWN.ICO
+  Linking VCRNEXT.ICO
+  Linking VCRLAST.ICO
+  Linking MiniCal.ico
+  Linking MiniOk.ico
+  Linking MiniCancel.ico
+  Linking ABUTIL.RSC
+  Linking ABPOPUP.obj
+  Linking ABPOPUP.RSC
+  Linking ABTOOLBA.obj
+  Linking ABEIP.obj
+  Linking ABUPROW.ICO
+  Linking ABDNROW.ICO
+  Linking ABEIP.RSC
+  Linking ABBROWSE.obj
+  Linking ABVCRFRM.obj
+  Linking CWSYNCHC.obj
+  Linking ojmd5.obj
+  Linking ABQUERY.obj
+  Linking ABQUERY.RSC
+  Linking ClaASC.LIB
+  Linking ClaRUN.lib
+  Linking WIN32.lib
+Done executing task "CW".
+Done building target "CoreCompile" in project "ScopeTestSuite.cwproj".
+Target "_TimeStampAfterCompile" skipped, due to false condition; ('$(RunPostBuildEvent)'=='OnOutputUpdated') was evaluated as (''=='OnOutputUpdated').
+Target "PostBuildEvent" skipped, due to false condition; (
+			            '$(PostBuildEvent)'!=''
+			            and
+			            (
+			                '$(RunPostBuildEvent)'!='OnOutputUpdated'
+			                or 
+			                '$(_BinaryTimestampBeforeCompile)'!='$(_BinaryTimestampAfterCompile)'
+			            )
+			        ) was evaluated as (
+			            ''!=''
+			            and
+			            (
+			                ''!='OnOutputUpdated'
+			                or 
+			                ''!=''
+			            )
+			        ).
+Target "Build" in file "C:\Clarion\Clarion11.1\bin\SoftVelocity.Build.Clarion.targets" from project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj" (entry point):
+Building target "Build" completely.
+No input files were specified.
+Done building target "Build" in project "ScopeTestSuite.cwproj".
+Done Building Project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj" (default targets).
 
-Done executing task "MSBuild" -- FAILED.
-Done building target "Build" in project "ScopeTestSuite.sln" -- FAILED.
-Done Building Project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln" (build target(s)) -- FAILED.
+Done executing task "MSBuild".
+Done building target "Build" in project "ScopeTestSuite.sln".
+Done Building Project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln" (build target(s)).
 
 
-Build FAILED.
-
-"f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln" (build target) (1) ->
-"f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj" (default target) (2) ->
-(CoreCompile target) -> 
-  f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\utils.clw(52,1): error : No matching prototype available [f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj]
-
+Build succeeded.
     0 Warning(s)
-    1 Error(s)
+    0 Error(s)
 
-Time Elapsed 00:00:00.29
+Time Elapsed 00:00:00.25

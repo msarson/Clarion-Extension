@@ -49,5 +49,3 @@ Counter LONG
   Counter = GlobalCounter  ! TEST 1: F12 here should also jump to main.clw line 67
   RETURN Counter
 
-ThisWindow.Ask PROCEDURE()
-  CODE

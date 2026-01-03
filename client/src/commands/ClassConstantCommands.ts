@@ -182,12 +182,12 @@ async function addClassConstantsToProject(args: AddConstantsArgs): Promise<void>
 }
 
 /**
- * Generates constant definitions string
- * Format: {value}%3b{constantName}=&gt;{value}%3b{constantName}=&gt;
- * Example: 1%3bStringTheoryLinkMode=&gt;0%3bStringTheoryDllMode=&gt;
+ * Generates constant definitions string  
+ * Format: {constantName}=>{value};{constantName}=>{value};
+ * Example: StringTheoryLinkMode=>1;StringTheoryDllMode=>0;
  */
 function generateConstantDefinitions(constants: ClassConstant[], useLinkMode: boolean): string {
-    const definitions: string[] = [];
+    const parts: string[] = [];
 
     for (const constant of constants) {
         let value: string;
@@ -200,11 +200,11 @@ function generateConstantDefinitions(constants: ClassConstant[], useLinkMode: bo
             continue;
         }
         
-        // Format: {value}%3b{constantName}=&gt;
-        definitions.push(`${value}%3b${constant.name}=>`);
+        // Format: {constantName}=>{value};
+        parts.push(`${constant.name}=>${value};`);
     }
 
-    return definitions.join('');
+    return parts.join('');
 }
 
 /**
