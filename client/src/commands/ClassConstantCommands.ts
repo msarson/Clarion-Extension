@@ -24,9 +24,11 @@ export function registerClassConstantCommands(context: vscode.ExtensionContext):
     // Command to add class constants to project file
     const addConstantsCmd = vscode.commands.registerCommand(
         'clarion.addClassConstants',
-        async (args: AddConstantsArgs) => {
+        async (...args: any[]) => {
             try {
-                await addClassConstantsToProject(args);
+                // VS Code passes command args as array - get first element
+                const argsObject = args[0] as AddConstantsArgs;
+                await addClassConstantsToProject(argsObject);
             } catch (error) {
                 vscode.window.showErrorMessage(
                     `Failed to add constants: ${error instanceof Error ? error.message : String(error)}`

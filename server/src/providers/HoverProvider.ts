@@ -1855,16 +1855,21 @@ export class HoverProvider {
                 
                 // Add required constants information
                 if (thisClassConstants && thisClassConstants.constants.length > 0) {
+                    logger.info(`Found ${thisClassConstants.constants.length} constants for ${def.className}`);
+                    
                     // Check which constants are missing from the project
                     const constantsChecker = new ProjectConstantsChecker();
                     const missingConstants = [];
                     
                     for (const constant of thisClassConstants.constants) {
                         const isDefined = await constantsChecker.isConstantDefined(constant.name, projectPath);
+                        logger.info(`Constant ${constant.name} defined: ${isDefined}`);
                         if (!isDefined) {
                             missingConstants.push(constant);
                         }
                     }
+                    
+                    logger.info(`Missing constants count: ${missingConstants.length}`);
                     
                     if (missingConstants.length > 0) {
                         classInfo.push(``);
@@ -1886,7 +1891,8 @@ export class HoverProvider {
                         classInfo.push(`- **DLL mode:** \`${dllModeDefs}\``);
                         
                         // Add clickable command to add constants
-                        const commandArgs = encodeURIComponent(JSON.stringify({
+                        // Note: Command links in markdown are passed to the command handler as-is
+                        const argsObject = {
                             className: def.className,
                             projectPath: projectPath,
                             constants: missingConstants.map(c => ({
@@ -1894,10 +1900,12 @@ export class HoverProvider {
                                 type: c.type,
                                 relatedFile: c.relatedFile
                             }))
-                        }));
+                        };
                         
                         classInfo.push(``);
-                        classInfo.push(`[➕ Add Constants to Project](command:clarion.addClassConstants?${commandArgs})`);
+                        // Use plain JSON.stringify - VS Code handles command: URIs specially
+                        classInfo.push(`[➕ Add Constants to Project](command:clarion.addClassConstants?${encodeURIComponent(JSON.stringify([argsObject]))})`);
+                        logger.info(`Command args object: ${JSON.stringify(argsObject).substring(0, 150)}...`);
                     } else {
                         // All constants are defined
                         classInfo.push(``);
@@ -1908,10 +1916,15 @@ export class HoverProvider {
                 classInfo.push(``);
                 classInfo.push(`*Part of ${index.classes.size} indexed classes*`);
                 
+                const hoverMarkdown = classInfo.join('\n');
+                logger.info(`Hover markdown length: ${hoverMarkdown.length} chars`);
+                logger.info(`Hover markdown preview: ${hoverMarkdown.substring(0, 200)}...`);
+                logger.info(`Hover markdown end: ...${hoverMarkdown.substring(hoverMarkdown.length - 200)}`);
+                
                 return {
                     contents: {
                         kind: 'markdown',
-                        value: classInfo.join('\n')
+                        value: hoverMarkdown
                     }
                 };
             }
