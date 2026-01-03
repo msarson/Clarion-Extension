@@ -72,7 +72,7 @@ GetCounter        PROCEDURE(),LONG
      END
 GlobalHelper PROCEDURE()  ! Declare the global procedure so it can be called from utils.clw
    END
-
+xx
 GlobalCounter LONG      ! Global variable - accessible in utils.clw (TEST 1)
 st StringTheory
    CODE

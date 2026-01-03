@@ -3,6 +3,7 @@ import { SolutionCache } from '../SolutionCache';
 import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { ClarionProjectInfo } from 'common/types';
 import { getLanguageClient } from '../LanguageClientManager';
+import { redirectionService } from '../paths/RedirectionService';
 import * as path from 'path';
 import * as fs from 'fs';
 import LoggerManager from '../utils/LoggerManager';
@@ -89,28 +90,43 @@ function extractProjectOutputInfo(cwprojPath: string): ProjectOutputInfo | undef
  * @returns Path to the executable or undefined if not found
  */
 function findExecutable(outputInfo: ProjectOutputInfo): string | undefined {
-    const { outputName, projectDir } = outputInfo;
+    const { outputName, configuration, projectDir } = outputInfo;
     const exeName = outputName.endsWith('.exe') ? outputName : `${outputName}.exe`;
     
-    // Common locations to check
+    logger.info(`Looking for executable: ${exeName} in project: ${projectDir}`);
+    logger.info(`Configuration: ${configuration}`);
+    
+    // Try using redirection service first
+    try {
+        const resolver = redirectionService.getResolver(projectDir);
+        const resolvedPath = resolver(exeName);
+        
+        if (resolvedPath && fs.existsSync(resolvedPath)) {
+            logger.info(`✅ Found executable via redirection: ${resolvedPath}`);
+            return resolvedPath;
+        }
+    } catch (error) {
+        logger.warn(`Redirection resolution failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    
+    // Fallback to common locations
     const possiblePaths = [
         path.join(projectDir, exeName),
+        path.join(projectDir, 'working', exeName),
         path.join(projectDir, 'bin', exeName),
-        path.join(projectDir, 'bin', 'Debug', exeName),
-        path.join(projectDir, 'bin', 'Release', exeName),
+        path.join(projectDir, 'bin', configuration, exeName),
         path.join(projectDir, 'obj', exeName),
-        path.join(projectDir, 'obj', 'Debug', exeName),
-        path.join(projectDir, 'obj', 'Release', exeName)
+        path.join(projectDir, 'obj', configuration, exeName)
     ];
 
     for (const exePath of possiblePaths) {
         if (fs.existsSync(exePath)) {
-            logger.info(`Found executable: ${exePath}`);
+            logger.info(`✅ Found executable: ${exePath}`);
             return exePath;
         }
     }
 
-    logger.warn(`Executable not found. Searched in: ${possiblePaths.join(', ')}`);
+    logger.warn(`❌ Executable not found. Searched in: ${possiblePaths.join(', ')}`);
     return undefined;
 }
 
