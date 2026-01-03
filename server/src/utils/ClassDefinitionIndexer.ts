@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { RedirectionFileParserServer } from '../solution/redirectionFileParserServer';
+import { RedirectionFileParserServer, RedirectionEntry } from '../solution/redirectionFileParserServer';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger('ClassDefinitionIndexer');
@@ -67,10 +67,10 @@ export class ClassDefinitionIndexer {
         try {
             // Get redirection paths
             const redirectionParser = new RedirectionFileParserServer();
-            await redirectionParser.parseRedFileAsync(projectPath);
+            const entries = await redirectionParser.parseRedFileAsync(projectPath);
 
             // Extract all unique directory paths from redirection entries
-            const searchPaths = this.extractSearchPaths(redirectionParser);
+            const searchPaths = this.extractSearchPathsFromEntries(entries);
             
             logger.info(`Found ${searchPaths.length} search paths from redirection file`);
 
@@ -154,17 +154,11 @@ export class ClassDefinitionIndexer {
 
     /**
      * Extracts unique directory paths from redirection entries
-     * @param parser The redirection file parser
+     * @param entries The redirection entries from the parser
      * @returns Array of unique directory paths
      */
-    private extractSearchPaths(parser: RedirectionFileParserServer): string[] {
+    private extractSearchPathsFromEntries(entries: RedirectionEntry[]): string[] {
         const paths = new Set<string>();
-
-        // The parser has a parseRedFile method that returns entries
-        // We need to re-parse to get the entries since they're private
-        // But we already parsed in buildIndex, so the entries are cached
-        // We can access entries through reflection as a workaround
-        const entries = (parser as any).entries as any[];
 
         if (!entries || entries.length === 0) {
             logger.warn('No redirection entries found');

@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { SolutionManager } from '../solution/solutionManager';
 import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
+import { serverSettings } from '../serverSettings';
 
 /**
  * Test suite for ClassDefinitionIndexer
@@ -19,6 +20,20 @@ suite('ClassDefinitionIndexer Tests', () => {
         console.log('\n🔧 Setting up ClassDefinitionIndexer tests...');
         
         try {
+            // Configure serverSettings for redirection file parsing
+            // These would normally be set by the client when opening a solution
+            serverSettings.redirectionFile = 'Clarion111.RED';
+            serverSettings.redirectionPaths = ['C:\\Clarion\\Clarion11.1\\bin']; // Default Clarion bin path
+            serverSettings.macros = {
+                'root': 'C:\\Clarion\\Clarion11.1',
+                'bin': 'C:\\Clarion\\Clarion11.1\\bin'
+            };
+            serverSettings.configuration = 'Debug';
+            
+            console.log('✅ ServerSettings configured');
+            console.log(`   📂 Redirection file: ${serverSettings.redirectionFile}`);
+            console.log(`   📂 Primary redirection path: ${serverSettings.primaryRedirectionPath}`);
+            
             // Load the test solution
             const testSolutionPath = path.resolve(__dirname, 
                 '..', '..', '..', '..', 'test-programs', 'scope-test-suite', 'ScopeTestSuite.sln');
@@ -54,6 +69,8 @@ suite('ClassDefinitionIndexer Tests', () => {
             
             const indexer = new ClassDefinitionIndexer();
             const projectPath = solutionManager!.solution.projects[0].path;
+            console.log(`   📂 Project path: ${projectPath}`);
+            
             const index = await indexer.buildIndex(projectPath);
             
             assert.ok(index, 'Index should be created');
