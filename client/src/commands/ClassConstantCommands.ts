@@ -85,6 +85,9 @@ async function addClassConstantsToProject(args: AddConstantsArgs): Promise<void>
 
     // Generate constant definitions
     const definitions = generateConstantDefinitions(constants, useLinkMode);
+    
+    console.log(`Generated definitions: ${definitions}`);
+    console.log(`Encoded for XML: ${encodeForXml(definitions)}`);
 
     // Find .cwproj file
     const projectFiles = await vscode.workspace.findFiles(
@@ -209,10 +212,11 @@ function decodeXmlEntities(encoded: string): string {
 }
 
 /**
- * Encodes for XML
+ * Encodes constant definitions for XML DefineConstants
+ * Note: xml2js will automatically escape XML entities (&gt;, &lt;, etc.)
+ * We just need to URL-encode the semicolons
  */
 function encodeForXml(definitions: string): string {
-    return definitions
-        .replace(/>/g, '&gt;')
-        .replace(/;/g, '%3b');
+    // Only URL-encode semicolons - xml2js will handle XML entity encoding
+    return definitions.replace(/;/g, '%3b');
 }
