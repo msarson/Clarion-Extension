@@ -23,6 +23,7 @@ import { ContextualHoverHandler } from './hover/ContextualHoverHandler';
 import { SymbolHoverResolver } from './hover/SymbolHoverResolver';
 import { VariableHoverResolver } from './hover/VariableHoverResolver';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
+import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -743,6 +744,13 @@ export class HoverProvider {
                 }
                 
                 logger.info('No scope found and no global variable found - cannot provide hover');
+                
+                // 🔍 Last resort: Check if this word is a CLASS type reference
+                // This handles when user hovers directly on a type name (e.g., hovering on "StringTheory" in "st StringTheory")
+                logger.info(`Checking if ${word} is a CLASS type...`);
+                const classTypeHover = await this.checkClassTypeHover(word, document);
+                if (classTypeHover) return classTypeHover;
+                
                 return null;
             }
 
@@ -1764,6 +1772,71 @@ export class HoverProvider {
                 value: markdown.join('\n')
             }
         };
+    }
+
+    /**
+     * Check if a word is a CLASS type and provide hover with definition info
+     * @param word The word to check
+     * @param document The document
+     * @returns Hover with class definition info, or null if not a class
+     */
+    private async checkClassTypeHover(word: string, document: TextDocument): Promise<Hover | null> {
+        try {
+            const classIndexer = new ClassDefinitionIndexer();
+            
+            // Get project path from document URI
+            const docPath = document.uri.replace('file:///', '').replace(/\//g, '\\');
+            const projectPath = path.dirname(docPath);
+            
+            logger.info(`Looking up CLASS type: ${word} in project: ${projectPath}`);
+            
+            // Try to get or build index for this project
+            const index = await classIndexer.getOrBuildIndex(projectPath);
+            
+            // Look up the class
+            const definitions = classIndexer.findClass(word, projectPath);
+            
+            if (definitions && definitions.length > 0) {
+                const def = definitions[0]; // Use first definition
+                
+                logger.info(`✅ Found CLASS type: ${def.className} in ${def.filePath}:${def.lineNumber}`);
+                
+                // Extract just the filename from the full path
+                const fileName = path.basename(def.filePath);
+                const relativePath = path.relative(projectPath, def.filePath);
+                
+                // Build hover text
+                const classInfo = [
+                    `**CLASS Type:** \`${def.className}\``,
+                    ``,
+                    `**Definition:**`,
+                    `- File: \`${fileName}\``,
+                    `- Line: ${def.lineNumber}`,
+                    `- Path: \`${relativePath}\``,
+                    `- Type: ${def.isType ? 'CLASS,TYPE' : 'CLASS'}`,
+                ];
+                
+                if (def.parentClass) {
+                    classInfo.push(`- Parent: \`${def.parentClass}\``);
+                }
+                
+                classInfo.push(``);
+                classInfo.push(`*Part of ${index.classes.size} indexed classes*`);
+                
+                return {
+                    contents: {
+                        kind: 'markdown',
+                        value: classInfo.join('\n')
+                    }
+                };
+            }
+            
+            logger.info(`No CLASS definition found for: ${word}`);
+        } catch (error) {
+            logger.error(`Error checking class type hover: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        
+        return null;
     }
 
 }
