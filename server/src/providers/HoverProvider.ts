@@ -25,6 +25,7 @@ import { VariableHoverResolver } from './hover/VariableHoverResolver';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
 import { IncludeVerifier } from '../utils/IncludeVerifier';
+import { ClassConstantParser } from '../utils/ClassConstantParser';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -1831,6 +1832,11 @@ export class HoverProvider {
                 
                 const relativePath = path.relative(projectPath, def.filePath);
                 
+                // Parse class file for required constants
+                const constantParser = new ClassConstantParser();
+                const classConstants = await constantParser.parseFile(def.filePath);
+                const thisClassConstants = classConstants.find(c => c.className.toLowerCase() === def.className.toLowerCase());
+                
                 // Build hover text
                 const classInfo = [
                     `**CLASS Type:** \`${def.className}\``,
@@ -1844,6 +1850,27 @@ export class HoverProvider {
                 
                 if (def.parentClass) {
                     classInfo.push(`- Parent: \`${def.parentClass}\``);
+                }
+                
+                // Add required constants information
+                if (thisClassConstants && thisClassConstants.constants.length > 0) {
+                    classInfo.push(``);
+                    classInfo.push(`**Required Constants:**`);
+                    
+                    for (const constant of thisClassConstants.constants) {
+                        const typeDesc = constant.type === 'Link' ? 'Link mode' : 'DLL mode';
+                        const fileInfo = constant.relatedFile ? ` (${constant.relatedFile})` : '';
+                        classInfo.push(`- \`${constant.name}\` - ${typeDesc}${fileInfo}`);
+                    }
+                    
+                    // Generate suggested definitions
+                    const linkModeDefs = constantParser.generateConstantDefinitions(thisClassConstants.constants, true);
+                    const dllModeDefs = constantParser.generateConstantDefinitions(thisClassConstants.constants, false);
+                    
+                    classInfo.push(``);
+                    classInfo.push(`**Suggested Project Constants:**`);
+                    classInfo.push(`- **Link mode:** \`${linkModeDefs}\``);
+                    classInfo.push(`- **DLL mode:** \`${dllModeDefs}\``);
                 }
                 
                 classInfo.push(``);

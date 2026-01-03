@@ -56,7 +56,8 @@
 ! - Find All References should respect scope boundaries
 !
 !═══════════════════════════════════════════════════════════════════════
-  INCLUDE('StringTheory.inc '),ONCE
+  INCLUDE('StringTheory.inc'),ONCE
+  INCLUDE('ABWindow.inc'),ONCE
    MAP
      MODULE('utils.clw')  !Can be written as MODULE('utils')
        IncrementCounter()  !can be written without parentheses
@@ -88,6 +89,7 @@ GlobalCounter LONG      ! Global variable - accessible in utils.clw (TEST 1)
 !
 GlobalHelper PROCEDURE()
 st StringTheory
+
 wm WindowManager
    CODE
    MESSAGE('This is a global procedure!')
