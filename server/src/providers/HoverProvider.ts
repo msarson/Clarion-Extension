@@ -767,7 +767,7 @@ export class HoverProvider {
 
             // Check if this is a local variable
             logger.info(`Checking if ${searchWord} is a local variable...`);
-            const variableHover = this.variableResolver.findLocalVariableHover(searchWord, tokens, currentScope, document, word);
+            const variableHover = await this.variableResolver.findLocalVariableHover(searchWord, tokens, currentScope, document, word);
             if (variableHover) return variableHover;
             logger.info(`${searchWord} is not a local variable`);
             
