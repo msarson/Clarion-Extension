@@ -1890,22 +1890,9 @@ export class HoverProvider {
                         classInfo.push(`- **Link mode:** \`${linkModeDefs}\``);
                         classInfo.push(`- **DLL mode:** \`${dllModeDefs}\``);
                         
-                        // Add clickable command to add constants
-                        // Note: Command links in markdown are passed to the command handler as-is
-                        const argsObject = {
-                            className: def.className,
-                            projectPath: projectPath,
-                            constants: missingConstants.map(c => ({
-                                name: c.name,
-                                type: c.type,
-                                relatedFile: c.relatedFile
-                            }))
-                        };
-                        
                         classInfo.push(``);
-                        // Use plain JSON.stringify - VS Code handles command: URIs specially
-                        classInfo.push(`[➕ Add Constants to Project](command:clarion.addClassConstants?${encodeURIComponent(JSON.stringify([argsObject]))})`);
-                        logger.info(`Command args object: ${JSON.stringify(argsObject).substring(0, 150)}...`);
+                        classInfo.push(`💡 **To add:** Run command \`Clarion: Add Class Constants\` or use Command Palette (Ctrl+Shift+P)`);
+                        logger.info(`Added instruction for ${missingConstants.length} missing constants`);
                     } else {
                         // All constants are defined
                         classInfo.push(``);
@@ -1920,6 +1907,11 @@ export class HoverProvider {
                 logger.info(`Hover markdown length: ${hoverMarkdown.length} chars`);
                 logger.info(`Hover markdown preview: ${hoverMarkdown.substring(0, 200)}...`);
                 logger.info(`Hover markdown end: ...${hoverMarkdown.substring(hoverMarkdown.length - 200)}`);
+                
+                // Log the full markdown to see exactly what's being sent
+                logger.info(`===== FULL HOVER MARKDOWN =====`);
+                logger.info(hoverMarkdown);
+                logger.info(`===== END HOVER MARKDOWN =====`);
                 
                 return {
                     contents: {
