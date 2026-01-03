@@ -209,24 +209,8 @@ export class HoverProvider {
                 logger.info(`Found Clarion attribute: ${word}`);
                 
                 const attribute = this.attributeService.getAttribute(word);
-                
-                // Check if there's an opening paren after the word
-                const textAfterWord = document.getText({
-                    start: { line: position.line, character: wordRange.end.character },
-                    end: { line: position.line, character: Math.min(wordRange.end.character + 10, line.length) }
-                }).trimStart();
-                
-                let paramCount: number | null = null;
-                
-                if (textAfterWord.startsWith('(')) {
-                    // There's a paren, count the actual parameters
-                    paramCount = this.countParametersInCall(line, word);
-                    logger.info(`Attribute parameter count: ${paramCount}`);
-                } else {
-                    // No paren after word - assume no parameters
-                    paramCount = 0;
-                    logger.info(`No parentheses found for attribute - assuming 0 parameters`);
-                }
+                const paramCount = this.countFunctionParameters(line, word, wordRange, document);
+                logger.info(`Attribute parameter count: ${paramCount}`);
                 
                 return this.formatter.formatAttribute(word, attribute, paramCount);
             }
@@ -245,24 +229,8 @@ export class HoverProvider {
                     logger.info(`Found built-in function: ${word}`);
                     
                     const signatures = this.builtinService.getSignatures(word);
-                    
-                    // Check if there's an opening paren after the word
-                    const textAfterWord = document.getText({
-                        start: { line: position.line, character: wordRange.end.character },
-                        end: { line: position.line, character: Math.min(wordRange.end.character + 10, line.length) }
-                    }).trimStart();
-                    
-                    let paramCount: number | null = null;
-                    
-                    if (textAfterWord.startsWith('(')) {
-                        // There's a paren, count the actual parameters
-                        paramCount = this.countParametersInCall(line, word);
-                        logger.info(`Parameter count in call: ${paramCount}`);
-                    } else {
-                        // No paren after word - assume () (zero parameters)
-                        paramCount = 0;
-                        logger.info(`No parentheses found - assuming 0 parameters`);
-                    }
+                    const paramCount = this.countFunctionParameters(line, word, wordRange, document);
+                    logger.info(`Parameter count in call: ${paramCount}`);
                     
                     return this.formatter.formatBuiltin(word, signatures, paramCount);
                 } else {
@@ -299,7 +267,7 @@ export class HoverProvider {
 
             // Check if this is a MAP procedure implementation and show declaration hover
             // Skip if we're inside a MAP block (those are declarations, not implementations)
-            const mapProcMatch = line.match(/^(\w+)\s+PROCEDURE\s*\(/i);
+            const mapProcMatch = line.match(ClarionPatterns.PROCEDURE_IMPLEMENTATION_WITH_PARAMS);
             logger.info(`MAP procedure regex test: line="${line}", match=${!!mapProcMatch}, inMapBlock=${documentStructure.isInMapBlock(position.line)}`);
             if (mapProcMatch && !documentStructure.isInMapBlock(position.line)) {
                 const procName = mapProcMatch[1];
@@ -375,9 +343,9 @@ export class HoverProvider {
             if (documentStructure.isInMapBlock(position.line)) {
                 logger.info(`Inside MAP block at line ${position.line}`);
                 // MAP declarations have two formats:
-                // 1. Indented: "    MyProc(params)" - no PROCEDURE keyword
-                // 2. Column 0: "MyProc    PROCEDURE(params)" - with PROCEDURE keyword
-                const mapDeclMatch = line.match(/^\s*(\w+)\s*(?:PROCEDURE\s*)?\(/i);
+                // 1. Indented: "    MyProc(params)" - no PROCEDURE/FUNCTION keyword
+                // 2. Column 0: "MyProc    PROCEDURE(params)" or "MyProc    FUNCTION(params)" - with keyword
+                const mapDeclMatch = line.match(ClarionPatterns.MAP_PROCEDURE_DECLARATION);
                 logger.info(`MAP declaration regex match: ${mapDeclMatch ? 'YES' : 'NO'}, line="${line}"`);
                 if (mapDeclMatch) {
                     const procName = mapDeclMatch[1];
@@ -718,74 +686,19 @@ export class HoverProvider {
                 logger.info('No scope found - checking for global variables');
                 
                 // First, check for global variable in CURRENT file (PROGRAM)
-                const firstCodeToken = tokens.find(t => 
-                    t.type === TokenType.Keyword && 
-                    t.value.toUpperCase() === 'CODE'
-                );
-                const globalScopeEndLine = firstCodeToken ? firstCodeToken.line : Number.MAX_SAFE_INTEGER;
+                const globalVarInfo = this.findGlobalVariable(word, tokens, document);
                 
-                // Search for global variable (Label at column 0, before first CODE)
-                const globalVar = tokens.find(t =>
-                    t.type === TokenType.Label &&
-                    t.start === 0 &&
-                    t.line < globalScopeEndLine &&
-                    t.value.toLowerCase() === word.toLowerCase()
-                );
-                
-                if (globalVar) {
-                    logger.info(`✅ Found global variable in current file: ${globalVar.value} at line ${globalVar.line}`);
-                    
-                    // Find the type by looking at the next token
-                    const globalIndex = tokens.indexOf(globalVar);
-                    let typeInfo = 'UNKNOWN';
-                    if (globalIndex + 1 < tokens.length) {
-                        const nextToken = tokens[globalIndex + 1];
-                        if (nextToken.line === globalVar.line) {
-                            if (nextToken.type === TokenType.Type) {
-                                typeInfo = nextToken.value;
-                            } else if (nextToken.type === TokenType.Structure) {
-                                typeInfo = nextToken.value.toUpperCase();
-                            }
-                        }
-                    }
-                    
-                    // Get scope info for the global variable
-                    const globalPos: Position = { line: globalVar.line, character: 0 };
-                    const scopeInfo = this.scopeAnalyzer.getTokenScope(document, globalPos);
-                    
-                    const markdown = [
-                        `**Global Variable:** \`${globalVar.value}\``,
-                        ``,
-                        `**Type:** \`${typeInfo}\``,
-                        ``
-                    ];
-                    
-                    if (scopeInfo) {
-                        const scopeIcon = scopeInfo.type === 'global' ? '🌍' : '📦';
-                        markdown.push(`**Scope:** ${scopeIcon} ${scopeInfo.type.charAt(0).toUpperCase() + scopeInfo.type.slice(1)}`);
-                        markdown.push(``);
-                        
-                        if (scopeInfo.type === 'global') {
-                            markdown.push(`**Visibility:** Visible everywhere`);
-                        } else {
-                            markdown.push(`**Visibility:** Visible only within this file (module-local)`);
-                        }
-                        markdown.push(``);
-                    }
-                    
-                    // Show file and line info similar to procedures
-                    const fileName = path.basename(document.uri.replace('file:///', ''));
-                    const lineNumber = globalVar.line + 1; // Convert to 1-based
-                    markdown.push(`**Declared in** \`${fileName}\` @ line ${lineNumber}`);
-                    markdown.push(``);
-                    markdown.push(`*Press F12 to go to declaration*`);
-                    
-                    return {
-                        contents: {
-                            kind: 'markdown',
-                            value: markdown.join('\n')
-                        }
-                    };
+                if (globalVarInfo) {
+                    logger.info(`✅ Found global variable in current file: ${globalVarInfo.token.value} at line ${globalVarInfo.token.line}`);
+                    return this.buildVariableHover(
+                        globalVarInfo.token.value,
+                        globalVarInfo.typeInfo,
+                        true,
+                        false,
+                        globalVarInfo.scopeInfo,
+                        document.uri,
+                        globalVarInfo.token.line
+                    );
                 }
                 
                 // If not found in current file, check for global variable in MEMBER parent file
@@ -809,75 +722,19 @@ export class HoverProvider {
                             );
                             const parentTokens = this.tokenCache.getTokens(parentDoc);
                             
-                            // Find first CODE token to establish boundary for global scope
-                            const firstCodeToken = parentTokens.find(t => 
-                                t.type === TokenType.Keyword && 
-                                t.value.toUpperCase() === 'CODE'
-                            );
-                            const globalScopeEndLine = firstCodeToken ? firstCodeToken.line : Number.MAX_SAFE_INTEGER;
+                            const globalVarInfo = this.findGlobalVariable(word, parentTokens, parentDoc);
                             
-                            // Search for global variable (Label at column 0, before first CODE)
-                            const globalVar = parentTokens.find(t =>
-                                t.type === TokenType.Label &&
-                                t.start === 0 &&
-                                t.line < globalScopeEndLine &&
-                                t.value.toLowerCase() === word.toLowerCase()
-                            );
-                            
-                            if (globalVar) {
-                                logger.info(`✅ Found global variable in MEMBER parent: ${globalVar.value} at line ${globalVar.line}`);
-                                
-                                // Find the type by looking at the next token
-                                const globalIndex = parentTokens.indexOf(globalVar);
-                                let typeInfo = 'UNKNOWN';
-                                if (globalIndex + 1 < parentTokens.length) {
-                                    const nextToken = parentTokens[globalIndex + 1];
-                                    if (nextToken.line === globalVar.line) {
-                                        if (nextToken.type === TokenType.Type) {
-                                            typeInfo = nextToken.value;
-                                        } else if (nextToken.type === TokenType.Structure) {
-                                            typeInfo = nextToken.value.toUpperCase();
-                                        }
-                                    }
-                                }
-                                
-                                // Use ScopeAnalyzer to get detailed scope info
-                                const globalPos: Position = { line: globalVar.line, character: globalVar.start };
-                                const scopeInfo = this.scopeAnalyzer.getTokenScope(parentDoc, globalPos);
-                                
-                                const markdown = [
-                                    `**Global Variable:** \`${globalVar.value}\``,
-                                    ``,
-                                    `**Type:** \`${typeInfo}\``,
-                                    ``
-                                ];
-                                
-                                if (scopeInfo) {
-                                    const scopeIcon = scopeInfo.type === 'global' ? '🌍' : '📦';
-                                    markdown.push(`**Scope:** ${scopeIcon} ${scopeInfo.type.charAt(0).toUpperCase() + scopeInfo.type.slice(1)}`);
-                                    markdown.push(``);
-                                    
-                                    if (scopeInfo.type === 'global') {
-                                        markdown.push(`**Visibility:** Visible everywhere`);
-                                    } else {
-                                        markdown.push(`**Visibility:** Visible only within this file (module-local)`);
-                                    }
-                                    markdown.push(``);
-                                }
-                                
-                                // Show file and line info similar to procedures
-                                const fileName = path.basename(memberToken.referencedFile);
-                                const lineNumber = globalVar.line + 1; // Convert to 1-based
-                                markdown.push(`**Declared in** \`${fileName}\` @ line ${lineNumber}`);
-                                markdown.push(``);
-                                markdown.push(`*Press F12 to go to declaration*`);
-                                
-                                return {
-                                    contents: {
-                                        kind: 'markdown',
-                                        value: markdown.join('\n')
-                                    }
-                                };
+                            if (globalVarInfo) {
+                                logger.info(`✅ Found global variable in MEMBER parent: ${globalVarInfo.token.value} at line ${globalVarInfo.token.line}`);
+                                return this.buildVariableHover(
+                                    globalVarInfo.token.value,
+                                    globalVarInfo.typeInfo,
+                                    true,
+                                    false,
+                                    globalVarInfo.scopeInfo,
+                                    parentDoc.uri,
+                                    globalVarInfo.token.line
+                                );
                             }
                         } catch (err) {
                             logger.error(`Error reading MEMBER parent file: ${err}`);
@@ -916,83 +773,19 @@ export class HoverProvider {
             
             // 🔗 Check for module-local variable in current file (Label at column 0, before first PROCEDURE)
             logger.info(`Checking for module-local variable in current file...`);
-            const firstProcToken = tokens.find(t => 
-                t.type === TokenType.Label &&
-                t.subType === TokenType.Procedure &&
-                t.start === 0
-            );
-            const moduleScopeEndLine = firstProcToken ? firstProcToken.line : Number.MAX_SAFE_INTEGER;
+            const moduleVarInfo = this.findModuleLocalVariable(searchWord, tokens, document);
             
-            // Search for module-local variable (Label at column 0, before first PROCEDURE)
-            const moduleVar = tokens.find(t =>
-                t.type === TokenType.Label &&
-                t.start === 0 &&
-                t.line < moduleScopeEndLine &&
-                t.value.toLowerCase() === searchWord.toLowerCase()
-            );
-            
-            if (moduleVar) {
-                logger.info(`✅ Found module-local variable in current file: ${moduleVar.value} at line ${moduleVar.line}`);
-                
-                // Find the type by looking at the next token
-                const moduleIndex = tokens.indexOf(moduleVar);
-                let typeInfo = 'UNKNOWN';
-                let isStructureDefinition = false;
-                
-                if (moduleIndex + 1 < tokens.length) {
-                    const nextToken = tokens[moduleIndex + 1];
-                    if (nextToken.line === moduleVar.line) {
-                        // Check if it's a regular type token
-                        if (nextToken.type === TokenType.Type) {
-                            typeInfo = nextToken.value;
-                        }
-                        // Check if it's a CLASS/GROUP/QUEUE declaration
-                        else if (nextToken.type === TokenType.Structure) {
-                            typeInfo = nextToken.value.toUpperCase(); // CLASS, GROUP, QUEUE, etc.
-                            isStructureDefinition = true; // This IS the definition
-                        }
-                    }
-                }
-                
-                // Get scope info for the module-local variable
-                const modulePos: Position = { line: moduleVar.line, character: 0 };
-                const scopeInfo = this.scopeAnalyzer.getTokenScope(document, modulePos);
-                
-                // Choose appropriate title based on whether this is a structure definition
-                const title = isStructureDefinition 
-                    ? `**Module-Local ${typeInfo}:** \`${moduleVar.value}\``
-                    : `**Module-Local Variable:** \`${moduleVar.value}\``;
-                
-                const markdown = [
-                    title,
-                    ``
-                ];
-                
-                // Only show "Type:" for regular variables, not structure definitions
-                if (!isStructureDefinition) {
-                    markdown.push(`**Type:** \`${typeInfo}\``);
-                    markdown.push(``);
-                }
-                
-                if (scopeInfo) {
-                    const scopeIcon = '📦';
-                    markdown.push(`**Scope:** ${scopeIcon} Module`);
-                    markdown.push(``);
-                    markdown.push(`**Visibility:** Visible only within this file (module-local)`);
-                    markdown.push(``);
-                }
-                
-                // Show file and line info similar to procedures
-                const fileName = path.basename(document.uri.replace('file:///', ''));
-                const lineNumber = moduleVar.line + 1; // Convert to 1-based
-                markdown.push(`**Defined in** \`${fileName}\` @ line ${lineNumber}`);
-                
-                return {
-                    contents: {
-                        kind: 'markdown',
-                        value: markdown.join('\n')
-                    }
-                };
+            if (moduleVarInfo) {
+                logger.info(`✅ Found module-local variable in current file: ${moduleVarInfo.token.value} at line ${moduleVarInfo.token.line}`);
+                return this.buildVariableHover(
+                    moduleVarInfo.token.value,
+                    moduleVarInfo.typeInfo,
+                    false,
+                    moduleVarInfo.isStructureDefinition,
+                    moduleVarInfo.scopeInfo,
+                    document.uri,
+                    moduleVarInfo.token.line
+                );
             }
             
             logger.info(`${searchWord} is not a module-local variable - checking MEMBER parent file`);
@@ -1051,78 +844,19 @@ export class HoverProvider {
                         }
                         
                         // Not a procedure - check for global variable
-                        // Find first CODE token to establish boundary for global scope
-                        const firstCodeToken = parentTokens.find(t => 
-                            t.type === TokenType.Keyword && 
-                            t.value.toUpperCase() === 'CODE'
-                        );
-                        const globalScopeEndLine = firstCodeToken ? firstCodeToken.line : Number.MAX_SAFE_INTEGER;
-                        logger.info(`Global scope ends at line ${globalScopeEndLine}`);
+                        const globalVarInfo = this.findGlobalVariable(searchWord, parentTokens, parentDoc);
                         
-                        // Search for global variable (Label at column 0, before first CODE)
-                        const globalVar = parentTokens.find(t =>
-                            t.type === TokenType.Label &&
-                            t.start === 0 &&
-                            t.line < globalScopeEndLine &&
-                            t.value.toLowerCase() === searchWord.toLowerCase()
-                        );
-                        
-                        logger.info(`Searched for ${searchWord}, found: ${globalVar ? `YES at line ${globalVar.line}` : 'NO'}`);
-                        
-                        if (globalVar) {
-                            logger.info(`✅ Found global variable in MEMBER parent: ${globalVar.value} at line ${globalVar.line}`);
-                            
-                            // Find the type by looking at the next token
-                            const globalIndex = parentTokens.indexOf(globalVar);
-                            let typeInfo = 'UNKNOWN';
-                            if (globalIndex + 1 < parentTokens.length) {
-                                const nextToken = parentTokens[globalIndex + 1];
-                                if (nextToken.line === globalVar.line) {
-                                    if (nextToken.type === TokenType.Type) {
-                                        typeInfo = nextToken.value;
-                                    } else if (nextToken.type === TokenType.Structure) {
-                                        typeInfo = nextToken.value.toUpperCase();
-                                    }
-                                }
-                            }
-                            
-                            // Use ScopeAnalyzer to get detailed scope info
-                            const globalPos: Position = { line: globalVar.line, character: globalVar.start };
-                            const scopeInfo = this.scopeAnalyzer.getTokenScope(parentDoc, globalPos);
-                            
-                            const markdown = [
-                                `**Global Variable:** \`${globalVar.value}\``,
-                                ``,
-                                `**Type:** \`${typeInfo}\``,
-                                ``
-                            ];
-                            
-                            if (scopeInfo) {
-                                const scopeIcon = scopeInfo.type === 'global' ? '🌍' : '📦';
-                                markdown.push(`**Scope:** ${scopeIcon} ${scopeInfo.type.charAt(0).toUpperCase() + scopeInfo.type.slice(1)}`);
-                                markdown.push(``);
-                                
-                                if (scopeInfo.type === 'global') {
-                                    markdown.push(`**Visibility:** Visible everywhere`);
-                                } else {
-                                    markdown.push(`**Visibility:** Visible only within this file (module-local)`);
-                                }
-                                markdown.push(``);
-                            }
-                            
-                            // Show file and line info similar to procedures
-                            const fileName = path.basename(resolvedPath);
-                            const lineNumber = globalVar.line + 1; // Convert to 1-based
-                            markdown.push(`**Declared in** \`${fileName}\` @ line ${lineNumber}`);
-                            markdown.push(``);
-                            markdown.push(`*Press F12 to go to declaration*`);
-                            
-                            return {
-                                contents: {
-                                    kind: 'markdown',
-                                    value: markdown.join('\n')
-                                }
-                            };
+                        if (globalVarInfo) {
+                            logger.info(`✅ Found global variable in MEMBER parent: ${globalVarInfo.token.value} at line ${globalVarInfo.token.line}`);
+                            return this.buildVariableHover(
+                                globalVarInfo.token.value,
+                                globalVarInfo.typeInfo,
+                                true,
+                                false,
+                                globalVarInfo.scopeInfo,
+                                parentDoc.uri,
+                                globalVarInfo.token.line
+                            );
                         }
                     } catch (err) {
                         logger.error(`Error reading MEMBER parent file: ${err}`);
@@ -1150,8 +884,8 @@ export class HoverProvider {
             return null;
         }
 
-        // Match PROCEDURE(...) pattern
-        const match = procedureLine.match(/PROCEDURE\s*\((.*?)\)/i);
+        // Match PROCEDURE(...) or FUNCTION(...) pattern
+        const match = procedureLine.match(ClarionPatterns.PROCEDURE_WITH_PARAMS);
         if (!match || !match[1]) {
             return null;
         }
@@ -1806,7 +1540,7 @@ export class HoverProvider {
                 for (let i = lineNumber + 1; i < Math.min(lines.length, lineNumber + 50); i++) {
                     const line = lines[i];
                     // Check for next procedure/routine implementation at column 0
-                    if (/^(\w+\.)?(\w+)\s+(PROCEDURE|ROUTINE|FUNCTION)\b/i.test(line)) {
+                    if (ClarionPatterns.HAS_PROCEDURE_KEYWORD.test(line)) {
                         endLine = i;
                         logger.info(`Found next procedure/routine at line ${i}, stopping before it`);
                         break;
@@ -1841,6 +1575,195 @@ export class HoverProvider {
         }
     }
 
+    /**
+     * Counts parameters in a function/attribute call
+     * Returns null if unable to parse, 0 if empty parentheses
+     */
+    private countFunctionParameters(line: string, word: string, wordRange: Range, document: TextDocument): number | null {
+        // Check if there's an opening paren after the word
+        const textAfterWord = document.getText({
+            start: { line: wordRange.start.line, character: wordRange.end.character },
+            end: { line: wordRange.start.line, character: Math.min(wordRange.end.character + 10, line.length) }
+        }).trimStart();
+        
+        if (textAfterWord.startsWith('(')) {
+            // There's a paren, count the actual parameters
+            return this.countParametersInCall(line, word);
+        } else {
+            // No paren after word - assume no parameters
+            return 0;
+        }
+    }
 
+    /**
+     * Builds markdown lines for scope information
+     */
+    private buildScopeMarkdown(scopeInfo: { type: string } | null): string[] {
+        if (!scopeInfo) return [];
+        
+        const scopeIcon = scopeInfo.type === 'global' ? '🌍' : '📦';
+        const scopeType = scopeInfo.type.charAt(0).toUpperCase() + scopeInfo.type.slice(1);
+        const visibility = scopeInfo.type === 'global' 
+            ? 'Visible everywhere'
+            : 'Visible only within this file (module-local)';
+        
+        return [
+            `**Scope:** ${scopeIcon} ${scopeType}`,
+            ``,
+            `**Visibility:** ${visibility}`,
+            ``
+        ];
+    }
+
+    /**
+     * Builds markdown for file location info
+     */
+    private buildLocationInfo(uri: string, lineNumber: number): string {
+        const fileName = path.basename(uri.replace('file:///', ''));
+        return `**Declared in** \`${fileName}\` @ line ${lineNumber}`;
+    }
+
+    /**
+     * Finds a global variable in the given tokens
+     * Returns variable info including type, line, and scope
+     */
+    private findGlobalVariable(
+        searchWord: string, 
+        tokens: Token[], 
+        document: TextDocument
+    ): { token: Token; typeInfo: string; scopeInfo: any } | null {
+        // Find first CODE token to establish boundary for global scope
+        const firstCodeToken = tokens.find(t => 
+            t.type === TokenType.Keyword && 
+            t.value.toUpperCase() === 'CODE'
+        );
+        const globalScopeEndLine = firstCodeToken ? firstCodeToken.line : Number.MAX_SAFE_INTEGER;
+        
+        // Search for global variable (Label at column 0, before first CODE)
+        const globalVar = tokens.find(t =>
+            t.type === TokenType.Label &&
+            t.start === 0 &&
+            t.line < globalScopeEndLine &&
+            t.value.toLowerCase() === searchWord.toLowerCase()
+        );
+        
+        if (!globalVar) return null;
+        
+        logger.info(`✅ Found global variable: ${globalVar.value} at line ${globalVar.line}`);
+        
+        // Find the type by looking at the next token
+        const globalIndex = tokens.indexOf(globalVar);
+        let typeInfo = 'UNKNOWN';
+        if (globalIndex + 1 < tokens.length) {
+            const nextToken = tokens[globalIndex + 1];
+            if (nextToken.line === globalVar.line) {
+                if (nextToken.type === TokenType.Type) {
+                    typeInfo = nextToken.value;
+                } else if (nextToken.type === TokenType.Structure) {
+                    typeInfo = nextToken.value.toUpperCase();
+                }
+            }
+        }
+        
+        // Get scope info for the global variable
+        const globalPos: Position = { line: globalVar.line, character: globalVar.start };
+        const scopeInfo = this.scopeAnalyzer.getTokenScope(document, globalPos);
+        
+        return { token: globalVar, typeInfo, scopeInfo };
+    }
+
+    /**
+     * Finds a module-local variable in the given tokens
+     * Returns variable info including type, line, and scope
+     */
+    private findModuleLocalVariable(
+        searchWord: string,
+        tokens: Token[],
+        document: TextDocument
+    ): { token: Token; typeInfo: string; isStructureDefinition: boolean; scopeInfo: any } | null {
+        // Find first PROCEDURE token to establish boundary for module scope
+        const firstProcToken = tokens.find(t => 
+            t.type === TokenType.Label &&
+            t.subType === TokenType.Procedure &&
+            t.start === 0
+        );
+        const moduleScopeEndLine = firstProcToken ? firstProcToken.line : Number.MAX_SAFE_INTEGER;
+        
+        // Search for module-local variable (Label at column 0, before first PROCEDURE)
+        const moduleVar = tokens.find(t =>
+            t.type === TokenType.Label &&
+            t.start === 0 &&
+            t.line < moduleScopeEndLine &&
+            t.value.toLowerCase() === searchWord.toLowerCase()
+        );
+        
+        if (!moduleVar) return null;
+        
+        logger.info(`✅ Found module-local variable: ${moduleVar.value} at line ${moduleVar.line}`);
+        
+        // Find the type by looking at the next token
+        const moduleIndex = tokens.indexOf(moduleVar);
+        let typeInfo = 'UNKNOWN';
+        let isStructureDefinition = false;
+        
+        if (moduleIndex + 1 < tokens.length) {
+            const nextToken = tokens[moduleIndex + 1];
+            if (nextToken.line === moduleVar.line) {
+                if (nextToken.type === TokenType.Type) {
+                    typeInfo = nextToken.value;
+                } else if (nextToken.type === TokenType.Structure) {
+                    typeInfo = nextToken.value.toUpperCase();
+                    isStructureDefinition = true;
+                }
+            }
+        }
+        
+        // Get scope info for the module-local variable
+        const modulePos: Position = { line: moduleVar.line, character: 0 };
+        const scopeInfo = this.scopeAnalyzer.getTokenScope(document, modulePos);
+        
+        return { token: moduleVar, typeInfo, isStructureDefinition, scopeInfo };
+    }
+
+    /**
+     * Builds hover content for a global or module-local variable
+     */
+    private buildVariableHover(
+        varName: string,
+        typeInfo: string,
+        isGlobal: boolean,
+        isStructureDefinition: boolean,
+        scopeInfo: any,
+        uri: string,
+        line: number
+    ): Hover {
+        const scopeType = isGlobal ? 'Global' : 'Module-Local';
+        
+        // Choose appropriate title based on whether this is a structure definition
+        const title = isStructureDefinition 
+            ? `**${scopeType} ${typeInfo}:** \`${varName}\``
+            : `**${scopeType} Variable:** \`${varName}\``;
+        
+        const markdown = [title, ``];
+        
+        // Only show "Type:" for regular variables, not structure definitions
+        if (!isStructureDefinition) {
+            markdown.push(`**Type:** \`${typeInfo}\``, ``);
+        }
+        
+        markdown.push(...this.buildScopeMarkdown(scopeInfo));
+        markdown.push(this.buildLocationInfo(uri, line + 1));
+        
+        if (isGlobal) {
+            markdown.push(``, `*Press F12 to go to declaration*`);
+        }
+        
+        return {
+            contents: {
+                kind: 'markdown',
+                value: markdown.join('\n')
+            }
+        };
+    }
 
 }
