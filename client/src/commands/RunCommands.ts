@@ -181,7 +181,10 @@ export function registerRunCommands(): Disposable[] {
                             const fileInProject = response.files.find(f => {
                                 const filePath = f.absolutePath || (f.relativePath ? path.resolve(path.dirname(proj.path), f.relativePath) : null);
                                 if (filePath) {
-                                    return path.normalize(filePath).toLowerCase() === path.normalize(activeEditor.document.uri.fsPath).toLowerCase();
+                                    const normalized = path.normalize(filePath).toLowerCase();
+                                    const targetNormalized = path.normalize(activeEditor.document.uri.fsPath).toLowerCase();
+                                    logger.info(`    Comparing: ${normalized} === ${targetNormalized}`);
+                                    return normalized === targetNormalized;
                                 }
                                 return false;
                             });
@@ -189,6 +192,8 @@ export function registerRunCommands(): Disposable[] {
                             if (fileInProject) {
                                 logger.info(`    ✅ Found file in project!`);
                                 projects.push(proj);
+                            } else {
+                                logger.info(`    ❌ File not found in this project`);
                             }
                         }
                     } catch (error) {
@@ -196,47 +201,64 @@ export function registerRunCommands(): Disposable[] {
                     }
                 }
                 
+                logger.info(`📊 Checking ${projects.length} total matching projects`);
+                
                 if (projects.length === 0) {
+                    logger.warn(`❌ No projects matched the current file`);
                     window.showWarningMessage("Current file does not belong to any project in the solution.");
                     return;
                 }
                 
+                logger.info(`✅ Found file in ${projects.length} project(s): ${projects.map(p => p.name).join(', ')}`);
+                
                 // Continue with the matched projects
                 let selectedProject = projects[0];
+                logger.info(`🎯 Selected project: ${selectedProject.name}`);
                 
                 // If multiple projects contain the file, let user choose
                 if (projects.length > 1) {
-                const projectNames = projects.map(p => p.name);
-                const selectedName = await window.showQuickPick(projectNames, {
-                    placeHolder: "Select a project to run"
-                });
+                    logger.info(`Multiple projects found, showing picker...`);
+                    const projectNames = projects.map(p => p.name);
+                    const selectedName = await window.showQuickPick(projectNames, {
+                        placeHolder: "Select a project to run"
+                    });
+                    
+                    if (!selectedName) {
+                        logger.info(`User cancelled project selection`);
+                        return;
+                    }
+                    
+                    selectedProject = projects.find(p => p.name === selectedName)!;
+                    logger.info(`User selected: ${selectedProject.name}`);
+                }
                 
-                if (!selectedName) {
+                logger.info(`📝 Extracting output info from: ${selectedProject.path}`);
+                
+                // Extract output info from the project file
+                const outputInfo = extractProjectOutputInfo(selectedProject.path);
+                
+                if (!outputInfo) {
+                    logger.warn(`Project ${selectedProject.name} is not an executable project`);
+                    window.showWarningMessage(`Project "${selectedProject.name}" is not an executable project.`);
                     return;
                 }
                 
-                selectedProject = projects.find(p => p.name === selectedName)!;
-            }
-            
-            // Extract output info from the project file
-            const outputInfo = extractProjectOutputInfo(selectedProject.path);
-            
-            if (!outputInfo) {
-                window.showWarningMessage(`Project "${selectedProject.name}" is not an executable project.`);
-                return;
-            }
-            
-            // Find the executable
-            const exePath = findExecutable(outputInfo);
-            
-            if (!exePath) {
-                const buildChoice = await window.showWarningMessage(
+                logger.info(`✅ Output info: type=${outputInfo.outputType}, name=${outputInfo.outputName}`);
+                logger.info(`🔍 Looking for executable...`);
+                
+                // Find the executable
+                const exePath = findExecutable(outputInfo);
+                
+                if (!exePath) {
+                    logger.warn(`Executable not found for ${selectedProject.name}`);
+                    const buildChoice = await window.showWarningMessage(
                     `Executable not found for project "${selectedProject.name}". Would you like to build the project first?`,
                     'Build & Run',
                     'Cancel'
                 );
                 
                 if (buildChoice === 'Build & Run') {
+                    logger.info(`User chose to build project`);
                     // Trigger build command and then run
                     await commands.executeCommand('clarion.buildCurrentProject');
                     
@@ -246,8 +268,13 @@ export function registerRunCommands(): Disposable[] {
                 return;
             }
             
+            logger.info(`🚀 Found executable: ${exePath}`);
+            logger.info(`🏃 Running executable...`);
+            
             // Run the executable
             runExecutable(exePath);
+            
+            logger.info(`✅ Command completed successfully`);
             } else {
                 window.showWarningMessage("No solution is currently loaded.");
                 return;
