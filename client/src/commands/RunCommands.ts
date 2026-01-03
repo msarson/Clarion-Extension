@@ -169,6 +169,8 @@ export function registerRunCommands(): Disposable[] {
                 
                 for (const proj of solutionInfo.projects) {
                     try {
+                        logger.info(`  Project: ${proj.name}, path: ${proj.path}`);
+                        
                         // Request project files from the server
                         const response = await client.sendRequest<{ files: any[] }>('clarion/getProjectFiles', {
                             projectGuid: proj.guid
@@ -179,7 +181,30 @@ export function registerRunCommands(): Disposable[] {
                             
                             // Check if this file is in the project
                             const fileInProject = response.files.find(f => {
-                                const filePath = f.absolutePath || (f.relativePath ? path.resolve(path.dirname(proj.path), f.relativePath) : null);
+                                // Log the file data for debugging
+                                logger.info(`    File data: name=${f.name}, relativePath=${f.relativePath}, absolutePath=${f.absolutePath}`);
+                                
+                                let filePath = f.absolutePath;
+                                if (!filePath && f.relativePath) {
+                                    // The project path might be wrong due to redirection or solution parsing issues
+                                    // Try the directory of the cwproj file first
+                                    const projectDir = path.dirname(proj.path);
+                                    filePath = path.resolve(projectDir, f.relativePath);
+                                    
+                                    // If the file doesn't exist there, check if the cwproj itself exists
+                                    // and use its actual location
+                                    if (!fs.existsSync(filePath)) {
+                                        // Check if project.path points to an actual file
+                                        if (fs.existsSync(proj.path)) {
+                                            // Use the actual directory of the cwproj
+                                            const actualProjectDir = path.dirname(proj.path);
+                                            filePath = path.resolve(actualProjectDir, f.relativePath);
+                                        }
+                                    }
+                                    
+                                    logger.info(`    Resolved path: ${filePath} (exists: ${fs.existsSync(filePath)})`);
+                                }
+                                
                                 if (filePath) {
                                     const normalized = path.normalize(filePath).toLowerCase();
                                     const targetNormalized = path.normalize(activeEditor.document.uri.fsPath).toLowerCase();
