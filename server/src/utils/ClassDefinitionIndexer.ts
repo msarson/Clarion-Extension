@@ -165,6 +165,42 @@ export class ClassDefinitionIndexer {
     }
 
     /**
+     * Finds all class definitions in a specific include file (case-insensitive filename)
+     * @param fileName The include filename (e.g., "StringTheory.inc")
+     * @param projectPath Optional project path to search in specific project index
+     * @returns Array of class definitions found in the file
+     */
+    findClassesByFile(fileName: string, projectPath?: string): ClassDefinitionInfo[] {
+        const results: ClassDefinitionInfo[] = [];
+        const fileNameLower = fileName.toLowerCase();
+
+        const searchIndex = (index: ClassIndex) => {
+            for (const definitions of index.classes.values()) {
+                for (const def of definitions) {
+                    if (path.basename(def.filePath).toLowerCase() === fileNameLower) {
+                        results.push(def);
+                    }
+                }
+            }
+        };
+
+        if (projectPath) {
+            const normalizedPath = path.normalize(projectPath);
+            const index = this.indexes.get(normalizedPath);
+            if (index) {
+                searchIndex(index);
+            }
+        } else {
+            // Search all indexes
+            for (const index of this.indexes.values()) {
+                searchIndex(index);
+            }
+        }
+
+        return results;
+    }
+
+    /**
      * Extracts unique directory paths from redirection entries
      * @param entries The redirection entries from the parser
      * @returns Array of unique directory paths
