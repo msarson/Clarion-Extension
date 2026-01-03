@@ -35,9 +35,7 @@ ModuleData LONG         ! Module-local - NOT accessible from main.clw (TEST 4)
 
 IncrementCounter PROCEDURE
 
-ThisWindow           CLASS(DirectWindowManager)
-ASK                   PROCEDURE(),DERIVED
-                     END
+
   CODE
   GlobalCounter += 1    ! TEST 1: F12 here should jump to main.clw line 67
   ModuleData = 99       ! Should work - same module

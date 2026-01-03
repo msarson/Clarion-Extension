@@ -24,6 +24,7 @@ import { SymbolHoverResolver } from './hover/SymbolHoverResolver';
 import { VariableHoverResolver } from './hover/VariableHoverResolver';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
+import { IncludeVerifier } from '../utils/IncludeVerifier';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -48,6 +49,7 @@ export class HoverProvider {
     private contextHandler: ContextualHoverHandler;
     private symbolResolver: SymbolHoverResolver;
     private variableResolver: VariableHoverResolver;
+    private includeVerifier: IncludeVerifier;
 
     constructor() {
         const solutionManager = SolutionManager.getInstance();
@@ -56,6 +58,7 @@ export class HoverProvider {
         this.contextHandler = new ContextualHoverHandler(this.builtinService, this.attributeService);
         this.symbolResolver = new SymbolHoverResolver(this.dataTypeService, this.controlService);
         this.variableResolver = new VariableHoverResolver(this.formatter, this.scopeAnalyzer, this.tokenCache);
+        this.includeVerifier = new IncludeVerifier();
     }
 
     /**
@@ -1810,10 +1813,22 @@ export class HoverProvider {
             if (definitions && definitions.length > 0) {
                 const def = definitions[0]; // Use first definition
                 
-                logger.info(`✅ Found CLASS type: ${def.className} in ${def.filePath}:${def.lineNumber}`);
+                logger.info(`Found CLASS definition: ${def.className} in ${def.filePath}:${def.lineNumber}`);
                 
                 // Extract just the filename from the full path
                 const fileName = path.basename(def.filePath);
+                
+                // ✅ NEW: Verify the class file is included in current scope
+                logger.info(`Verifying if ${fileName} is included...`);
+                const isIncluded = await this.includeVerifier.isClassIncluded(fileName, document);
+                
+                if (!isIncluded) {
+                    logger.info(`❌ ${fileName} is not included in current scope - skipping hover`);
+                    return null;
+                }
+                
+                logger.info(`✅ Found CLASS type: ${def.className} and verified it's included`);
+                
                 const relativePath = path.relative(projectPath, def.filePath);
                 
                 // Build hover text

@@ -88,6 +88,7 @@ GlobalCounter LONG      ! Global variable - accessible in utils.clw (TEST 1)
 !
 GlobalHelper PROCEDURE()
 st StringTheory
+wm WindowManager
    CODE
    MESSAGE('This is a global procedure!')
    RETURN
