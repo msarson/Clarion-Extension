@@ -149,49 +149,73 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             
             const projectGuid = node.data.guid;
             const projectName = node.data.name;
+            const projectFilename = node.data.filename;
+            
+            logger.info(`Setting startup project: ${projectName} (${projectGuid})`);
+            logger.info(`Project path: ${node.data.path}`);
+            logger.info(`Project filename: ${projectFilename}`);
             
             // Check if this is an executable project
             const projectPath = node.data.path;
-            if (fs.existsSync(projectPath) && fs.statSync(projectPath).isDirectory()) {
-                const files = fs.readdirSync(projectPath);
-                const cwprojFile = files.find(f => f.toLowerCase().endsWith('.cwproj'));
-                if (cwprojFile) {
-                    const cwprojPath = path.join(projectPath, cwprojFile);
-                    logger.info(`Checking project file: ${cwprojPath}`);
-                    
-                    const outputInfo = extractProjectOutputInfo(cwprojPath);
-                    
-                    if (!outputInfo) {
-                        // Read the cwproj to show what was found
-                        try {
-                            const content = fs.readFileSync(cwprojPath, 'utf8');
-                            const outputTypeMatch = /<OutputType>([^<]+)<\/OutputType>/i.exec(content);
-                            const outputNameMatch = /<OutputName>([^<]+)<\/OutputName>/i.exec(content);
-                            const modelMatch = /<Model>([^<]+)<\/Model>/i.exec(content);
-                            
-                            const outputType = outputTypeMatch ? outputTypeMatch[1] : 'not found';
-                            const outputName = outputNameMatch ? outputNameMatch[1] : 'not found';
-                            const model = modelMatch ? modelMatch[1] : 'not found';
-                            
-                            logger.warn(`Project not executable - OutputType: ${outputType}, OutputName: ${outputName}, Model: ${model}`);
-                            logger.warn(`Project file path: ${cwprojPath}`);
-                            logger.warn(`Project GUID: ${projectGuid}`);
-                            
-                            window.showWarningMessage(
-                                `${projectName} cannot be set as startup project.\n\n` +
-                                `Details:\n` +
-                                `• OutputType: ${outputType}\n` +
-                                `• OutputName: ${outputName}\n` +
-                                `• Model: ${model}\n\n` +
-                                `Project file: ${cwprojPath}\n\n` +
-                                `Only projects with OutputType='Exe' or 'WinExe' can be startup projects.`
-                            );
-                        } catch (readError) {
-                            window.showWarningMessage(`${projectName} is not an executable project and cannot be set as startup project.`);
-                        }
+            let cwprojPath: string;
+            
+            // Use the filename from project data to get the exact cwproj file
+            if (projectFilename) {
+                cwprojPath = path.join(projectPath, projectFilename);
+            } else {
+                // Fallback: search for .cwproj in directory
+                if (fs.existsSync(projectPath) && fs.statSync(projectPath).isDirectory()) {
+                    const files = fs.readdirSync(projectPath);
+                    const cwprojFile = files.find(f => f.toLowerCase().endsWith('.cwproj'));
+                    if (!cwprojFile) {
+                        window.showErrorMessage(`No .cwproj file found for project "${projectName}".`);
                         return;
                     }
+                    cwprojPath = path.join(projectPath, cwprojFile);
+                } else {
+                    window.showErrorMessage(`Project directory not found: ${projectPath}`);
+                    return;
                 }
+            }
+            
+            logger.info(`Checking project file: ${cwprojPath}`);
+            
+            if (!fs.existsSync(cwprojPath)) {
+                window.showErrorMessage(`Project file not found: ${cwprojPath}`);
+                return;
+            }
+            
+            const outputInfo = extractProjectOutputInfo(cwprojPath);
+            
+            if (!outputInfo) {
+                // Read the cwproj to show what was found
+                try {
+                    const content = fs.readFileSync(cwprojPath, 'utf8');
+                    const outputTypeMatch = /<OutputType>([^<]+)<\/OutputType>/i.exec(content);
+                    const outputNameMatch = /<OutputName>([^<]+)<\/OutputName>/i.exec(content);
+                    const modelMatch = /<Model>([^<]+)<\/Model>/i.exec(content);
+                    
+                    const outputType = outputTypeMatch ? outputTypeMatch[1] : 'not found';
+                    const outputName = outputNameMatch ? outputNameMatch[1] : 'not found';
+                    const model = modelMatch ? modelMatch[1] : 'not found';
+                    
+                    logger.warn(`Project not executable - OutputType: ${outputType}, OutputName: ${outputName}, Model: ${model}`);
+                    logger.warn(`Project file path: ${cwprojPath}`);
+                    logger.warn(`Project GUID: ${projectGuid}`);
+                    
+                    window.showWarningMessage(
+                        `${projectName} cannot be set as startup project.\n\n` +
+                        `Details:\n` +
+                        `• OutputType: ${outputType}\n` +
+                        `• OutputName: ${outputName}\n` +
+                        `• Model: ${model}\n\n` +
+                        `Project file: ${cwprojPath}\n\n` +
+                        `Only projects with OutputType='Exe' or 'WinExe' can be startup projects.`
+                    );
+                } catch (readError) {
+                    window.showWarningMessage(`${projectName} is not an executable project and cannot be set as startup project.`);
+                }
+                return;
             }
             
             // Save to workspace configuration
