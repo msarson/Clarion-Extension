@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger('IncludeVerifier');
+logger.setLevel('info');
 
 /**
  * Represents a parsed INCLUDE statement
@@ -45,6 +46,8 @@ export class IncludeVerifier {
 
             // Get includes from current file
             const currentIncludes = await this.getIncludesForFile(document);
+            logger.info(`Found ${currentIncludes.length} includes in current file`);
+            currentIncludes.forEach(inc => logger.info(`  - ${inc.fileName} at line ${inc.lineNumber}`));
             
             // Check if class file is in current file's includes
             if (this.hasInclude(classFileName, currentIncludes)) {
@@ -58,6 +61,8 @@ export class IncludeVerifier {
             
             if (memberParent) {
                 const parentIncludes = await this.getIncludesForFile(memberParent);
+                logger.info(`Found ${parentIncludes.length} includes in MEMBER parent`);
+                parentIncludes.forEach(inc => logger.info(`  - ${inc.fileName} at line ${inc.lineNumber}`));
                 
                 if (this.hasInclude(classFileName, parentIncludes)) {
                     logger.info(`✅ Found ${classFileName} in MEMBER parent`);
@@ -175,7 +180,7 @@ export class IncludeVerifier {
             const includeMatch = line.match(/INCLUDE\s*\(\s*['"]([^'"]+)['"]\s*\)(\s*,\s*ONCE)?/i);
             
             if (includeMatch) {
-                const fileName = includeMatch[1];
+                const fileName = includeMatch[1].trim(); // Trim whitespace from filename
                 const hasOnce = !!includeMatch[2];
                 
                 includes.push({

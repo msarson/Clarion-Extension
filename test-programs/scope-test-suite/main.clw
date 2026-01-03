@@ -56,7 +56,7 @@
 ! - Find All References should respect scope boundaries
 !
 !═══════════════════════════════════════════════════════════════════════
-
+  INCLUDE('StringTheory.inc '),ONCE
    MAP
      MODULE('utils.clw')  !Can be written as MODULE('utils')
        IncrementCounter()  !can be written without parentheses
