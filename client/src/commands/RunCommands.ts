@@ -61,12 +61,14 @@ function extractProjectOutputInfo(cwprojPath: string): ProjectOutputInfo | undef
         const model = properties.get('model') || '';
 
         // Check if this is an executable project
-        // OutputType should be "Exe" OR Model should not be "Dll"/"Library"
-        const isExecutable = outputType.toLowerCase() === 'exe' || 
-                            (outputType.toLowerCase() !== 'library' && model.toLowerCase() !== 'dll');
+        // OutputType takes priority: Exe or WinExe = executable
+        // If OutputType is Library, it's definitely not executable regardless of Model
+        const outputTypeLower = outputType.toLowerCase();
+        const isExecutable = (outputTypeLower === 'exe' || outputTypeLower === 'winexe') && 
+                            outputName.length > 0;
 
         // Only return info if this is an executable project
-        if (isExecutable && outputName) {
+        if (isExecutable) {
             return {
                 outputType,
                 outputName,

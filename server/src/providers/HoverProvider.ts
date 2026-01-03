@@ -48,7 +48,7 @@ export class HoverProvider {
     private dataTypeService = DataTypeService.getInstance();
     private scopeAnalyzer: ScopeAnalyzer;
     private formatter: HoverFormatter;
-    private contextHandler: ContextualHoverHandler;c
+    private contextHandler: ContextualHoverHandler;
     private symbolResolver: SymbolHoverResolver;
     private variableResolver: VariableHoverResolver;
     private includeVerifier: IncludeVerifier;
