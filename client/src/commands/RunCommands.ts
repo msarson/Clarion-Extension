@@ -394,20 +394,37 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             
             logger.info(`📝 Extracting output info from: ${selectedProject.path}`);
             
-            // proj.path is a directory, need to find the .cwproj file
-            let cwprojPath = selectedProject.path;
-            if (fs.existsSync(cwprojPath) && fs.statSync(cwprojPath).isDirectory()) {
-                // Find the .cwproj file in this directory
-                const files = fs.readdirSync(cwprojPath);
-                const cwprojFile = files.find(f => f.toLowerCase().endsWith('.cwproj'));
-                if (cwprojFile) {
-                    cwprojPath = path.join(cwprojPath, cwprojFile);
-                    logger.info(`📝 Found cwproj file: ${cwprojPath}`);
+            // Use the filename from project data to get the exact cwproj file
+            let cwprojPath: string;
+            if (selectedProject.filename) {
+                cwprojPath = path.join(selectedProject.path, selectedProject.filename);
+                logger.info(`📝 Using project filename: ${selectedProject.filename}`);
+            } else {
+                // Fallback: search for .cwproj in directory
+                if (fs.existsSync(selectedProject.path) && fs.statSync(selectedProject.path).isDirectory()) {
+                    const files = fs.readdirSync(selectedProject.path);
+                    const cwprojFile = files.find(f => f.toLowerCase().endsWith('.cwproj'));
+                    if (cwprojFile) {
+                        cwprojPath = path.join(selectedProject.path, cwprojFile);
+                        logger.info(`📝 Found cwproj file: ${cwprojPath}`);
+                    } else {
+                        logger.warn(`No .cwproj file found in directory: ${selectedProject.path}`);
+                        window.showWarningMessage(`No .cwproj file found for project "${selectedProject.name}".`);
+                        return;
+                    }
                 } else {
-                    logger.warn(`No .cwproj file found in directory: ${cwprojPath}`);
-                    window.showWarningMessage(`No .cwproj file found for project "${selectedProject.name}".`);
+                    logger.error(`Project directory not found: ${selectedProject.path}`);
+                    window.showErrorMessage(`Project directory not found: ${selectedProject.path}`);
                     return;
                 }
+            }
+            
+            logger.info(`📝 Checking project file: ${cwprojPath}`);
+            
+            if (!fs.existsSync(cwprojPath)) {
+                logger.error(`Project file not found: ${cwprojPath}`);
+                window.showErrorMessage(`Project file not found: ${cwprojPath}`);
+                return;
             }
             
             // Extract output info from the project file
