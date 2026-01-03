@@ -31,8 +31,8 @@ export class ClassConstantParser {
     // Pattern: DLL(ConstantName)
     private static readonly DLL_PATTERN = /DLL\s*\(\s*(\w+)\s*\)/gi;
     
-    // Pattern: CLASS definition start
-    private static readonly CLASS_PATTERN = /^(\w+)\s+CLASS\s*\(/i;
+    // Pattern: CLASS definition start (with or without opening paren)
+    private static readonly CLASS_PATTERN = /^(\w+)\s+CLASS\b/i;
 
     /**
      * Parses a CLASS definition file and extracts all required constants
@@ -69,15 +69,24 @@ export class ClassConstantParser {
                 const classLines: string[] = [line];
                 let j = i + 1;
                 
-                while (j < lines.length) {
-                    const nextLine = lines[j].trim();
-                    classLines.push(nextLine);
-                    
-                    // Stop at END at column 0 or next CLASS definition
-                    if (/^\s*END\s*$/i.test(nextLine) || /^\w+\s+CLASS\s*\(/i.test(nextLine)) {
-                        break;
+                // Check if this is a single-line class definition (no opening paren or ends same line)
+                const hasOpenParen = /CLASS\s*\(/i.test(line);
+                
+                if (hasOpenParen) {
+                    // Multi-line class with methods - collect until END
+                    while (j < lines.length) {
+                        const nextLine = lines[j];
+                        classLines.push(nextLine);
+                        
+                        // Stop at END at column 0 or next CLASS definition at column 0
+                        if (/^\s*END\s*$/i.test(nextLine) || (/^\w+\s+CLASS\b/i.test(nextLine) && /^\w/.test(nextLine))) {
+                            break;
+                        }
+                        j++;
                     }
-                    j++;
+                } else {
+                    // Single-line class declaration - might continue on next lines with continuations
+                    // But for now, just use the first line as it contains all the attributes
                 }
 
                 // Parse constants from the collected class definition
