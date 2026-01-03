@@ -186,22 +186,9 @@ export function registerRunCommands(): Disposable[] {
                                 
                                 let filePath = f.absolutePath;
                                 if (!filePath && f.relativePath) {
-                                    // The project path might be wrong due to redirection or solution parsing issues
-                                    // Try the directory of the cwproj file first
-                                    const projectDir = path.dirname(proj.path);
-                                    filePath = path.resolve(projectDir, f.relativePath);
-                                    
-                                    // If the file doesn't exist there, check if the cwproj itself exists
-                                    // and use its actual location
-                                    if (!fs.existsSync(filePath)) {
-                                        // Check if project.path points to an actual file
-                                        if (fs.existsSync(proj.path)) {
-                                            // Use the actual directory of the cwproj
-                                            const actualProjectDir = path.dirname(proj.path);
-                                            filePath = path.resolve(actualProjectDir, f.relativePath);
-                                        }
-                                    }
-                                    
+                                    // proj.path is actually a directory, not a file path
+                                    // Resolve the file relative to that directory
+                                    filePath = path.resolve(proj.path, f.relativePath);
                                     logger.info(`    Resolved path: ${filePath} (exists: ${fs.existsSync(filePath)})`);
                                 }
                                 
