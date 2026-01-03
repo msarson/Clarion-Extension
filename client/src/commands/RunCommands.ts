@@ -159,10 +159,35 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
                 const cwprojFile = files.find(f => f.toLowerCase().endsWith('.cwproj'));
                 if (cwprojFile) {
                     const cwprojPath = path.join(projectPath, cwprojFile);
+                    logger.info(`Checking project file: ${cwprojPath}`);
+                    
                     const outputInfo = extractProjectOutputInfo(cwprojPath);
                     
                     if (!outputInfo) {
-                        window.showWarningMessage(`${projectName} is not an executable project and cannot be set as startup project.`);
+                        // Read the cwproj to show what was found
+                        try {
+                            const content = fs.readFileSync(cwprojPath, 'utf8');
+                            const outputTypeMatch = /<OutputType>([^<]+)<\/OutputType>/i.exec(content);
+                            const outputNameMatch = /<OutputName>([^<]+)<\/OutputName>/i.exec(content);
+                            const modelMatch = /<Model>([^<]+)<\/Model>/i.exec(content);
+                            
+                            const outputType = outputTypeMatch ? outputTypeMatch[1] : 'not found';
+                            const outputName = outputNameMatch ? outputNameMatch[1] : 'not found';
+                            const model = modelMatch ? modelMatch[1] : 'not found';
+                            
+                            logger.warn(`Project not executable - OutputType: ${outputType}, OutputName: ${outputName}, Model: ${model}`);
+                            
+                            window.showWarningMessage(
+                                `${projectName} cannot be set as startup project.\n\n` +
+                                `Details:\n` +
+                                `• OutputType: ${outputType}\n` +
+                                `• OutputName: ${outputName}\n` +
+                                `• Model: ${model}\n\n` +
+                                `Only projects with OutputType='Exe' or 'WinExe' can be startup projects.`
+                            );
+                        } catch (readError) {
+                            window.showWarningMessage(`${projectName} is not an executable project and cannot be set as startup project.`);
+                        }
                         return;
                     }
                 }
