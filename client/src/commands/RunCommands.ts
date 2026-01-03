@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("RunCommands");
+logger.setLevel("info");
 
 interface ProjectOutputInfo {
     outputType: string;
@@ -137,10 +138,22 @@ export function registerRunCommands(): Disposable[] {
             }
             
             const filePath = activeEditor.document.uri.fsPath;
+            logger.info(`📄 Current file path: ${filePath}`);
+            
             const solutionCache = SolutionCache.getInstance();
+            
+            // Check if solution is loaded
+            if (!solutionCache.getSolutionInfo()) {
+                window.showWarningMessage("No solution is currently loaded.");
+                return;
+            }
+            
+            logger.info(`🔍 Searching for projects containing: ${filePath}`);
             
             // Find the project(s) the file belongs to
             const projects = solutionCache.findProjectsForFile(filePath);
+            
+            logger.info(`📊 Found ${projects.length} projects`);
             
             if (projects.length === 0) {
                 window.showWarningMessage("Current file does not belong to any project in the solution.");
