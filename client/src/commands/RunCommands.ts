@@ -150,6 +150,22 @@ export function registerRunCommands(): Disposable[] {
             
             logger.info(`🔍 Searching for projects containing: ${filePath}`);
             
+            // Debug: Check what projects are in the solution
+            const solutionInfo = solutionCache.getSolutionInfo();
+            if (solutionInfo) {
+                logger.info(`📋 Solution has ${solutionInfo.projects.length} projects:`);
+                for (const proj of solutionInfo.projects) {
+                    logger.info(`  - ${proj.name} (${proj.sourceFiles.length} files)`);
+                    // Check if this specific file is in the project's sourceFiles
+                    const fileInProject = proj.sourceFiles.find(f => 
+                        f.relativePath && path.resolve(path.dirname(proj.path), f.relativePath).toLowerCase() === filePath.toLowerCase()
+                    );
+                    if (fileInProject) {
+                        logger.info(`    ✅ Found file in project: ${fileInProject.relativePath}`);
+                    }
+                }
+            }
+            
             // Find the project(s) the file belongs to
             const projects = solutionCache.findProjectsForFile(filePath);
             
