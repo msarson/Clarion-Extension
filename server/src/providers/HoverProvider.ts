@@ -1555,7 +1555,7 @@ export class HoverProvider {
                 for (let i = lineNumber + 1; i < Math.min(lines.length, lineNumber + 50); i++) {
                     const line = lines[i];
                     // Check for next procedure/routine implementation at column 0
-                    if (/^(\w+\.)?(\w+)\s+(PROCEDURE|ROUTINE|FUNCTION)\b/i.test(line)) {
+                    if (ClarionPatterns.HAS_PROCEDURE_KEYWORD.test(line)) {
                         endLine = i;
                         logger.info(`Found next procedure/routine at line ${i}, stopping before it`);
                         break;
