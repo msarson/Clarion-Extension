@@ -71,9 +71,20 @@ export class ClarionPatterns {
      * MyProc PROCEDURE(params) at start of line
      * 
      * Capture groups:
-     * [1] = Procedure name
+     * [1] = Leading whitespace
+     * [2] = Procedure name
+     * [3] = Keyword (PROCEDURE or FUNCTION)
      */
     public static readonly PROCEDURE_IMPLEMENTATION = /^(\s*)(\w+)\s+(PROCEDURE|FUNCTION)/i;
+    
+    /**
+     * Matches a standalone procedure/function implementation with parentheses
+     * Used for detecting procedure implementations that need to show MAP declarations
+     * 
+     * Capture groups:
+     * [1] = Procedure name
+     */
+    public static readonly PROCEDURE_IMPLEMENTATION_WITH_PARAMS = /^(\w+)\s+(?:PROCEDURE|FUNCTION)\s*\(/i;
     
     /**
      * Matches any PROCEDURE or FUNCTION declaration (method, standalone, or routine)
@@ -87,11 +98,11 @@ export class ClarionPatterns {
     public static readonly HAS_PROCEDURE_KEYWORD = /^(\w+\.)?(\w+)\s+(PROCEDURE|ROUTINE|FUNCTION)\b/i;
     
     /**
-     * Matches a PROCEDURE declaration with parentheses (for parameter counting)
+     * Matches a PROCEDURE or FUNCTION declaration with parentheses (for parameter counting)
      * Capture groups:
      * [1] = Parameter list
      */
-    public static readonly PROCEDURE_WITH_PARAMS = /PROCEDURE\s*\(([^)]*)\)/i;
+    public static readonly PROCEDURE_WITH_PARAMS = /(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i;
     
     // ===================================================================
     // CLASS PATTERNS
