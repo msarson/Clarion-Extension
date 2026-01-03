@@ -272,32 +272,37 @@ export function registerRunCommands(): Disposable[] {
                 }
                 
                 logger.info(`✅ Output info: type=${outputInfo.outputType}, name=${outputInfo.outputName}`);
+                
+                // Always build before running to ensure we have the latest executable
+                logger.info(`🔨 Building project before running...`);
+                window.showInformationMessage(`Building ${selectedProject.name}...`);
+                
+                try {
+                    await commands.executeCommand('clarion.buildProject', { 
+                        data: selectedProject 
+                    });
+                    
+                    // Give the build a moment to complete
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                } catch (buildError) {
+                    logger.error(`Build failed: ${buildError instanceof Error ? buildError.message : String(buildError)}`);
+                    window.showErrorMessage(`Build failed. Check the output for details.`);
+                    return;
+                }
+                
                 logger.info(`🔍 Looking for executable...`);
                 
                 // Find the executable
                 const exePath = findExecutable(outputInfo);
                 
                 if (!exePath) {
-                    logger.warn(`Executable not found for ${selectedProject.name}`);
-                    const buildChoice = await window.showWarningMessage(
-                    `Executable not found for project "${selectedProject.name}". Would you like to build the project first?`,
-                    'Build & Run',
-                    'Cancel'
-                );
-                
-                if (buildChoice === 'Build & Run') {
-                    logger.info(`User chose to build project`);
-                    // Trigger build command and then run
-                    await commands.executeCommand('clarion.buildCurrentProject');
-                    
-                    // Wait a moment for build to complete and try again
-                    window.showInformationMessage('Please run the command again after the build completes.');
+                    logger.warn(`Executable not found even after build for ${selectedProject.name}`);
+                    window.showErrorMessage(`Executable not found. The build may have failed.`);
+                    return;
                 }
-                return;
-            }
-            
-            logger.info(`🚀 Found executable: ${exePath}`);
-            logger.info(`🏃 Running executable...`);
+                
+                logger.info(`🚀 Found executable: ${exePath}`);
+                logger.info(`🏃 Running executable...`);
             
             // Run the executable
             runExecutable(exePath);
