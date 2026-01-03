@@ -172,6 +172,16 @@
                 "when": "clarion.solutionOpen"
             },
             {
+                "command": "clarion.setStartupProject",
+                "title": "Set as Startup Project",
+                "when": "clarion.solutionOpen"
+            },
+            {
+                "command": "clarion.clearStartupProject",
+                "title": "Clear Startup Project",
+                "when": "clarion.solutionOpen"
+            },
+            {
                 "command": "clarion.buildSolution",
                 "title": "Build Clarion Solution",
                 "key": "ctrl+shift+b",
@@ -332,6 +342,11 @@
                     "command": "clarion.buildProject",
                     "when": "view == solutionView && viewItem == clarionProject",
                     "group": "build"
+                },
+                {
+                    "command": "clarion.setStartupProject",
+                    "when": "view == solutionView && viewItem == clarionProject",
+                    "group": "startup"
                 },
                 {
                     "command": "clarion.buildProject",

@@ -1,4 +1,4 @@
-import { commands, window, Disposable, Terminal, Uri } from 'vscode';
+import { commands, window, Disposable, Terminal, Uri, workspace } from 'vscode';
 import { SolutionCache } from '../SolutionCache';
 import { ClarionProjectInfo } from 'common/types';
 import { getLanguageClient } from '../LanguageClientManager';
@@ -57,9 +57,15 @@ function extractProjectOutputInfo(cwprojPath: string): ProjectOutputInfo | undef
         const outputType = properties.get('outputtype') || '';
         const outputName = properties.get('outputname') || properties.get('assemblyname') || '';
         const configuration = properties.get('configuration') || 'Debug';
+        const model = properties.get('model') || '';
+
+        // Check if this is an executable project
+        // OutputType should be "Exe" OR Model should not be "Dll"/"Library"
+        const isExecutable = outputType.toLowerCase() === 'exe' || 
+                            (outputType.toLowerCase() !== 'library' && model.toLowerCase() !== 'dll');
 
         // Only return info if this is an executable project
-        if (outputType.toLowerCase() === 'exe' && outputName) {
+        if (isExecutable && outputName) {
             return {
                 outputType,
                 outputName,
@@ -68,6 +74,7 @@ function extractProjectOutputInfo(cwprojPath: string): ProjectOutputInfo | undef
             };
         }
 
+        logger.info(`Project is not executable: OutputType=${outputType}, Model=${model}`);
         return undefined;
     } catch (error) {
         logger.error(`Error extracting project output info: ${error instanceof Error ? error.message : String(error)}`);
@@ -130,6 +137,51 @@ function runExecutable(exePath: string): void {
  */
 export function registerRunCommands(): Disposable[] {
     return [
+        commands.registerCommand('clarion.setStartupProject', async (node) => {
+            logger.info("📌 Setting startup project...");
+            
+            if (!node || !node.data || !node.data.guid) {
+                window.showErrorMessage("Invalid project selection.");
+                return;
+            }
+            
+            const projectGuid = node.data.guid;
+            const projectName = node.data.name;
+            
+            // Check if this is an executable project
+            const projectPath = node.data.path;
+            if (fs.existsSync(projectPath) && fs.statSync(projectPath).isDirectory()) {
+                const files = fs.readdirSync(projectPath);
+                const cwprojFile = files.find(f => f.toLowerCase().endsWith('.cwproj'));
+                if (cwprojFile) {
+                    const cwprojPath = path.join(projectPath, cwprojFile);
+                    const outputInfo = extractProjectOutputInfo(cwprojPath);
+                    
+                    if (!outputInfo) {
+                        window.showWarningMessage(`${projectName} is not an executable project and cannot be set as startup project.`);
+                        return;
+                    }
+                }
+            }
+            
+            // Save to workspace configuration
+            const config = workspace.getConfiguration('clarion');
+            await config.update('startupProject', projectGuid, false);
+            
+            logger.info(`✅ Set ${projectName} (${projectGuid}) as startup project`);
+            window.showInformationMessage(`${projectName} set as startup project.`);
+        }),
+        
+        commands.registerCommand('clarion.clearStartupProject', async () => {
+            logger.info("🗑️ Clearing startup project...");
+            
+            const config = workspace.getConfiguration('clarion');
+            await config.update('startupProject', undefined, false);
+            
+            logger.info(`✅ Cleared startup project`);
+            window.showInformationMessage("Startup project cleared.");
+        }),
+        
         commands.registerCommand('clarion.runWithoutDebugging', async () => {
             logger.info("🚀 Running current project without debugging...");
             
@@ -150,11 +202,35 @@ export function registerRunCommands(): Disposable[] {
                 return;
             }
             
-            logger.info(`🔍 Searching for projects containing: ${filePath}`);
+            logger.info(`🔍 Searching for startup project or current file's project...`);
             
-            // Debug: Check what projects are in the solution
             const solutionInfo = solutionCache.getSolutionInfo();
-            if (solutionInfo) {
+            if (!solutionInfo) {
+                window.showWarningMessage("No solution is currently loaded.");
+                return;
+            }
+            
+            // Check for startup project in workspace settings
+            const workspaceConfig = workspace.getConfiguration('clarion');
+            const startupProjectGuid = workspaceConfig.get<string>('startupProject');
+            
+            let selectedProject: ClarionProjectInfo | undefined;
+            
+            if (startupProjectGuid) {
+                // Find the startup project
+                selectedProject = solutionInfo.projects.find(p => 
+                    p.guid.replace(/[{}]/g, '').toLowerCase() === startupProjectGuid.replace(/[{}]/g, '').toLowerCase()
+                );
+                
+                if (selectedProject) {
+                    logger.info(`✅ Using startup project: ${selectedProject.name}`);
+                } else {
+                    logger.warn(`⚠️ Startup project GUID ${startupProjectGuid} not found in solution`);
+                    window.showWarningMessage("Configured startup project not found. Please set a valid startup project.");
+                    return;
+                }
+            } else {
+                logger.info(`📋 No startup project configured, detecting from current file...`);
                 logger.info(`📋 Solution has ${solutionInfo.projects.length} projects:`);
                 
                 // Get the language client to fetch project files
@@ -224,7 +300,7 @@ export function registerRunCommands(): Disposable[] {
                 logger.info(`✅ Found file in ${projects.length} project(s): ${projects.map(p => p.name).join(', ')}`);
                 
                 // Continue with the matched projects
-                let selectedProject = projects[0];
+                selectedProject = projects[0];
                 logger.info(`🎯 Selected project: ${selectedProject.name}`);
                 
                 // If multiple projects contain the file, let user choose
@@ -243,75 +319,79 @@ export function registerRunCommands(): Disposable[] {
                     selectedProject = projects.find(p => p.name === selectedName)!;
                     logger.info(`User selected: ${selectedProject.name}`);
                 }
-                
-                logger.info(`📝 Extracting output info from: ${selectedProject.path}`);
-                
-                // proj.path is a directory, need to find the .cwproj file
-                let cwprojPath = selectedProject.path;
-                if (fs.existsSync(cwprojPath) && fs.statSync(cwprojPath).isDirectory()) {
-                    // Find the .cwproj file in this directory
-                    const files = fs.readdirSync(cwprojPath);
-                    const cwprojFile = files.find(f => f.toLowerCase().endsWith('.cwproj'));
-                    if (cwprojFile) {
-                        cwprojPath = path.join(cwprojPath, cwprojFile);
-                        logger.info(`📝 Found cwproj file: ${cwprojPath}`);
-                    } else {
-                        logger.warn(`No .cwproj file found in directory: ${cwprojPath}`);
-                        window.showWarningMessage(`No .cwproj file found for project "${selectedProject.name}".`);
-                        return;
-                    }
-                }
-                
-                // Extract output info from the project file
-                const outputInfo = extractProjectOutputInfo(cwprojPath);
-                
-                if (!outputInfo) {
-                    logger.warn(`Project ${selectedProject.name} is not an executable project`);
-                    window.showWarningMessage(`Project "${selectedProject.name}" is not an executable project.`);
+            }
+            
+            // At this point, selectedProject should be defined
+            if (!selectedProject) {
+                logger.error(`❌ No project selected`);
+                window.showErrorMessage("No project could be determined.");
+                return;
+            }
+            
+            logger.info(`📝 Extracting output info from: ${selectedProject.path}`);
+            
+            // proj.path is a directory, need to find the .cwproj file
+            let cwprojPath = selectedProject.path;
+            if (fs.existsSync(cwprojPath) && fs.statSync(cwprojPath).isDirectory()) {
+                // Find the .cwproj file in this directory
+                const files = fs.readdirSync(cwprojPath);
+                const cwprojFile = files.find(f => f.toLowerCase().endsWith('.cwproj'));
+                if (cwprojFile) {
+                    cwprojPath = path.join(cwprojPath, cwprojFile);
+                    logger.info(`📝 Found cwproj file: ${cwprojPath}`);
+                } else {
+                    logger.warn(`No .cwproj file found in directory: ${cwprojPath}`);
+                    window.showWarningMessage(`No .cwproj file found for project "${selectedProject.name}".`);
                     return;
                 }
+            }
+            
+            // Extract output info from the project file
+            const outputInfo = extractProjectOutputInfo(cwprojPath);
+            
+            if (!outputInfo) {
+                logger.warn(`Project ${selectedProject.name} is not an executable project`);
+                window.showWarningMessage(`Project "${selectedProject.name}" is not an executable project.`);
+                return;
+            }
+            
+            logger.info(`✅ Output info: type=${outputInfo.outputType}, name=${outputInfo.outputName}`);
+            
+            // Always build before running to ensure we have the latest executable
+            logger.info(`🔨 Building project before running...`);
+            window.showInformationMessage(`Building ${selectedProject.name}...`);
+            
+            try {
+                await commands.executeCommand('clarion.buildProject', { 
+                    data: selectedProject 
+                });
                 
-                logger.info(`✅ Output info: type=${outputInfo.outputType}, name=${outputInfo.outputName}`);
-                
-                // Always build before running to ensure we have the latest executable
-                logger.info(`🔨 Building project before running...`);
-                window.showInformationMessage(`Building ${selectedProject.name}...`);
-                
-                try {
-                    await commands.executeCommand('clarion.buildProject', { 
-                        data: selectedProject 
-                    });
-                    
-                    // Give the build a moment to complete
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                } catch (buildError) {
-                    logger.error(`Build failed: ${buildError instanceof Error ? buildError.message : String(buildError)}`);
-                    window.showErrorMessage(`Build failed. Check the output for details.`);
-                    return;
-                }
-                
-                logger.info(`🔍 Looking for executable...`);
-                
-                // Find the executable
-                const exePath = findExecutable(outputInfo);
-                
-                if (!exePath) {
-                    logger.warn(`Executable not found even after build for ${selectedProject.name}`);
-                    window.showErrorMessage(`Executable not found. The build may have failed.`);
-                    return;
-                }
-                
-                logger.info(`🚀 Found executable: ${exePath}`);
-                logger.info(`🏃 Running executable...`);
+                // Give the build a moment to complete
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            } catch (buildError) {
+                logger.error(`Build failed: ${buildError instanceof Error ? buildError.message : String(buildError)}`);
+                window.showErrorMessage(`Build failed. Check the output for details.`);
+                return;
+            }
+            
+            logger.info(`🔍 Looking for executable...`);
+            
+            // Find the executable
+            const exePath = findExecutable(outputInfo);
+            
+            if (!exePath) {
+                logger.warn(`Executable not found even after build for ${selectedProject.name}`);
+                window.showErrorMessage(`Executable not found. The build may have failed.`);
+                return;
+            }
+            
+            logger.info(`🚀 Found executable: ${exePath}`);
+            logger.info(`🏃 Running executable...`);
             
             // Run the executable
             runExecutable(exePath);
             
             logger.info(`✅ Command completed successfully`);
-            } else {
-                window.showWarningMessage("No solution is currently loaded.");
-                return;
-            }
         })
     ];
 }

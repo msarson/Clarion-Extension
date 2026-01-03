@@ -1,4 +1,5 @@
    PROGRAM
+  INCLUDE('StringTheory.inc'),ONCE
 
 !═══════════════════════════════════════════════════════════════════════
 ! SCOPE TEST SUITE - CROSS-FILE SCOPE TESTING
@@ -73,7 +74,10 @@ GlobalHelper PROCEDURE()  ! Declare the global procedure so it can be called fro
    END
 
 GlobalCounter LONG      ! Global variable - accessible in utils.clw (TEST 1)
+st StringTheory
    CODE
+   st.SetValue('Clarion is cool!')
+   MESSAGE(st.GetValue())
    GlobalCounter = 0
    IncrementCounter()    ! TEST 2: F12 → line 57 MAP, Ctrl+F12 → utils.clw line 34
    IncrementCounter()
