@@ -174,6 +174,8 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
                             const model = modelMatch ? modelMatch[1] : 'not found';
                             
                             logger.warn(`Project not executable - OutputType: ${outputType}, OutputName: ${outputName}, Model: ${model}`);
+                            logger.warn(`Project file path: ${cwprojPath}`);
+                            logger.warn(`Project GUID: ${projectGuid}`);
                             
                             window.showWarningMessage(
                                 `${projectName} cannot be set as startup project.\n\n` +
@@ -181,6 +183,7 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
                                 `• OutputType: ${outputType}\n` +
                                 `• OutputName: ${outputName}\n` +
                                 `• Model: ${model}\n\n` +
+                                `Project file: ${cwprojPath}\n\n` +
                                 `Only projects with OutputType='Exe' or 'WinExe' can be startup projects.`
                             );
                         } catch (readError) {
