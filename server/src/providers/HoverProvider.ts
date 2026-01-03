@@ -26,6 +26,7 @@ import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
 import { IncludeVerifier } from '../utils/IncludeVerifier';
 import { ClassConstantParser } from '../utils/ClassConstantParser';
+import { ProjectConstantsChecker } from '../utils/ProjectConstantsChecker';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -1854,23 +1855,40 @@ export class HoverProvider {
                 
                 // Add required constants information
                 if (thisClassConstants && thisClassConstants.constants.length > 0) {
-                    classInfo.push(``);
-                    classInfo.push(`**Required Constants:**`);
+                    // Check which constants are missing from the project
+                    const constantsChecker = new ProjectConstantsChecker();
+                    const missingConstants = [];
                     
                     for (const constant of thisClassConstants.constants) {
-                        const typeDesc = constant.type === 'Link' ? 'Link mode' : 'DLL mode';
-                        const fileInfo = constant.relatedFile ? ` (${constant.relatedFile})` : '';
-                        classInfo.push(`- \`${constant.name}\` - ${typeDesc}${fileInfo}`);
+                        const isDefined = await constantsChecker.isConstantDefined(constant.name, projectPath);
+                        if (!isDefined) {
+                            missingConstants.push(constant);
+                        }
                     }
                     
-                    // Generate suggested definitions
-                    const linkModeDefs = constantParser.generateConstantDefinitions(thisClassConstants.constants, true);
-                    const dllModeDefs = constantParser.generateConstantDefinitions(thisClassConstants.constants, false);
-                    
-                    classInfo.push(``);
-                    classInfo.push(`**Suggested Project Constants:**`);
-                    classInfo.push(`- **Link mode:** \`${linkModeDefs}\``);
-                    classInfo.push(`- **DLL mode:** \`${dllModeDefs}\``);
+                    if (missingConstants.length > 0) {
+                        classInfo.push(``);
+                        classInfo.push(`**⚠️ Missing Constants:**`);
+                        
+                        for (const constant of missingConstants) {
+                            const typeDesc = constant.type === 'Link' ? 'Link mode' : 'DLL mode';
+                            const fileInfo = constant.relatedFile ? ` (${constant.relatedFile})` : '';
+                            classInfo.push(`- \`${constant.name}\` - ${typeDesc}${fileInfo}`);
+                        }
+                        
+                        // Generate suggested definitions for missing constants only
+                        const linkModeDefs = constantParser.generateConstantDefinitions(missingConstants, true);
+                        const dllModeDefs = constantParser.generateConstantDefinitions(missingConstants, false);
+                        
+                        classInfo.push(``);
+                        classInfo.push(`**Suggested Values:**`);
+                        classInfo.push(`- **Link mode:** \`${linkModeDefs}\``);
+                        classInfo.push(`- **DLL mode:** \`${dllModeDefs}\``);
+                    } else {
+                        // All constants are defined
+                        classInfo.push(``);
+                        classInfo.push(`✅ **All required constants are defined in project**`);
+                    }
                 }
                 
                 classInfo.push(``);
