@@ -48,10 +48,8 @@ function extractProjectOutputInfo(cwprojPath: string): ProjectOutputInfo | undef
                 const propertyName = propertyMatch[1];
                 const propertyValue = propertyMatch[2].trim();
                 
-                // Store properties case-insensitively
-                if (!properties.has(propertyName.toLowerCase())) {
-                    properties.set(propertyName.toLowerCase(), propertyValue);
-                }
+                // Always overwrite with the latest value found (configuration-specific values come later)
+                properties.set(propertyName.toLowerCase(), propertyValue);
             }
         }
 
