@@ -267,7 +267,7 @@ export class HoverProvider {
 
             // Check if this is a MAP procedure implementation and show declaration hover
             // Skip if we're inside a MAP block (those are declarations, not implementations)
-            const mapProcMatch = line.match(/^(\w+)\s+PROCEDURE\s*\(/i);
+            const mapProcMatch = line.match(/^(\w+)\s+(PROCEDURE|FUNCTION)\s*\(/i);
             logger.info(`MAP procedure regex test: line="${line}", match=${!!mapProcMatch}, inMapBlock=${documentStructure.isInMapBlock(position.line)}`);
             if (mapProcMatch && !documentStructure.isInMapBlock(position.line)) {
                 const procName = mapProcMatch[1];
@@ -899,8 +899,8 @@ export class HoverProvider {
             return null;
         }
 
-        // Match PROCEDURE(...) pattern
-        const match = procedureLine.match(/PROCEDURE\s*\((.*?)\)/i);
+        // Match PROCEDURE(...) or FUNCTION(...) pattern
+        const match = procedureLine.match(/(?:PROCEDURE|FUNCTION)\s*\((.*?)\)/i);
         if (!match || !match[1]) {
             return null;
         }
