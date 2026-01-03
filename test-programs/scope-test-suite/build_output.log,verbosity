@@ -1,4 +1,4 @@
-Build started 03/01/2026 15:21:33.
+Build started 03/01/2026 15:25:21.
 Project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln" on node 1 (build target(s)).
 Building with tools version "4.0".
 Target "ValidateSolutionConfiguration" in file "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln.metaproj" from project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln" (entry point):
@@ -42,7 +42,159 @@ Target "_TimeStampBeforeCompile" skipped, due to false condition; ('$(RunPostBui
 Target "CoreCompile" in file "C:\Clarion\Clarion11.1\bin\SoftVelocity.Build.Clarion.targets" from project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj" (target "Build" depends on it):
 Using "CW" task from assembly "C:\Clarion\Clarion11.1\bin\SoftVelocity.CW.Build.Tasks.dll".
 Task "CW"
-f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj(4,36): error : Invalid character => expected
+  Making main.obj : pragma changed
+  Including: EQUATES.CLW
+  Including: *property.clw
+  Including: EQUATES.CLW
+  Including:  
+  Including: StringTheory.inc
+  Including:  
+  Including: ABWindow.inc
+  Including: *ABRESIZE.INC
+  Including: **ABRESIZE.EQU
+  Including: *ABRESIZE.INC
+  Including: ABWindow.inc
+  Including: *ABBROWSE.INC
+  Including: **ABFILE.INC
+  Including: ***FILECB.INC
+  Including: ****BUILTINS.CLW
+  Including: ***FILECB.INC
+  Including: **ABFILE.INC
+  Including: ***ABFILE.EQU
+  Including: **ABFILE.INC
+  Including: ***CWSYNCHM.INC
+  Including: ****CWSYNCH.INT
+  Including: ***CWSYNCHM.INC
+  Including: **ABFILE.INC
+  Including: *ABBROWSE.INC
+  Including: **ABPOPUP.INC
+  Including: ***ABUTIL.INC
+  Including: ****ABERROR.INC
+  Including: *****ERRORS.CLW
+  Including: ****ABERROR.INC
+  Including: ***ABUTIL.INC
+  Including: **ABPOPUP.INC
+  Including: *ABBROWSE.INC
+  Including: **ABTOOLBA.INC
+  Including: ***ABTOOLBA.EQU
+  Including: **ABTOOLBA.INC
+  Including: *ABBROWSE.INC
+  Including: **ABEIP.INC
+  Including: *ABBROWSE.INC
+  Including: **ABBROWSE.EQU
+  Including: *ABBROWSE.INC
+  Including: ABWindow.inc
+  Including: *ABVCRFRM.INC
+  Including: ABWindow.inc
+  Including:  
+  Optimizing _main
+  Optimizing 
+  Optimizing GLOBALHELPER@F
+  Optimizing 
+  made main.obj
+  Making utils.obj : pragma changed
+  Including: main.clw
+  Including: *EQUATES.CLW
+  Including: **property.clw
+  Including: *EQUATES.CLW
+  Including: main.clw
+  Including: *StringTheory.inc
+  Including: main.clw
+  Including: *ABWindow.inc
+  Including: **ABRESIZE.INC
+  Including: ***ABRESIZE.EQU
+  Including: **ABRESIZE.INC
+  Including: *ABWindow.inc
+  Including: **ABBROWSE.INC
+  Including: ***ABFILE.INC
+  Including: ****FILECB.INC
+  Including: *****BUILTINS.CLW
+  Including: ****FILECB.INC
+  Including: ***ABFILE.INC
+  Including: ****ABFILE.EQU
+  Including: ***ABFILE.INC
+  Including: ****CWSYNCHM.INC
+  Including: *****CWSYNCH.INT
+  Including: ****CWSYNCHM.INC
+  Including: ***ABFILE.INC
+  Including: **ABBROWSE.INC
+  Including: ***ABPOPUP.INC
+  Including: ****ABUTIL.INC
+  Including: *****ABERROR.INC
+  Including: ******ERRORS.CLW
+  Including: *****ABERROR.INC
+  Including: ****ABUTIL.INC
+  Including: ***ABPOPUP.INC
+  Including: **ABBROWSE.INC
+  Including: ***ABTOOLBA.INC
+  Including: ****ABTOOLBA.EQU
+  Including: ***ABTOOLBA.INC
+  Including: **ABBROWSE.INC
+  Including: ***ABEIP.INC
+  Including: **ABBROWSE.INC
+  Including: ***ABBROWSE.EQU
+  Including: **ABBROWSE.INC
+  Including: *ABWindow.inc
+  Including: **ABVCRFRM.INC
+  Including: *ABWindow.inc
+  Including: main.clw
+  Including:  
+  Including: startproc.inc
+  Including:  
+f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\utils.clw(52,1): error : No matching prototype available [f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj]
+  made utils.obj
+  Making StartProc.obj : pragma changed
+  Including: main.clw
+  Including: *EQUATES.CLW
+  Including: **property.clw
+  Including: *EQUATES.CLW
+  Including: main.clw
+  Including: *StringTheory.inc
+  Including: main.clw
+  Including: *ABWindow.inc
+  Including: **ABRESIZE.INC
+  Including: ***ABRESIZE.EQU
+  Including: **ABRESIZE.INC
+  Including: *ABWindow.inc
+  Including: **ABBROWSE.INC
+  Including: ***ABFILE.INC
+  Including: ****FILECB.INC
+  Including: *****BUILTINS.CLW
+  Including: ****FILECB.INC
+  Including: ***ABFILE.INC
+  Including: ****ABFILE.EQU
+  Including: ***ABFILE.INC
+  Including: ****CWSYNCHM.INC
+  Including: *****CWSYNCH.INT
+  Including: ****CWSYNCHM.INC
+  Including: ***ABFILE.INC
+  Including: **ABBROWSE.INC
+  Including: ***ABPOPUP.INC
+  Including: ****ABUTIL.INC
+  Including: *****ABERROR.INC
+  Including: ******ERRORS.CLW
+  Including: *****ABERROR.INC
+  Including: ****ABUTIL.INC
+  Including: ***ABPOPUP.INC
+  Including: **ABBROWSE.INC
+  Including: ***ABTOOLBA.INC
+  Including: ****ABTOOLBA.EQU
+  Including: ***ABTOOLBA.INC
+  Including: **ABBROWSE.INC
+  Including: ***ABEIP.INC
+  Including: **ABBROWSE.INC
+  Including: ***ABBROWSE.EQU
+  Including: **ABBROWSE.INC
+  Including: *ABWindow.inc
+  Including: **ABVCRFRM.INC
+  Including: *ABWindow.inc
+  Including: main.clw
+  Including:  
+  Including: startproc.inc
+  Including:  
+  Optimizing STARTPROC@Fsb
+  Optimizing 
+  made StartProc.obj
 Done executing task "CW" -- FAILED.
 Done building target "CoreCompile" in project "ScopeTestSuite.cwproj" -- FAILED.
 Done Building Project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj" (default targets) -- FAILED.
@@ -57,9 +209,9 @@ Build FAILED.
 "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln" (build target) (1) ->
 "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj" (default target) (2) ->
 (CoreCompile target) -> 
-  f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj(4,36): error : Invalid character => expected
+  f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\utils.clw(52,1): error : No matching prototype available [f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj]
 
     0 Warning(s)
     1 Error(s)
 
-Time Elapsed 00:00:00.12
+Time Elapsed 00:00:00.29

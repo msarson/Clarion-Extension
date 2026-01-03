@@ -7,7 +7,7 @@
     <OutputType>Exe</OutputType>
     <RootNamespace>ScopeTestSuite</RootNamespace>
     <AssemblyName>ScopeTestSuite</AssemblyName>
-    <OutputName>ScopeTestSuite</OutputName>
+    <OutputName>ScopeTestSuite</OutputName>    
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DebugSymbols>True</DebugSymbols>

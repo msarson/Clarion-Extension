@@ -152,22 +152,30 @@ export class ClassConstantParser {
 
     /**
      * Generates suggested constant definitions for a project file
+     * Format: {value}%3b{constantName}=>{value}%3b{constantName}=>
      * @param constants Array of constants to generate definitions for
-     * @param useLinkMode If true, generates LinkMode=>1, DLLMode=>0. If false, opposite.
-     * @returns String with constant definitions (e.g., "StringTheoryLinkMode=>1;StringTheoryDllMode=>0;")
+     * @param useLinkMode If true, generates LinkMode=1, DLLMode=0. If false, opposite.
+     * @returns String with constant definitions (e.g., "1%3bStringTheoryLinkMode=>0%3bStringTheoryDllMode=>")
      */
     generateConstantDefinitions(constants: ClassConstant[], useLinkMode: boolean = true): string {
         const definitions: string[] = [];
 
         for (const constant of constants) {
+            let value: string;
+            
             if (constant.type === 'Link') {
-                definitions.push(`${constant.name}=>${useLinkMode ? '1' : '0'}`);
+                value = useLinkMode ? '1' : '0';
             } else if (constant.type === 'DLL') {
-                definitions.push(`${constant.name}=>${useLinkMode ? '0' : '1'}`);
+                value = useLinkMode ? '0' : '1';
+            } else {
+                continue;
             }
+            
+            // Format: {value}%3b{constantName}=>
+            definitions.push(`${value}%3b${constant.name}=>`);
         }
 
-        return definitions.join(';') + (definitions.length > 0 ? ';' : '');
+        return definitions.join('');
     }
 
     /**

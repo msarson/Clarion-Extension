@@ -183,19 +183,28 @@ async function addClassConstantsToProject(args: AddConstantsArgs): Promise<void>
 
 /**
  * Generates constant definitions string
+ * Format: {value}%3b{constantName}=&gt;{value}%3b{constantName}=&gt;
+ * Example: 1%3bStringTheoryLinkMode=&gt;0%3bStringTheoryDllMode=&gt;
  */
 function generateConstantDefinitions(constants: ClassConstant[], useLinkMode: boolean): string {
     const definitions: string[] = [];
 
     for (const constant of constants) {
+        let value: string;
+        
         if (constant.type === 'Link') {
-            definitions.push(`${constant.name}=>${useLinkMode ? '1' : '0'}`);
+            value = useLinkMode ? '1' : '0';
         } else if (constant.type === 'DLL') {
-            definitions.push(`${constant.name}=>${useLinkMode ? '0' : '1'}`);
+            value = useLinkMode ? '0' : '1';
+        } else {
+            continue;
         }
+        
+        // Format: {value}%3b{constantName}=&gt;
+        definitions.push(`${value}%3b${constant.name}=>`);
     }
 
-    return definitions.join(';') + (definitions.length > 0 ? ';' : '');
+    return definitions.join('');
 }
 
 /**
