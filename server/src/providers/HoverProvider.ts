@@ -872,7 +872,18 @@ export class HoverProvider {
                 }
             }
             
-            logger.info(`❌ HOVER-RETURN: ${searchWord} is not a local variable or global in MEMBER parent - returning null`);
+            logger.info(`❌ ${searchWord} is not a local variable or global in MEMBER parent`);
+            
+            // 🔍 Last resort: Check if this word is a CLASS type reference
+            // This handles when user hovers directly on a type name (e.g., hovering on "StringTheory" in "st StringTheory")
+            logger.info(`Checking if ${word} is a CLASS type...`);
+            const classTypeHover = await this.checkClassTypeHover(word, document);
+            if (classTypeHover) {
+                logger.info(`✅ HOVER-RETURN: Found CLASS type hover for ${word}`);
+                return classTypeHover;
+            }
+            
+            logger.info(`❌ HOVER-RETURN: No hover information found for ${word}`);
             return null;
         } catch (error) {
             logger.error(`Error providing hover: ${error instanceof Error ? error.message : String(error)}`);
