@@ -629,6 +629,12 @@
                     "scope": "resource",
                     "description": "Path to the currently selected Clarion solution file."
                 },
+                "clarion.startupProject": {
+                    "type": "string",
+                    "default": "",
+                    "scope": "resource",
+                    "description": "GUID of the project to run when pressing Ctrl+F5 (Run Without Debugging). If not set, the project containing the current file will be used."
+                },
                 "clarion.telemetry.enabled": {
                     "type": "boolean",
                     "default": true,
