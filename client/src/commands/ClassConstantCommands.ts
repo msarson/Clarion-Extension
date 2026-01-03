@@ -13,6 +13,7 @@ interface AddConstantsArgs {
     className: string;
     projectPath: string;
     constants: ClassConstant[];
+    mode?: 'link' | 'dll'; // Optional: if provided, skip the Quick Pick
 }
 
 /**
@@ -45,10 +46,16 @@ export function registerClassConstantCommands(context: vscode.ExtensionContext):
  * Adds class constants to the project file
  */
 async function addClassConstantsToProject(args: AddConstantsArgs): Promise<void> {
-    const { className, projectPath, constants } = args;
+    const { className, projectPath, constants, mode } = args;
 
-    // Ask user which mode they want
-    const mode = await vscode.window.showQuickPick(
+    // If mode is provided (from Code Action), use it directly
+    let useLinkMode: boolean;
+    
+    if (mode) {
+        useLinkMode = mode === 'link';
+    } else {
+        // Ask user which mode they want
+        const modeSelection = await vscode.window.showQuickPick(
         [
             {
                 label: '$(link) Link Mode',
@@ -69,11 +76,12 @@ async function addClassConstantsToProject(args: AddConstantsArgs): Promise<void>
         }
     );
 
-    if (!mode) {
+    if (!modeSelection) {
         return; // User cancelled
     }
-
-    const useLinkMode = mode.value === 'link';
+    
+    useLinkMode = modeSelection.value === 'link';
+    }
 
     // Generate constant definitions
     const definitions = generateConstantDefinitions(constants, useLinkMode);

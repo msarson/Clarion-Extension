@@ -1890,9 +1890,7 @@ export class HoverProvider {
                         classInfo.push(`- **Link mode:** \`${linkModeDefs}\``);
                         classInfo.push(`- **DLL mode:** \`${dllModeDefs}\``);
                         
-                        classInfo.push(``);
-                        classInfo.push(`💡 **To add:** Run command \`Clarion: Add Class Constants\` or use Command Palette (Ctrl+Shift+P)`);
-                        logger.info(`Added instruction for ${missingConstants.length} missing constants`);
+                        logger.info(`Listed ${missingConstants.length} missing constants`);
                     } else {
                         // All constants are defined
                         classInfo.push(``);

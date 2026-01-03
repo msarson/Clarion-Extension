@@ -54,6 +54,7 @@ import { SolutionManager } from './solution/solutionManager';
 import { RedirectionFileParserServer } from './solution/redirectionFileParserServer';
 import { DefinitionProvider } from './providers/DefinitionProvider';
 import { HoverProvider } from './providers/HoverProvider';
+import { ClassConstantsCodeActionProvider } from './providers/ClassConstantsCodeActionProvider';
 import { DiagnosticProvider } from './providers/DiagnosticProvider';
 import { SignatureHelpProvider } from './providers/SignatureHelpProvider';
 import { ImplementationProvider } from './providers/ImplementationProvider';
@@ -139,6 +140,7 @@ connection.onInitialize((params) => {
                 definitionProvider: true,
                 implementationProvider: true,
                 hoverProvider: true,
+                codeActionProvider: true,
                 signatureHelpProvider: {
                     triggerCharacters: ['(', ','],
                     retriggerCharacters: [')']
@@ -1288,6 +1290,37 @@ connection.onHover(async (params) => {
     } catch (error) {
         logger.error(`❌ Error providing hover: ${error instanceof Error ? error.message : String(error)}`);
         return null;
+    }
+});
+
+// Handle code actions (lightbulb) requests
+connection.onCodeAction(async (params) => {
+    logger.info(`💡 Received code action request for: ${params.textDocument.uri}`);
+    
+    if (!serverInitialized) {
+        logger.info(`⚠️ Server not initialized yet, delaying code action request`);
+        return [];
+    }
+    
+    const document = documents.get(params.textDocument.uri);
+    if (!document) {
+        logger.info(`⚠️ Document not found: ${params.textDocument.uri}`);
+        return [];
+    }
+    
+    try {
+        const codeActionProvider = new ClassConstantsCodeActionProvider();
+        const actions = await codeActionProvider.provideCodeActions(
+            document,
+            params.range,
+            params.context,
+            params as any // CancellationToken
+        );
+        logger.info(`Provided ${actions.length} code actions`);
+        return actions;
+    } catch (error) {
+        logger.error(`❌ Error providing code actions: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
     }
 });
 
