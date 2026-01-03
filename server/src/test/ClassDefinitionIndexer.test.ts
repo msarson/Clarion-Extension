@@ -2,6 +2,7 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as fs from 'fs';
 import { SolutionManager } from '../solution/solutionManager';
+import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
 
 /**
  * Test suite for ClassDefinitionIndexer
@@ -48,54 +49,49 @@ suite('ClassDefinitionIndexer Tests', () => {
     
     suite('Phase 1: Index Building', () => {
         
-        test.skip('Should build index from redirection paths', async function() {
+        test('Should build index from redirection paths', async function() {
             this.timeout(10000);
             
-            // TODO: Implement ClassDefinitionIndexer
-            // const indexer = new ClassDefinitionIndexer();
-            // const projectPath = solutionManager!.solution.projects[0].projectDirectory;
-            // const index = await indexer.buildIndex(projectPath);
+            const indexer = new ClassDefinitionIndexer();
+            const projectPath = solutionManager!.solution.projects[0].path;
+            const index = await indexer.buildIndex(projectPath);
             
-            // assert.ok(index, 'Index should be created');
-            // assert.ok(index.classes.size > 0, 'Index should contain classes');
+            assert.ok(index, 'Index should be created');
+            assert.ok(index.classes.size > 0, 'Index should contain classes');
             
-            console.log('⏭️  Test skipped - waiting for ClassDefinitionIndexer implementation');
+            console.log(`   ✅ Index created with ${index.classes.size} unique class names`);
         });
         
-        test.skip('Should find StringTheory class in index', async function() {
+        test('Should find StringTheory class in index', async function() {
             this.timeout(10000);
             
-            // TODO: Implement ClassDefinitionIndexer
-            // const indexer = new ClassDefinitionIndexer();
-            // const projectPath = solutionManager!.solution.projects[0].projectDirectory;
-            // const index = await indexer.buildIndex(projectPath);
+            const indexer = new ClassDefinitionIndexer();
+            const projectPath = solutionManager!.solution.projects[0].path;
+            const index = await indexer.buildIndex(projectPath);
             
-            // const stringTheoryDef = index.classes.get('StringTheory');
-            // assert.ok(stringTheoryDef, 'Should find StringTheory class');
-            // assert.ok(stringTheoryDef.length > 0, 'Should have at least one definition');
-            // assert.ok(stringTheoryDef[0].filePath.includes('StringTheory.inc'), 'Should be in StringTheory.inc');
+            const stringTheoryDef = index.classes.get('stringtheory'); // lowercase key
+            assert.ok(stringTheoryDef, 'Should find StringTheory class');
+            assert.ok(stringTheoryDef.length > 0, 'Should have at least one definition');
+            assert.ok(stringTheoryDef[0].filePath.toLowerCase().includes('stringtheory.inc'), 'Should be in StringTheory.inc');
             
-            console.log('⏭️  Test skipped - waiting for ClassDefinitionIndexer implementation');
+            console.log(`   ✅ Found StringTheory at: ${stringTheoryDef[0].filePath}:${stringTheoryDef[0].lineNumber}`);
         });
         
-        test.skip('Should complete index build in reasonable time (<5 seconds)', async function() {
+        test('Should complete index build in reasonable time (<5 seconds)', async function() {
             this.timeout(10000);
             
-            // TODO: Implement ClassDefinitionIndexer
-            // const indexer = new ClassDefinitionIndexer();
-            // const projectPath = solutionManager!.solution.projects[0].projectDirectory;
+            const indexer = new ClassDefinitionIndexer();
+            const projectPath = solutionManager!.solution.projects[0].path;
             
-            // const startTime = Date.now();
-            // const index = await indexer.buildIndex(projectPath);
-            // const duration = Date.now() - startTime;
+            const startTime = Date.now();
+            const index = await indexer.buildIndex(projectPath);
+            const duration = Date.now() - startTime;
             
-            // console.log(`   ⏱️  Index built in ${duration}ms`);
-            // console.log(`   📊 Found ${index.classes.size} unique class names`);
-            // console.log(`   📦 Total definitions: ${Array.from(index.classes.values()).flat().length}`);
+            console.log(`   ⏱️  Index built in ${duration}ms`);
+            console.log(`   📊 Found ${index.classes.size} unique class names`);
+            console.log(`   📦 Total definitions: ${Array.from(index.classes.values()).flat().length}`);
             
-            // assert.ok(duration < 5000, `Index build took ${duration}ms, should be under 5000ms`);
-            
-            console.log('⏭️  Test skipped - waiting for ClassDefinitionIndexer implementation');
+            assert.ok(duration < 5000, `Index build took ${duration}ms, should be under 5000ms`);
         });
     });
     
