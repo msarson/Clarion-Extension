@@ -343,9 +343,9 @@ export class HoverProvider {
             if (documentStructure.isInMapBlock(position.line)) {
                 logger.info(`Inside MAP block at line ${position.line}`);
                 // MAP declarations have two formats:
-                // 1. Indented: "    MyProc(params)" - no PROCEDURE keyword
-                // 2. Column 0: "MyProc    PROCEDURE(params)" - with PROCEDURE keyword
-                const mapDeclMatch = line.match(/^\s*(\w+)\s*(?:PROCEDURE\s*)?\(/i);
+                // 1. Indented: "    MyProc(params)" - no PROCEDURE/FUNCTION keyword
+                // 2. Column 0: "MyProc    PROCEDURE(params)" or "MyProc    FUNCTION(params)" - with keyword
+                const mapDeclMatch = line.match(ClarionPatterns.MAP_PROCEDURE_DECLARATION);
                 logger.info(`MAP declaration regex match: ${mapDeclMatch ? 'YES' : 'NO'}, line="${line}"`);
                 if (mapDeclMatch) {
                     const procName = mapDeclMatch[1];

@@ -58,13 +58,14 @@ export class ClarionPatterns {
     /**
      * Matches a procedure declaration in a MAP block
      * Handles both formats:
-     * - MyProc(params)              [indented, no PROCEDURE keyword]
-     * - MyProc    PROCEDURE(params) [column 0, with PROCEDURE keyword]
+     * - MyProc(params)                         [indented, no PROCEDURE/FUNCTION keyword]
+     * - MyProc    PROCEDURE(params)            [column 0, with PROCEDURE keyword]
+     * - MyProc    FUNCTION(params)             [column 0, with FUNCTION keyword]
      * 
      * Capture groups:
      * [1] = Procedure name
      */
-    public static readonly MAP_PROCEDURE_DECLARATION = /^\s*(\w+)\s*(?:PROCEDURE\s*)?\(/i;
+    public static readonly MAP_PROCEDURE_DECLARATION = /^\s*(\w+)\s*(?:(?:PROCEDURE|FUNCTION)\s*)?\(/i;
     
     /**
      * Matches a standalone procedure implementation
