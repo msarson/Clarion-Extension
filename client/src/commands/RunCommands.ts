@@ -1,5 +1,7 @@
 import { commands, window, Disposable, Terminal, Uri } from 'vscode';
 import { SolutionCache } from '../SolutionCache';
+import { ClarionProjectInfo } from 'common/types';
+import { getLanguageClient } from '../LanguageClientManager';
 import * as path from 'path';
 import * as fs from 'fs';
 import LoggerManager from '../utils/LoggerManager';
@@ -154,32 +156,56 @@ export function registerRunCommands(): Disposable[] {
             const solutionInfo = solutionCache.getSolutionInfo();
             if (solutionInfo) {
                 logger.info(`📋 Solution has ${solutionInfo.projects.length} projects:`);
+                
+                // Get the language client to fetch project files
+                const client = getLanguageClient();
+                if (!client) {
+                    window.showErrorMessage("Language client not available. Please wait for the extension to fully load.");
+                    return;
+                }
+                
+                // Find the project containing this file by checking server data
+                let projects: ClarionProjectInfo[] = [];
+                
                 for (const proj of solutionInfo.projects) {
-                    logger.info(`  - ${proj.name} (${proj.sourceFiles.length} files)`);
-                    // Check if this specific file is in the project's sourceFiles
-                    const fileInProject = proj.sourceFiles.find(f => 
-                        f.relativePath && path.resolve(path.dirname(proj.path), f.relativePath).toLowerCase() === filePath.toLowerCase()
-                    );
-                    if (fileInProject) {
-                        logger.info(`    ✅ Found file in project: ${fileInProject.relativePath}`);
+                    try {
+                        // Request project files from the server
+                        const response = await client.sendRequest<{ files: any[] }>('clarion/getProjectFiles', {
+                            projectGuid: proj.guid
+                        });
+                        
+                        if (response && response.files) {
+                            logger.info(`  - ${proj.name} (${response.files.length} files)`);
+                            
+                            // Check if this file is in the project
+                            const fileInProject = response.files.find(f => {
+                                const filePath = f.absolutePath || (f.relativePath ? path.resolve(path.dirname(proj.path), f.relativePath) : null);
+                                if (filePath) {
+                                    return path.normalize(filePath).toLowerCase() === path.normalize(activeEditor.document.uri.fsPath).toLowerCase();
+                                }
+                                return false;
+                            });
+                            
+                            if (fileInProject) {
+                                logger.info(`    ✅ Found file in project!`);
+                                projects.push(proj);
+                            }
+                        }
+                    } catch (error) {
+                        logger.error(`Error getting files for project ${proj.name}: ${error instanceof Error ? error.message : String(error)}`);
                     }
                 }
-            }
-            
-            // Find the project(s) the file belongs to
-            const projects = solutionCache.findProjectsForFile(filePath);
-            
-            logger.info(`📊 Found ${projects.length} projects`);
-            
-            if (projects.length === 0) {
-                window.showWarningMessage("Current file does not belong to any project in the solution.");
-                return;
-            }
-            
-            let selectedProject = projects[0];
-            
-            // If multiple projects contain the file, let user choose
-            if (projects.length > 1) {
+                
+                if (projects.length === 0) {
+                    window.showWarningMessage("Current file does not belong to any project in the solution.");
+                    return;
+                }
+                
+                // Continue with the matched projects
+                let selectedProject = projects[0];
+                
+                // If multiple projects contain the file, let user choose
+                if (projects.length > 1) {
                 const projectNames = projects.map(p => p.name);
                 const selectedName = await window.showQuickPick(projectNames, {
                     placeHolder: "Select a project to run"
@@ -222,6 +248,10 @@ export function registerRunCommands(): Disposable[] {
             
             // Run the executable
             runExecutable(exePath);
+            } else {
+                window.showWarningMessage("No solution is currently loaded.");
+                return;
+            }
         })
     ];
 }
