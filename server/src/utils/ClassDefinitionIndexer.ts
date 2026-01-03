@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { RedirectionFileParserServer, RedirectionEntry } from '../solution/redirectionFileParserServer';
 import LoggerManager from '../logger';
+import { serverSettings } from '../serverSettings';
 
 const logger = LoggerManager.getLogger('ClassDefinitionIndexer');
 
@@ -72,7 +73,18 @@ export class ClassDefinitionIndexer {
             // Extract all unique directory paths from redirection entries
             const searchPaths = this.extractSearchPathsFromEntries(entries);
             
-            logger.info(`Found ${searchPaths.length} search paths from redirection file`);
+            // Also include libsrc paths from serverSettings
+            // These are configured from ClarionProperties.xml and contain paths to standard library includes
+            if (serverSettings.libsrcPaths && serverSettings.libsrcPaths.length > 0) {
+                logger.info(`Adding ${serverSettings.libsrcPaths.length} libsrc paths from serverSettings`);
+                for (const libPath of serverSettings.libsrcPaths) {
+                    if (fs.existsSync(libPath) && fs.statSync(libPath).isDirectory()) {
+                        searchPaths.push(libPath);
+                    }
+                }
+            }
+            
+            logger.info(`Found ${searchPaths.length} total search paths (redirection + libsrc)`);
 
             // Scan all .inc files in these paths
             const allFiles: string[] = [];

@@ -29,10 +29,15 @@ suite('ClassDefinitionIndexer Tests', () => {
                 'bin': 'C:\\Clarion\\Clarion11.1\\bin'
             };
             serverSettings.configuration = 'Debug';
+            serverSettings.libsrcPaths = [
+                'C:\\Clarion\\Clarion11.1\\libsrc\\win',
+                'C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win'
+            ];
             
             console.log('✅ ServerSettings configured');
             console.log(`   📂 Redirection file: ${serverSettings.redirectionFile}`);
             console.log(`   📂 Primary redirection path: ${serverSettings.primaryRedirectionPath}`);
+            console.log(`   📂 Libsrc paths: ${serverSettings.libsrcPaths.length} paths`);
             
             // Load the test solution
             const testSolutionPath = path.resolve(__dirname, 
