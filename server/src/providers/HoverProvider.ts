@@ -773,21 +773,6 @@ export class HoverProvider {
             
             // 🔗 Check for module-local variable in current file (Label at column 0, before first PROCEDURE)
             logger.info(`Checking for module-local variable in current file...`);
-            const firstProcToken = tokens.find(t => 
-                t.type === TokenType.Label &&
-                t.subType === TokenType.Procedure &&
-                t.start === 0
-            );
-            const moduleScopeEndLine = firstProcToken ? firstProcToken.line : Number.MAX_SAFE_INTEGER;
-            
-            // Search for module-local variable (Label at column 0, before first PROCEDURE)
-            const moduleVar = tokens.find(t =>
-                t.type === TokenType.Label &&
-                t.start === 0 &&
-                t.line < moduleScopeEndLine &&
-                t.value.toLowerCase() === searchWord.toLowerCase()
-            );
-            
             const moduleVarInfo = this.findModuleLocalVariable(searchWord, tokens, document);
             
             if (moduleVarInfo) {
