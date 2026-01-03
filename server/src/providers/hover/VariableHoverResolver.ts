@@ -6,6 +6,7 @@ import { TokenCache } from '../../TokenCache';
 import { ClarionDocumentSymbolProvider } from '../ClarionDocumentSymbolProvider';
 import { HoverFormatter, VariableInfo } from './HoverFormatter';
 import { ScopeAnalyzer } from '../../utils/ScopeAnalyzer';
+import { ClassDefinitionIndexer } from '../../utils/ClassDefinitionIndexer';
 import LoggerManager from '../../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -16,11 +17,15 @@ const logger = LoggerManager.getLogger("VariableHoverResolver");
  * Resolves hover information for variables (parameters, local, module, global)
  */
 export class VariableHoverResolver {
+    private classIndexer: ClassDefinitionIndexer;
+    
     constructor(
         private formatter: HoverFormatter,
         private scopeAnalyzer: ScopeAnalyzer,
         private tokenCache: TokenCache
-    ) {}
+    ) {
+        this.classIndexer = new ClassDefinitionIndexer();
+    }
 
     /**
      * Find and format hover for a parameter
@@ -37,11 +42,14 @@ export class VariableHoverResolver {
     /**
      * Find and format hover for a local variable
      */
-    findLocalVariableHover(word: string, tokens: Token[], currentScope: Token, document: TextDocument, originalWord?: string): Hover | null {
+    async findLocalVariableHover(word: string, tokens: Token[], currentScope: Token, document: TextDocument, originalWord?: string): Promise<Hover | null> {
         const variableInfo = this.findLocalVariableInfo(word, tokens, currentScope, document, originalWord);
         if (variableInfo) {
             logger.info(`✅ Found variable info for ${word}: type=${variableInfo.type}, line=${variableInfo.line}`);
-            return this.formatter.formatVariable(originalWord || word, variableInfo, currentScope, document);
+            const baseHover = this.formatter.formatVariable(originalWord || word, variableInfo, currentScope, document);
+            
+            // Enhance with class definition info if applicable
+            return await this.enhanceHoverWithClassInfo(baseHover, variableInfo.type, document);
         }
         return null;
     }
@@ -416,5 +424,83 @@ export class VariableHoverResolver {
      */
     private getTokens(document: TextDocument): Token[] {
         return this.tokenCache.getTokens(document);
+    }
+
+    /**
+     * Enhance hover text with class definition info from the indexer
+     * @param baseHover The base hover text
+     * @param typeName The type name to look up
+     * @param document The current document
+     * @returns Enhanced hover or original if no class info found
+     */
+    async enhanceHoverWithClassInfo(baseHover: Hover, typeName: string, document: TextDocument): Promise<Hover> {
+        try {
+            // Extract just the type name without decorators like & or *
+            const cleanTypeName = typeName.replace(/^[&*\s]+/, '').trim();
+            
+            logger.info(`Looking up class definition for type: ${cleanTypeName}`);
+            
+            // Get project path from document URI
+            const docPath = document.uri.replace('file:///', '').replace(/\//g, '\\');
+            const projectPath = path.dirname(docPath);
+            
+            // Try to get or build index for this project
+            const index = await this.classIndexer.getOrBuildIndex(projectPath);
+            
+            // Look up the class
+            const definitions = this.classIndexer.findClass(cleanTypeName, projectPath);
+            
+            if (definitions && definitions.length > 0) {
+                const def = definitions[0]; // Use first definition
+                
+                logger.info(`Found class definition: ${def.className} in ${def.filePath}:${def.lineNumber}`);
+                
+                // Extract just the filename from the full path
+                const fileName = path.basename(def.filePath);
+                
+                // Build enhanced hover text
+                const classInfo = [
+                    ``,
+                    `---`,
+                    `**Class Definition:**`,
+                    `- File: \`${fileName}\` (line ${def.lineNumber})`,
+                    `- Type: ${def.isType ? 'CLASS,TYPE' : 'CLASS'}`,
+                ];
+                
+                if (def.parentClass) {
+                    classInfo.push(`- Parent: \`${def.parentClass}\``);
+                }
+                
+                // Add indexer stats
+                classInfo.push(``,  `*Indexed ${index.classes.size} classes in project*`);
+                
+                // Append to existing hover content
+                let existingContent = '';
+                if (typeof baseHover.contents === 'string') {
+                    existingContent = baseHover.contents;
+                } else if ('kind' in baseHover.contents && 'value' in baseHover.contents) {
+                    existingContent = baseHover.contents.value;
+                } else if (Array.isArray(baseHover.contents)) {
+                    existingContent = baseHover.contents.map(c => typeof c === 'string' ? c : c.value).join('\n');
+                }
+                
+                const enhancedContent = existingContent + '\n' + classInfo.join('\n');
+                
+                return {
+                    contents: {
+                        kind: 'markdown',
+                        value: enhancedContent
+                    },
+                    range: baseHover.range
+                };
+            }
+            
+            logger.info(`No class definition found for: ${cleanTypeName}`);
+        } catch (error) {
+            logger.error(`Error enhancing hover with class info: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        
+        // Return original hover if no enhancement possible
+        return baseHover;
     }
 }

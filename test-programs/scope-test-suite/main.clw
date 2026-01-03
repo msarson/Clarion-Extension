@@ -56,7 +56,9 @@
 ! - Find All References should respect scope boundaries
 !
 !═══════════════════════════════════════════════════════════════════════
-
+  
+  
+  
    MAP
      MODULE('utils.clw')  !Can be written as MODULE('utils')
        IncrementCounter()  !can be written without parentheses
@@ -71,7 +73,6 @@ GlobalHelper PROCEDURE()  ! Declare the global procedure so it can be called fro
    END
 
 GlobalCounter LONG      ! Global variable - accessible in utils.clw (TEST 1)
-
    CODE
    GlobalCounter = 0
    IncrementCounter()    ! TEST 2: F12 → line 57 MAP, Ctrl+F12 → utils.clw line 34
@@ -87,6 +88,9 @@ GlobalCounter LONG      ! Global variable - accessible in utils.clw (TEST 1)
 !         **Visibility:** Accessible from all files in the solution
 !
 GlobalHelper PROCEDURE()
+
+
    CODE
+
    MESSAGE('This is a global procedure!')
    RETURN

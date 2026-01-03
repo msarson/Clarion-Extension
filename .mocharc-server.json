@@ -1,0 +1,7 @@
+{
+  "ui": "tdd",
+  "timeout": 30000,
+  "spec": [
+    "out/server/src/test/ClassDefinitionIndexer.test.js"
+  ]
+}

@@ -23,6 +23,10 @@ import { ContextualHoverHandler } from './hover/ContextualHoverHandler';
 import { SymbolHoverResolver } from './hover/SymbolHoverResolver';
 import { VariableHoverResolver } from './hover/VariableHoverResolver';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
+import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
+import { IncludeVerifier } from '../utils/IncludeVerifier';
+import { ClassConstantParser } from '../utils/ClassConstantParser';
+import { ProjectConstantsChecker } from '../utils/ProjectConstantsChecker';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -47,6 +51,7 @@ export class HoverProvider {
     private contextHandler: ContextualHoverHandler;
     private symbolResolver: SymbolHoverResolver;
     private variableResolver: VariableHoverResolver;
+    private includeVerifier: IncludeVerifier;
 
     constructor() {
         const solutionManager = SolutionManager.getInstance();
@@ -55,6 +60,7 @@ export class HoverProvider {
         this.contextHandler = new ContextualHoverHandler(this.builtinService, this.attributeService);
         this.symbolResolver = new SymbolHoverResolver(this.dataTypeService, this.controlService);
         this.variableResolver = new VariableHoverResolver(this.formatter, this.scopeAnalyzer, this.tokenCache);
+        this.includeVerifier = new IncludeVerifier();
     }
 
     /**
@@ -743,6 +749,13 @@ export class HoverProvider {
                 }
                 
                 logger.info('No scope found and no global variable found - cannot provide hover');
+                
+                // 🔍 Last resort: Check if this word is a CLASS type reference
+                // This handles when user hovers directly on a type name (e.g., hovering on "StringTheory" in "st StringTheory")
+                logger.info(`Checking if ${word} is a CLASS type...`);
+                const classTypeHover = await this.checkClassTypeHover(word, document);
+                if (classTypeHover) return classTypeHover;
+                
                 return null;
             }
 
@@ -767,7 +780,7 @@ export class HoverProvider {
 
             // Check if this is a local variable
             logger.info(`Checking if ${searchWord} is a local variable...`);
-            const variableHover = this.variableResolver.findLocalVariableHover(searchWord, tokens, currentScope, document, word);
+            const variableHover = await this.variableResolver.findLocalVariableHover(searchWord, tokens, currentScope, document, word);
             if (variableHover) return variableHover;
             logger.info(`${searchWord} is not a local variable`);
             
@@ -864,7 +877,18 @@ export class HoverProvider {
                 }
             }
             
-            logger.info(`❌ HOVER-RETURN: ${searchWord} is not a local variable or global in MEMBER parent - returning null`);
+            logger.info(`❌ ${searchWord} is not a local variable or global in MEMBER parent`);
+            
+            // 🔍 Last resort: Check if this word is a CLASS type reference
+            // This handles when user hovers directly on a type name (e.g., hovering on "StringTheory" in "st StringTheory")
+            logger.info(`Checking if ${word} is a CLASS type...`);
+            const classTypeHover = await this.checkClassTypeHover(word, document);
+            if (classTypeHover) {
+                logger.info(`✅ HOVER-RETURN: Found CLASS type hover for ${word}`);
+                return classTypeHover;
+            }
+            
+            logger.info(`❌ HOVER-RETURN: No hover information found for ${word}`);
             return null;
         } catch (error) {
             logger.error(`Error providing hover: ${error instanceof Error ? error.message : String(error)}`);
@@ -1764,6 +1788,143 @@ export class HoverProvider {
                 value: markdown.join('\n')
             }
         };
+    }
+
+    /**
+     * Check if a word is a CLASS type and provide hover with definition info
+     * @param word The word to check
+     * @param document The document
+     * @returns Hover with class definition info, or null if not a class
+     */
+    private async checkClassTypeHover(word: string, document: TextDocument): Promise<Hover | null> {
+        try {
+            const classIndexer = new ClassDefinitionIndexer();
+            
+            // Get project path from document URI
+            const docPath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
+            const projectPath = path.dirname(docPath);
+            
+            logger.info(`Looking up CLASS type: ${word} in project: ${projectPath}`);
+            
+            // Try to get or build index for this project
+            const index = await classIndexer.getOrBuildIndex(projectPath);
+            
+            // Look up the class
+            const definitions = classIndexer.findClass(word, projectPath);
+            
+            if (definitions && definitions.length > 0) {
+                const def = definitions[0]; // Use first definition
+                
+                logger.info(`Found CLASS definition: ${def.className} in ${def.filePath}:${def.lineNumber}`);
+                
+                // Extract just the filename from the full path
+                const fileName = path.basename(def.filePath);
+                
+                // ✅ NEW: Verify the class file is included in current scope
+                logger.info(`Verifying if ${fileName} is included...`);
+                const isIncluded = await this.includeVerifier.isClassIncluded(fileName, document);
+                
+                if (!isIncluded) {
+                    logger.info(`❌ ${fileName} is not included in current scope - skipping hover`);
+                    return null;
+                }
+                
+                logger.info(`✅ Found CLASS type: ${def.className} and verified it's included`);
+                
+                const relativePath = path.relative(projectPath, def.filePath);
+                
+                // Parse class file for required constants
+                const constantParser = new ClassConstantParser();
+                const classConstants = await constantParser.parseFile(def.filePath);
+                const thisClassConstants = classConstants.find(c => c.className.toLowerCase() === def.className.toLowerCase());
+                
+                // Build hover text
+                const classInfo = [
+                    `**CLASS Type:** \`${def.className}\``,
+                    ``,
+                    `**Definition:**`,
+                    `- File: \`${fileName}\``,
+                    `- Line: ${def.lineNumber}`,
+                    `- Path: \`${relativePath}\``,
+                    `- Type: ${def.isType ? 'CLASS,TYPE' : 'CLASS'}`,
+                ];
+                
+                if (def.parentClass) {
+                    classInfo.push(`- Parent: \`${def.parentClass}\``);
+                }
+                
+                // Add required constants information
+                if (thisClassConstants && thisClassConstants.constants.length > 0) {
+                    logger.info(`Found ${thisClassConstants.constants.length} constants for ${def.className}`);
+                    
+                    // Check which constants are missing from the project
+                    const constantsChecker = new ProjectConstantsChecker();
+                    const missingConstants = [];
+                    
+                    for (const constant of thisClassConstants.constants) {
+                        const isDefined = await constantsChecker.isConstantDefined(constant.name, projectPath);
+                        logger.info(`Constant ${constant.name} defined: ${isDefined}`);
+                        if (!isDefined) {
+                            missingConstants.push(constant);
+                        }
+                    }
+                    
+                    logger.info(`Missing constants count: ${missingConstants.length}`);
+                    
+                    if (missingConstants.length > 0) {
+                        classInfo.push(``);
+                        classInfo.push(`**⚠️ Missing Constants:**`);
+                        
+                        for (const constant of missingConstants) {
+                            const typeDesc = constant.type === 'Link' ? 'Link mode' : 'DLL mode';
+                            const fileInfo = constant.relatedFile ? ` (${constant.relatedFile})` : '';
+                            classInfo.push(`- \`${constant.name}\` - ${typeDesc}${fileInfo}`);
+                        }
+                        
+                        // Generate suggested definitions for missing constants only
+                        const linkModeDefs = constantParser.generateConstantDefinitions(missingConstants, true);
+                        const dllModeDefs = constantParser.generateConstantDefinitions(missingConstants, false);
+                        
+                        classInfo.push(``);
+                        classInfo.push(`**Suggested Values:**`);
+                        classInfo.push(`- **Link mode:** \`${linkModeDefs}\``);
+                        classInfo.push(`- **DLL mode:** \`${dllModeDefs}\``);
+                        
+                        logger.info(`Listed ${missingConstants.length} missing constants`);
+                    } else {
+                        // All constants are defined
+                        classInfo.push(``);
+                        classInfo.push(`✅ **All required constants are defined in project**`);
+                    }
+                }
+                
+                classInfo.push(``);
+                classInfo.push(`*Part of ${index.classes.size} indexed classes*`);
+                
+                const hoverMarkdown = classInfo.join('\n');
+                logger.info(`Hover markdown length: ${hoverMarkdown.length} chars`);
+                logger.info(`Hover markdown preview: ${hoverMarkdown.substring(0, 200)}...`);
+                logger.info(`Hover markdown end: ...${hoverMarkdown.substring(hoverMarkdown.length - 200)}`);
+                
+                // Log the full markdown to see exactly what's being sent
+                logger.info(`===== FULL HOVER MARKDOWN =====`);
+                logger.info(hoverMarkdown);
+                logger.info(`===== END HOVER MARKDOWN =====`);
+                
+                return {
+                    contents: {
+                        kind: 'markdown',
+                        value: hoverMarkdown
+                    }
+                };
+            }
+            
+            logger.info(`No CLASS definition found for: ${word}`);
+        } catch (error) {
+            logger.error(`Error checking class type hover: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        
+        return null;
     }
 
 }

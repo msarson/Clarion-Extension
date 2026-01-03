@@ -1,4 +1,4 @@
-Build started 02/01/2026 12:07:43.
+Build started 03/01/2026 17:10:32.
 Project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln" on node 1 (build target(s)).
 Building with tools version "4.0".
 Target "ValidateSolutionConfiguration" in file "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln.metaproj" from project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.sln" (entry point):
@@ -42,11 +42,31 @@ Target "_TimeStampBeforeCompile" skipped, due to false condition; ('$(RunPostBui
 Target "CoreCompile" in file "C:\Clarion\Clarion11.1\bin\SoftVelocity.Build.Clarion.targets" from project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj" (target "Build" depends on it):
 Using "CW" task from assembly "C:\Clarion\Clarion11.1\bin\SoftVelocity.CW.Build.Tasks.dll".
 Task "CW"
-  Making utils.obj : utils.clw changed
-  Including: main.clw
+  Making main.obj : main.clw changed
+  Including: StringTheory.inc
   Including: *EQUATES.CLW
   Including: **property.clw
   Including: *EQUATES.CLW
+  Including: StringTheory.inc
+  Including:  
+  Including: BUILTINS.CLW
+  Including:  
+  Optimizing _main
+  Optimizing 
+  Optimizing GLOBALHELPER@F
+  Optimizing 
+  Optimizing 
+  Optimizing 
+  Optimizing 
+  Optimizing 
+  made main.obj
+  Making utils.obj : main.clw changed
+  Including: main.clw
+  Including: *StringTheory.inc
+  Including: **EQUATES.CLW
+  Including: ***property.clw
+  Including: **EQUATES.CLW
+  Including: *StringTheory.inc
   Including: main.clw
   Including: *BUILTINS.CLW
   Including: main.clw
@@ -60,11 +80,30 @@ Task "CW"
   Optimizing INCREMENTCOUNTER@F
   Optimizing 
   made utils.obj
+  Making StartProc.obj : main.clw changed
+  Including: main.clw
+  Including: *StringTheory.inc
+  Including: **EQUATES.CLW
+  Including: ***property.clw
+  Including: **EQUATES.CLW
+  Including: *StringTheory.inc
+  Including: main.clw
+  Including: *BUILTINS.CLW
+  Including: main.clw
+  Including:  
+  Including: startproc.inc
+  Including:  
+  Optimizing STARTPROC@Fsb
+  Optimizing 
+  made StartProc.obj
   Making ScopeTestSuite.exe
   Linking iexe32.obj
   Linking main.obj
   Linking utils.obj
   Linking StartProc.obj
+  Linking StringTheory.obj
+  Linking CWSYNCHC.obj
+  Linking ojmd5.obj
   Linking ClaRUN.lib
   Linking WIN32.lib
 Done executing task "CW".
@@ -102,4 +141,4 @@ Build succeeded.
     0 Warning(s)
     0 Error(s)
 
-Time Elapsed 00:00:00.15
+Time Elapsed 00:00:00.18
