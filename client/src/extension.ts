@@ -10,6 +10,7 @@ import LoggerManager from './utils/LoggerManager';
 
 import { registerNavigationCommands } from './commands/NavigationCommands';
 import { registerBuildCommands } from './commands/BuildCommands';
+import { registerRunCommands } from './commands/RunCommands';
 import { registerSolutionManagementCommands, registerSolutionOpeningCommands, registerMiscSolutionCommands } from './commands/SolutionCommands';
 import { registerProjectFileCommands } from './commands/ProjectFileCommands';
 import { registerStatusCommands } from './commands/ViewCommands';
@@ -149,6 +150,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
     context.subscriptions.push(
         ...registerNavigationCommands(treeView, solutionTreeDataProvider),
         ...registerBuildCommands(diagnosticCollection, solutionTreeDataProvider),
+        ...registerRunCommands(),
         ...registerSolutionManagementCommands(context, client, initializeSolution, createSolutionTreeView)
     );
     
