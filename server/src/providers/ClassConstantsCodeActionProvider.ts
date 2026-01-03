@@ -91,6 +91,10 @@ export class ClassConstantsCodeActionProvider {
             const isIncluded = await this.includeVerifier.isClassIncluded(fileName, document);
             logger.info(`Class ${fileName} included: ${isIncluded}`);
             if (!isIncluded) {
+                logger.info(`Class ${fileName} not included, offering to add INCLUDE`);
+                // Offer Code Action to add the missing INCLUDE
+                const addIncludeActions = await this.getActionsForMissingInclude(word, fileName, document);
+                actions.push(...addIncludeActions);
                 return actions;
             }
 
@@ -270,6 +274,65 @@ export class ClassConstantsCodeActionProvider {
             
         } catch (error) {
             logger.error(`Error getting actions for INCLUDE: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        
+        return actions;
+    }
+
+    /**
+     * Gets Code Actions for adding a missing INCLUDE statement
+     */
+    private async getActionsForMissingInclude(className: string, includeFile: string, document: TextDocument): Promise<CodeAction[]> {
+        const actions: CodeAction[] = [];
+        
+        try {
+            const projectPath = path.dirname(decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\'));
+            
+            // Create action to add include to current file
+            const addToCurrentFileAction = CodeAction.create(
+                `Add INCLUDE('${includeFile}',ONCE) to current file`,
+                Command.create(
+                    'Add INCLUDE',
+                    'clarion.addIncludeStatement',
+                    {
+                        includeFile,
+                        targetFile: document.uri,
+                        location: 'current'
+                    }
+                ),
+                CodeActionKind.QuickFix
+            );
+            addToCurrentFileAction.isPreferred = true;
+            actions.push(addToCurrentFileAction);
+            
+            // Check if this is a MEMBER module and offer to add to parent
+            const text = document.getText();
+            const memberMatch = text.match(/^\s*MEMBER\s*\(\s*['"]([^'"]+)['"]\s*\)/im);
+            
+            if (memberMatch) {
+                const memberFile = memberMatch[1];
+                logger.info(`Detected MEMBER file: ${memberFile}, offering to add INCLUDE there`);
+                
+                const addToMemberAction = CodeAction.create(
+                    `Add INCLUDE('${includeFile}',ONCE) to ${memberFile}`,
+                    Command.create(
+                        'Add INCLUDE',
+                        'clarion.addIncludeStatement',
+                        {
+                            includeFile,
+                            targetFile: memberFile,
+                            location: 'member'
+                        }
+                    ),
+                    CodeActionKind.QuickFix
+                );
+                actions.push(addToMemberAction);
+            }
+            
+            logger.info(`Provided ${actions.length} code actions for missing INCLUDE ${includeFile}`);
+            
+        } catch (error) {
+            logger.error(`Error getting actions for missing INCLUDE: ${error instanceof Error ? error.message : String(error)}`);
         }
         
         return actions;

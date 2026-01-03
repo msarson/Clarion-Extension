@@ -17,6 +17,7 @@ import { registerTextEditingCommands } from './commands/TextEditingCommands';
 import { registerClassCreationCommands } from './commands/ClassCreationCommands';
 import { registerImplementationCommands } from './commands/ImplementationCommands';
 import { registerClassConstantCommands } from './commands/ClassConstantCommands';
+import { registerIncludeStatementCommands } from './commands/IncludeStatementCommands';
 import { createSolutionTreeView, createStructureView } from './views/ViewManager';
 import { registerLanguageFeatures } from './providers/LanguageFeatureManager';
 import * as SolutionOpener from './solution/SolutionOpener';
@@ -133,6 +134,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
     
     // Register class constant commands
     context.subscriptions.push(...registerClassConstantCommands(context));
+    
+    // Register include statement commands
+    context.subscriptions.push(...registerIncludeStatementCommands(context));
     
     context.subscriptions.push(...disposables);
     
