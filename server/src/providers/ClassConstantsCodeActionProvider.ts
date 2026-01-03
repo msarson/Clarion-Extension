@@ -52,17 +52,27 @@ export class ClassConstantsCodeActionProvider {
             // Check if this is a class type with missing constants
             const projectPath = path.dirname(decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\'));
             
+            logger.info(`Project path: ${projectPath}`);
+            
+            // Build or get index for this project
+            const index = await this.classIndexer.getOrBuildIndex(projectPath);
+            logger.info(`Index has ${index.classes.size} classes`);
+            
             // Look up the class
             const definitions = this.classIndexer.findClass(word, projectPath);
+            logger.info(`Found ${definitions?.length || 0} definitions for ${word}`);
+            
             if (!definitions || definitions.length === 0) {
                 return actions;
             }
 
             const def = definitions[0];
             const fileName = path.basename(def.filePath);
+            logger.info(`Class file: ${fileName}, checking if included`);
 
             // Verify the class file is included
             const isIncluded = await this.includeVerifier.isClassIncluded(fileName, document);
+            logger.info(`Class ${fileName} included: ${isIncluded}`);
             if (!isIncluded) {
                 return actions;
             }
