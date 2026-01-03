@@ -56,8 +56,9 @@
 ! - Find All References should respect scope boundaries
 !
 !═══════════════════════════════════════════════════════════════════════
-  INCLUDE('StringTheory.inc'),ONCE
-  INCLUDE('ABWindow.inc'),ONCE
+  
+  
+  
    MAP
      MODULE('utils.clw')  !Can be written as MODULE('utils')
        IncrementCounter()  !can be written without parentheses
@@ -72,10 +73,7 @@ GlobalHelper PROCEDURE()  ! Declare the global procedure so it can be called fro
    END
 
 GlobalCounter LONG      ! Global variable - accessible in utils.clw (TEST 1)
-st StringTheory
    CODE
-   st.SetValue('Scope Test Suite Started')
-   Message(st.GetValue())
    GlobalCounter = 0
    IncrementCounter()    ! TEST 2: F12 → line 57 MAP, Ctrl+F12 → utils.clw line 34
    IncrementCounter()
@@ -91,9 +89,7 @@ st StringTheory
 !
 GlobalHelper PROCEDURE()
 
-wm WindowManager
 
-! wm WindowManager
    CODE
 
    MESSAGE('This is a global procedure!')

@@ -8,6 +8,16 @@ interface AddIncludeArgs {
     location: 'current' | 'member';
 }
 
+interface AddIncludeAndConstantsArgs {
+    includeFile: string;
+    targetFile: string;  // URI or filename
+    location: 'current' | 'member';
+    className: string;
+    projectPath: string;
+    constants: Array<{ name: string; type: string; relatedFile?: string }>;
+    mode: 'link' | 'dll';
+}
+
 /**
  * Registers commands related to adding INCLUDE statements to Clarion files
  */
@@ -29,7 +39,39 @@ export function registerIncludeStatementCommands(context: vscode.ExtensionContex
         }
     );
 
-    disposables.push(addIncludeCmd);
+    // Command to add INCLUDE + Constants in one action
+    const addIncludeAndConstantsCmd = vscode.commands.registerCommand(
+        'clarion.addIncludeAndConstants',
+        async (...args: any[]) => {
+            try {
+                const argsObject = args[0] as AddIncludeAndConstantsArgs;
+                // First, add the INCLUDE
+                await addIncludeStatementToFile({
+                    includeFile: argsObject.includeFile,
+                    targetFile: argsObject.targetFile,
+                    location: argsObject.location
+                });
+                
+                // Then add the constants (reuse the existing command)
+                await vscode.commands.executeCommand('clarion.addClassConstants', {
+                    className: argsObject.className,
+                    projectPath: argsObject.projectPath,
+                    constants: argsObject.constants,
+                    mode: argsObject.mode
+                });
+                
+                vscode.window.showInformationMessage(
+                    `✅ Added INCLUDE and constants for ${argsObject.className} (${argsObject.mode} mode)`
+                );
+            } catch (error) {
+                vscode.window.showErrorMessage(
+                    `Failed to add INCLUDE and constants: ${error instanceof Error ? error.message : String(error)}`
+                );
+            }
+        }
+    );
+
+    disposables.push(addIncludeCmd, addIncludeAndConstantsCmd);
     return disposables;
 }
 
@@ -73,7 +115,7 @@ async function addIncludeStatementToFile(args: AddIncludeArgs): Promise<void> {
     }
 
     // Create the INCLUDE statement
-    const includeStatement = `  INCLUDE('${includeFile}',ONCE)\n`;
+    const includeStatement = `  INCLUDE('${includeFile}'),ONCE\n`;
 
     // Create workspace edit
     const edit = new vscode.WorkspaceEdit();
@@ -84,17 +126,12 @@ async function addIncludeStatementToFile(args: AddIncludeArgs): Promise<void> {
 
     if (success) {
         vscode.window.showInformationMessage(
-            `✅ Added INCLUDE('${includeFile}',ONCE) to ${path.basename(targetUri.fsPath)}`
+            `✅ Added INCLUDE('${includeFile}'),ONCE to ${path.basename(targetUri.fsPath)}`
         );
 
         // Save the file
         const updatedDoc = await vscode.workspace.openTextDocument(targetUri);
         await updatedDoc.save();
-
-        // Show the file to user
-        await vscode.window.showTextDocument(updatedDoc, {
-            selection: new vscode.Range(insertPosition, insertPosition)
-        });
     } else {
         throw new Error('Failed to apply workspace edit');
     }

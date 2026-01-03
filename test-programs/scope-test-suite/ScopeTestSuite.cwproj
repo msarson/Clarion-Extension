@@ -7,8 +7,7 @@
     <OutputType>Exe</OutputType>
     <RootNamespace>ScopeTestSuite</RootNamespace>
     <AssemblyName>ScopeTestSuite</AssemblyName>
-    <OutputName>ScopeTestSuite</OutputName>
-    <DefineConstants>StringTheoryLinkMode=&gt;1%3bStringTheoryDLLMode=&gt;0%3b_ABCLinkMode_=&gt;1%3b_ABCDllMode_=&gt;0%3b</DefineConstants>
+    <OutputName>ScopeTestSuite</OutputName>    
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DebugSymbols>True</DebugSymbols>

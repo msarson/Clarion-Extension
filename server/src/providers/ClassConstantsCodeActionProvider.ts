@@ -290,7 +290,7 @@ export class ClassConstantsCodeActionProvider {
             
             // Create action to add include to current file
             const addToCurrentFileAction = CodeAction.create(
-                `Add INCLUDE('${includeFile}',ONCE) to current file`,
+                `Add INCLUDE('${includeFile}'),ONCE to current file`,
                 Command.create(
                     'Add INCLUDE',
                     'clarion.addIncludeStatement',
@@ -314,7 +314,7 @@ export class ClassConstantsCodeActionProvider {
                 logger.info(`Detected MEMBER file: ${memberFile}, offering to add INCLUDE there`);
                 
                 const addToMemberAction = CodeAction.create(
-                    `Add INCLUDE('${includeFile}',ONCE) to ${memberFile}`,
+                    `Add INCLUDE('${includeFile}'),ONCE to ${memberFile}`,
                     Command.create(
                         'Add INCLUDE',
                         'clarion.addIncludeStatement',
@@ -327,6 +327,129 @@ export class ClassConstantsCodeActionProvider {
                     CodeActionKind.QuickFix
                 );
                 actions.push(addToMemberAction);
+            }
+            
+            // Check if there are also missing constants for this class
+            await this.classIndexer.getOrBuildIndex(projectPath);
+            const classDefArray = this.classIndexer.findClass(className, projectPath);
+            const classDef = classDefArray && classDefArray.length > 0 ? classDefArray[0] : null;
+            
+            if (classDef) {
+                const constantParser = new ClassConstantParser();
+                const constantsChecker = new ProjectConstantsChecker();
+                const classConstants = await constantParser.parseFile(classDef.filePath);
+                const thisClassConstants = classConstants.find(c => c.className.toLowerCase() === className.toLowerCase());
+                
+                if (thisClassConstants && thisClassConstants.constants.length > 0) {
+                    const missingConstants: Array<{name: string, type: string, relatedFile?: string}> = [];
+                    
+                    for (const constant of thisClassConstants.constants) {
+                        const isDefined = await constantsChecker.isConstantDefined(constant.name, projectPath);
+                        if (!isDefined) {
+                            missingConstants.push(constant);
+                        }
+                    }
+                    
+                    if (missingConstants.length > 0) {
+                        logger.info(`Found ${missingConstants.length} missing constants for ${className}, adding combined actions`);
+                        
+                        // Add combined actions (INCLUDE + Constants)
+                        const addBothLinkAction = CodeAction.create(
+                            `Add INCLUDE + Constants (Link Mode) to current file`,
+                            Command.create(
+                                'Add INCLUDE and Constants',
+                                'clarion.addIncludeAndConstants',
+                                {
+                                    includeFile,
+                                    targetFile: document.uri,
+                                    location: 'current',
+                                    className: className,
+                                    projectPath: projectPath,
+                                    constants: missingConstants.map(c => ({
+                                        name: c.name,
+                                        type: c.type,
+                                        relatedFile: c.relatedFile
+                                    })),
+                                    mode: 'link'
+                                }
+                            ),
+                            CodeActionKind.QuickFix
+                        );
+                        
+                        const addBothDllAction = CodeAction.create(
+                            `Add INCLUDE + Constants (DLL Mode) to current file`,
+                            Command.create(
+                                'Add INCLUDE and Constants',
+                                'clarion.addIncludeAndConstants',
+                                {
+                                    includeFile,
+                                    targetFile: document.uri,
+                                    location: 'current',
+                                    className: className,
+                                    projectPath: projectPath,
+                                    constants: missingConstants.map(c => ({
+                                        name: c.name,
+                                        type: c.type,
+                                        relatedFile: c.relatedFile
+                                    })),
+                                    mode: 'dll'
+                                }
+                            ),
+                            CodeActionKind.QuickFix
+                        );
+                        
+                        actions.push(addBothLinkAction, addBothDllAction);
+                        
+                        // Add same for MEMBER file if applicable
+                        if (memberMatch) {
+                            const addBothToMemberLinkAction = CodeAction.create(
+                                `Add INCLUDE + Constants (Link Mode) to ${memberMatch[1]}`,
+                                Command.create(
+                                    'Add INCLUDE and Constants',
+                                    'clarion.addIncludeAndConstants',
+                                    {
+                                        includeFile,
+                                        targetFile: memberMatch[1],
+                                        location: 'member',
+                                        className: className,
+                                        projectPath: projectPath,
+                                        constants: missingConstants.map(c => ({
+                                            name: c.name,
+                                            type: c.type,
+                                            relatedFile: c.relatedFile
+                                        })),
+                                        mode: 'link'
+                                    }
+                                ),
+                                CodeActionKind.QuickFix
+                            );
+                            
+                            const addBothToMemberDllAction = CodeAction.create(
+                                `Add INCLUDE + Constants (DLL Mode) to ${memberMatch[1]}`,
+                                Command.create(
+                                    'Add INCLUDE and Constants',
+                                    'clarion.addIncludeAndConstants',
+                                    {
+                                        includeFile,
+                                        targetFile: memberMatch[1],
+                                        location: 'member',
+                                        className: className,
+                                        projectPath: projectPath,
+                                        constants: missingConstants.map(c => ({
+                                            name: c.name,
+                                            type: c.type,
+                                            relatedFile: c.relatedFile
+                                        })),
+                                        mode: 'dll'
+                                    }
+                                ),
+                                CodeActionKind.QuickFix
+                            );
+                            
+                            actions.push(addBothToMemberLinkAction, addBothToMemberDllAction);
+                        }
+                    }
+                }
             }
             
             logger.info(`Provided ${actions.length} code actions for missing INCLUDE ${includeFile}`);
