@@ -1884,6 +1884,20 @@ export class HoverProvider {
                         classInfo.push(`**Suggested Values:**`);
                         classInfo.push(`- **Link mode:** \`${linkModeDefs}\``);
                         classInfo.push(`- **DLL mode:** \`${dllModeDefs}\``);
+                        
+                        // Add clickable command to add constants
+                        const commandArgs = encodeURIComponent(JSON.stringify({
+                            className: def.className,
+                            projectPath: projectPath,
+                            constants: missingConstants.map(c => ({
+                                name: c.name,
+                                type: c.type,
+                                relatedFile: c.relatedFile
+                            }))
+                        }));
+                        
+                        classInfo.push(``);
+                        classInfo.push(`[➕ Add Constants to Project](command:clarion.addClassConstants?${commandArgs})`);
                     } else {
                         // All constants are defined
                         classInfo.push(``);
