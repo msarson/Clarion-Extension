@@ -246,8 +246,24 @@ export function registerRunCommands(): Disposable[] {
                 
                 logger.info(`📝 Extracting output info from: ${selectedProject.path}`);
                 
+                // proj.path is a directory, need to find the .cwproj file
+                let cwprojPath = selectedProject.path;
+                if (fs.existsSync(cwprojPath) && fs.statSync(cwprojPath).isDirectory()) {
+                    // Find the .cwproj file in this directory
+                    const files = fs.readdirSync(cwprojPath);
+                    const cwprojFile = files.find(f => f.toLowerCase().endsWith('.cwproj'));
+                    if (cwprojFile) {
+                        cwprojPath = path.join(cwprojPath, cwprojFile);
+                        logger.info(`📝 Found cwproj file: ${cwprojPath}`);
+                    } else {
+                        logger.warn(`No .cwproj file found in directory: ${cwprojPath}`);
+                        window.showWarningMessage(`No .cwproj file found for project "${selectedProject.name}".`);
+                        return;
+                    }
+                }
+                
                 // Extract output info from the project file
-                const outputInfo = extractProjectOutputInfo(selectedProject.path);
+                const outputInfo = extractProjectOutputInfo(cwprojPath);
                 
                 if (!outputInfo) {
                     logger.warn(`Project ${selectedProject.name} is not an executable project`);
