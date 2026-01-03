@@ -1801,7 +1801,7 @@ export class HoverProvider {
             const classIndexer = new ClassDefinitionIndexer();
             
             // Get project path from document URI
-            const docPath = document.uri.replace('file:///', '').replace(/\//g, '\\');
+            const docPath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
             const projectPath = path.dirname(docPath);
             
             logger.info(`Looking up CLASS type: ${word} in project: ${projectPath}`);
