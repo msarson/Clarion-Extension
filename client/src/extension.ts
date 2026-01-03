@@ -150,7 +150,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
     context.subscriptions.push(
         ...registerNavigationCommands(treeView, solutionTreeDataProvider),
         ...registerBuildCommands(diagnosticCollection, solutionTreeDataProvider),
-        ...registerRunCommands(),
+        ...registerRunCommands(solutionTreeDataProvider),
         ...registerSolutionManagementCommands(context, client, initializeSolution, createSolutionTreeView)
     );
     

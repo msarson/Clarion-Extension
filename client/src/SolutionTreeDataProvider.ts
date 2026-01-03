@@ -922,7 +922,21 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
 
         if ((data as any)?.guid) {
             const project = data as ClarionProjectInfo;
-            treeItem.iconPath = new ThemeIcon('repo');
+            
+            // Check if this is the startup project
+            const workspaceConfig = workspace.getConfiguration('clarion');
+            const startupProjectGuid = workspaceConfig.get<string>('startupProject');
+            const isStartupProject = startupProjectGuid && 
+                project.guid.replace(/[{}]/g, '').toLowerCase() === startupProjectGuid.replace(/[{}]/g, '').toLowerCase();
+            
+            if (isStartupProject) {
+                // Make startup project bold and add play icon
+                treeItem.iconPath = new ThemeIcon('play');
+                treeItem.description = '(Startup)';
+            } else {
+                treeItem.iconPath = new ThemeIcon('repo');
+            }
+            
             treeItem.contextValue = 'clarionProject';
             const projectFile = path.join(project.path, project.filename);
             logger.info(`🔍 Project file path: ${projectFile}`);

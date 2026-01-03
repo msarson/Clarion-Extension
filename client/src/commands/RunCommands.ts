@@ -1,5 +1,6 @@
 import { commands, window, Disposable, Terminal, Uri, workspace } from 'vscode';
 import { SolutionCache } from '../SolutionCache';
+import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { ClarionProjectInfo } from 'common/types';
 import { getLanguageClient } from '../LanguageClientManager';
 import * as path from 'path';
@@ -133,9 +134,10 @@ function runExecutable(exePath: string): void {
 
 /**
  * Registers all run-related commands
+ * @param solutionTreeDataProvider - Solution tree provider to refresh after setting startup project
  * @returns Array of disposables for the registered commands
  */
-export function registerRunCommands(): Disposable[] {
+export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataProvider): Disposable[] {
     return [
         commands.registerCommand('clarion.setStartupProject', async (node) => {
             logger.info("📌 Setting startup project...");
@@ -170,6 +172,11 @@ export function registerRunCommands(): Disposable[] {
             
             logger.info(`✅ Set ${projectName} (${projectGuid}) as startup project`);
             window.showInformationMessage(`${projectName} set as startup project.`);
+            
+            // Refresh the tree to show the visual indicator
+            if (solutionTreeDataProvider) {
+                await solutionTreeDataProvider.refresh();
+            }
         }),
         
         commands.registerCommand('clarion.clearStartupProject', async () => {
@@ -180,6 +187,11 @@ export function registerRunCommands(): Disposable[] {
             
             logger.info(`✅ Cleared startup project`);
             window.showInformationMessage("Startup project cleared.");
+            
+            // Refresh the tree to remove the visual indicator
+            if (solutionTreeDataProvider) {
+                await solutionTreeDataProvider.refresh();
+            }
         }),
         
         commands.registerCommand('clarion.runWithoutDebugging', async () => {
