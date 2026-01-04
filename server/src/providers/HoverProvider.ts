@@ -295,67 +295,13 @@ export class HoverProvider {
             if (!currentScope) {
                 logger.info('No scope found - checking for global variables');
                 
-                // First, check for global variable in CURRENT file (PROGRAM)
-                const globalVarInfo = this.findGlobalVariable(word, tokens, document);
-                
-                if (globalVarInfo) {
-                    logger.info(`✅ Found global variable in current file: ${globalVarInfo.token.value} at line ${globalVarInfo.token.line}`);
-                    return this.buildVariableHover(
-                        globalVarInfo.token.value,
-                        globalVarInfo.typeInfo,
-                        true,
-                        false,
-                        globalVarInfo.scopeInfo,
-                        document.uri,
-                        globalVarInfo.token.line
-                    );
-                }
-                
-                // If not found in current file, check for global variable in MEMBER parent file
-                const memberToken = tokens.find(t => 
-                    t.value && t.value.toUpperCase() === 'MEMBER' && 
-                    t.line < 5 && 
-                    t.referencedFile
-                );
-                
-                if (memberToken && memberToken.referencedFile) {
-                    logger.info(`Found MEMBER reference to: ${memberToken.referencedFile}`);
-                    
-                    if (fs.existsSync(memberToken.referencedFile)) {
-                        try {
-                            const parentContents = await fs.promises.readFile(memberToken.referencedFile, 'utf-8');
-                            const parentDoc = TextDocument.create(
-                                `file:///${memberToken.referencedFile.replace(/\\/g, '/')}`,
-                                'clarion',
-                                1,
-                                parentContents
-                            );
-                            const parentTokens = this.tokenCache.getTokens(parentDoc);
-                            
-                            const globalVarInfo = this.findGlobalVariable(word, parentTokens, parentDoc);
-                            
-                            if (globalVarInfo) {
-                                logger.info(`✅ Found global variable in MEMBER parent: ${globalVarInfo.token.value} at line ${globalVarInfo.token.line}`);
-                                return this.buildVariableHover(
-                                    globalVarInfo.token.value,
-                                    globalVarInfo.typeInfo,
-                                    true,
-                                    false,
-                                    globalVarInfo.scopeInfo,
-                                    parentDoc.uri,
-                                    globalVarInfo.token.line
-                                );
-                            }
-                        } catch (err) {
-                            logger.error(`Error reading MEMBER parent file: ${err}`);
-                        }
-                    }
-                }
+                // Check for global variable (in current file or MEMBER parent)
+                const globalVarHover = await this.variableResolver.findGlobalVariableHover(word, tokens, document);
+                if (globalVarHover) return globalVarHover;
                 
                 logger.info('No scope found and no global variable found - cannot provide hover');
                 
                 // 🔍 Last resort: Check if this word is a CLASS type reference
-                // This handles when user hovers directly on a type name (e.g., hovering on "StringTheory" in "st StringTheory")
                 logger.info(`Checking if ${word} is a CLASS type...`);
                 const classTypeHover = await this.checkClassTypeHover(word, document);
                 if (classTypeHover) return classTypeHover;
@@ -388,22 +334,10 @@ export class HoverProvider {
             if (variableHover) return variableHover;
             logger.info(`${searchWord} is not a local variable`);
             
-            // 🔗 Check for module-local variable in current file (Label at column 0, before first PROCEDURE)
+            // 🔗 Check for module-local variable in current file
             logger.info(`Checking for module-local variable in current file...`);
-            const moduleVarInfo = this.findModuleLocalVariable(searchWord, tokens, document);
-            
-            if (moduleVarInfo) {
-                logger.info(`✅ Found module-local variable in current file: ${moduleVarInfo.token.value} at line ${moduleVarInfo.token.line}`);
-                return this.buildVariableHover(
-                    moduleVarInfo.token.value,
-                    moduleVarInfo.typeInfo,
-                    false,
-                    moduleVarInfo.isStructureDefinition,
-                    moduleVarInfo.scopeInfo,
-                    document.uri,
-                    moduleVarInfo.token.line
-                );
-            }
+            const moduleVarHover = this.variableResolver.findModuleVariableHover(searchWord, tokens, document);
+            if (moduleVarHover) return moduleVarHover;
             
             logger.info(`${searchWord} is not a module-local variable - checking MEMBER parent file`);
             
@@ -460,21 +394,9 @@ export class HoverProvider {
                             return this.formatter.formatProcedure(searchWord, mapDecl, procImpl, document, position);
                         }
                         
-                        // Not a procedure - check for global variable
-                        const globalVarInfo = this.findGlobalVariable(searchWord, parentTokens, parentDoc);
-                        
-                        if (globalVarInfo) {
-                            logger.info(`✅ Found global variable in MEMBER parent: ${globalVarInfo.token.value} at line ${globalVarInfo.token.line}`);
-                            return this.buildVariableHover(
-                                globalVarInfo.token.value,
-                                globalVarInfo.typeInfo,
-                                true,
-                                false,
-                                globalVarInfo.scopeInfo,
-                                parentDoc.uri,
-                                globalVarInfo.token.line
-                            );
-                        }
+                        // Not a procedure - check for global variable in parent
+                        const globalVarHover = await this.variableResolver.findGlobalVariableHover(searchWord, parentTokens, parentDoc);
+                        if (globalVarHover) return globalVarHover;
                     } catch (err) {
                         logger.error(`Error reading MEMBER parent file: ${err}`);
                     }
@@ -959,156 +881,6 @@ export class HoverProvider {
     /**
      * Builds markdown lines for scope information
      */
-    private buildScopeMarkdown(scopeInfo: { type: string } | null): string[] {
-        if (!scopeInfo) return [];
-        
-        const scopeIcon = scopeInfo.type === 'global' ? '🌍' : '📦';
-        const scopeLabel = scopeInfo.type === 'global' ? 'Global variable' : 'Module variable';
-        
-        return [
-            `${scopeIcon} ${scopeLabel}`
-        ];
-    }
-
-    /**
-     * Builds markdown for file location info
-     */
-    private buildLocationInfo(uri: string, lineNumber: number): string {
-        const fileName = path.basename(uri.replace('file:///', ''));
-        return `Declared in ${fileName}:${lineNumber}`;
-    }
-
-    /**
-     * Finds a global variable in the given tokens
-     * Returns variable info including type, line, and scope
-     */
-    private findGlobalVariable(
-        searchWord: string, 
-        tokens: Token[], 
-        document: TextDocument
-    ): { token: Token; typeInfo: string; scopeInfo: any } | null {
-        // Find first CODE token to establish boundary for global scope
-        const firstCodeToken = tokens.find(t => 
-            t.type === TokenType.Keyword && 
-            t.value.toUpperCase() === 'CODE'
-        );
-        const globalScopeEndLine = firstCodeToken ? firstCodeToken.line : Number.MAX_SAFE_INTEGER;
-        
-        // Search for global variable (Label at column 0, before first CODE)
-        const globalVar = tokens.find(t =>
-            t.type === TokenType.Label &&
-            t.start === 0 &&
-            t.line < globalScopeEndLine &&
-            t.value.toLowerCase() === searchWord.toLowerCase()
-        );
-        
-        if (!globalVar) return null;
-        
-        logger.info(`✅ Found global variable: ${globalVar.value} at line ${globalVar.line}`);
-        
-        // Find the type by looking at the next token
-        const globalIndex = tokens.indexOf(globalVar);
-        let typeInfo = 'UNKNOWN';
-        if (globalIndex + 1 < tokens.length) {
-            const nextToken = tokens[globalIndex + 1];
-            if (nextToken.line === globalVar.line) {
-                if (nextToken.type === TokenType.Type) {
-                    typeInfo = nextToken.value;
-                } else if (nextToken.type === TokenType.Structure) {
-                    typeInfo = nextToken.value.toUpperCase();
-                }
-            }
-        }
-        
-        // Get scope info for the global variable
-        const globalPos: Position = { line: globalVar.line, character: globalVar.start };
-        const scopeInfo = this.scopeAnalyzer.getTokenScope(document, globalPos);
-        
-        return { token: globalVar, typeInfo, scopeInfo };
-    }
-
-    /**
-     * Finds a module-local variable in the given tokens
-     * Returns variable info including type, line, and scope
-     */
-    private findModuleLocalVariable(
-        searchWord: string,
-        tokens: Token[],
-        document: TextDocument
-    ): { token: Token; typeInfo: string; isStructureDefinition: boolean; scopeInfo: any } | null {
-        // Find first PROCEDURE token to establish boundary for module scope
-        const firstProcToken = tokens.find(t => 
-            t.type === TokenType.Label &&
-            t.subType === TokenType.Procedure &&
-            t.start === 0
-        );
-        const moduleScopeEndLine = firstProcToken ? firstProcToken.line : Number.MAX_SAFE_INTEGER;
-        
-        // Search for module-local variable (Label at column 0, before first PROCEDURE)
-        const moduleVar = tokens.find(t =>
-            t.type === TokenType.Label &&
-            t.start === 0 &&
-            t.line < moduleScopeEndLine &&
-            t.value.toLowerCase() === searchWord.toLowerCase()
-        );
-        
-        if (!moduleVar) return null;
-        
-        logger.info(`✅ Found module-local variable: ${moduleVar.value} at line ${moduleVar.line}`);
-        
-        // Find the type by looking at the next token
-        const moduleIndex = tokens.indexOf(moduleVar);
-        let typeInfo = 'UNKNOWN';
-        let isStructureDefinition = false;
-        
-        if (moduleIndex + 1 < tokens.length) {
-            const nextToken = tokens[moduleIndex + 1];
-            if (nextToken.line === moduleVar.line) {
-                if (nextToken.type === TokenType.Type) {
-                    typeInfo = nextToken.value;
-                } else if (nextToken.type === TokenType.Structure) {
-                    typeInfo = nextToken.value.toUpperCase();
-                    isStructureDefinition = true;
-                }
-            }
-        }
-        
-        // Get scope info for the module-local variable
-        const modulePos: Position = { line: moduleVar.line, character: 0 };
-        const scopeInfo = this.scopeAnalyzer.getTokenScope(document, modulePos);
-        
-        return { token: moduleVar, typeInfo, isStructureDefinition, scopeInfo };
-    }
-
-    /**
-     * Builds hover content for a global or module-local variable
-     */
-    private buildVariableHover(
-        varName: string,
-        typeInfo: string,
-        isGlobal: boolean,
-        isStructureDefinition: boolean,
-        scopeInfo: any,
-        uri: string,
-        line: number
-    ): Hover {
-        const markdown = [
-            `**${varName}** — \`${typeInfo}\``,
-            ``
-        ];
-        
-        markdown.push(...this.buildScopeMarkdown(scopeInfo));
-        markdown.push(this.buildLocationInfo(uri, line + 1));
-        markdown.push(``);
-        markdown.push(`F12 → Go to declaration`);
-        
-        return {
-            contents: {
-                kind: 'markdown',
-                value: markdown.join('\n')
-            }
-        };
-    }
 
     /**
      * Check if a word is a CLASS type and provide hover with definition info
