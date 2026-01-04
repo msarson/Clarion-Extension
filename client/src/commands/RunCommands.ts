@@ -315,6 +315,7 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             const startupProjectGuid = workspaceConfig.get<string>('startupProject');
             
             let selectedProject: ClarionProjectInfo | undefined;
+            let currentFileProject: ClarionProjectInfo | undefined; // Track project containing current file
             
             if (startupProjectGuid) {
                 // Find the startup project
@@ -324,6 +325,40 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
                 
                 if (selectedProject) {
                     logger.info(`✅ Using startup project: ${selectedProject.name}`);
+                    
+                    // Also find which project contains the current file
+                    logger.info(`🔍 Detecting project containing current file...`);
+                    const client = getLanguageClient();
+                    if (client) {
+                        for (const proj of solutionInfo.projects) {
+                            try {
+                                const response = await client.sendRequest<{ files: any[] }>('clarion/getProjectFiles', {
+                                    projectGuid: proj.guid
+                                });
+                                
+                                if (response && response.files) {
+                                    const fileInProject = response.files.find(f => {
+                                        let filePath = f.absolutePath;
+                                        if (!filePath && f.relativePath) {
+                                            filePath = path.resolve(proj.path, f.relativePath);
+                                        }
+                                        if (filePath) {
+                                            return path.normalize(filePath).toLowerCase() === path.normalize(activeEditor.document.uri.fsPath).toLowerCase();
+                                        }
+                                        return false;
+                                    });
+                                    
+                                    if (fileInProject) {
+                                        currentFileProject = proj;
+                                        logger.info(`✅ Current file belongs to: ${proj.name}`);
+                                        break;
+                                    }
+                                }
+                            } catch (error) {
+                                // Silently continue
+                            }
+                        }
+                    }
                 } else {
                     logger.warn(`⚠️ Startup project GUID ${startupProjectGuid} not found in solution`);
                     window.showWarningMessage("Configured startup project not found. Please set a valid startup project.");
@@ -474,8 +509,27 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             
             logger.info(`✅ Output info: type=${outputInfo.outputType}, name=${outputInfo.outputName}`);
             
+            // Build sequence: if current file is in a different project, build that first
+            if (currentFileProject && currentFileProject.guid !== selectedProject.guid) {
+                logger.info(`🔨 Building dependency project first: ${currentFileProject.name}`);
+                window.showInformationMessage(`Building ${currentFileProject.name}...`);
+                
+                try {
+                    await commands.executeCommand('clarion.buildProject', { 
+                        data: currentFileProject 
+                    });
+                    
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    logger.info(`✅ Dependency build complete`);
+                } catch (buildError) {
+                    logger.error(`Dependency build failed: ${buildError instanceof Error ? buildError.message : String(buildError)}`);
+                    window.showErrorMessage(`Failed to build ${currentFileProject.name}. Check the output for details.`);
+                    return;
+                }
+            }
+            
             // Always build before running to ensure we have the latest executable
-            logger.info(`🔨 Building project before running...`);
+            logger.info(`🔨 Building startup project: ${selectedProject.name}`);
             window.showInformationMessage(`Building ${selectedProject.name}...`);
             
             try {
