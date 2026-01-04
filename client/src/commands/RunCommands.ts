@@ -16,6 +16,7 @@ interface ProjectOutputInfo {
     outputName: string;
     configuration: string;
     projectDir: string;
+    startProgram?: string; // Optional path from <StartProgram> element
 }
 
 /**
@@ -58,6 +59,7 @@ function extractProjectOutputInfo(cwprojPath: string): ProjectOutputInfo | undef
         const outputName = properties.get('outputname') || properties.get('assemblyname') || '';
         const configuration = properties.get('configuration') || 'Debug';
         const model = properties.get('model') || '';
+        const startProgram = properties.get('startprogram') || '';
 
         // Check if this is an executable project
         // OutputType takes priority: Exe or WinExe = executable
@@ -72,7 +74,8 @@ function extractProjectOutputInfo(cwprojPath: string): ProjectOutputInfo | undef
                 outputType,
                 outputName,
                 configuration,
-                projectDir
+                projectDir,
+                startProgram: startProgram || undefined
             };
         }
 
@@ -90,13 +93,30 @@ function extractProjectOutputInfo(cwprojPath: string): ProjectOutputInfo | undef
  * @returns Path to the executable or undefined if not found
  */
 function findExecutable(outputInfo: ProjectOutputInfo): string | undefined {
-    const { outputName, configuration, projectDir } = outputInfo;
+    const { outputName, configuration, projectDir, startProgram } = outputInfo;
     const exeName = outputName.endsWith('.exe') ? outputName : `${outputName}.exe`;
     
     logger.info(`Looking for executable: ${exeName} in project: ${projectDir}`);
     logger.info(`Configuration: ${configuration}`);
     
-    // Try using redirection service first
+    // Check StartProgram first - this is the most explicit setting
+    if (startProgram) {
+        logger.info(`Found StartProgram setting: ${startProgram}`);
+        
+        // StartProgram path is relative to project directory
+        const startProgramPath = path.isAbsolute(startProgram) 
+            ? startProgram 
+            : path.resolve(projectDir, startProgram);
+        
+        if (fs.existsSync(startProgramPath)) {
+            logger.info(`✅ Found executable via StartProgram: ${startProgramPath}`);
+            return startProgramPath;
+        } else {
+            logger.warn(`⚠️ StartProgram path does not exist: ${startProgramPath}`);
+        }
+    }
+    
+    // Try using redirection service
     try {
         const resolver = redirectionService.getResolver(projectDir);
         const resolvedPath = resolver(exeName);
