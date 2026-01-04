@@ -24,6 +24,7 @@ import { SymbolHoverResolver } from './hover/SymbolHoverResolver';
 import { VariableHoverResolver } from './hover/VariableHoverResolver';
 import { ProcedureHoverResolver } from './hover/ProcedureHoverResolver';
 import { MethodHoverResolver } from './hover/MethodHoverResolver';
+import { HoverContextBuilder } from './hover/HoverContextBuilder';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
 import { IncludeVerifier } from '../utils/IncludeVerifier';
@@ -55,6 +56,7 @@ export class HoverProvider {
     private variableResolver: VariableHoverResolver;
     private procedureResolver: ProcedureHoverResolver;
     private methodResolver: MethodHoverResolver;
+    private contextBuilder: HoverContextBuilder;
     private includeVerifier: IncludeVerifier;
 
     constructor() {
@@ -66,6 +68,7 @@ export class HoverProvider {
         this.variableResolver = new VariableHoverResolver(this.formatter, this.scopeAnalyzer, this.tokenCache);
         this.procedureResolver = new ProcedureHoverResolver(this.mapResolver, this.crossFileResolver, this.formatter);
         this.methodResolver = new MethodHoverResolver(this.overloadResolver, this.memberResolver, this.formatter);
+        this.contextBuilder = new HoverContextBuilder();
         this.includeVerifier = new IncludeVerifier();
     }
 
@@ -76,51 +79,13 @@ export class HoverProvider {
         logger.info(`Providing hover for position ${position.line}:${position.character} in ${document.uri}`);
 
         try {
-            // Get tokens first for OMIT/COMPILE detection
-            const allTokens = this.tokenCache.getTokens(document);
-            
-            // Check if the line is inside an OMIT or COMPILE block
-            if (OmitCompileDetector.isLineOmitted(position.line, allTokens, document)) {
-                logger.info(`Line ${position.line} is inside OMIT/COMPILE block - skipping hover`);
-                return null;
+            // Build hover context
+            const context = await this.contextBuilder.build(document, position);
+            if (!context) {
+                return null; // No word or in OMIT block
             }
             
-            // Get DocumentStructure for MAP block detection
-            const documentStructure = this.tokenCache.getStructure(document);
-            
-            // Get the word at the current position
-            const wordRange = TokenHelper.getWordRangeAtPosition(document, position);
-            if (!wordRange) {
-                logger.info('No word found at position');
-                return null;
-            }
-
-            const word = document.getText(wordRange);
-            logger.info(`Found word: "${word}" at position`);
-
-            // Get the line to check context
-            const line = document.getText({
-                start: { line: position.line, character: 0 },
-                end: { line: position.line, character: Number.MAX_VALUE }
-            });
-
-            // ✅ CONTEXT-AWARE DETECTION: Determine if we should prioritize control or data type
-            // Get tokens to check for label before the word
-            const currentLineTokens = allTokens.filter(t => t.line === position.line);
-            
-            // Check if there's a Label token before the current word (indicates data declaration)
-            const hasLabelBefore = currentLineTokens.some(t => 
-                t.type === TokenType.Label && 
-                t.start < wordRange.start.character
-            );
-            
-            // Check if we're in a WINDOW/REPORT/APPLICATION structure (indicates control context)
-            const isInWindowContext = documentStructure.isInWindowStructure(position.line);
-            
-            // Check if we're in a MAP block (for MODULE keyword detection)
-            const isInMapBlock = documentStructure.isInMapBlock(position.line);
-            
-            logger.info(`Context detection: hasLabelBefore=${hasLabelBefore}, isInWindowContext=${isInWindowContext}, isInMapBlock=${isInMapBlock}`);
+            const { word, wordRange, line, tokens, documentStructure, isInMapBlock, isInWindowContext, isInClassBlock, hasLabelBefore } = context;
 
             // Handle MODULE keyword specially (can be keyword in MAP or attribute on CLASS)
             if (word.toUpperCase() === 'MODULE') {
@@ -130,20 +95,19 @@ export class HoverProvider {
 
             // Handle TO keyword specially (can be in LOOP or CASE structure)
             if (word.toUpperCase() === 'TO') {
-                const toHover = this.contextHandler.handleToKeyword(allTokens, position, line);
+                const toHover = this.contextHandler.handleToKeyword(tokens, position, line);
                 if (toHover) return toHover;
             }
 
             // Handle ELSE keyword specially (can be in IF or CASE structure)
             if (word.toUpperCase() === 'ELSE') {
-                const elseHover = this.contextHandler.handleElseKeyword(allTokens, position);
+                const elseHover = this.contextHandler.handleElseKeyword(tokens, position);
                 if (elseHover) return elseHover;
             }
 
             // Handle PROCEDURE keyword specially (different contexts: MAP prototype, CLASS method, implementation)
             if (word.toUpperCase() === 'PROCEDURE') {
-                const isInClass = documentStructure.isInClassBlock(position.line);
-                const procedureHover = this.contextHandler.handleProcedureKeyword(line, isInMapBlock, isInClass);
+                const procedureHover = this.contextHandler.handleProcedureKeyword(line, isInMapBlock, isInClassBlock);
                 if (procedureHover) return procedureHover;
             }
 
@@ -288,9 +252,8 @@ export class HoverProvider {
                 }
             }
 
-            // Get tokens and find current scope
-            const tokens = this.tokenCache.getTokens(document);
-            const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, position.line);
+            // Use current scope from context
+            const { currentScope } = context;
 
             if (!currentScope) {
                 logger.info('No scope found - checking for global variables');
