@@ -1,9 +1,10 @@
-import { commands, window, Disposable, Terminal, Uri, workspace } from 'vscode';
+import { commands, window, Disposable, Terminal, Uri, workspace, DiagnosticCollection, languages } from 'vscode';
 import { SolutionCache } from '../SolutionCache';
 import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { ClarionProjectInfo } from 'common/types';
 import { getLanguageClient } from '../LanguageClientManager';
 import { redirectionService } from '../paths/RedirectionService';
+import * as buildTasks from '../buildTasks';
 import * as path from 'path';
 import * as fs from 'fs';
 import LoggerManager from '../utils/LoggerManager';
@@ -515,13 +516,17 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
                 window.showInformationMessage(`Building ${currentFileProject.name}...`);
                 
                 try {
-                    await commands.executeCommand('clarion.buildProject', { 
-                        data: currentFileProject 
-                    });
+                    // Create diagnostic collection for build errors
+                    const diagnosticCollection = languages.createDiagnosticCollection('clarion-build');
                     
-                    // Wait longer for the build to actually complete
-                    logger.info(`⏳ Waiting for ${currentFileProject.name} build to complete...`);
-                    await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
+                    // Call buildSolutionOrProject directly - this will wait for completion
+                    await buildTasks.buildSolutionOrProject(
+                        "Project",
+                        currentFileProject,
+                        diagnosticCollection,
+                        solutionTreeDataProvider
+                    );
+                    
                     logger.info(`✅ Dependency build complete, proceeding to startup project`);
                 } catch (buildError) {
                     logger.error(`Dependency build failed: ${buildError instanceof Error ? buildError.message : String(buildError)}`);
@@ -535,13 +540,17 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             window.showInformationMessage(`Building ${selectedProject.name}...`);
             
             try {
-                await commands.executeCommand('clarion.buildProject', { 
-                    data: selectedProject 
-                });
+                // Create diagnostic collection for build errors
+                const diagnosticCollection = languages.createDiagnosticCollection('clarion-build');
                 
-                // Give the build a moment to complete
-                logger.info(`⏳ Waiting for ${selectedProject.name} build to complete...`);
-                await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
+                // Call buildSolutionOrProject directly - this will wait for completion
+                await buildTasks.buildSolutionOrProject(
+                    "Project",
+                    selectedProject,
+                    diagnosticCollection,
+                    solutionTreeDataProvider
+                );
+                
                 logger.info(`✅ Build complete, looking for executable...`);
             } catch (buildError) {
                 logger.error(`Build failed: ${buildError instanceof Error ? buildError.message : String(buildError)}`);
