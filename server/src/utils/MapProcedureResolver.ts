@@ -15,7 +15,7 @@ import { SolutionManager } from '../solution/solutionManager';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("MapProcedureResolver");
-logger.setLevel("error"); // Production: Only log errors
+logger.setLevel("info"); // Set to info for debugging
 
 export class MapProcedureResolver {
     private scopeAnalyzer: ScopeAnalyzer;
@@ -899,6 +899,24 @@ export class MapProcedureResolver {
             
             if (procDeclarations.length === 0) {
                 logger.info(`⚠️ Procedure ${procName} not declared in MAP of ${path.basename(resolvedPath)}`);
+                logger.info(`   Searching for direct implementation in file (may be declared in parent PROGRAM's MODULE block)`);
+                
+                // Fallback: The procedure might be declared in the parent file's MODULE block
+                // but implemented directly in this file
+                const implementations = moduleTokens.filter(t =>
+                    t.subType === TokenType.GlobalProcedure &&
+                    t.label?.toLowerCase() === procName.toLowerCase()
+                );
+                
+                if (implementations.length > 0) {
+                    const impl = implementations[0];
+                    logger.info(`✅ Found direct implementation in file at line ${impl.line}`);
+                    return Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
+                        start: { line: impl.line, character: 0 },
+                        end: { line: impl.line, character: impl.value.length }
+                    });
+                }
+                
                 return null;
             }
             

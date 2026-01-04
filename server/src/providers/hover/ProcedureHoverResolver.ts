@@ -55,12 +55,15 @@ export class ProcedureHoverResolver {
         
         // Find MAP declaration first
         const mapDecl = this.mapResolver.findMapDeclaration(word, tokens, document, line);
+        logger.info(`MAP declaration found: ${!!mapDecl}`);
         
         let procImpl = null;
         if (mapDecl) {
             // Check if MAP declaration is from an INCLUDE file
             const mapDeclUri = mapDecl.uri;
             const isFromInclude = mapDeclUri !== document.uri;
+            
+            logger.info(`MAP from INCLUDE: ${isFromInclude}, mapUri: ${mapDeclUri}`);
             
             if (isFromInclude) {
                 logger.info(`MAP declaration is from INCLUDE file: ${mapDeclUri}`);
@@ -85,6 +88,7 @@ export class ProcedureHoverResolver {
                 }
             } else {
                 // Find implementation using MAP declaration position in current document
+                logger.info(`Looking for implementation in current document at MAP line ${mapDecl.range.start.line}`);
                 const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
                 procImpl = await this.mapResolver.findProcedureImplementation(
                     word,
@@ -93,8 +97,11 @@ export class ProcedureHoverResolver {
                     mapPosition,
                     line
                 );
+                logger.info(`Implementation found in current document: ${!!procImpl}`);
             }
         }
+        
+        logger.info(`Final result: mapDecl=${!!mapDecl}, procImpl=${!!procImpl}`);
         
         if (mapDecl || procImpl) {
             return this.formatter.formatProcedure(word, mapDecl, procImpl, document, position);
