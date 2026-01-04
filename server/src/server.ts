@@ -241,7 +241,7 @@ documents.onDidOpen((event) => {
         }
         
         // Validate document for diagnostics
-        validateTextDocument(document);
+        validateTextDocument(document, 'onDidOpen');
     } catch (error) {
         logger.error(`❌ [CRITICAL] Error in onDidOpen: ${error instanceof Error ? error.message : String(error)}`);
         logger.error(`❌ [CRITICAL] Error stack: ${error instanceof Error && error.stack ? error.stack : 'No stack available'}`);
@@ -255,8 +255,11 @@ const tokenCache = TokenCache.getInstance();
 
 export let globalClarionSettings: any = {};
 
+// Track last validated document versions to avoid duplicate work
+const lastValidatedVersions = new Map<string, number>();
+
 // ✅ Diagnostic validation function
-function validateTextDocument(document: TextDocument): void {
+function validateTextDocument(document: TextDocument, caller: string = 'unknown'): void {
     try {
         // Skip non-Clarion files
         if (!document.uri.toLowerCase().endsWith('.clw') && 
@@ -265,11 +268,21 @@ function validateTextDocument(document: TextDocument): void {
             return;
         }
 
-        logger.info(`🔍 Validating document: ${document.uri}`);
+        // 🚀 PERF: Skip if we just validated this exact version
+        const lastVersion = lastValidatedVersions.get(document.uri);
+        if (lastVersion === document.version) {
+            logger.info(`⚡ Skipping duplicate validation for ${document.uri} v${document.version} (caller: ${caller})`);
+            return;
+        }
+
+        logger.info(`🔍 Validating document: ${document.uri} (caller: ${caller})`);
         
         // PERFORMANCE: Use cached tokens instead of re-tokenizing
         const tokens = getTokens(document);
-        const diagnostics = DiagnosticProvider.validateDocument(document, tokens);
+        const diagnostics = DiagnosticProvider.validateDocument(document, tokens, caller);
+        
+        // Remember we validated this version
+        lastValidatedVersions.set(document.uri, document.version);
         
         logger.info(`🔍 Found ${diagnostics.length} diagnostics for: ${document.uri}`);
         
@@ -518,7 +531,7 @@ documents.onDidChangeContent(event => {
                 logger.info(`🔍 Successfully refreshed tokens after edit: ${uri}, got ${tokens.length} tokens`);
                 
                 // Validate document using fresh tokens
-                validateTextDocument(document);
+                validateTextDocument(document, 'onDidChangeContent');
                 
                 // 🔄 Notify client that document symbols have changed
                 // This triggers structure view to refresh with fresh symbols
