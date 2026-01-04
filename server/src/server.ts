@@ -504,6 +504,10 @@ documents.onDidChangeContent(event => {
         // 🚀 PERF: Invalidate caches immediately so fresh data is computed after debounce
         symbolCache.delete(uri);
         foldingCache.delete(uri);
+        
+        // Invalidate cross-file cache for this document
+        const filePath = decodeURIComponent(uri.replace('file:///', ''));
+        hoverProvider.invalidateCache(filePath);
 
         // 🔍 CORRECTNESS: Check if this edit affects structure lifecycle
         // If so, clear token cache to force full re-tokenization

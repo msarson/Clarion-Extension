@@ -7,11 +7,13 @@ import { ClarionDocumentSymbolProvider } from '../ClarionDocumentSymbolProvider'
 import { HoverFormatter, VariableInfo } from './HoverFormatter';
 import { ScopeAnalyzer } from '../../utils/ScopeAnalyzer';
 import { ClassDefinitionIndexer } from '../../utils/ClassDefinitionIndexer';
+import { CrossFileCache } from './CrossFileCache';
 import LoggerManager from '../../logger';
 import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("VariableHoverResolver");
+logger.setLevel("info");
 
 /**
  * Resolves hover information for variables (parameters, local, module, global)
@@ -22,7 +24,8 @@ export class VariableHoverResolver {
     constructor(
         private formatter: HoverFormatter,
         private scopeAnalyzer: ScopeAnalyzer,
-        private tokenCache: TokenCache
+        private tokenCache: TokenCache,
+        private crossFileCache?: CrossFileCache
     ) {
         this.classIndexer = new ClassDefinitionIndexer();
     }
@@ -200,9 +203,9 @@ export class VariableHoverResolver {
     }
 
     /**
-     * Find local variable information using the document symbol tree
+     * Find local variable information using the document symbol tree (public for use by other resolvers)
      */
-    private findLocalVariableInfo(word: string, tokens: Token[], currentScope: Token, document: TextDocument, originalWord?: string): { type: string; line: number } | null {
+    public findLocalVariableInfo(word: string, tokens: Token[], currentScope: Token, document: TextDocument, originalWord?: string): { type: string; line: number } | null {
         logger.info(`findLocalVariableInfo called for word: ${word}, scope: ${currentScope.value} at line ${currentScope.line}`);
         
         const symbolProvider = new ClarionDocumentSymbolProvider();
@@ -362,16 +365,10 @@ export class VariableHoverResolver {
         const currentFileDir = path.dirname(currentFilePath);
         const resolvedPath = path.resolve(currentFileDir, parentFile);
         
-        if (fs.existsSync(resolvedPath)) {
-            try {
-                const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
-                const parentDoc = TextDocument.create(
-                    `file:///${resolvedPath.replace(/\\/g, '/')}`,
-                    'clarion',
-                    1,
-                    parentContents
-                );
-                const parentTokens = this.getTokens(parentDoc);
+        if (this.crossFileCache) {
+            const cached = await this.crossFileCache.getOrLoadDocument(resolvedPath);
+            if (cached) {
+                const { document: parentDoc, tokens: parentTokens } = cached;
                 
                 const firstCodeToken = parentTokens.find(t => 
                     t.type === TokenType.Keyword && 
@@ -390,8 +387,40 @@ export class VariableHoverResolver {
                     logger.info(`✅ Found global variable in MEMBER parent: ${globalVar.value} at line ${globalVar.line}`);
                     return this.buildGlobalVariableHover(globalVar, parentTokens, parentDoc);
                 }
-            } catch (err) {
-                logger.error(`Error reading MEMBER parent file: ${err}`);
+            }
+        } else {
+            // Fallback to direct file reading if cache not available
+            if (fs.existsSync(resolvedPath)) {
+                try {
+                    const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
+                    const parentDoc = TextDocument.create(
+                        `file:///${resolvedPath.replace(/\\/g, '/')}`,
+                        'clarion',
+                        1,
+                        parentContents
+                    );
+                    const parentTokens = this.getTokens(parentDoc);
+                    
+                    const firstCodeToken = parentTokens.find(t => 
+                        t.type === TokenType.Keyword && 
+                        t.value.toUpperCase() === 'CODE'
+                    );
+                    const globalScopeEndLine = firstCodeToken ? firstCodeToken.line : Number.MAX_SAFE_INTEGER;
+                    
+                    const globalVar = parentTokens.find(t =>
+                        t.type === TokenType.Label &&
+                        t.start === 0 &&
+                        t.line < globalScopeEndLine &&
+                        t.value.toLowerCase() === searchWord.toLowerCase()
+                    );
+                    
+                    if (globalVar) {
+                        logger.info(`✅ Found global variable in MEMBER parent: ${globalVar.value} at line ${globalVar.line}`);
+                        return this.buildGlobalVariableHover(globalVar, parentTokens, parentDoc);
+                    }
+                } catch (err) {
+                    logger.error(`Error reading MEMBER parent file: ${err}`);
+                }
             }
         }
         

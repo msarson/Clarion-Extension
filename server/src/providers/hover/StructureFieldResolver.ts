@@ -5,6 +5,7 @@ import { TokenCache } from '../../TokenCache';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { HoverFormatter } from './HoverFormatter';
 import { MethodHoverResolver } from './MethodHoverResolver';
+import { VariableHoverResolver } from './VariableHoverResolver';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("StructureFieldResolver");
@@ -18,7 +19,7 @@ export class StructureFieldResolver {
     constructor(
         private formatter: HoverFormatter,
         private methodResolver: MethodHoverResolver,
-        private findLocalVariableInfo: (word: string, tokens: Token[], currentScope: Token, document: TextDocument, originalWord?: string) => { type: string; line: number } | null
+        private variableResolver: VariableHoverResolver
     ) {}
 
     /**
@@ -45,7 +46,7 @@ export class StructureFieldResolver {
             const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, position.line);
             if (currentScope) {
                 // Look for the GROUP/QUEUE/etc definition
-                const structureInfo = this.findLocalVariableInfo(word, tokens, currentScope, document, word);
+                const structureInfo = this.variableResolver.findLocalVariableInfo(word, tokens, currentScope, document, word);
                 if (structureInfo) {
                     logger.info(`✅ Found structure info for ${word}`);
                     return this.formatter.formatVariable(word, structureInfo, currentScope, document);
@@ -111,7 +112,7 @@ export class StructureFieldResolver {
                 if (currentScope) {
                     // Try to find the structure field using dot notation reference
                     const fullReference = `${structureName}.${word}`;
-                    const variableInfo = this.findLocalVariableInfo(word, tokens, currentScope, document, fullReference);
+                    const variableInfo = this.variableResolver.findLocalVariableInfo(word, tokens, currentScope, document, fullReference);
                     if (variableInfo) {
                         logger.info(`✅ Found structure field info for ${fullReference}`);
                         return this.formatter.formatVariable(fullReference, variableInfo, currentScope, document);

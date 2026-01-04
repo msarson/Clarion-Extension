@@ -58,7 +58,7 @@
 !
 !═══════════════════════════════════════════════════════════════════════
   
-  
+! Test comment  
   
    MAP
      MODULE('utils.clw')  !Can be written as MODULE('utils')

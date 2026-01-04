@@ -5,6 +5,7 @@ import LoggerManager from '../logger';
 import { serverSettings } from '../serverSettings';
 
 const logger = LoggerManager.getLogger('ClassDefinitionIndexer');
+logger.setLevel('error');
 
 /**
  * Represents a single class definition found in a file
@@ -277,7 +278,7 @@ export class ClassDefinitionIndexer {
                         lineContent: line.trim()
                     });
 
-                    logger.debug(`Found class: ${className} in ${path.basename(filePath)}:${i + 1}`);
+                    logger.info(`Found class: ${className} in ${path.basename(filePath)}:${i + 1}`);
                 }
             }
         } catch (error) {
