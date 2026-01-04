@@ -23,18 +23,24 @@ class Logger {
     }
 
     debug(message: string, ...args: any[]) {
+        // In perf test mode, allow PERF messages through, skip others
+        if (LoggingConfig.PERF_TEST_MODE && !message.includes('🚀') && !message.includes('[PERF]')) return;
         if (this.shouldLog("debug")) {
             console.log(`[${this.getTimestamp()}] [${this.name}] 🐛 DEBUG:`, message, ...args);
         }
     }
 
     info(message: string, ...args: any[]) {
+        // In perf test mode, allow PERF messages through, skip others
+        if (LoggingConfig.PERF_TEST_MODE && !message.includes('🚀') && !message.includes('[PERF]')) return;
         if (this.shouldLog("info")) {
             console.log(`[${this.getTimestamp()}] [${this.name}] ℹ️ INFO:`, message, ...args);
         }
     }
 
     warn(message: string, ...args: any[]) {
+        // In perf test mode, allow PERF messages through, skip others
+        if (LoggingConfig.PERF_TEST_MODE && !message.includes('🚀') && !message.includes('[PERF]')) return;
         if (this.shouldLog("warn")) {
             console.log(`[${this.getTimestamp()}] [${this.name}] ⚠️ WARN:`, message, ...args);
         }
@@ -51,8 +57,8 @@ class Logger {
      * Search for "PERF:" in debug console to see all performance metrics
      */
     perf(message: string, metrics?: Record<string, number | string>) {
-        // Only log performance metrics if logger is at DEBUG level
-        if (!this.shouldLog("debug")) return;
+        // In perf test mode, always log perf metrics regardless of level
+        if (!LoggingConfig.PERF_TEST_MODE && !this.shouldLog("debug")) return;
         
         const timestamp = this.getTimestamp();
         if (metrics) {

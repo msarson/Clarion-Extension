@@ -9,7 +9,7 @@ import LoggerManager from '../logger';
 const logger = LoggerManager.getLogger("OmitCompileDetector");
 logger.setLevel("error");
 
-interface DirectiveBlock {
+export interface DirectiveBlock {
     type: 'OMIT' | 'COMPILE';
     terminator: string;
     startLine: number;
@@ -26,7 +26,17 @@ export class OmitCompileDetector {
      */
     public static isLineOmitted(line: number, tokens: Token[], document: TextDocument): boolean {
         const blocks = this.findDirectiveBlocks(tokens, document);
-        
+        return this.isLineOmittedWithBlocks(line, blocks);
+    }
+    
+    /**
+     * Check if a line is inside an OMIT or COMPILE block using pre-computed blocks
+     * 🚀 PERF: Use this when checking multiple lines to avoid rebuilding blocks
+     * @param line Line number to check (0-based)
+     * @param blocks Pre-computed directive blocks from findDirectiveBlocks()
+     * @returns true if the line is omitted/compiled out
+     */
+    public static isLineOmittedWithBlocks(line: number, blocks: DirectiveBlock[]): boolean {
         for (const block of blocks) {
             if (block.endLine === null) {
                 // Block never ends - check if we're after start
@@ -46,8 +56,9 @@ export class OmitCompileDetector {
     
     /**
      * Find all OMIT/COMPILE directive blocks in the document
+     * 🚀 PERF: Make this public so callers can compute once and reuse
      */
-    private static findDirectiveBlocks(tokens: Token[], document: TextDocument): DirectiveBlock[] {
+    public static findDirectiveBlocks(tokens: Token[], document: TextDocument): DirectiveBlock[] {
         const blocks: DirectiveBlock[] = [];
         const activeBlocks: Array<{ type: 'OMIT' | 'COMPILE', terminator: string, startLine: number }> = [];
         
