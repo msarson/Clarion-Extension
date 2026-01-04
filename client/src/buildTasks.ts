@@ -195,15 +195,45 @@ function findCurrentProjects(solutionInfo: any): ClarionProjectInfo[] {
 
     const activeFilePath = activeEditor.document.uri.fsPath;
     const activeFileName = path.basename(activeFilePath);
+    
+    logger.info(`🔍 Finding projects for file: ${activeFilePath}`);
 
-    // Use SolutionCache to find all projects for the active file
-    const solutionCache = SolutionCache.getInstance();
-    // Use the full file path instead of just the basename
-    const projects = solutionCache.findProjectsForFile(activeFilePath);
+    // Search through all projects to find which contain this file
+    const matchingProjects: ClarionProjectInfo[] = [];
+    
+    for (const proj of solutionInfo.projects) {
+        logger.info(`  Checking project: ${proj.name} (${proj.sourceFiles?.length || 0} files)`);
+        
+        if (proj.sourceFiles && proj.sourceFiles.length > 0) {
+            for (const file of proj.sourceFiles) {
+                // Resolve the file path
+                let filePath = file.absolutePath;
+                if (!filePath && file.relativePath) {
+                    // Use project.path (directory) + filename to get full path
+                    if (proj.filename) {
+                        filePath = path.join(proj.path, file.relativePath);
+                    } else {
+                        filePath = path.join(proj.path, file.relativePath);
+                    }
+                }
+                
+                if (filePath) {
+                    const normalizedFilePath = path.normalize(filePath).toLowerCase();
+                    const normalizedActivePath = path.normalize(activeFilePath).toLowerCase();
+                    
+                    if (normalizedFilePath === normalizedActivePath) {
+                        logger.info(`  ✅ Found match in project: ${proj.name}`);
+                        matchingProjects.push(proj);
+                        break;
+                    }
+                }
+            }
+        }
+    }
 
-    if (projects.length > 0) {
-        logger.info(`✅ Found ${projects.length} projects for file ${activeFileName} using server-side solution cache`);
-        return projects;
+    if (matchingProjects.length > 0) {
+        logger.info(`✅ Found ${matchingProjects.length} projects for file ${activeFileName}`);
+        return matchingProjects;
     }
 
     logger.info(`❌ No projects found for file ${activeFileName}`);
