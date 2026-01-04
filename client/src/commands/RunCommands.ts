@@ -519,8 +519,10 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
                         data: currentFileProject 
                     });
                     
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    logger.info(`✅ Dependency build complete`);
+                    // Wait longer for the build to actually complete
+                    logger.info(`⏳ Waiting for ${currentFileProject.name} build to complete...`);
+                    await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
+                    logger.info(`✅ Dependency build complete, proceeding to startup project`);
                 } catch (buildError) {
                     logger.error(`Dependency build failed: ${buildError instanceof Error ? buildError.message : String(buildError)}`);
                     window.showErrorMessage(`Failed to build ${currentFileProject.name}. Check the output for details.`);
@@ -538,7 +540,9 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
                 });
                 
                 // Give the build a moment to complete
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                logger.info(`⏳ Waiting for ${selectedProject.name} build to complete...`);
+                await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
+                logger.info(`✅ Build complete, looking for executable...`);
             } catch (buildError) {
                 logger.error(`Build failed: ${buildError instanceof Error ? buildError.message : String(buildError)}`);
                 window.showErrorMessage(`Build failed. Check the output for details.`);
