@@ -335,19 +335,46 @@ export class HoverFormatter {
         // Add scope information if available
         if (procImpl || mapDecl) {
             try {
-                const checkLocation = procImpl || mapDecl;
-                if (checkLocation) {
-                    const uri = decodeURIComponent(checkLocation.uri.replace('file:///', ''));
-                    const content = fs.readFileSync(uri, 'utf-8');
-                    const lines = content.split('\n');
-                    const firstNonCommentLine = lines.find(l => l.trim() && !l.trim().startsWith('!'));
+                // First check if MAP declaration is inside a MODULE block
+                let isModuleScoped = false;
+                if (mapDecl) {
+                    const mapUri = decodeURIComponent(mapDecl.uri.replace('file:///', ''));
+                    const mapContent = fs.readFileSync(mapUri, 'utf-8');
+                    const mapLines = mapContent.split('\n');
+                    const mapLine = mapDecl.range.start.line;
                     
-                    if (firstNonCommentLine) {
-                        const trimmed = firstNonCommentLine.trim().toUpperCase();
-                        if (trimmed.startsWith('PROGRAM')) {
-                            header = `**${procName}** 🌍 Global Procedure\n`;
-                        } else if (trimmed.startsWith('MEMBER')) {
-                            header = `**${procName}** 📦 Module Procedure\n`;
+                    // Search backwards from MAP declaration to find MODULE keyword
+                    for (let i = mapLine - 1; i >= Math.max(0, mapLine - 20); i--) {
+                        const line = mapLines[i].trim().toUpperCase();
+                        if (line.startsWith('MODULE(') || line === 'MODULE') {
+                            isModuleScoped = true;
+                            break;
+                        }
+                        // Stop if we hit MAP or END
+                        if (line === 'MAP' || line === 'END') {
+                            break;
+                        }
+                    }
+                }
+                
+                if (isModuleScoped) {
+                    header = `**${procName}** 📦 Module Procedure\n`;
+                } else {
+                    // Check file type for global vs module
+                    const checkLocation = procImpl || mapDecl;
+                    if (checkLocation) {
+                        const uri = decodeURIComponent(checkLocation.uri.replace('file:///', ''));
+                        const content = fs.readFileSync(uri, 'utf-8');
+                        const lines = content.split('\n');
+                        const firstNonCommentLine = lines.find(l => l.trim() && !l.trim().startsWith('!'));
+                        
+                        if (firstNonCommentLine) {
+                            const trimmed = firstNonCommentLine.trim().toUpperCase();
+                            if (trimmed.startsWith('PROGRAM')) {
+                                header = `**${procName}** 🌍 Global Procedure\n`;
+                            } else if (trimmed.startsWith('MEMBER')) {
+                                header = `**${procName}** 📦 Module Procedure\n`;
+                            }
                         }
                     }
                 }
