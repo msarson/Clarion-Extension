@@ -555,17 +555,15 @@
                 "path": "./snippets/override.json"
             }
         ],
+        "configurationDefaults": {
+            "[clarion-template]": {
+                "editor.colorDecorators": false
+            }
+        },
         "configuration": {
             "type": "object",
             "title": "Clarion Extension Configuration",
             "properties": {
-                "[clarion-template]": {
-                    "type": "object",
-                    "default": {
-                        "editor.colorDecorators": false
-                    },
-                    "description": "Language-specific settings for Clarion Template files."
-                },
                 "clarion.build.revealOutput": {
                     "type": "string",
                     "enum": [
