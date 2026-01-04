@@ -510,34 +510,18 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             
             logger.info(`✅ Output info: type=${outputInfo.outputType}, name=${outputInfo.outputName}`);
             
-            // Build sequence: if current file is in a different project, build that first
+            // Simple approach: Build the current file's project if different from startup
+            // This ensures the developer's current work is compiled, then we run the startup EXE
+            let projectToBuild = selectedProject;
+            
             if (currentFileProject && currentFileProject.guid !== selectedProject.guid) {
-                logger.info(`🔨 Building dependency project first: ${currentFileProject.name}`);
-                window.showInformationMessage(`Building ${currentFileProject.name}...`);
-                
-                try {
-                    // Create diagnostic collection for build errors
-                    const diagnosticCollection = languages.createDiagnosticCollection('clarion-build');
-                    
-                    // Call buildSolutionOrProject directly - this will wait for completion
-                    await buildTasks.buildSolutionOrProject(
-                        "Project",
-                        currentFileProject,
-                        diagnosticCollection,
-                        solutionTreeDataProvider
-                    );
-                    
-                    logger.info(`✅ Dependency build complete, proceeding to startup project`);
-                } catch (buildError) {
-                    logger.error(`Dependency build failed: ${buildError instanceof Error ? buildError.message : String(buildError)}`);
-                    window.showErrorMessage(`Failed to build ${currentFileProject.name}. Check the output for details.`);
-                    return;
-                }
+                logger.info(`📝 Current file is in ${currentFileProject.name}, will build that instead of ${selectedProject.name}`);
+                projectToBuild = currentFileProject;
             }
             
-            // Always build before running to ensure we have the latest executable
-            logger.info(`🔨 Building startup project: ${selectedProject.name}`);
-            window.showInformationMessage(`Building ${selectedProject.name}...`);
+            // Build the selected project
+            logger.info(`🔨 Building project: ${projectToBuild.name}`);
+            window.showInformationMessage(`Building ${projectToBuild.name}...`);
             
             try {
                 // Create diagnostic collection for build errors
@@ -546,7 +530,7 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
                 // Call buildSolutionOrProject directly - this will wait for completion
                 await buildTasks.buildSolutionOrProject(
                     "Project",
-                    selectedProject,
+                    projectToBuild,
                     diagnosticCollection,
                     solutionTreeDataProvider
                 );
