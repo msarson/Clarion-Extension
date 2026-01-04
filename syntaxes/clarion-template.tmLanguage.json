@@ -60,7 +60,7 @@
         },
         {
           "match": "\\b#(?i:DECLARE|EQUATE|SET|CLEAR|ADD|DELETE|DELETEALL|FREE|PURGE|FIX|FIND|POP|SELECT)\\b",
-          "name": "keyword.control.symbol.template.clarion"
+          "name": "storage.modifier.symbol.template.clarion"
         },
         {
           "match": "\\b#(?i:DEFINE|EXPAND)\\b",
