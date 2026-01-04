@@ -56,9 +56,7 @@
                 ],
                 "extensions": [
                     ".tpl",
-                    ".tpw",
-                    ".txa",
-                    ".txd"
+                    ".tpw"
                 ],
                 "configuration": "./syntaxes/clarion-template.configuration.json"
             }
