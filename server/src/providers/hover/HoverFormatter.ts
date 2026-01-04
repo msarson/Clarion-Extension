@@ -70,79 +70,49 @@ export class HoverFormatter {
         
         const displayName = name;
         
-        // Get scope information using ScopeAnalyzer
-        let scopeInfo = '';
-        let visibilityInfo = '';
+        const markdown = [
+            `**${displayName}** — \`${info.type}\``,
+            ``
+        ];
+        
+        // Determine scope for new format
         if (document) {
             const position = { line: info.line, character: 0 };
             const detailedScope = this.scopeAnalyzer.getTokenScope(document, position);
             
             if (detailedScope) {
-                // Check if this is a method (procedure with ClassName.MethodName pattern)
+                const scopeIcon = detailedScope.type === 'routine' ? '🔐' : 
+                                  detailedScope.type === 'procedure' ? '🔧' : 
+                                  detailedScope.type === 'module' ? '📦' : '🌍';
+                
+                // Check if this is a method
                 const procedureName = detailedScope.containingProcedure?.label || detailedScope.containingProcedure?.value;
                 const isMethod = procedureName?.includes('.');
                 
-                const scopeIcon = detailedScope.type === 'routine' ? '🔐' : 
-                                  detailedScope.type === 'procedure' ? '🔒' : 
-                                  detailedScope.type === 'module' ? '📦' : '🌍';
-                
-                // Use "Method" instead of "Procedure" for methods
-                let scopeTypeLabel = detailedScope.type.charAt(0).toUpperCase() + detailedScope.type.slice(1);
-                if (detailedScope.type === 'procedure' && isMethod) {
-                    scopeTypeLabel = 'Method';
-                }
-                
-                scopeInfo = `**Scope:** ${scopeIcon} ${scopeTypeLabel}`;
-                
-                if (detailedScope.type === 'routine' && detailedScope.containingRoutine) {
-                    const routineName = detailedScope.containingRoutine.label || detailedScope.containingRoutine.value;
-                    scopeInfo += ` (${routineName})`;
-                } else if (detailedScope.type === 'procedure' && detailedScope.containingProcedure) {
-                    scopeInfo += ` (${procedureName})`;
-                }
-                
+                let scopeLabel = '';
                 if (detailedScope.type === 'routine') {
-                    visibilityInfo = `**Visibility:** Only visible within this routine`;
+                    scopeLabel = `${scopeIcon} Routine variable`;
                 } else if (detailedScope.type === 'procedure') {
-                    if (isMethod) {
-                        visibilityInfo = `**Visibility:** Visible throughout this method and its routines`;
-                    } else {
-                        visibilityInfo = `**Visibility:** Visible throughout this procedure and its routines`;
-                    }
+                    scopeLabel = isMethod ? `${scopeIcon} Method variable` : `${scopeIcon} Procedure variable`;
                 } else if (detailedScope.type === 'module') {
-                    visibilityInfo = `**Visibility:** Visible only within this file (module-local)`;
+                    scopeLabel = `${scopeIcon} Module variable`;
                 } else {
-                    visibilityInfo = `**Visibility:** Visible everywhere (global)`;
+                    scopeLabel = `${scopeIcon} Global variable`;
                 }
+                
+                markdown.push(scopeLabel);
             }
-        }
-        
-        const markdown = [
-            `**${variableType}:** \`${displayName}\``,
-            ``,
-            `**Type:** \`${info.type}\``,
-            ``
-        ];
-        
-        if (scopeInfo) {
-            markdown.push(scopeInfo);
-            markdown.push(``);
-        }
-        
-        if (visibilityInfo) {
-            markdown.push(visibilityInfo);
-            markdown.push(``);
         }
         
         if (document) {
             const fileName = path.basename(document.uri.replace('file:///', ''));
             const lineNumber = info.line + 1;
-            markdown.push(`**Declared in** \`${fileName}\` @ line ${lineNumber}`);
+            markdown.push(`Declared in ${fileName}:${lineNumber}`);
         } else {
-            markdown.push(`**Declared at:** line ${info.line + 1}`);
+            markdown.push(`Declared at line ${info.line + 1}`);
         }
         markdown.push(``);
-        markdown.push(`*Press F12 to go to declaration*`);
+        markdown.push(`F12 → Go to declaration`);
 
         return {
             contents: {

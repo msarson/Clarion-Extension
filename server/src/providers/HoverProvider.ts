@@ -1626,16 +1626,10 @@ export class HoverProvider {
         if (!scopeInfo) return [];
         
         const scopeIcon = scopeInfo.type === 'global' ? '🌍' : '📦';
-        const scopeType = scopeInfo.type.charAt(0).toUpperCase() + scopeInfo.type.slice(1);
-        const visibility = scopeInfo.type === 'global' 
-            ? 'Visible everywhere'
-            : 'Visible only within this file (module-local)';
+        const scopeLabel = scopeInfo.type === 'global' ? 'Global variable' : 'Module variable';
         
         return [
-            `**Scope:** ${scopeIcon} ${scopeType}`,
-            ``,
-            `**Visibility:** ${visibility}`,
-            ``
+            `${scopeIcon} ${scopeLabel}`
         ];
     }
 
@@ -1644,7 +1638,7 @@ export class HoverProvider {
      */
     private buildLocationInfo(uri: string, lineNumber: number): string {
         const fileName = path.basename(uri.replace('file:///', ''));
-        return `**Declared in** \`${fileName}\` @ line ${lineNumber}`;
+        return `Declared in ${fileName}:${lineNumber}`;
     }
 
     /**
@@ -1761,26 +1755,15 @@ export class HoverProvider {
         uri: string,
         line: number
     ): Hover {
-        const scopeType = isGlobal ? 'Global' : 'Module-Local';
-        
-        // Choose appropriate title based on whether this is a structure definition
-        const title = isStructureDefinition 
-            ? `**${scopeType} ${typeInfo}:** \`${varName}\``
-            : `**${scopeType} Variable:** \`${varName}\``;
-        
-        const markdown = [title, ``];
-        
-        // Only show "Type:" for regular variables, not structure definitions
-        if (!isStructureDefinition) {
-            markdown.push(`**Type:** \`${typeInfo}\``, ``);
-        }
+        const markdown = [
+            `**${varName}** — \`${typeInfo}\``,
+            ``
+        ];
         
         markdown.push(...this.buildScopeMarkdown(scopeInfo));
         markdown.push(this.buildLocationInfo(uri, line + 1));
-        
-        if (isGlobal) {
-            markdown.push(``, `*Press F12 to go to declaration*`);
-        }
+        markdown.push(``);
+        markdown.push(`F12 → Go to declaration`);
         
         return {
             contents: {

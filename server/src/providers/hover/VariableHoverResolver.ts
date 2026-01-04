@@ -98,33 +98,21 @@ export class VariableHoverResolver {
             const modulePos: Position = { line: moduleVar.line, character: 0 };
             const scopeInfo = this.scopeAnalyzer.getTokenScope(document, modulePos);
             
-            // Choose appropriate title based on whether this is a structure definition
-            const title = isStructureDefinition 
-                ? `**Module-Local ${typeInfo}:** \`${moduleVar.value}\``
-                : `**Module-Local Variable:** \`${moduleVar.value}\``;
-            
             const markdown = [
-                title,
+                `**${moduleVar.value}** — \`${typeInfo}\``,
                 ``
             ];
             
-            // Only show "Type:" for regular variables, not structure definitions
-            if (!isStructureDefinition) {
-                markdown.push(`**Type:** \`${typeInfo}\``);
-                markdown.push(``);
-            }
-            
             if (scopeInfo) {
                 const scopeIcon = '📦';
-                markdown.push(`**Scope:** ${scopeIcon} Module`);
-                markdown.push(``);
-                markdown.push(`**Visibility:** Visible only within this file (module-local)`);
-                markdown.push(``);
+                markdown.push(`${scopeIcon} Module variable`);
             }
             
             const fileName = path.basename(document.uri.replace('file:///', ''));
             const lineNumber = moduleVar.line + 1;
-            markdown.push(`**Defined in** \`${fileName}\` @ line ${lineNumber}`);
+            markdown.push(`Declared in ${fileName}:${lineNumber}`);
+            markdown.push(``);
+            markdown.push(`F12 → Go to declaration`);
             
             return {
                 contents: {
@@ -342,30 +330,21 @@ export class VariableHoverResolver {
         const scopeInfo = this.scopeAnalyzer.getTokenScope(document, globalPos);
         
         const markdown = [
-            `**Global Variable:** \`${globalVar.value}\``,
-            ``,
-            `**Type:** \`${typeInfo}\``,
+            `**${globalVar.value}** — \`${typeInfo}\``,
             ``
         ];
         
         if (scopeInfo) {
             const scopeIcon = scopeInfo.type === 'global' ? '🌍' : '📦';
-            markdown.push(`**Scope:** ${scopeIcon} ${scopeInfo.type.charAt(0).toUpperCase() + scopeInfo.type.slice(1)}`);
-            markdown.push(``);
-            
-            if (scopeInfo.type === 'global') {
-                markdown.push(`**Visibility:** Visible everywhere`);
-            } else {
-                markdown.push(`**Visibility:** Visible only within this file (module-local)`);
-            }
-            markdown.push(``);
+            const scopeLabel = scopeInfo.type === 'global' ? 'Global variable' : 'Module variable';
+            markdown.push(`${scopeIcon} ${scopeLabel}`);
         }
         
         const fileName = path.basename(document.uri.replace('file:///', ''));
         const lineNumber = globalVar.line + 1;
-        markdown.push(`**Declared in** \`${fileName}\` @ line ${lineNumber}`);
+        markdown.push(`Declared in ${fileName}:${lineNumber}`);
         markdown.push(``);
-        markdown.push(`*Press F12 to go to declaration*`);
+        markdown.push(`F12 → Go to declaration`);
         
         return {
             contents: {
