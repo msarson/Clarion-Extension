@@ -22,6 +22,7 @@ import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { ContextualHoverHandler } from './hover/ContextualHoverHandler';
 import { SymbolHoverResolver } from './hover/SymbolHoverResolver';
 import { VariableHoverResolver } from './hover/VariableHoverResolver';
+import { ProcedureHoverResolver } from './hover/ProcedureHoverResolver';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
 import { IncludeVerifier } from '../utils/IncludeVerifier';
@@ -51,6 +52,7 @@ export class HoverProvider {
     private contextHandler: ContextualHoverHandler;
     private symbolResolver: SymbolHoverResolver;
     private variableResolver: VariableHoverResolver;
+    private procedureResolver: ProcedureHoverResolver;
     private includeVerifier: IncludeVerifier;
 
     constructor() {
@@ -60,6 +62,7 @@ export class HoverProvider {
         this.contextHandler = new ContextualHoverHandler(this.builtinService, this.attributeService);
         this.symbolResolver = new SymbolHoverResolver(this.dataTypeService, this.controlService);
         this.variableResolver = new VariableHoverResolver(this.formatter, this.scopeAnalyzer, this.tokenCache);
+        this.procedureResolver = new ProcedureHoverResolver(this.mapResolver, this.crossFileResolver, this.formatter);
         this.includeVerifier = new IncludeVerifier();
     }
 
@@ -145,63 +148,8 @@ export class HoverProvider {
             // OR if this is inside a START() call (e.g., "START(ProcName, ...)")
             // BUT: Skip if it's SELF.member (class method call)
             // NOTE: PARENT.member NOT supported yet - needs parent class resolution
-            const detection = ProcedureCallDetector.isProcedureCallOrReference(document, position, wordRange);
-            const isSelfMethodCall = word.toUpperCase().includes('SELF.') && /\w+\.\w+/.test(word);
-            
-            if (detection.isProcedure && !isSelfMethodCall) {
-                logger.info(`Detected procedure ${ProcedureCallDetector.getDetectionMessage(word, detection.isStartCall)}`);
-                
-                // Get tokens for parameter counting
-                const tokens = this.tokenCache.getTokens(document);
-                
-                // Find MAP declaration first
-                const mapDecl = this.mapResolver.findMapDeclaration(word, tokens, document, line);
-                
-                let procImpl = null;
-                if (mapDecl) {
-                    // Check if MAP declaration is from an INCLUDE file
-                    const mapDeclUri = mapDecl.uri;
-                    const isFromInclude = mapDeclUri !== document.uri;
-                    
-                    if (isFromInclude) {
-                        logger.info(`MAP declaration is from INCLUDE file: ${mapDeclUri}`);
-                        // Load the INCLUDE file and its tokens
-                        try {
-                            const fs = require('fs');
-                            const decodedPath = decodeURIComponent(mapDeclUri.replace('file:///', ''));
-                            const includeContent = fs.readFileSync(decodedPath, 'utf-8');
-                            const includeDoc = TextDocument.create(mapDeclUri, 'clarion', 1, includeContent);
-                            const includeTokens = this.tokenCache.getTokens(includeDoc);
-                            
-                            // Find implementation using INCLUDE file's document and tokens
-                            const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
-                            procImpl = await this.mapResolver.findProcedureImplementation(
-                                word,
-                                includeTokens,
-                                includeDoc,
-                                mapPosition,
-                                line
-                            );
-                        } catch (error) {
-                            logger.info(`Error loading INCLUDE file: ${error}`);
-                        }
-                    } else {
-                        // Find implementation using MAP declaration position in current document
-                        const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
-                        procImpl = await this.mapResolver.findProcedureImplementation(
-                            word,
-                            tokens,
-                            document,
-                            mapPosition, // Use MAP position, not call position
-                            line
-                        );
-                    }
-                }
-                
-                if (mapDecl || procImpl) {
-                    return this.formatter.formatProcedure(word, mapDecl, procImpl, document, position);
-                }
-            }
+            const procedureCallHover = await this.procedureResolver.resolveProcedureCall(word, document, position, wordRange, line);
+            if (procedureCallHover) return procedureCallHover;
 
             // Check for data types and controls using context-aware resolver
             const symbolHover = this.symbolResolver.resolve(word, {
@@ -273,123 +221,12 @@ export class HoverProvider {
 
             // Check if this is a MAP procedure implementation and show declaration hover
             // Skip if we're inside a MAP block (those are declarations, not implementations)
-            const mapProcMatch = line.match(ClarionPatterns.PROCEDURE_IMPLEMENTATION_WITH_PARAMS);
-            logger.info(`MAP procedure regex test: line="${line}", match=${!!mapProcMatch}, inMapBlock=${documentStructure.isInMapBlock(position.line)}`);
-            if (mapProcMatch && !documentStructure.isInMapBlock(position.line)) {
-                const procName = mapProcMatch[1];
-                const procNameEnd = mapProcMatch.index! + procName.length;
-                
-                // Check if cursor is on the procedure name
-                if (position.character >= mapProcMatch.index! && position.character <= procNameEnd) {
-                    // Determine scope for this procedure implementation
-                    const tokens = this.tokenCache.getTokens(document);
-                    const firstNonCommentToken = tokens.find(t => t.type !== TokenType.Comment);
-                    const isProgramFile = firstNonCommentToken?.type === TokenType.ClarionDocument && 
-                                         firstNonCommentToken.value.toUpperCase() === 'PROGRAM';
-                    const isMemberFile = firstNonCommentToken?.type === TokenType.ClarionDocument && 
-                                        (firstNonCommentToken.value.toUpperCase() === 'MEMBER' || 
-                                         firstNonCommentToken.value.toUpperCase().startsWith('MEMBER('));
-                    
-                    const scopeIcon = isProgramFile ? '🌍' : (isMemberFile ? '📦' : '');
-                    const scopeText = isProgramFile ? 'Global' : (isMemberFile ? 'Module' : '');
-                    
-                    // Find the MAP declaration for this procedure using resolver
-                    // Pass implementation signature for overload resolution
-                    const mapLocation = this.mapResolver.findMapDeclaration(procName, tokens, document, line);
-                    
-                    if (!mapLocation) {
-                        // Not found in current file, check for MEMBER
-                        logger.info(`MAP declaration not found in current file, checking for MEMBER...`);
-                        const memberToken = tokens.find(t => 
-                            t.line < 5 && 
-                            t.value.toUpperCase() === 'MEMBER' &&
-                            t.referencedFile
-                        );
-                        
-                        if (memberToken?.referencedFile) {
-                            logger.info(`Found MEMBER('${memberToken.referencedFile}'), searching parent for MAP declaration`);
-                            
-                            // Use CrossFileResolver to find MAP declaration
-                            const memberMapResult = await this.crossFileResolver.findMapDeclarationInMemberFile(
-                                procName,
-                                memberToken.referencedFile,
-                                document,
-                                line
-                            );
-                            
-                            if (memberMapResult) {
-                                // Found MAP in parent file - use it
-                                const implLocation: Location = {
-                                    uri: document.uri,
-                                    range: {
-                                        start: { line: position.line, character: mapProcMatch.index! },
-                                        end: { line: position.line, character: procNameEnd }
-                                    }
-                                };
-                                
-                                return this.formatter.formatProcedure(procName, memberMapResult.location, implLocation, document, position);
-                            }
-                        }
-                    } else {
-                        // Found MAP in current file
-                        const implLocation: Location = {
-                            uri: document.uri,
-                            range: {
-                                start: { line: position.line, character: mapProcMatch.index! },
-                                end: { line: position.line, character: procNameEnd }
-                            }
-                        };
-                        
-                        return this.formatter.formatProcedure(procName, mapLocation, implLocation, document, position);
-                    }
-                }
-            }
+            const procImplHover = await this.procedureResolver.resolveProcedureImplementation(document, position, line, documentStructure);
+            if (procImplHover) return procImplHover;
 
             // Check if this is inside a MAP block (declaration) and show implementation hover
-            if (documentStructure.isInMapBlock(position.line)) {
-                logger.info(`Inside MAP block at line ${position.line}`);
-                // MAP declarations have two formats:
-                // 1. Indented: "    MyProc(params)" - no PROCEDURE/FUNCTION keyword
-                // 2. Column 0: "MyProc    PROCEDURE(params)" or "MyProc    FUNCTION(params)" - with keyword
-                const mapDeclMatch = line.match(ClarionPatterns.MAP_PROCEDURE_DECLARATION);
-                logger.info(`MAP declaration regex match: ${mapDeclMatch ? 'YES' : 'NO'}, line="${line}"`);
-                if (mapDeclMatch) {
-                    const procName = mapDeclMatch[1];
-                    const procNameStart = line.indexOf(procName);
-                    const procNameEnd = procNameStart + procName.length;
-                    
-                    logger.info(`Procedure name: "${procName}", range: ${procNameStart}-${procNameEnd}, cursor at: ${position.character}`);
-                    
-                    // Check if cursor is on the procedure name
-                    if (position.character >= procNameStart && position.character <= procNameEnd) {
-                        logger.info(`Cursor is on procedure name, searching for implementation with overload resolution...`);
-                        
-                        // Use MapProcedureResolver for overload resolution
-                        const tokens = this.tokenCache.getTokens(document);
-                        const implLocation = await this.mapResolver.findProcedureImplementation(
-                            procName, 
-                            tokens, 
-                            document, 
-                            position, 
-                            line,  // Pass declaration signature for overload matching
-                            documentStructure  // Pass cached structure for performance
-                        );
-                        
-                        // Use the standard procedure hover construction
-                        const mapDecl: Location = {
-                            uri: document.uri,
-                            range: {
-                                start: { line: position.line, character: procNameStart },
-                                end: { line: position.line, character: procNameEnd }
-                            }
-                        };
-                        
-                        return this.formatter.formatProcedure(procName, mapDecl, implLocation, document, position);
-                    } else {
-                        logger.info(`Cursor NOT on procedure name (cursor at ${position.character}, name range ${procNameStart}-${procNameEnd})`);
-                    }
-                }
-            }
+            const mapDeclHover = await this.procedureResolver.resolveMapDeclaration(document, position, line, documentStructure);
+            if (mapDeclHover) return mapDeclHover;
 
             // Check if this is a method declaration in a CLASS (declaration) and show implementation hover
             const methodTokens = this.tokenCache.getTokens(document);
