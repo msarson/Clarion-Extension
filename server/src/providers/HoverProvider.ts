@@ -26,6 +26,7 @@ import { ProcedureHoverResolver } from './hover/ProcedureHoverResolver';
 import { MethodHoverResolver } from './hover/MethodHoverResolver';
 import { HoverContextBuilder } from './hover/HoverContextBuilder';
 import { HoverRouter } from './hover/HoverRouter';
+import { StructureFieldResolver } from './hover/StructureFieldResolver';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
 import { IncludeVerifier } from '../utils/IncludeVerifier';
@@ -59,6 +60,7 @@ export class HoverProvider {
     private methodResolver: MethodHoverResolver;
     private contextBuilder: HoverContextBuilder;
     private router: HoverRouter;
+    private structureFieldResolver: StructureFieldResolver;
     private includeVerifier: IncludeVerifier;
 
     constructor() {
@@ -71,6 +73,11 @@ export class HoverProvider {
         this.procedureResolver = new ProcedureHoverResolver(this.mapResolver, this.crossFileResolver, this.formatter);
         this.methodResolver = new MethodHoverResolver(this.overloadResolver, this.memberResolver, this.formatter);
         this.contextBuilder = new HoverContextBuilder();
+        this.structureFieldResolver = new StructureFieldResolver(
+            this.formatter,
+            this.methodResolver,
+            this.findLocalVariableInfo.bind(this)
+        );
         this.router = new HoverRouter(
             this.procedureResolver,
             this.methodResolver,
@@ -101,81 +108,13 @@ export class HoverProvider {
             const routedHover = await this.router.route(context);
             if (routedHover) return routedHover;
 
-            // Check if this is a structure/group name followed by a dot (e.g., hovering over "MyGroup" in "MyGroup.MyVar")
-            // BUT: Skip SELF.member - those are class method calls handled below
-            // NOTE: PARENT.member NOT supported yet - requires parent class lookup
-            // Search for a dot starting from the word's position in the line
-            const wordStartInLine = line.indexOf(word, Math.max(0, position.character - word.length));
-            const dotIndex = line.indexOf('.', wordStartInLine);
-            
-            const isSelfMember = word.toUpperCase().startsWith('SELF.');
-            
-            if (dotIndex > wordStartInLine && dotIndex < wordStartInLine + word.length + 5 && !isSelfMember) {
-                // There's a dot right after the word - this looks like structure.field notation
-                logger.info(`Detected dot notation for word: ${word}, dotIndex: ${dotIndex}`);
-                
-                const tokens = this.tokenCache.getTokens(document);
-                const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, position.line);
-                if (currentScope) {
-                    // Look for the GROUP/QUEUE/etc definition
-                    const structureInfo = this.findLocalVariableInfo(word, tokens, currentScope, document, word);
-                    if (structureInfo) {
-                        logger.info(`✅ HOVER-RETURN: Found structure info for ${word}`);
-                        return this.formatter.formatVariable(word, structureInfo, currentScope, document);
-                    } else {
-                        logger.info(`❌ HOVER-MISS: Could not find structure info for ${word}`);
-                    }
-                }
-            }
+            // Check for structure.field access (e.g., MyGroup.MyVar)
+            const structureHover = await this.structureFieldResolver.resolveStructureAccess(word, line, position, document);
+            if (structureHover) return structureHover;
 
-            // Check if this is a class member access (self.member or variable.member)
-            const dotBeforeIndex = line.lastIndexOf('.', position.character - 1);
-            if (dotBeforeIndex > 0) {
-                const beforeDot = line.substring(0, dotBeforeIndex).trim();
-                const afterDot = line.substring(dotBeforeIndex + 1).trim();
-                const fieldMatch = afterDot.match(/^(\w+)/);
-                
-                // Extract field name from word (in case TokenHelper returned "prefix.field")
-                const fieldName = word.includes('.') ? word.split('.').pop()! : word;
-                
-                if (fieldMatch && fieldMatch[1].toLowerCase() === fieldName.toLowerCase()) {
-                    // Check if this is a method call (has parentheses)
-                    const hasParentheses = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
-                    
-                    // This is a member access (hovering over the field after the dot)
-                    if (beforeDot.toLowerCase() === 'self' || beforeDot.toLowerCase().endsWith(' self')) {
-                        // self.member - class member
-                        // If it's a method call, count parameters
-                        let paramCount: number | undefined;
-                        if (hasParentheses) {
-                            paramCount = this.memberResolver.countParametersInCall(line, fieldName);
-                            logger.info(`Method call detected with ${paramCount} parameters`);
-                        }
-                        
-                        const methodCallHover = await this.methodResolver.resolveMethodCall(fieldName, document, position, line, paramCount);
-                        if (methodCallHover) return methodCallHover;
-                    } else {
-                        // variable.member - structure field access (e.g., MyGroup.MyVar)
-                        const structureNameMatch = beforeDot.match(/(\w+)\s*$/);
-                        if (structureNameMatch) {
-                            const structureName = structureNameMatch[1];
-                            logger.info(`Detected structure field access: ${structureName}.${word}`);
-                            
-                            const tokens = this.tokenCache.getTokens(document);
-                            const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, position.line);
-                            if (currentScope) {
-                                // Try to find the structure field using dot notation reference
-                                const fullReference = `${structureName}.${word}`;
-                                const variableInfo = this.findLocalVariableInfo(word, tokens, currentScope, document, fullReference);
-                                if (variableInfo) {
-                                    logger.info(`✅ HOVER-RETURN: Found structure field info for ${fullReference}`);
-                                    return this.formatter.formatVariable(fullReference, variableInfo, currentScope, document);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            // Check for field access after dot (e.g., self.member or variable.member)
+            const fieldHover = await this.structureFieldResolver.resolveFieldAccess(word, line, position, document, this.countParametersInCall.bind(this));
+            if (fieldHover) return fieldHover;
 
             // currentScope already destructured above from context
 
