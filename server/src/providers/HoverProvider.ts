@@ -27,6 +27,7 @@ import { MethodHoverResolver } from './hover/MethodHoverResolver';
 import { HoverContextBuilder } from './hover/HoverContextBuilder';
 import { HoverRouter } from './hover/HoverRouter';
 import { StructureFieldResolver } from './hover/StructureFieldResolver';
+import { CrossFileCache } from './hover/CrossFileCache';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
 import { IncludeVerifier } from '../utils/IncludeVerifier';
@@ -62,6 +63,7 @@ export class HoverProvider {
     private router: HoverRouter;
     private structureFieldResolver: StructureFieldResolver;
     private includeVerifier: IncludeVerifier;
+    private crossFileCache: CrossFileCache;
 
     constructor() {
         const solutionManager = SolutionManager.getInstance();
@@ -69,14 +71,15 @@ export class HoverProvider {
         this.formatter = new HoverFormatter(this.scopeAnalyzer);
         this.contextHandler = new ContextualHoverHandler(this.builtinService, this.attributeService);
         this.symbolResolver = new SymbolHoverResolver(this.dataTypeService, this.controlService);
-        this.variableResolver = new VariableHoverResolver(this.formatter, this.scopeAnalyzer, this.tokenCache);
+        this.crossFileCache = new CrossFileCache(this.tokenCache);
+        this.variableResolver = new VariableHoverResolver(this.formatter, this.scopeAnalyzer, this.tokenCache, this.crossFileCache);
         this.procedureResolver = new ProcedureHoverResolver(this.mapResolver, this.crossFileResolver, this.formatter);
         this.methodResolver = new MethodHoverResolver(this.overloadResolver, this.memberResolver, this.formatter);
         this.contextBuilder = new HoverContextBuilder();
         this.structureFieldResolver = new StructureFieldResolver(
             this.formatter,
             this.methodResolver,
-            this.findLocalVariableInfo.bind(this)
+            this.variableResolver
         );
         this.router = new HoverRouter(
             this.procedureResolver,
@@ -184,48 +187,36 @@ export class HoverProvider {
                 const currentFileDir = path.dirname(currentFilePath);
                 const resolvedPath = path.resolve(currentFileDir, memberToken.referencedFile);
                 logger.info(`Resolved MEMBER path: ${resolvedPath}`);
-                logger.info(`Checking if file exists: ${fs.existsSync(resolvedPath)}`);
                 
-                if (fs.existsSync(resolvedPath)) {
-                    try {
-                        logger.info(`Reading MEMBER parent file: ${resolvedPath}`);
-                        const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
-                        const parentDoc = TextDocument.create(
-                            `file:///${resolvedPath.replace(/\\/g, '/')}`,
-                            'clarion',
-                            1,
-                            parentContents
+                const cached = await this.crossFileCache.getOrLoadDocument(resolvedPath);
+                if (cached) {
+                    const { document: parentDoc, tokens: parentTokens } = cached;
+                    logger.info(`Loaded parent file, found ${parentTokens.length} tokens`);
+                    
+                    // First check if this is a procedure in the MAP (before treating as variable)
+                    // Look for MAP declaration of the procedure
+                    const parentStructure = this.tokenCache.getStructure(parentDoc);
+                    const mapDecl = this.mapResolver.findMapDeclaration(searchWord, parentTokens, parentDoc, line);
+                    
+                    if (mapDecl) {
+                        logger.info(`✅ Found MAP declaration for ${searchWord} in parent - treating as procedure call`);
+                        
+                        // Find implementation
+                        const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
+                        const procImpl = await this.mapResolver.findProcedureImplementation(
+                            searchWord,
+                            parentTokens,
+                            parentDoc,
+                            mapPosition,
+                            line
                         );
-                        const parentTokens = this.tokenCache.getTokens(parentDoc);
-                        logger.info(`Tokenized parent file, found ${parentTokens.length} tokens`);
                         
-                        // First check if this is a procedure in the MAP (before treating as variable)
-                        // Look for MAP declaration of the procedure
-                        const parentStructure = this.tokenCache.getStructure(parentDoc);
-                        const mapDecl = this.mapResolver.findMapDeclaration(searchWord, parentTokens, parentDoc, line);
-                        
-                        if (mapDecl) {
-                            logger.info(`✅ Found MAP declaration for ${searchWord} in parent - treating as procedure call`);
-                            
-                            // Find implementation
-                            const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
-                            const procImpl = await this.mapResolver.findProcedureImplementation(
-                                searchWord,
-                                parentTokens,
-                                parentDoc,
-                                mapPosition,
-                                line
-                            );
-                            
-                            return this.formatter.formatProcedure(searchWord, mapDecl, procImpl, document, position);
-                        }
-                        
-                        // Not a procedure - check for global variable in parent
-                        const globalVarHover = await this.variableResolver.findGlobalVariableHover(searchWord, parentTokens, parentDoc);
-                        if (globalVarHover) return globalVarHover;
-                    } catch (err) {
-                        logger.error(`Error reading MEMBER parent file: ${err}`);
+                        return this.formatter.formatProcedure(searchWord, mapDecl, procImpl, document, position);
                     }
+                    
+                    // Not a procedure - check for global variable in parent
+                    const globalVarHover = await this.variableResolver.findGlobalVariableHover(searchWord, parentTokens, parentDoc);
+                    if (globalVarHover) return globalVarHover;
                 }
             }
             
@@ -843,6 +834,20 @@ export class HoverProvider {
         }
         
         return null;
+    }
+
+    /**
+     * Invalidate cache for a specific file
+     */
+    public invalidateCache(filePath: string): void {
+        this.crossFileCache.invalidate(filePath);
+    }
+
+    /**
+     * Clear all cache
+     */
+    public clearCache(): void {
+        this.crossFileCache.clear();
     }
 
 }
