@@ -25,6 +25,7 @@ import { VariableHoverResolver } from './hover/VariableHoverResolver';
 import { ProcedureHoverResolver } from './hover/ProcedureHoverResolver';
 import { MethodHoverResolver } from './hover/MethodHoverResolver';
 import { HoverContextBuilder } from './hover/HoverContextBuilder';
+import { HoverRouter } from './hover/HoverRouter';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
 import { IncludeVerifier } from '../utils/IncludeVerifier';
@@ -57,6 +58,7 @@ export class HoverProvider {
     private procedureResolver: ProcedureHoverResolver;
     private methodResolver: MethodHoverResolver;
     private contextBuilder: HoverContextBuilder;
+    private router: HoverRouter;
     private includeVerifier: IncludeVerifier;
 
     constructor() {
@@ -69,6 +71,14 @@ export class HoverProvider {
         this.procedureResolver = new ProcedureHoverResolver(this.mapResolver, this.crossFileResolver, this.formatter);
         this.methodResolver = new MethodHoverResolver(this.overloadResolver, this.memberResolver, this.formatter);
         this.contextBuilder = new HoverContextBuilder();
+        this.router = new HoverRouter(
+            this.procedureResolver,
+            this.methodResolver,
+            this.variableResolver,
+            this.symbolResolver,
+            this.contextHandler,
+            this.formatter
+        );
         this.includeVerifier = new IncludeVerifier();
     }
 
@@ -85,96 +95,11 @@ export class HoverProvider {
                 return null; // No word or in OMIT block
             }
             
-            const { word, wordRange, line, tokens, documentStructure, isInMapBlock, isInWindowContext, isInClassBlock, hasLabelBefore } = context;
+            const { word, wordRange, line, tokens, currentScope } = context;
 
-            // Handle MODULE keyword specially (can be keyword in MAP or attribute on CLASS)
-            if (word.toUpperCase() === 'MODULE') {
-                const moduleHover = this.contextHandler.handleModuleKeyword(isInMapBlock);
-                if (moduleHover) return moduleHover;
-            }
-
-            // Handle TO keyword specially (can be in LOOP or CASE structure)
-            if (word.toUpperCase() === 'TO') {
-                const toHover = this.contextHandler.handleToKeyword(tokens, position, line);
-                if (toHover) return toHover;
-            }
-
-            // Handle ELSE keyword specially (can be in IF or CASE structure)
-            if (word.toUpperCase() === 'ELSE') {
-                const elseHover = this.contextHandler.handleElseKeyword(tokens, position);
-                if (elseHover) return elseHover;
-            }
-
-            // Handle PROCEDURE keyword specially (different contexts: MAP prototype, CLASS method, implementation)
-            if (word.toUpperCase() === 'PROCEDURE') {
-                const procedureHover = this.contextHandler.handleProcedureKeyword(line, isInMapBlock, isInClassBlock);
-                if (procedureHover) return procedureHover;
-            }
-
-            // Check if this is a procedure call (e.g., "MyProcedure()")
-            // OR if this is inside a START() call (e.g., "START(ProcName, ...)")
-            // BUT: Skip if it's SELF.member (class method call)
-            // NOTE: PARENT.member NOT supported yet - needs parent class resolution
-            const procedureCallHover = await this.procedureResolver.resolveProcedureCall(word, document, position, wordRange, line);
-            if (procedureCallHover) return procedureCallHover;
-
-            // Check for data types and controls using context-aware resolver
-            const symbolHover = this.symbolResolver.resolve(word, {
-                hasLabelBefore,
-                isInWindowContext
-            });
-            if (symbolHover) return symbolHover;
-
-            // Check if this word is a Clarion attribute
-            if (this.attributeService.isAttribute(word)) {
-                logger.info(`Found Clarion attribute: ${word}`);
-                
-                const attribute = this.attributeService.getAttribute(word);
-                const paramCount = this.countFunctionParameters(line, word, wordRange, document);
-                logger.info(`Attribute parameter count: ${paramCount}`);
-                
-                return this.formatter.formatAttribute(word, attribute, paramCount);
-            }
-
-            // Check if this word is a built-in function (but NOT a class method call)
-            // Only show built-in hover if the word is standalone (not preceded by a dot)
-            if (this.builtinService.isBuiltin(word)) {
-                // Get text before the word to check if it's a class method call
-                const textBeforeWord = document.getText({
-                    start: { line: position.line, character: 0 },
-                    end: { line: position.line, character: wordRange.start.character }
-                });
-                
-                // If there's a dot immediately before the word, it's a class method, not a built-in
-                if (!textBeforeWord.trimEnd().endsWith('.')) {
-                    logger.info(`Found built-in function: ${word}`);
-                    
-                    const signatures = this.builtinService.getSignatures(word);
-                    const paramCount = this.countFunctionParameters(line, word, wordRange, document);
-                    logger.info(`Parameter count in call: ${paramCount}`);
-                    
-                    return this.formatter.formatBuiltin(word, signatures, paramCount);
-                } else {
-                    logger.info(`Word ${word} is preceded by dot - treating as class method, not built-in`);
-                }
-            }
-            
-            // Check if this is a method implementation line and show declaration hover
-            const methodImplHover = await this.methodResolver.resolveMethodImplementation(document, position, line);
-            if (methodImplHover) return methodImplHover;
-
-            // Check if this is a MAP procedure implementation and show declaration hover
-            // Skip if we're inside a MAP block (those are declarations, not implementations)
-            const procImplHover = await this.procedureResolver.resolveProcedureImplementation(document, position, line, documentStructure);
-            if (procImplHover) return procImplHover;
-
-            // Check if this is inside a MAP block (declaration) and show implementation hover
-            const mapDeclHover = await this.procedureResolver.resolveMapDeclaration(document, position, line, documentStructure);
-            if (mapDeclHover) return mapDeclHover;
-
-            // Check if this is a method declaration in a CLASS (declaration) and show implementation hover
-            const methodDeclHover = await this.methodResolver.resolveMethodDeclaration(document, position, line);
-            if (methodDeclHover) return methodDeclHover;
+            // Route through the router for keywords, procedures, methods, symbols, attributes, builtins
+            const routedHover = await this.router.route(context);
+            if (routedHover) return routedHover;
 
             // Check if this is a structure/group name followed by a dot (e.g., hovering over "MyGroup" in "MyGroup.MyVar")
             // BUT: Skip SELF.member - those are class method calls handled below
@@ -252,8 +177,7 @@ export class HoverProvider {
                 }
             }
 
-            // Use current scope from context
-            const { currentScope } = context;
+            // currentScope already destructured above from context
 
             if (!currentScope) {
                 logger.info('No scope found - checking for global variables');
