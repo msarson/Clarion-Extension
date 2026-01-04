@@ -44,13 +44,21 @@
                     ".clw",
                     ".equ",
                     ".inc",
-                    ".int",
-                    ".txa",
-                    ".txd",
+                    ".int"
+                ],
+                "configuration": "./syntaxes/clarion.configuration.json"
+            },
+            {
+                "id": "clarion-template",
+                "aliases": [
+                    "Clarion Template",
+                    "clarion-template"
+                ],
+                "extensions": [
                     ".tpl",
                     ".tpw"
                 ],
-                "configuration": "./syntaxes/clarion.configuration.json"
+                "configuration": "./syntaxes/clarion-template.configuration.json"
             }
         ],
         "grammars": [
@@ -58,6 +66,11 @@
                 "language": "clarion",
                 "scopeName": "source.clarion",
                 "path": "./syntaxes/clarion.tmLanguage.json"
+            },
+            {
+                "language": "clarion-template",
+                "scopeName": "source.clarion.template",
+                "path": "./syntaxes/clarion-template.tmLanguage.json"
             }
         ],
         "submenus": [

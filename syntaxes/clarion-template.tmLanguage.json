@@ -1,0 +1,170 @@
+{
+  "name": "Clarion Template",
+  "scopeName": "source.clarion.template",
+  "fileTypes": ["tpl", "tpw"],
+  "patterns": [
+    { "include": "#templateComments" },
+    { "include": "#templateStatements" },
+    { "include": "#templateSymbols" },
+    { "include": "#strings" },
+    { "include": "#operators" },
+    { "include": "#numericConstants" },
+    { "include": "#targetCode" }
+  ],
+  "repository": {
+    "templateComments": {
+      "patterns": [
+        {
+          "match": "^#!.*$",
+          "name": "comment.line.template.clarion"
+        },
+        {
+          "match": "^#####.*$",
+          "name": "comment.line.aligned.clarion"
+        },
+        {
+          "match": "^#\\?\\?.*$",
+          "name": "comment.line.editor.clarion"
+        }
+      ]
+    },
+    "templateStatements": {
+      "patterns": [
+        {
+          "match": "^\\s*#(?i:TEMPLATE|APPLICATION|PROGRAM|MODULE)\\b",
+          "name": "keyword.control.section.major.template.clarion"
+        },
+        {
+          "match": "^\\s*#(?i:PROCEDURE|GROUP|CODE|CONTROL|EXTENSION|UTILITY)\\b",
+          "name": "keyword.control.section.template.clarion"
+        },
+        {
+          "match": "\\b#(?i:IF|ELSIF|ELSE|ENDIF)\\b",
+          "name": "keyword.control.conditional.template.clarion"
+        },
+        {
+          "match": "\\b#(?i:CASE|OF|OROF)\\b",
+          "name": "keyword.control.case.template.clarion"
+        },
+        {
+          "match": "\\b#(?i:FOR|ENDFOR|LOOP|ENDLOOP|BREAK|CYCLE)\\b",
+          "name": "keyword.control.loop.template.clarion"
+        },
+        {
+          "match": "\\b#(?i:GENERATE|AT|ENDAT|EMBED|INSERT|CALL|INVOKE|RETURN)\\b",
+          "name": "keyword.control.generation.template.clarion"
+        },
+        {
+          "match": "\\b#(?i:CREATE|OPEN|APPEND|CLOSE|REDIRECT|REMOVE|REPLACE|READ)\\b",
+          "name": "keyword.control.file.template.clarion"
+        },
+        {
+          "match": "\\b#(?i:DECLARE|EQUATE|SET|CLEAR|ADD|DELETE|DELETEALL|FREE|PURGE|FIX|FIND|POP|SELECT)\\b",
+          "name": "keyword.control.symbol.template.clarion"
+        },
+        {
+          "match": "\\b#(?i:DEFINE|EXPAND)\\b",
+          "name": "keyword.control.macro.template.clarion"
+        },
+        {
+          "match": "\\b#(?i:PROMPT|DISPLAY|FIELD|BUTTON|BOXED|ENABLE|PREPARE|IMAGE)\\b",
+          "name": "keyword.control.prompt.template.clarion"
+        },
+        {
+          "match": "\\b#(?i:INDENT|COMMENT)\\b",
+          "name": "keyword.control.format.template.clarion"
+        },
+        {
+          "match": "\\b#(?i:QUERY|RESUME|RELEASE)\\b",
+          "name": "keyword.control.conditional-source.template.clarion"
+        },
+        {
+          "match": "\\b#(?i:PREEMBED|POSTEMBED|EMPTYEMBED)\\b",
+          "name": "keyword.control.embed-decoration.template.clarion"
+        },
+        {
+          "match": "\\b#(?i:ERROR|MESSAGE|ASSERT|ABORT|DEBUG)\\b",
+          "name": "keyword.control.error.template.clarion"
+        },
+        {
+          "match": "\\b#(?i:ACCEPT|REJECT|PRIORITY|CONTEXT|RESTRICT|SECTION|PROTOTYPE|ATSTART|ATEND|DEFAULT|HELP|INCLUDE|PROJECT|PDEFINE|EXPORT|IMPORT|RUN|RUNDLL|CLASS|SHEET)\\b",
+          "name": "keyword.control.misc.template.clarion"
+        }
+      ]
+    },
+    "templateSymbols": {
+      "patterns": [
+        {
+          "match": "%[A-Za-z_][A-Za-z0-9_:.]*",
+          "name": "variable.other.template.clarion"
+        },
+        {
+          "match": "(?i:%(?:Application|AppName|File|FileName|Field|FieldName|Key|KeyName|Procedure|ProcedureName|Module|ModuleName|FileType|FieldType|KeyField|ProcedureType))\\b",
+          "name": "variable.language.builtin.template.clarion"
+        },
+        {
+          "match": "(?i:%(?:Null|True|False))\\b",
+          "name": "constant.language.template.clarion"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.single.template.clarion",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "match": "''",
+              "name": "constant.character.escape.clarion"
+            },
+            {
+              "include": "#templateSymbols"
+            }
+          ]
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "match": "\\b(?i:AND|OR|NOT)\\b",
+          "name": "keyword.operator.logical.template.clarion"
+        },
+        {
+          "match": "(<>|>=|<=|=|>|<)",
+          "name": "keyword.operator.comparison.template.clarion"
+        },
+        {
+          "match": "&",
+          "name": "keyword.operator.concatenation.template.clarion"
+        },
+        {
+          "match": "[+\\-*/]",
+          "name": "keyword.operator.arithmetic.template.clarion"
+        }
+      ]
+    },
+    "numericConstants": {
+      "match": "\\b[0-9]+\\b",
+      "name": "constant.numeric.template.clarion"
+    },
+    "targetCode": {
+      "patterns": [
+        {
+          "match": "^(?!\\s*#)(.*)$",
+          "captures": {
+            "1": {
+              "patterns": [
+                { "include": "#templateSymbols" },
+                { "include": "source.clarion" }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "uuid": "f8e4a5c1-2b3d-4e5f-9a8b-7c6d5e4f3a2b"
+}
