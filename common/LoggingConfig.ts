@@ -19,7 +19,7 @@ export class LoggingConfig {
     /**
      * Enable this for performance testing - logs perf metrics while minimizing other noise
      */
-    static readonly PERF_TEST_MODE: boolean = true;
+    static readonly PERF_TEST_MODE: boolean = false;
     /**
      * Detects if we're running in release mode (packaged extension).
      * 
