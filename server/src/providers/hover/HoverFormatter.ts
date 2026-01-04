@@ -415,27 +415,41 @@ export class HoverFormatter {
                 const fileName = path.basename(implUri);
                 const lineNumber = startLine + 1;
                 
-                const maxLines = 10;
+                const maxLines = 15;
                 const endLine = Math.min(startLine + maxLines, implLines.length);
                 const codeLines: string[] = [];
+                
+                let foundCode = false;
+                let linesAfterCode = 0;
+                const maxLinesAfterCode = 3;
                 
                 for (let i = startLine; i < endLine; i++) {
                     const line = implLines[i];
                     if (!line) continue;
                     
                     const trimmed = line.trim().toUpperCase();
-                    if (i > startLine && (trimmed.startsWith('RETURN') || 
-                        trimmed.match(/^\w+\s+(PROCEDURE|ROUTINE|FUNCTION)/))) {
+                    
+                    // Stop if we hit another procedure/routine
+                    if (i > startLine && trimmed.match(/^\w+\s+(PROCEDURE|ROUTINE|FUNCTION)/)) {
                         break;
                     }
                     
                     codeLines.push(line);
                     
+                    // Track CODE section
                     if (trimmed === 'CODE') {
-                        if (i + 1 < endLine && implLines[i + 1]) {
-                            codeLines.push(implLines[i + 1]);
+                        foundCode = true;
+                    } else if (foundCode) {
+                        linesAfterCode++;
+                        // Show a few lines after CODE, then stop with ellipsis
+                        if (linesAfterCode >= maxLinesAfterCode) {
+                            codeLines.push('  ! ...');
+                            break;
                         }
-                        codeLines.push('  ! ...');
+                    }
+                    
+                    // Stop at RETURN
+                    if (trimmed.startsWith('RETURN')) {
                         break;
                     }
                 }
