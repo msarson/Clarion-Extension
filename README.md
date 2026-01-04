@@ -15,7 +15,7 @@ Comprehensive Clarion language support for Visual Studio Code with solution mana
 
 The **Clarion Extension** provides professional-grade support for Clarion development in Visual Studio Code, featuring:
 
-- ✅ **Complete language support** - Syntax highlighting, IntelliSense, and code navigation
+- ✅ **Complete language support** - Syntax highlighting, IntelliSense, and code navigation for **Clarion** and **Template Language**
 - ✅ **Solution management** - Native Clarion solution explorer with project navigation  
 - ✅ **Real-time diagnostics** - Catch errors as you type
 - ✅ **Build integration** - Generate applications with ClarionCl.exe
@@ -98,6 +98,16 @@ Settings are saved in `.vscode/settings.json` within the folder - commit them wi
 ## What's New
 
 ### Version 0.8.4 (Unreleased)
+
+#### 🎨 **Template Language Support (New!)** - January 2026
+- **Separate language for templates** - `.tpl` and `.tpw` files now have dedicated Template Language support
+- **100+ template keywords** - Full syntax highlighting for `#IF`, `#FOR`, `#PROCEDURE`, `#ADD`, `#EMBED`, etc.
+- **Template symbols** - Proper highlighting for `%Application`, `%File`, `%Field` and all built-in symbols
+- **Comments support** - `#!` template comments, `#####` aligned comments, `#??` editor comments
+- **Operators & expressions** - Logical operators (AND, OR, NOT), comparison, string concatenation
+- **Target code embedding** - Clarion code within templates properly highlighted with symbol interpolation
+- **No false positives** - Color decorators disabled to prevent VS Code from showing color pickers on `#ADD` statements
+- **Code folding** - Support for `#IF/#ENDIF`, `#FOR/#ENDFOR`, `#PROCEDURE`, and other template structures
 
 #### 🎯 **Scope-Aware Navigation (New Feature!)** - December 2025
 - **ScopeAnalyzer service** - New comprehensive scope analysis for Clarion code

@@ -8,6 +8,24 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 
 ## [0.8.4] - Unreleased
 
+### 🎨 Template Language Support (January 2026)
+
+#### New Language: Clarion Template
+- **Separate language definition** - `.tpl` and `.tpw` files now recognized as "Clarion Template" language
+- **Comprehensive TextMate grammar** - Full syntax highlighting with 100+ template keywords
+- **Template statements** - `#IF`, `#FOR`, `#CASE`, `#PROCEDURE`, `#CODE`, `#CONTROL`, `#EXTENSION`, `#GROUP`, etc.
+- **Symbol management** - `#DECLARE`, `#SET`, `#EQUATE`, `#ADD`, `#FIX`, `#DELETE`, `#FIND`, etc.
+- **Code generation** - `#GENERATE`, `#AT`, `#EMBED`, `#INSERT`, `#CALL`, `#INVOKE`
+- **File operations** - `#CREATE`, `#OPEN`, `#APPEND`, `#CLOSE`, `#REDIRECT`
+- **Prompts & UI** - `#PROMPT`, `#DISPLAY`, `#FIELD`, `#BUTTON`, `#BOXED`, `#ENABLE`
+- **Control flow** - Full support for template loops, conditionals, and case statements
+- **Template symbols** - `%Application`, `%File`, `%Field`, `%Procedure` and all built-in symbols highlighted
+- **Comments** - `#!` (template), `#####` (aligned), `#??` (editor) comment types
+- **Operators** - Logical (AND, OR, NOT), comparison, string concatenation, arithmetic
+- **Target code embedding** - Clarion code within templates properly highlighted with `%symbol%` interpolation
+- **Code folding** - Support for `#IF/#ENDIF`, `#FOR/#ENDFOR`, `#PROCEDURE`, and other structures
+- **Configuration** - Color decorators disabled by default to prevent false positives on hex-like patterns
+
 ### 🎯 Major Performance Improvements
 
 #### MAP Resolution & Navigation Performance (January 2026)
