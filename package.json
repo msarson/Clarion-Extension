@@ -557,7 +557,8 @@
         ],
         "configurationDefaults": {
             "[clarion-template]": {
-                "editor.colorDecorators": false
+                "editor.colorDecorators": false,
+                "editor.defaultColorDecorators": false
             }
         },
         "configuration": {
