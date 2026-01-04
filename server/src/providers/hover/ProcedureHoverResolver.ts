@@ -112,18 +112,19 @@ export class ProcedureHoverResolver {
         line: string,
         documentStructure: any
     ): Promise<Hover | null> {
-        const mapProcMatch = line.match(ClarionPatterns.PROCEDURE_IMPLEMENTATION_WITH_PARAMS);
+        const mapProcMatch = line.match(ClarionPatterns.PROCEDURE_IMPLEMENTATION);
         logger.info(`MAP procedure regex test: line="${line}", match=${!!mapProcMatch}, inMapBlock=${documentStructure.isInMapBlock(position.line)}`);
         
         if (!mapProcMatch || documentStructure.isInMapBlock(position.line)) {
             return null;
         }
 
-        const procName = mapProcMatch[1];
-        const procNameEnd = mapProcMatch.index! + procName.length;
+        const procName = mapProcMatch[2]; // [1] is whitespace, [2] is name, [3] is keyword
+        const procNameStart = line.indexOf(procName);
+        const procNameEnd = procNameStart + procName.length;
         
         // Check if cursor is on the procedure name
-        if (position.character < mapProcMatch.index! || position.character > procNameEnd) {
+        if (position.character < procNameStart || position.character > procNameEnd) {
             return null;
         }
 
@@ -164,7 +165,7 @@ export class ProcedureHoverResolver {
                     const implLocation: Location = {
                         uri: document.uri,
                         range: {
-                            start: { line: position.line, character: mapProcMatch.index! },
+                            start: { line: position.line, character: procNameStart },
                             end: { line: position.line, character: procNameEnd }
                         }
                     };
@@ -177,7 +178,7 @@ export class ProcedureHoverResolver {
             const implLocation: Location = {
                 uri: document.uri,
                 range: {
-                    start: { line: position.line, character: mapProcMatch.index! },
+                    start: { line: position.line, character: procNameStart },
                     end: { line: position.line, character: procNameEnd }
                 }
             };
