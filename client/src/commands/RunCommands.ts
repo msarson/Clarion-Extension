@@ -1,10 +1,9 @@
-import { commands, window, Disposable, Terminal, Uri, workspace, DiagnosticCollection, languages } from 'vscode';
+import { commands, window, Disposable, Terminal, Uri, workspace } from 'vscode';
 import { SolutionCache } from '../SolutionCache';
 import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { ClarionProjectInfo } from 'common/types';
 import { getLanguageClient } from '../LanguageClientManager';
 import { redirectionService } from '../paths/RedirectionService';
-import * as buildTasks from '../buildTasks';
 import * as path from 'path';
 import * as fs from 'fs';
 import LoggerManager from '../utils/LoggerManager';
@@ -510,38 +509,8 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             
             logger.info(`✅ Output info: type=${outputInfo.outputType}, name=${outputInfo.outputName}`);
             
-            // Simple approach: Build the current file's project if different from startup
-            // This ensures the developer's current work is compiled, then we run the startup EXE
-            let projectToBuild = selectedProject;
-            
-            if (currentFileProject && currentFileProject.guid !== selectedProject.guid) {
-                logger.info(`📝 Current file is in ${currentFileProject.name}, will build that instead of ${selectedProject.name}`);
-                projectToBuild = currentFileProject;
-            }
-            
-            // Build the selected project
-            logger.info(`🔨 Building project: ${projectToBuild.name}`);
-            window.showInformationMessage(`Building ${projectToBuild.name}...`);
-            
-            try {
-                // Create diagnostic collection for build errors
-                const diagnosticCollection = languages.createDiagnosticCollection('clarion-build');
-                
-                // Call buildSolutionOrProject directly - this will wait for completion
-                await buildTasks.buildSolutionOrProject(
-                    "Project",
-                    projectToBuild,
-                    diagnosticCollection,
-                    solutionTreeDataProvider
-                );
-                
-                logger.info(`✅ Build complete, looking for executable...`);
-            } catch (buildError) {
-                logger.error(`Build failed: ${buildError instanceof Error ? buildError.message : String(buildError)}`);
-                window.showErrorMessage(`Build failed. Check the output for details.`);
-                return;
-            }
-            
+            // No automatic build - developer is responsible for building
+            // Just find and run the executable
             logger.info(`🔍 Looking for executable...`);
             
             // Find the executable
