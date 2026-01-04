@@ -307,6 +307,8 @@ export class HoverFormatter {
         currentDocument: TextDocument,
         currentPosition?: { line: number; character: number }
     ): Promise<Hover | null> {
+        logger.info(`formatProcedure: procName="${procName}", hasMapDecl=${!!mapDecl}, hasProcImpl=${!!procImpl}`);
+        
         const parts: string[] = [];
         
         let header = `**${procName}** (Procedure)\n`;
@@ -331,6 +333,8 @@ export class HoverFormatter {
                 isAtImplementation = true;
             }
         }
+        
+        logger.info(`formatProcedure: isAtMapDeclaration=${isAtMapDeclaration}, isAtImplementation=${isAtImplementation}`);
         
         // Add scope information if available
         if (procImpl || mapDecl) {
@@ -386,6 +390,7 @@ export class HoverFormatter {
         parts.push(header);
         
         // Show MAP declaration - but NOT if we're hovering at the MAP declaration itself
+        logger.info(`formatProcedure: About to check MAP declaration, mapDecl=${!!mapDecl}, isAtMapDeclaration=${isAtMapDeclaration}`);
         if (mapDecl && !isAtMapDeclaration) {
             try {
                 const mapUri = decodeURIComponent(mapDecl.uri.replace('file:///', ''));
@@ -405,12 +410,16 @@ export class HoverFormatter {
         }
         
         // Show PROCEDURE implementation - but NOT if we're hovering at the implementation itself
+        logger.info(`formatProcedure: About to check implementation, procImpl=${!!procImpl}, isAtImplementation=${isAtImplementation}`);
         if (procImpl && !isAtImplementation) {
             try {
                 const implUri = decodeURIComponent(procImpl.uri.replace('file:///', ''));
+                logger.info(`formatProcedure: Reading implementation from ${implUri}`);
                 const implContent = fs.readFileSync(implUri, 'utf-8');
                 const implLines = implContent.split('\n');
                 const startLine = procImpl.range.start.line;
+                
+                logger.info(`formatProcedure: Implementation starts at line ${startLine}`);
                 
                 const fileName = path.basename(implUri);
                 const lineNumber = startLine + 1;
@@ -455,11 +464,16 @@ export class HoverFormatter {
                 }
                 
                 if (codeLines.length > 0) {
+                    logger.info(`formatProcedure: Adding implementation preview with ${codeLines.length} lines`);
                     parts.push(`\n**Implemented in** \`${fileName}\` @ line ${lineNumber}:\n\`\`\`clarion\n${codeLines.join('\n')}\n\`\`\``);
+                } else {
+                    logger.info(`formatProcedure: No code lines captured for preview`);
                 }
             } catch (error) {
                 logger.error(`Error reading PROCEDURE implementation: ${error}`);
             }
+        } else {
+            logger.info(`formatProcedure: Skipping implementation preview (procImpl=${!!procImpl}, isAtImplementation=${isAtImplementation})`);
         }
         
         // Add context-aware navigation hint
