@@ -495,6 +495,7 @@ LocalToRoutine LONG
 
         test('F12 on MAP declaration should jump to PROCEDURE implementation', async () => {
             const code = `
+PROGRAM
   MAP
     ProcessOrder(LONG orderId)
   END
@@ -505,16 +506,17 @@ ProcessOrder PROCEDURE(LONG orderId)
   END`.trim();
             
             const document = createDocument(code);
-            const position: Position = { line: 1, character: 6 }; // On 'ProcessOrder' in MAP
+            const position: Position = { line: 2, character: 6 }; // On 'ProcessOrder' in MAP
             
             const result = await definitionProvider.provideDefinition(document, position);
             
             assert.ok(result, 'Should find PROCEDURE implementation');
-            assert.strictEqual(getLocationLine(result), 4, 'Should jump to PROCEDURE line');
+            assert.strictEqual(getLocationLine(result), 5, 'Should jump to PROCEDURE line');
         });
 
         test('Should handle MAP with PROCEDURE keyword', async () => {
             const code = `
+PROGRAM
   MAP
     ProcessOrder PROCEDURE(LONG orderId)
   END
@@ -524,16 +526,17 @@ ProcessOrder PROCEDURE(LONG orderId)
   END`.trim();
             
             const document = createDocument(code);
-            const position: Position = { line: 1, character: 6 }; // On 'ProcessOrder'
+            const position: Position = { line: 2, character: 6 }; // On 'ProcessOrder'
             
             const result = await definitionProvider.provideDefinition(document, position);
             
             assert.ok(result, 'Should find implementation');
-            assert.strictEqual(getLocationLine(result), 4, 'Should jump to implementation');
+            assert.strictEqual(getLocationLine(result), 5, 'Should jump to implementation');
         });
 
         test('Should handle MAP with comma syntax', async () => {
             const code = `
+PROGRAM
   MAP
     ProcessOrder,PROCEDURE(LONG orderId)
   END
@@ -543,16 +546,17 @@ ProcessOrder PROCEDURE(LONG orderId)
   END`.trim();
             
             const document = createDocument(code);
-            const position: Position = { line: 1, character: 6 }; // On 'ProcessOrder'
+            const position: Position = { line: 2, character: 6 }; // On 'ProcessOrder'
             
             const result = await definitionProvider.provideDefinition(document, position);
             
             assert.ok(result, 'Should find implementation');
-            assert.strictEqual(getLocationLine(result), 4, 'Should jump to implementation');
+            assert.strictEqual(getLocationLine(result), 5, 'Should jump to implementation');
         });
 
         test('Should handle multi-parameter MAP procedures', async () => {
             const code = `
+PROGRAM
   MAP
     SaveRecord(STRING fileName, LONG recordId, *STRING result)
   END
@@ -562,16 +566,17 @@ SaveRecord PROCEDURE(STRING fileName, LONG recordId, *STRING result)
   END`.trim();
             
             const document = createDocument(code);
-            const position: Position = { line: 1, character: 6 }; // On 'SaveRecord'
+            const position: Position = { line: 2, character: 6 }; // On 'SaveRecord'
             
             const result = await definitionProvider.provideDefinition(document, position);
             
             assert.ok(result, 'Should find implementation');
-            assert.strictEqual(getLocationLine(result), 4, 'Should jump to implementation');
+            assert.strictEqual(getLocationLine(result), 5, 'Should jump to implementation');
         });
 
         test('Should handle multiple MAP blocks', async () => {
             const code = `
+PROGRAM
   MAP
     FirstProc()
   END
@@ -589,12 +594,12 @@ SecondProc PROCEDURE(LONG id)
   END`.trim();
             
             const document = createDocument(code);
-            const position: Position = { line: 5, character: 6 }; // On 'SecondProc' in second MAP
+            const position: Position = { line: 6, character: 6 }; // On 'SecondProc' in second MAP
             
             const result = await definitionProvider.provideDefinition(document, position);
             
             assert.ok(result, 'Should find SecondProc implementation');
-            assert.strictEqual(getLocationLine(result), 12, 'Should jump to SecondProc');
+            assert.strictEqual(getLocationLine(result), 13, 'Should jump to SecondProc');
         });
     });
 
