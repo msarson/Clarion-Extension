@@ -37,6 +37,7 @@ import {
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
 import { ClarionDocumentSymbolProvider } from './providers/ClarionDocumentSymbolProvider';
+import { ClarionSemanticTokensProvider } from './providers/ClarionSemanticTokensProvider';
 
 import { Token } from './ClarionTokenizer';
 import { TokenCache } from './TokenCache';
@@ -77,6 +78,7 @@ export let solutionOperationInProgress = false;
 // ✅ Initialize Providers
 
 const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider();
+const clarionSemanticTokensProvider = new ClarionSemanticTokensProvider();
 const definitionProvider = new DefinitionProvider();
 const hoverProvider = new HoverProvider();
 const signatureHelpProvider = new SignatureHelpProvider();
@@ -144,6 +146,11 @@ connection.onInitialize((params) => {
                 signatureHelpProvider: {
                     triggerCharacters: ['(', ','],
                     retriggerCharacters: [')']
+                },
+                semanticTokensProvider: {
+                    legend: clarionSemanticTokensProvider.getLegend(),
+                    range: false,
+                    full: true
                 }
             }
         };
@@ -1375,6 +1382,48 @@ connection.onSignatureHelp(async (params) => {
         console.error(`❌ [SIG-HELP] Error providing signature help: ${error instanceof Error ? error.message : String(error)}`);
         console.error(`❌ [SIG-HELP] Stack: ${error instanceof Error ? error.stack : 'No stack'}`);
         return undefined;
+    }
+});
+
+// ✅ Handle Semantic Tokens Request
+connection.languages.semanticTokens.on((params) => {
+    const perfStart = performance.now();
+    try {
+        logger.info(`🎨 [DEBUG] Received semantic tokens request for: ${params.textDocument.uri}`);
+        const document = documents.get(params.textDocument.uri);
+        if (!document) {
+            logger.warn(`⚠️ [DEBUG] Document not found for semantic tokens: ${params.textDocument.uri}`);
+            return { data: [] };
+        }
+
+        const uri = document.uri;
+        
+        // Get tokens from cache (uses incremental tokenization automatically)
+        const tokenStart = performance.now();
+        const tokens = getTokens(document);
+        const tokenTime = performance.now() - tokenStart;
+        
+        logger.info(`🎨 [DEBUG] Got ${tokens.length} tokens for semantic tokens`);
+        logger.perf('SemanticTokens: getTokens', { time_ms: tokenTime.toFixed(2), tokens: tokens.length });
+        
+        // Generate semantic tokens
+        const semanticStart = performance.now();
+        const semanticTokens = clarionSemanticTokensProvider.provideSemanticTokens(tokens);
+        const semanticTime = performance.now() - semanticStart;
+        
+        const totalTime = performance.now() - perfStart;
+        logger.info(`🎨 [DEBUG] Generated semantic tokens for: ${uri} in ${totalTime.toFixed(2)}ms (tokenize: ${tokenTime.toFixed(2)}ms, semantic: ${semanticTime.toFixed(2)}ms)`);
+        logger.perf('SemanticTokens: total', { 
+            time_ms: totalTime.toFixed(2), 
+            tokenize_ms: tokenTime.toFixed(2),
+            semantic_ms: semanticTime.toFixed(2),
+            data_length: semanticTokens.data.length 
+        });
+        
+        return semanticTokens;
+    } catch (error) {
+        logger.error(`❌ [DEBUG] Error providing semantic tokens: ${error instanceof Error ? error.message : String(error)}`);
+        return { data: [] };
     }
 });
 

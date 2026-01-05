@@ -73,6 +73,57 @@
                 "path": "./syntaxes/clarion-template.tmLanguage.json"
             }
         ],
+        "semanticTokenTypes": [
+            {
+                "id": "keywordControl",
+                "description": "Control flow keywords (IF, LOOP, CASE)"
+            },
+            {
+                "id": "keywordStructure",
+                "description": "Data structure keywords (GROUP, RECORD, QUEUE)"
+            },
+            {
+                "id": "keywordOop",
+                "description": "OOP keywords (CLASS, INTERFACE)"
+            },
+            {
+                "id": "keywordWindow",
+                "description": "UI structure keywords (WINDOW, REPORT)"
+            }
+        ],
+        "semanticTokenModifiers": [
+            {
+                "id": "endStructure",
+                "description": "END keyword closing a data structure"
+            },
+            {
+                "id": "endOop",
+                "description": "END keyword closing a class or interface"
+            },
+            {
+                "id": "endWindow",
+                "description": "END keyword closing a window or report"
+            },
+            {
+                "id": "endControl",
+                "description": "END keyword closing control flow"
+            }
+        ],
+        "semanticTokenScopes": [
+            {
+                "language": "clarion",
+                "scopes": {
+                    "keywordControl": ["keyword.control.clarion"],
+                    "keywordStructure": ["storage.type.structure.clarion"],
+                    "keywordStructure.endStructure": ["storage.type.structure.clarion"],
+                    "keywordOop": ["keyword.oop.clarion"],
+                    "keywordOop.endOop": ["keyword.oop.clarion"],
+                    "keywordWindow": ["storage.type.control.clarion"],
+                    "keywordWindow.endWindow": ["storage.type.control.clarion"],
+                    "keywordControl.endControl": ["keyword.control.clarion"]
+                }
+            }
+        ],
         "submenus": [
             {
                 "id": "clarion.solutionMenu",
@@ -558,7 +609,7 @@
         "configurationDefaults": {
             "[clarion-template]": {
                 "editor.colorDecorators": false,
-                "editor.defaultColorDecorators": false
+                "editor.defaultColorDecorators": "never"
             }
         },
         "configuration": {
@@ -968,7 +1019,10 @@
         "package": "npm run compile:dev && vsce package",
         "package:release": "npm run compile:release && vsce package --allow-star-activation",
         "watch": "tsc -b -w",
-        "test": "npm run compile:dev && mocha out/server/src/test/**/*.test.js out/client/src/test/**/*.test.js --exclude 'out/client/src/test/UnreachableCodeDecorator.test.js' --exclude 'out/client/src/test/TextEditingCommands.test.js'"
+        "test": "npm run test:server",
+        "test:server": "mocha",
+        "test:client": "mocha --config .mocharc-client.json",
+        "test:all": "npm run compile:dev && npm run test:server && npm run test:client"
     },
     "devDependencies": {
         "@types/mocha": "^8.2.2",

@@ -11,7 +11,9 @@ export const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     CASE: /(?<![:\w.])\bCASE\b/i,
     CLASS: /\bCLASS\b/i,
     GROUP: /\bGROUP\b/i,
-    FILE: /\sFILE\b/i,  // Includes leading space to avoid matching in wrong context
+    // ✅ FILE, QUEUE, VIEW changed to use word boundary instead of requiring leading space
+    // The tokenizer already checks prevChar for ':' and '.' to prevent qualified identifiers
+    FILE: /\bFILE\b/i,
     INTERFACE: /\bINTERFACE\b/i,
     IF: /(?<![:\w.])\bIF\b/i,  // ✅ Prevent matching after : or . or word char
     JOIN: /\bJOIN\b/i,
@@ -19,8 +21,8 @@ export const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     MAP: /\bMAP\b/i,
     MENU: /\bMENU\b(?=\s*(\(|,))/i,
     MENUBAR: /\bMENUBAR\b/i,
-    //QUEUE: /\bQUEUE(?![:\(])\b/i,  // Prevents detecting Queue:Browse as a structure
-    QUEUE: /\s+\bQUEUE\b(?!:)/i,  // Includes leading space to avoid matching Queue:Browse
+    // ✅ QUEUE changed to use negative lookbehind for qualified identifiers
+    QUEUE: /(?<![:\w.])\bQUEUE\b/i,
 
     // RECORD: /^\s*(\w+)\s+(RECORD)\b/i,
     // ✅ RECORD should not match when it's part of a field name (preceded by : or . or alphanumeric)
@@ -31,7 +33,8 @@ export const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     SHEET: /\bSHEET\b/i,
     TAB: /\bTAB\b/i,
     TOOLBAR: /^[ \t]*TOOLBAR\b(?=\s*(\(|,))/i,  // Only match TOOLBAR at beginning of line followed by ( or ,
-    VIEW: /\sVIEW\b/i,  // Includes leading space to avoid matching in wrong context
+    // ✅ VIEW changed to use word boundary instead of requiring leading space
+    VIEW: /\bVIEW\b/i,
     WINDOW: /\bWINDOW\b(?=\s*(\(|,))/i,
     OPTION: /\bOPTION\b/i,
     ITEMIZE: /\bITEMIZE\b/i,
