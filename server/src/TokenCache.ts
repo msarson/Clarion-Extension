@@ -137,6 +137,11 @@ export class TokenCache {
                 const lineTokens = this.buildLineTokenMap(document, tokens);
                 const cacheTime = performance.now() - cacheStart;
                 
+                //Process tokens through DocumentStructure to set subtypes (MapProcedure, etc.)
+                // This modifies tokens in-place - must be done BEFORE caching
+                const structure = new DocumentStructure(tokens);
+                structure.process();
+                
                 this.cache.set(document.uri, { 
                     version: document.version, 
                     tokens,
