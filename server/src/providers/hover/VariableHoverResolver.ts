@@ -113,7 +113,13 @@ export class VariableHoverResolver {
             
             const fileName = path.basename(document.uri.replace('file:///', ''));
             const lineNumber = moduleVar.line + 1;
-            markdown.push(`Declared in ${fileName}:${lineNumber}`);
+            // Append "Declared in" to the same line as scope label if it exists
+            const lastLine = markdown[markdown.length - 1];
+            if (lastLine && lastLine.includes('variable')) {
+                markdown[markdown.length - 1] = `${lastLine} Declared in ${fileName}:${lineNumber}`;
+            } else {
+                markdown.push(`Declared in ${fileName}:${lineNumber}`);
+            }
             markdown.push(``);
             markdown.push(`F12 → Go to declaration`);
             
@@ -345,7 +351,13 @@ export class VariableHoverResolver {
         
         const fileName = path.basename(document.uri.replace('file:///', ''));
         const lineNumber = globalVar.line + 1;
-        markdown.push(`Declared in ${fileName}:${lineNumber}`);
+        // Append "Declared in" to the same line as scope label if it exists
+        const lastLine = markdown[markdown.length - 1];
+        if (lastLine && lastLine.includes('variable')) {
+            markdown[markdown.length - 1] = `${lastLine} Declared in ${fileName}:${lineNumber}`;
+        } else {
+            markdown.push(`Declared in ${fileName}:${lineNumber}`);
+        }
         markdown.push(``);
         markdown.push(`F12 → Go to declaration`);
         

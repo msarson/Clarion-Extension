@@ -101,14 +101,19 @@ export class HoverFormatter {
                 }
                 
                 markdown.push(scopeLabel);
-                markdown.push(``); // Blank line after scope label
             }
         }
         
         if (document) {
             const fileName = path.basename(document.uri.replace('file:///', ''));
             const lineNumber = info.line + 1;
-            markdown.push(`Declared in ${fileName}:${lineNumber}`);
+            // Append "Declared in" to the same line as scope label if it exists
+            const lastLine = markdown[markdown.length - 1];
+            if (lastLine && lastLine.includes('variable')) {
+                markdown[markdown.length - 1] = `${lastLine} Declared in ${fileName}:${lineNumber}`;
+            } else {
+                markdown.push(`Declared in ${fileName}:${lineNumber}`);
+            }
         } else {
             markdown.push(`Declared at line ${info.line + 1}`);
         }

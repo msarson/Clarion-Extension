@@ -1002,13 +1002,8 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             assert.ok(hoverText.includes('LONG'), 'Should show type');
             assert.ok(hoverText.includes('utils.clw:57'), 'Should show declaration location');
             
-            // Check formatting: scope label and "Declared in" should be on separate lines
-            const lines = hoverText.split('\n');
-            const scopeLine = lines.find((l: string) => l.includes('Procedure variable'));
-            const declaredLine = lines.find((l: string) => l.includes('Declared in'));
-            assert.ok(scopeLine, 'Should have scope line');
-            assert.ok(declaredLine, 'Should have declared line');
-            assert.notStrictEqual(scopeLine, declaredLine, 'Scope and declaration should be on separate lines');
+            // Format should be: "🔧 Procedure variable Declared in utils.clw:57" on one line
+            assert.ok(hoverText.includes('Procedure variable Declared in'), 'Scope and declaration should be on same line');
         });
     });
     
