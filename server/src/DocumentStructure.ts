@@ -777,6 +777,10 @@ export class DocumentStructure {
         const lastStructure = this.structureStack.pop();
         if (lastStructure) {
             lastStructure.finishesAt = token.line;
+            
+            // ✅ Set parent relationship so END knows what it closes
+            token.parent = lastStructure;
+            
             logger.info(`🔚 Closed ${lastStructure.value} at Line ${token.line}`);
             
             // ✅ Special handling: Check if the structure that's NOW on top of the stack
