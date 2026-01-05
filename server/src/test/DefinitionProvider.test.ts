@@ -198,7 +198,8 @@ ProcessData ROUTINE
             const scope = TokenHelper.getInnermostScopeAtLine(tokens, 3);
             
             assert.ok(scope, 'Should find scope');
-            assert.ok(scope!.value.toUpperCase().includes('ROUTINE'));
+            assert.strictEqual(scope!.subType, TokenType.Routine, 'Should be a routine scope');
+            assert.strictEqual(scope!.label?.toUpperCase(), 'PROCESSDATA', 'Should be ProcessData');
         });
     });
 
@@ -492,9 +493,16 @@ LocalToRoutine LONG
 
     suite('🚨 Gap Coverage: MAP Procedure Forward Navigation (Declaration → Implementation)', () => {
         const definitionProvider = new DefinitionProvider();
+        const tokenCache = TokenCache.getInstance();
+
+        teardown(() => {
+            // Clear cached test documents to ensure fresh tokenization
+            tokenCache.clearTokens('test://test.clw');
+        });
 
         test('F12 on MAP declaration should jump to PROCEDURE implementation', async () => {
             const code = `
+PROGRAM
   MAP
     ProcessOrder(LONG orderId)
   END
@@ -505,16 +513,17 @@ ProcessOrder PROCEDURE(LONG orderId)
   END`.trim();
             
             const document = createDocument(code);
-            const position: Position = { line: 1, character: 6 }; // On 'ProcessOrder' in MAP
+            const position: Position = { line: 2, character: 6 }; // On 'ProcessOrder' in MAP
             
             const result = await definitionProvider.provideDefinition(document, position);
             
             assert.ok(result, 'Should find PROCEDURE implementation');
-            assert.strictEqual(getLocationLine(result), 4, 'Should jump to PROCEDURE line');
+            assert.strictEqual(getLocationLine(result), 5, 'Should jump to PROCEDURE line');
         });
 
         test('Should handle MAP with PROCEDURE keyword', async () => {
             const code = `
+PROGRAM
   MAP
     ProcessOrder PROCEDURE(LONG orderId)
   END
@@ -524,16 +533,17 @@ ProcessOrder PROCEDURE(LONG orderId)
   END`.trim();
             
             const document = createDocument(code);
-            const position: Position = { line: 1, character: 6 }; // On 'ProcessOrder'
+            const position: Position = { line: 2, character: 6 }; // On 'ProcessOrder'
             
             const result = await definitionProvider.provideDefinition(document, position);
             
             assert.ok(result, 'Should find implementation');
-            assert.strictEqual(getLocationLine(result), 4, 'Should jump to implementation');
+            assert.strictEqual(getLocationLine(result), 5, 'Should jump to implementation');
         });
 
         test('Should handle MAP with comma syntax', async () => {
             const code = `
+PROGRAM
   MAP
     ProcessOrder,PROCEDURE(LONG orderId)
   END
@@ -543,16 +553,17 @@ ProcessOrder PROCEDURE(LONG orderId)
   END`.trim();
             
             const document = createDocument(code);
-            const position: Position = { line: 1, character: 6 }; // On 'ProcessOrder'
+            const position: Position = { line: 2, character: 6 }; // On 'ProcessOrder'
             
             const result = await definitionProvider.provideDefinition(document, position);
             
             assert.ok(result, 'Should find implementation');
-            assert.strictEqual(getLocationLine(result), 4, 'Should jump to implementation');
+            assert.strictEqual(getLocationLine(result), 5, 'Should jump to implementation');
         });
 
         test('Should handle multi-parameter MAP procedures', async () => {
             const code = `
+PROGRAM
   MAP
     SaveRecord(STRING fileName, LONG recordId, *STRING result)
   END
@@ -562,16 +573,17 @@ SaveRecord PROCEDURE(STRING fileName, LONG recordId, *STRING result)
   END`.trim();
             
             const document = createDocument(code);
-            const position: Position = { line: 1, character: 6 }; // On 'SaveRecord'
+            const position: Position = { line: 2, character: 6 }; // On 'SaveRecord'
             
             const result = await definitionProvider.provideDefinition(document, position);
             
             assert.ok(result, 'Should find implementation');
-            assert.strictEqual(getLocationLine(result), 4, 'Should jump to implementation');
+            assert.strictEqual(getLocationLine(result), 5, 'Should jump to implementation');
         });
 
         test('Should handle multiple MAP blocks', async () => {
             const code = `
+PROGRAM
   MAP
     FirstProc()
   END
@@ -589,20 +601,27 @@ SecondProc PROCEDURE(LONG id)
   END`.trim();
             
             const document = createDocument(code);
-            const position: Position = { line: 5, character: 6 }; // On 'SecondProc' in second MAP
+            const position: Position = { line: 6, character: 6 }; // On 'SecondProc' in second MAP
             
             const result = await definitionProvider.provideDefinition(document, position);
             
             assert.ok(result, 'Should find SecondProc implementation');
-            assert.strictEqual(getLocationLine(result), 12, 'Should jump to SecondProc');
+            assert.strictEqual(getLocationLine(result), 13, 'Should jump to SecondProc');
         });
     });
 
     suite('🚨 Gap Coverage: MAP Procedure Reverse Navigation (Implementation → Declaration)', () => {
         const definitionProvider = new DefinitionProvider();
+        const tokenCache = TokenCache.getInstance();
+
+        teardown(() => {
+            // Clear cached test documents to ensure fresh tokenization
+            tokenCache.clearTokens('test://test.clw');
+        });
 
         test('F12 on PROCEDURE implementation should jump to MAP declaration', async () => {
             const code = `
+PROGRAM
   MAP
     ProcessOrder(LONG orderId)
   END
@@ -613,16 +632,17 @@ ProcessOrder PROCEDURE(LONG orderId)
   END`.trim();
             
             const document = createDocument(code);
-            const position: Position = { line: 4, character: 5 }; // On 'ProcessOrder' in PROCEDURE
+            const position: Position = { line: 5, character: 5 }; // On 'ProcessOrder' in PROCEDURE
             
             const result = await definitionProvider.provideDefinition(document, position);
             
             assert.ok(result, 'Should find MAP declaration');
-            assert.strictEqual(getLocationLine(result), 1, 'Should jump to MAP line');
+            assert.strictEqual(getLocationLine(result), 2, 'Should jump to MAP line');
         });
 
         test('Should prioritize MAP declaration over global procedure', async () => {
             const code = `
+PROGRAM
   MAP
     Utility(STRING text)
   END
@@ -633,16 +653,17 @@ Utility PROCEDURE(STRING text)
   END`.trim();
             
             const document = createDocument(code);
-            const position: Position = { line: 4, character: 3 }; // On 'Utility'
+            const position: Position = { line: 5, character: 3 }; // On 'Utility'
             
             const result = await definitionProvider.provideDefinition(document, position);
             
             assert.ok(result, 'Should find MAP declaration');
-            assert.strictEqual(getLocationLine(result), 1, 'Should prioritize MAP');
+            assert.strictEqual(getLocationLine(result), 2, 'Should prioritize MAP');
         });
 
         test('Should handle cursor on PROCEDURE keyword', async () => {
             const code = `
+PROGRAM
   MAP
     MyProc()
   END
@@ -652,7 +673,7 @@ MyProc PROCEDURE()
   END`.trim();
             
             const document = createDocument(code);
-            const position: Position = { line: 4, character: 10 }; // On 'PROCEDURE' keyword
+            const position: Position = { line: 5, character: 10 }; // On 'PROCEDURE' keyword
             
             const result = await definitionProvider.provideDefinition(document, position);
             
@@ -664,9 +685,16 @@ MyProc PROCEDURE()
 
     suite('🚨 Gap Coverage: MAP Edge Cases', () => {
         const definitionProvider = new DefinitionProvider();
+        const tokenCache = TokenCache.getInstance();
+
+        teardown(() => {
+            // Clear cached test documents to ensure fresh tokenization
+            tokenCache.clearTokens('test://test.clw');
+        });
 
         test('Should handle MAP procedure with return type', async () => {
             const code = `
+PROGRAM
   MAP
     GetValue(),LONG
   END
@@ -677,16 +705,17 @@ GetValue PROCEDURE(),LONG
   END`.trim();
             
             const document = createDocument(code);
-            const position: Position = { line: 1, character: 6 }; // On 'GetValue' in MAP
+            const position: Position = { line: 2, character: 6 }; // On 'GetValue' in MAP
             
             const result = await definitionProvider.provideDefinition(document, position);
             
             assert.ok(result, 'Should find implementation');
-            assert.strictEqual(getLocationLine(result), 4, 'Should jump to implementation');
+            assert.strictEqual(getLocationLine(result), 5, 'Should jump to implementation');
         });
 
         test('Should handle MAP with MODULE declaration', async () => {
             const code = `
+PROGRAM
   MAP
     MODULE('EXTERNAL')
       ExternalProc(LONG id)
@@ -698,7 +727,7 @@ ExternalProc PROCEDURE(LONG id)
   END`.trim();
             
             const document = createDocument(code);
-            const position: Position = { line: 2, character: 8 }; // On 'ExternalProc'
+            const position: Position = { line: 3, character: 8 }; // On 'ExternalProc'
             
             const result = await definitionProvider.provideDefinition(document, position);
             
@@ -708,6 +737,7 @@ ExternalProc PROCEDURE(LONG id)
 
         test('Should handle indented PROCEDURE implementation', async () => {
             const code = `
+PROGRAM
   MAP
     HelperProc(STRING text)
   END
@@ -717,16 +747,17 @@ ExternalProc PROCEDURE(LONG id)
     END`.trim();
             
             const document = createDocument(code);
-            const position: Position = { line: 4, character: 6 }; // On indented 'HelperProc'
+            const position: Position = { line: 5, character: 6 }; // On indented 'HelperProc'
             
             const result = await definitionProvider.provideDefinition(document, position);
             
             assert.ok(result, 'Should handle indented implementation');
-            assert.strictEqual(getLocationLine(result), 1, 'Should jump to MAP');
+            assert.strictEqual(getLocationLine(result), 2, 'Should jump to MAP');
         });
 
         test('Should not confuse MAP procedure with CLASS method', async () => {
             const code = `
+PROGRAM
 MyClass CLASS
 Process PROCEDURE()
   END
@@ -740,12 +771,12 @@ Process PROCEDURE(LONG id)
   END`.trim();
             
             const document = createDocument(code);
-            const position: Position = { line: 8, character: 3 }; // On 'Process' implementation
+            const position: Position = { line: 9, character: 3 }; // On 'Process' implementation
             
             const result = await definitionProvider.provideDefinition(document, position);
             
             assert.ok(result, 'Should find MAP declaration, not CLASS method');
-            assert.strictEqual(getLocationLine(result), 5, 'Should jump to MAP, not CLASS');
+            assert.strictEqual(getLocationLine(result), 6, 'Should jump to MAP, not CLASS');
         });
 
         test('Should handle MAP inside SECTION/ROUTINE', async () => {
@@ -796,6 +827,7 @@ MyWindow WINDOW,AT(0,0,100,100)
 
         teardown(() => {
             // Clear cached test documents to ensure fresh tokenization
+            tokenCache.clearTokens('test://test.clw'); // Default URI used by most tests
             tokenCache.clearTokens('test://test-prioritize.clw');
             tokenCache.clearTokens('test://test-routine-access.clw');
             tokenCache.clearTokens('test://test-member-scope.clw');

@@ -76,7 +76,7 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Number]: /\b[0-9]+(\.[0-9]+)?\b/i,
     [TokenType.Operator]: /[\+\-\*\/\=\>\<\&\|\~]/,
     [TokenType.Delimiter]: /[\(\)\[\]\{\}\,\:\;]/,
-    [TokenType.Label]: /^(?!(?:COMPILE|OMIT|EMBED|SECTION|ENDSECTION|MODULE|MAP|CLASS|FILE|GROUP|QUEUE|VIEW|WINDOW|REPORT|INTERFACE|RECORD|END)\b)[A-Za-z_][A-Za-z0-9_:]*/i,  // Starts at column 0, can include colons, but NOT directive keywords, structure keywords, or END
+    [TokenType.Label]: /^(?!(?:COMPILE|OMIT|EMBED|SECTION|ENDSECTION|MODULE|MAP|CLASS|FILE|GROUP|QUEUE|VIEW|WINDOW|REPORT|INTERFACE|RECORD|PROGRAM|MEMBER|END)\b)[A-Za-z_][A-Za-z0-9_:]*/i,  // Starts at column 0, can include colons, but NOT directive keywords, structure keywords, document keywords, or END
     [TokenType.Variable]: /\b(?!(?:IF|LOOP|CASE|ACCEPT|EXECUTE|BEGIN|FILE|QUEUE|GROUP|RECORD|CLASS|WINDOW|REPORT|MODULE|MAP|VIEW|INTERFACE|END)\b)[A-Za-z_][A-Za-z0-9_]*\b/i,  // Exclude structure keywords to allow them to match Structure type first
     [TokenType.ImplicitVariable]: /\b[A-Za-z_][A-Za-z0-9_]*[$#"]/i,  // ✅ Variables ending with implicit type suffixes
     [TokenType.Function]: /\b[A-Za-z_][A-Za-z0-9_]*(?=\()/i,

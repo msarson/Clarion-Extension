@@ -623,6 +623,7 @@ export class DocumentStructure {
                 
                 // Special handling for MAP structure: look for shorthand procedure declarations
                 if (token.value.toUpperCase() === "MAP") {
+                    logger.info(`🗺️ Found MAP structure at line ${token.line}, calling processShorthandProcedures()`);
                     this.processShorthandProcedures(token);
                 }
             } else {
@@ -642,12 +643,15 @@ export class DocumentStructure {
      * In MAP structures, procedures can be declared without the PROCEDURE keyword
      * Format: ProcedureName(parameters),returnType
      *
-     * In shorthand syntax, the entire declaration is in a single token:
-     * e.g., "Dos2DriverPipe(Long pOpCode, long pClaFCB, long pVarList),long,name(LongName)"
+     * Handles two tokenization patterns:
+     * 1. Single token: "Dos2DriverPipe(Long pOpCode, long pClaFCB, long pVarList)"
+     * 2. Separate tokens: "SaveRecord" followed by "(" token
      */
     private processShorthandProcedures(mapToken: Token): void {
         const mapIndex = this.tokens.indexOf(mapToken);
         if (mapIndex === -1) return;
+        
+        logger.info(`🔍 Processing shorthand procedures in MAP at line ${mapToken.line}`);
         
         // Find the END statement for this MAP
         let endIndex = -1;
@@ -666,7 +670,7 @@ export class DocumentStructure {
                 }
             }
             
-            // Look for tokens that contain an opening parenthesis
+            // Pattern 1: Look for tokens that contain an opening parenthesis in the same token value
             // In shorthand syntax, the procedure name and opening parenthesis are in the same token
             if (token.value.includes("(") && token.value !== "(" && !token.value.toLowerCase().startsWith("module") && ! token.value.startsWith("!")) {
                 // This looks like a shorthand procedure declaration
@@ -682,7 +686,27 @@ export class DocumentStructure {
                 // This ensures it will be displayed correctly in the outline view
                 token.label = procName;
                 
-                logger.info(`📌 Found MAP shorthand procedure: ${procName} at line ${token.line}`);
+                logger.info(`📌 Found MAP shorthand procedure (single token): ${procName} at line ${token.line}`);
+            }
+            // Pattern 2: Check if this token is followed by "(" (separate tokens)
+            else if ((token.type === TokenType.Function || 
+                      token.type === TokenType.Variable || 
+                      token.type === TokenType.Label) &&
+                     i + 1 < this.tokens.length &&
+                     this.tokens[i + 1].value === "(" &&
+                     !token.value.toLowerCase().startsWith("module") &&
+                     !token.value.toLowerCase().startsWith("map") &&
+                     !token.value.startsWith("!")) {
+                // This looks like a shorthand procedure declaration with separate tokens
+                token.subType = TokenType.MapProcedure;
+                token.parent = mapToken;
+                mapToken.children = mapToken.children || [];
+                mapToken.children.push(token);
+                
+                // Set the token's label to the procedure name
+                token.label = token.value;
+                
+                logger.info(`📌 Found MAP shorthand procedure (separate tokens): ${token.value} at line ${token.line}`);
             }
         }
     }

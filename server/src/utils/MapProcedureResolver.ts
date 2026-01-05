@@ -15,7 +15,6 @@ import { SolutionManager } from '../solution/solutionManager';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("MapProcedureResolver");
-logger.setLevel("info"); // Set to info for debugging
 
 export class MapProcedureResolver {
     private scopeAnalyzer: ScopeAnalyzer;
@@ -392,10 +391,11 @@ export class MapProcedureResolver {
             return null;
         }
 
-        // Check if we're inside a PROCEDURE/ROUTINE/PROGRAM block - if so, skip MAP logic
+        // Check if we're inside a PROCEDURE/ROUTINE block - if so, skip MAP logic
         // (we're in actual code, not in a MAP declaration section)
+        // NOTE: Exclude ClarionDocument (PROGRAM/MODULE) since MAP declarations are inside those
         const procedureBlocks = tokens.filter(t =>
-            (t.subType === TokenType.GlobalProcedure || t.type === TokenType.ClarionDocument) &&
+            t.subType === TokenType.GlobalProcedure &&
             t.line < position.line &&
             t.finishesAt !== undefined &&
             t.finishesAt >= position.line
@@ -411,9 +411,15 @@ export class MapProcedureResolver {
         // Use provided structure or create new one (for tests)
         const docStructure = documentStructure || new DocumentStructure(tokens);
         
+        // If we created a new DocumentStructure, ensure it's processed
+        if (!documentStructure) {
+            docStructure.process();
+        }
+        
         // Special case: If the document is an INCLUDE file (has MODULE at top level without MAP)
         // and position is on a procedure declaration, find implementation via MODULE
-        const isIncludeFile = !docStructure.isInMapBlock(position.line);
+        const isInMap = docStructure.isInMapBlock(position.line);
+        const isIncludeFile = !isInMap;
         
         if (isIncludeFile) {
             logger.info(`Position ${position.line} is not inside a MAP block - checking if this is an INCLUDE file`);

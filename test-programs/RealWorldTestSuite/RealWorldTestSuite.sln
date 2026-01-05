@@ -1,8 +1,8 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 2012
 # Clarion 2.1.0.2447
-Project("{12B76EC0-1D7B-4FA7-A7D0-C524288B48A1}") = "ScopeTestSuite", "ScopeTestSuite.cwproj", "{8B8D458E-C672-4EA6-B6DC-B9645FAE5E5B}"
+Project("{12B76EC0-1D7B-4FA7-A7D0-C524288B48A1}") = "CrossFileScope", "CrossFileScope.cwproj", "{8B8D458E-C672-4EA6-B6DC-B9645FAE5E5B}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

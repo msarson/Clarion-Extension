@@ -204,6 +204,7 @@ export class ClarionTokenizer {
                             upperSubstring.startsWith('GROUP') ||
                             upperSubstring.startsWith('RECORD') ||
                             upperSubstring.startsWith('CLASS') ||
+                            upperSubstring.startsWith('INTERFACE') ||
                             upperSubstring.startsWith('WINDOW') ||
                             upperSubstring.startsWith('REPORT') ||
                             upperSubstring.startsWith('MODULE') ||
