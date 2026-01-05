@@ -270,7 +270,7 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             
             // Find GlobalCounter in utils.clw
             const globalCounterToken = utilsTokens.find(t => 
-                t.value === 'GlobalCounter' && t.line > 30); // Should be around line 36
+                t.value === 'GlobalCounter' && t.line > 45); // Should be around line 50 (0-based)
             
             assert.ok(globalCounterToken, 'Should find GlobalCounter token in utils.clw');
             console.log(`   📍 Found GlobalCounter in utils.clw at line ${globalCounterToken!.line}`);
@@ -316,16 +316,16 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             
             const tokens = tokenCache.getTokens(mainDoc);
             
-            // Find IncrementCounter call (should be around line 76-77 in 1-based, 75-76 in 0-based)
+            // Find IncrementCounter call (should be around line 94 in 1-based, 93 in 0-based)
             const incrementTokenCall = tokens.find(t => 
-                t.value === 'IncrementCounter' && t.line > 70);
+                t.value === 'IncrementCounter' && t.line > 85);
             
             assert.ok(incrementTokenCall, 'Should find IncrementCounter call in CODE section');
             console.log(`   📍 Found IncrementCounter call at line ${incrementTokenCall!.line} (0-based) = line ${incrementTokenCall!.line + 1} (1-based shown in VSCode)`);
             
             // Also find the MAP declaration for comparison
             const incrementTokenMap = tokens.find(t => 
-                t.value === 'IncrementCounter' && t.line >= 60 && t.line <= 65);
+                t.value === 'IncrementCounter' && t.line >= 73 && t.line <= 80);
             if (incrementTokenMap) {
                 console.log(`   📍 Found IncrementCounter MAP declaration at line ${incrementTokenMap.line} (0-based) = line ${incrementTokenMap.line + 1} (1-based)`);
             }
@@ -345,15 +345,15 @@ suite('Solution-Based Cross-File Scope Tests', () => {
                 // Check if it jumped to MAP declaration or to itself
                 if (defLine === incrementTokenCall!.line) {
                     console.log(`   ⚠️ WARNING: F12 jumped to the call itself, not to MAP declaration!`);
-                    console.log(`   Expected: line 61 (0-based) = line 62 (1-based) in MAP block`);
+                    console.log(`   Expected: line 75 (0-based) = line 76 (1-based) in MAP block`);
                     console.log(`   Got: line ${defLine} (0-based) = line ${defLine + 1} (1-based) - the call site`);
                 } else {
                     console.log(`   ✅ F12 correctly jumped to different line (likely MAP declaration)`);
                 }
                 
-                // Should be in MAP block (line 61 in 0-based = line 62 in 1-based)
-                assert.ok(defLine >= 60 && defLine <= 65, 
-                    `F12 should jump to MAP declaration (expected line 60-65 0-based, got ${defLine})`);
+                // Should be in MAP block (line 73-80 in 0-based = line 74-81 in 1-based)
+                assert.ok(defLine >= 73 && defLine <= 80, 
+                    `F12 should jump to MAP declaration (expected line 73-80 0-based, got ${defLine})`);
             } else {
                 console.log(`   ⚠️ F12 found no definition`);
             }
@@ -374,7 +374,7 @@ suite('Solution-Based Cross-File Scope Tests', () => {
                 assert.ok(implUri.toLowerCase().includes('utils.clw'), 
                     'Ctrl+F12 should navigate to implementation in utils.clw');
                     
-                // Implementation should be around line 34 (0-based) = line 35 (1-based)
+                // Implementation should be around line 46 (0-based) = line 47 (1-based)
                 console.log(`   ✅ Ctrl+F12 correctly navigated to implementation in MEMBER file`);
             } else {
                 console.log(`   ❌ Ctrl+F12 found no implementation - ISSUE DETECTED`);
@@ -398,9 +398,9 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             
             const tokens = tokenCache.getTokens(utilsDoc);
             
-            // Find ModuleData declaration (should be around line 32)
+            // Find ModuleData declaration (should be around line 45 in 1-based, 44 in 0-based)
             const moduleDataToken = tokens.find(t => 
-                t.value === 'ModuleData' && t.line > 25 && t.line < 40);
+                t.value === 'ModuleData' && t.line > 40 && t.line < 50);
             
             if (moduleDataToken) {
                 console.log(`   📍 Found ModuleData declaration at line ${moduleDataToken.line}`);
@@ -417,7 +417,7 @@ suite('Solution-Based Cross-File Scope Tests', () => {
     
     suite('TEST Hover Consistency', () => {
         
-        test('Hover on IncrementCounter at MAP declaration (line 62)', async function() {
+        test('Hover on IncrementCounter at MAP declaration (line 76)', async function() {
             this.timeout(10000);
             
             assert.ok(solutionManager, 'Solution manager should be loaded');
@@ -434,9 +434,9 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             
             const tokens = tokenCache.getTokens(mainDoc);
             
-            // Find IncrementCounter in MAP (line 61 0-based = line 62 1-based)
+            // Find IncrementCounter in MAP (line 75 0-based = line 76 1-based)
             const mapToken = tokens.find(t => 
-                t.value === 'IncrementCounter' && t.line >= 60 && t.line <= 65);
+                t.value === 'IncrementCounter' && t.line >= 73 && t.line <= 80);
             
             assert.ok(mapToken, 'Should find IncrementCounter in MAP');
             console.log(`   📍 Testing hover at MAP declaration line ${mapToken!.line} (0-based) = line ${mapToken!.line + 1} (1-based)`);
@@ -481,7 +481,7 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             }
         });
         
-        test('Hover on GlobalHelper at MAP declaration (line 70)', async function() {
+        test('Hover on GlobalHelper at MAP declaration (line 84)', async function() {
             this.timeout(10000);
             
             assert.ok(solutionManager, 'Solution manager should be loaded');
@@ -498,9 +498,9 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             
             const tokens = tokenCache.getTokens(mainDoc);
             
-            // Find GlobalHelper MAP declaration (line 69 0-based = line 70 1-based)
+            // Find GlobalHelper MAP declaration (line 83 0-based = line 84 1-based)
             const mapDeclToken = tokens.find(t => 
-                t.value === 'GlobalHelper' && t.line === 69);
+                t.value === 'GlobalHelper' && t.line === 83);
             
             assert.ok(mapDeclToken, 'Should find GlobalHelper MAP declaration');
             console.log(`   📍 Testing hover at GlobalHelper MAP declaration line ${mapDeclToken!.line} (0-based) = line ${mapDeclToken!.line + 1} (1-based)`);
@@ -539,7 +539,7 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             console.log(`   ✅ PASS: GlobalHelper MAP hover shows implementation correctly`);
         });
         
-        test('Hover on IncrementCounter at implementation (line 35 in utils.clw)', async function() {
+        test('Hover on IncrementCounter at implementation (line 47 in utils.clw)', async function() {
             this.timeout(10000);
             
             assert.ok(solutionManager, 'Solution manager should be loaded');
@@ -556,9 +556,9 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             
             const tokens = tokenCache.getTokens(utilsDoc);
             
-            // Find IncrementCounter implementation (line 34 0-based = line 35 1-based)
+            // Find IncrementCounter implementation (line 46 0-based = line 47 1-based)
             const implToken = tokens.find(t => 
-                t.value === 'IncrementCounter' && t.line >= 30 && t.line <= 40);
+                t.value === 'IncrementCounter' && t.line >= 44 && t.line <= 50);
             
             assert.ok(implToken, 'Should find IncrementCounter implementation');
             console.log(`   📍 Testing hover at implementation line ${implToken!.line} (0-based) = line ${implToken!.line + 1} (1-based)`);
@@ -603,7 +603,7 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             }
         });
         
-        test('Hover on IncrementCounter at call site (line 77 in main.clw)', async function() {
+        test('Hover on IncrementCounter at call site (line 94 in main.clw)', async function() {
             this.timeout(10000);
             
             assert.ok(solutionManager, 'Solution manager should be loaded');
@@ -620,9 +620,9 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             
             const tokens = tokenCache.getTokens(mainDoc);
             
-            // Find IncrementCounter call (line 76 0-based = line 77 1-based)
+            // Find IncrementCounter call (line 93 0-based = line 94 1-based)
             const callToken = tokens.find(t => 
-                t.value === 'IncrementCounter' && t.line > 70);
+                t.value === 'IncrementCounter' && t.line > 85);
             
             assert.ok(callToken, 'Should find IncrementCounter call');
             console.log(`   📍 Testing hover at call site line ${callToken!.line} (0-based) = line ${callToken!.line + 1} (1-based)`);
@@ -692,7 +692,7 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             }
         });
         
-        test('Hover on GlobalCounter in utils.clw (line 37)', async function() {
+        test('Hover on GlobalCounter in utils.clw (line 51)', async function() {
             this.timeout(10000);
             
             assert.ok(solutionManager, 'Solution manager should be loaded');
@@ -709,9 +709,9 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             
             const tokens = tokenCache.getTokens(utilsDoc);
             
-            // Find GlobalCounter usage on line 36 (0-based) = line 37 (1-based)
+            // Find GlobalCounter usage on line 50 (0-based) = line 51 (1-based)
             const globalCounterToken = tokens.find(t => 
-                t.value === 'GlobalCounter' && t.line === 36);
+                t.value === 'GlobalCounter' && t.line === 50);
             
             assert.ok(globalCounterToken, 'Should find GlobalCounter token');
             console.log(`   📍 Testing hover on GlobalCounter at line ${globalCounterToken!.line} (0-based) = line ${globalCounterToken!.line + 1} (1-based)`);
@@ -750,7 +750,7 @@ suite('Solution-Based Cross-File Scope Tests', () => {
     
     suite('Comprehensive Hover Tests', () => {
         
-        test('TEST 1: Hover on GlobalCounter in utils.clw line 37 (usage in procedure)', async function() {
+        test('TEST 1: Hover on GlobalCounter in utils.clw line 51 (usage in procedure)', async function() {
             this.timeout(10000);
             
             const project = solutionManager!.solution.projects[0];
@@ -768,10 +768,10 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             assert.ok(hoverText.includes('Global Variable'), 'Should identify as global variable');
             assert.ok(hoverText.includes('🌍'), 'Should show global scope icon');
             assert.ok(hoverText.includes('main.clw'), 'Should show declared in main.clw');
-            assert.ok(hoverText.includes('line 73'), 'Should show line number');
+            assert.ok(hoverText.includes('line 87'), 'Should show line number');
         });
         
-        test('TEST 2: Hover on IncrementCounter at call site in main.clw line 77', async function() {
+        test('TEST 2: Hover on IncrementCounter at call site in main.clw line 94', async function() {
             this.timeout(10000);
             
             const project = solutionManager!.solution.projects[0];
@@ -794,7 +794,7 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             assert.ok(hoverText.includes('Ctrl+F12'), 'Should mention Ctrl+F12');
         });
         
-        test('TEST 3: Hover on GetCounter at call site in main.clw line 79', async function() {
+        test('TEST 3: Hover on GetCounter at call site in main.clw line 95', async function() {
             this.timeout(10000);
             
             const project = solutionManager!.solution.projects[0];
@@ -814,7 +814,7 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             assert.ok(hoverText.includes('📦'), 'Should show module scope icon');
         });
         
-        test('TEST 4: Hover on ModuleData in utils.clw line 38 (module-local variable)', async function() {
+        test('TEST 4: Hover on ModuleData in utils.clw line 52 (module-local variable)', async function() {
             this.timeout(10000);
             
             const project = solutionManager!.solution.projects[0];
@@ -834,7 +834,7 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             assert.ok(hoverText.includes('utils.clw'), 'Should show declared in utils.clw');
         });
         
-        test('TEST 5: Hover on GlobalHelper at MAP declaration in main.clw line 70', async function() {
+        test('TEST 5: Hover on GlobalHelper at MAP declaration in main.clw line 84', async function() {
             this.timeout(10000);
             
             const project = solutionManager!.solution.projects[0];
@@ -852,10 +852,10 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             assert.ok(hoverText.includes('GlobalHelper'), 'Should show procedure name');
             assert.ok(hoverText.includes('🌍'), 'Should show global scope icon');
             assert.ok(hoverText.includes('Implemented in'), 'Should show implementation location');
-            assert.ok(hoverText.includes('line 89'), 'Should show correct implementation line');
+            assert.ok(hoverText.includes('line 105'), 'Should show correct implementation line');
         });
         
-        test('TEST 5b: Hover on GlobalHelper at implementation in main.clw line 89', async function() {
+        test('TEST 5b: Hover on GlobalHelper at implementation in main.clw line 105', async function() {
             this.timeout(10000);
             
             const project = solutionManager!.solution.projects[0];
@@ -873,11 +873,11 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             assert.ok(hoverText.includes('GlobalHelper'), 'Should show procedure name');
             assert.ok(hoverText.includes('🌍'), 'Should show global scope icon');
             assert.ok(hoverText.includes('Declared in'), 'Should show declaration location');
-            assert.ok(hoverText.includes('line 70'), 'Should show correct declaration line');
+            assert.ok(hoverText.includes('line 84'), 'Should show correct declaration line');
             assert.ok(!hoverText.includes('Implemented in'), 'Should NOT show implementation (we are at it)');
         });
         
-        test('TEST 6: Hover on GlobalHelper call in utils.clw line 39', async function() {
+        test('TEST 6: Hover on GlobalHelper call in utils.clw line 53', async function() {
             this.timeout(10000);
             
             const project = solutionManager!.solution.projects[0];
@@ -890,9 +890,9 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             
             const tokens = tokenCache.getTokens(utilsDoc);
             
-            // Find GlobalHelper token on line 38 (0-based) = line 39 (1-based)
+            // Find GlobalHelper token on line 52 (0-based) = line 53 (1-based)
             const globalHelperToken = tokens.find(t => 
-                t.value === 'GlobalHelper' && t.line === 38);
+                t.value === 'GlobalHelper' && t.line === 52);
             
             assert.ok(globalHelperToken, 'Should find GlobalHelper token');
             console.log(`   📍 Testing hover on GlobalHelper at line ${globalHelperToken!.line} (0-based) = line ${globalHelperToken!.line + 1} (1-based), char ${globalHelperToken!.start}`);
@@ -916,7 +916,7 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             assert.ok(hoverText.includes('main.clw'), 'Should reference main.clw');
         });
         
-        test('Hover on IncrementCounter at MAP declaration in main.clw line 62', async function() {
+        test('Hover on IncrementCounter at MAP declaration in main.clw line 76', async function() {
             this.timeout(10000);
             
             const project = solutionManager!.solution.projects[0];
@@ -938,7 +938,7 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             assert.ok(!hoverText.includes('Declared in'), 'Should NOT show declaration (we are at it)');
         });
         
-        test('Hover on IncrementCounter at implementation in utils.clw line 35', async function() {
+        test('Hover on IncrementCounter at implementation in utils.clw line 47', async function() {
             this.timeout(10000);
             
             const project = solutionManager!.solution.projects[0];
@@ -960,7 +960,7 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             assert.ok(!hoverText.includes('Implemented in'), 'Should NOT show implementation (we are at it)');
         });
         
-        test('Hover on GlobalCounter at declaration in main.clw line 73', async function() {
+        test('Hover on GlobalCounter at declaration in main.clw line 87', async function() {
             this.timeout(10000);
             
             const project = solutionManager!.solution.projects[0];
