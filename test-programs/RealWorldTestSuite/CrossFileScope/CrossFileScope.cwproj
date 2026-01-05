@@ -5,9 +5,9 @@
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">Win32</Platform>
     <OutputType>Exe</OutputType>
-    <RootNamespace>ScopeTestSuite</RootNamespace>
-    <AssemblyName>ScopeTestSuite</AssemblyName>
-    <OutputName>ScopeTestSuite</OutputName>
+    <RootNamespace>CrossFileScope</RootNamespace>
+    <AssemblyName>CrossFileScope</AssemblyName>
+    <OutputName>CrossFileScope</OutputName>
     <DefineConstants>StringTheoryLinkMode=&gt;1%3bStringTheoryDLLMode=&gt;0%3b</DefineConstants>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">

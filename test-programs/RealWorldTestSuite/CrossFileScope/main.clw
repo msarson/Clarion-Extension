@@ -2,6 +2,17 @@
   INCLUDE('StringTheory.inc'),ONCE
 
 !═══════════════════════════════════════════════════════════════════════
+! ⚠️  DO NOT MODIFY THIS FILE WITHOUT UPDATING TESTS ⚠️
+!═══════════════════════════════════════════════════════════════════════
+!
+! This file is used by automated tests in:
+!   - server/src/test/SolutionBased.CrossFileScope.test.ts
+!   - server/src/test/CrossFileScope.test.ts
+!
+! Changes to line numbers or structure will break tests!
+! If you must change this file, update the corresponding test expectations.
+!
+!═══════════════════════════════════════════════════════════════════════
 ! SCOPE TEST SUITE - CROSS-FILE SCOPE TESTING
 !═══════════════════════════════════════════════════════════════════════
 !

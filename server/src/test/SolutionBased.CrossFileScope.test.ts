@@ -45,7 +45,7 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             // __dirname in compiled JS is out/server/src/test
             // We need to go up to project root, then into test-programs
             const testSolutionPath = path.resolve(__dirname, 
-                '..', '..', '..', '..', 'test-programs', 'scope-test-suite', 'ScopeTestSuite.sln');
+                '..', '..', '..', '..', 'test-programs', 'RealWorldTestSuite', 'RealWorldTestSuite.sln');
             
             console.log(`📂 Test solution path: ${testSolutionPath}`);
             

@@ -267,10 +267,10 @@ CODE
     });
 
     suite('TEST 7: MAP INCLUDE - Module-Local Procedure Declarations', () => {
-        // Use real files from test-programs/scope-test-suite
+        // Use real files from test-programs/RealWorldTestSuite/CrossFileScope
         // __dirname is out/server/src/test, need to go up to project root
         const projectRoot = path.join(__dirname, '../../../../');
-        const testSuitePath = path.join(projectRoot, 'test-programs/scope-test-suite');
+        const testSuitePath = path.join(projectRoot, 'test-programs/RealWorldTestSuite/CrossFileScope');
         const utilsPath = path.join(testSuitePath, 'utils.clw');
         const startprocIncPath = path.join(testSuitePath, 'StartProc.inc');
 

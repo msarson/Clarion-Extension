@@ -8,7 +8,7 @@ import { serverSettings } from '../serverSettings';
 /**
  * Test suite for ClassDefinitionIndexer
  * 
- * This test uses the real Clarion library files and the scope-test-suite solution
+ * This test uses the real Clarion library files and the RealWorldTestSuite solution
  * to test the class definition indexer functionality.
  */
 suite('ClassDefinitionIndexer Tests', () => {
@@ -41,7 +41,7 @@ suite('ClassDefinitionIndexer Tests', () => {
             
             // Load the test solution
             const testSolutionPath = path.resolve(__dirname, 
-                '..', '..', '..', '..', 'test-programs', 'scope-test-suite', 'ScopeTestSuite.sln');
+                '..', '..', '..', '..', 'test-programs', 'RealWorldTestSuite', 'RealWorldTestSuite.sln');
             
             console.log(`📂 Test solution path: ${testSolutionPath}`);
             
