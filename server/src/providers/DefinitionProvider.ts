@@ -129,12 +129,28 @@ export class DefinitionProvider {
                 // First, try to find MAP declaration in current file
                 const mapDecl = this.mapResolver.findMapDeclaration(word, tokens, document, line);
                 
-                // Check if we're already AT the MAP declaration - if so, don't navigate to itself
+                // Check if we're already AT the MAP declaration - if so, jump to implementation instead
                 if (mapDecl && 
                     mapDecl.uri === document.uri && 
                     mapDecl.range.start.line === position.line) {
-                    logger.info(`❌ Already at MAP declaration for ${word} - returning null to prevent self-navigation`);
-                    return null;
+                    logger.info(`📍 Already at MAP declaration for ${word} - finding implementation instead`);
+                    
+                    // Navigate to implementation (like Ctrl+F12 would do)
+                    const implLocation = await this.mapResolver.findProcedureImplementation(
+                        word,
+                        tokens,
+                        document,
+                        position,
+                        line // Pass declaration signature for overload matching
+                    );
+                    
+                    if (implLocation) {
+                        logger.info(`✅ Found implementation at line ${implLocation.range.start.line}`);
+                        return implLocation;
+                    } else {
+                        logger.info(`❌ No implementation found for MAP declaration: ${word}`);
+                        return null;
+                    }
                 }
                 
                 if (mapDecl) {
