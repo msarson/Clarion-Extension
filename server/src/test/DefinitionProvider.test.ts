@@ -492,6 +492,12 @@ LocalToRoutine LONG
 
     suite('🚨 Gap Coverage: MAP Procedure Forward Navigation (Declaration → Implementation)', () => {
         const definitionProvider = new DefinitionProvider();
+        const tokenCache = TokenCache.getInstance();
+
+        teardown(() => {
+            // Clear cached test documents to ensure fresh tokenization
+            tokenCache.clearTokens('test://test.clw');
+        });
 
         test('F12 on MAP declaration should jump to PROCEDURE implementation', async () => {
             const code = `
@@ -605,6 +611,12 @@ SecondProc PROCEDURE(LONG id)
 
     suite('🚨 Gap Coverage: MAP Procedure Reverse Navigation (Implementation → Declaration)', () => {
         const definitionProvider = new DefinitionProvider();
+        const tokenCache = TokenCache.getInstance();
+
+        teardown(() => {
+            // Clear cached test documents to ensure fresh tokenization
+            tokenCache.clearTokens('test://test.clw');
+        });
 
         test('F12 on PROCEDURE implementation should jump to MAP declaration', async () => {
             const code = `
@@ -672,6 +684,12 @@ MyProc PROCEDURE()
 
     suite('🚨 Gap Coverage: MAP Edge Cases', () => {
         const definitionProvider = new DefinitionProvider();
+        const tokenCache = TokenCache.getInstance();
+
+        teardown(() => {
+            // Clear cached test documents to ensure fresh tokenization
+            tokenCache.clearTokens('test://test.clw');
+        });
 
         test('Should handle MAP procedure with return type', async () => {
             const code = `

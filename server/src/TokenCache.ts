@@ -468,6 +468,13 @@ export class TokenCache {
         });
         const mergeTime = performance.now() - mergeStart;
         
+        // Process tokens through DocumentStructure to set subtypes (MapProcedure, etc.)
+        // This modifies tokens in-place - must be done BEFORE caching
+        const processStart = performance.now();
+        const structure = new DocumentStructure(mergedTokens);
+        structure.process();
+        const processTime = performance.now() - processStart;
+        
         // Update cache
         const cacheStart = performance.now();
         const lineTokens = this.buildLineTokenMap(document, mergedTokens);
@@ -496,6 +503,7 @@ export class TokenCache {
             'tokenize_ms': tokenizeTime.toFixed(2),
             'adjust_ms': adjustTime.toFixed(2),
             'merge_ms': mergeTime.toFixed(2),
+            'process_ms': processTime.toFixed(2),
             'cache_ms': cacheTime.toFixed(2)
         });
         

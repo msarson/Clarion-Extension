@@ -15,7 +15,6 @@ import { SolutionManager } from '../solution/solutionManager';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("MapProcedureResolver");
-logger.setLevel("info"); // Set to info for debugging
 
 export class MapProcedureResolver {
     private scopeAnalyzer: ScopeAnalyzer;
