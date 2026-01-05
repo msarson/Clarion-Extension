@@ -153,10 +153,13 @@ suite('ClarionTokenizer Tests', () => {
 
     test('Should still recognize actual keywords when not qualified', () => {
         const code = `
-   case myVar
-   of 1
-      record:field = 5
-   end`;
+TestProc PROCEDURE()
+  CODE
+  case myVar
+  of 1
+    record:field = 5
+  end
+  RETURN`;
         const tokenizer = new ClarionTokenizer(code);
         const tokens = tokenizer.tokenize();
         
