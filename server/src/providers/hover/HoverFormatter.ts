@@ -367,17 +367,30 @@ export class HoverFormatter {
                     // Check file type for global vs module
                     const checkLocation = procImpl || mapDecl;
                     if (checkLocation) {
-                        const uri = decodeURIComponent(checkLocation.uri.replace('file:///', ''));
-                        const content = fs.readFileSync(uri, 'utf-8');
-                        const lines = content.split('\n');
-                        const firstNonCommentLine = lines.find(l => l.trim() && !l.trim().startsWith('!'));
+                        let content: string;
                         
-                        if (firstNonCommentLine) {
-                            const trimmed = firstNonCommentLine.trim().toUpperCase();
-                            if (trimmed.startsWith('PROGRAM')) {
-                                header = `**${procName}** 🌍 Global Procedure\n`;
-                            } else if (trimmed.startsWith('MEMBER')) {
-                                header = `**${procName}** 📦 Module Procedure\n`;
+                        // Use current document if same URI, otherwise read from disk
+                        if (checkLocation.uri === currentDocument.uri) {
+                            content = currentDocument.getText();
+                        } else if (checkLocation.uri.startsWith('test://')) {
+                            // Skip for test URIs
+                            content = '';
+                        } else {
+                            const uri = decodeURIComponent(checkLocation.uri.replace('file:///', ''));
+                            content = fs.readFileSync(uri, 'utf-8');
+                        }
+                        
+                        if (content) {
+                            const lines = content.split('\n');
+                            const firstNonCommentLine = lines.find(l => l.trim() && !l.trim().startsWith('!'));
+                            
+                            if (firstNonCommentLine) {
+                                const trimmed = firstNonCommentLine.trim().toUpperCase();
+                                if (trimmed.startsWith('PROGRAM')) {
+                                    header = `**${procName}** 🌍 Global Procedure\n`;
+                                } else if (trimmed.startsWith('MEMBER')) {
+                                    header = `**${procName}** 📦 Module Procedure\n`;
+                                }
                             }
                         }
                     }
@@ -393,14 +406,34 @@ export class HoverFormatter {
         logger.info(`formatProcedure: About to check MAP declaration, mapDecl=${!!mapDecl}, isAtMapDeclaration=${isAtMapDeclaration}`);
         if (mapDecl && !isAtMapDeclaration) {
             try {
-                const mapUri = decodeURIComponent(mapDecl.uri.replace('file:///', ''));
-                const mapContent = fs.readFileSync(mapUri, 'utf-8');
+                // Check if MAP is in current document or if we need to read from disk
+                const isSameDocument = mapDecl.uri === currentDocument.uri;
+                let mapContent: string;
+                let mapUri: string;
+                
+                if (isSameDocument) {
+                    // Use current document content
+                    mapContent = currentDocument.getText();
+                    mapUri = currentDocument.uri;
+                } else if (mapDecl.uri.startsWith('test://')) {
+                    // Cannot read test:// URIs from filesystem - skip
+                    logger.info(`formatProcedure: Skipping test:// URI MAP preview`);
+                    throw new Error('Cannot read test:// URI from filesystem');
+                } else {
+                    // Read from filesystem
+                    mapUri = decodeURIComponent(mapDecl.uri.replace('file:///', ''));
+                    mapContent = fs.readFileSync(mapUri, 'utf-8');
+                }
+                
                 const mapLines = mapContent.split('\n');
                 const mapLine = mapLines[mapDecl.range.start.line];
                 
                 if (mapLine) {
                     const trimmedMapLine = mapLine.trim();
-                    const fileName = path.basename(mapUri);
+                    // Extract filename from URI (handle both file:// and test:// URIs)
+                    const fileName = mapUri.includes('://') 
+                        ? mapUri.split('/').pop() || 'unknown'
+                        : path.basename(mapUri);
                     const lineNumber = mapDecl.range.start.line + 1;
                     parts.push(`**Declared in** \`${fileName}\` @ line ${lineNumber}:\n\`\`\`clarion\n${trimmedMapLine}\n\`\`\``);
                 }
@@ -413,15 +446,36 @@ export class HoverFormatter {
         logger.info(`formatProcedure: About to check implementation, procImpl=${!!procImpl}, isAtImplementation=${isAtImplementation}`);
         if (procImpl && !isAtImplementation) {
             try {
-                const implUri = decodeURIComponent(procImpl.uri.replace('file:///', ''));
-                logger.info(`formatProcedure: Reading implementation from ${implUri}`);
-                const implContent = fs.readFileSync(implUri, 'utf-8');
+                // Check if implementation is in current document or if we need to read from disk
+                const isSameDocument = procImpl.uri === currentDocument.uri;
+                let implContent: string;
+                let implUri: string;
+                
+                if (isSameDocument) {
+                    // Use current document content
+                    implContent = currentDocument.getText();
+                    implUri = currentDocument.uri;
+                    logger.info(`formatProcedure: Using current document content`);
+                } else if (procImpl.uri.startsWith('test://')) {
+                    // Cannot read test:// URIs from filesystem - skip implementation preview
+                    logger.info(`formatProcedure: Skipping test:// URI implementation preview`);
+                    throw new Error('Cannot read test:// URI from filesystem');
+                } else {
+                    // Read from filesystem
+                    implUri = decodeURIComponent(procImpl.uri.replace('file:///', ''));
+                    logger.info(`formatProcedure: Reading implementation from ${implUri}`);
+                    implContent = fs.readFileSync(implUri, 'utf-8');
+                }
+                
                 const implLines = implContent.split('\n');
                 const startLine = procImpl.range.start.line;
                 
                 logger.info(`formatProcedure: Implementation starts at line ${startLine}`);
                 
-                const fileName = path.basename(implUri);
+                // Extract filename from URI (handle both file:// and test:// URIs)
+                const fileName = implUri.includes('://') 
+                    ? implUri.split('/').pop() || 'unknown'
+                    : path.basename(implUri);
                 const lineNumber = startLine + 1;
                 
                 const maxLines = 15;

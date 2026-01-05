@@ -198,7 +198,8 @@ ProcessData ROUTINE
             const scope = TokenHelper.getInnermostScopeAtLine(tokens, 3);
             
             assert.ok(scope, 'Should find scope');
-            assert.ok(scope!.value.toUpperCase().includes('ROUTINE'));
+            assert.strictEqual(scope!.subType, TokenType.Routine, 'Should be a routine scope');
+            assert.strictEqual(scope!.label?.toUpperCase(), 'PROCESSDATA', 'Should be ProcessData');
         });
     });
 

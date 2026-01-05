@@ -17,11 +17,12 @@ export class SymbolDefinitionResolver {
     private symbolProvider = new ClarionDocumentSymbolProvider();
 
     /**
-     * Finds the definition of a label in the current document
-     * Handles prefixed labels (e.g., LOC:SomeField) with full validation logic
+     * Finds ALL label definitions matching the word (no scope filtering)
+     * Returns all candidates - caller should filter by scope using ScopeAnalyzer
+     * Handles prefixed labels (e.g., LOC:SomeField) with validation logic
      */
-    public findLabelDefinition(word: string, document: TextDocument, position: Position, tokens: Token[]): Location | null {
-        logger.info(`Looking for label definition: ${word}`);
+    public findAllLabelCandidates(word: string, document: TextDocument, tokens: Token[]): Location[] {
+        logger.info(`Finding all label candidates for: ${word}`);
 
         // Check if the word contains a colon (prefix notation like LOC:SomeField)
         // or a dot (structure field notation like MyGroup.MyVar)
@@ -42,7 +43,7 @@ export class SymbolDefinitionResolver {
             logger.info(`Detected dot notation label reference: ${word}, searching for field: ${searchWord}`);
         }
 
-        // Look for a label token that matches the word (labels are in column 1)
+        // Look for ALL label tokens that match the word (labels are at column 0)
         // IMPORTANT: Search for both the extracted field name AND the full word
         // This handles cases like LOC:SMTPbccAddress where the colon is part of the variable name
         const labelTokens = tokens.filter(token =>
@@ -52,119 +53,70 @@ export class SymbolDefinitionResolver {
             token.start === 0
         );
 
-        if (labelTokens.length > 0) {
-            logger.info(`Found ${labelTokens.length} label tokens for ${searchWord}`);
-
-            // Find the current scope (procedure, routine, etc.)
-            const currentLine = position.line;
-            const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, currentLine);
-
-
-            // If we found a scope, first look for labels within that scope
-            if (currentScope) {
-                logger.info(`Current scope: ${currentScope.value} (${currentScope.line}-${currentScope.finishesAt})`);
-
-                // Find labels in the current scope
-                const scopedLabels = labelTokens.filter(token =>
-                    token.line >= currentScope!.line &&
-                    (currentScope!.finishesAt === undefined || token.line <= currentScope!.finishesAt)
-                );
-
-                if (scopedLabels.length > 0) {
-                    logger.info(`Found ${scopedLabels.length} labels in current scope`);
-                    
-                    // Iterate through all scoped labels to find one that passes validation
-                    for (const token of scopedLabels) {
-                        // CRITICAL FIX: Check if this is a structure field that requires a prefix
-                        // Get symbol information to check _possibleReferences
-                        const symbols = this.symbolProvider.provideDocumentSymbols(tokens, document.uri);
-                        const symbol = this.findSymbolAtLine(symbols, token.line, searchWord);
-                        
-                        if (symbol && (symbol as any)._possibleReferences) {
-                            const possibleRefs = (symbol as any)._possibleReferences as string[];
-                            logger.info(`PREFIX-VALIDATION-LABEL: Token "${token.value}" at line ${token.line} has possible references: ${possibleRefs.join(', ')}`);
-                            
-                            // Check if the search word matches any of the possible references (case-insensitive)
-                            const matchesReference = possibleRefs.some(ref =>
-                                ref.toUpperCase() === word.toUpperCase()
-                            );
-                            
-                            // Explicitly check if trying to access with unprefixed name - REJECT
-                            // Compare the token value against searchWord (not word)
-                            const isUnprefixedMatch = token.value.toUpperCase() === searchWord.toUpperCase();
-                            
-                            if (!matchesReference || (isUnprefixedMatch && !hasPrefix)) {
-                                if (isUnprefixedMatch && !hasPrefix) {
-                                    logger.info(`❌ PREFIX-REJECT-LABEL: Cannot access structure field "${token.value}" with unprefixed name - must use ${possibleRefs.join(' or ')}`);
-                                } else {
-                                    logger.info(`❌ PREFIX-VALIDATION-LABEL: Search word "${word}" not in possible references - skipping this structure field`);
-                                }
-                                // Skip this label and continue checking others
-                                continue;
-                            } else {
-                                logger.info(`✅ PREFIX-VALIDATION-LABEL: Search word "${word}" matches a valid reference`);
-                            }
-                        }
-
-                        // This label passed validation (or doesn't have _possibleReferences)
-                        // Return the location of the label definition
-                        logger.info(`Returning label at line ${token.line}`);
-                        return Location.create(document.uri, {
-                            start: { line: token.line, character: 0 },
-                            end: { line: token.line, character: token.value.length }
-                        });
-                    }
-                    
-                    // If we get here, all scoped labels failed validation
-                    logger.info(`All ${scopedLabels.length} scoped labels failed prefix validation`);
-                }
-            }
-
-            // If no scoped labels were found or all failed validation, check all labels
-            logger.info(`Checking all ${labelTokens.length} label tokens for non-structure-field matches`);
-            const symbolsForFallback = this.symbolProvider.provideDocumentSymbols(tokens, document.uri);
-            
-            for (const token of labelTokens) {
-                // CRITICAL FIX: Check if this is a structure field that requires a prefix
-                // Get symbol information to check _possibleReferences
-                const symbol = this.findSymbolAtLine(symbolsForFallback, token.line, searchWord);
-                
-                if (symbol && (symbol as any)._possibleReferences) {
-                    const possibleRefs = (symbol as any)._possibleReferences as string[];
-                    logger.info(`PREFIX-VALIDATION-LABEL-FALLBACK: Token "${token.value}" at line ${token.line} has possible references: ${possibleRefs.join(', ')}`);
-                    
-                    // Check if the search word matches any of the possible references (case-insensitive)
-                    const matchesReference = possibleRefs.some(ref =>
-                        ref.toUpperCase() === word.toUpperCase()
-                    );
-                    
-                    // Explicitly check if trying to access with unprefixed name - REJECT
-                    const isUnprefixedMatch = token.value.toUpperCase() === word.toUpperCase();
-                    
-                    if (!matchesReference || (isUnprefixedMatch && !hasPrefix)) {
-                        if (isUnprefixedMatch && !hasPrefix) {
-                            logger.info(`❌ PREFIX-REJECT-LABEL-FALLBACK: Cannot access structure field "${token.value}" with unprefixed name - must use ${possibleRefs.join(' or ')}`);
-                        } else {
-                            logger.info(`❌ PREFIX-VALIDATION-LABEL-FALLBACK: Search word "${word}" not in possible references - skipping this structure field`);
-                        }
-                        // Skip this label and continue checking others
-                        continue;
-                    } else {
-                        logger.info(`✅ PREFIX-VALIDATION-LABEL-FALLBACK: Search word "${word}" matches a valid reference`);
-                    }
-                }
-
-                // This label passed validation (or doesn't have _possibleReferences)
-                // Return the location of the label definition
-                logger.info(`Returning label at line ${token.line}`);
-                return Location.create(document.uri, {
-                    start: { line: token.line, character: 0 },
-                    end: { line: token.line, character: token.value.length }
-                });
-            }
+        if (labelTokens.length === 0) {
+            logger.info(`No label tokens found for ${searchWord}`);
+            return [];
         }
 
-        return null;
+        logger.info(`Found ${labelTokens.length} label tokens for ${searchWord}`);
+        const candidates: Location[] = [];
+        const symbols = this.symbolProvider.provideDocumentSymbols(tokens, document.uri);
+
+        // Check each label token for prefix validation
+        for (const token of labelTokens) {
+            // Check if this is a structure field that requires a prefix
+            const symbol = this.findSymbolAtLine(symbols, token.line, searchWord);
+            
+            if (symbol && (symbol as any)._possibleReferences) {
+                const possibleRefs = (symbol as any)._possibleReferences as string[];
+                logger.info(`PREFIX-VALIDATION: Token "${token.value}" at line ${token.line} has possible references: ${possibleRefs.join(', ')}`);
+                
+                // Check if the search word matches any of the possible references (case-insensitive)
+                const matchesReference = possibleRefs.some(ref =>
+                    ref.toUpperCase() === word.toUpperCase()
+                );
+                
+                // Explicitly check if trying to access with unprefixed name - REJECT
+                const isUnprefixedMatch = token.value.toUpperCase() === searchWord.toUpperCase();
+                
+                if (!matchesReference || (isUnprefixedMatch && !hasPrefix)) {
+                    if (isUnprefixedMatch && !hasPrefix) {
+                        logger.info(`❌ PREFIX-REJECT: Cannot access structure field "${token.value}" with unprefixed name - must use ${possibleRefs.join(' or ')}`);
+                    } else {
+                        logger.info(`❌ PREFIX-VALIDATION: Search word "${word}" not in possible references - skipping`);
+                    }
+                    continue;
+                }
+                logger.info(`✅ PREFIX-VALIDATION: Search word "${word}" matches a valid reference`);
+            }
+
+            // This label passed validation (or doesn't have _possibleReferences)
+            candidates.push(Location.create(document.uri, {
+                start: { line: token.line, character: 0 },
+                end: { line: token.line, character: token.value.length }
+            }));
+        }
+
+        logger.info(`Returning ${candidates.length} label candidates (before scope filtering)`);
+        return candidates;
+    }
+
+    /**
+     * Finds the definition of a label in the current document
+     * @deprecated Use findAllLabelCandidates() + ScopeAnalyzer.canAccess() instead
+     * Handles prefixed labels (e.g., LOC:SomeField) with full validation logic
+     */
+    public findLabelDefinition(word: string, document: TextDocument, position: Position, tokens: Token[]): Location | null {
+        // Get all candidates
+        const candidates = this.findAllLabelCandidates(word, document, tokens);
+        
+        if (candidates.length === 0) {
+            return null;
+        }
+        
+        // Return first candidate (no scope filtering - this is deprecated behavior)
+        // TODO: Callers should use findAllLabelCandidates() + ScopeAnalyzer instead
+        return candidates[0];
     }
 
     /**

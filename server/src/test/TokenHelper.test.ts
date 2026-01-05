@@ -136,7 +136,8 @@ END`;
             
             assert.ok(scope, 'Should find a scope');
             // Should return the innermost scope (routine, not procedure)
-            assert.ok(scope!.value.toUpperCase().includes('ROUTINE'));
+            assert.strictEqual(scope!.subType, TokenType.Routine, 'Should be a routine scope');
+            assert.strictEqual(scope!.label?.toUpperCase(), 'MYROUTINE', 'Should be MyRoutine');
         });
 
         test('Should return undefined for line outside any scope', () => {

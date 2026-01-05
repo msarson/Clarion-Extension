@@ -288,11 +288,59 @@ export class DefinitionProvider {
             }
 
             // First, check if this is a reference to a label in the current document
-            // This is the highest priority - look for labels in the same scope first
-            const labelDefinition = this.symbolResolver.findLabelDefinition(word, document, position, tokens);
-            if (labelDefinition) {
-                logger.info(`Found label definition for ${word} in the current document`);
-                return labelDefinition;
+            // Get ALL label candidates and filter by scope using ScopeAnalyzer
+            const labelCandidates = this.symbolResolver.findAllLabelCandidates(word, document, tokens);
+            if (labelCandidates.length > 0) {
+                logger.info(`Found ${labelCandidates.length} label candidates for ${word}, filtering by scope...`);
+                
+                // Filter candidates by scope accessibility
+                const accessibleLabels: Location[] = [];
+                for (const candidate of labelCandidates) {
+                    const canAccess = this.scopeAnalyzer.canAccess(
+                        position,
+                        candidate.range.start,
+                        document,
+                        document  // Same document
+                    );
+                    
+                    if (canAccess) {
+                        accessibleLabels.push(candidate);
+                        logger.info(`✅ Label at line ${candidate.range.start.line} is accessible`);
+                    } else {
+                        logger.info(`❌ Label at line ${candidate.range.start.line} is out of scope`);
+                    }
+                }
+                
+                if (accessibleLabels.length > 0) {
+                    // Sort by scope priority: routine > procedure > module > global
+                    // This ensures shadowing works correctly (innermost scope wins)
+                    accessibleLabels.sort((a, b) => {
+                        const aScopeInfo = this.scopeAnalyzer.getTokenScope(document, a.range.start);
+                        const bScopeInfo = this.scopeAnalyzer.getTokenScope(document, b.range.start);
+                        
+                        const scopePriority = (scopeType: string) => {
+                            switch (scopeType) {
+                                case 'routine': return 4;
+                                case 'procedure': return 3;
+                                case 'module': return 2;
+                                case 'global': return 1;
+                                default: return 0;
+                            }
+                        };
+                        
+                        const aPriority = scopePriority(aScopeInfo?.type || 'global');
+                        const bPriority = scopePriority(bScopeInfo?.type || 'global');
+                        
+                        // Higher priority first (routine before procedure, etc.)
+                        return bPriority - aPriority;
+                    });
+                    
+                    logger.info(`Found ${accessibleLabels.length} accessible labels, returning highest priority (line ${accessibleLabels[0].range.start.line})`);
+                    return accessibleLabels[0];
+                }
+                
+                logger.info(`No accessible labels found - all ${labelCandidates.length} candidates are out of scope`);
+                // Don't return null yet - continue to check other resolution methods
             }
 
             // Next, check if this is a reference to a variable or other symbol
@@ -1523,6 +1571,26 @@ export class DefinitionProvider {
             );
     
             if (label) {
+                // Check if this label is inside a procedure's DATA section (not truly global)
+                const containingProcedure = tokens.find(t =>
+                    (t.subType === TokenType.Procedure || 
+                     t.subType === TokenType.MethodImplementation ||
+                     t.subType === TokenType.MethodDeclaration) &&
+                    t.line < label.line &&
+                    t.finishesAt !== undefined &&
+                    t.finishesAt >= label.line
+                );
+                
+                if (containingProcedure) {
+                    // This label is inside a procedure - it's a local variable, not global
+                    // Check if it's in the DATA section (before CODE marker)
+                    const codeMarker = containingProcedure.executionMarker;
+                    if (codeMarker && label.line < codeMarker.line) {
+                        logger.info(`❌ Skipping label ${label.value} at line ${label.line} - it's local to procedure ${containingProcedure.value}, not global`);
+                        continue; // Skip this file, continue searching other files
+                    }
+                }
+                
                 logger.info(`✅ Found global label: ${label.value} at line ${label.line} in ${fullPath}`);
                 return Location.create(doc.uri, {
                     start: { line: label.line, character: label.start },
@@ -1974,8 +2042,8 @@ export class DefinitionProvider {
         });
 
         if (accessible.length === 0) {
-            logger.info(`⚠️ SCOPE-FILTER: No accessible candidates found, returning all candidates as fallback`);
-            return candidates; // Fallback: if nothing is accessible, return all (preserve existing behavior)
+            logger.info(`⚠️ SCOPE-FILTER: No accessible candidates found - variable is out of scope`);
+            return []; // Return empty array - variable is not accessible from this scope
         }
 
         logger.info(`✅ SCOPE-FILTER: Filtered to ${accessible.length} accessible candidates`);
