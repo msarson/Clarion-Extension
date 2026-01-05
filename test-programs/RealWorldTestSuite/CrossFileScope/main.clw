@@ -27,27 +27,27 @@
 ! TEST 1: Cross-file F12 Navigation (MEMBER → PROGRAM Global)
 ! ------------------------------------------------------------
 ! - Open utils.clw
-! - Line 36: Put cursor on 'GlobalCounter'
+! - Line 51: Put cursor on 'GlobalCounter'
 ! - Press F12 (Go to Definition)
-! - Expected: Should jump to main.clw line 67 (global declaration)
+! - Expected: Should jump to main.clw line 87 (global declaration)
 ! - Validates: Cross-file access to global symbols works
 !
 ! TEST 2: F12 vs Ctrl+F12 for Procedures (Definition vs Implementation)
 ! ----------------------------------------------------------------------
 ! - Open main.clw
-! - Line 71: Put cursor on 'IncrementCounter'
+! - Line 94: Put cursor on 'IncrementCounter'
 ! - Press F12 (Go to Definition)
-! - Expected: Should jump to line 57 (MAP declaration in same file)
+! - Expected: Should jump to line 76 (MAP declaration in same file)
 ! - Then press Ctrl+F12 (Go to Implementation)
-! - Expected: Should jump to utils.clw line 34 (implementation)
+! - Expected: Should jump to utils.clw line 47 (implementation)
 ! - Validates: F12 → MAP declaration, Ctrl+F12 → implementation
 !
 ! TEST 3: Cross-file Procedure with Return Types
 ! -----------------------------------------------
 ! - Open main.clw
-! - Line 73: Put cursor on 'GetCounter'
+! - Line 95: Put cursor on 'GetCounter'
 ! - Press F12 (Go to Definition)
-! - Expected: Should jump to line 58 (MAP declaration)
+! - Expected: Should jump to line 77 (MAP declaration)
 ! - Press Ctrl+F12 (Go to Implementation)
 ! - Expected: Should jump to utils.clw line 39 (implementation)
 ! - Validates: MAP declarations with return types work correctly
