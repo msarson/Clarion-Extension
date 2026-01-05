@@ -978,6 +978,38 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             assert.ok(hoverText.includes('🌍'), 'Should show global scope icon');
             assert.ok(hoverText.includes('LONG'), 'Should show type');
         });
+        
+        test('TEST 10: Hover on Counter (procedure-local variable) in utils.clw line 60', async function() {
+            this.timeout(10000);
+            
+            const project = solutionManager!.solution.projects[0];
+            const utilsFile = project.sourceFiles.find(f => f.relativePath.toLowerCase().endsWith('utils.clw'));
+            assert.ok(utilsFile);
+            
+            const utilsPath = utilsFile!.getAbsolutePath()!;
+            const utilsUri = `file:///${utilsPath.replace(/\\/g, '/')}`;
+            const utilsDoc = TextDocument.create(utilsUri, 'clarion', 1, utilsFile!.getContent()!);
+            
+            // Line 60 (0-based line 59): "Counter = GlobalCounter"
+            const hoverResult = await hoverProvider.provideHover(utilsDoc, { line: 59, character: 3 }); // On "Counter"
+            assert.ok(hoverResult, 'Should have hover');
+            
+            const hoverText = (hoverResult.contents as any).value;
+            console.log('TEST 10 HOVER TEXT:', hoverText);
+            assert.ok(hoverText.includes('Counter'), 'Should show variable name');
+            assert.ok(hoverText.includes('Procedure variable'), 'Should identify as procedure variable');
+            assert.ok(hoverText.includes('🔧'), 'Should show procedure scope icon');
+            assert.ok(hoverText.includes('LONG'), 'Should show type');
+            assert.ok(hoverText.includes('utils.clw:57'), 'Should show declaration location');
+            
+            // Check formatting: scope label and "Declared in" should be on separate lines
+            const lines = hoverText.split('\n');
+            const scopeLine = lines.find((l: string) => l.includes('Procedure variable'));
+            const declaredLine = lines.find((l: string) => l.includes('Declared in'));
+            assert.ok(scopeLine, 'Should have scope line');
+            assert.ok(declaredLine, 'Should have declared line');
+            assert.notStrictEqual(scopeLine, declaredLine, 'Scope and declaration should be on separate lines');
+        });
     });
     
     suite('Diagnostic: Solution Structure', () => {

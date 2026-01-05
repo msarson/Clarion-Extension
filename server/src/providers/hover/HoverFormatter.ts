@@ -101,6 +101,7 @@ export class HoverFormatter {
                 }
                 
                 markdown.push(scopeLabel);
+                markdown.push(``); // Blank line after scope label
             }
         }
         
