@@ -826,6 +826,7 @@ MyWindow WINDOW,AT(0,0,100,100)
 
         teardown(() => {
             // Clear cached test documents to ensure fresh tokenization
+            tokenCache.clearTokens('test://test.clw'); // Default URI used by most tests
             tokenCache.clearTokens('test://test-prioritize.clw');
             tokenCache.clearTokens('test://test-routine-access.clw');
             tokenCache.clearTokens('test://test-member-scope.clw');
