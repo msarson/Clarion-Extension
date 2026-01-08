@@ -43,7 +43,8 @@ export class StructureFieldResolver {
             logger.info(`Detected dot notation for word: ${word}, dotIndex: ${dotIndex}`);
             
             const tokens = this.tokenCache.getTokens(document);
-            const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, position.line);
+            const structure = this.tokenCache.getStructure(document); // 🚀 PERFORMANCE: Get cached structure
+            const currentScope = TokenHelper.getInnermostScopeAtLine(structure, position.line); // 🚀 PERFORMANCE: O(log n) vs O(n)
             if (currentScope) {
                 // Look for the GROUP/QUEUE/etc definition
                 const structureInfo = this.variableResolver.findLocalVariableInfo(word, tokens, currentScope, document, word);
@@ -108,7 +109,8 @@ export class StructureFieldResolver {
                 logger.info(`Detected structure field access: ${structureName}.${word}`);
                 
                 const tokens = this.tokenCache.getTokens(document);
-                const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, position.line);
+                const structure = this.tokenCache.getStructure(document); // 🚀 PERFORMANCE: Get cached structure
+                const currentScope = TokenHelper.getInnermostScopeAtLine(structure, position.line); // 🚀 PERFORMANCE: O(log n) vs O(n)
                 if (currentScope) {
                     // Try to find the structure field using dot notation reference
                     const fullReference = `${structureName}.${word}`;
