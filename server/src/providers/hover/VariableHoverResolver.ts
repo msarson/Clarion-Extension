@@ -74,58 +74,59 @@ export class VariableHoverResolver {
      * Find and format hover for a module-local variable
      */
     findModuleVariableHover(searchWord: string, tokens: Token[], document: TextDocument): Hover | null {
-        logger.info(`Checking for module-local variable in current file...`);
+        logger.info(`Checking for module-local variable in current file: ${searchWord}...`);
         
         const symbolInfo = this.symbolFinder.findModuleVariable(searchWord, tokens, document);
         
-        if (symbolInfo) {
-            logger.info(`✅ Found module-local variable in current file: ${symbolInfo.token.value} at line ${symbolInfo.location.line}`);
-            
-            const scopeInfo = this.scopeAnalyzer.getTokenScope(document, { 
-                line: symbolInfo.location.line, 
-                character: 0 
-            });
-            
-            const markdown = [
-                `**${symbolInfo.token.value}** — \`${symbolInfo.type}\``,
-                ``
-            ];
-            
-            if (scopeInfo) {
-                const scopeIcon = '📦';
-                markdown.push(`${scopeIcon} Module variable`);
-            }
-            
-            const fileName = path.basename(document.uri.replace('file:///', ''));
-            const lineNumber = symbolInfo.location.line + 1;
-            // Append "Declared in" to the same line as scope label if it exists
-            const lastLine = markdown[markdown.length - 1];
-            if (lastLine && lastLine.includes('variable')) {
-                markdown[markdown.length - 1] = `${lastLine} Declared in ${fileName}:${lineNumber}`;
-            } else {
-                markdown.push(`Declared in ${fileName}:${lineNumber}`);
-            }
-            
-            // Add the actual source code line
-            if (symbolInfo.declaration) {
-                markdown.push(``);
-                markdown.push('```clarion');
-                markdown.push(symbolInfo.declaration);
-                markdown.push('```');
-            }
-            
-            markdown.push(``);
-            markdown.push(`F12 → Go to declaration`);
-            
-            return {
-                contents: {
-                    kind: 'markdown',
-                    value: markdown.join('\n')
-                }
-            };
+        if (!symbolInfo) {
+            logger.info(`❌ findModuleVariable returned null for ${searchWord}`);
+            return null;
         }
         
-        return null;
+        logger.info(`✅ Found module-local variable in current file: ${symbolInfo.token.value} at line ${symbolInfo.location.line}`);
+        
+        const scopeInfo = this.scopeAnalyzer.getTokenScope(document, { 
+            line: symbolInfo.location.line, 
+            character: 0 
+        });
+        
+        const markdown = [
+            `**${symbolInfo.token.value}** — \`${symbolInfo.type}\``,
+            ``
+        ];
+        
+        if (scopeInfo) {
+            const scopeIcon = '📦';
+            markdown.push(`${scopeIcon} Module variable`);
+        }
+        
+        const fileName = path.basename(document.uri.replace('file:///', ''));
+        const lineNumber = symbolInfo.location.line + 1;
+        // Append "Declared in" to the same line as scope label if it exists
+        const lastLine = markdown[markdown.length - 1];
+        if (lastLine && lastLine.includes('variable')) {
+            markdown[markdown.length - 1] = `${lastLine} Declared in ${fileName}:${lineNumber}`;
+        } else {
+            markdown.push(`Declared in ${fileName}:${lineNumber}`);
+        }
+        
+        // Add the actual source code line
+        if (symbolInfo.declaration) {
+            markdown.push(``);
+            markdown.push('```clarion');
+            markdown.push(symbolInfo.declaration);
+            markdown.push('```');
+        }
+        
+        markdown.push(``);
+        markdown.push(`F12 → Go to declaration`);
+        
+        return {
+            contents: {
+                kind: 'markdown',
+                value: markdown.join('\n')
+            }
+        };
     }
 
     /**
