@@ -239,29 +239,33 @@ export class SymbolFinderService {
     ): SymbolInfo | null {
         logger.info(`Finding module variable: "${word}"`);
         
-        // Find the first procedure to determine module scope boundary
-        // Check for any type of procedure: GlobalProcedure, Procedure, MethodImplementation, etc.
+        // Find the first PROCEDURE implementation (not MAP declaration)
+        // Only check Procedure, GlobalProcedure, and MethodImplementation
+        // MapProcedure tokens are declarations inside MAP blocks, not implementations
         const firstProcToken = tokens.find(t =>
-            t.subType === TokenType.Procedure ||
-            t.subType === TokenType.GlobalProcedure ||
-            t.subType === TokenType.MethodImplementation ||
-            t.subType === TokenType.MapProcedure
+            (t.subType === TokenType.Procedure ||
+             t.subType === TokenType.GlobalProcedure ||
+             t.subType === TokenType.MethodImplementation) &&
+            // Verify it's actually a PROCEDURE keyword or a label token for the procedure
+            (t.value.toUpperCase() === 'PROCEDURE' || t.type === TokenType.Label) &&
+            t.start === 0
         );
         
         const moduleScopeEndLine = firstProcToken ? firstProcToken.line : Number.MAX_SAFE_INTEGER;
         
         // Find variable in module scope
-        const moduleVar = tokens.find(t =>
+        const candidateVars = tokens.filter(t =>
             t.type === TokenType.Label &&
             t.start === 0 &&
             t.line < moduleScopeEndLine &&
-            t.value.toLowerCase() === word.toLowerCase() &&
-            // Ensure it's not inside a procedure
+            t.value.toLowerCase() === word.toLowerCase()
+        );
+        
+        const moduleVar = candidateVars.find(t => 
             !this.isTokenInsideProcedure(tokens, t, moduleScopeEndLine)
         );
         
         if (!moduleVar) {
-            logger.info(`❌ Module variable "${word}" not found`);
             return null;
         }
         
@@ -401,13 +405,13 @@ export class SymbolFinderService {
      * Check if a token is inside a procedure
      */
     private isTokenInsideProcedure(tokens: Token[], token: Token, beforeLine: number): boolean {
-        // Find if there's a procedure token before this token that hasn't finished yet
+        // Find if there's a procedure implementation before this token that hasn't finished yet
+        // Only check Procedure, GlobalProcedure, and MethodImplementation
+        // MapProcedure tokens are declarations inside MAP blocks, not implementations
         for (const t of tokens) {
-            // Only check procedure tokens (all types)
             if (t.subType !== TokenType.Procedure &&
                 t.subType !== TokenType.GlobalProcedure &&
-                t.subType !== TokenType.MethodImplementation &&
-                t.subType !== TokenType.MapProcedure) {
+                t.subType !== TokenType.MethodImplementation) {
                 continue;
             }
             
@@ -427,7 +431,6 @@ export class SymbolFinderService {
                     return true;
                 }
                 // If finishesAt is undefined, assume procedure extends to end of file
-                // (or until we find another procedure)
                 if (t.finishesAt === undefined) {
                     return true;
                 }
