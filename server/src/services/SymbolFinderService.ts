@@ -20,6 +20,8 @@ import { TokenCache } from '../TokenCache';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { TokenHelper } from '../utils/TokenHelper';
 import LoggerManager from '../logger';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const logger = LoggerManager.getLogger("SymbolFinderService");
 logger.setLevel("info");
@@ -310,6 +312,218 @@ export class SymbolFinderService {
     }
     
     /**
+     * Find a global variable definition
+     * 
+     * Global variables are declared at the start of a PROGRAM file, before the first CODE section.
+     * 
+     * Search strategy (follows Clarion's MEMBER architecture):
+     * 1. Search current file (before first CODE)
+     * 2. If current file has MEMBER('file.clw'), search that parent file
+     * 3. Return null if not found
+     * 
+     * Note: MEMBER files can only reference ONE parent PROGRAM file, so max 2 files searched.
+     * 
+     * @param word - The variable name to find
+     * @param tokens - Tokens of current document
+     * @param document - Current document
+     * @returns SymbolInfo if found, null otherwise
+     */
+    async findGlobalVariable(word: string, tokens: Token[], document: TextDocument): Promise<SymbolInfo | null> {
+        logger.info(`🔍 findGlobalVariable: searching for "${word}"`);
+        
+        // Step 1: Search current file for global variable (before first CODE/PROCEDURE)
+        const firstCodeToken = tokens.find(t => 
+            t.type === TokenType.Keyword && 
+            t.value.toUpperCase() === 'CODE'
+        );
+        
+        // If no CODE found, look for first PROCEDURE as the boundary
+        const firstProcedure = tokens.find(t =>
+            t.subType === TokenType.Procedure ||
+            t.subType === TokenType.GlobalProcedure
+        );
+        
+        // Global scope ends at first CODE, or first PROCEDURE if no CODE found
+        let globalScopeEndLine: number;
+        if (firstCodeToken) {
+            globalScopeEndLine = firstCodeToken.line;
+            logger.info(`First CODE token at line: ${globalScopeEndLine}`);
+        } else if (firstProcedure) {
+            globalScopeEndLine = firstProcedure.line;
+            logger.info(`No CODE token, using first PROCEDURE at line: ${globalScopeEndLine}`);
+        } else {
+            globalScopeEndLine = Number.MAX_SAFE_INTEGER;
+            logger.info(`No CODE or PROCEDURE tokens, treating entire file as global scope`);
+        }
+        
+        const globalVar = tokens.find(t =>
+            t.type === TokenType.Label &&
+            t.start === 0 &&
+            t.line < globalScopeEndLine &&
+            t.value.toLowerCase() === word.toLowerCase()
+        );
+        
+        if (globalVar) {
+            logger.info(`✅ Found global variable in current file: ${globalVar.value} at line ${globalVar.line} (< ${globalScopeEndLine})`);
+            
+            // Get type from next token
+            const varIndex = tokens.indexOf(globalVar);
+            let typeInfo = 'UNKNOWN';
+            let declaration: string | undefined;
+            
+            if (varIndex + 1 < tokens.length) {
+                const nextToken = tokens[varIndex + 1];
+                if (nextToken.line === globalVar.line) {
+                    if (nextToken.type === TokenType.Type) {
+                        typeInfo = nextToken.value;
+                    } else if (nextToken.type === TokenType.Structure) {
+                        typeInfo = nextToken.value.toUpperCase(); // CLASS, GROUP, QUEUE
+                    }
+                    
+                    // Try to build full declaration
+                    const lineTokens = tokens.filter(t => t.line === globalVar.line);
+                    declaration = lineTokens.map(t => t.value).join(' ');
+                }
+            }
+            
+            return {
+                token: globalVar,
+                type: typeInfo,
+                scope: {
+                    token: globalVar,
+                    type: 'global'
+                },
+                location: {
+                    uri: document.uri,
+                    line: globalVar.line,
+                    character: globalVar.start
+                },
+                declaration: declaration,
+                originalWord: word,
+                searchWord: word
+            };
+        }
+        
+        // Step 2: If not found and current file has MEMBER token, search parent file
+        const memberToken = tokens.find(t => 
+            t.value && t.value.toUpperCase() === 'MEMBER' && 
+            t.line < 5 && 
+            t.referencedFile
+        );
+        
+        if (memberToken && memberToken.referencedFile) {
+            logger.info(`Found MEMBER reference to: ${memberToken.referencedFile}`);
+            return await this.findGlobalVariableInParentFile(word, memberToken.referencedFile, document);
+        }
+        
+        logger.info(`❌ Global variable "${word}" not found in current file or parent`);
+        return null;
+    }
+    
+    /**
+     * Helper: Find global variable in MEMBER parent file
+     * 
+     * @param word - Variable name to find
+     * @param parentFile - Relative path to parent file (from MEMBER token)
+     * @param currentDocument - Current document (to resolve relative path)
+     * @returns SymbolInfo if found, null otherwise
+     */
+    private async findGlobalVariableInParentFile(word: string, parentFile: string, currentDocument: TextDocument): Promise<SymbolInfo | null> {
+        const currentFilePath = decodeURIComponent(currentDocument.uri.replace('file:///', ''));
+        const currentFileDir = path.dirname(currentFilePath);
+        const resolvedPath = path.resolve(currentFileDir, parentFile);
+        
+        logger.info(`Searching parent file: ${resolvedPath}`);
+        
+        if (!fs.existsSync(resolvedPath)) {
+            logger.warn(`Parent file not found: ${resolvedPath}`);
+            return null;
+        }
+        
+        try {
+            const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
+            const parentDoc = TextDocument.create(
+                `file:///${resolvedPath.replace(/\\/g, '/')}`,
+                'clarion',
+                1,
+                parentContents
+            );
+            const parentTokens = this.tokenCache.getTokens(parentDoc);
+            
+            const firstCodeToken = parentTokens.find(t => 
+                t.type === TokenType.Keyword && 
+                t.value.toUpperCase() === 'CODE'
+            );
+            
+            // If no CODE found, look for first PROCEDURE as the boundary
+            const firstProcedure = parentTokens.find(t =>
+                t.subType === TokenType.Procedure ||
+                t.subType === TokenType.GlobalProcedure
+            );
+            
+            // Global scope ends at first CODE, or first PROCEDURE if no CODE found
+            const globalScopeEndLine = firstCodeToken ? firstCodeToken.line : 
+                                      firstProcedure ? firstProcedure.line :
+                                      Number.MAX_SAFE_INTEGER;
+            
+            const globalVar = parentTokens.find(t =>
+                t.type === TokenType.Label &&
+                t.start === 0 &&
+                t.line < globalScopeEndLine &&
+                t.value.toLowerCase() === word.toLowerCase()
+            );
+            
+            if (globalVar) {
+                logger.info(`✅ Found global variable in MEMBER parent: ${globalVar.value} at line ${globalVar.line}`);
+                
+                // Get type from next token
+                const varIndex = parentTokens.indexOf(globalVar);
+                let typeInfo = 'UNKNOWN';
+                let declaration: string | undefined;
+                
+                if (varIndex + 1 < parentTokens.length) {
+                    const nextToken = parentTokens[varIndex + 1];
+                    if (nextToken.line === globalVar.line) {
+                        if (nextToken.type === TokenType.Type) {
+                            typeInfo = nextToken.value;
+                        } else if (nextToken.type === TokenType.Structure) {
+                            typeInfo = nextToken.value.toUpperCase(); // CLASS, GROUP, QUEUE
+                        }
+                        
+                        // Try to build full declaration
+                        const lineTokens = parentTokens.filter(t => t.line === globalVar.line);
+                        declaration = lineTokens.map(t => t.value).join(' ');
+                    }
+                }
+                
+                return {
+                    token: globalVar,
+                    type: typeInfo,
+                    scope: {
+                        token: globalVar,
+                        type: 'global'
+                    },
+                    location: {
+                        uri: parentDoc.uri,
+                        line: globalVar.line,
+                        character: globalVar.start
+                    },
+                    declaration: declaration,
+                    originalWord: word,
+                    searchWord: word
+                };
+            }
+            
+            logger.info(`❌ Global variable "${word}" not found in parent file`);
+            return null;
+            
+        } catch (err) {
+            logger.error(`Error reading MEMBER parent file: ${err}`);
+            return null;
+        }
+    }
+    
+    /**
      * Search for a variable/symbol with full word first, then fallback to stripped prefix
      * This implements the Phase 1 fix for labels with colons (e.g., "BRW1::View:Browse")
      * 
@@ -338,7 +552,9 @@ export class SymbolFinderService {
             const moduleResult = this.findModuleVariable(word, tokens, document);
             if (moduleResult) return moduleResult;
             
-            // TODO: Try global variable
+            // Try global variable
+            const globalResult = await this.findGlobalVariable(word, tokens, document);
+            if (globalResult) return globalResult;
             
             return null;
         }
@@ -367,6 +583,13 @@ export class SymbolFinderService {
             return result;
         }
         
+        // 4. Try as global variable
+        result = await this.findGlobalVariable(word, tokens, document);
+        if (result) {
+            logger.info(`✅ Found as global variable: ${word}`);
+            return result;
+        }
+        
         // If not found and word has colon, try with stripped prefix
         const colonIndex = word.lastIndexOf(':');
         if (colonIndex > 0) {
@@ -392,6 +615,14 @@ export class SymbolFinderService {
             result = this.findModuleVariable(searchWord, tokens, document);
             if (result) {
                 logger.info(`✅ Found as module variable (stripped): ${searchWord}`);
+                result.originalWord = word;
+                return result;
+            }
+            
+            // Try global variable with stripped word
+            result = await this.findGlobalVariable(searchWord, tokens, document);
+            if (result) {
+                logger.info(`✅ Found as global variable (stripped): ${searchWord}`);
                 result.originalWord = word;
                 return result;
             }

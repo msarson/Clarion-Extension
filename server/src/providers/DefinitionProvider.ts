@@ -18,6 +18,7 @@ import { CrossFileResolver } from '../utils/CrossFileResolver';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
+import { SymbolFinderService } from '../services/SymbolFinderService';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
 logger.setLevel("error"); // Production: Only log errors
@@ -36,10 +37,12 @@ export class DefinitionProvider {
     private fileResolver = new FileDefinitionResolver();
     private crossFileResolver = new CrossFileResolver(this.tokenCache);
     private scopeAnalyzer: ScopeAnalyzer;
+    private symbolFinder: SymbolFinderService;
 
     constructor() {
         const solutionManager = SolutionManager.getInstance();
         this.scopeAnalyzer = new ScopeAnalyzer(this.tokenCache, solutionManager);
+        this.symbolFinder = new SymbolFinderService(this.tokenCache, this.scopeAnalyzer);
     }
 
     /**
@@ -349,16 +352,6 @@ export class DefinitionProvider {
             if (symbolDefinition) {
                 logger.info(`Found symbol definition for ${word} in the current document`);
                 return symbolDefinition;
-            }
-
-            // Check if this looks like a variable (has a label token somewhere) to prevent
-            // mistaking variables for procedures. Do a quick global check.
-            const globalVarExists = await this.findGlobalDefinition(word, document.uri);
-            if (globalVarExists) {
-                logger.info(`${word} is a variable (found globally), not searching for procedure implementation`);
-                // This is a variable that we couldn't resolve (blocked by scope or other reason)
-                // Don't continue to procedure search
-                return null;
             }
 
             // Check if we're inside a MAP block and the word is a procedure declaration
@@ -1226,8 +1219,14 @@ export class DefinitionProvider {
         }
     
         // 🌍 Global fallback
-        const globalLocation = await this.findGlobalDefinition(searchWord, document.uri);
-        if (globalLocation) {
+        const globalSymbol = await this.symbolFinder.findGlobalVariable(searchWord, tokens, document);
+        if (globalSymbol) {
+            // Convert SymbolInfo to Location
+            const globalLocation = Location.create(globalSymbol.location.uri, {
+                start: { line: globalSymbol.location.line, character: globalSymbol.location.character },
+                end: { line: globalSymbol.location.line, character: globalSymbol.location.character + globalSymbol.token.value.length }
+            });
+            
             // Validate scope accessibility before returning cross-file results
             const globalUri = globalLocation.uri;
             if (globalUri !== document.uri) {
@@ -1665,97 +1664,6 @@ export class DefinitionProvider {
 
         logger.info(`No definition found for '${word}' in ${fromPath} or its includes/members`);
         return null;
-    }
-
-    private async findGlobalDefinition(word: string, documentUri: string): Promise<Location | null> {
-        const solutionManager = SolutionManager.getInstance();
-        if (!solutionManager) {
-            logger.warn("❌ No SolutionManager instance available.");
-            return null;
-        }
-    
-        const documentPath = documentUri.replace("file:///", "").replace(/\//g, "\\");
-        const currentProject = solutionManager.findProjectForFile(documentPath);
-        if (!currentProject) {
-            logger.warn(`❗ No project found for ${documentPath}`);
-            return null;
-        }
-    
-        const visited = new Set<string>();
-    
-        // 🔍 Step 1: Search known project source files
-        for (const sourceFile of currentProject.sourceFiles) {
-            const fullPath = path.join(currentProject.path, sourceFile.relativePath);
-            if (!fs.existsSync(fullPath) || visited.has(fullPath)) continue;
-    
-            visited.add(fullPath);
-            const contents = await currentProject.readFileContents(fullPath);
-            if (!contents) continue;
-    
-            const doc = TextDocument.create(`file:///${fullPath.replace(/\\/g, "/")}`, "clarion", 1, contents);
-            const tokens = this.tokenCache.getTokens(doc);
-    
-            const label = tokens.find(t =>
-                t.start === 0 &&
-                t.type === TokenType.Label &&
-                t.value.toLowerCase() === word.toLowerCase()
-            );
-    
-            if (label) {
-                // Check if this label is inside a procedure's DATA section (not truly global)
-                const containingProcedure = tokens.find(t =>
-                    (t.subType === TokenType.Procedure || 
-                     t.subType === TokenType.MethodImplementation ||
-                     t.subType === TokenType.MethodDeclaration) &&
-                    t.line < label.line &&
-                    t.finishesAt !== undefined &&
-                    t.finishesAt >= label.line
-                );
-                
-                if (containingProcedure) {
-                    // This label is inside a procedure - it's a local variable, not global
-                    // Check if it's in the DATA section (before CODE marker)
-                    const codeMarker = containingProcedure.executionMarker;
-                    if (codeMarker && label.line < codeMarker.line) {
-                        logger.info(`❌ Skipping label ${label.value} at line ${label.line} - it's local to procedure ${containingProcedure.value}, not global`);
-                        continue; // Skip this file, continue searching other files
-                    }
-                }
-                
-                logger.info(`✅ Found global label: ${label.value} at line ${label.line} in ${fullPath}`);
-                return Location.create(doc.uri, {
-                    start: { line: label.line, character: label.start },
-                    end: { line: label.line, character: label.start + label.value.length }
-                });
-            }
-        }
-    
-        // 🔁 Step 2: Fallback — search all redirection paths
-        logger.info(`↪️ Fallback: searching via redirection for ${word}`);
-        const resolvedCandidate = await solutionManager.findFileWithExtension(`${word}.CLW`);
-        if (resolvedCandidate && resolvedCandidate.path && fs.existsSync(resolvedCandidate.path) && !visited.has(resolvedCandidate.path)) {
-            const contents = await fs.promises.readFile(resolvedCandidate.path, "utf-8");
-            const doc = TextDocument.create(`file:///${resolvedCandidate.path.replace(/\\/g, "/")}`, "clarion", 1, contents);
-            const tokens = this.tokenCache.getTokens(doc);
-
-            const label = tokens.find(t =>
-                t.start === 0 &&
-                t.type === TokenType.Label &&
-                t.value.toLowerCase() === word.toLowerCase()
-            );
-
-            if (label) {
-                logger.info(`✅ Found global label via redirection: ${label.value} at line ${label.line} in ${resolvedCandidate.path} (source: ${resolvedCandidate.source})`);
-                return Location.create(doc.uri, {
-                    start: { line: label.line, character: label.start },
-                    end: { line: label.line, character: label.start + label.value.length }
-                });
-            }
-        }
-    
-        // 🔁 Step 3: Try the recursive include search as a last resort
-        logger.info(`↪️ Last resort: trying recursive include search for ${word}`);
-        return await this.findDefinitionInIncludes(word, documentPath);
     }
 
     /**
