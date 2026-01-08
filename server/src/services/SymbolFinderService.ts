@@ -18,6 +18,7 @@ import { Token, TokenType } from '../ClarionTokenizer';
 import { ClarionDocumentSymbolProvider, ClarionDocumentSymbol } from '../providers/ClarionDocumentSymbolProvider';
 import { TokenCache } from '../TokenCache';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
+import { TokenHelper } from '../utils/TokenHelper';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("SymbolFinderService");
@@ -195,14 +196,18 @@ export class SymbolFinderService {
         
         logger.info(`✅ Found variable: ${varSymbol.name} of type ${varSymbol._clarionType || varSymbol.detail}`);
         
+        // Extract the variable name (without type info that may be in the name)
+        // ClarionDocumentSymbolProvider may include type in the name like "Counter LONG"
+        const varName = varSymbol._clarionVarName || varSymbol.name.split(' ')[0];
+        
         // Find the actual token for this variable
         const variableToken = tokens.find(t =>
             t.line === varSymbol.range.start.line &&
-            t.value.toLowerCase() === varSymbol.name.toLowerCase()
+            t.value.toLowerCase() === varName.toLowerCase()
         );
         
         if (!variableToken) {
-            logger.warn(`⚠️ Found symbol but couldn't locate token for ${varSymbol.name}`);
+            logger.warn(`⚠️ Found symbol but couldn't locate token for ${varName} at line ${varSymbol.range.start.line}`);
             return null;
         }
         
@@ -235,10 +240,12 @@ export class SymbolFinderService {
         logger.info(`Finding module variable: "${word}"`);
         
         // Find the first procedure to determine module scope boundary
+        // Check for any type of procedure: GlobalProcedure, Procedure, MethodImplementation, etc.
         const firstProcToken = tokens.find(t =>
-            t.type === TokenType.Label &&
-            t.subType === TokenType.Procedure &&
-            t.start === 0
+            t.subType === TokenType.Procedure ||
+            t.subType === TokenType.GlobalProcedure ||
+            t.subType === TokenType.MethodImplementation ||
+            t.subType === TokenType.MapProcedure
         );
         
         const moduleScopeEndLine = firstProcToken ? firstProcToken.line : Number.MAX_SAFE_INTEGER;
@@ -299,27 +306,132 @@ export class SymbolFinderService {
     }
     
     /**
+     * Search for a variable/symbol with full word first, then fallback to stripped prefix
+     * This implements the Phase 1 fix for labels with colons (e.g., "BRW1::View:Browse")
+     * 
+     * Search order:
+     * 1. Try full word (e.g., "BRW1::View:Browse")
+     * 2. If not found and has colon, try stripped (e.g., "Browse")
+     * 3. Try parameter, local, module, then global scope
+     */
+    async findSymbol(
+        word: string,
+        document: TextDocument,
+        position: { line: number; character: number },
+        scopeToken?: Token
+    ): Promise<SymbolInfo | null> {
+        const tokens = this.tokenCache.getTokens(document);
+        
+        logger.info(`🔍 Finding symbol: "${word}" at line ${position.line}`);
+        
+        // Get scope if not provided
+        const currentScope = scopeToken || TokenHelper.getInnermostScopeAtLine(tokens, position.line);
+        
+        if (!currentScope) {
+            logger.info('No scope found, checking module/global only');
+            
+            // Try module variable
+            const moduleResult = this.findModuleVariable(word, tokens, document);
+            if (moduleResult) return moduleResult;
+            
+            // TODO: Try global variable
+            
+            return null;
+        }
+        
+        // Phase 1 fix: Try FULL word first
+        logger.info(`Trying full word: "${word}"`);
+        
+        // 1. Try as parameter
+        let result = this.findParameter(word, document, currentScope);
+        if (result) {
+            logger.info(`✅ Found as parameter: ${word}`);
+            return result;
+        }
+        
+        // 2. Try as local variable
+        result = this.findLocalVariable(word, tokens, currentScope, document);
+        if (result) {
+            logger.info(`✅ Found as local variable: ${word}`);
+            return result;
+        }
+        
+        // 3. Try as module variable
+        result = this.findModuleVariable(word, tokens, document);
+        if (result) {
+            logger.info(`✅ Found as module variable: ${word}`);
+            return result;
+        }
+        
+        // If not found and word has colon, try with stripped prefix
+        const colonIndex = word.lastIndexOf(':');
+        if (colonIndex > 0) {
+            const searchWord = word.substring(colonIndex + 1);
+            logger.info(`Full word not found, trying stripped: "${searchWord}"`);
+            
+            // Try parameter with stripped word
+            result = this.findParameter(searchWord, document, currentScope);
+            if (result) {
+                logger.info(`✅ Found as parameter (stripped): ${searchWord}`);
+                result.originalWord = word; // Keep original word
+                return result;
+            }
+            
+            // Try local variable with stripped word
+            result = this.findLocalVariable(searchWord, tokens, currentScope, document, word);
+            if (result) {
+                logger.info(`✅ Found as local variable (stripped): ${searchWord}`);
+                return result;
+            }
+            
+            // Try module variable with stripped word
+            result = this.findModuleVariable(searchWord, tokens, document);
+            if (result) {
+                logger.info(`✅ Found as module variable (stripped): ${searchWord}`);
+                result.originalWord = word;
+                return result;
+            }
+        }
+        
+        logger.info(`❌ Symbol "${word}" not found`);
+        return null;
+    }
+    
+    /**
      * Check if a token is inside a procedure
      */
     private isTokenInsideProcedure(tokens: Token[], token: Token, beforeLine: number): boolean {
         // Find if there's a procedure token before this token that hasn't finished yet
-        for (let i = tokens.length - 1; i >= 0; i--) {
-            const t = tokens[i];
-            
-            // Stop searching if we go past our token
-            if (t.line > token.line) continue;
-            if (t.line > beforeLine) continue;
-            
-            // Check if this is a procedure that contains our token
-            if (t.subType === TokenType.Procedure && 
-                t.line < token.line &&
-                t.finishesAt && 
-                t.finishesAt >= token.line) {
-                return true;
+        for (const t of tokens) {
+            // Only check procedure tokens (all types)
+            if (t.subType !== TokenType.Procedure &&
+                t.subType !== TokenType.GlobalProcedure &&
+                t.subType !== TokenType.MethodImplementation &&
+                t.subType !== TokenType.MapProcedure) {
+                continue;
             }
             
-            // Stop if we've searched far enough back
-            if (t.line < token.line - 100) break;
+            // Skip procedures that start after our token
+            if (t.line >= token.line) continue;
+            
+            // Skip procedures that are after the beforeLine boundary
+            if (t.line >= beforeLine) continue;
+            
+            // Check if this procedure contains our token
+            // A procedure contains a token if:
+            // 1. Procedure starts before the token
+            // 2. Procedure finishes after the token (or hasn't finished yet)
+            if (t.line < token.line) {
+                // If finishesAt is defined and >= token line, it contains it
+                if (t.finishesAt !== undefined && t.finishesAt >= token.line) {
+                    return true;
+                }
+                // If finishesAt is undefined, assume procedure extends to end of file
+                // (or until we find another procedure)
+                if (t.finishesAt === undefined) {
+                    return true;
+                }
+            }
         }
         
         return false;
@@ -362,6 +474,7 @@ export class SymbolFinderService {
         // Check direct children
         if (symbol.children) {
             for (const child of symbol.children) {
+                
                 // Match on name (case-insensitive)
                 if (child.name.toLowerCase() === searchText.toLowerCase()) {
                     return child;
@@ -369,6 +482,12 @@ export class SymbolFinderService {
                 
                 // Also check _clarionVarName if present (handles prefixed variables)
                 if (child._clarionVarName?.toLowerCase() === searchText.toLowerCase()) {
+                    return child;
+                }
+                
+                // Handle GROUP/QUEUE/CLASS with format "GROUP (VarName)" or "GROUP,PRE(XXX)"
+                const groupMatch = child.name.match(/^(?:GROUP|QUEUE|CLASS)\s*\(([^)]+)\)/i);
+                if (groupMatch && groupMatch[1].toLowerCase() === searchText.toLowerCase()) {
                     return child;
                 }
                 

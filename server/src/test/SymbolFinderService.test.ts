@@ -12,6 +12,8 @@ import { TokenCache } from '../TokenCache';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { SolutionManager } from '../solution/solutionManager';
 import { TokenHelper } from '../utils/TokenHelper';
+import { setServerInitialized } from '../serverState';
+import { TokenType } from '../tokenizer/TokenTypes';
 
 suite('SymbolFinderService Tests', () => {
     let service: SymbolFinderService;
@@ -19,6 +21,9 @@ suite('SymbolFinderService Tests', () => {
     let scopeAnalyzer: ScopeAnalyzer;
 
     setup(() => {
+        // CRITICAL: Initialize server state for tests
+        setServerInitialized(true);
+        
         tokenCache = TokenCache.getInstance();
         const solutionManager = SolutionManager.getInstance();
         scopeAnalyzer = new ScopeAnalyzer(tokenCache, solutionManager);
