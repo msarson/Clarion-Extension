@@ -19,6 +19,7 @@ export class DocumentStructure {
     private procedureIndex: Map<string, Token> = new Map();
     private tokensByLine: Map<number, Token[]> = new Map();
     private structuresByType: Map<string, Token[]> = new Map();
+    private parentIndex: Map<Token, Token> = new Map(); // 🚀 PERFORMANCE: O(1) parent lookups
 
     constructor(private tokens: Token[], private lines?: string[]) {
         // 🚀 PERFORMANCE: Build indexes first for fast lookups
@@ -54,14 +55,122 @@ export class DocumentStructure {
             }
         }
         
+        // 🚀 PERFORMANCE: Build parent relationship index
+        this.buildParentIndex();
+        
         const indexTime = performance.now() - perfStart;
         logger.perf('Built indexes', {
             'time_ms': indexTime.toFixed(2),
             'tokens': this.tokens.length,
             'labels': this.labelIndex.size,
             'lines': this.tokensByLine.size,
-            'struct_types': this.structuresByType.size
+            'struct_types': this.structuresByType.size,
+            'parent_relationships': this.parentIndex.size
         });
+    }
+
+    /**
+     * 🚀 PERFORMANCE: Build parent relationship index for O(1) parent lookups
+     * This eliminates the need for O(n) scans to find parent structures
+     */
+    private buildParentIndex(): void {
+        const structureStack: Token[] = [];
+        
+        for (const token of this.tokens) {
+            // Pop completed structures from the stack
+            while (structureStack.length > 0) {
+                const top = structureStack[structureStack.length - 1];
+                if (top.finishesAt !== undefined && top.finishesAt < token.line) {
+                    structureStack.pop();
+                } else {
+                    break;
+                }
+            }
+            
+            // Current parent is top of stack (if any)
+            if (structureStack.length > 0) {
+                this.parentIndex.set(token, structureStack[structureStack.length - 1]);
+            }
+            
+            // Push new structures onto the stack
+            if (this.isStructureToken(token)) {
+                structureStack.push(token);
+            }
+        }
+    }
+
+    /**
+     * Check if a token represents a structure that can have children
+     */
+    private isStructureToken(token: Token): boolean {
+        // Structures: CLASS, INTERFACE, MAP, MODULE, GROUP, QUEUE, FILE, etc.
+        if (token.type === TokenType.Structure) {
+            return true;
+        }
+        
+        // Procedures: PROCEDURE, FUNCTION, METHOD implementations
+        if (token.subType === TokenType.Procedure ||
+            token.subType === TokenType.GlobalProcedure ||
+            token.subType === TokenType.MethodImplementation) {
+            return true;
+        }
+        
+        // Routines (nested procedures)
+        if (token.subType === TokenType.Routine) {
+            return true;
+        }
+        
+        return false;
+    }
+
+    /**
+     * 🚀 PERFORMANCE: Get the immediate parent token (O(1) lookup)
+     * @param token The token to find the parent of
+     * @returns The parent token or undefined if at top level
+     */
+    public getParent(token: Token): Token | undefined {
+        return this.parentIndex.get(token);
+    }
+
+    /**
+     * 🚀 PERFORMANCE: Get the parent scope token (O(1) lookup)
+     * A scope is a procedure, routine, or top-level structure
+     * @param token The token to find the parent scope of
+     * @returns The parent scope token or undefined if at top level
+     */
+    public getParentScope(token: Token): Token | undefined {
+        let parent = this.getParent(token);
+        
+        // Walk up the parent chain until we find a scope-defining structure
+        while (parent) {
+            if (this.isScopeToken(parent)) {
+                return parent;
+            }
+            parent = this.getParent(parent);
+        }
+        
+        return undefined;
+    }
+
+    /**
+     * Check if a token defines a scope (procedure, routine, or module-like structure)
+     */
+    private isScopeToken(token: Token): boolean {
+        // Procedures and routines define scopes
+        if (token.subType === TokenType.Procedure ||
+            token.subType === TokenType.GlobalProcedure ||
+            token.subType === TokenType.MethodImplementation ||
+            token.subType === TokenType.Routine) {
+            return true;
+        }
+        
+        // MODULE structures define scopes
+        if (token.type === TokenType.Structure && 
+            token.value.toUpperCase() === 'MODULE') {
+            return true;
+        }
+        
+        return false;
     }
 
     /**
