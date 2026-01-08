@@ -174,6 +174,15 @@ export class DocumentStructure {
     }
 
     /**
+     * 🚀 PERFORMANCE: Get tokens on a specific line (O(1) lookup)
+     * @param line Line number
+     * @returns Array of tokens on that line, or undefined if no tokens
+     */
+    public getTokensByLine(line: number): Token[] | undefined {
+        return this.tokensByLine.get(line);
+    }
+
+    /**
      * Gets the control and structure context at a specific position
      * Used for context-aware IntelliSense features
      */

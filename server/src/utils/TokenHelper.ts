@@ -1,6 +1,7 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Position, Range } from 'vscode-languageserver-protocol';
 import { Token, TokenType } from '../ClarionTokenizer';
+import { DocumentStructure } from '../DocumentStructure';
 
 /**
  * Shared utility for token and scope navigation
@@ -8,43 +9,126 @@ import { Token, TokenType } from '../ClarionTokenizer';
  */
 export class TokenHelper {
     /**
-     * Gets the innermost scope at a line
-     * Excludes MethodDeclaration (CLASS method declarations in DATA section)
+     * Gets the innermost scope at a line (optimized version using DocumentStructure)
+     * 🚀 PERFORMANCE: O(log n) using document structure instead of O(n) filter
+     * @param structure DocumentStructure instance
+     * @param line Line number to find scope for
+     * @returns The innermost scope token or undefined
      */
-    public static getInnermostScopeAtLine(tokens: Token[], line: number): Token | undefined {
-        const scopes = tokens.filter(token =>
-            // Only consider actual procedure implementations and global procedures, not method declarations in CLASS
-            (token.subType === TokenType.Procedure ||
-                token.subType === TokenType.GlobalProcedure ||
-                token.subType === TokenType.MethodImplementation ||
-                token.subType === TokenType.Routine) &&
-            token.line <= line &&
-            (token.finishesAt === undefined || token.finishesAt >= line)
-        );
+    public static getInnermostScopeAtLine(structure: DocumentStructure, line: number): Token | undefined;
+    
+    /**
+     * Gets the innermost scope at a line (legacy version)
+     * ⚠️ DEPRECATED: Use overload with DocumentStructure for better performance
+     * @param tokens Array of tokens
+     * @param line Line number to find scope for
+     * @returns The innermost scope token or undefined
+     */
+    public static getInnermostScopeAtLine(tokens: Token[], line: number): Token | undefined;
+    
+    /**
+     * Implementation of getInnermostScopeAtLine
+     */
+    public static getInnermostScopeAtLine(tokensOrStructure: Token[] | DocumentStructure, line: number): Token | undefined {
+        // Check if we received a DocumentStructure
+        if ('getParent' in tokensOrStructure) {
+            // 🚀 PERFORMANCE: Use structure's parent index
+            const structure = tokensOrStructure as DocumentStructure;
+            
+            // Get all tokens on this line
+            const lineTokens = structure.getTokensByLine(line);
+            if (!lineTokens || lineTokens.length === 0) {
+                return undefined;
+            }
+            
+            // Find any token on this line
+            const anyToken = lineTokens[0];
+            
+            // Walk up the parent chain to find the innermost scope
+            let current: Token | undefined = anyToken;
+            let innermostScope: Token | undefined = undefined;
+            
+            while (current) {
+                if (this.isScopeDefiningToken(current)) {
+                    innermostScope = current;
+                }
+                current = structure.getParent(current);
+            }
+            
+            return innermostScope;
+        } else {
+            // Legacy implementation using token array (O(n) filter)
+            const tokens = tokensOrStructure as Token[];
+            const scopes = tokens.filter(token =>
+                // Only consider actual procedure implementations and global procedures, not method declarations in CLASS
+                (token.subType === TokenType.Procedure ||
+                    token.subType === TokenType.GlobalProcedure ||
+                    token.subType === TokenType.MethodImplementation ||
+                    token.subType === TokenType.Routine) &&
+                token.line <= line &&
+                (token.finishesAt === undefined || token.finishesAt >= line)
+            );
 
-        return scopes.length > 0 ? scopes[scopes.length - 1] : undefined;
+            return scopes.length > 0 ? scopes[scopes.length - 1] : undefined;
+        }
     }
 
     /**
-     * Finds the parent scope (procedure/method) containing a routine
+     * Finds the parent scope (procedure/method) containing a routine (optimized version)
+     * 🚀 PERFORMANCE: O(log n) using parent index instead of O(n) filter
+     * @param structure DocumentStructure instance
+     * @param routineScope The routine token
+     * @returns Parent scope token or undefined
      */
-    public static getParentScopeOfRoutine(tokens: Token[], routineScope: Token): Token | undefined {
-        // Find all procedure/method scopes that contain this routine
-        const parentScopes = tokens.filter(token =>
-            (token.subType === TokenType.Procedure ||
-                token.subType === TokenType.GlobalProcedure ||
-                token.subType === TokenType.MethodImplementation ||
-                token.subType === TokenType.MethodDeclaration) &&
-            token.line < routineScope.line &&
-            (token.finishesAt === undefined || token.finishesAt >= routineScope.line)
-        );
+    public static getParentScopeOfRoutine(structure: DocumentStructure, routineScope: Token): Token | undefined;
+    
+    /**
+     * Finds the parent scope (procedure/method) containing a routine (legacy version)
+     * ⚠️ DEPRECATED: Use overload with DocumentStructure for better performance
+     * @param tokens Array of tokens
+     * @param routineScope The routine token
+     * @returns Parent scope token or undefined
+     */
+    public static getParentScopeOfRoutine(tokens: Token[], routineScope: Token): Token | undefined;
+    
+    /**
+     * Implementation of getParentScopeOfRoutine
+     */
+    public static getParentScopeOfRoutine(tokensOrStructure: Token[] | DocumentStructure, routineScope: Token): Token | undefined {
+        // Check if we received a DocumentStructure
+        if ('getParent' in tokensOrStructure) {
+            // 🚀 PERFORMANCE: Use structure's parent index (O(log n))
+            const structure = tokensOrStructure as DocumentStructure;
+            return structure.getParentScope(routineScope);
+        } else {
+            // Legacy implementation using token array (O(n) filter)
+            const tokens = tokensOrStructure as Token[];
+            const parentScopes = tokens.filter(token =>
+                (token.subType === TokenType.Procedure ||
+                    token.subType === TokenType.GlobalProcedure ||
+                    token.subType === TokenType.MethodImplementation ||
+                    token.subType === TokenType.MethodDeclaration) &&
+                token.line < routineScope.line &&
+                (token.finishesAt === undefined || token.finishesAt >= routineScope.line)
+            );
 
-        if (parentScopes.length === 0) {
-            return undefined;
+            if (parentScopes.length === 0) {
+                return undefined;
+            }
+
+            // Return the closest parent (highest line number)
+            return parentScopes.reduce((a, b) => a.line > b.line ? a : b);
         }
+    }
 
-        // Return the closest parent (highest line number)
-        return parentScopes.reduce((a, b) => a.line > b.line ? a : b);
+    /**
+     * Check if a token defines a scope (procedure, routine, etc.)
+     */
+    private static isScopeDefiningToken(token: Token): boolean {
+        return token.subType === TokenType.Procedure ||
+               token.subType === TokenType.GlobalProcedure ||
+               token.subType === TokenType.MethodImplementation ||
+               token.subType === TokenType.Routine;
     }
 
     /**
