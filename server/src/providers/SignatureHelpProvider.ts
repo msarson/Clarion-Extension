@@ -212,17 +212,19 @@ export class SignatureHelpProvider {
     ): Promise<SignatureInformation[]> {
         logger.info(`Getting class method signatures for ${prefix}.${methodName}`);
 
+        const structure = this.tokenCache.getStructure(document); // 🚀 PERFORMANCE: Get cached structure
+        
         // Determine the class name
         let className: string | null = null;
 
         if (prefix.toLowerCase() === 'self') {
             // Find current class context
-            let currentScope = TokenHelper.getInnermostScopeAtLine(tokens, currentLine);
+            let currentScope = TokenHelper.getInnermostScopeAtLine(structure, currentLine); // 🚀 PERFORMANCE: O(log n) vs O(n)
             
             // If we're in a routine, get the parent scope
             if (currentScope && currentScope.subType === TokenType.Routine) {
                 logger.info(`Current scope is a routine, looking for parent scope`);
-                const parentScope = TokenHelper.getParentScopeOfRoutine(tokens, currentScope);
+                const parentScope = TokenHelper.getParentScopeOfRoutine(structure, currentScope); // 🚀 PERFORMANCE: O(1) vs O(n)
                 if (parentScope) {
                     currentScope = parentScope;
                     logger.info(`Using parent scope: ${currentScope.value}`);

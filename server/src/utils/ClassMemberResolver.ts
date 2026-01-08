@@ -35,8 +35,10 @@ export class ClassMemberResolver {
     ): { type: string; className: string; line: number; file: string } | null {
         logger.info(`🔍 findClassMemberInfo called for member: ${memberName}${paramCount !== undefined ? ` with ${paramCount} parameters` : ''}`);
         
+        const structure = this.tokenCache.getStructure(document); // 🚀 PERFORMANCE: Get cached structure
+        
         // Find the current scope to get the class name
-        let currentScope = TokenHelper.getInnermostScopeAtLine(tokens, currentLine);
+        let currentScope = TokenHelper.getInnermostScopeAtLine(structure, currentLine); // 🚀 PERFORMANCE: O(log n) vs O(n)
         if (!currentScope) {
             logger.info('❌ No scope found');
             return null;
@@ -47,7 +49,7 @@ export class ClassMemberResolver {
         // If we're in a routine, get the parent scope
         if (currentScope.subType === TokenType.Routine) {
             logger.info(`Current scope is a routine, looking for parent scope`);
-            const parentScope = TokenHelper.getParentScopeOfRoutine(tokens, currentScope);
+            const parentScope = TokenHelper.getParentScopeOfRoutine(structure, currentScope); // 🚀 PERFORMANCE: O(1) vs O(n)
             if (parentScope) {
                 currentScope = parentScope;
                 logger.info(`Using parent scope: ${currentScope.value}`);
