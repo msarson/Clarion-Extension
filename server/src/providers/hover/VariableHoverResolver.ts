@@ -8,6 +8,7 @@ import { HoverFormatter, VariableInfo } from './HoverFormatter';
 import { ScopeAnalyzer } from '../../utils/ScopeAnalyzer';
 import { ClassDefinitionIndexer } from '../../utils/ClassDefinitionIndexer';
 import { CrossFileCache } from './CrossFileCache';
+import { SymbolFinderService } from '../../services/SymbolFinderService';
 import LoggerManager from '../../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -20,6 +21,7 @@ logger.setLevel("info");
  */
 export class VariableHoverResolver {
     private classIndexer: ClassDefinitionIndexer;
+    private symbolFinder: SymbolFinderService;
     
     constructor(
         private formatter: HoverFormatter,
@@ -28,15 +30,21 @@ export class VariableHoverResolver {
         private crossFileCache?: CrossFileCache
     ) {
         this.classIndexer = new ClassDefinitionIndexer();
+        this.symbolFinder = new SymbolFinderService(tokenCache, scopeAnalyzer);
     }
 
     /**
      * Find and format hover for a parameter
      */
     findParameterHover(word: string, document: TextDocument, currentScope: Token): Hover | null {
-        const parameterInfo = this.findParameterInfo(word, document, currentScope);
-        if (parameterInfo) {
+        const symbolInfo = this.symbolFinder.findParameter(word, document, currentScope);
+        
+        if (symbolInfo) {
             logger.info(`Found parameter info for ${word}`);
+            const parameterInfo = {
+                type: symbolInfo.type,
+                line: symbolInfo.location.line
+            };
             return this.formatter.formatParameter(word, parameterInfo, currentScope);
         }
         return null;
@@ -46,13 +54,18 @@ export class VariableHoverResolver {
      * Find and format hover for a local variable
      */
     async findLocalVariableHover(word: string, tokens: Token[], currentScope: Token, document: TextDocument, originalWord?: string): Promise<Hover | null> {
-        const variableInfo = this.findLocalVariableInfo(word, tokens, currentScope, document, originalWord);
-        if (variableInfo) {
-            logger.info(`✅ Found variable info for ${word}: type=${variableInfo.type}, line=${variableInfo.line}`);
+        const symbolInfo = this.symbolFinder.findLocalVariable(word, tokens, currentScope, document, originalWord);
+        
+        if (symbolInfo) {
+            logger.info(`✅ Found variable info for ${word}: type=${symbolInfo.type}, line=${symbolInfo.location.line}`);
+            const variableInfo: VariableInfo = {
+                type: symbolInfo.type,
+                line: symbolInfo.location.line
+            };
             const baseHover = this.formatter.formatVariable(originalWord || word, variableInfo, currentScope, document);
             
             // Enhance with class definition info if applicable
-            return await this.enhanceHoverWithClassInfo(baseHover, variableInfo.type, document);
+            return await this.enhanceHoverWithClassInfo(baseHover, symbolInfo.type, document);
         }
         return null;
     }
@@ -61,77 +74,59 @@ export class VariableHoverResolver {
      * Find and format hover for a module-local variable
      */
     findModuleVariableHover(searchWord: string, tokens: Token[], document: TextDocument): Hover | null {
-        logger.info(`Checking for module-local variable in current file...`);
-        const firstProcToken = tokens.find(t => 
-            t.type === TokenType.Label &&
-            t.subType === TokenType.Procedure &&
-            t.start === 0
-        );
-        const moduleScopeEndLine = firstProcToken ? firstProcToken.line : Number.MAX_SAFE_INTEGER;
+        logger.info(`Checking for module-local variable in current file: ${searchWord}...`);
         
-        const moduleVar = tokens.find(t =>
-            t.type === TokenType.Label &&
-            t.start === 0 &&
-            t.line < moduleScopeEndLine &&
-            t.value.toLowerCase() === searchWord.toLowerCase()
-        );
+        const symbolInfo = this.symbolFinder.findModuleVariable(searchWord, tokens, document);
         
-        if (moduleVar) {
-            logger.info(`✅ Found module-local variable in current file: ${moduleVar.value} at line ${moduleVar.line}`);
-            
-            const moduleIndex = tokens.indexOf(moduleVar);
-            let typeInfo = 'UNKNOWN';
-            let isStructureDefinition = false;
-            
-            if (moduleIndex + 1 < tokens.length) {
-                const nextToken = tokens[moduleIndex + 1];
-                if (nextToken.line === moduleVar.line) {
-                    // Check if it's a regular type token
-                    if (nextToken.type === TokenType.Type) {
-                        typeInfo = nextToken.value;
-                    }
-                    // Check if it's a CLASS/GROUP/QUEUE declaration
-                    else if (nextToken.type === TokenType.Structure) {
-                        typeInfo = nextToken.value.toUpperCase(); // CLASS, GROUP, QUEUE, etc.
-                        isStructureDefinition = true; // This IS the definition
-                    }
-                }
-            }
-            
-            const modulePos: Position = { line: moduleVar.line, character: 0 };
-            const scopeInfo = this.scopeAnalyzer.getTokenScope(document, modulePos);
-            
-            const markdown = [
-                `**${moduleVar.value}** — \`${typeInfo}\``,
-                ``
-            ];
-            
-            if (scopeInfo) {
-                const scopeIcon = '📦';
-                markdown.push(`${scopeIcon} Module variable`);
-            }
-            
-            const fileName = path.basename(document.uri.replace('file:///', ''));
-            const lineNumber = moduleVar.line + 1;
-            // Append "Declared in" to the same line as scope label if it exists
-            const lastLine = markdown[markdown.length - 1];
-            if (lastLine && lastLine.includes('variable')) {
-                markdown[markdown.length - 1] = `${lastLine} Declared in ${fileName}:${lineNumber}`;
-            } else {
-                markdown.push(`Declared in ${fileName}:${lineNumber}`);
-            }
-            markdown.push(``);
-            markdown.push(`F12 → Go to declaration`);
-            
-            return {
-                contents: {
-                    kind: 'markdown',
-                    value: markdown.join('\n')
-                }
-            };
+        if (!symbolInfo) {
+            logger.info(`❌ findModuleVariable returned null for ${searchWord}`);
+            return null;
         }
         
-        return null;
+        logger.info(`✅ Found module-local variable in current file: ${symbolInfo.token.value} at line ${symbolInfo.location.line}`);
+        
+        const scopeInfo = this.scopeAnalyzer.getTokenScope(document, { 
+            line: symbolInfo.location.line, 
+            character: 0 
+        });
+        
+        const markdown = [
+            `**${symbolInfo.token.value}** — \`${symbolInfo.type}\``,
+            ``
+        ];
+        
+        if (scopeInfo) {
+            const scopeIcon = '📦';
+            markdown.push(`${scopeIcon} Module variable`);
+        }
+        
+        const fileName = path.basename(document.uri.replace('file:///', ''));
+        const lineNumber = symbolInfo.location.line + 1;
+        // Append "Declared in" to the same line as scope label if it exists
+        const lastLine = markdown[markdown.length - 1];
+        if (lastLine && lastLine.includes('variable')) {
+            markdown[markdown.length - 1] = `${lastLine} Declared in ${fileName}:${lineNumber}`;
+        } else {
+            markdown.push(`Declared in ${fileName}:${lineNumber}`);
+        }
+        
+        // Add the actual source code line
+        if (symbolInfo.declaration) {
+            markdown.push(``);
+            markdown.push('```clarion');
+            markdown.push(symbolInfo.declaration);
+            markdown.push('```');
+        }
+        
+        markdown.push(``);
+        markdown.push(`F12 → Go to declaration`);
+        
+        return {
+            contents: {
+                kind: 'markdown',
+                value: markdown.join('\n')
+            }
+        };
     }
 
     /**
@@ -174,145 +169,19 @@ export class VariableHoverResolver {
     }
 
     /**
-     * Find parameter information
-     */
-    private findParameterInfo(word: string, document: TextDocument, currentScope: Token): { type: string; line: number } | null {
-        const content = document.getText();
-        const lines = content.split('\n');
-        const procedureLine = lines[currentScope.line];
-
-        if (!procedureLine) {
-            return null;
-        }
-
-        const match = procedureLine.match(/PROCEDURE\s*\((.*?)\)/i);
-        if (!match || !match[1]) {
-            return null;
-        }
-
-        const paramString = match[1];
-        const params = paramString.split(',');
-
-        for (const param of params) {
-            const trimmedParam = param.trim();
-            const paramMatch = trimmedParam.match(/([*&]?\s*\w+)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*=.*)?$/i);
-            if (paramMatch) {
-                const type = paramMatch[1].trim();
-                const paramName = paramMatch[2];
-                if (paramName.toLowerCase() === word.toLowerCase()) {
-                    return { type, line: currentScope.line };
-                }
-            }
-        }
-
-        return null;
-    }
-
-    /**
      * Find local variable information using the document symbol tree (public for use by other resolvers)
      */
     public findLocalVariableInfo(word: string, tokens: Token[], currentScope: Token, document: TextDocument, originalWord?: string): { type: string; line: number } | null {
         logger.info(`findLocalVariableInfo called for word: ${word}, scope: ${currentScope.value} at line ${currentScope.line}`);
         
-        const symbolProvider = new ClarionDocumentSymbolProvider();
-        const symbols = symbolProvider.provideDocumentSymbols(tokens, document.uri);
+        const symbolInfo = this.symbolFinder.findLocalVariable(word, tokens, currentScope, document, originalWord);
         
-        const procedureSymbol = this.findProcedureContainingLine(symbols, currentScope.line);
-        if (procedureSymbol) {
-            logger.info(`Found procedure symbol: ${procedureSymbol.name}`);
-            
-            const searchText = originalWord || word;
-            logger.info(`Searching with searchText="${searchText}"`);
-            const varSymbol = this.findVariableInSymbol(procedureSymbol, searchText);
-            if (varSymbol) {
-                logger.info(`Found variable in symbol tree: ${varSymbol.name}`);
-                
-                let type = (varSymbol as any)._clarionType || varSymbol.detail || 'Unknown';
-                
-                if (varSymbol.kind === 23 && type === 'Unknown') {
-                    const structTypeMatch = varSymbol.name.match(/^(\w+)\s*\(/);
-                    if (structTypeMatch) {
-                        type = structTypeMatch[1];
-                    }
-                }
-                
-                return {
-                    type: type,
-                    line: varSymbol.range.start.line
-                };
-            }
-        }
-        
-        return null;
-    }
-
-    /**
-     * Find procedure symbol that contains the given line
-     */
-    private findProcedureContainingLine(symbols: any[], line: number): any | null {
-        for (const symbol of symbols) {
-            if (symbol.range.start.line <= line && symbol.range.end.line >= line) {
-                if (symbol.kind === 12) {
-                    return symbol;
-                }
-                if (symbol.children) {
-                    const result = this.findProcedureContainingLine(symbol.children, line);
-                    if (result) return result;
-                }
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Find variable in symbol's children by name
-     */
-    private findVariableInSymbol(symbol: any, fieldName: string): any | null {
-        if (!symbol.children) return null;
-        
-        for (const child of symbol.children) {
-            if (child.kind === 23) {
-                const groupNameMatch = child.name.match(/\(([^)]+)\)/);
-                if (groupNameMatch) {
-                    const groupName = groupNameMatch[1];
-                    if (groupName.toLowerCase() === fieldName.toLowerCase()) {
-                        return child;
-                    }
-                }
-                
-                if (child.children) {
-                    const result = this.findVariableInSymbol(child, fieldName);
-                    if (result) return result;
-                }
-            } else if (child.kind === 13) {
-                const varName = (child as any)._clarionVarName || child.name.match(/^([^\s]+)/)?.[1] || child.name;
-                
-                if ((child as any)._isPartOfStructure && (child as any)._possibleReferences) {
-                    const possibleRefs = (child as any)._possibleReferences as string[];
-                    const matchesReference = possibleRefs.some(ref => 
-                        ref.toUpperCase() === fieldName.toUpperCase()
-                    );
-                    const isUnprefixedMatch = varName.toUpperCase() === fieldName.toUpperCase();
-                    
-                    if (matchesReference && !isUnprefixedMatch) {
-                        return child;
-                    } else if (isUnprefixedMatch) {
-                        continue;
-                    } else {
-                        continue;
-                    }
-                } else if (varName.toLowerCase() === fieldName.toLowerCase()) {
-                    return child;
-                }
-                
-                if (child.children) {
-                    const result = this.findVariableInSymbol(child, fieldName);
-                    if (result) return result;
-                }
-            } else if (child.children) {
-                const result = this.findVariableInSymbol(child, fieldName);
-                if (result) return result;
-            }
+        if (symbolInfo) {
+            logger.info(`Found variable in symbol tree: ${symbolInfo.token.value}`);
+            return {
+                type: symbolInfo.type,
+                line: symbolInfo.location.line
+            };
         }
         
         return null;
@@ -358,6 +227,20 @@ export class VariableHoverResolver {
         } else {
             markdown.push(`Declared in ${fileName}:${lineNumber}`);
         }
+        
+        // Add the actual source code line
+        const content = document.getText();
+        const lines = content.split(/\r?\n/);
+        if (globalVar.line < lines.length) {
+            const sourceLine = lines[globalVar.line].trim();
+            if (sourceLine) {
+                markdown.push(``);
+                markdown.push('```clarion');
+                markdown.push(sourceLine);
+                markdown.push('```');
+            }
+        }
+        
         markdown.push(``);
         markdown.push(`F12 → Go to declaration`);
         

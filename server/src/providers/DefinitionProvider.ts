@@ -18,6 +18,7 @@ import { CrossFileResolver } from '../utils/CrossFileResolver';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
+import { SymbolFinderService } from '../services/SymbolFinderService';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
 logger.setLevel("error"); // Production: Only log errors
@@ -36,10 +37,12 @@ export class DefinitionProvider {
     private fileResolver = new FileDefinitionResolver();
     private crossFileResolver = new CrossFileResolver(this.tokenCache);
     private scopeAnalyzer: ScopeAnalyzer;
+    private symbolFinder: SymbolFinderService;
 
     constructor() {
         const solutionManager = SolutionManager.getInstance();
         this.scopeAnalyzer = new ScopeAnalyzer(this.tokenCache, solutionManager);
+        this.symbolFinder = new SymbolFinderService(this.tokenCache, this.scopeAnalyzer);
     }
 
     /**
@@ -349,16 +352,6 @@ export class DefinitionProvider {
             if (symbolDefinition) {
                 logger.info(`Found symbol definition for ${word} in the current document`);
                 return symbolDefinition;
-            }
-
-            // Check if this looks like a variable (has a label token somewhere) to prevent
-            // mistaking variables for procedures. Do a quick global check.
-            const globalVarExists = await this.findGlobalDefinition(word, document.uri);
-            if (globalVarExists) {
-                logger.info(`${word} is a variable (found globally), not searching for procedure implementation`);
-                // This is a variable that we couldn't resolve (blocked by scope or other reason)
-                // Don't continue to procedure search
-                return null;
             }
 
             // Check if we're inside a MAP block and the word is a procedure declaration
@@ -758,47 +751,54 @@ export class DefinitionProvider {
         const currentLine = position.line;
         logger.info(`🔍 Current line: ${currentLine}, total tokens: ${tokens.length}`);
         
-        // Check if word contains a colon (prefix notation like LOC:SomeField)
-        // or a dot (structure field notation like MyGroup.MyVar)
-        const colonIndex = word.lastIndexOf(':');
-        const dotIndex = word.lastIndexOf('.');
-        let searchWord = word;
-        let prefixPart = '';
-        
-        if (colonIndex > 0) {
-            prefixPart = word.substring(0, colonIndex);
-            searchWord = word.substring(colonIndex + 1);
-            logger.info(`Detected prefixed variable reference: prefix="${prefixPart}", field="${searchWord}"`);
-        } else if (dotIndex > 0) {
-            // For dot notation, prefix is the structure name
-            prefixPart = word.substring(0, dotIndex);
-            searchWord = word.substring(dotIndex + 1);
-            logger.info(`Detected dot notation variable reference: structure="${prefixPart}", field="${searchWord}"`);
-        }
-        
         // Get the line to check context
         const line = document.getText({
             start: { line: position.line, character: 0 },
             end: { line: position.line, character: Number.MAX_VALUE }
         });
         
-        // CRITICAL FIX: Check if this is a standalone word without prefix or structure notation
-        // For goto definition, we need to handle standalone words differently than hover
-        // We should NOT allow goto definition for standalone variables if they're part of a structure
-        const isStandaloneWord = !line.includes(':' + searchWord) && !line.includes('.' + searchWord);
-        logger.info(`Is standalone word: ${isStandaloneWord}, line: "${line}"`);
+        // Declare these at function scope so they're available throughout
+        let searchWord = word;
+        let prefixPart = '';
+        let isStandaloneWord = false;
         
         const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, currentLine);
     
         if (currentScope) {
             logger.info(`Current scope: ${currentScope.value} (${currentScope.line}-${currentScope.finishesAt})`);
             
-            // Check if this is a parameter in the current procedure
-            const parameterDefinition = this.findParameterDefinition(searchWord, document, currentScope);
+            // ✨ PHASE 1 FIX: Search with full word FIRST (handles labels with colons like BRW1::View:Browse)
+            // This matches the 2026-01-06 fix applied to HoverProvider
+            logger.info(`Trying full word: "${word}"`);
+            let parameterDefinition = this.findParameterDefinition(word, document, currentScope);
             if (parameterDefinition) {
-                logger.info(`Found parameter definition for ${searchWord} in procedure ${currentScope.value}`);
+                logger.info(`Found parameter definition for ${word} in procedure ${currentScope.value}`);
                 return parameterDefinition;
             }
+            
+            // Setup for prefix/dot detection but DON'T overwrite searchWord yet
+            // We'll try the full word search first, then fall back to stripped version
+            const colonIndex = word.lastIndexOf(':');
+            const dotIndex = word.lastIndexOf('.');
+            
+            // Keep searchWord as the full word for now
+            searchWord = word;
+            
+            // Detect if we have prefix/dot but don't strip yet
+            if (colonIndex > 0) {
+                prefixPart = word.substring(0, colonIndex);
+                logger.info(`Detected colon in word: prefix="${prefixPart}", will try full word first, then stripped if needed`);
+            } else if (dotIndex > 0) {
+                // For dot notation, prefix is the structure name
+                prefixPart = word.substring(0, dotIndex);
+                logger.info(`Detected dot in word: structure="${prefixPart}"`);
+            } else {
+                logger.info(`${word} has no prefix/dot`);
+            }
+            
+            // Check if word is standalone (not part of prefix notation on this line)
+            isStandaloneWord = !line.includes(':' + searchWord) && !line.includes('.' + searchWord);
+            logger.info(`Is standalone word: ${isStandaloneWord}, line: "${line}"`);
             
             // For PROCEDURE/METHOD: Search the DATA section (everything before CODE)
             // For ROUTINE: Only search explicit DATA sections
@@ -983,6 +983,130 @@ export class DefinitionProvider {
                 logger.info(`Searching routine DATA section`);
                 // The routine variable search is handled below in the general search
             }
+            
+            // ✨ PHASE 1 FIX: If full word search failed and we have a colon, try with stripped prefix
+            if (colonIndex > 0 && searchWord === word) {
+                // We searched with full word and found nothing, now try stripped version
+                searchWord = word.substring(colonIndex + 1);
+                logger.info(`Full word "${word}" not found in DATA section, retrying with stripped field: "${searchWord}"`);
+                
+                // Try parameter with stripped prefix
+                const parameterDefinition = this.findParameterDefinition(searchWord, document, currentScope);
+                if (parameterDefinition) {
+                    logger.info(`Found parameter definition for ${searchWord} in procedure ${currentScope.value}`);
+                    return parameterDefinition;
+                }
+                
+                // Re-run the DATA section search with stripped word
+                if (currentScope.subType === TokenType.Procedure || 
+                    currentScope.subType === TokenType.MethodImplementation ||
+                    currentScope.subType === TokenType.MethodDeclaration) {
+                    
+                    const codeMarker = currentScope.executionMarker;
+                    let dataEnd = codeMarker ? codeMarker.line : currentScope.finishesAt;
+                    
+                    if (dataEnd === undefined) {
+                        const nextProcedure = tokens.find(t =>
+                            (t.subType === TokenType.Procedure ||
+                             t.subType === TokenType.MethodImplementation ||
+                             t.subType === TokenType.MethodDeclaration) &&
+                            t.line > currentScope.line
+                        );
+                        
+                        if (nextProcedure) {
+                            dataEnd = nextProcedure.line;
+                        } else {
+                            dataEnd = tokens[tokens.length - 1].line;
+                        }
+                    }
+                    
+                    logger.info(`Re-searching DATA section with stripped word: "${searchWord}"`);
+                    
+                    // Same logic as above but with stripped searchWord
+                    const dataVariables = tokens.filter(token => {
+                        const isStructureField = token.isStructureField || token.structurePrefix;
+                        let exactMatch = token.value.toLowerCase() === searchWord.toLowerCase();
+                        let prefixedMatch = token.type === TokenType.Label &&
+                                           token.value.includes(':') &&
+                                           token.value.toLowerCase().endsWith(':' + searchWord.toLowerCase());
+                        
+                        if (isStructureField) {
+                            if (!prefixPart && exactMatch) {
+                                return false;
+                            }
+                            if (!prefixedMatch) {
+                                return false;
+                            }
+                        } else {
+                            if (!exactMatch && !prefixedMatch) {
+                                return false;
+                            }
+                        }
+                        
+                        if (token.type !== TokenType.Variable && token.type !== TokenType.Label) {
+                            return false;
+                        }
+                        
+                        if (token.line <= currentScope.line || (dataEnd !== undefined && token.line >= dataEnd)) {
+                            return false;
+                        }
+                        
+                        if (exactMatch && token.start > 0) {
+                            const labelAtStart = tokens.find(t =>
+                                t.line === token.line &&
+                                t.start === 0 &&
+                                t.type === TokenType.Label
+                            );
+                            
+                            if (labelAtStart && labelAtStart.value.includes(':')) {
+                                return true;
+                            }
+                            
+                            return false;
+                        }
+                        
+                        return true;
+                    });
+                    
+                    if (dataVariables.length > 0) {
+                        logger.info(`Found ${dataVariables.length} variables with stripped word in DATA section`);
+                        
+                        for (const token of dataVariables) {
+                            if ((token as any)._possibleReferences) {
+                                const possibleRefs = (token as any)._possibleReferences as string[];
+                                const matchesReference = possibleRefs.some(ref => 
+                                    ref.toUpperCase() === word.toUpperCase()
+                                );
+                                const isUnprefixedMatch = token.value.toUpperCase() === word.toUpperCase();
+                                
+                                if (!matchesReference || (isUnprefixedMatch && !prefixPart)) {
+                                    continue;
+                                }
+                            }
+                            
+                            if (token.start > 0) {
+                                const labelToken = tokens.find(t =>
+                                    t.line === token.line &&
+                                    t.start === 0 &&
+                                    t.type === TokenType.Label
+                                );
+                                
+                                if (labelToken) {
+                                    return Location.create(document.uri, {
+                                        start: { line: labelToken.line, character: 0 },
+                                        end: { line: labelToken.line, character: labelToken.value.length }
+                                    });
+                                }
+                            }
+                            
+                            return Location.create(document.uri, {
+                                start: { line: token.line, character: token.start },
+                                end: { line: token.line, character: token.start + token.value.length }
+                            });
+                        }
+                    }
+                }
+            }
         } else {
             logger.info(`❌ NO SCOPE FOUND at line ${currentLine} - cannot check for parameters`);
         }
@@ -1095,8 +1219,14 @@ export class DefinitionProvider {
         }
     
         // 🌍 Global fallback
-        const globalLocation = await this.findGlobalDefinition(searchWord, document.uri);
-        if (globalLocation) {
+        const globalSymbol = await this.symbolFinder.findGlobalVariable(searchWord, tokens, document);
+        if (globalSymbol) {
+            // Convert SymbolInfo to Location
+            const globalLocation = Location.create(globalSymbol.location.uri, {
+                start: { line: globalSymbol.location.line, character: globalSymbol.location.character },
+                end: { line: globalSymbol.location.line, character: globalSymbol.location.character + globalSymbol.token.value.length }
+            });
+            
             // Validate scope accessibility before returning cross-file results
             const globalUri = globalLocation.uri;
             if (globalUri !== document.uri) {
@@ -1534,97 +1664,6 @@ export class DefinitionProvider {
 
         logger.info(`No definition found for '${word}' in ${fromPath} or its includes/members`);
         return null;
-    }
-
-    private async findGlobalDefinition(word: string, documentUri: string): Promise<Location | null> {
-        const solutionManager = SolutionManager.getInstance();
-        if (!solutionManager) {
-            logger.warn("❌ No SolutionManager instance available.");
-            return null;
-        }
-    
-        const documentPath = documentUri.replace("file:///", "").replace(/\//g, "\\");
-        const currentProject = solutionManager.findProjectForFile(documentPath);
-        if (!currentProject) {
-            logger.warn(`❗ No project found for ${documentPath}`);
-            return null;
-        }
-    
-        const visited = new Set<string>();
-    
-        // 🔍 Step 1: Search known project source files
-        for (const sourceFile of currentProject.sourceFiles) {
-            const fullPath = path.join(currentProject.path, sourceFile.relativePath);
-            if (!fs.existsSync(fullPath) || visited.has(fullPath)) continue;
-    
-            visited.add(fullPath);
-            const contents = await currentProject.readFileContents(fullPath);
-            if (!contents) continue;
-    
-            const doc = TextDocument.create(`file:///${fullPath.replace(/\\/g, "/")}`, "clarion", 1, contents);
-            const tokens = this.tokenCache.getTokens(doc);
-    
-            const label = tokens.find(t =>
-                t.start === 0 &&
-                t.type === TokenType.Label &&
-                t.value.toLowerCase() === word.toLowerCase()
-            );
-    
-            if (label) {
-                // Check if this label is inside a procedure's DATA section (not truly global)
-                const containingProcedure = tokens.find(t =>
-                    (t.subType === TokenType.Procedure || 
-                     t.subType === TokenType.MethodImplementation ||
-                     t.subType === TokenType.MethodDeclaration) &&
-                    t.line < label.line &&
-                    t.finishesAt !== undefined &&
-                    t.finishesAt >= label.line
-                );
-                
-                if (containingProcedure) {
-                    // This label is inside a procedure - it's a local variable, not global
-                    // Check if it's in the DATA section (before CODE marker)
-                    const codeMarker = containingProcedure.executionMarker;
-                    if (codeMarker && label.line < codeMarker.line) {
-                        logger.info(`❌ Skipping label ${label.value} at line ${label.line} - it's local to procedure ${containingProcedure.value}, not global`);
-                        continue; // Skip this file, continue searching other files
-                    }
-                }
-                
-                logger.info(`✅ Found global label: ${label.value} at line ${label.line} in ${fullPath}`);
-                return Location.create(doc.uri, {
-                    start: { line: label.line, character: label.start },
-                    end: { line: label.line, character: label.start + label.value.length }
-                });
-            }
-        }
-    
-        // 🔁 Step 2: Fallback — search all redirection paths
-        logger.info(`↪️ Fallback: searching via redirection for ${word}`);
-        const resolvedCandidate = await solutionManager.findFileWithExtension(`${word}.CLW`);
-        if (resolvedCandidate && resolvedCandidate.path && fs.existsSync(resolvedCandidate.path) && !visited.has(resolvedCandidate.path)) {
-            const contents = await fs.promises.readFile(resolvedCandidate.path, "utf-8");
-            const doc = TextDocument.create(`file:///${resolvedCandidate.path.replace(/\\/g, "/")}`, "clarion", 1, contents);
-            const tokens = this.tokenCache.getTokens(doc);
-
-            const label = tokens.find(t =>
-                t.start === 0 &&
-                t.type === TokenType.Label &&
-                t.value.toLowerCase() === word.toLowerCase()
-            );
-
-            if (label) {
-                logger.info(`✅ Found global label via redirection: ${label.value} at line ${label.line} in ${resolvedCandidate.path} (source: ${resolvedCandidate.source})`);
-                return Location.create(doc.uri, {
-                    start: { line: label.line, character: label.start },
-                    end: { line: label.line, character: label.start + label.value.length }
-                });
-            }
-        }
-    
-        // 🔁 Step 3: Try the recursive include search as a last resort
-        logger.info(`↪️ Last resort: trying recursive include search for ${word}`);
-        return await this.findDefinitionInIncludes(word, documentPath);
     }
 
     /**

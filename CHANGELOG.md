@@ -8,6 +8,22 @@ This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x 
 
 ## [0.8.4] - Unreleased
 
+### 🏗️ Architecture Refactoring (January 2026)
+
+#### SymbolFinderService - Unified Symbol Finding
+- **New centralized service** - Created `SymbolFinderService` to eliminate code duplication between HoverProvider and DefinitionProvider
+- **~510 lines of duplicate code eliminated** - Parameter, local, module, and global variable finding logic unified
+- **Comprehensive test coverage** - 12 unit tests for SymbolFinderService (100% passing)
+- **Consistent behavior** - Hover and F12 now use identical logic for finding symbols
+- **Performance improvement** - Global variable search now efficient (searches max 2 files instead of entire project)
+- **Architecture correctness** - Follows Clarion MEMBER semantics (MEMBER files reference ONE parent only)
+
+#### Bug Fixes from Refactoring
+- **Fixed: Global scope detection** - Variables in procedures no longer incorrectly identified as global when CODE token missing
+- **Fixed: Colon-handling in labels** - F12 now works on labels like `BRW1::View:Browse` (searches full word first, then strips prefix)
+- **Fixed: MEMBER file module variables** - Correctly finds module variables in MEMBER files with MAP blocks
+- **Improved: Cross-provider consistency** - All variable finding uses same search hierarchy and logic
+
 ### 🎨 Template Language Support (January 2026)
 
 #### New Language: Clarion Template

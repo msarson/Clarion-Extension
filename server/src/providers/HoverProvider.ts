@@ -140,7 +140,20 @@ export class HoverProvider {
 
             logger.info(`Current scope: ${currentScope.value}`);
 
-            // Strip prefix if present (e.g., LOC:Field -> Field)
+            // First, try searching with the full word (handles labels with colons like BRW1::View:Browse)
+            logger.info(`Checking if ${word} (full word) is a parameter...`);
+            let parameterHover = this.variableResolver.findParameterHover(word, document, currentScope);
+            if (parameterHover) return parameterHover;
+
+            logger.info(`Checking if ${word} (full word) is a local variable...`);
+            let variableHover = await this.variableResolver.findLocalVariableHover(word, tokens, currentScope, document, word);
+            if (variableHover) return variableHover;
+            
+            logger.info(`Checking for ${word} (full word) as module-local variable...`);
+            let moduleVarHover = this.variableResolver.findModuleVariableHover(word, tokens, document);
+            if (moduleVarHover) return moduleVarHover;
+
+            // If not found and word contains colon, try stripping prefix (e.g., LOC:Field -> Field)
             const colonIndex = word.lastIndexOf(':');
             let searchWord = word;
             let prefixPart = '';
@@ -148,25 +161,27 @@ export class HoverProvider {
             if (colonIndex > 0) {
                 prefixPart = word.substring(0, colonIndex);
                 searchWord = word.substring(colonIndex + 1);
-                logger.info(`Detected prefixed variable in hover: prefix="${prefixPart}", field="${searchWord}"`);
+                logger.info(`Full word not found. Trying with prefix stripped: prefix="${prefixPart}", field="${searchWord}"`);
+                
+                // Check if this is a parameter (with prefix stripped)
+                logger.info(`Checking if ${searchWord} is a parameter...`);
+                parameterHover = this.variableResolver.findParameterHover(searchWord, document, currentScope);
+                if (parameterHover) return parameterHover;
+                logger.info(`${searchWord} is not a parameter`);
+
+                // Check if this is a local variable (with prefix stripped)
+                logger.info(`Checking if ${searchWord} is a local variable...`);
+                variableHover = await this.variableResolver.findLocalVariableHover(searchWord, tokens, currentScope, document, word);
+                if (variableHover) return variableHover;
+                logger.info(`${searchWord} is not a local variable`);
+                
+                // 🔗 Check for module-local variable in current file (with prefix stripped)
+                logger.info(`Checking for module-local variable in current file...`);
+                moduleVarHover = this.variableResolver.findModuleVariableHover(searchWord, tokens, document);
+                if (moduleVarHover) return moduleVarHover;
+            } else {
+                logger.info(`${word} has no prefix, already searched as-is`);
             }
-
-            // Check if this is a parameter
-            logger.info(`Checking if ${searchWord} is a parameter...`);
-            const parameterHover = this.variableResolver.findParameterHover(searchWord, document, currentScope);
-            if (parameterHover) return parameterHover;
-            logger.info(`${searchWord} is not a parameter`);
-
-            // Check if this is a local variable
-            logger.info(`Checking if ${searchWord} is a local variable...`);
-            const variableHover = await this.variableResolver.findLocalVariableHover(searchWord, tokens, currentScope, document, word);
-            if (variableHover) return variableHover;
-            logger.info(`${searchWord} is not a local variable`);
-            
-            // 🔗 Check for module-local variable in current file
-            logger.info(`Checking for module-local variable in current file...`);
-            const moduleVarHover = this.variableResolver.findModuleVariableHover(searchWord, tokens, document);
-            if (moduleVarHover) return moduleVarHover;
             
             logger.info(`${searchWord} is not a module-local variable - checking MEMBER parent file`);
             

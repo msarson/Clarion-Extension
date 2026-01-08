@@ -89,13 +89,8 @@ export class ClarionSemanticTokensProvider {
             return true;
         }
         
-        // Encode structure keywords
+        // Encode structure keywords (includes CLASS, INTERFACE, GROUP, QUEUE, etc.)
         if (token.type === TokenType.Structure) {
-            return true;
-        }
-        
-        // Encode OOP keywords
-        if (token.type === TokenType.Class) {
             return true;
         }
         
@@ -120,21 +115,9 @@ export class ClarionSemanticTokensProvider {
             return;
         }
         
-        // Handle structure keywords (GROUP, RECORD, QUEUE, etc.)
+        // Handle structure keywords (includes CLASS, INTERFACE, GROUP, QUEUE, etc.)
         if (token.type === TokenType.Structure) {
             this.encodeStructureToken(token, builder);
-            return;
-        }
-        
-        // Handle OOP keywords (CLASS, INTERFACE)
-        if (token.type === TokenType.Class) {
-            builder.push(
-                token.line,
-                token.start,
-                token.value.length,
-                SemanticTokenTypes.keywordOop,
-                0
-            );
             return;
         }
         
@@ -160,8 +143,12 @@ export class ClarionSemanticTokensProvider {
         const upperValue = token.value.toUpperCase();
         let tokenType = SemanticTokenTypes.keyword;
         
+        // OOP structures
+        if (['CLASS', 'INTERFACE'].includes(upperValue)) {
+            tokenType = SemanticTokenTypes.keywordOop;
+        }
         // Data structures
-        if (['GROUP', 'RECORD', 'QUEUE', 'FILE', 'VIEW', 'TABLE'].includes(upperValue)) {
+        else if (['GROUP', 'RECORD', 'QUEUE', 'FILE', 'VIEW', 'TABLE'].includes(upperValue)) {
             tokenType = SemanticTokenTypes.keywordStructure;
         }
         // UI structures
