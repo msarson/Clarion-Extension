@@ -120,6 +120,20 @@ export class VariableHoverResolver {
             } else {
                 markdown.push(`Declared in ${fileName}:${lineNumber}`);
             }
+            
+            // Add the actual source code line
+            const content = document.getText();
+            const lines = content.split(/\r?\n/);
+            if (moduleVar.line < lines.length) {
+                const sourceLine = lines[moduleVar.line].trim();
+                if (sourceLine) {
+                    markdown.push(``);
+                    markdown.push('```clarion');
+                    markdown.push(sourceLine);
+                    markdown.push('```');
+                }
+            }
+            
             markdown.push(``);
             markdown.push(`F12 → Go to declaration`);
             
@@ -358,6 +372,20 @@ export class VariableHoverResolver {
         } else {
             markdown.push(`Declared in ${fileName}:${lineNumber}`);
         }
+        
+        // Add the actual source code line
+        const content = document.getText();
+        const lines = content.split(/\r?\n/);
+        if (globalVar.line < lines.length) {
+            const sourceLine = lines[globalVar.line].trim();
+            if (sourceLine) {
+                markdown.push(``);
+                markdown.push('```clarion');
+                markdown.push(sourceLine);
+                markdown.push('```');
+            }
+        }
+        
         markdown.push(``);
         markdown.push(`F12 → Go to declaration`);
         

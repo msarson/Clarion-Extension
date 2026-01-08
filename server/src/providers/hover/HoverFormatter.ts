@@ -114,6 +114,19 @@ export class HoverFormatter {
             } else {
                 markdown.push(`Declared in ${fileName}:${lineNumber}`);
             }
+            
+            // Add the actual source code line
+            const content = document.getText();
+            const lines = content.split(/\r?\n/);
+            if (info.line < lines.length) {
+                const sourceLine = lines[info.line].trim();
+                if (sourceLine) {
+                    markdown.push(``);
+                    markdown.push('```clarion');
+                    markdown.push(sourceLine);
+                    markdown.push('```');
+                }
+            }
         } else {
             markdown.push(`Declared at line ${info.line + 1}`);
         }
