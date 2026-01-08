@@ -748,6 +748,7 @@ export class DefinitionProvider {
         logger.info(`Looking for symbol definition: ${word}`);
     
         const tokens = this.tokenCache.getTokens(document);
+        const structure = this.tokenCache.getStructure(document); // 🚀 PERFORMANCE: Get cached structure
         const currentLine = position.line;
         logger.info(`🔍 Current line: ${currentLine}, total tokens: ${tokens.length}`);
         
@@ -762,7 +763,7 @@ export class DefinitionProvider {
         let prefixPart = '';
         let isStandaloneWord = false;
         
-        const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, currentLine);
+        const currentScope = TokenHelper.getInnermostScopeAtLine(structure, currentLine); // 🚀 PERFORMANCE: O(log n) vs O(n)
     
         if (currentScope) {
             logger.info(`Current scope: ${currentScope.value} (${currentScope.line}-${currentScope.finishesAt})`);
@@ -1781,8 +1782,10 @@ export class DefinitionProvider {
     private async findClassMember(tokens: Token[], memberName: string, document: TextDocument, currentLine: number): Promise<Location | null> {
         logger.info(`Looking for class member ${memberName} in current context`);
 
+        const structure = this.tokenCache.getStructure(document); // 🚀 PERFORMANCE: Get cached structure
+        
         // Find the current class or method context
-        let currentScope = TokenHelper.getInnermostScopeAtLine(tokens, currentLine);
+        let currentScope = TokenHelper.getInnermostScopeAtLine(structure, currentLine); // 🚀 PERFORMANCE: O(log n) vs O(n)
         if (!currentScope) {
             logger.info('No scope found - cannot determine class context');
             return null;
@@ -1791,7 +1794,7 @@ export class DefinitionProvider {
         // If we're in a routine, we need the parent scope (the method/procedure) to get the class name
         if (currentScope.subType === TokenType.Routine) {
             logger.info(`Current scope is a routine (${currentScope.value}), looking for parent scope`);
-            const parentScope = TokenHelper.getParentScopeOfRoutine(tokens, currentScope);
+            const parentScope = TokenHelper.getParentScopeOfRoutine(structure, currentScope); // 🚀 PERFORMANCE: O(1) vs O(n)
             if (parentScope) {
                 currentScope = parentScope;
                 logger.info(`Using parent scope: ${currentScope.value}`);
