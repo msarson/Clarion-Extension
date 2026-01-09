@@ -229,16 +229,7 @@ export class ClarionTokenizer {
                         }
                         
                         // Note: Removed tokensOnCurrentLine check - declaration structures CAN be indented
-                        // The original check was meant to prevent "Label FILE..." patterns,
-                        // but it incorrectly blocked legitimately indented structures in generated code
-                        
-                        // Allow reasonable indentation (up to 50 columns) for generated code
-                        // Most hand-written Clarion code has structures near left margin,
-                        // but generated code (like from Clarion IDE templates) can have deep indentation
-                        if (column > 50) {
-                            // Skip if column > 50 - extreme indentation is likely not a structure declaration
-                            continue;
-                        }
+                        // Removed column check - structures can appear at any indentation level (except labels which must be at column 0)
                         
                         // 🚀 PERF: Check if this looks like a structure keyword
                         const hasStructureKeyword = isExecutionStructure || isDeclarationStructure;
