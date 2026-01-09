@@ -231,7 +231,7 @@ export class DefinitionProvider {
                 t.subType === TokenType.GlobalProcedure
             );
             
-            logger.info(`Tokens on line ${position.line}: ${tokens.filter(t => t.line === position.line).map(t => `type=${t.type}, subType=${t.subType}, value="${t.value}", label="${t.label}"`).join('; ')}`);
+            logger.info(`Tokens on line ${position.line}: ${TokenHelper.findTokens(tokens, { line: position.line }).map(t => `type=${t.type}, subType=${t.subType}, value="${t.value}", label="${t.label}"`).join('; ')}`);
             logger.info(`Token at position with GlobalProcedure subtype: ${tokenAtPosition ? `YES (label="${tokenAtPosition.label}")` : 'NO'}`);
             
             if (tokenAtPosition && tokenAtPosition.label) {
@@ -259,7 +259,7 @@ export class DefinitionProvider {
                     } else {
                         logger.info(`❌ No MEMBER token found with referencedFile in first 5 lines`);
                         // Debug: Show all tokens in first 5 lines
-                        const firstTokens = tokens.filter(t => t.line < 5);
+                        const firstTokens = TokenHelper.findTokensInHeader(tokens, 5);
                         logger.info(`Debug: Found ${firstTokens.length} tokens in first 5 lines:`);
                         firstTokens.forEach(t => {
                             logger.info(`  Line ${t.line}: type=${t.type}, value="${t.value}", referencedFile="${t.referencedFile || 'undefined'}"`);
@@ -462,11 +462,7 @@ export class DefinitionProvider {
                     }
 
                     // Find the structure definition - handle complex structure names
-                    const structureTokens = tokens.filter(token =>
-                        token.type === TokenType.Label &&
-                        token.value.toLowerCase() === structureName.toLowerCase() &&
-                        token.start === 0
-                    );
+                    const structureTokens = TokenHelper.findLabels(tokens, structureName);
 
                     if (structureTokens.length > 0) {
                         // Find the field within the structure
@@ -490,19 +486,13 @@ export class DefinitionProvider {
                 logger.info(`Detected prefix notation: ${prefixPart}:${fieldName}`);
 
                 // Try to find structures with this exact prefix first
-                let structuresWithPrefix = tokens.filter(token =>
-                    token.type === TokenType.Structure &&
-                    token.structurePrefix?.toLowerCase() === prefixPart.toLowerCase()
-                );
+                let structuresWithPrefix = TokenHelper.findStructuresWithPrefix(tokens, prefixPart);
 
                 // If no exact match, try to find structures where the prefix is part of a complex name
                 // For example, if prefixPart is "Queue:Browse:1", look for structures with prefix "Queue"
                 if (structuresWithPrefix.length === 0 && prefixPart.includes(':')) {
                     const simplePrefixPart = prefixPart.split(':')[0];
-                    structuresWithPrefix = tokens.filter(token =>
-                        token.type === TokenType.Structure &&
-                        token.structurePrefix?.toLowerCase() === simplePrefixPart.toLowerCase()
-                    );
+                    structuresWithPrefix = TokenHelper.findStructuresWithPrefix(tokens, simplePrefixPart);
                 }
 
                 if (structuresWithPrefix.length > 0) {
@@ -678,11 +668,7 @@ export class DefinitionProvider {
         logger.info(`Is standalone word in structure definition: ${isStandaloneWord}, line: "${line}"`);
 
         // Look for a label token that matches the word (structure definitions are labels in column 1)
-        const labelTokens = tokens.filter(token =>
-            token.type === TokenType.Label &&
-            token.value.toLowerCase() === word.toLowerCase() &&
-            token.start === 0
-        );
+        const labelTokens = TokenHelper.findLabels(tokens, word);
 
         if (labelTokens.length > 0) {
             logger.info(`Found ${labelTokens.length} label tokens for ${word}`);

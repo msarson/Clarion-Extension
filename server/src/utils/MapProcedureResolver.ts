@@ -12,6 +12,7 @@ import { DocumentStructure } from '../DocumentStructure';
 import { ScopeAnalyzer } from './ScopeAnalyzer';
 import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
+import { TokenHelper } from './TokenHelper';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("MapProcedureResolver");
@@ -201,7 +202,7 @@ export class MapProcedureResolver {
         logger.info(`📊 Total tokens in document: ${tokens.length}`);
 
         // Debug: Find any tokens with value 'MAP' regardless of type
-        const anyMapTokens = tokens.filter(t => t.value.toUpperCase() === 'MAP');
+        const anyMapTokens = TokenHelper.findTokens(tokens, { value: 'MAP' });
         logger.info(`🔍 Found ${anyMapTokens.length} token(s) with value 'MAP' (any type)`);
         if (anyMapTokens.length > 0) {
             anyMapTokens.forEach((t, i) => {
@@ -215,10 +216,7 @@ export class MapProcedureResolver {
         }
 
         // Find all MAP structures
-        const mapStructures = tokens.filter(t => 
-            t.type === TokenType.Structure && 
-            t.value.toUpperCase() === 'MAP'
-        );
+        const mapStructures = TokenHelper.findMapStructures(tokens);
 
         logger.info(`📋 Found ${mapStructures.length} MAP structure(s) in document "${document.uri.split('/').pop()}"`);
         if (mapStructures.length > 0) {
@@ -394,9 +392,11 @@ export class MapProcedureResolver {
         // Check if we're inside a PROCEDURE/ROUTINE block - if so, skip MAP logic
         // (we're in actual code, not in a MAP declaration section)
         // NOTE: Exclude ClarionDocument (PROGRAM/MODULE) since MAP declarations are inside those
-        const procedureBlocks = tokens.filter(t =>
-            t.subType === TokenType.GlobalProcedure &&
-            t.line < position.line &&
+        const procedureBlocks = TokenHelper.findTokens(tokens, {
+            subType: TokenType.GlobalProcedure,
+            beforeLine: position.line + 1,
+            afterLine: position.line - 1
+        }).filter(t => 
             t.finishesAt !== undefined &&
             t.finishesAt >= position.line
         );
@@ -425,11 +425,10 @@ export class MapProcedureResolver {
             logger.info(`Position ${position.line} is not inside a MAP block - checking if this is an INCLUDE file`);
             
             // Look for MODULE blocks in this file
-            const moduleBlocks = tokens.filter(t =>
-                t.type === TokenType.Structure &&
-                t.value.toUpperCase() === 'MODULE' &&
-                t.referencedFile
-            );
+            const moduleBlocks = TokenHelper.findTokens(tokens, {
+                type: TokenType.Structure,
+                value: 'MODULE'
+            }).filter(t => t.referencedFile);
             
             if (moduleBlocks.length > 0) {
                 logger.info(`   Found ${moduleBlocks.length} MODULE block(s) with referencedFile in this file`);
@@ -545,10 +544,9 @@ export class MapProcedureResolver {
         // Find all GlobalProcedure implementations with matching name in current file
         const candidates: Array<{ token: Token, signature: string }> = [];
         
-        const implementations = tokens.filter(t =>
-            t.subType === TokenType.GlobalProcedure &&
-            t.label?.toLowerCase() === procName.toLowerCase()
-        );
+        const implementations = TokenHelper.findTokens(tokens, {
+            subType: TokenType.GlobalProcedure
+        }).filter(t => t.label?.toLowerCase() === procName.toLowerCase());
 
         if (implementations.length === 0) {
             logger.info(`No implementation found for ${procName}`);
