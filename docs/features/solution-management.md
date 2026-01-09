@@ -1,5 +1,7 @@
 # Solution Management
 
+[← Back to Documentation Home](../../README.md)
+
 Working with Clarion solutions, projects, and build configurations in VS Code.
 
 ## Overview

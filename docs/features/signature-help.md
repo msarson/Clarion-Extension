@@ -1,5 +1,7 @@
 # Signature Help & Hover Documentation
 
+[← Back to Documentation Home](../../README.md)
+
 Get instant documentation and parameter hints for Clarion functions and methods.
 
 ## Overview

@@ -1,5 +1,7 @@
 # Settings Reference
 
+[← Back to Documentation Home](../../README.md)
+
 Complete reference for all Clarion Extension configuration settings.
 
 ## Configuration Location

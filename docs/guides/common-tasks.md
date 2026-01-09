@@ -1,5 +1,7 @@
 # Common Tasks
 
+[← Back to Documentation Home](../../README.md)
+
 Everyday workflows made easy. Find your task and follow the steps.
 
 ## Table of Contents

@@ -1,4 +1,6 @@
-# **Snippet Cheat sheet for the clarion-extensions**
+# Snippet Cheat Sheet
+
+[← Back to Documentation Home](../../README.md)
 
 Snippets are activated when a range of characters are typed that match the selected snippet and then pressing the activation key, TAB for instance.
 

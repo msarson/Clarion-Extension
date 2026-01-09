@@ -1,5 +1,7 @@
 # Installation Guide
 
+[← Back to Documentation Home](../../README.md)
+
 Complete setup instructions for the Clarion Extension.
 
 ## Requirements

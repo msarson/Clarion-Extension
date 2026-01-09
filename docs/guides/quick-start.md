@@ -1,5 +1,7 @@
 # Quick Start Guide
 
+[← Back to Documentation Home](../../README.md)
+
 Get up and running with the Clarion Extension in 5 minutes.
 
 ---

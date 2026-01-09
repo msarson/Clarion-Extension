@@ -1,5 +1,7 @@
 # Navigation Features
 
+[← Back to Documentation Home](../../README.md)
+
 Master code navigation with F12, Ctrl+F12, and hover tooltips.
 
 ## Overview

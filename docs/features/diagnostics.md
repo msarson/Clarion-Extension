@@ -1,5 +1,7 @@
 # Diagnostics & Validation
 
+[← Back to Documentation Home](../../README.md)
+
 Real-time error detection and code validation as you type.
 
 ## Overview

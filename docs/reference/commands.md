@@ -1,5 +1,7 @@
 # Clarion Extension - Commands and Settings Reference
 
+[← Back to Documentation Home](../../README.md)
+
 Complete reference for all commands and settings in the Clarion Extension for Visual Studio Code.
 
 ## Table of Contents

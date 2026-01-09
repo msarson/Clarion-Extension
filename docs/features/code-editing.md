@@ -1,5 +1,7 @@
 # Code Editing Tools
 
+[← Back to Documentation Home](../../README.md)
+
 Productivity features to write Clarion code faster.
 
 ## Overview
