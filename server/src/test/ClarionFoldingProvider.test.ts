@@ -286,6 +286,83 @@ ThisWindow.Kill PROCEDURE()
         });
     });
 
+    suite('computeFoldingRanges - WINDOW/APPLICATION Structures', () => {
+        
+        test('Should create folding range for simple WINDOW', () => {
+            const code = `TestWindow WINDOW('Test'),AT(,,600,400)
+            END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            assert.ok(ranges.length > 0, 'Should have folding range for WINDOW');
+            const windowRange = ranges.find(r => r.startLine === 0);
+            assert.ok(windowRange, 'Should find window folding range');
+            assert.strictEqual(windowRange!.endLine, 1, 'Should extend to END');
+        });
+
+        test('Should create folding ranges for WINDOW with nested MENU structures', () => {
+            const code = `TestWindow WINDOW('Test'),AT(,,600,400)
+              MENUBAR,USE(?MENUBAR1)
+                MENU('&File'),USE(?FileMenu)
+                  ITEM('E&xit'),USE(?Exit)
+                END
+                MENU('&Help'),USE(?HelpMenu)
+                  ITEM('&About'),USE(?About)
+                END
+              END
+            END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            // Should have ranges for WINDOW, MENUBAR, and both MENUs
+            assert.ok(ranges.length >= 4, `Should have at least 4 folding ranges, got ${ranges.length}`);
+            
+            // Check for window range (0-9)
+            const windowRange = ranges.find(r => r.startLine === 0 && r.endLine === 9);
+            assert.ok(windowRange, 'Should find window folding range from line 0 to 9');
+            
+            // Check for menubar range (1-8)
+            const menubarRange = ranges.find(r => r.startLine === 1 && r.endLine === 8);
+            assert.ok(menubarRange, 'Should find menubar folding range from line 1 to 8');
+            
+            // Check for File menu range (2-4)
+            const fileMenuRange = ranges.find(r => r.startLine === 2 && r.endLine === 4);
+            assert.ok(fileMenuRange, 'Should find File menu folding range from line 2 to 4');
+            
+            // Check for Help menu range (5-7)
+            const helpMenuRange = ranges.find(r => r.startLine === 5 && r.endLine === 7);
+            assert.ok(helpMenuRange, 'Should find Help menu folding range from line 5 to 7');
+        });
+
+        test('Should create folding range for APPLICATION structure', () => {
+            const code = `AppFrame APPLICATION('Test App'),AT(,,600,400)
+              MENUBAR,USE(?MENUBAR1)
+                MENU('&File'),USE(?FileMenu)
+                  ITEM('E&xit'),USE(?Exit)
+                END
+              END
+            END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            // Should have ranges for APPLICATION, MENUBAR, and MENU
+            assert.ok(ranges.length >= 3, `Should have at least 3 folding ranges, got ${ranges.length}`);
+            
+            // Check for application range
+            const appRange = ranges.find(r => r.startLine === 0 && r.endLine === 6);
+            assert.ok(appRange, 'Should find application folding range from line 0 to 6');
+        });
+    });
+
     suite('computeFoldingRanges - Control Flow (IF/ELSE/ELSIF)', () => {
         
         test('Should fold IF with ELSE correctly', () => {

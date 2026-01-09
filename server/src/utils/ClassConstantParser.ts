@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger('ClassConstantParser');
-logger.setLevel('info');
+logger.setLevel('error');
 
 /**
  * Represents a constant required by a CLASS definition

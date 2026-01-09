@@ -6,7 +6,19 @@ All notable changes to the Clarion Extension are documented here.
 
 ## Recent Versions
 
-### [0.8.4] - Unreleased
+### [0.8.5] - 2026-01-09
+**Folding Provider Fix**
+
+**Highlights:**
+- 🔧 Fixed APPLICATION structures not creating folds
+- 🔧 Fixed nested MENU structures not folding
+- ✨ Removed arbitrary indentation limits for structure recognition
+
+[**→ Full details**](docs/changelogs/CHANGELOG-0.8.5.md)
+
+---
+
+### [0.8.4] - 2026-01-09
 **Architecture Refactoring & Documentation Overhaul**
 
 **Highlights:**

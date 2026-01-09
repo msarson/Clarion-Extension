@@ -9,7 +9,7 @@ import * as fs from 'fs';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("RunCommands");
-logger.setLevel("info");
+logger.setLevel("error");
 
 interface ProjectOutputInfo {
     outputType: string;

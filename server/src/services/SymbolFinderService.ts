@@ -24,7 +24,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("SymbolFinderService");
-logger.setLevel("info");
+logger.setLevel("error");
 
 /**
  * Information about a found symbol

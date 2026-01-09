@@ -233,7 +233,7 @@ export { showClarionQuickOpen } from './navigation/QuickOpenProvider';
 
 export function deactivate(): Thenable<void> | undefined {
     // Set to info level to capture shutdown process
-    logger.setLevel("info");
+    logger.setLevel("error");
     logger.info("🛑 DEACTIVATE: Starting extension deactivation");
     console.log("🛑 DEACTIVATE: Starting extension deactivation at " + new Date().toISOString());
     

@@ -6,7 +6,7 @@ import * as path from 'path';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("CrossFileCache");
-logger.setLevel("info");
+logger.setLevel("error");
 
 export interface CachedDocument {
     document: TextDocument;
