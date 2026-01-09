@@ -393,10 +393,6 @@
                 "title": "Open Containing Folder"
             },
             {
-                "command": "clarion.viewGeneratedSource",
-                "title": "View Generated Source"
-            },
-            {
                 "command": "clarion.openInClarionIDE",
                 "title": "Open in Clarion IDE"
             },
@@ -542,11 +538,6 @@
                 },
                 {
                     "command": "clarion.openContainingFolder",
-                    "when": "view == solutionView && viewItem == clarionApp",
-                    "group": "navigation"
-                },
-                {
-                    "command": "clarion.viewGeneratedSource",
                     "when": "view == solutionView && viewItem == clarionApp",
                     "group": "navigation"
                 }

@@ -122,30 +122,6 @@ export function registerTreeCommands(): Disposable[] {
             }
         }),
 
-        // View generated source for an application
-        commands.registerCommand('clarion.viewGeneratedSource', async (node) => {
-            if (node && node.data && node.data.name && node.data.absolutePath) {
-                // Get the base name without extension
-                const appName = node.data.name.replace(/\.app$/i, '');
-                
-                // Get the directory of the app file
-                const appDir = path.dirname(node.data.absolutePath);
-                
-                // Look for the generated .clw file (usually in same directory)
-                const clwPath = path.join(appDir, `${appName}.clw`);
-                
-                if (fs.existsSync(clwPath)) {
-                    // Open the generated CLW file
-                    const doc = await window.showTextDocument(Uri.file(clwPath));
-                    window.showInformationMessage(`Opened generated source: ${appName}.clw`);
-                } else {
-                    window.showWarningMessage(`Generated source not found: ${appName}.clw\nGenerate the application first.`);
-                }
-            } else {
-                window.showErrorMessage("Cannot determine application.");
-            }
-        }),
-
         // Open solution in Clarion IDE
         commands.registerCommand('clarion.openInClarionIDE', async () => {
             if (!globalSolutionFile) {
