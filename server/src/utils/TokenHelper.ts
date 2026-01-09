@@ -316,6 +316,30 @@ export class TokenHelper {
     }
 
     /**
+     * Find CLASS structures
+     * @param tokens Array of tokens
+     * @returns Array of CLASS structure tokens
+     */
+    public static findClassStructures(tokens: Token[]): Token[] {
+        return this.findTokens(tokens, {
+            type: TokenType.Structure,
+            value: 'CLASS'
+        });
+    }
+
+    /**
+     * Find MODULE structures
+     * @param tokens Array of tokens
+     * @returns Array of MODULE structure tokens
+     */
+    public static findModuleStructures(tokens: Token[]): Token[] {
+        return this.findTokens(tokens, {
+            type: TokenType.Structure,
+            value: 'MODULE'
+        });
+    }
+
+    /**
      * Find procedure tokens (any type: Procedure, GlobalProcedure, MethodImplementation)
      * @param tokens Array of tokens
      * @returns Array of procedure tokens
