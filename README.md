@@ -38,11 +38,12 @@ Open any Clarion solution - just open the folder.
 - No workspace files needed
 - **[Learn more about Solution Management →](docs/features/solution-management.md)**
 
-### 🧭 **Smart Code Navigation** (Requires Solution)
-Jump to definitions, find implementations, see where code is used.
-- Press **F12** to go to definition
+### 🧭 **Smart Code Navigation**
+Jump to definitions, find implementations - works in same file immediately, cross-file with solution.
+- Press **F12** to go to definition (same file: no solution needed!)
 - Press **Ctrl+F12** to go to implementation
 - Hover for documentation and previews
+- Cross-file navigation requires solution
 - **[Learn more about Navigation →](docs/features/navigation.md)**
 
 ### 💡 **Signature Help & Documentation**

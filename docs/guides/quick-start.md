@@ -11,17 +11,23 @@ Get up and running with the Clarion Extension in 5 minutes.
 ✅ **Syntax Highlighting** - All Clarion code colored  
 ✅ **Code Snippets** - IF, LOOP, variable shortcuts, etc.  
 ✅ **Signature Help** - Parameter hints for 148 built-in functions  
-✅ **Hover Documentation** - Info for built-in functions and keywords  
+✅ **Hover Documentation** - Info for built-in functions, keywords, and symbols in current file  
 ✅ **Code Folding** - Collapse/expand structures  
 ✅ **Bracket Matching** - Auto-close parentheses, quotes  
+✅ **Basic Navigation (F12)** - Go to definition within the same file  
+✅ **Hover on Variables** - See type and scope (same file only)  
+
+**These work better with a solution:**
+
+🔓 **Cross-File Navigation** - F12 on INCLUDE, MODULE, MEMBER  
+🔓 **Solution-Wide Search** - Find symbols across all projects  
 
 **These require a solution:**
 
-🔒 **Navigation (F12, Ctrl+F12)** - Needs solution for cross-file jumps  
 🔒 **Build Integration** - Needs solution configuration  
 🔒 **Solution Explorer** - Shows your project structure  
 
-**TL;DR:** Basic editing works immediately. Navigation and building need a solution.
+**TL;DR:** Basic editing and same-file navigation work immediately. Cross-file features and building need a solution.
 
 ---
 
@@ -88,19 +94,28 @@ These settings are saved in `.vscode/settings.json` in your solution folder.
 
 ```clarion
 TestProc PROCEDURE
+MyVar     LONG
 CODE
   SUB(  ← Type this and parameter hints appear!
+  MyVar = 10  ← Hover over MyVar to see type
+  ! Press F12 on MyVar to jump to declaration
 ```
 
-**What works immediately:**
+**What works immediately (same file):**
 - **Signature Help** - Type `SUB(` and see parameter hints
-- **Hover** - Hover over `SUB` to see documentation
+- **Hover** - Hover over `SUB`, `MyVar`, or `TestProc` for info
+- **F12 Navigation** - Press F12 on `MyVar` to jump to its declaration
 - **Snippets** - Type `IF` then Tab for full structure
 - **Syntax Highlighting** - Code is colored
 
+**What needs a solution (cross-file):**
+- F12 on INCLUDE statements
+- F12 on MODULE references
+- Cross-file procedure navigation
+
 ---
 
-### Navigate Your Code (Requires Solution)
+### Navigate Your Code (Works in Same File)
 
 **Go to Definition** (See where something is declared)
 1. Click on any procedure, variable, or include
