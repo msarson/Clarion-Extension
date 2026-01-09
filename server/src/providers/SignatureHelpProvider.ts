@@ -278,7 +278,7 @@ export class SignatureHelpProvider {
         
         // ✅ CONTEXT-AWARE DETECTION: Determine context for MODULE and data types
         // Get tokens to check for label before the method name
-        const lineTokens = tokens.filter(t => t.line === position.line);
+        const lineTokens = TokenHelper.findTokens(tokens, { line: position.line });
         
         // Check if there's a Label token before the current word (indicates data declaration)
         const hasLabelBefore = lineTokens.some(t => 
@@ -378,10 +378,7 @@ export class SignatureHelpProvider {
         const declarations: { signature: string; paramCount: number }[] = [];
 
         // Search in current file
-        const classTokens = tokens.filter(token =>
-            token.type === TokenType.Structure &&
-            token.value.toUpperCase() === 'CLASS'
-        );
+        const classTokens = TokenHelper.findClassStructures(tokens);
 
         for (const classToken of classTokens) {
             const labelToken = tokens.find(t =>
@@ -587,7 +584,8 @@ export class SignatureHelpProvider {
         const varToken = varTokens[varTokens.length - 1]; // Use closest declaration
 
         // Find the type token on the same line
-        const lineTokens = tokens.filter(t => t.line === varToken.line && t.start > varToken.start);
+        const lineTokens = TokenHelper.findTokens(tokens, { line: varToken.line })
+            .filter(t => t.start > varToken.start);
         const typeToken = lineTokens.find(t =>
             t.type === TokenType.Type ||
             t.type === TokenType.Label || // Class names appear as labels
