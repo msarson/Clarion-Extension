@@ -65,16 +65,27 @@ export function registerBuildCommands(
 
         // Build project from application context
         commands.registerCommand('clarion.buildProjectFromApp', async (node) => {
-            if (node && node.data && node.data.absolutePath) {
-                // Find the project that contains this application
-                const solutionCache = SolutionCache.getInstance();
-                const projects = solutionCache.findProjectsForFile(node.data.absolutePath);
+            if (node && node.data && node.data.name) {
+                // Get the application name without extension (e.g., "IBSQuery" from "IBSQuery.app")
+                const appName = node.data.name.replace(/\.app$/i, '');
                 
-                if (projects.length > 0) {
-                    // Use the first project if multiple projects contain the app
-                    await buildTasks.buildSolutionOrProject("Project", projects[0], diagnosticCollection, solutionTreeDataProvider);
+                // Find the project with matching name
+                const solutionCache = SolutionCache.getInstance();
+                const solutionInfo = solutionCache.getSolutionInfo();
+                
+                if (solutionInfo) {
+                    // Try to find a project with the same name as the application
+                    const project = solutionInfo.projects.find(p => 
+                        p.name.toLowerCase() === appName.toLowerCase()
+                    );
+                    
+                    if (project) {
+                        await buildTasks.buildSolutionOrProject("Project", project, diagnosticCollection, solutionTreeDataProvider);
+                    } else {
+                        window.showErrorMessage(`Cannot find project "${appName}" for application: ${node.data.name}`);
+                    }
                 } else {
-                    window.showErrorMessage(`Cannot find project for application: ${node.data.name}`);
+                    window.showErrorMessage("No solution is currently loaded.");
                 }
             } else {
                 window.showErrorMessage("Cannot determine which application's project to build.");
@@ -83,19 +94,31 @@ export function registerBuildCommands(
 
         // Generate and build project from application context
         commands.registerCommand('clarion.generateAndBuildApp', async (node) => {
-            if (node && node.data && node.data.absolutePath) {
-                // Find the project that contains this application
-                const solutionCache = SolutionCache.getInstance();
-                const projects = solutionCache.findProjectsForFile(node.data.absolutePath);
+            if (node && node.data && node.data.absolutePath && node.data.name) {
+                // Get the application name without extension (e.g., "IBSQuery" from "IBSQuery.app")
+                const appName = node.data.name.replace(/\.app$/i, '');
                 
-                if (projects.length > 0) {
-                    // First, generate the application
-                    await clarionClHelper.generateApp(node.data.absolutePath);
+                // Find the project with matching name
+                const solutionCache = SolutionCache.getInstance();
+                const solutionInfo = solutionCache.getSolutionInfo();
+                
+                if (solutionInfo) {
+                    // Try to find a project with the same name as the application
+                    const project = solutionInfo.projects.find(p => 
+                        p.name.toLowerCase() === appName.toLowerCase()
+                    );
                     
-                    // Then build the project
-                    await buildTasks.buildSolutionOrProject("Project", projects[0], diagnosticCollection, solutionTreeDataProvider);
+                    if (project) {
+                        // First, generate the application
+                        await clarionClHelper.generateApp(node.data.absolutePath);
+                        
+                        // Then build the project
+                        await buildTasks.buildSolutionOrProject("Project", project, diagnosticCollection, solutionTreeDataProvider);
+                    } else {
+                        window.showErrorMessage(`Cannot find project "${appName}" for application: ${node.data.name}`);
+                    }
                 } else {
-                    window.showErrorMessage(`Cannot find project for application: ${node.data.name}`);
+                    window.showErrorMessage("No solution is currently loaded.");
                 }
             } else {
                 window.showErrorMessage("Cannot determine which application to generate and build.");
