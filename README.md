@@ -17,6 +17,14 @@ Professional Clarion language support for Visual Studio Code with intelligent co
 
 ## ✨ Key Features
 
+### 🎨 **Clarion & Template Language Support**
+Full language support for Clarion code and templates.
+- **Clarion files (.clw, .inc)** - Complete syntax highlighting and IntelliSense
+- **Template files (.tpl, .tpw)** - Dedicated grammar with 100+ template keywords
+- Code folding for structures and template blocks
+- Context-aware coloring and semantic tokens
+- **[Learn more about Code Editing →](docs/features/code-editing.md)**
+
 ### 💡 **Signature Help & Documentation**
 Get instant parameter hints and documentation - works immediately, no solution needed!
 - 148 built-in functions with parameter hints
@@ -45,20 +53,6 @@ Jump to definitions, find implementations - works in same file immediately, cros
 - Hover for documentation and previews
 - Cross-file navigation requires solution
 - **[Learn more about Navigation →](docs/features/navigation.md)**
-
-### 💡 **Signature Help & Documentation**
-Get instant parameter hints and documentation as you code.
-- 148 built-in functions with parameter hints
-- Method overload support
-- Hover documentation for all symbols
-- **[Learn more about Signature Help →](docs/features/signature-help.md)**
-
-### ✏️ **Code Snippets**
-Write code faster with 50+ smart snippets.
-- Structure templates (IF, LOOP, CASE, etc.)
-- Variable declaration shortcuts
-- Procedure and method templates
-- **[Learn more about Snippets →](docs/features/code-editing.md#code-snippets)**
 
 ### 🔧 **Build Integration**
 Generate applications directly from VS Code.
