@@ -80,11 +80,8 @@ export class ClassMemberResolver {
         logger.info(`Looking for member ${memberName} in class ${className}`);
         
         // Search in current file first
-        const classTokens = tokens.filter(token =>
-            token.type === TokenType.Structure &&
-            token.value.toUpperCase() === 'CLASS' &&
-            token.line > 0
-        );
+        const classTokens = TokenHelper.findClassStructures(tokens)
+            .filter(token => token.line > 0);
         
         for (const classToken of classTokens) {
             const labelToken = tokens.find(t =>
@@ -374,45 +371,5 @@ export class ClassMemberResolver {
         }
         
         return commaCount + 1;
-    }
-
-    /**
-     * Gets the innermost scope at a given line
-     */
-    private getInnermostScopeAtLine(tokens: Token[], line: number): Token | null {
-        const scopes = tokens.filter(token =>
-            token.type === TokenType.Procedure &&
-            token.line <= line &&
-            (token.finishesAt === undefined || token.finishesAt >= line)
-        );
-
-        if (scopes.length === 0) {
-            return null;
-        }
-
-        // Return the scope with the highest line number (innermost)
-        return scopes.reduce((innermost, current) =>
-            current.line > innermost.line ? current : innermost
-        );
-    }
-
-    /**
-     * Gets the parent scope of a routine
-     */
-    private getParentScopeOfRoutine(tokens: Token[], routineScope: Token): Token | null {
-        const procedures = tokens.filter(t =>
-            t.type === TokenType.Procedure &&
-            t.line < routineScope.line &&
-            (t.finishesAt === undefined || t.finishesAt >= routineScope.line)
-        );
-
-        if (procedures.length === 0) {
-            return null;
-        }
-
-        // Return the procedure with the highest line number (closest parent)
-        return procedures.reduce((closest, current) =>
-            current.line > closest.line ? current : closest
-        );
     }
 }

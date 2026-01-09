@@ -7,6 +7,7 @@ import { ClassMemberResolver } from '../../utils/ClassMemberResolver';
 import { HoverFormatter } from './HoverFormatter';
 import { ClarionPatterns } from '../../utils/ClarionPatterns';
 import { SolutionManager } from '../../solution/solutionManager';
+import { TokenHelper } from '../../utils/TokenHelper';
 import LoggerManager from '../../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -81,10 +82,10 @@ export class MethodHoverResolver {
         const methodTokens = this.tokenCache.getTokens(document);
         
         logger.info(`Checking for method declaration at line ${position.line}, char ${position.character}`);
-        logger.info(`Total tokens at this line: ${methodTokens.filter(t => t.line === position.line).length}`);
+        logger.info(`Total tokens at this line: ${TokenHelper.findTokens(methodTokens, { line: position.line }).length}`);
         
         // Look for a token that could be a method declaration
-        const lineTokens = methodTokens.filter(t => t.line === position.line);
+        const lineTokens = TokenHelper.findTokens(methodTokens, { line: position.line });
         
         let currentToken = lineTokens.find(t =>
             t.subType === TokenType.MethodDeclaration &&
