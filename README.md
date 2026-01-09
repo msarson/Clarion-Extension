@@ -17,11 +17,28 @@ Professional Clarion language support for Visual Studio Code with intelligent co
 
 ## ✨ Key Features
 
+### 💡 **Signature Help & Documentation**
+Get instant parameter hints and documentation - works immediately, no solution needed!
+- 148 built-in functions with parameter hints
+- Method overload support
+- Hover documentation for all symbols
+- **[Learn more about Signature Help →](docs/features/signature-help.md)**
+
+### ✏️ **Code Snippets**
+Write code faster with 50+ smart snippets - works immediately!
+- Structure templates (IF, LOOP, CASE, etc.)
+- Variable declaration shortcuts
+- Procedure and method templates
+- **[Learn more about Snippets →](docs/features/code-editing.md#code-snippets)**
+
 ### 📂 **Solution Management**
-Open any Clarion solution - just open the folder. No workspace files needed.
+Open any Clarion solution - just open the folder.
+- Auto-detects `.sln` files in folder
+- Recent solutions list for quick access
+- No workspace files needed
 - **[Learn more about Solution Management →](docs/features/solution-management.md)**
 
-### 🧭 **Smart Code Navigation**
+### 🧭 **Smart Code Navigation** (Requires Solution)
 Jump to definitions, find implementations, see where code is used.
 - Press **F12** to go to definition
 - Press **Ctrl+F12** to go to implementation

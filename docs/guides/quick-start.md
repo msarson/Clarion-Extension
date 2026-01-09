@@ -2,6 +2,29 @@
 
 Get up and running with the Clarion Extension in 5 minutes.
 
+---
+
+## What Works Without a Solution?
+
+**You can use these features immediately (no solution needed):**
+
+✅ **Syntax Highlighting** - All Clarion code colored  
+✅ **Code Snippets** - IF, LOOP, variable shortcuts, etc.  
+✅ **Signature Help** - Parameter hints for 148 built-in functions  
+✅ **Hover Documentation** - Info for built-in functions and keywords  
+✅ **Code Folding** - Collapse/expand structures  
+✅ **Bracket Matching** - Auto-close parentheses, quotes  
+
+**These require a solution:**
+
+🔒 **Navigation (F12, Ctrl+F12)** - Needs solution for cross-file jumps  
+🔒 **Build Integration** - Needs solution configuration  
+🔒 **Solution Explorer** - Shows your project structure  
+
+**TL;DR:** Basic editing works immediately. Navigation and building need a solution.
+
+---
+
 ## Step 1: Install the Extension
 
 1. Open **Visual Studio Code**
@@ -59,7 +82,25 @@ These settings are saved in `.vscode/settings.json` in your solution folder.
 
 ## Step 4: Start Using the Extension
 
-### Navigate Your Code
+### Try Features Without a Solution First
+
+**Open any `.clw` file (or create a test file):**
+
+```clarion
+TestProc PROCEDURE
+CODE
+  SUB(  ← Type this and parameter hints appear!
+```
+
+**What works immediately:**
+- **Signature Help** - Type `SUB(` and see parameter hints
+- **Hover** - Hover over `SUB` to see documentation
+- **Snippets** - Type `IF` then Tab for full structure
+- **Syntax Highlighting** - Code is colored
+
+---
+
+### Navigate Your Code (Requires Solution)
 
 **Go to Definition** (See where something is declared)
 1. Click on any procedure, variable, or include
