@@ -1438,7 +1438,7 @@ documents.listen(connection);
 
 // Add shutdown handlers
 connection.onShutdown(() => {
-    logger.setLevel("info");
+    logger.setLevel("error");
     const shutdownLogPath = path.join(__dirname, '..', '..', 'shutdown.log');
     const logMessage = (msg: string) => {
         const timestamp = new Date().toISOString();

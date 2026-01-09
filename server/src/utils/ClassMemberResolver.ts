@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ClassMemberResolver");
-logger.setLevel("info"); // Enable info logging for debugging
+logger.setLevel("error");
 
 /**
  * Shared utility for resolving class members (methods, properties)

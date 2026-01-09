@@ -14,7 +14,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("VariableHoverResolver");
-logger.setLevel("info");
+logger.setLevel("error");
 
 /**
  * Resolves hover information for variables (parameters, local, module, global)

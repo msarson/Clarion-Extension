@@ -119,8 +119,15 @@ Productivity features to write code faster.
 
 ## 🆕 What's New
 
-### Latest: v0.8.5 (In Development)
-Stay tuned for upcoming improvements!
+### Latest: v0.8.5 (2026-01-09)
+
+#### 🔧 Folding Provider Fix
+Fixed critical issues with code folding for window definitions:
+- APPLICATION structures now fold correctly
+- Nested MENU structures fold properly at any indentation level
+- Removed arbitrary 50-column limit for structure recognition
+
+**Impact:** Complex window/application definitions with nested menus now have proper code folding support.
 
 ### Recent: v0.8.4 (2026-01-09)
 

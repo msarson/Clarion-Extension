@@ -6,7 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger('IncludeVerifier');
-logger.setLevel('info');
+logger.setLevel('error');
 
 /**
  * Represents a parsed INCLUDE statement

@@ -4,7 +4,7 @@ import * as xml2js from 'xml2js';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger('ProjectConstantsChecker');
-logger.setLevel('info');
+logger.setLevel('error');
 
 /**
  * Parsed project constant
