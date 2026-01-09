@@ -557,7 +557,7 @@ MyProc(|)  ← Cursor here after typing (
 
 ## Related Features
 
-- **[IntelliSense](intellisense.md)** - Code completion
+- **[Signature Help](signature-help.md)** - Parameter hints for functions
 - **[Snippets Reference](../reference/snippets.md)** - All available snippets
 - **[Common Tasks](../guides/common-tasks.md)** - Usage examples
 
