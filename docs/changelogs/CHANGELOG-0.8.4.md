@@ -38,6 +38,18 @@
 
 ## 🎯 Major Performance Improvements
 
+### Token Performance Optimization (January 2026)
+- **50-60% performance improvement** - DocumentStructure caching eliminates repeated token parsing
+- **Parent index** - O(1) scope lookups via parent relationship index
+- **TokenHelper consolidation** - Replaced ~29 repetitive filter patterns across 10 files
+- **Helper methods** - findLabels(), findMapStructures(), findProcedures(), findRoutines(), etc.
+- **Optimized comparisons** - equalsIgnoreCase() checks length first for early exit
+
+### Symbol Provider Performance (December 2025)
+- **97% faster symbol provider** - Fixed massive filterOmittedSymbols bottleneck
+- **O(n²) fixes** - Eliminated quadratic performance in SignatureHelpProvider class method search
+- **Duplicate validation** - Prevented duplicate symbol validation with caller tracking
+
 ### MAP Resolution & Navigation Performance (January 2026)
 - **Eliminated scanning hundreds of MEMBER files** during procedure lookups
 - **Fast direct MODULE resolution** - Detects `MODULE('xxx.CLW')` references and resolves immediately
@@ -72,6 +84,25 @@
 - **Consistent CrossFileResolver usage** - All providers (Hover, Definition, Implementation) now use same service pattern
 - **Enhanced MAP procedure lookup** - Handles both PROCEDURE and FUNCTION keywords interchangeably
 - **Better MODULE extraction** - Upward search algorithm handles nested structures and indented declarations
+- **F12 from MAP to implementation** - Navigate from MAP declaration to actual procedure code
+- **START() procedure support** - Hover and navigation work inside START() calls
+
+### Syntax & Grammar Improvements (December 2025)
+- **Semantic tokens provider** - Context-aware END keyword and period terminator coloring
+- **Improved Clarion grammar** - Based on official Clarion documentation
+- **Reorganized grammar structure** - Better clarity and maintainability
+- **Enhanced comment support** - `#!` comments allowed anywhere on line, not just at start
+
+### HoverProvider Refactoring (December 2025)
+- **HoverRouter** - Centralized routing logic for hover requests
+- **HoverContextBuilder** - Extracts context building from main provider
+- **MethodHoverResolver** - Specialized resolver for method hovers
+- **ProcedureHoverResolver** - Specialized resolver for procedure hovers
+- **VariableHoverResolver** - Specialized resolver for variable hovers
+- **StructureFieldResolver** - Handles structure field hovers
+- **HoverFormatter** - Consistent hover text formatting
+- **CrossFileCache** - Caching layer for cross-file lookups
+- **~500+ lines of code eliminated** through extraction and consolidation
 
 ### Documentation (January 2026)
 - **Complete documentation restructure** - Created user-friendly guide structure
@@ -99,6 +130,22 @@
 - Fixed terminal reuse for build tasks
 - Fixed build completion messages showing when log file missing
 - Fixed timing issue where configuration change event read stale data
+- Fixed Ctrl+Shift+B to properly detect current file's project
+- Fixed StartProgram setting support in .cwproj files
+- Fixed executable location finding via RedirectionService
+
+### Navigation & Hover Fixes (December 2025 - January 2026)
+- Fixed procedures without parentheses hover/navigation
+- Fixed MODULE scope detection
+- Fixed procedure implementation preview in hovers
+- Fixed variable hover formatting (scope and declaration on same line)
+- Fixed multi-parameter MAP procedure declarations
+- Fixed MAP→Implementation navigation checks
+
+### Tokenization Fixes (December 2025)
+- Fixed MODULE/TYPE tokenization bug
+- Fixed CASE structure requiring CODE section
+- Fixed incremental tokenization to process tokens through DocumentStructure
 
 ### Documentation Fixes (January 2026)
 - **Fixed unicode quote bug** - Paste as Clarion String now converts smart quotes to ASCII
@@ -109,9 +156,20 @@
 
 ### Service Pattern Improvements (December 2025 - January 2026)
 - **ScopeAnalyzer service** - New scope analysis infrastructure (248 lines, 29 tests)
-- Eliminated code duplication - All providers use **CrossFileResolver** service consistently
-- Followed established service architecture from December refactoring
+- **SymbolFinderService** - Unified symbol finding (~510 lines of duplication eliminated)
+- **CrossFileResolver** - All providers use consistent service pattern
 - **ProcedureCallDetector** utility class extracts reusable call detection logic
+- **ClarionPatterns** - Centralized regex patterns (no more inline patterns)
+- Followed established service architecture from December refactoring
+
+### HoverProvider Architecture (December 2025)
+- **Major refactoring** - Extracted 8 specialized resolver/utility classes
+- **HoverRouter** - Routes hover requests to appropriate resolvers
+- **HoverContextBuilder** - Builds context information for hovers
+- **Specialized resolvers** - Method, Procedure, Variable, StructureField
+- **HoverFormatter** - Consistent formatting across all hover types
+- **CrossFileCache** - Caching layer to avoid repeated file reads
+- **Code reduction** - ~500+ lines eliminated through extraction
 
 ### Logging
 - **All loggers set to error level** for production (minimal overhead)
@@ -121,10 +179,32 @@
 ## 🧪 Testing
 
 - **ScopeAnalyzer.test.ts** - 29 tests for scope analysis (December 2025)
+- **SymbolFinderService.test.ts** - 12 tests for unified symbol finding (January 2026)
 - **DefinitionProvider integration tests** - 6 tests for scope-aware navigation (December 2025)
 - **MapTokenType.test.ts** - Validates FUNCTION tokens have correct type/subType (January 2026)
 - **CrossFileScope.test.ts** - Tests for START() procedure references (January 2026)
+- **Grammar test file** - Comprehensive grammar validation (December 2025)
 - Enhanced scope test suite with MODULE resolution examples
+- Reorganized test suite structure for better maintainability
+- Flattened test directory structure to fix solution initialization
 - **492 tests passing** throughout all changes
+
+## 📊 Metrics
+
+- **251 commits** in version 0.8.4
+- **Performance gains:**
+  - 50-60% faster document structure operations (caching)
+  - 97% faster symbol provider (bottleneck fix)
+  - O(1) scope lookups (parent index)
+  - Eliminated O(n²) class method searches
+- **Code quality:**
+  - ~510 lines eliminated (SymbolFinderService)
+  - ~500 lines eliminated (HoverProvider refactoring)
+  - ~29 filter patterns consolidated (TokenHelper)
+  - 8 new specialized classes extracted
+- **Documentation:**
+  - 11 new documentation files created
+  - README reduced from 361 → 160 lines
+  - All docs have navigation links
 
 [← Back to Changelog](../../CHANGELOG.md)
