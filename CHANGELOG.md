@@ -6,7 +6,17 @@ All notable changes to the Clarion Extension are documented here.
 
 ## Recent Versions
 
-### [0.8.4] - Unreleased
+### [0.8.5] - Unreleased
+**In Development**
+
+**Highlights:**
+- TBD
+
+[**→ Full details**](docs/changelogs/CHANGELOG-0.8.5.md)
+
+---
+
+### [0.8.4] - 2026-01-09
 **Architecture Refactoring & Documentation Overhaul**
 
 **Highlights:**

@@ -117,15 +117,20 @@ Productivity features to write code faster.
 
 ---
 
-## 🆕 What's New in v0.8.4
+## 🆕 What's New
 
-### 🎨 Template Language Support
+### Latest: v0.8.5 (In Development)
+Stay tuned for upcoming improvements!
+
+### Recent: v0.8.4 (2026-01-09)
+
+#### 🎨 Template Language Support
 Dedicated syntax highlighting for `.tpl` and `.tpw` files with 100+ template keywords.
 
-### ⚡ Performance Boost
+#### ⚡ Performance Boost
 50-60% faster token processing with optimized caching and parent relationship indexing.
 
-### 🎯 Scope-Aware Navigation
+#### 🎯 Scope-Aware Navigation
 F12 now correctly prioritizes local variables over globals with the same name.
 
 **[See full changelog →](CHANGELOG.md)**
