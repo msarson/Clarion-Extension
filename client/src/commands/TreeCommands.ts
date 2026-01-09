@@ -91,8 +91,20 @@ export function registerTreeCommands(): Disposable[] {
                     // Application node - get directory
                     folderPath = path.dirname(node.data.absolutePath);
                 } else if (node.data.path) {
-                    // Project or solution node - path is already the directory
-                    folderPath = node.data.path;
+                    // Project or solution node
+                    // Check if path points to a file or directory
+                    if (fs.existsSync(node.data.path)) {
+                        const stats = fs.statSync(node.data.path);
+                        if (stats.isDirectory()) {
+                            folderPath = node.data.path;
+                        } else {
+                            // It's a file (like .sln or .cwproj) - get its directory
+                            folderPath = path.dirname(node.data.path);
+                        }
+                    } else {
+                        // Doesn't exist, assume it's a file path
+                        folderPath = path.dirname(node.data.path);
+                    }
                 } else if (node.data.relativePath && node.parent && node.parent.data && node.parent.data.path) {
                     // File node - get directory of the file
                     const filePath = path.join(node.parent.data.path, node.data.relativePath);
