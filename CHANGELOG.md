@@ -6,6 +6,16 @@ All notable changes to the Clarion Extension are documented here.
 
 ## Recent Versions
 
+### [0.8.6] - Unreleased
+**In Development**
+
+**Highlights:**
+- TBD
+
+[**→ Full details**](docs/changelogs/CHANGELOG-0.8.6.md)
+
+---
+
 ### [0.8.5] - 2026-01-09
 **Folding Provider Fix**
 

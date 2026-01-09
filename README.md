@@ -119,7 +119,10 @@ Productivity features to write code faster.
 
 ## 🆕 What's New
 
-### Latest: v0.8.5 (2026-01-09)
+### Latest: v0.8.6 (In Development)
+Stay tuned for upcoming improvements!
+
+### Recent: v0.8.5 (2026-01-09)
 
 #### 🔧 Folding Provider Fix
 Fixed critical issues with code folding for window definitions:
