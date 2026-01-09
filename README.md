@@ -18,11 +18,12 @@ Professional Clarion language support for Visual Studio Code with intelligent co
 ## ✨ Key Features
 
 ### 🎨 **Clarion & Template Language Support**
-Full language support for Clarion code and templates.
+Full language support for Clarion code, basic support for templates.
 - **Clarion files (.clw, .inc)** - Complete syntax highlighting and IntelliSense
-- **Template files (.tpl, .tpw)** - Dedicated grammar with 100+ template keywords
+- **Template files (.tpl, .tpw)** - Syntax highlighting with 100+ template keywords
 - Code folding for structures and template blocks
-- Context-aware coloring and semantic tokens
+- Context-aware coloring for Clarion code
+- **Note:** Template files have syntax highlighting only (no IntelliSense/navigation)
 - **[Learn more about Code Editing →](docs/features/code-editing.md)**
 
 ### 💡 **Signature Help & Documentation**
