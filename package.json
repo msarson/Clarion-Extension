@@ -373,6 +373,14 @@
                 "title": "Generate Application"
             },
             {
+                "command": "clarion.buildProjectFromApp",
+                "title": "Build Project"
+            },
+            {
+                "command": "clarion.generateAndBuildApp",
+                "title": "Generate + Build Project"
+            },
+            {
                 "command": "clarion.pasteAsString",
                 "title": "Clarion: Paste as String"
             },
@@ -439,6 +447,16 @@
                 },
                 {
                     "command": "clarion.generateApp",
+                    "when": "view == solutionView && viewItem == clarionApp",
+                    "group": "generate"
+                },
+                {
+                    "command": "clarion.buildProjectFromApp",
+                    "when": "view == solutionView && viewItem == clarionApp",
+                    "group": "generate"
+                },
+                {
+                    "command": "clarion.generateAndBuildApp",
                     "when": "view == solutionView && viewItem == clarionApp",
                     "group": "generate"
                 }

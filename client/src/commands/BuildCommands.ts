@@ -63,6 +63,45 @@ export function registerBuildCommands(
             }
         }),
 
+        // Build project from application context
+        commands.registerCommand('clarion.buildProjectFromApp', async (node) => {
+            if (node && node.data && node.data.absolutePath) {
+                // Find the project that contains this application
+                const solutionCache = SolutionCache.getInstance();
+                const projects = solutionCache.findProjectsForFile(node.data.absolutePath);
+                
+                if (projects.length > 0) {
+                    // Use the first project if multiple projects contain the app
+                    await buildTasks.buildSolutionOrProject("Project", projects[0], diagnosticCollection, solutionTreeDataProvider);
+                } else {
+                    window.showErrorMessage(`Cannot find project for application: ${node.data.name}`);
+                }
+            } else {
+                window.showErrorMessage("Cannot determine which application's project to build.");
+            }
+        }),
+
+        // Generate and build project from application context
+        commands.registerCommand('clarion.generateAndBuildApp', async (node) => {
+            if (node && node.data && node.data.absolutePath) {
+                // Find the project that contains this application
+                const solutionCache = SolutionCache.getInstance();
+                const projects = solutionCache.findProjectsForFile(node.data.absolutePath);
+                
+                if (projects.length > 0) {
+                    // First, generate the application
+                    await clarionClHelper.generateApp(node.data.absolutePath);
+                    
+                    // Then build the project
+                    await buildTasks.buildSolutionOrProject("Project", projects[0], diagnosticCollection, solutionTreeDataProvider);
+                } else {
+                    window.showErrorMessage(`Cannot find project for application: ${node.data.name}`);
+                }
+            } else {
+                window.showErrorMessage("Cannot determine which application to generate and build.");
+            }
+        }),
+
         // Add build current project command
         commands.registerCommand('clarion.buildCurrentProject', async () => {
             logger.info("🔄 Building current project or solution...");
