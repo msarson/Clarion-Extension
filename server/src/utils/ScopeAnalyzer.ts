@@ -3,6 +3,7 @@ import { Position } from 'vscode-languageserver';
 import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
 import { Token, TokenType } from '../tokenizer/TokenTypes';
+import { TokenHelper } from './TokenHelper';
 import { RedirectionFileParserServer } from '../solution/redirectionFileParserServer';
 import LoggerManager from '../logger';
 import * as path from 'path';
@@ -140,10 +141,7 @@ export class ScopeAnalyzer {
         logger.info(`🗺️ getMapScopeLevel: Searching for "${symbol.value}" in MAP blocks...`);
         
         // Find all MAP blocks in the document
-        const mapStructures = tokens.filter(t => 
-            t.type === TokenType.Structure && 
-            t.value.toUpperCase() === 'MAP'
-        );
+        const mapStructures = TokenHelper.findMapStructures(tokens);
 
         logger.info(`📋 Found ${mapStructures.length} MAP blocks in document`);
 
@@ -156,10 +154,8 @@ export class ScopeAnalyzer {
             
             // Check if our symbol is in this MAP's tokens (including INCLUDEs)
             // Match by value and type (procedure declarations)
-            const matchingTokens = mapTokens.filter(t => 
-                t.value.toLowerCase() === symbol.value.toLowerCase() &&
-                (t.subType === TokenType.MapProcedure || t.type === TokenType.Function)
-            );
+            const matchingTokens = TokenHelper.findTokens(mapTokens, { value: symbol.value })
+                .filter(t => t.subType === TokenType.MapProcedure || t.type === TokenType.Function);
             
             if (matchingTokens.length > 0) {
                 logger.info(`✅ Found ${matchingTokens.length} matching token(s) for "${symbol.value}" in MAP #${i + 1}`);
@@ -437,9 +433,10 @@ export class ScopeAnalyzer {
         }
 
         // Get tokens directly in the MAP block
-        const mapTokens = tokens.filter(t =>
-            t.line > mapStartLine && t.line < mapEndLine
-        );
+        const mapTokens = TokenHelper.findTokens(tokens, {
+            afterLine: mapStartLine,
+            beforeLine: mapEndLine
+        });
 
         logger.info(`   📄 Direct MAP tokens: ${mapTokens.length}`);
 

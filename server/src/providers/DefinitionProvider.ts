@@ -231,7 +231,7 @@ export class DefinitionProvider {
                 t.subType === TokenType.GlobalProcedure
             );
             
-            logger.info(`Tokens on line ${position.line}: ${tokens.filter(t => t.line === position.line).map(t => `type=${t.type}, subType=${t.subType}, value="${t.value}", label="${t.label}"`).join('; ')}`);
+            logger.info(`Tokens on line ${position.line}: ${TokenHelper.findTokens(tokens, { line: position.line }).map(t => `type=${t.type}, subType=${t.subType}, value="${t.value}", label="${t.label}"`).join('; ')}`);
             logger.info(`Token at position with GlobalProcedure subtype: ${tokenAtPosition ? `YES (label="${tokenAtPosition.label}")` : 'NO'}`);
             
             if (tokenAtPosition && tokenAtPosition.label) {
@@ -259,7 +259,7 @@ export class DefinitionProvider {
                     } else {
                         logger.info(`❌ No MEMBER token found with referencedFile in first 5 lines`);
                         // Debug: Show all tokens in first 5 lines
-                        const firstTokens = tokens.filter(t => t.line < 5);
+                        const firstTokens = TokenHelper.findTokensInHeader(tokens, 5);
                         logger.info(`Debug: Found ${firstTokens.length} tokens in first 5 lines:`);
                         firstTokens.forEach(t => {
                             logger.info(`  Line ${t.line}: type=${t.type}, value="${t.value}", referencedFile="${t.referencedFile || 'undefined'}"`);
@@ -462,11 +462,7 @@ export class DefinitionProvider {
                     }
 
                     // Find the structure definition - handle complex structure names
-                    const structureTokens = tokens.filter(token =>
-                        token.type === TokenType.Label &&
-                        token.value.toLowerCase() === structureName.toLowerCase() &&
-                        token.start === 0
-                    );
+                    const structureTokens = TokenHelper.findLabels(tokens, structureName);
 
                     if (structureTokens.length > 0) {
                         // Find the field within the structure
@@ -490,19 +486,13 @@ export class DefinitionProvider {
                 logger.info(`Detected prefix notation: ${prefixPart}:${fieldName}`);
 
                 // Try to find structures with this exact prefix first
-                let structuresWithPrefix = tokens.filter(token =>
-                    token.type === TokenType.Structure &&
-                    token.structurePrefix?.toLowerCase() === prefixPart.toLowerCase()
-                );
+                let structuresWithPrefix = TokenHelper.findStructuresWithPrefix(tokens, prefixPart);
 
                 // If no exact match, try to find structures where the prefix is part of a complex name
                 // For example, if prefixPart is "Queue:Browse:1", look for structures with prefix "Queue"
                 if (structuresWithPrefix.length === 0 && prefixPart.includes(':')) {
                     const simplePrefixPart = prefixPart.split(':')[0];
-                    structuresWithPrefix = tokens.filter(token =>
-                        token.type === TokenType.Structure &&
-                        token.structurePrefix?.toLowerCase() === simplePrefixPart.toLowerCase()
-                    );
+                    structuresWithPrefix = TokenHelper.findStructuresWithPrefix(tokens, simplePrefixPart);
                 }
 
                 if (structuresWithPrefix.length > 0) {
@@ -678,11 +668,7 @@ export class DefinitionProvider {
         logger.info(`Is standalone word in structure definition: ${isStandaloneWord}, line: "${line}"`);
 
         // Look for a label token that matches the word (structure definitions are labels in column 1)
-        const labelTokens = tokens.filter(token =>
-            token.type === TokenType.Label &&
-            token.value.toLowerCase() === word.toLowerCase() &&
-            token.start === 0
-        );
+        const labelTokens = TokenHelper.findLabels(tokens, word);
 
         if (labelTokens.length > 0) {
             logger.info(`Found ${labelTokens.length} label tokens for ${word}`);
@@ -748,6 +734,7 @@ export class DefinitionProvider {
         logger.info(`Looking for symbol definition: ${word}`);
     
         const tokens = this.tokenCache.getTokens(document);
+        const structure = this.tokenCache.getStructure(document); // 🚀 PERFORMANCE: Get cached structure
         const currentLine = position.line;
         logger.info(`🔍 Current line: ${currentLine}, total tokens: ${tokens.length}`);
         
@@ -762,7 +749,7 @@ export class DefinitionProvider {
         let prefixPart = '';
         let isStandaloneWord = false;
         
-        const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, currentLine);
+        const currentScope = TokenHelper.getInnermostScopeAtLine(structure, currentLine); // 🚀 PERFORMANCE: O(log n) vs O(n)
     
         if (currentScope) {
             logger.info(`Current scope: ${currentScope.value} (${currentScope.line}-${currentScope.finishesAt})`);
@@ -1112,9 +1099,7 @@ export class DefinitionProvider {
         }
     
         // DEBUG: Log all tokens that match the word to see what we're getting
-        const allMatchingTokens = tokens.filter(token => 
-            token.value.toLowerCase() === searchWord.toLowerCase()
-        );
+        const allMatchingTokens = TokenHelper.findTokens(tokens, { value: searchWord });
         logger.info(`🔍 DEBUG: Found ${allMatchingTokens.length} tokens matching "${searchWord}"`);
         allMatchingTokens.forEach(t => 
             logger.info(`  -> Line ${t.line}, Type: ${t.type}, Start: ${t.start}, Value: "${t.value}"`)
@@ -1781,8 +1766,10 @@ export class DefinitionProvider {
     private async findClassMember(tokens: Token[], memberName: string, document: TextDocument, currentLine: number): Promise<Location | null> {
         logger.info(`Looking for class member ${memberName} in current context`);
 
+        const structure = this.tokenCache.getStructure(document); // 🚀 PERFORMANCE: Get cached structure
+        
         // Find the current class or method context
-        let currentScope = TokenHelper.getInnermostScopeAtLine(tokens, currentLine);
+        let currentScope = TokenHelper.getInnermostScopeAtLine(structure, currentLine); // 🚀 PERFORMANCE: O(log n) vs O(n)
         if (!currentScope) {
             logger.info('No scope found - cannot determine class context');
             return null;
@@ -1791,7 +1778,7 @@ export class DefinitionProvider {
         // If we're in a routine, we need the parent scope (the method/procedure) to get the class name
         if (currentScope.subType === TokenType.Routine) {
             logger.info(`Current scope is a routine (${currentScope.value}), looking for parent scope`);
-            const parentScope = TokenHelper.getParentScopeOfRoutine(tokens, currentScope);
+            const parentScope = TokenHelper.getParentScopeOfRoutine(structure, currentScope); // 🚀 PERFORMANCE: O(1) vs O(n)
             if (parentScope) {
                 currentScope = parentScope;
                 logger.info(`Using parent scope: ${currentScope.value}`);
@@ -1837,11 +1824,8 @@ export class DefinitionProvider {
         logger.info(`Looking for member ${memberName} in class ${className}`);
 
         // Find the CLASS structure definition
-        const classTokens = tokens.filter(token =>
-            token.type === TokenType.Structure &&
-            token.value.toUpperCase() === 'CLASS' &&
-            token.line > 0
-        );
+        const classTokens = TokenHelper.findClassStructures(tokens)
+            .filter(token => token.line > 0);
 
         for (const classToken of classTokens) {
             // Find the label token just before this CLASS
@@ -1897,8 +1881,9 @@ export class DefinitionProvider {
         const varToken = varTokens[0];
         
         // Find the type token on the same line (should be after the variable name)
-        const lineTokens = tokens.filter(t => t.line === varToken.line && t.start > varToken.start);
-        const typeToken = lineTokens.find(t => 
+        const lineTokens = TokenHelper.findTokens(tokens, { line: varToken.line })
+            .filter(t => t.start > varToken.start);
+        const typeToken = lineTokens.find(t =>
             t.type === TokenType.Type || 
             t.type === TokenType.Label || // Class names appear as labels
             /^[A-Z][A-Za-z0-9_]*$/.test(t.value) // Capitalized word (likely a class name)

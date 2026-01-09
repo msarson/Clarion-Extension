@@ -94,7 +94,7 @@ export class HoverContextBuilder {
         const isInClassBlock = documentStructure.isInClassBlock(position.line);
         
         // Get current scope
-        const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, position.line) || null;
+        const currentScope = TokenHelper.getInnermostScopeAtLine(documentStructure, position.line) || null; // 🚀 PERFORMANCE: O(log n) vs O(n)
         
         logger.info(`Context: hasLabelBefore=${hasLabelBefore}, isInWindowContext=${isInWindowContext}, isInMapBlock=${isInMapBlock}, isInClassBlock=${isInClassBlock}`);
 

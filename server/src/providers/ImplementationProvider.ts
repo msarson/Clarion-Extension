@@ -16,6 +16,7 @@ import { MapProcedureResolver } from '../utils/MapProcedureResolver';
 import { CrossFileResolver } from '../utils/CrossFileResolver';
 import { SolutionManager } from '../solution/solutionManager';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
+import { TokenHelper } from '../utils/TokenHelper';
 import LoggerManager from '../logger';
 import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import * as fs from 'fs';
@@ -287,9 +288,7 @@ export class ImplementationProvider {
      * Check if a line is inside a MODULE block
      */
     private isInModuleBlock(line: number, tokens: Token[]): boolean {
-        const moduleBlocks = tokens.filter(t =>
-            t.type === TokenType.Structure &&
-            t.value.toUpperCase() === 'MODULE' &&
+        const moduleBlocks = TokenHelper.findModuleStructures(tokens).filter(t =>
             t.line <= line &&
             t.finishesAt !== undefined &&
             t.finishesAt >= line
@@ -328,8 +327,8 @@ export class ImplementationProvider {
         
         // If not found by subType, check for Label + PROCEDURE pattern (method declaration in CLASS)
         if (!tokenAtPosition) {
-            const lineTokens = tokens.filter(t => t.line === position.line);
-            const labelToken = lineTokens.find(t => 
+            const lineTokens = TokenHelper.findTokens(tokens, { line: position.line });
+            const labelToken = lineTokens.find(t =>
                 t.type === TokenType.Label && 
                 t.start === 0 &&
                 position.character >= t.start &&

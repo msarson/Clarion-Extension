@@ -997,13 +997,13 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             const hoverText = (hoverResult.contents as any).value;
             console.log('TEST 10 HOVER TEXT:', hoverText);
             assert.ok(hoverText.includes('Counter'), 'Should show variable name');
-            assert.ok(hoverText.includes('Procedure variable'), 'Should identify as procedure variable');
+            assert.ok(hoverText.includes('Local procedure variable'), 'Should identify as local procedure variable');
             assert.ok(hoverText.includes('🔧'), 'Should show procedure scope icon');
             assert.ok(hoverText.includes('LONG'), 'Should show type');
             assert.ok(hoverText.includes('utils.clw:57'), 'Should show declaration location');
             
             // Format should be: "🔧 Procedure variable Declared in utils.clw:57" on one line
-            assert.ok(hoverText.includes('Procedure variable Declared in'), 'Scope and declaration should be on same line');
+            assert.ok(hoverText.includes('Local procedure variable Declared in'), 'Scope and declaration should be on same line');
         });
     });
     

@@ -2,6 +2,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { SolutionManager } from '../solution/solutionManager';
 import { ClarionPatterns } from './ClarionPatterns';
+import { TokenHelper } from './TokenHelper';
 import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../logger';
@@ -48,11 +49,8 @@ export class MethodOverloadResolver {
         // Search in current file first
         const candidates: MethodDeclarationInfo[] = [];
         
-        const classTokens = tokens.filter(token =>
-            token.type === TokenType.Structure &&
-            token.value.toUpperCase() === 'CLASS' &&
-            token.line > 0
-        );
+        const classTokens = TokenHelper.findClassStructures(tokens)
+            .filter(token => token.line > 0);
         
         for (const classToken of classTokens) {
             const labelToken = tokens.find(t =>

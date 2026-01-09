@@ -592,7 +592,7 @@ export class HoverProvider {
         
         if (variableTokens.length === 0) {
             // Debug: Check what tokens exist for this word
-            const allMatchingTokens = tokens.filter(t => t.value.toLowerCase() === word.toLowerCase());
+            const allMatchingTokens = TokenHelper.findTokens(tokens, { value: word });
             logger.info(`Debug: Found ${allMatchingTokens.length} total tokens matching "${word}"`);
             allMatchingTokens.forEach(t => {
                 logger.info(`  -> Line ${t.line}, Type: ${t.type}, SubType: ${t.subType}, Start: ${t.start}, Value: "${t.value}"`);
@@ -625,8 +625,8 @@ export class HoverProvider {
         }
         
         // Fallback: Try to find the type declaration on the same line using tokens
-        const lineTokens = tokens.filter(t => t.line === varToken.line);
-        const typeTokens = lineTokens.filter(t => 
+        const lineTokens = TokenHelper.findTokens(tokens, { line: varToken.line });
+        const typeTokens = lineTokens.filter(t =>
             t.type === TokenType.Type || 
             t.type === TokenType.Structure ||
             t.type === TokenType.ReferenceVariable ||

@@ -142,11 +142,13 @@ export class TokenCache {
                 const structure = new DocumentStructure(tokens);
                 structure.process();
                 
+                // 🚀 PERFORMANCE: Cache the structure to avoid rebuilding it
                 this.cache.set(document.uri, { 
                     version: document.version, 
                     tokens,
                     lineTokens,
-                    documentText: currentText
+                    documentText: currentText,
+                    structure: structure
                 });
                 
                 const fullTime = performance.now() - fullStart;
@@ -480,11 +482,13 @@ export class TokenCache {
         const lineTokens = this.buildLineTokenMap(document, mergedTokens);
         const cacheTime = performance.now() - cacheStart;
         
+        // 🚀 PERFORMANCE: Cache the structure to avoid rebuilding it
         this.cache.set(document.uri, {
             version: document.version,
             tokens: mergedTokens,
             lineTokens,
-            documentText: newText
+            documentText: newText,
+            structure: structure
         });
         
         const totalTime = performance.now() - perfStart;
