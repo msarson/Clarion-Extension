@@ -60,7 +60,7 @@ LOOP
 END
 ```
 
-**Trigger:** `LOOPFT` (LOOP with FOR/TO)
+**Trigger:** `LOOPFT` (LOOP with FROM/TO)
 
 ```clarion
 LOOP var = from TO to
@@ -166,9 +166,12 @@ END
 **Converts clipboard text to Clarion string format:**
 
 - Automatically escapes quotes
+- Converts unicode quotes to ASCII (for Clarion compatibility)
 - Adds line continuation (`& |`)
 - Handles multi-line text
 - Perfect for SQL, error messages, multi-line strings
+
+> **Note:** Unicode "smart quotes" (', ', ", ") from Word, web browsers, etc. are automatically converted to ASCII quotes (' and ") to ensure Clarion compiler compatibility.
 
 ---
 
@@ -229,6 +232,22 @@ He said "Hello"
 ```clarion
 'He said "Hello"'
 ```
+
+---
+
+#### Unicode Quotes (from Word/Web)
+
+**Clipboard (with "smart quotes"):**
+```
+SELECT * FROM Customers WHERE Name = 'John's Store'
+```
+
+**Pasted (automatically converted to ASCII):**
+```clarion
+'SELECT * FROM Customers WHERE Name = ''John''s Store'''
+```
+
+> **Note:** Unicode quotes (', ', ", ") are converted to ASCII (' and ") before escaping. This ensures Clarion compiler compatibility.
 
 ---
 
