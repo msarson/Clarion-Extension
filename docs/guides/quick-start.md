@@ -75,25 +75,29 @@ These settings are saved in `.vscode/settings.json` in your solution folder.
 - Hover your mouse over any symbol
 - See documentation, file contents, or method signatures
 
-### Use IntelliSense
+### Use Signature Help (Parameter Hints)
 
-1. Start typing a function name (e.g., `SUB`)
-2. IntelliSense shows available functions
-3. Arrow keys to select, **Tab** or **Enter** to insert
-4. See parameter hints as you type
+1. Type a function name (e.g., `SUB`)
+2. Type opening parenthesis `(`
+3. **Parameter hints appear automatically**
+4. See parameter names, types, and descriptions
+5. Type `,` to move to next parameter
+
+**Note:** This extension shows parameter hints for functions you're calling. It does not have auto-complete dropdowns as you type.
 
 ### Use Code Snippets
 
 1. Type a snippet trigger (e.g., `IF`)
 2. Press **Tab**
 3. The full structure is inserted with placeholders
+4. **Tab** again to jump to next placeholder
 
 **Common snippets:**
 - `IF` → IF/THEN/END
 - `LOOP` → LOOP/END
 - `MAP` → MAP/END
-- `VS` → String variable
-- `VL` → Long variable
+- `VS` → String variable declaration
+- `VL` → Long variable declaration
 
 **[See all snippets →](../reference/snippets.md)**
 

@@ -387,7 +387,6 @@ Even in large codebases (1000+ files), navigation is instant.
 
 ## Related Features
 
-- **[IntelliSense](intellisense.md)** - Code completion uses same symbol resolution
-- **[Solution Management](solution-management.md)** - Configure includes and redirections
+- **[Signature Help](signature-help.md)** - Parameter hints use same symbol resolution
 - **[Common Tasks](../guides/common-tasks.md)** - Quick navigation recipes
 

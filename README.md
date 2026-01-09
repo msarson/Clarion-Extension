@@ -28,12 +28,19 @@ Jump to definitions, find implementations, see where code is used.
 - Hover for documentation and previews
 - **[Learn more about Navigation →](docs/features/navigation.md)**
 
-### 💡 **IntelliSense & Code Completion**
-Context-aware suggestions as you type with full documentation.
-- 261 documented items (functions, attributes, controls)
-- Parameter hints with type information
-- Signature help for method overloads
-- **[Learn more about IntelliSense →](docs/features/intellisense.md)**
+### 💡 **Signature Help & Documentation**
+Get instant parameter hints and documentation as you code.
+- 148 built-in functions with parameter hints
+- Method overload support
+- Hover documentation for all symbols
+- **[Learn more about Signature Help →](docs/features/signature-help.md)**
+
+### ✏️ **Code Snippets**
+Write code faster with 50+ smart snippets.
+- Structure templates (IF, LOOP, CASE, etc.)
+- Variable declaration shortcuts
+- Procedure and method templates
+- **[Learn more about Snippets →](docs/features/code-editing.md#code-snippets)**
 
 ### 🔧 **Build Integration**
 Generate applications directly from VS Code.
@@ -84,7 +91,7 @@ Productivity features to write code faster.
 
 ### Feature Documentation
 - **[Navigation Features](docs/features/navigation.md)** - F12, Ctrl+F12, hover tooltips
-- **[IntelliSense & Completion](docs/features/intellisense.md)** - Smart code completion
+- **[Signature Help](docs/features/signature-help.md)** - Parameter hints and documentation
 - **[Solution Management](docs/features/solution-management.md)** - Working with solutions
 - **[Diagnostics & Validation](docs/features/diagnostics.md)** - Error detection
 - **[Code Editing Tools](docs/features/code-editing.md)** - Snippets, commands, wizards
