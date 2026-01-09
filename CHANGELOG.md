@@ -10,7 +10,7 @@ All notable changes to the Clarion Extension are documented here.
 **In Development**
 
 **Highlights:**
-- TBD
+- ✨ Added OLE structure support for folding and navigation
 
 [**→ Full details**](docs/changelogs/CHANGELOG-0.8.6.md)
 

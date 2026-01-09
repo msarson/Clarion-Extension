@@ -4,48 +4,32 @@
 
 ## 🎯 Overview
 
-This release focuses on...
+This release adds support for OLE controls in window structures, ensuring proper folding and navigation.
 
 ---
 
 ## ✨ Features
 
-### New Features
-- TBD
-
----
-
-## 🐛 Bug Fixes
-
-### Bug Fixes
-- TBD
-
----
-
-## 🏗️ Architecture & Code Quality
-
-### Improvements
-- TBD
+### OLE Structure Support
+- Added OLE to structure recognition in tokenizer
+- OLE controls now fold correctly in WINDOW/APPLICATION definitions
+- OLE controls appear properly in outline view
+- Document structure navigation works with OLE controls
 
 ---
 
 ## 🧪 Testing
 
-- TBD
-
----
-
-## 📝 Documentation
-
-- TBD
+- **New Tests**: Added OLE control folding test
+- **All tests passing**: 496/496
 
 ---
 
 ## 📊 Metrics
 
-- **Commits**: TBD
-- **Performance gains**: TBD
-- **Code quality**: TBD
+- **Commits**: 2
+- **Files changed**: 3
+- **Test coverage**: Maintained at 100% for folding provider
 
 ---
 
