@@ -23,18 +23,24 @@ class Logger {
     }
 
     debug(message: string, ...args: any[]) {
+        // In perf test mode, allow PERF messages through, skip others
+        if (LoggingConfig.PERF_TEST_MODE && !message.includes('🚀') && !message.includes('[PERF]')) return;
         if (this.shouldLog("debug")) {
             console.log(`[${this.getTimestamp()}] [${this.name}] 🐛 DEBUG:`, message, ...args);
         }
     }
 
     info(message: string, ...args: any[]) {
+        // In perf test mode, allow PERF messages through, skip others
+        if (LoggingConfig.PERF_TEST_MODE && !message.includes('🚀') && !message.includes('[PERF]')) return;
         if (this.shouldLog("info")) {
             console.log(`[${this.getTimestamp()}] [${this.name}] ℹ️ INFO:`, message, ...args);
         }
     }
 
     warn(message: string, ...args: any[]) {
+        // In perf test mode, allow PERF messages through, skip others
+        if (LoggingConfig.PERF_TEST_MODE && !message.includes('🚀') && !message.includes('[PERF]')) return;
         if (this.shouldLog("warn")) {
             console.log(`[${this.getTimestamp()}] [${this.name}] ⚠️ WARN:`, message, ...args);
         }
@@ -43,6 +49,25 @@ class Logger {
     error(message: string, ...args: any[]) {
         if (this.shouldLog("error")) {
             console.log(`[${this.getTimestamp()}] [${this.name}] ❌ ERROR:`, message, ...args);
+        }
+    }
+
+    /**
+     * 📊 Log performance metrics - only logs at DEBUG level to reduce console noise
+     * Search for "PERF:" in debug console to see all performance metrics
+     */
+    perf(message: string, metrics?: Record<string, number | string>) {
+        // In perf test mode, always log perf metrics regardless of level
+        if (!LoggingConfig.PERF_TEST_MODE && !this.shouldLog("debug")) return;
+        
+        const timestamp = this.getTimestamp();
+        if (metrics) {
+            const metricsStr = Object.entries(metrics)
+                .map(([key, value]) => `${key}=${value}`)
+                .join(', ');
+            console.log(`[${timestamp}] [${this.name}] 📊 PERF: ${message} | ${metricsStr}`);
+        } else {
+            console.log(`[${timestamp}] [${this.name}] 📊 PERF: ${message}`);
         }
     }
 

@@ -212,17 +212,19 @@ export class SignatureHelpProvider {
     ): Promise<SignatureInformation[]> {
         logger.info(`Getting class method signatures for ${prefix}.${methodName}`);
 
+        const structure = this.tokenCache.getStructure(document); // 🚀 PERFORMANCE: Get cached structure
+        
         // Determine the class name
         let className: string | null = null;
 
         if (prefix.toLowerCase() === 'self') {
             // Find current class context
-            let currentScope = TokenHelper.getInnermostScopeAtLine(tokens, currentLine);
+            let currentScope = TokenHelper.getInnermostScopeAtLine(structure, currentLine); // 🚀 PERFORMANCE: O(log n) vs O(n)
             
             // If we're in a routine, get the parent scope
             if (currentScope && currentScope.subType === TokenType.Routine) {
                 logger.info(`Current scope is a routine, looking for parent scope`);
-                const parentScope = TokenHelper.getParentScopeOfRoutine(tokens, currentScope);
+                const parentScope = TokenHelper.getParentScopeOfRoutine(structure, currentScope); // 🚀 PERFORMANCE: O(1) vs O(n)
                 if (parentScope) {
                     currentScope = parentScope;
                     logger.info(`Using parent scope: ${currentScope.value}`);
@@ -276,7 +278,7 @@ export class SignatureHelpProvider {
         
         // ✅ CONTEXT-AWARE DETECTION: Determine context for MODULE and data types
         // Get tokens to check for label before the method name
-        const lineTokens = tokens.filter(t => t.line === position.line);
+        const lineTokens = TokenHelper.findTokens(tokens, { line: position.line });
         
         // Check if there's a Label token before the current word (indicates data declaration)
         const hasLabelBefore = lineTokens.some(t => 
@@ -376,10 +378,7 @@ export class SignatureHelpProvider {
         const declarations: { signature: string; paramCount: number }[] = [];
 
         // Search in current file
-        const classTokens = tokens.filter(token =>
-            token.type === TokenType.Structure &&
-            token.value.toUpperCase() === 'CLASS'
-        );
+        const classTokens = TokenHelper.findClassStructures(tokens);
 
         for (const classToken of classTokens) {
             const labelToken = tokens.find(t =>
@@ -389,20 +388,29 @@ export class SignatureHelpProvider {
             );
 
             if (labelToken) {
-                // Find all methods with this name
-                for (let i = labelToken.line + 1; i < tokens.length; i++) {
-                    const lineTokens = tokens.filter(t => t.line === i);
-                    const endToken = lineTokens.find(t => t.value.toUpperCase() === 'END' && t.start === 0);
-                    if (endToken) break;
-
-                    const methodToken = lineTokens.find(t =>
-                        t.value.toLowerCase() === methodName.toLowerCase() &&
-                        t.start === 0
-                    );
-
-                    if (methodToken) {
-                        const content = document.getText();
-                        const lines = content.split('\n');
+                // Get file content once
+                const content = document.getText();
+                const lines = content.split('\n');
+                
+                // Find all methods with this name by iterating through tokens
+                // This is O(n) instead of O(n²) with repeated filter calls
+                for (const token of tokens) {
+                    // Only process tokens after the class start
+                    if (token.line <= labelToken.line) continue;
+                    
+                    // Stop at END token at column 0
+                    if (token.type === TokenType.Keyword &&
+                        token.value.toUpperCase() === 'END' && 
+                        token.start === 0) {
+                        break;
+                    }
+                    
+                    // Check if this is a method declaration at start of line
+                    if (token.type === TokenType.Label &&
+                        token.value.toLowerCase() === methodName.toLowerCase() &&
+                        token.start === 0) {
+                        
+                        const i = token.line;
                         const signature = lines[i].trim();
                         const paramCount = this.overloadResolver.countParametersInDeclaration(signature);
 
@@ -576,7 +584,8 @@ export class SignatureHelpProvider {
         const varToken = varTokens[varTokens.length - 1]; // Use closest declaration
 
         // Find the type token on the same line
-        const lineTokens = tokens.filter(t => t.line === varToken.line && t.start > varToken.start);
+        const lineTokens = TokenHelper.findTokens(tokens, { line: varToken.line })
+            .filter(t => t.start > varToken.start);
         const typeToken = lineTokens.find(t =>
             t.type === TokenType.Type ||
             t.type === TokenType.Label || // Class names appear as labels

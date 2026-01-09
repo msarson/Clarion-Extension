@@ -11,7 +11,9 @@ export const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     CASE: /(?<![:\w.])\bCASE\b/i,
     CLASS: /\bCLASS\b/i,
     GROUP: /\bGROUP\b/i,
-    FILE: /\sFILE\b/i,  // Includes leading space to avoid matching in wrong context
+    // ✅ FILE, QUEUE, VIEW changed to use word boundary instead of requiring leading space
+    // The tokenizer already checks prevChar for ':' and '.' to prevent qualified identifiers
+    FILE: /\bFILE\b/i,
     INTERFACE: /\bINTERFACE\b/i,
     IF: /(?<![:\w.])\bIF\b/i,  // ✅ Prevent matching after : or . or word char
     JOIN: /\bJOIN\b/i,
@@ -19,8 +21,8 @@ export const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     MAP: /\bMAP\b/i,
     MENU: /\bMENU\b(?=\s*(\(|,))/i,
     MENUBAR: /\bMENUBAR\b/i,
-    //QUEUE: /\bQUEUE(?![:\(])\b/i,  // Prevents detecting Queue:Browse as a structure
-    QUEUE: /\s+\bQUEUE\b(?!:)/i,  // Includes leading space to avoid matching Queue:Browse
+    // ✅ QUEUE changed to use negative lookbehind for qualified identifiers
+    QUEUE: /(?<![:\w.])\bQUEUE\b/i,
 
     // RECORD: /^\s*(\w+)\s+(RECORD)\b/i,
     // ✅ RECORD should not match when it's part of a field name (preceded by : or . or alphanumeric)
@@ -31,7 +33,8 @@ export const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     SHEET: /\bSHEET\b/i,
     TAB: /\bTAB\b/i,
     TOOLBAR: /^[ \t]*TOOLBAR\b(?=\s*(\(|,))/i,  // Only match TOOLBAR at beginning of line followed by ( or ,
-    VIEW: /\sVIEW\b/i,  // Includes leading space to avoid matching in wrong context
+    // ✅ VIEW changed to use word boundary instead of requiring leading space
+    VIEW: /\bVIEW\b/i,
     WINDOW: /\bWINDOW\b(?=\s*(\(|,))/i,
     OPTION: /\bOPTION\b/i,
     ITEMIZE: /\bITEMIZE\b/i,
@@ -67,14 +70,14 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     // ✅ Structure is handled specially in PatternMatcher - see STRUCTURE_PATTERNS
     // DO NOT combine patterns here as it breaks negative lookbehinds!
     [TokenType.WindowElement]: /\b(?:BUTTON|ENTRY|TEXT|LIST|COMBO|CHECK|RADIO|OPTION|SHEET|TAB|IMAGE|LINE|BOX|ELLIPSE|PANEL|PROGRESS|REGION|PROMPT|SPIN|ITEM|GROUP)\b|STRING\s*\(@[^)]*\)/i,
-    [TokenType.Attribute]: /\b(?:ALONE|AUTO|BINARY|BINDABLE|CENTERED|CREATE|CURSOR|DEFAULT|DLL|DOUBLE|DROP|DRIVER|DUP|EXTERNAL|FILL|FILTER|FIRST|FLAT|HLP|ICON|IMM|INS|MASK|MAX|MDI|MODAL|MSG|NAME|NOBAR|NOCASE|NOFRAME|NOMERGE|NOSHEET|OEM|OVER|OVR|OWNER|PAGE|PASCAL|PRE|PRIMARY|PRIVATE|PROTECTED|RAW|RECLAIM|REQ|RESIZE|RIGHT|SCROLL|STATUS|STATIC|STD|SYSTEM|THREAD|TIMER|TIP|TIMES|TRN|UPR|USE|VBX|VCR|WALLPAPER|REF)\b/i,
+    [TokenType.Attribute]: /\b(?:ALONE|AUTO|BINARY|BINDABLE|CENTERED|CREATE|CURSOR|DEFAULT|DLL|DOUBLE|DROP|DRIVER|DUP|EXTERNAL|FILL|FILTER|FIRST|FLAT|HLP|ICON|IMM|INS|MASK|MAX|MDI|MODAL|MODULE|MSG|NAME|NOBAR|NOCASE|NOFRAME|NOMERGE|NOSHEET|OEM|OVER|OVR|OWNER|PAGE|PASCAL|PRE|PRIMARY|PRIVATE|PROTECTED|RAW|RECLAIM|REQ|RESIZE|RIGHT|SCROLL|STATUS|STATIC|STD|SYSTEM|THREAD|TIMER|TIP|TIMES|TRN|TYPE|UPR|USE|VBX|VCR|WALLPAPER|REF)\b/i,
     [TokenType.Constant]: /\b(?:TRUE|FALSE|NULL|LEVEL:BENIGN|LEVEL:NOTIFY|LEVEL:FATAL|ICON:Asterisk|ICON:Exclamation|ICON:Hand|ICON:Question|BUTTON:YES|BUTTON:NO|BUTTON:OK|BUTTON:CANCEL|CENTER|LEFT|RIGHT)\b/i,
     [TokenType.Property]: /\b(?:color|width|height|top|left|right|bottom|text|visible|enabled|font|size|style|value|caption)\b/i,
     [TokenType.Number]: /\b[0-9]+(\.[0-9]+)?\b/i,
     [TokenType.Operator]: /[\+\-\*\/\=\>\<\&\|\~]/,
     [TokenType.Delimiter]: /[\(\)\[\]\{\}\,\:\;]/,
-    [TokenType.Label]: /^(?!(?:COMPILE|OMIT|EMBED|SECTION|ENDSECTION|MODULE|MAP|CLASS|FILE|GROUP|QUEUE|VIEW|WINDOW|REPORT|INTERFACE|RECORD|END)\b)[A-Za-z_][A-Za-z0-9_:]*/i,  // Starts at column 0, can include colons, but NOT directive keywords, structure keywords, or END
-    [TokenType.Variable]: /\b[A-Za-z_][A-Za-z0-9_]*\b/i,
+    [TokenType.Label]: /^(?!(?:COMPILE|OMIT|EMBED|SECTION|ENDSECTION|MODULE|MAP|CLASS|FILE|GROUP|QUEUE|VIEW|WINDOW|REPORT|INTERFACE|RECORD|PROGRAM|MEMBER|END)\b)[A-Za-z_][A-Za-z0-9_:]*/i,  // Starts at column 0, can include colons, but NOT directive keywords, structure keywords, document keywords, or END
+    [TokenType.Variable]: /\b(?!(?:IF|LOOP|CASE|ACCEPT|EXECUTE|BEGIN|FILE|QUEUE|GROUP|RECORD|CLASS|WINDOW|REPORT|MODULE|MAP|VIEW|INTERFACE|END)\b)[A-Za-z_][A-Za-z0-9_]*\b/i,  // Exclude structure keywords to allow them to match Structure type first
     [TokenType.ImplicitVariable]: /\b[A-Za-z_][A-Za-z0-9_]*[$#"]/i,  // ✅ Variables ending with implicit type suffixes
     [TokenType.Function]: /\b[A-Za-z_][A-Za-z0-9_]*(?=\()/i,
     [TokenType.ReferenceVariable]: /&\s*[A-Za-z_][A-Za-z0-9_]*/i,

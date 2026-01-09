@@ -5,7 +5,7 @@ import { ClarionLocation } from './LocationProvider'; // Make sure this import i
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("HoverProvider");
-logger.setLevel("error");
+logger.setLevel("info");
 
 /**
  * Provides hover information for Clarion code elements.
@@ -113,61 +113,7 @@ export class ClarionHoverProvider implements vscode.HoverProvider {
         return null;
     }
 
-    /**
-     * Finds the implementation of a method call in the current file
-     */
-    private async findMethodImplementationForCall(
-        document: vscode.TextDocument,
-        methodName: string,
-        paramCount: number
-    ): Promise<vscode.Location | null> {
-        logger.info(`Finding implementation for method call ${methodName} with ${paramCount} parameters`);
-        
-        try {
-            const content = document.getText();
-            const implementationRegex = new RegExp(
-                `(\\w+)\\.${methodName}\\s+(?:procedure|function)\\s*\\(([^)]*)\\)`,
-                'gi'
-            );
-            
-            let bestMatch: { line: number, distance: number } | null = null;
-            let match: RegExpExecArray | null;
-            
-            while ((match = implementationRegex.exec(content)) !== null) {
-                const params = match[2];
-                const implementationParamCount = params.trim() === "" ? 0 : params.split(',').length;
-                const matchPos = match.index;
-                const lineNumber = content.substring(0, matchPos).split('\n').length - 1;
-                const paramDistance = Math.abs(implementationParamCount - paramCount);
-                
-                if (paramDistance === 0) {
-                    logger.info(`Found exact parameter count match at line ${lineNumber}`);
-                    return new vscode.Location(
-                        document.uri,
-                        new vscode.Position(lineNumber, 0)
-                    );
-                }
-                
-                if (bestMatch === null || paramDistance < bestMatch.distance) {
-                    bestMatch = { line: lineNumber, distance: paramDistance };
-                }
-            }
-            
-            if (bestMatch !== null) {
-                logger.info(`Using closest parameter count match at line ${bestMatch.line}`);
-                return new vscode.Location(
-                    document.uri,
-                    new vscode.Position(bestMatch.line, 0)
-                );
-            }
-            
-            return null;
-        } catch (error) {
-            logger.error(`Error finding method implementation: ${error instanceof Error ? error.message : String(error)}`);
-            return null;
-        }
-    }
-
+    
     /**
      * Detects if the cursor is on a routine reference (in DO statements)
      */

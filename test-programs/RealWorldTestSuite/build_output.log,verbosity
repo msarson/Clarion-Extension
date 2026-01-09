@@ -1,0 +1,66 @@
+Build started 03/01/2026 23:59:29.
+Project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj" on node 1 (build target(s)).
+Building with tools version "4.0".
+Target "PreBuildEvent" skipped, due to false condition; ('$(PreBuildEvent)'!='') was evaluated as (''!='').
+Target "_TimeStampBeforeCompile" skipped, due to false condition; ('$(RunPostBuildEvent)'=='OnOutputUpdated') was evaluated as (''=='OnOutputUpdated').
+Target "CoreCompile" in file "C:\Clarion\Clarion11.1\bin\SoftVelocity.Build.Clarion.targets" from project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj" (target "Build" depends on it):
+Using "CW" task from assembly "C:\Clarion\Clarion11.1\bin\SoftVelocity.CW.Build.Tasks.dll".
+Task "CW"
+  Making main.obj : file does not exist
+  Including: StringTheory.inc
+  Including: *EQUATES.CLW
+  Including: **property.clw
+  Including: *EQUATES.CLW
+  Including: StringTheory.inc
+  Including:  
+  Including: BUILTINS.CLW
+  Including:  
+f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\main.clw(75,3): error : Expected: <ID> & APPLICATION CLASS FILE GROUP INTERFACE ITEMIZE QUEUE REPORT VIEW WINDOW  [f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj]
+  made main.obj
+  Making utils.obj : file does not exist
+  Including: main.clw
+  Including: *StringTheory.inc
+  Including: **EQUATES.CLW
+  Including: ***property.clw
+  Including: **EQUATES.CLW
+  Including: *StringTheory.inc
+  Including: main.clw
+  Including: *BUILTINS.CLW
+  Including: main.clw
+f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\main.clw(75,3): error : Expected: <ID> & APPLICATION CLASS FILE GROUP INTERFACE ITEMIZE QUEUE REPORT VIEW WINDOW  [f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj]
+  Including:  
+  Including: startproc.inc
+  Including:  
+  made utils.obj
+  Making StartProc.obj : file does not exist
+  Including: main.clw
+  Including: *StringTheory.inc
+  Including: **EQUATES.CLW
+  Including: ***property.clw
+  Including: **EQUATES.CLW
+  Including: *StringTheory.inc
+  Including: main.clw
+  Including: *BUILTINS.CLW
+  Including: main.clw
+f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\main.clw(75,3): error : Expected: <ID> & APPLICATION CLASS FILE GROUP INTERFACE ITEMIZE QUEUE REPORT VIEW WINDOW  [f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj]
+  Including:  
+  Including: startproc.inc
+  Including:  
+  made StartProc.obj
+Done executing task "CW" -- FAILED.
+Done building target "CoreCompile" in project "ScopeTestSuite.cwproj" -- FAILED.
+Done Building Project "f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj" (build target(s)) -- FAILED.
+
+
+Build FAILED.
+
+"f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj" (build target) (1) ->
+(CoreCompile target) -> 
+  f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\main.clw(75,3): error : Expected: <ID> & APPLICATION CLASS FILE GROUP INTERFACE ITEMIZE QUEUE REPORT VIEW WINDOW  [f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj]
+  f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\main.clw(75,3): error : Expected: <ID> & APPLICATION CLASS FILE GROUP INTERFACE ITEMIZE QUEUE REPORT VIEW WINDOW  [f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj]
+  f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\main.clw(75,3): error : Expected: <ID> & APPLICATION CLASS FILE GROUP INTERFACE ITEMIZE QUEUE REPORT VIEW WINDOW  [f:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\ScopeTestSuite.cwproj]
+
+    0 Warning(s)
+    3 Error(s)
+
+Time Elapsed 00:00:00.21

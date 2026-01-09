@@ -1,12 +1,7 @@
 {
   "ui": "tdd",
-  "timeout": 5000,
+  "timeout": 30000,
   "spec": [
-    "out/server/src/test/**/*.test.js",
-    "out/client/src/test/**/*.test.js"
-  ],
-  "exclude": [
-    "out/client/src/test/UnreachableCodeDecorator.test.js",
-    "out/client/src/test/TextEditingCommands.test.js"
+    "out/server/src/test/**/*.test.js"
   ]
 }

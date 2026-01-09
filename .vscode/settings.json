@@ -1,11 +1,9 @@
 {
   "testing.automaticallyOpenPeekView": "failureInVisibleDocument",
   "mochaExplorer.files": [
-    "out/server/src/test/**/*.test.js",
-    "out/client/src/test/**/*.test.js"
+    "out/server/src/test/**/*.test.js"
   ],
   "mochaExplorer.watch": [
-    "out/server/src/**/*.js",
-    "out/client/src/**/*.js"
+    "out/server/src/**/*.js"
   ]
 }

@@ -4,7 +4,7 @@ import { DocumentStructure } from './DocumentStructure';
 import LoggerManager from './logger';
 
 const logger = LoggerManager.getLogger("TokenCache");
-logger.setLevel("error"); // Temporarily enable info logging to debug structure caching
+logger.setLevel("error"); // Production: Only log errors
 
 /**
  * Line-based token data for incremental updates
@@ -137,11 +137,18 @@ export class TokenCache {
                 const lineTokens = this.buildLineTokenMap(document, tokens);
                 const cacheTime = performance.now() - cacheStart;
                 
+                //Process tokens through DocumentStructure to set subtypes (MapProcedure, etc.)
+                // This modifies tokens in-place - must be done BEFORE caching
+                const structure = new DocumentStructure(tokens);
+                structure.process();
+                
+                // 🚀 PERFORMANCE: Cache the structure to avoid rebuilding it
                 this.cache.set(document.uri, { 
                     version: document.version, 
                     tokens,
                     lineTokens,
-                    documentText: currentText
+                    documentText: currentText,
+                    structure: structure
                 });
                 
                 const fullTime = performance.now() - fullStart;
@@ -463,16 +470,25 @@ export class TokenCache {
         });
         const mergeTime = performance.now() - mergeStart;
         
+        // Process tokens through DocumentStructure to set subtypes (MapProcedure, etc.)
+        // This modifies tokens in-place - must be done BEFORE caching
+        const processStart = performance.now();
+        const structure = new DocumentStructure(mergedTokens);
+        structure.process();
+        const processTime = performance.now() - processStart;
+        
         // Update cache
         const cacheStart = performance.now();
         const lineTokens = this.buildLineTokenMap(document, mergedTokens);
         const cacheTime = performance.now() - cacheStart;
         
+        // 🚀 PERFORMANCE: Cache the structure to avoid rebuilding it
         this.cache.set(document.uri, {
             version: document.version,
             tokens: mergedTokens,
             lineTokens,
-            documentText: newText
+            documentText: newText,
+            structure: structure
         });
         
         const totalTime = performance.now() - perfStart;
@@ -491,6 +507,7 @@ export class TokenCache {
             'tokenize_ms': tokenizeTime.toFixed(2),
             'adjust_ms': adjustTime.toFixed(2),
             'merge_ms': mergeTime.toFixed(2),
+            'process_ms': processTime.toFixed(2),
             'cache_ms': cacheTime.toFixed(2)
         });
         

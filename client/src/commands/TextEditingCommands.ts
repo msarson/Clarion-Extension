@@ -36,8 +36,12 @@ function convertToClarionString(text: string, lineTerminator: LineTerminator, tr
             line = line.trimStart();
         }
         
-        // Escape single quotes by doubling them
-        const escapedLine = line.replace(/'/g, "''");
+        // Convert unicode quotes to ASCII (for Clarion compiler compatibility)
+        // then escape single quotes by doubling them
+        const escapedLine = line
+            .replace(/[\u2018\u2019]/g, "'")  // Convert unicode single quotes to ASCII
+            .replace(/[\u201C\u201D]/g, '"')  // Convert unicode double quotes to ASCII
+            .replace(/'/g, "''");              // Escape ASCII single quotes for Clarion
         
         // Build the string line - preserve the original content exactly
         let clarionLine = `'${escapedLine}`;

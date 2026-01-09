@@ -19,9 +19,10 @@ export class DiagnosticProvider {
      * Validate a Clarion document and return diagnostics
      * @param document - TextDocument to validate
      * @param tokens - Pre-tokenized tokens (optional, will tokenize if not provided)
+     * @param caller - Optional identifier for debugging who called this (for perf tracking)
      * @returns Array of Diagnostic objects
      */
-    public static validateDocument(document: TextDocument, tokens?: Token[]): Diagnostic[] {
+    public static validateDocument(document: TextDocument, tokens?: Token[], caller?: string): Diagnostic[] {
         const perfStart = performance.now();
         
         // Use provided tokens or tokenize if not provided
@@ -66,7 +67,7 @@ export class DiagnosticProvider {
         diagnostics.push(...classPropertyDiagnostics);
         
         const perfTime = performance.now() - perfStart;
-        logger.perf('Validation complete', {
+        logger.perf(`🚀 Validation complete${caller ? ` (caller: ${caller})` : ''}`, {
             'time_ms': perfTime.toFixed(2),
             'tokens': tokens.length,
             'diagnostics': diagnostics.length

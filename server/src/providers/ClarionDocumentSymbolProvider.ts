@@ -9,6 +9,8 @@ import { HierarchyManager, ParentStackEntry } from './utils/HierarchyManager';
 import { SymbolFinder } from './utils/SymbolFinder';
 import { isAttributeKeyword, isDataType } from '../utils/AttributeKeywords';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
+import { OmitCompileDetector, DirectiveBlock } from '../utils/OmitCompileDetector';
+import { TextDocument } from 'vscode-languageserver-textdocument';
 
 /**
  * Extended DocumentSymbol with Clarion-specific metadata
@@ -266,7 +268,8 @@ export class ClarionDocumentSymbolProvider {
         return { value: "", nextIndex: j };
     }
 
-    public provideDocumentSymbols(tokens: Token[], documentUri: string): ClarionDocumentSymbol[] {
+    public provideDocumentSymbols(tokens: Token[], documentUri: string, document?: TextDocument): ClarionDocumentSymbol[] {
+        const perfStart = performance.now();
         if (!serverInitialized) {
             logger.warn(`⚠️ Server not initialized, skipping document symbols for: ${documentUri}`);
             return [];
@@ -301,6 +304,8 @@ export class ClarionDocumentSymbolProvider {
 
         // CRITICAL FIX: Track the last method implementation to ensure variables are properly attached
         let lastMethodImplementation: ClarionDocumentSymbol | null = null;
+        
+        const perfLoopStart = performance.now();
 
         for (let i = 0; i < tokens.length; i++) {
             const token = tokens[i];
@@ -715,6 +720,25 @@ export class ClarionDocumentSymbolProvider {
         // These create circular references and shouldn't be sent to the client
         this.cleanupInternalProperties(symbols);
 
+        // Filter out symbols in OMIT/COMPILE blocks if document is provided
+        const perfFilterStart = performance.now();
+        if (document) {
+            this.filterOmittedSymbols(symbols, tokens, document);
+        }
+        const perfFilterTime = performance.now() - perfFilterStart;
+        
+        const perfLoopTime = performance.now() - perfLoopStart;
+        const perfTotalTime = performance.now() - perfStart;
+        
+        logger.perf('🚀 Symbol: COMPLETE', {
+            total_ms: perfTotalTime.toFixed(2),
+            loop_ms: perfLoopTime.toFixed(2),
+            filter_ms: perfFilterTime.toFixed(2),
+            tokens: tokens.length,
+            symbols: symbols.length,
+            lines: this.tokensByLine.size
+        });
+
         return symbols;
     }
     
@@ -732,6 +756,34 @@ export class ClarionDocumentSymbolProvider {
             // Recursively clean children
             if (symbol.children && symbol.children.length > 0) {
                 this.cleanupInternalProperties(symbol.children);
+            }
+        }
+    }
+    
+    /**
+     * Filter out symbols that are within OMIT/COMPILE blocks
+     */
+    private filterOmittedSymbols(symbols: ClarionDocumentSymbol[], tokens: Token[], document: TextDocument): void {
+        // 🚀 PERF: Build directive blocks ONCE instead of for every symbol
+        const blocks = OmitCompileDetector.findDirectiveBlocks(tokens, document);
+        this.filterOmittedSymbolsWithBlocks(symbols, blocks);
+    }
+    
+    /**
+     * Recursive helper that uses pre-computed directive blocks
+     */
+    private filterOmittedSymbolsWithBlocks(symbols: ClarionDocumentSymbol[], blocks: DirectiveBlock[]): void {
+        for (let i = symbols.length - 1; i >= 0; i--) {
+            const symbol = symbols[i];
+            const symbolLine = symbol.range.start.line;
+            
+            // Check if this symbol is in an omitted region using pre-computed blocks
+            if (OmitCompileDetector.isLineOmittedWithBlocks(symbolLine, blocks)) {
+                // Remove this symbol
+                symbols.splice(i, 1);
+            } else if (symbol.children && symbol.children.length > 0) {
+                // Recursively filter children
+                this.filterOmittedSymbolsWithBlocks(symbol.children, blocks);
             }
         }
     }

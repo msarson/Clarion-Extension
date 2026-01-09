@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ClassMemberResolver");
-logger.setLevel("error"); // PERF: Only log errors to reduce overhead
+logger.setLevel("info"); // Enable info logging for debugging
 
 /**
  * Shared utility for resolving class members (methods, properties)
@@ -35,8 +35,10 @@ export class ClassMemberResolver {
     ): { type: string; className: string; line: number; file: string } | null {
         logger.info(`🔍 findClassMemberInfo called for member: ${memberName}${paramCount !== undefined ? ` with ${paramCount} parameters` : ''}`);
         
+        const structure = this.tokenCache.getStructure(document); // 🚀 PERFORMANCE: Get cached structure
+        
         // Find the current scope to get the class name
-        let currentScope = TokenHelper.getInnermostScopeAtLine(tokens, currentLine);
+        let currentScope = TokenHelper.getInnermostScopeAtLine(structure, currentLine); // 🚀 PERFORMANCE: O(log n) vs O(n)
         if (!currentScope) {
             logger.info('❌ No scope found');
             return null;
@@ -47,7 +49,7 @@ export class ClassMemberResolver {
         // If we're in a routine, get the parent scope
         if (currentScope.subType === TokenType.Routine) {
             logger.info(`Current scope is a routine, looking for parent scope`);
-            const parentScope = TokenHelper.getParentScopeOfRoutine(tokens, currentScope);
+            const parentScope = TokenHelper.getParentScopeOfRoutine(structure, currentScope); // 🚀 PERFORMANCE: O(1) vs O(n)
             if (parentScope) {
                 currentScope = parentScope;
                 logger.info(`Using parent scope: ${currentScope.value}`);
@@ -78,11 +80,8 @@ export class ClassMemberResolver {
         logger.info(`Looking for member ${memberName} in class ${className}`);
         
         // Search in current file first
-        const classTokens = tokens.filter(token =>
-            token.type === TokenType.Structure &&
-            token.value.toUpperCase() === 'CLASS' &&
-            token.line > 0
-        );
+        const classTokens = TokenHelper.findClassStructures(tokens)
+            .filter(token => token.line > 0);
         
         for (const classToken of classTokens) {
             const labelToken = tokens.find(t =>
@@ -97,36 +96,54 @@ export class ClassMemberResolver {
                 // Collect all matching members (for overload resolution)
                 const candidates: { type: string; line: number; paramCount: number }[] = [];
                 
-                // Search for member in this class
-                for (let i = labelToken.line + 1; i < tokens.length; i++) {
-                    const lineTokens = tokens.filter(t => t.line === i);
-                    const endToken = lineTokens.find(t => t.value.toUpperCase() === 'END' && t.start === 0);
-                    if (endToken) break;
+                // Get file content once
+                const content = document.getText();
+                const lines = content.split('\n');
+                
+                // Search for member in this class by iterating through tokens
+                // This is O(n) instead of O(n²) with repeated filter calls
+                for (const token of tokens) {
+                    // Only process tokens after the class start
+                    if (token.line <= labelToken.line) continue;
                     
-                    const memberToken = lineTokens.find(t => 
-                        t.value.toLowerCase() === memberName.toLowerCase() && 
-                        t.start === 0
-                    );
+                    // Stop at END token at column 0
+                    if (token.type === TokenType.Keyword &&
+                        token.value.toUpperCase() === 'END' && 
+                        token.start === 0) {
+                        break;
+                    }
                     
-                    if (memberToken) {
-                        logger.info(`Found member ${memberName} at line ${i} in current file`);
+                    // Debug: Log all label tokens in the class for troubleshooting
+                    if (token.type === TokenType.Label && token.start === 0) {
+                        logger.info(`📋 Class member candidate: "${token.value}" at line ${token.line}, type=${token.type}`);
+                    }
+                    
+                    // Check if this is a member at start of line
+                    if (token.type === TokenType.Label &&
+                        token.value.toLowerCase() === memberName.toLowerCase() && 
+                        token.start === 0) {
                         
-                        // Get the type signature
-                        const memberEnd = memberToken.start + memberToken.value.length;
-                        const typeTokens = lineTokens.filter(t => t.start > memberEnd);
-                        const type = typeTokens.length > 0 ? typeTokens[0].value : 'Unknown';
+                        const i = token.line;
+                        logger.info(`✅ Found member ${memberName} at line ${i} in current file`);
+                        
+                        // Get the type signature - find the next token on the same line
+                        const memberEnd = token.start + token.value.length;
+                        const typeToken = tokens.find(t => 
+                            t.line === i && 
+                            t.start > memberEnd
+                        );
+                        const type = typeToken ? typeToken.value : 'Unknown';
+                        logger.info(`   Type token: ${type}, line: ${i}`);
                         
                         // Count parameters in declaration if it's a PROCEDURE
                         let declParamCount = 0;
                         if (type.toUpperCase() === 'PROCEDURE') {
-                            const content = document.getText();
-                            const lines = content.split('\n');
                             const fullLine = lines[i];
                             declParamCount = this.countParametersInDeclaration(fullLine);
                         }
                         
                         candidates.push({ type, line: i, paramCount: declParamCount });
-                        logger.info(`Candidate: ${memberName} with ${declParamCount} parameters at line ${i}`);
+                        logger.info(`   Candidate added: ${memberName} with ${declParamCount} parameters at line ${i}`);
                     }
                 }
                 
@@ -354,45 +371,5 @@ export class ClassMemberResolver {
         }
         
         return commaCount + 1;
-    }
-
-    /**
-     * Gets the innermost scope at a given line
-     */
-    private getInnermostScopeAtLine(tokens: Token[], line: number): Token | null {
-        const scopes = tokens.filter(token =>
-            token.type === TokenType.Procedure &&
-            token.line <= line &&
-            (token.finishesAt === undefined || token.finishesAt >= line)
-        );
-
-        if (scopes.length === 0) {
-            return null;
-        }
-
-        // Return the scope with the highest line number (innermost)
-        return scopes.reduce((innermost, current) =>
-            current.line > innermost.line ? current : innermost
-        );
-    }
-
-    /**
-     * Gets the parent scope of a routine
-     */
-    private getParentScopeOfRoutine(tokens: Token[], routineScope: Token): Token | null {
-        const procedures = tokens.filter(t =>
-            t.type === TokenType.Procedure &&
-            t.line < routineScope.line &&
-            (t.finishesAt === undefined || t.finishesAt >= routineScope.line)
-        );
-
-        if (procedures.length === 0) {
-            return null;
-        }
-
-        // Return the procedure with the highest line number (closest parent)
-        return procedures.reduce((closest, current) =>
-            current.line > closest.line ? current : closest
-        );
     }
 }

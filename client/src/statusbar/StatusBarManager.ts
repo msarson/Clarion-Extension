@@ -22,8 +22,10 @@ export async function updateConfigurationStatusBar(configuration: string): Promi
         configStatusBarItem.command = 'clarion.setConfiguration'; // ✅ Clicking will open the config picker
     }
 
-    configStatusBarItem.text = `$(gear) Clarion: ${configuration}`;
-    configStatusBarItem.tooltip = "Click to change Clarion configuration";
+    // Display just the configuration part (before the pipe) for cleaner UI
+    const displayConfig = configuration.split('|')[0];
+    configStatusBarItem.text = `$(gear) Clarion: ${displayConfig}`;
+    configStatusBarItem.tooltip = `Click to change Clarion configuration (Current: ${configuration})`;
     configStatusBarItem.show();
 
     // ✅ Ensure the setting is updated

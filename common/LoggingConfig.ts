@@ -9,9 +9,17 @@
  * - Release mode: Minimal logging (error level only) for end users
  * - Mode is determined by checking if we're in production (no source files available)
  * - When packaged for marketplace, source files are excluded, triggering release mode
+ * 
+ * PERFORMANCE TESTING MODE:
+ * - Set PERF_TEST_MODE = true to enable performance logging
+ * - This will set debug level to capture perf() calls while keeping other logs at error
  */
 
 export class LoggingConfig {
+    /**
+     * Enable this for performance testing - logs perf metrics while minimizing other noise
+     */
+    static readonly PERF_TEST_MODE: boolean = false;
     /**
      * Detects if we're running in release mode (packaged extension).
      * 
@@ -47,14 +55,19 @@ export class LoggingConfig {
     /**
      * Log level for development builds
      * More verbose to help with debugging during development
+     * Set to "debug" to enable performance logging (perf())
      */
-    static readonly DEV_LOG_LEVEL: "debug" | "info" | "warn" | "error" = "warn";
+    static readonly DEV_LOG_LEVEL: "debug" | "info" | "warn" | "error" = "debug";
     
     /**
      * Gets the appropriate default log level based on current mode
      * @returns Log level for current environment (development or release)
      */
     static getDefaultLogLevel(): "debug" | "info" | "warn" | "error" {
+        // In perf test mode, use debug level to capture perf() calls
+        if (this.PERF_TEST_MODE) {
+            return "debug";
+        }
         return this.IS_RELEASE_MODE ? this.RELEASE_LOG_LEVEL : this.DEV_LOG_LEVEL;
     }
     

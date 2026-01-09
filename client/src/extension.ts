@@ -10,12 +10,15 @@ import LoggerManager from './utils/LoggerManager';
 
 import { registerNavigationCommands } from './commands/NavigationCommands';
 import { registerBuildCommands } from './commands/BuildCommands';
+import { registerRunCommands } from './commands/RunCommands';
 import { registerSolutionManagementCommands, registerSolutionOpeningCommands, registerMiscSolutionCommands } from './commands/SolutionCommands';
 import { registerProjectFileCommands } from './commands/ProjectFileCommands';
 import { registerStatusCommands } from './commands/ViewCommands';
 import { registerTextEditingCommands } from './commands/TextEditingCommands';
 import { registerClassCreationCommands } from './commands/ClassCreationCommands';
 import { registerImplementationCommands } from './commands/ImplementationCommands';
+import { registerClassConstantCommands } from './commands/ClassConstantCommands';
+import { registerIncludeStatementCommands } from './commands/IncludeStatementCommands';
 import { createSolutionTreeView, createStructureView } from './views/ViewManager';
 import { registerLanguageFeatures } from './providers/LanguageFeatureManager';
 import * as SolutionOpener from './solution/SolutionOpener';
@@ -130,6 +133,12 @@ export async function activate(context: ExtensionContext): Promise<void> {
     // Register implementation commands
     context.subscriptions.push(...registerImplementationCommands(context));
     
+    // Register class constant commands
+    context.subscriptions.push(...registerClassConstantCommands(context));
+    
+    // Register include statement commands
+    context.subscriptions.push(...registerIncludeStatementCommands(context));
+    
     context.subscriptions.push(...disposables);
     
     // Register remaining commands
@@ -141,6 +150,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
     context.subscriptions.push(
         ...registerNavigationCommands(treeView, solutionTreeDataProvider),
         ...registerBuildCommands(diagnosticCollection, solutionTreeDataProvider),
+        ...registerRunCommands(solutionTreeDataProvider),
         ...registerSolutionManagementCommands(context, client, initializeSolution, createSolutionTreeView)
     );
     
@@ -222,10 +232,41 @@ export { showClarionQuickOpen } from './navigation/QuickOpenProvider';
 
 
 export function deactivate(): Thenable<void> | undefined {
+    // Set to info level to capture shutdown process
+    logger.setLevel("info");
+    logger.info("🛑 DEACTIVATE: Starting extension deactivation");
+    console.log("🛑 DEACTIVATE: Starting extension deactivation at " + new Date().toISOString());
+    
     if (!client) {
+        logger.info("🛑 DEACTIVATE: No client to stop");
+        console.log("🛑 DEACTIVATE: No client to stop");
         return undefined;
     }
-    return client.stop();
+    
+    logger.info("🛑 DEACTIVATE: Stopping language client...");
+    console.log("🛑 DEACTIVATE: Stopping language client at " + new Date().toISOString());
+    
+    const stopPromise = client.stop();
+    
+    // Add timeout monitoring
+    const timeoutId = setTimeout(() => {
+        logger.info("🛑 DEACTIVATE: Client stop() taking longer than 5 seconds...");
+        console.log("🛑 DEACTIVATE: Client stop() taking longer than 5 seconds at " + new Date().toISOString());
+    }, 5000);
+    
+    if (stopPromise) {
+        return stopPromise.then(() => {
+            clearTimeout(timeoutId);
+            logger.info("🛑 DEACTIVATE: Language client stopped successfully");
+            console.log("🛑 DEACTIVATE: Language client stopped successfully at " + new Date().toISOString());
+        }).catch((error) => {
+            clearTimeout(timeoutId);
+            logger.info(`🛑 DEACTIVATE: Error stopping client: ${error}`);
+            console.log(`🛑 DEACTIVATE: Error stopping client: ${error} at ` + new Date().toISOString());
+        });
+    }
+    
+    return undefined;
 }
 
 

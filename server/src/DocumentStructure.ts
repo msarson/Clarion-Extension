@@ -19,6 +19,7 @@ export class DocumentStructure {
     private procedureIndex: Map<string, Token> = new Map();
     private tokensByLine: Map<number, Token[]> = new Map();
     private structuresByType: Map<string, Token[]> = new Map();
+    private parentIndex: Map<Token, Token> = new Map(); // 🚀 PERFORMANCE: O(1) parent lookups
 
     constructor(private tokens: Token[], private lines?: string[]) {
         // 🚀 PERFORMANCE: Build indexes first for fast lookups
@@ -54,14 +55,131 @@ export class DocumentStructure {
             }
         }
         
+        // 🚀 PERFORMANCE: Build parent relationship index
+        this.buildParentIndex();
+        
         const indexTime = performance.now() - perfStart;
         logger.perf('Built indexes', {
             'time_ms': indexTime.toFixed(2),
             'tokens': this.tokens.length,
             'labels': this.labelIndex.size,
             'lines': this.tokensByLine.size,
-            'struct_types': this.structuresByType.size
+            'struct_types': this.structuresByType.size,
+            'parent_relationships': this.parentIndex.size
         });
+    }
+
+    /**
+     * 🚀 PERFORMANCE: Build parent relationship index for O(1) parent lookups
+     * This eliminates the need for O(n) scans to find parent structures
+     */
+    private buildParentIndex(): void {
+        const structureStack: Token[] = [];
+        
+        for (const token of this.tokens) {
+            // Pop completed structures from the stack
+            while (structureStack.length > 0) {
+                const top = structureStack[structureStack.length - 1];
+                if (top.finishesAt !== undefined && top.finishesAt < token.line) {
+                    structureStack.pop();
+                } else {
+                    break;
+                }
+            }
+            
+            // Current parent is top of stack (if any)
+            if (structureStack.length > 0) {
+                this.parentIndex.set(token, structureStack[structureStack.length - 1]);
+            }
+            
+            // Push new structures onto the stack
+            if (this.isStructureToken(token)) {
+                structureStack.push(token);
+            }
+        }
+    }
+
+    /**
+     * Check if a token represents a structure that can have children
+     */
+    private isStructureToken(token: Token): boolean {
+        // Structures: CLASS, INTERFACE, MAP, MODULE, GROUP, QUEUE, FILE, etc.
+        if (token.type === TokenType.Structure) {
+            return true;
+        }
+        
+        // Procedures: PROCEDURE, FUNCTION, METHOD implementations
+        if (token.subType === TokenType.Procedure ||
+            token.subType === TokenType.GlobalProcedure ||
+            token.subType === TokenType.MethodImplementation) {
+            return true;
+        }
+        
+        // Routines (nested procedures)
+        if (token.subType === TokenType.Routine) {
+            return true;
+        }
+        
+        return false;
+    }
+
+    /**
+     * 🚀 PERFORMANCE: Get the immediate parent token (O(1) lookup)
+     * @param token The token to find the parent of
+     * @returns The parent token or undefined if at top level
+     */
+    public getParent(token: Token): Token | undefined {
+        return this.parentIndex.get(token);
+    }
+
+    /**
+     * 🚀 PERFORMANCE: Get the parent scope token (O(1) lookup)
+     * A scope is a procedure, routine, or top-level structure
+     * @param token The token to find the parent scope of
+     * @returns The parent scope token or undefined if at top level
+     */
+    public getParentScope(token: Token): Token | undefined {
+        let parent = this.getParent(token);
+        
+        // Walk up the parent chain until we find a scope-defining structure
+        while (parent) {
+            if (this.isScopeToken(parent)) {
+                return parent;
+            }
+            parent = this.getParent(parent);
+        }
+        
+        return undefined;
+    }
+
+    /**
+     * Check if a token defines a scope (procedure, routine, or module-like structure)
+     */
+    private isScopeToken(token: Token): boolean {
+        // Procedures and routines define scopes
+        if (token.subType === TokenType.Procedure ||
+            token.subType === TokenType.GlobalProcedure ||
+            token.subType === TokenType.MethodImplementation ||
+            token.subType === TokenType.Routine) {
+            return true;
+        }
+        
+        // MODULE structures define scopes
+        if (token.type === TokenType.Structure && 
+            token.value.toUpperCase() === 'MODULE') {
+            return true;
+        }
+        
+        return false;
+    }
+
+    /**
+     * 🚀 PERFORMANCE: Get tokens on a specific line (O(1) lookup)
+     * @param line Line number
+     * @returns Array of tokens on that line, or undefined if no tokens
+     */
+    public getTokensByLine(line: number): Token[] | undefined {
+        return this.tokensByLine.get(line);
     }
 
     /**
@@ -442,40 +560,56 @@ export class DocumentStructure {
 
         // ✅ Check if structure ends on the same line (single-line declaration)
         // Examples: "AnswerDateTime GROUP(DateTimeType)." or "MyGroup GROUP;END"
+        // Also applies to single-line control flow: "IF condition THEN statement." or "IF x THEN y END"
+        // Handles line continuation: "IF x THEN | \n statement."
         const sameLine = this.tokensByLine.get(token.line) || [];
         const structureIndex = sameLine.indexOf(token);
         let endsOnSameLine = false;
+        let continuationLine = token.line;
         
-        // Check source text for period (since periods may not be tokenized)
-        if (this.lines && token.line >= 0 && token.line < this.lines.length) {
-            const lineText = this.lines[token.line];
+        // Follow line continuations to find the actual end
+        while (continuationLine < this.tokens[this.tokens.length - 1].line) {
+            const lineTokens = this.tokensByLine.get(continuationLine) || [];
             
-            // Check if line ends with period (after trimming whitespace)
-            if (lineText.trim().endsWith('.')) {
+            // Find the last non-comment token on this line
+            let lastSignificantToken: Token | undefined;
+            for (let i = lineTokens.length - 1; i >= 0; i--) {
+                const t = lineTokens[i];
+                if (t.type !== TokenType.Comment) {
+                    lastSignificantToken = t;
+                    break;
+                }
+            }
+            
+            if (!lastSignificantToken) {
+                break; // Empty line or only comments
+            }
+            
+            // Check if this line has a continuation character
+            const hasContinuation = lastSignificantToken.type === TokenType.LineContinuation || 
+                                   lastSignificantToken.value === '|';
+            
+            if (hasContinuation) {
+                // Statement continues on next line
+                continuationLine++;
+                continue;
+            }
+            
+            // No continuation - check if this line ends with a terminator
+            const isEnd = lastSignificantToken.type === TokenType.EndStatement || 
+                         lastSignificantToken.value.toUpperCase() === 'END';
+            const isPeriod = lastSignificantToken.value === '.';
+            
+            if (isEnd || isPeriod) {
                 endsOnSameLine = true;
-                token.finishesAt = token.line;
-            }
-        }
-        
-        // Also check tokens for period or END (fallback if source text not available)
-        if (!endsOnSameLine) {
-            for (let i = structureIndex + 1; i < sameLine.length; i++) {
-                const t = sameLine[i];
-                
-                // Found period terminator
-                if (t.value === '.') {
-                    endsOnSameLine = true;
-                    token.finishesAt = token.line;
-                    break;
-                }
-                
-                // Found END keyword
-                if (t.type === TokenType.EndStatement || t.value.toUpperCase() === 'END') {
-                    endsOnSameLine = true;
-                    token.finishesAt = token.line;
-                    break;
+                token.finishesAt = continuationLine;
+                // Mark if this spans multiple lines due to continuation
+                if (continuationLine > token.line) {
+                    token.isSingleLineWithContinuation = true;
                 }
             }
+            
+            break; // Found the end of the statement
         }
         
         // If structure ends on same line, don't push to stack (no folding needed)
@@ -607,6 +741,7 @@ export class DocumentStructure {
                 
                 // Special handling for MAP structure: look for shorthand procedure declarations
                 if (token.value.toUpperCase() === "MAP") {
+                    logger.info(`🗺️ Found MAP structure at line ${token.line}, calling processShorthandProcedures()`);
                     this.processShorthandProcedures(token);
                 }
             } else {
@@ -626,12 +761,15 @@ export class DocumentStructure {
      * In MAP structures, procedures can be declared without the PROCEDURE keyword
      * Format: ProcedureName(parameters),returnType
      *
-     * In shorthand syntax, the entire declaration is in a single token:
-     * e.g., "Dos2DriverPipe(Long pOpCode, long pClaFCB, long pVarList),long,name(LongName)"
+     * Handles two tokenization patterns:
+     * 1. Single token: "Dos2DriverPipe(Long pOpCode, long pClaFCB, long pVarList)"
+     * 2. Separate tokens: "SaveRecord" followed by "(" token
      */
     private processShorthandProcedures(mapToken: Token): void {
         const mapIndex = this.tokens.indexOf(mapToken);
         if (mapIndex === -1) return;
+        
+        logger.info(`🔍 Processing shorthand procedures in MAP at line ${mapToken.line}`);
         
         // Find the END statement for this MAP
         let endIndex = -1;
@@ -650,7 +788,7 @@ export class DocumentStructure {
                 }
             }
             
-            // Look for tokens that contain an opening parenthesis
+            // Pattern 1: Look for tokens that contain an opening parenthesis in the same token value
             // In shorthand syntax, the procedure name and opening parenthesis are in the same token
             if (token.value.includes("(") && token.value !== "(" && !token.value.toLowerCase().startsWith("module") && ! token.value.startsWith("!")) {
                 // This looks like a shorthand procedure declaration
@@ -666,7 +804,27 @@ export class DocumentStructure {
                 // This ensures it will be displayed correctly in the outline view
                 token.label = procName;
                 
-                logger.info(`📌 Found MAP shorthand procedure: ${procName} at line ${token.line}`);
+                logger.info(`📌 Found MAP shorthand procedure (single token): ${procName} at line ${token.line}`);
+            }
+            // Pattern 2: Check if this token is followed by "(" (separate tokens)
+            else if ((token.type === TokenType.Function || 
+                      token.type === TokenType.Variable || 
+                      token.type === TokenType.Label) &&
+                     i + 1 < this.tokens.length &&
+                     this.tokens[i + 1].value === "(" &&
+                     !token.value.toLowerCase().startsWith("module") &&
+                     !token.value.toLowerCase().startsWith("map") &&
+                     !token.value.startsWith("!")) {
+                // This looks like a shorthand procedure declaration with separate tokens
+                token.subType = TokenType.MapProcedure;
+                token.parent = mapToken;
+                mapToken.children = mapToken.children || [];
+                mapToken.children.push(token);
+                
+                // Set the token's label to the procedure name
+                token.label = token.value;
+                
+                logger.info(`📌 Found MAP shorthand procedure (separate tokens): ${token.value} at line ${token.line}`);
             }
         }
     }
@@ -714,12 +872,72 @@ export class DocumentStructure {
             return;
         }
         
+        // ✅ Check if this period is part of a continued statement (line with | before this line)
+        // If the previous line has a line continuation, this period is a statement terminator, not a structure terminator
+        if (token.value === '.') {
+            const prevLine = this.tokensByLine.get(token.line - 1) || [];
+            let lastTokenOnPrevLine: Token | undefined;
+            for (let i = prevLine.length - 1; i >= 0; i--) {
+                const t = prevLine[i];
+                if (t.type !== TokenType.Comment) {
+                    lastTokenOnPrevLine = t;
+                    break;
+                }
+            }
+            
+            if (lastTokenOnPrevLine) {
+                const hasContinuation = lastTokenOnPrevLine.type === TokenType.LineContinuation || 
+                                       lastTokenOnPrevLine.value === '|';
+                if (hasContinuation) {
+                    // This period ends a continued statement, not a structure
+                    logger.info(`🔚 Period at Line ${token.line} ends continued statement from Line ${token.line - 1} (not popping stack)`);
+                    return;
+                }
+            }
+        }
+        
+        // Look ahead to find the next non-comment token
+        const currentIndex = this.tokens.indexOf(token);
+        let nextSignificantToken: Token | undefined;
+        
+        for (let i = currentIndex + 1; i < this.tokens.length; i++) {
+            const t = this.tokens[i];
+            // Skip comments and continue to next line
+            if (t.type === TokenType.Comment) continue;
+            // Found a token on a different line
+            if (t.line > token.line) {
+                nextSignificantToken = t;
+                break;
+            }
+        }
+        
+        const nextValue = nextSignificantToken?.value.toUpperCase();
+        const isElseOrElsif = nextValue === 'ELSE' || nextValue === 'ELSIF';
+        const isOf = nextValue === 'OF';
+        
         // This END/period terminates a structure from the stack
         const lastStructure = this.structureStack.pop();
         if (lastStructure) {
             lastStructure.finishesAt = token.line;
-            // Don't overwrite END token's start position - it's already correct from tokenizer
+            
+            // ✅ Set parent relationship so END knows what it closes
+            token.parent = lastStructure;
+            
             logger.info(`🔚 Closed ${lastStructure.value} at Line ${token.line}`);
+            
+            // ✅ Special handling: Check if the structure that's NOW on top of the stack
+            // (after popping) is an IF/CASE that continues with ELSE/ELSIF/OF
+            if (this.structureStack.length > 0) {
+                const parentStructure = this.structureStack[this.structureStack.length - 1];
+                const parentType = parentStructure.value.toUpperCase();
+                
+                if ((parentType === 'IF' && isElseOrElsif) || (parentType === 'CASE' && isOf)) {
+                    // The END closed a nested structure/branch, but the parent IF/CASE continues
+                    logger.info(`🔄 ${parentType} at Line ${parentStructure.line} continues with ${nextValue} at Line ${nextSignificantToken!.line}`);
+                    // Parent IF/CASE stays on stack, will be closed by a later END
+                }
+            }
+            
             if (["CLASS", "MAP", "INTERFACE", "MODULE"].includes(lastStructure.value.toUpperCase())) {
                 this.insideClassOrInterfaceOrMapDepth = Math.max(0, this.insideClassOrInterfaceOrMapDepth - 1);
                 logger.info(`Exiting ${lastStructure.value.toUpperCase()} structure, depth: ${this.insideClassOrInterfaceOrMapDepth}`);

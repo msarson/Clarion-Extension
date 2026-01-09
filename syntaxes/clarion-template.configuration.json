@@ -1,0 +1,28 @@
+{
+  "comments": {
+    "lineComment": "#!"
+  },
+  "brackets": [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"]
+  ],
+  "autoClosingPairs": [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"],
+    { "open": "'", "close": "'", "notIn": ["string", "comment"] }
+  ],
+  "surroundingPairs": [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"],
+    ["'", "'"]
+  ],
+  "folding": {
+    "markers": {
+      "start": "^\\s*#(?i:IF|FOR|LOOP|CASE|GROUP|PROCEDURE|CODE|CONTROL|EXTENSION)\\b",
+      "end": "^\\s*#(?i:ENDIF|ENDFOR|ENDLOOP|OF|OROF)\\b"
+    }
+  }
+}

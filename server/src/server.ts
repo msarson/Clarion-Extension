@@ -37,6 +37,7 @@ import {
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
 import { ClarionDocumentSymbolProvider } from './providers/ClarionDocumentSymbolProvider';
+import { ClarionSemanticTokensProvider } from './providers/ClarionSemanticTokensProvider';
 
 import { Token } from './ClarionTokenizer';
 import { TokenCache } from './TokenCache';
@@ -54,16 +55,16 @@ import { SolutionManager } from './solution/solutionManager';
 import { RedirectionFileParserServer } from './solution/redirectionFileParserServer';
 import { DefinitionProvider } from './providers/DefinitionProvider';
 import { HoverProvider } from './providers/HoverProvider';
+import { ClassConstantsCodeActionProvider } from './providers/ClassConstantsCodeActionProvider';
 import { DiagnosticProvider } from './providers/DiagnosticProvider';
 import { SignatureHelpProvider } from './providers/SignatureHelpProvider';
 import { ImplementationProvider } from './providers/ImplementationProvider';
 import { UnreachableCodeProvider } from './providers/UnreachableCodeProvider';
-import path = require('path');
 import { ClarionSolutionInfo } from 'common/types';
-
-import * as fs from 'fs';
 import { URI } from 'vscode-languageserver';
 import { setServerInitialized, serverInitialized } from './serverState';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const logger = LoggerManager.getLogger("Server");
 logger.setLevel("error");
@@ -77,6 +78,7 @@ export let solutionOperationInProgress = false;
 // ✅ Initialize Providers
 
 const clarionDocumentSymbolProvider = new ClarionDocumentSymbolProvider();
+const clarionSemanticTokensProvider = new ClarionSemanticTokensProvider();
 const definitionProvider = new DefinitionProvider();
 const hoverProvider = new HoverProvider();
 const signatureHelpProvider = new SignatureHelpProvider();
@@ -140,9 +142,15 @@ connection.onInitialize((params) => {
                 definitionProvider: true,
                 implementationProvider: true,
                 hoverProvider: true,
+                codeActionProvider: true,
                 signatureHelpProvider: {
                     triggerCharacters: ['(', ','],
                     retriggerCharacters: [')']
+                },
+                semanticTokensProvider: {
+                    legend: clarionSemanticTokensProvider.getLegend(),
+                    range: false,
+                    full: true
                 }
             }
         };
@@ -240,7 +248,7 @@ documents.onDidOpen((event) => {
         }
         
         // Validate document for diagnostics
-        validateTextDocument(document);
+        validateTextDocument(document, 'onDidOpen');
     } catch (error) {
         logger.error(`❌ [CRITICAL] Error in onDidOpen: ${error instanceof Error ? error.message : String(error)}`);
         logger.error(`❌ [CRITICAL] Error stack: ${error instanceof Error && error.stack ? error.stack : 'No stack available'}`);
@@ -254,8 +262,11 @@ const tokenCache = TokenCache.getInstance();
 
 export let globalClarionSettings: any = {};
 
+// Track last validated document versions to avoid duplicate work
+const lastValidatedVersions = new Map<string, number>();
+
 // ✅ Diagnostic validation function
-function validateTextDocument(document: TextDocument): void {
+function validateTextDocument(document: TextDocument, caller: string = 'unknown'): void {
     try {
         // Skip non-Clarion files
         if (!document.uri.toLowerCase().endsWith('.clw') && 
@@ -264,11 +275,21 @@ function validateTextDocument(document: TextDocument): void {
             return;
         }
 
-        logger.info(`🔍 Validating document: ${document.uri}`);
+        // 🚀 PERF: Skip if we just validated this exact version
+        const lastVersion = lastValidatedVersions.get(document.uri);
+        if (lastVersion === document.version) {
+            logger.info(`⚡ Skipping duplicate validation for ${document.uri} v${document.version} (caller: ${caller})`);
+            return;
+        }
+
+        logger.info(`🔍 Validating document: ${document.uri} (caller: ${caller})`);
         
         // PERFORMANCE: Use cached tokens instead of re-tokenizing
         const tokens = getTokens(document);
-        const diagnostics = DiagnosticProvider.validateDocument(document, tokens);
+        const diagnostics = DiagnosticProvider.validateDocument(document, tokens, caller);
+        
+        // Remember we validated this version
+        lastValidatedVersions.set(document.uri, document.version);
         
         logger.info(`🔍 Found ${diagnostics.length} diagnostics for: ${document.uri}`);
         
@@ -490,6 +511,10 @@ documents.onDidChangeContent(event => {
         // 🚀 PERF: Invalidate caches immediately so fresh data is computed after debounce
         symbolCache.delete(uri);
         foldingCache.delete(uri);
+        
+        // Invalidate cross-file cache for this document
+        const filePath = decodeURIComponent(uri.replace('file:///', ''));
+        hoverProvider.invalidateCache(filePath);
 
         // 🔍 CORRECTNESS: Check if this edit affects structure lifecycle
         // If so, clear token cache to force full re-tokenization
@@ -517,7 +542,7 @@ documents.onDidChangeContent(event => {
                 logger.info(`🔍 Successfully refreshed tokens after edit: ${uri}, got ${tokens.length} tokens`);
                 
                 // Validate document using fresh tokens
-                validateTextDocument(document);
+                validateTextDocument(document, 'onDidChangeContent');
                 
                 // 🔄 Notify client that document symbols have changed
                 // This triggers structure view to refresh with fresh symbols
@@ -630,7 +655,7 @@ connection.onDocumentSymbol((params: DocumentSymbolParams) => {
         logger.perf('Symbols: getTokens', { time_ms: tokenTime.toFixed(2), tokens: tokens.length });
         
         const symbolStart = performance.now();
-        const symbols = clarionDocumentSymbolProvider.provideDocumentSymbols(tokens, uri);
+        const symbols = clarionDocumentSymbolProvider.provideDocumentSymbols(tokens, uri, document);
         const symbolTime = performance.now() - symbolStart;
         
         // Cache the symbols for quick retrieval during typing
@@ -1200,7 +1225,7 @@ connection.onRequest('clarion/documentSymbols', async (params: { uri: string }) 
 
     logger.info(`📜 [Server] Handling documentSymbols request for ${params.uri}`);
     const tokens = getTokens(document);
-    const symbols = clarionDocumentSymbolProvider.provideDocumentSymbols(tokens, params.uri);
+    const symbols = clarionDocumentSymbolProvider.provideDocumentSymbols(tokens, params.uri, document);
     logger.info(`✅ [Server] Returning ${symbols.length} symbols`);
     return symbols;
 });
@@ -1292,6 +1317,37 @@ connection.onHover(async (params) => {
     }
 });
 
+// Handle code actions (lightbulb) requests
+connection.onCodeAction(async (params) => {
+    logger.info(`💡 Received code action request for: ${params.textDocument.uri}`);
+    
+    if (!serverInitialized) {
+        logger.info(`⚠️ Server not initialized yet, delaying code action request`);
+        return [];
+    }
+    
+    const document = documents.get(params.textDocument.uri);
+    if (!document) {
+        logger.info(`⚠️ Document not found: ${params.textDocument.uri}`);
+        return [];
+    }
+    
+    try {
+        const codeActionProvider = new ClassConstantsCodeActionProvider();
+        const actions = await codeActionProvider.provideCodeActions(
+            document,
+            params.range,
+            params.context,
+            params as any // CancellationToken
+        );
+        logger.info(`Provided ${actions.length} code actions`);
+        return actions;
+    } catch (error) {
+        logger.error(`❌ Error providing code actions: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
+    }
+});
+
 // Handle signature help requests
 connection.onSignatureHelp(async (params) => {
     logger.debug(`🔔 [SIG-HELP] Received signature help request for: ${params.textDocument.uri} at position ${params.position.line}:${params.position.character}`);
@@ -1329,6 +1385,48 @@ connection.onSignatureHelp(async (params) => {
     }
 });
 
+// ✅ Handle Semantic Tokens Request
+connection.languages.semanticTokens.on((params) => {
+    const perfStart = performance.now();
+    try {
+        logger.info(`🎨 [DEBUG] Received semantic tokens request for: ${params.textDocument.uri}`);
+        const document = documents.get(params.textDocument.uri);
+        if (!document) {
+            logger.warn(`⚠️ [DEBUG] Document not found for semantic tokens: ${params.textDocument.uri}`);
+            return { data: [] };
+        }
+
+        const uri = document.uri;
+        
+        // Get tokens from cache (uses incremental tokenization automatically)
+        const tokenStart = performance.now();
+        const tokens = getTokens(document);
+        const tokenTime = performance.now() - tokenStart;
+        
+        logger.info(`🎨 [DEBUG] Got ${tokens.length} tokens for semantic tokens`);
+        logger.perf('SemanticTokens: getTokens', { time_ms: tokenTime.toFixed(2), tokens: tokens.length });
+        
+        // Generate semantic tokens
+        const semanticStart = performance.now();
+        const semanticTokens = clarionSemanticTokensProvider.provideSemanticTokens(tokens);
+        const semanticTime = performance.now() - semanticStart;
+        
+        const totalTime = performance.now() - perfStart;
+        logger.info(`🎨 [DEBUG] Generated semantic tokens for: ${uri} in ${totalTime.toFixed(2)}ms (tokenize: ${tokenTime.toFixed(2)}ms, semantic: ${semanticTime.toFixed(2)}ms)`);
+        logger.perf('SemanticTokens: total', { 
+            time_ms: totalTime.toFixed(2), 
+            tokenize_ms: tokenTime.toFixed(2),
+            semantic_ms: semanticTime.toFixed(2),
+            data_length: semanticTokens.data.length 
+        });
+        
+        return semanticTokens;
+    } catch (error) {
+        logger.error(`❌ [DEBUG] Error providing semantic tokens: ${error instanceof Error ? error.message : String(error)}`);
+        return { data: [] };
+    }
+});
+
 
 
 
@@ -1337,6 +1435,50 @@ connection.onSignatureHelp(async (params) => {
 
 // ✅ Start Listening
 documents.listen(connection);
+
+// Add shutdown handlers
+connection.onShutdown(() => {
+    logger.setLevel("info");
+    const shutdownLogPath = path.join(__dirname, '..', '..', 'shutdown.log');
+    const logMessage = (msg: string) => {
+        const timestamp = new Date().toISOString();
+        const fullMsg = `[${timestamp}] ${msg}\n`;
+        logger.info(msg);
+        console.log(`🛑 ${msg}`);
+        try {
+            fs.appendFileSync(shutdownLogPath, fullMsg);
+        } catch (e) {
+            console.error("Failed to write to shutdown log:", e);
+        }
+    };
+    
+    logMessage("SERVER SHUTDOWN: onShutdown handler called");
+    logMessage(`SERVER SHUTDOWN: Active documents: ${documents.all().length}`);
+    logMessage("SERVER SHUTDOWN: Clearing caches...");
+    
+    return new Promise((resolve) => {
+        setTimeout(() => {
+            logMessage("SERVER SHUTDOWN: Shutdown handler complete");
+            resolve();
+        }, 100);
+    });
+});
+
+connection.onExit(() => {
+    const timestamp = new Date().toISOString();
+    logger.info("SERVER EXIT: onExit handler called");
+    console.log(`🛑 SERVER EXIT: onExit handler called at ${timestamp}`);
+    const shutdownLogPath = path.join(__dirname, '..', '..', 'shutdown.log');
+    try {
+        fs.appendFileSync(shutdownLogPath, `[${timestamp}] SERVER EXIT: onExit handler called\n`);
+    } catch (e) {
+        // Ignore - server is exiting anyway
+    }
+});
+
+// Listen on the connection
+logger.info("🚀 SERVER: Starting to listen on connection");
+console.log("🚀 SERVER: Starting to listen on connection at " + new Date().toISOString());
 connection.listen();
 
 // Add a handler for getting performance metrics

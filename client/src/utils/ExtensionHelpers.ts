@@ -84,8 +84,7 @@ export function extractConfigurationsFromSolution(solutionContent: string): stri
         .split('\n')
         .map(line => line.trim())
         .filter(line => line && !line.startsWith("GlobalSection")) // ✅ Remove section header
-        .map(line => line.split('=')[0].trim()) // ✅ Extract left-hand side (config name)
-        .map(config => config.split('|')[0].trim()) // ✅ Extract everything before the pipe
+        .map(line => line.split('=')[0].trim()) // ✅ Extract left-hand side (config name with platform)
         .filter(config => config.length > 0); // ✅ Ensure only valid names remain
 
     logger.info(`📂 Extracted configurations from solution: ${JSON.stringify(configurations)}`);
