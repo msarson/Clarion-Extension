@@ -16,19 +16,28 @@ Get up and running with the Clarion Extension in 5 minutes.
 
 ## Step 2: Open Your First Solution
 
-**It's as simple as opening a folder:**
+**Open the folder containing your solution:**
 
 1. Click **File → Open Folder** (or press `Ctrl+K Ctrl+O`)
 2. Browse to the folder containing your `.sln` file
 3. Click **Select Folder**
 
-The extension automatically detects your solution!
+**The extension scans for solutions:**
 
-### Alternative: Use the Solution View
+4. Open the **Clarion Tools** sidebar (Activity Bar, left side)
+5. You'll see "X Solution(s) Found"  
+6. Click the **▶** solution name to open it
 
-1. Click the **Clarion Tools** icon in the Activity Bar (left sidebar)
-2. Click **"Browse for Solution"**
+This triggers first-time configuration (see Step 3).
+
+### Alternative: Browse for Solution Anywhere
+
+**If your `.sln` is not in the opened folder:**
+
+1. Open the **Clarion Tools** sidebar
+2. Click **"📂 Browse for Solution..."**
 3. Navigate to and select your `.sln` file
+4. The containing folder opens automatically
 
 ---
 

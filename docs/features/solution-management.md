@@ -18,31 +18,35 @@ The Clarion Extension provides native solution management:
 
 ### Method 1: Open Folder (Recommended)
 
-**Simplest approach:**
+**Simple two-step process:**
 
 1. **File → Open Folder** (or press `Ctrl+K Ctrl+O`)
 2. Browse to folder containing your `.sln` file
 3. Click **Select Folder**
 
-The extension automatically detects and loads the solution.
+**Then in Clarion Tools sidebar:**
+
+4. Extension scans and shows "X Solution(s) Found"
+5. Click the **▶** solution name to open it
+6. First-time: Configure Clarion path and settings (see Configuration section)
 
 **Why this works:**
-- Extension scans folder for `.sln` files
-- Parses solution and loads all projects
-- Creates Solution View in **Clarion Tools** sidebar
+- Extension automatically scans folder for `.sln` files
+- Shows all detected solutions in **Clarion Tools** sidebar
+- Click to open and configure
 
 ---
 
 ### Method 2: Browse for Solution
 
-**From the Clarion Tools sidebar:**
+**If `.sln` file is elsewhere:**
 
 1. Open **Clarion Tools** icon in Activity Bar (left sidebar)
-2. In **Solution View**, click **"Browse for Solution"**
+2. In **Solution View**, click **"📂 Browse for Solution..."**
 3. Navigate to your `.sln` file
 4. Click **Open**
 
-The containing folder opens automatically.
+The containing folder opens automatically, and the solution is loaded.
 
 ---
 

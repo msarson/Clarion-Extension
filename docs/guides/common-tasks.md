@@ -183,11 +183,12 @@ Perfect for SQL queries, error messages, and multi-line strings!
 **Method 1: Open Folder**
 1. **File → Open Folder** (`Ctrl+K Ctrl+O`)
 2. Select folder containing your `.sln` file
-3. Done!
+3. Open **Clarion Tools** sidebar
+4. Click the **▶** solution name shown under "X Solution(s) Found"
 
 **Method 2: Browse from Solution View**
 1. Open **Clarion Tools** sidebar
-2. Click **"Browse for Solution"**
+2. Click **"📂 Browse for Solution..."**
 3. Select your `.sln` file
 
 **Method 3: Recent Solutions**
