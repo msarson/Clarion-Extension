@@ -1099,9 +1099,7 @@ export class DefinitionProvider {
         }
     
         // DEBUG: Log all tokens that match the word to see what we're getting
-        const allMatchingTokens = tokens.filter(token => 
-            token.value.toLowerCase() === searchWord.toLowerCase()
-        );
+        const allMatchingTokens = TokenHelper.findTokens(tokens, { value: searchWord });
         logger.info(`🔍 DEBUG: Found ${allMatchingTokens.length} tokens matching "${searchWord}"`);
         allMatchingTokens.forEach(t => 
             logger.info(`  -> Line ${t.line}, Type: ${t.type}, Start: ${t.start}, Value: "${t.value}"`)
@@ -1826,11 +1824,8 @@ export class DefinitionProvider {
         logger.info(`Looking for member ${memberName} in class ${className}`);
 
         // Find the CLASS structure definition
-        const classTokens = tokens.filter(token =>
-            token.type === TokenType.Structure &&
-            token.value.toUpperCase() === 'CLASS' &&
-            token.line > 0
-        );
+        const classTokens = TokenHelper.findClassStructures(tokens)
+            .filter(token => token.line > 0);
 
         for (const classToken of classTokens) {
             // Find the label token just before this CLASS
@@ -1886,8 +1881,9 @@ export class DefinitionProvider {
         const varToken = varTokens[0];
         
         // Find the type token on the same line (should be after the variable name)
-        const lineTokens = tokens.filter(t => t.line === varToken.line && t.start > varToken.start);
-        const typeToken = lineTokens.find(t => 
+        const lineTokens = TokenHelper.findTokens(tokens, { line: varToken.line })
+            .filter(t => t.start > varToken.start);
+        const typeToken = lineTokens.find(t =>
             t.type === TokenType.Type || 
             t.type === TokenType.Label || // Class names appear as labels
             /^[A-Z][A-Za-z0-9_]*$/.test(t.value) // Capitalized word (likely a class name)
