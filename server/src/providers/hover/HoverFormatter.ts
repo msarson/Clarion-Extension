@@ -91,9 +91,9 @@ export class HoverFormatter {
                 
                 let scopeLabel = '';
                 if (detailedScope.type === 'routine') {
-                    scopeLabel = `${scopeIcon} Routine variable`;
+                    scopeLabel = `${scopeIcon} Local routine variable`;
                 } else if (detailedScope.type === 'procedure') {
-                    scopeLabel = isMethod ? `${scopeIcon} Method variable` : `${scopeIcon} Procedure variable`;
+                    scopeLabel = isMethod ? `${scopeIcon} Local method variable` : `${scopeIcon} Local procedure variable`;
                 } else if (detailedScope.type === 'module') {
                     scopeLabel = `${scopeIcon} Module variable`;
                 } else {
@@ -149,43 +149,41 @@ export class HoverFormatter {
         const memberType = isMethod ? 'Method' : 'Property';
         
         const markdown = [
-            `**Class ${memberType}:** \`${name}\``,
+            `**${name}** (Class ${memberType})`,
+            ``,
+            `**Class:** ${info.className}`,
             ``
         ];
         
-        if (info.type.length > 50) {
-            markdown.push(`**Type:**`);
-            markdown.push('```clarion');
-            markdown.push(info.type);
-            markdown.push('```');
-        } else {
-            markdown.push(`**Type:** \`${info.type}\``);
-        }
-        
-        markdown.push(``);
-        markdown.push(`**Class:** ${info.className}`);
-        
-        if (info.line >= 0) {
+        // Show declaration with code snippet
+        try {
+            const declUri = decodeURIComponent(info.file.replace('file:///', ''));
+            const declContent = fs.readFileSync(declUri, 'utf-8');
+            const declLines = declContent.split('\n');
+            const declLine = declLines[info.line];
+            
+            if (declLine) {
+                const trimmedDeclLine = declLine.trim();
+                const declFileName = path.basename(declUri);
+                const declLineNumber = info.line + 1;
+                markdown.push(`**Declaration in** \`${declFileName}\` @ line ${declLineNumber}: *(F12 to navigate)*`);
+                markdown.push('```clarion');
+                markdown.push(trimmedDeclLine);
+                markdown.push('```');
+            }
+        } catch (error) {
+            // Fallback if can't read file
             const fileName = info.file.split(/[\/\\]/).pop() || info.file;
-            markdown.push(``);
-            markdown.push(`**Declared in:** \`${fileName}\` at line **${info.line + 1}**`);
-            markdown.push(``);
+            markdown.push(`**Declaration in** \`${fileName}\` @ line ${info.line + 1}: *(F12 to navigate)*`);
             
-            if (isMethod) {
-                markdown.push(`*(F12 to definition | Ctrl+F12 to implementation)*`);
+            // Show type info as fallback
+            markdown.push('```clarion');
+            if (info.type.length > 50) {
+                markdown.push(info.type);
             } else {
-                markdown.push(`*(F12 will navigate to the definition)*`);
+                markdown.push(`${name}  ${info.type}`);
             }
-        } else {
-            markdown.push(``);
-            markdown.push(`**Declared in:** ${info.file}`);
-            markdown.push(``);
-            
-            if (isMethod) {
-                markdown.push(`*(F12 to definition | Ctrl+F12 to implementation)*`);
-            } else {
-                markdown.push(`*Press F12 to go to definition*`);
-            }
+            markdown.push('```');
         }
 
         return {
@@ -218,10 +216,12 @@ export class HoverFormatter {
                 const trimmedDeclLine = declLine.trim();
                 const declFileName = path.basename(declUri);
                 const declLineNumber = declarationInfo.line + 1;
-                markdown.push(`**Declaration in** \`${declFileName}\` @ line ${declLineNumber}:`);
+                markdown.push(`**Declaration in** \`${declFileName}\` @ line ${declLineNumber}: *(F12 to navigate)*`);
                 markdown.push('```clarion');
                 markdown.push(trimmedDeclLine);
                 markdown.push('```');
+                markdown.push('');
+                markdown.push('---'); // Horizontal separator line
                 markdown.push('');
             }
         } catch (error) {
@@ -263,7 +263,7 @@ export class HoverFormatter {
             }
             
             if (codeLines.length > 0) {
-                markdown.push(`**Implementation in** \`${implFileName}\` @ line ${implLineNumber}:`);
+                markdown.push(`**Implementation in** \`${implFileName}\` @ line ${implLineNumber}: *(Ctrl+F12 to navigate)*`);
                 markdown.push('```clarion');
                 markdown.push(codeLines.join('\n'));
                 markdown.push('```');
@@ -277,9 +277,6 @@ export class HoverFormatter {
             markdown.push(`**Implementation:** \`${implFile}\` @ line **${implLine}**`);
         }
         
-        markdown.push('');
-        markdown.push(`*(F12 to definition | Ctrl+F12 to implementation)*`);
-
         return {
             contents: {
                 kind: 'markdown',

@@ -72,7 +72,10 @@ export class StructureFieldResolver {
     ): Promise<Hover | null> {
         // Check if this is a class member access (self.member or variable.member)
         const dotBeforeIndex = line.lastIndexOf('.', position.character - 1);
+        logger.info(`resolveFieldAccess: word="${word}", position.character=${position.character}, dotBeforeIndex=${dotBeforeIndex}`);
+        
         if (dotBeforeIndex <= 0) {
+            logger.info(`resolveFieldAccess: No dot found before position, returning null`);
             return null;
         }
 
@@ -80,18 +83,27 @@ export class StructureFieldResolver {
         const afterDot = line.substring(dotBeforeIndex + 1).trim();
         const fieldMatch = afterDot.match(/^(\w+)/);
         
+        logger.info(`resolveFieldAccess: beforeDot="${beforeDot}", afterDot="${afterDot}"`);
+        
         // Extract field name from word (in case TokenHelper returned "prefix.field")
         const fieldName = word.includes('.') ? word.split('.').pop()! : word;
+        logger.info(`resolveFieldAccess: fieldName extracted="${fieldName}", fieldMatch[1]="${fieldMatch ? fieldMatch[1] : 'null'}"`);
         
         if (!fieldMatch || fieldMatch[1].toLowerCase() !== fieldName.toLowerCase()) {
+            logger.info(`resolveFieldAccess: Field name mismatch, returning null`);
             return null;
         }
 
         // Check if this is a method call (has parentheses)
         const hasParentheses = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
         
+        // Check if beforeDot ends with 'self' as a complete word (not part of another word)
+        // Handles: "self", "address(self", "x = self", etc.
+        const isSelfMember = /\bself$/i.test(beforeDot);
+        logger.info(`resolveFieldAccess: Checking if beforeDot ends with 'self': "${beforeDot}" matches \\bself$ = ${isSelfMember}`);
+        
         // This is a member access (hovering over the field after the dot)
-        if (beforeDot.toLowerCase() === 'self' || beforeDot.toLowerCase().endsWith(' self')) {
+        if (isSelfMember) {
             // self.member - class member
             // If it's a method call, count parameters
             let paramCount: number | undefined;

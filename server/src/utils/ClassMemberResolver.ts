@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ClassMemberResolver");
-logger.setLevel("error"); // PERF: Only log errors to reduce overhead
+logger.setLevel("info"); // Enable info logging for debugging
 
 /**
  * Shared utility for resolving class members (methods, properties)
@@ -116,13 +116,18 @@ export class ClassMemberResolver {
                         break;
                     }
                     
+                    // Debug: Log all label tokens in the class for troubleshooting
+                    if (token.type === TokenType.Label && token.start === 0) {
+                        logger.info(`📋 Class member candidate: "${token.value}" at line ${token.line}, type=${token.type}`);
+                    }
+                    
                     // Check if this is a member at start of line
                     if (token.type === TokenType.Label &&
                         token.value.toLowerCase() === memberName.toLowerCase() && 
                         token.start === 0) {
                         
                         const i = token.line;
-                        logger.info(`Found member ${memberName} at line ${i} in current file`);
+                        logger.info(`✅ Found member ${memberName} at line ${i} in current file`);
                         
                         // Get the type signature - find the next token on the same line
                         const memberEnd = token.start + token.value.length;
@@ -131,6 +136,7 @@ export class ClassMemberResolver {
                             t.start > memberEnd
                         );
                         const type = typeToken ? typeToken.value : 'Unknown';
+                        logger.info(`   Type token: ${type}, line: ${i}`);
                         
                         // Count parameters in declaration if it's a PROCEDURE
                         let declParamCount = 0;
@@ -140,7 +146,7 @@ export class ClassMemberResolver {
                         }
                         
                         candidates.push({ type, line: i, paramCount: declParamCount });
-                        logger.info(`Candidate: ${memberName} with ${declParamCount} parameters at line ${i}`);
+                        logger.info(`   Candidate added: ${memberName} with ${declParamCount} parameters at line ${i}`);
                     }
                 }
                 

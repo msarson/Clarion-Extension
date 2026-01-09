@@ -221,4 +221,168 @@ export class TokenHelper {
     private static isWordCharacter(char: string): boolean {
         return /[a-zA-Z0-9_]/.test(char);
     }
+
+    // ========================================================================
+    // Phase 2: Filter Pattern Consolidation & Case-Insensitive Comparison
+    // ========================================================================
+
+    /**
+     * Case-insensitive string comparison (optimized to avoid unnecessary allocations)
+     * 🚀 PERFORMANCE: Only allocates uppercase strings once, not in tight loops
+     * @param a First string
+     * @param b Second string  
+     * @returns true if strings are equal (case-insensitive)
+     */
+    public static equalsIgnoreCase(a: string, b: string): boolean {
+        if (a.length !== b.length) return false;
+        return a.toUpperCase() === b.toUpperCase();
+    }
+
+    /**
+     * Find all tokens matching given criteria
+     * Consolidates common filter patterns used throughout the codebase
+     * @param tokens Array of tokens to search
+     * @param criteria Filter criteria object
+     * @returns Array of matching tokens
+     */
+    public static findTokens(tokens: Token[], criteria: {
+        type?: TokenType;
+        types?: TokenType[];
+        subType?: TokenType;
+        subTypes?: TokenType[];
+        value?: string;
+        valueMatch?: (value: string) => boolean;
+        atStart?: boolean;
+        line?: number;
+        beforeLine?: number;
+        afterLine?: number;
+        inScope?: Token;
+    }): Token[] {
+        return tokens.filter(t => {
+            // Type filtering
+            if (criteria.type !== undefined && t.type !== criteria.type) return false;
+            if (criteria.types && !criteria.types.includes(t.type)) return false;
+            
+            // SubType filtering
+            if (criteria.subType !== undefined && t.subType !== criteria.subType) return false;
+            if (criteria.subTypes && !criteria.subTypes.includes(t.subType!)) return false;
+            
+            // Value filtering (case-insensitive)
+            if (criteria.value && !this.equalsIgnoreCase(t.value, criteria.value)) return false;
+            if (criteria.valueMatch && !criteria.valueMatch(t.value)) return false;
+            
+            // Position filtering
+            if (criteria.atStart !== undefined && (t.start === 0) !== criteria.atStart) return false;
+            if (criteria.line !== undefined && t.line !== criteria.line) return false;
+            if (criteria.beforeLine !== undefined && t.line >= criteria.beforeLine) return false;
+            if (criteria.afterLine !== undefined && t.line <= criteria.afterLine) return false;
+            
+            // Scope filtering
+            if (criteria.inScope) {
+                const inScope = t.line >= criteria.inScope.line &&
+                              (criteria.inScope.finishesAt === undefined || 
+                               t.line <= criteria.inScope.finishesAt);
+                if (!inScope) return false;
+            }
+            
+            return true;
+        });
+    }
+
+    /**
+     * Find labels at column 0 (common pattern across providers)
+     * @param tokens Array of tokens
+     * @param name Optional label name to match (case-insensitive)
+     * @returns Array of label tokens
+     */
+    public static findLabels(tokens: Token[], name?: string): Token[] {
+        return this.findTokens(tokens, {
+            type: TokenType.Label,
+            atStart: true,
+            value: name
+        });
+    }
+
+    /**
+     * Find MAP structures (common pattern in MapProcedureResolver)
+     * @param tokens Array of tokens
+     * @returns Array of MAP structure tokens
+     */
+    public static findMapStructures(tokens: Token[]): Token[] {
+        return this.findTokens(tokens, {
+            type: TokenType.Structure,
+            value: 'MAP'
+        });
+    }
+
+    /**
+     * Find procedure tokens (any type: Procedure, GlobalProcedure, MethodImplementation)
+     * @param tokens Array of tokens
+     * @returns Array of procedure tokens
+     */
+    public static findProcedures(tokens: Token[]): Token[] {
+        return this.findTokens(tokens, {
+            subTypes: [
+                TokenType.Procedure,
+                TokenType.GlobalProcedure,
+                TokenType.MethodImplementation
+            ]
+        });
+    }
+
+    /**
+     * Find routine tokens
+     * @param tokens Array of tokens
+     * @returns Array of routine tokens
+     */
+    public static findRoutines(tokens: Token[]): Token[] {
+        return this.findTokens(tokens, {
+            subType: TokenType.Routine
+        });
+    }
+
+    /**
+     * Find variable tokens at column 0 (common pattern for data section variables)
+     * @param tokens Array of tokens
+     * @param name Optional variable name to match (case-insensitive)
+     * @returns Array of variable tokens
+     */
+    public static findVariablesAtStart(tokens: Token[], name?: string): Token[] {
+        return this.findTokens(tokens, {
+            types: [
+                TokenType.Variable,
+                TokenType.ReferenceVariable,
+                TokenType.ImplicitVariable,
+                TokenType.Label // Labels can also be variable declarations
+            ],
+            atStart: true,
+            value: name
+        });
+    }
+
+    /**
+     * Find structure tokens with specific prefix
+     * @param tokens Array of tokens
+     * @param prefix Structure prefix to match (case-insensitive)
+     * @returns Array of structure tokens with matching prefix
+     */
+    public static findStructuresWithPrefix(tokens: Token[], prefix: string): Token[] {
+        return tokens.filter(t =>
+            t.type === TokenType.Structure &&
+            t.structurePrefix &&
+            this.equalsIgnoreCase(t.structurePrefix, prefix)
+        );
+    }
+
+    /**
+     * Find tokens in first N lines (common pattern for file header scanning)
+     * @param tokens Array of tokens
+     * @param maxLine Maximum line number (exclusive)
+     * @returns Array of tokens before maxLine
+     */
+    public static findTokensInHeader(tokens: Token[], maxLine: number = 5): Token[] {
+        return this.findTokens(tokens, {
+            beforeLine: maxLine
+        });
+    }
 }
