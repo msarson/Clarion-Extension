@@ -11,7 +11,6 @@ The Clarion Extension provides powerful code editing tools:
 - **Add Method Implementation** - Generate method stubs automatically
 - **Create New Class** - Interactive class creation wizard
 - **Code folding** - Collapse/expand code blocks
-- **Auto-indentation** - Smart indenting
 
 ---
 
@@ -501,42 +500,6 @@ CODE
 - `Ctrl+K Ctrl+1` - Fold level 1
 - `Ctrl+K Ctrl+2` - Fold level 2
 - etc.
-
----
-
-## Auto-Indentation
-
-### Smart Indenting
-
-**Automatically indents based on context:**
-
-```clarion
-IF x = 1 THEN
-  DoSomething()    ← Auto-indented
-  IF y = 2 THEN
-    DoMore()       ← Nested indent
-  END
-END
-```
-
-**Press Enter:**
-- Cursor indented correctly
-- Maintains current indentation level
-- Increases indent after structure keywords
-
----
-
-### Manual Indentation
-
-**Adjust indentation:**
-- `Tab` - Indent right
-- `Shift+Tab` - Indent left
-- `Ctrl+]` - Indent line
-- `Ctrl+[` - Outdent line
-
-**Format document:**
-- `Shift+Alt+F` - Format entire document
-- Fixes all indentation
 
 ---
 
