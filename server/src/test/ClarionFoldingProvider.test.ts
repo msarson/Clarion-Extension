@@ -361,6 +361,25 @@ ThisWindow.Kill PROCEDURE()
             const appRange = ranges.find(r => r.startLine === 0 && r.endLine === 6);
             assert.ok(appRange, 'Should find application folding range from line 0 to 6');
         });
+
+        test('Should create folding range for OLE control', () => {
+            const code = `TestWindow WINDOW('Test'),AT(,,600,400)
+              OLE,AT(10,10,200,100),USE(?OLE1)
+              END
+            END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            // Should have ranges for WINDOW and OLE
+            assert.ok(ranges.length >= 2, `Should have at least 2 folding ranges, got ${ranges.length}`);
+            
+            // Check for OLE range
+            const oleRange = ranges.find(r => r.startLine === 1 && r.endLine === 2);
+            assert.ok(oleRange, 'Should find OLE folding range from line 1 to 2');
+        });
     });
 
     suite('computeFoldingRanges - Control Flow (IF/ELSE/ELSIF)', () => {

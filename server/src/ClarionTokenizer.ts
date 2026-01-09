@@ -215,7 +215,8 @@ export class ClarionTokenizer {
                             upperSubstring.startsWith('TAB') ||
                             upperSubstring.startsWith('MENU') ||
                             upperSubstring.startsWith('MENUBAR') ||
-                            upperSubstring.startsWith('TOOLBAR');
+                            upperSubstring.startsWith('TOOLBAR') ||
+                            upperSubstring.startsWith('OLE');
                         
                         // Skip DECLARATION structures in CODE section (they're not valid there)
                         // But ALLOW execution structures (IF/LOOP/CASE) - they're needed for control flow
