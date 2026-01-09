@@ -199,6 +199,7 @@ export class ClarionTokenizer {
                             upperSubstring.startsWith('BEGIN');
                         
                         const isDeclarationStructure =
+                            upperSubstring.startsWith('APPLICATION') ||
                             upperSubstring.startsWith('FILE') ||
                             upperSubstring.startsWith('QUEUE') ||
                             upperSubstring.startsWith('GROUP') ||
@@ -213,6 +214,7 @@ export class ClarionTokenizer {
                             upperSubstring.startsWith('SHEET') ||
                             upperSubstring.startsWith('TAB') ||
                             upperSubstring.startsWith('MENU') ||
+                            upperSubstring.startsWith('MENUBAR') ||
                             upperSubstring.startsWith('TOOLBAR');
                         
                         // Skip DECLARATION structures in CODE section (they're not valid there)
