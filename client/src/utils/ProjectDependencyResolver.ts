@@ -5,7 +5,6 @@ import { ClarionProjectInfo } from '../../../common/types';
 import LoggerManager from './LoggerManager';
 
 const logger = LoggerManager.getLogger("ProjectDependencyResolver");
-logger.setLevel("info"); // Enable info logging for debugging
 
 export interface ProjectReference {
     projectGuid: string;
@@ -31,8 +30,6 @@ export class ProjectDependencyResolver {
      * Analyzes all projects and builds the dependency graph
      */
     public async analyzeDependencies(): Promise<void> {
-        logger.info(`Analyzing dependencies for ${this.projects.length} projects`);
-
         // First pass: Extract project GUIDs and basic info
         for (const project of this.projects) {
             try {
@@ -51,15 +48,11 @@ export class ProjectDependencyResolver {
                     this.projectNodes.set(guid, node);
                     this.guidToProject.set(guid, project);
                     this.nameToNode.set(project.name.toLowerCase(), node); // Case-insensitive name lookup
-                    
-                    logger.info(`  Project: ${project.name}, GUID: ${guid}, OutputType: ${projectData.outputType}, Dependencies: ${projectData.references.length}`);
                 }
             } catch (error) {
                 logger.error(`Failed to parse project ${project.name}: ${error}`);
             }
         }
-
-        logger.info(`Built dependency graph with ${this.projectNodes.size} nodes`);
     }
 
     /**
@@ -151,7 +144,6 @@ export class ProjectDependencyResolver {
             if (ref.projectName) {
                 const nodeByName = this.nameToNode.get(ref.projectName.toLowerCase());
                 if (nodeByName) {
-                    logger.info(`Resolved ${ref.projectName} by name (GUID in reference: ${ref.projectGuid})`);
                     return nodeByName;
                 }
             }
@@ -159,7 +151,6 @@ export class ProjectDependencyResolver {
             // Fallback to GUID lookup
             const nodeByGuid = this.projectNodes.get(ref.projectGuid);
             if (nodeByGuid) {
-                logger.info(`Resolved ${ref.projectName || 'unknown'} by GUID ${ref.projectGuid}`);
                 return nodeByGuid;
             }
             
@@ -230,9 +221,6 @@ export class ProjectDependencyResolver {
             }
         }
 
-        logger.info(`Build order (no reverse needed): First=${sorted[0]?.name}, Last=${sorted[sorted.length-1]?.name}`);
-        
-        logger.info(`Build order determined: ${sorted.map(p => p.name).join(' -> ')}`);
         return sorted;
     }
 
