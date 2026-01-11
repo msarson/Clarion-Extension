@@ -369,6 +369,14 @@
                 "title": "Generate All Applications"
             },
             {
+                "command": "clarion.generateAllAppsThenBuildSolution",
+                "title": "Generate All/Build All"
+            },
+            {
+                "command": "clarion.buildAllProjects",
+                "title": "Build All"
+            },
+            {
                 "command": "clarion.generateApp",
                 "title": "Generate Application"
             },
@@ -480,7 +488,17 @@
                 {
                     "command": "clarion.generateAllApps",
                     "when": "view == solutionView && viewItem == clarionApplicationsGroup",
-                    "group": "generate"
+                    "group": "generate@1"
+                },
+                {
+                    "command": "clarion.generateAllAppsThenBuildSolution",
+                    "when": "view == solutionView && viewItem == clarionApplicationsGroup",
+                    "group": "generate@2"
+                },
+                {
+                    "command": "clarion.buildAllProjects",
+                    "when": "view == solutionView && viewItem == clarionApplicationsGroup",
+                    "group": "generate@3"
                 },
                 {
                     "command": "clarion.importAllAppsFromTextForSolution",

@@ -54,6 +54,20 @@ export function registerBuildCommands(
         commands.registerCommand('clarion.generateAllApps', async (node) => {
             await clarionClHelper.generateAllApps();
         }),
+        
+        // Generate All then Build All
+        commands.registerCommand('clarion.generateAllAppsThenBuildSolution', async (node) => {
+            // First generate all apps
+            await clarionClHelper.generateAllApps();
+            
+            // Then build the solution with dependency order
+            await buildTasks.buildSolutionWithDependencyOrder(diagnosticCollection, solutionTreeDataProvider);
+        }),
+        
+        // Build All (just kicks off the build we've been working on)
+        commands.registerCommand('clarion.buildAllProjects', async (node) => {
+            await buildTasks.buildSolutionWithDependencyOrder(diagnosticCollection, solutionTreeDataProvider);
+        }),
 
         commands.registerCommand('clarion.generateApp', async (node) => {
             if (node && node.data && node.data.absolutePath) {
