@@ -311,7 +311,7 @@ export function registerTreeCommands(solutionTreeDataProvider?: any): Disposable
         // Toggle application sort order
         commands.registerCommand('clarion.toggleApplicationSortOrder', async () => {
             if (solutionTreeDataProvider) {
-                solutionTreeDataProvider.toggleApplicationSortOrder();
+                await solutionTreeDataProvider.toggleApplicationSortOrder();
                 const currentOrder = solutionTreeDataProvider.getApplicationSortOrder();
                 const orderName = currentOrder === 'solution' ? 'Solution Order' : 'Build Order (Dependencies)';
                 
