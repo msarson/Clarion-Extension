@@ -78,6 +78,81 @@ export async function generateAllApps(): Promise<void> {
     }
 }
 
+/**
+ * Generate all apps with progress tracking
+ */
+export async function generateAllAppsWithProgress(
+    appPaths: string[],
+    solutionTreeDataProvider?: any
+): Promise<void> {
+    if (!globalSolutionFile) {
+        window.showErrorMessage('No solution file is currently open');
+        return;
+    }
+
+    const solutionDir = path.dirname(globalSolutionFile);
+    let successCount = 0;
+    let failCount = 0;
+
+    for (let i = 0; i < appPaths.length; i++) {
+        const appPath = appPaths[i];
+        const appName = path.basename(appPath, '.app');
+        
+        try {
+            logger.info(`Generating app: ${appName}`);
+            window.showInformationMessage(`Generating: ${appName}.app`);
+            
+            // Notify tree provider that this app is generating
+            if (solutionTreeDataProvider) {
+                solutionTreeDataProvider.setCurrentlyGeneratingApp(appName);
+                solutionTreeDataProvider.setGenerateProgress(i + 1, appPaths.length);
+            }
+            
+            const args = ['/win', '/ag', appPath];
+            await runClarionCl(args, solutionDir);
+            successCount++;
+            
+            // Clear generating status for this app
+            if (solutionTreeDataProvider) {
+                solutionTreeDataProvider.setCurrentlyGeneratingApp(null);
+            }
+            
+        } catch (error) {
+            failCount++;
+            logger.error(`Failed to generate app ${appName}: ${error}`);
+            
+            // Clear generating status on error
+            if (solutionTreeDataProvider) {
+                solutionTreeDataProvider.setCurrentlyGeneratingApp(null);
+                solutionTreeDataProvider.clearGenerateProgress();
+            }
+            
+            const continueGeneration = await window.showErrorMessage(
+                `Generate failed for ${appName}. Continue with remaining apps?`,
+                'Continue',
+                'Stop'
+            );
+            
+            if (continueGeneration !== 'Continue') {
+                break;
+            }
+        }
+    }
+    
+    // Clear generate progress when done
+    if (solutionTreeDataProvider) {
+        solutionTreeDataProvider.clearGenerateProgress();
+    }
+    
+    // Show final status
+    if (failCount === 0) {
+        window.showInformationMessage(`✅ All apps generated successfully: ${successCount} apps`);
+    } else {
+        window.showWarningMessage(`Generation complete: ${successCount} succeeded, ${failCount} failed`);
+    }
+}
+
+
 export async function generateApp(appPath: string): Promise<void> {
     if (!appPath) {
         window.showErrorMessage('No application path provided');

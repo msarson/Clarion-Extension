@@ -68,6 +68,12 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     
     // Track overall build progress
     private _buildProgress: { current: number; total: number } | null = null;
+    
+    // Track currently generating app
+    private _currentlyGeneratingApp: string | null = null; // App name (without .app)
+    
+    // Track overall generation progress
+    private _generateProgress: { current: number; total: number } | null = null;
 
     constructor() {
         this.solutionCache = SolutionCache.getInstance();
@@ -97,6 +103,30 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     
     getBuildProgress(): { current: number; total: number } | null {
         return this._buildProgress;
+    }
+    
+    // Methods to track generation status
+    setCurrentlyGeneratingApp(appName: string | null): void {
+        this._currentlyGeneratingApp = appName;
+        this._onDidChangeTreeData.fire();
+    }
+    
+    getCurrentlyGeneratingApp(): string | null {
+        return this._currentlyGeneratingApp;
+    }
+    
+    setGenerateProgress(current: number, total: number): void {
+        this._generateProgress = { current, total };
+        this._onDidChangeTreeData.fire();
+    }
+    
+    clearGenerateProgress(): void {
+        this._generateProgress = null;
+        this._onDidChangeTreeData.fire();
+    }
+    
+    getGenerateProgress(): { current: number; total: number } | null {
+        return this._generateProgress;
     }
 
     // Method to set filter text with debouncing
@@ -920,12 +950,18 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             const appData = data as any;
             const exists = fs.existsSync(appData.absolutePath);
             
-            // Check if this app's corresponding project is building
+            // Check if this app is currently generating or building
             // APP file name (without .app) should match project name
             const appName = appData.name?.replace(/\.app$/i, '');
+            const isGenerating = appName && this._currentlyGeneratingApp === appName;
             const isBuilding = appName && this._currentlyBuildingProject === appName;
             
-            if (isBuilding) {
+            if (isGenerating) {
+                // Show generating icon for the app (takes priority over building)
+                treeItem.iconPath = new ThemeIcon('sync~spin');
+                treeItem.description = '(Generating...)';
+                treeItem.tooltip = `${appData.absolutePath} - Generating application...`;
+            } else if (isBuilding) {
                 // Show building icon for the app
                 treeItem.iconPath = new ThemeIcon('sync~spin');
                 treeItem.description = '(Building...)';
@@ -1132,8 +1168,12 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         treeItem.contextValue = 'clarionSolution';
         treeItem.tooltip = "Right-click for more options";
         
-        // Add build progress to description if building
-        if (this._buildProgress) {
+        // Add generation progress to description if generating (takes priority)
+        if (this._generateProgress) {
+            treeItem.description = `Generating ${this._generateProgress.current} of ${this._generateProgress.total}`;
+            treeItem.tooltip = `Generating apps: ${this._generateProgress.current} of ${this._generateProgress.total} completed`;
+        } else if (this._buildProgress) {
+            // Add build progress to description if building
             treeItem.description = `Building ${this._buildProgress.current} of ${this._buildProgress.total}`;
             treeItem.tooltip = `Building solution: ${this._buildProgress.current} of ${this._buildProgress.total} projects completed`;
         }

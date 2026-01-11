@@ -57,11 +57,21 @@ export function registerBuildCommands(
         
         // Generate All then Build All
         commands.registerCommand('clarion.generateAllAppsThenBuildSolution', async (node) => {
-            // First generate all apps
-            await clarionClHelper.generateAllApps();
+            // Get all app files from the solution
+            const solutionCache = SolutionCache.getInstance();
+            const solutionInfo = solutionCache.getSolutionInfo();
             
-            // Then build the solution with dependency order
-            await buildTasks.buildSolutionWithDependencyOrder(diagnosticCollection, solutionTreeDataProvider);
+            if (solutionInfo && solutionInfo.applications && solutionInfo.applications.length > 0) {
+                const appPaths = solutionInfo.applications.map(app => app.absolutePath);
+                
+                // Generate all apps with progress tracking
+                await clarionClHelper.generateAllAppsWithProgress(appPaths, solutionTreeDataProvider);
+                
+                // Then build the solution with dependency order
+                await buildTasks.buildSolutionWithDependencyOrder(diagnosticCollection, solutionTreeDataProvider);
+            } else {
+                window.showInformationMessage('No applications found in solution');
+            }
         }),
         
         // Build All (just kicks off the build we've been working on)
