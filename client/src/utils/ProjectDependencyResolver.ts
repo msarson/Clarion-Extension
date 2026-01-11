@@ -169,14 +169,18 @@ export class ProjectDependencyResolver {
         };
 
         // Helper function for depth-first search
-        const visit = (guid: string): boolean => {
+        const visit = (guid: string, pathStack: string[] = []): boolean => {
             if (visited.has(guid)) {
                 return true;
             }
 
             if (visiting.has(guid)) {
-                logger.error(`Circular dependency detected involving project with GUID: ${guid}`);
-                return false;
+                // Circular dependency detected - log it with full path
+                const node = this.projectNodes.get(guid);
+                const cyclePath = [...pathStack, node?.project.name || guid].join(' -> ');
+                logger.warn(`⚠️ Circular dependency detected: ${cyclePath}`);
+                logger.warn(`   Skipping this circular edge to allow sort to continue`);
+                return true; // Don't fail, just skip this circular edge
             }
 
             const node = this.projectNodes.get(guid);
@@ -187,12 +191,15 @@ export class ProjectDependencyResolver {
             }
 
             visiting.add(guid);
+            const newPath = [...pathStack, node.project.name];
 
             // Visit all dependencies first
             for (const ref of node.references) {
                 const depNode = resolveReference(ref);
-                if (depNode && !visit(depNode.guid)) {
-                    return false;
+                if (depNode) {
+                    if (!visit(depNode.guid, newPath)) {
+                        return false;
+                    }
                 }
             }
 
@@ -219,21 +226,12 @@ export class ProjectDependencyResolver {
         // Visit all nodes
         for (const node of nodeArray) {
             if (!visited.has(node.guid)) {
-                if (!visit(node.guid)) {
-                    logger.error('Topological sort failed due to circular dependencies');
-                    // Return projects in original order as fallback
-                    return this.projects;
-                }
+                visit(node.guid, []);
             }
         }
 
-        logger.info(`Before reverse: First=${sorted[0]?.name}, Last=${sorted[sorted.length-1]?.name}`);
+        logger.info(`Build order (no reverse needed): First=${sorted[0]?.name}, Last=${sorted[sorted.length-1]?.name}`);
         
-        // Reverse the array because DFS post-order gives us reverse topological order
-        // Dependencies are added last, but should be built first
-        sorted.reverse();
-        
-        logger.info(`After reverse: First=${sorted[0]?.name}, Last=${sorted[sorted.length-1]?.name}`);
         logger.info(`Build order determined: ${sorted.map(p => p.name).join(' -> ')}`);
         return sorted;
     }
