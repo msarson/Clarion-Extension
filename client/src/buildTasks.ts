@@ -641,14 +641,16 @@ export async function buildSolutionWithDependencyOrder(
         let successCount = 0;
         let failCount = 0;
         
-        for (const project of buildOrder) {
+        for (let i = 0; i < buildOrder.length; i++) {
+            const project = buildOrder[i];
             try {
                 logger.info(`Building project: ${project.name}`);
                 window.showInformationMessage(`Building: ${project.name}`);
                 
-                // Notify tree provider that this project is building
+                // Notify tree provider of build progress
                 if (solutionTreeDataProvider) {
                     solutionTreeDataProvider.setCurrentlyBuildingProject(project.name);
+                    solutionTreeDataProvider.setBuildProgress(i + 1, buildOrder.length);
                 }
                 
                 const buildConfig = {
@@ -666,7 +668,7 @@ export async function buildSolutionWithDependencyOrder(
                 await executeBuildTaskSync(buildParams);
                 successCount++;
                 
-                // Clear building status
+                // Clear building status for this project
                 if (solutionTreeDataProvider) {
                     solutionTreeDataProvider.setCurrentlyBuildingProject(null);
                 }
@@ -675,6 +677,7 @@ export async function buildSolutionWithDependencyOrder(
                 // Clear building status on error
                 if (solutionTreeDataProvider) {
                     solutionTreeDataProvider.setCurrentlyBuildingProject(null);
+                    solutionTreeDataProvider.clearBuildProgress();
                 }
                 
                 failCount++;
@@ -682,6 +685,11 @@ export async function buildSolutionWithDependencyOrder(
                 window.showErrorMessage(`Build failed for ${project.name}. Stopping build.`);
                 break; // Stop on first error
             }
+        }
+        
+        // Clear build progress when done
+        if (solutionTreeDataProvider) {
+            solutionTreeDataProvider.clearBuildProgress();
         }
         
         // Show final status

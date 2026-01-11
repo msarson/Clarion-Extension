@@ -65,6 +65,9 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
 
     // Track currently building project
     private _currentlyBuildingProject: string | null = null; // Project name
+    
+    // Track overall build progress
+    private _buildProgress: { current: number; total: number } | null = null;
 
     constructor() {
         this.solutionCache = SolutionCache.getInstance();
@@ -79,6 +82,21 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
 
     getCurrentlyBuildingProject(): string | null {
         return this._currentlyBuildingProject;
+    }
+    
+    // Methods to track build progress
+    setBuildProgress(current: number, total: number): void {
+        this._buildProgress = { current, total };
+        this._onDidChangeTreeData.fire();
+    }
+    
+    clearBuildProgress(): void {
+        this._buildProgress = null;
+        this._onDidChangeTreeData.fire();
+    }
+    
+    getBuildProgress(): { current: number; total: number } | null {
+        return this._buildProgress;
     }
 
     // Method to set filter text with debouncing
@@ -1091,6 +1109,13 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         treeItem.iconPath = new ThemeIcon('symbol-class');
         treeItem.contextValue = 'clarionSolution';
         treeItem.tooltip = "Right-click for more options";
+        
+        // Add build progress to description if building
+        if (this._buildProgress) {
+            treeItem.description = `Building ${this._buildProgress.current} of ${this._buildProgress.total}`;
+            treeItem.tooltip = `Building solution: ${this._buildProgress.current} of ${this._buildProgress.total} projects completed`;
+        }
+        
         treeItem.command = {
             title: 'Open Solution File',
             command: 'clarion.openFile',
