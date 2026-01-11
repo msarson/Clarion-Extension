@@ -109,6 +109,11 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     toggleApplicationSortOrder(): void {
         this._applicationSortOrder = this._applicationSortOrder === 'solution' ? 'build' : 'solution';
         logger.info(`🔀 Application sort order changed to: ${this._applicationSortOrder}`);
+        logger.info(`🔄 Clearing cached root to force rebuild...`);
+        
+        // Clear the cached root so getChildren() will rebuild the tree
+        this._root = null;
+        
         logger.info(`🔄 Triggering tree refresh...`);
         this._onDidChangeTreeData.fire();
     }
