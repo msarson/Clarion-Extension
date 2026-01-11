@@ -16,13 +16,14 @@ export interface ProjectReference {
 export interface ProjectNode {
     project: ClarionProjectInfo;
     guid: string;
-    references: string[]; // GUIDs of projects this depends on
+    references: ProjectReference[]; // Full reference info (name, GUID, file)
     outputType?: string; // "Library" or "WinExe"
 }
 
 export class ProjectDependencyResolver {
     private projectNodes: Map<string, ProjectNode> = new Map();
     private guidToProject: Map<string, ClarionProjectInfo> = new Map();
+    private nameToNode: Map<string, ProjectNode> = new Map(); // Name-based lookup
 
     constructor(private solutionDir: string, private projects: ClarionProjectInfo[]) {}
 
@@ -43,12 +44,13 @@ export class ProjectDependencyResolver {
                     const node: ProjectNode = {
                         project,
                         guid,
-                        references: projectData.references.map(ref => ref.projectGuid),
+                        references: projectData.references,
                         outputType: projectData.outputType
                     };
 
                     this.projectNodes.set(guid, node);
                     this.guidToProject.set(guid, project);
+                    this.nameToNode.set(project.name.toLowerCase(), node); // Case-insensitive name lookup
                     
                     logger.info(`  Project: ${project.name}, GUID: ${guid}, OutputType: ${projectData.outputType}, Dependencies: ${projectData.references.length}`);
                 }
@@ -143,6 +145,29 @@ export class ProjectDependencyResolver {
         const visited = new Set<string>();
         const visiting = new Set<string>();
 
+        // Helper function to resolve a project reference by name first, then GUID
+        const resolveReference = (ref: ProjectReference): ProjectNode | null => {
+            // Try name-based lookup first (preferred)
+            if (ref.projectName) {
+                const nodeByName = this.nameToNode.get(ref.projectName.toLowerCase());
+                if (nodeByName) {
+                    logger.info(`Resolved ${ref.projectName} by name (GUID in reference: ${ref.projectGuid})`);
+                    return nodeByName;
+                }
+            }
+            
+            // Fallback to GUID lookup
+            const nodeByGuid = this.projectNodes.get(ref.projectGuid);
+            if (nodeByGuid) {
+                logger.info(`Resolved ${ref.projectName || 'unknown'} by GUID ${ref.projectGuid}`);
+                return nodeByGuid;
+            }
+            
+            // Not found by either method
+            logger.warn(`Cannot resolve project reference: name="${ref.projectName}", GUID=${ref.projectGuid}`);
+            return null;
+        };
+
         // Helper function for depth-first search
         const visit = (guid: string): boolean => {
             if (visited.has(guid)) {
@@ -164,8 +189,9 @@ export class ProjectDependencyResolver {
             visiting.add(guid);
 
             // Visit all dependencies first
-            for (const depGuid of node.references) {
-                if (!visit(depGuid)) {
+            for (const ref of node.references) {
+                const depNode = resolveReference(ref);
+                if (depNode && !visit(depNode.guid)) {
                     return false;
                 }
             }
@@ -221,10 +247,7 @@ export class ProjectDependencyResolver {
         
         for (const [guid, node] of this.projectNodes) {
             const depNames = node.references
-                .map(depGuid => {
-                    const depNode = this.projectNodes.get(depGuid);
-                    return depNode ? depNode.project.name : `Unknown(${depGuid})`;
-                })
+                .map(ref => ref.projectName || `Unknown(${ref.projectGuid})`)
                 .join(', ');
             
             lines.push(`${node.project.name} (${node.outputType || 'Unknown'})${depNames ? ` -> ${depNames}` : ''}`);
