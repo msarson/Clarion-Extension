@@ -397,6 +397,22 @@
                 "title": "Open in Clarion IDE"
             },
             {
+                "command": "clarion.importAppFromTextForSolution",
+                "title": "Import App from Text for Solution"
+            },
+            {
+                "command": "clarion.exportAppToVersionControl",
+                "title": "Export App to Version Control"
+            },
+            {
+                "command": "clarion.importAllAppsFromTextForSolution",
+                "title": "Import All Apps from Text for Solution"
+            },
+            {
+                "command": "clarion.exportAllAppsToVersionControl",
+                "title": "Export All Apps to Version Control"
+            },
+            {
                 "command": "clarion.pasteAsString",
                 "title": "Clarion: Paste as String"
             },
@@ -460,6 +476,16 @@
                     "command": "clarion.generateAllApps",
                     "when": "view == solutionView && viewItem == clarionApplicationsGroup",
                     "group": "generate"
+                },
+                {
+                    "command": "clarion.importAllAppsFromTextForSolution",
+                    "when": "view == solutionView && viewItem == clarionApplicationsGroup",
+                    "group": "versioncontrol"
+                },
+                {
+                    "command": "clarion.exportAllAppsToVersionControl",
+                    "when": "view == solutionView && viewItem == clarionApplicationsGroup",
+                    "group": "versioncontrol"
                 },
                 {
                     "command": "clarion.generateApp",
@@ -540,6 +566,16 @@
                     "command": "clarion.openContainingFolder",
                     "when": "view == solutionView && viewItem == clarionApp",
                     "group": "navigation"
+                },
+                {
+                    "command": "clarion.importAppFromTextForSolution",
+                    "when": "view == solutionView && viewItem == clarionApp",
+                    "group": "versioncontrol"
+                },
+                {
+                    "command": "clarion.exportAppToVersionControl",
+                    "when": "view == solutionView && viewItem == clarionApp",
+                    "group": "versioncontrol"
                 }
             ],
             "commandPalette": [

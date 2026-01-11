@@ -98,3 +98,131 @@ export async function generateApp(appPath: string): Promise<void> {
         logger.error(`Generate app failed: ${error}`);
     }
 }
+
+// UpperPark Version Control Commands
+
+export async function importAppFromTextForSolution(appPath: string): Promise<void> {
+    if (!appPath) {
+        window.showErrorMessage('No application path provided');
+        return;
+    }
+
+    if (!globalSolutionFile) {
+        window.showErrorMessage('No solution file is currently open');
+        return;
+    }
+
+    const solutionDir = path.dirname(globalSolutionFile);
+    const args = ['/win', '/up_createappVC', appPath];
+
+    try {
+        await runClarionCl(args, solutionDir);
+    } catch (error) {
+        logger.error(`Import app from text for solution failed: ${error}`);
+    }
+}
+
+export async function exportAppToVersionControl(appPath: string): Promise<void> {
+    if (!appPath) {
+        window.showErrorMessage('No application path provided');
+        return;
+    }
+
+    if (!globalSolutionFile) {
+        window.showErrorMessage('No solution file is currently open');
+        return;
+    }
+
+    const solutionDir = path.dirname(globalSolutionFile);
+    const appFileName = path.basename(appPath);
+    
+    const args = ['/win', '/up_exportappToVC', globalSolutionFile, appFileName];
+
+    try {
+        await runClarionCl(args, solutionDir);
+    } catch (error) {
+        logger.error(`Export app to version control failed: ${error}`);
+    }
+}
+
+export async function importAllAppsFromTextForSolution(appPaths: string[]): Promise<void> {
+    if (!appPaths || appPaths.length === 0) {
+        window.showErrorMessage('No applications provided');
+        return;
+    }
+
+    if (!globalSolutionFile) {
+        window.showErrorMessage('No solution file is currently open');
+        return;
+    }
+
+    const channel = getOutputChannel();
+    channel.show(true);
+    channel.appendLine(`Importing ${appPaths.length} application(s)...`);
+    channel.appendLine('');
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const appPath of appPaths) {
+        try {
+            channel.appendLine(`Importing: ${path.basename(appPath)}`);
+            await importAppFromTextForSolution(appPath);
+            successCount++;
+        } catch (error) {
+            failCount++;
+            logger.error(`Failed to import ${appPath}: ${error}`);
+            channel.appendLine(`✗ Failed: ${path.basename(appPath)}`);
+        }
+    }
+
+    channel.appendLine('');
+    channel.appendLine(`Import complete: ${successCount} succeeded, ${failCount} failed`);
+    
+    if (failCount === 0) {
+        window.showInformationMessage(`Successfully imported ${successCount} application(s)`);
+    } else {
+        window.showWarningMessage(`Imported ${successCount} application(s), ${failCount} failed`);
+    }
+}
+
+export async function exportAllAppsToVersionControl(appPaths: string[]): Promise<void> {
+    if (!appPaths || appPaths.length === 0) {
+        window.showErrorMessage('No applications provided');
+        return;
+    }
+
+    if (!globalSolutionFile) {
+        window.showErrorMessage('No solution file is currently open');
+        return;
+    }
+
+    const channel = getOutputChannel();
+    channel.show(true);
+    channel.appendLine(`Exporting ${appPaths.length} application(s)...`);
+    channel.appendLine('');
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const appPath of appPaths) {
+        try {
+            channel.appendLine(`Exporting: ${path.basename(appPath)}`);
+            await exportAppToVersionControl(appPath);
+            successCount++;
+        } catch (error) {
+            failCount++;
+            logger.error(`Failed to export ${appPath}: ${error}`);
+            channel.appendLine(`✗ Failed: ${path.basename(appPath)}`);
+        }
+    }
+
+    channel.appendLine('');
+    channel.appendLine(`Export complete: ${successCount} succeeded, ${failCount} failed`);
+    
+    if (failCount === 0) {
+        window.showInformationMessage(`Successfully exported ${successCount} application(s)`);
+    } else {
+        window.showWarningMessage(`Exported ${successCount} application(s), ${failCount} failed`);
+    }
+}

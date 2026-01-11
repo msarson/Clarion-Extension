@@ -4,6 +4,8 @@ import * as fs from 'fs';
 import * as child_process from 'child_process';
 import { globalSolutionFile, globalClarionPropertiesFile } from '../globals';
 import { ClarionInstallationDetector } from '../utils/ClarionInstallationDetector';
+import { detectUpperParkCapabilities } from '../utils/UpperParkDetector';
+import * as clarionClHelper from '../clarionClHelper';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("TreeCommands");
@@ -190,6 +192,118 @@ export function registerTreeCommands(): Disposable[] {
             } catch (error) {
                 logger.error(`Error opening Clarion IDE: ${error}`);
                 window.showErrorMessage(`Failed to open Clarion IDE: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }),
+
+        // UpperPark Version Control Commands for .app files
+
+        // Import App from Text for Solution
+        commands.registerCommand('clarion.importAppFromTextForSolution', async (node) => {
+            if (!node || !node.data || !node.data.absolutePath) {
+                window.showErrorMessage("No application selected.");
+                return;
+            }
+
+            const capabilities = await detectUpperParkCapabilities();
+            if (!capabilities.hasCreateAppVC) {
+                window.showErrorMessage("UpperPark Version Control is not available in your Clarion installation.");
+                return;
+            }
+
+            try {
+                await clarionClHelper.importAppFromTextForSolution(node.data.absolutePath);
+            } catch (error) {
+                logger.error(`Import app from text for solution failed: ${error}`);
+            }
+        }),
+
+        // Export App to Version Control
+        commands.registerCommand('clarion.exportAppToVersionControl', async (node) => {
+            if (!node || !node.data || !node.data.absolutePath) {
+                window.showErrorMessage("No application selected.");
+                return;
+            }
+
+            const capabilities = await detectUpperParkCapabilities();
+            if (!capabilities.hasExportAppToVC) {
+                window.showErrorMessage("UpperPark Version Control is not available in your Clarion installation.");
+                return;
+            }
+
+            try {
+                await clarionClHelper.exportAppToVersionControl(node.data.absolutePath);
+            } catch (error) {
+                logger.error(`Export app to version control failed: ${error}`);
+            }
+        }),
+
+        // Import All Apps from Text for Solution
+        commands.registerCommand('clarion.importAllAppsFromTextForSolution', async (node) => {
+            if (!node || !node.data || node.data.type !== 'applications-group') {
+                window.showErrorMessage("No applications group selected.");
+                return;
+            }
+
+            const capabilities = await detectUpperParkCapabilities();
+            if (!capabilities.hasCreateAppVC) {
+                window.showErrorMessage("UpperPark Version Control is not available in your Clarion installation.");
+                return;
+            }
+
+            // Get all application paths from the node's children
+            const appPaths: string[] = [];
+            if (node.children) {
+                for (const child of node.children) {
+                    if (child.data && child.data.type === 'clarionApp' && child.data.absolutePath) {
+                        appPaths.push(child.data.absolutePath);
+                    }
+                }
+            }
+
+            if (appPaths.length === 0) {
+                window.showErrorMessage("No applications found to import.");
+                return;
+            }
+
+            try {
+                await clarionClHelper.importAllAppsFromTextForSolution(appPaths);
+            } catch (error) {
+                logger.error(`Import all apps from text for solution failed: ${error}`);
+            }
+        }),
+
+        // Export All Apps to Version Control
+        commands.registerCommand('clarion.exportAllAppsToVersionControl', async (node) => {
+            if (!node || !node.data || node.data.type !== 'applications-group') {
+                window.showErrorMessage("No applications group selected.");
+                return;
+            }
+
+            const capabilities = await detectUpperParkCapabilities();
+            if (!capabilities.hasExportAppToVC) {
+                window.showErrorMessage("UpperPark Version Control is not available in your Clarion installation.");
+                return;
+            }
+
+            // Get all application paths from the node's children
+            const appPaths: string[] = [];
+            if (node.children) {
+                for (const child of node.children) {
+                    if (child.data && child.data.type === 'clarionApp' && child.data.absolutePath) {
+                        appPaths.push(child.data.absolutePath);
+                    }
+                }
+            }
+
+            if (appPaths.length === 0) {
+                window.showErrorMessage("No applications found to export.");
+                return;
+            }
+
+            try {
+                await clarionClHelper.exportAllAppsToVersionControl(appPaths);
+            } catch (error) {
+                logger.error(`Export all apps to version control failed: ${error}`);
             }
         })
     ];
