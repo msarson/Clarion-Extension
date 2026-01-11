@@ -47,9 +47,9 @@ export async function runClarionBuild(
 
     // If building full solution, use dependency-aware build
     if (buildConfig.buildTarget === "Solution") {
-        // Auto-switch to build order
-        if (solutionTreeDataProvider && solutionTreeDataProvider.getApplicationSortOrder() === 'solution') {
-            await solutionTreeDataProvider.toggleApplicationSortOrder();
+        // Ensure we're in build order mode for solution builds
+        if (solutionTreeDataProvider) {
+            await solutionTreeDataProvider.setApplicationSortOrder('build');
         }
         
         await buildSolutionWithDependencyOrder(diagCollection, solutionTreeDataProvider);

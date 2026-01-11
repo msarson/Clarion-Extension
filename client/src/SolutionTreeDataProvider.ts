@@ -142,6 +142,14 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         // Force a full refresh to rebuild the tree with new sort order
         await this.refresh();
     }
+    
+    // Set application sort order directly
+    async setApplicationSortOrder(order: 'solution' | 'build'): Promise<void> {
+        if (this._applicationSortOrder !== order) {
+            this._applicationSortOrder = order;
+            await this.refresh();
+        }
+    }
 
     // Get current application sort order
     getApplicationSortOrder(): 'solution' | 'build' {
