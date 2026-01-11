@@ -147,7 +147,11 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     async setApplicationSortOrder(order: 'solution' | 'build'): Promise<void> {
         if (this._applicationSortOrder !== order) {
             this._applicationSortOrder = order;
+            // Clear the root to force complete rebuild
+            this._root = null;
             await this.refresh();
+            // Give VS Code a moment to process the tree update
+            await new Promise(resolve => setTimeout(resolve, 100));
         }
     }
 
