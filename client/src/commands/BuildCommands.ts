@@ -27,8 +27,8 @@ export function registerBuildCommands(
         
         // Add solution build command for context menu (no prompt)
         commands.registerCommand("clarion.buildSolutionDirect", async () => {
-            // User explicitly chose to build the solution from context menu, don't prompt
-            await buildTasks.buildSolutionOrProject("Solution", undefined, diagnosticCollection, solutionTreeDataProvider);
+            // Use dependency-aware build for solution
+            await buildTasks.buildSolutionWithDependencyOrder(diagnosticCollection, solutionTreeDataProvider);
         }),
 
         // Add project build command
@@ -165,7 +165,7 @@ export function registerBuildCommands(
                 }
                 
                 if (selectedOption === "Build Full Solution") {
-                    await buildTasks.buildSolutionOrProject("Solution", undefined, diagnosticCollection, solutionTreeDataProvider);
+                    await buildTasks.buildSolutionWithDependencyOrder(diagnosticCollection, solutionTreeDataProvider);
                 } else {
                     // Extract project name from the selected option
                     const projectName = selectedOption.replace("Build Project: ", "");
@@ -179,7 +179,7 @@ export function registerBuildCommands(
                 }
             } else {
                 // Build the entire solution if no project is found
-                await buildTasks.buildSolutionOrProject("Solution", undefined, diagnosticCollection, solutionTreeDataProvider);
+                await buildTasks.buildSolutionWithDependencyOrder(diagnosticCollection, solutionTreeDataProvider);
             }
         }),
 
