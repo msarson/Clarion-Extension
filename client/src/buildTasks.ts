@@ -646,6 +646,11 @@ export async function buildSolutionWithDependencyOrder(
                 logger.info(`Building project: ${project.name}`);
                 window.showInformationMessage(`Building: ${project.name}`);
                 
+                // Notify tree provider that this project is building
+                if (solutionTreeDataProvider) {
+                    solutionTreeDataProvider.setCurrentlyBuildingProject(project.name);
+                }
+                
                 const buildConfig = {
                     buildTarget: "Project" as const,
                     selectedProjectPath: project.path,
@@ -661,7 +666,17 @@ export async function buildSolutionWithDependencyOrder(
                 await executeBuildTaskSync(buildParams);
                 successCount++;
                 
+                // Clear building status
+                if (solutionTreeDataProvider) {
+                    solutionTreeDataProvider.setCurrentlyBuildingProject(null);
+                }
+                
             } catch (error) {
+                // Clear building status on error
+                if (solutionTreeDataProvider) {
+                    solutionTreeDataProvider.setCurrentlyBuildingProject(null);
+                }
+                
                 failCount++;
                 logger.error(`Failed to build project ${project.name}: ${error}`);
                 window.showErrorMessage(`Build failed for ${project.name}. Stopping build.`);

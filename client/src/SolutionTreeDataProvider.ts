@@ -63,9 +63,22 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     // Application sort order: 'solution' (as in .sln) or 'build' (dependency order)
     private _applicationSortOrder: 'solution' | 'build' = 'solution';
 
+    // Track currently building project
+    private _currentlyBuildingProject: string | null = null; // Project name
+
     constructor() {
         this.solutionCache = SolutionCache.getInstance();
         this.projectIndex = ProjectIndex.getInstance();
+    }
+
+    // Methods to track build status
+    setCurrentlyBuildingProject(projectName: string | null): void {
+        this._currentlyBuildingProject = projectName;
+        this._onDidChangeTreeData.fire();
+    }
+
+    getCurrentlyBuildingProject(): string | null {
+        return this._currentlyBuildingProject;
     }
 
     // Method to set filter text with debouncing
@@ -940,13 +953,20 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         if ((data as any)?.guid) {
             const project = data as ClarionProjectInfo;
             
+            // Check if this project is currently building
+            const isBuilding = this._currentlyBuildingProject === project.name;
+            
             // Check if this is the startup project
             const workspaceConfig = workspace.getConfiguration('clarion');
             const startupProjectGuid = workspaceConfig.get<string>('startupProject');
             const isStartupProject = startupProjectGuid && 
                 project.guid.replace(/[{}]/g, '').toLowerCase() === startupProjectGuid.replace(/[{}]/g, '').toLowerCase();
             
-            if (isStartupProject) {
+            if (isBuilding) {
+                // Show building icon with sync/loading indicator
+                treeItem.iconPath = new ThemeIcon('sync~spin');
+                treeItem.description = '(Building...)';
+            } else if (isStartupProject) {
                 // Make startup project bold and add play icon
                 treeItem.iconPath = new ThemeIcon('play');
                 treeItem.description = '(Startup)';
