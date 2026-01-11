@@ -908,7 +908,17 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             const appData = data as any;
             const exists = fs.existsSync(appData.absolutePath);
             
-            if (exists) {
+            // Check if this app's corresponding project is building
+            // APP file name (without .app) should match project name
+            const appName = appData.name?.replace(/\.app$/i, '');
+            const isBuilding = appName && this._currentlyBuildingProject === appName;
+            
+            if (isBuilding) {
+                // Show building icon for the app
+                treeItem.iconPath = new ThemeIcon('sync~spin');
+                treeItem.description = '(Building...)';
+                treeItem.tooltip = `${appData.absolutePath} - Building project...`;
+            } else if (exists) {
                 treeItem.iconPath = new ThemeIcon('symbol-class'); // Application icon
                 treeItem.tooltip = appData.absolutePath;
                 // Don't set a command - APP files are binary and shouldn't open in editor

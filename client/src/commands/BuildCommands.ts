@@ -22,7 +22,7 @@ export function registerBuildCommands(
     return [
         // Add solution build command (used by keyboard shortcut - shows prompt)
         commands.registerCommand("clarion.buildSolution", async () => {
-            await buildTasks.runClarionBuild();
+            await buildTasks.runClarionBuild(diagnosticCollection, solutionTreeDataProvider);
         }),
         
         // Add solution build command for context menu (no prompt)

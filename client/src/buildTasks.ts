@@ -21,7 +21,10 @@ logger.setLevel("error"); // Production: Only log errors
 /**
  * Main entry point for the Clarion build process
  */
-export async function runClarionBuild() {
+export async function runClarionBuild(
+    diagnosticCollection?: DiagnosticCollection,
+    solutionTreeDataProvider?: any
+) {
     if (!validateBuildEnvironment()) {
         return;
     }
@@ -39,16 +42,27 @@ export async function runClarionBuild() {
         return;
     }
 
-    // Prepare build task parameters
-    const buildParams = prepareBuildParameters(buildConfig);
-
     // ✅ Ensure we have a diagnostic collection for this extension
-    const diagnosticCollection = languages.createDiagnosticCollection("clarion");
+    const diagCollection = diagnosticCollection || languages.createDiagnosticCollection("clarion");
+
+    // If building full solution, use dependency-aware build
+    if (buildConfig.buildTarget === "Solution") {
+        // Auto-switch to build order
+        if (solutionTreeDataProvider && solutionTreeDataProvider.getApplicationSortOrder() === 'solution') {
+            await solutionTreeDataProvider.toggleApplicationSortOrder();
+        }
+        
+        await buildSolutionWithDependencyOrder(diagCollection, solutionTreeDataProvider);
+        return;
+    }
+
+    // Prepare build task parameters for project build
+    const buildParams = prepareBuildParameters(buildConfig);
 
     // Execute the build task with diagnostics
     await executeBuildTask({
         ...buildParams,
-        diagnosticCollection,   // ✅ pass through
+        diagnosticCollection: diagCollection,   // ✅ pass through
     });
 }
 
