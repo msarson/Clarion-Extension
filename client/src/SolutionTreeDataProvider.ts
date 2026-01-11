@@ -15,7 +15,7 @@ import { GlobalSolutionHistory } from './utils/GlobalSolutionHistory';
 import { ProjectDependencyResolver } from './utils/ProjectDependencyResolver';
 
 const logger = LoggerManager.getLogger("SolutionTreeDataProvider");
-logger.setLevel("error");
+logger.setLevel("info"); // Enable info logging for debugging
 
 // Create a specialized debug logger for file resolution issues
 const fileResolutionLogger = LoggerManager.getLogger("FileResolution");
@@ -108,6 +108,8 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     // Toggle application sort order
     toggleApplicationSortOrder(): void {
         this._applicationSortOrder = this._applicationSortOrder === 'solution' ? 'build' : 'solution';
+        logger.info(`🔀 Application sort order changed to: ${this._applicationSortOrder}`);
+        logger.info(`🔄 Triggering tree refresh...`);
         this._onDidChangeTreeData.fire();
     }
 
@@ -1203,18 +1205,41 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 // Determine application order based on sort preference
                 let orderedApplications = [...solution.applications];
                 
+                // Log original order
+                logger.info(`📋 Original application order (${solution.applications.length} apps):`);
+                solution.applications.forEach((app, idx) => {
+                    logger.info(`  ${idx + 1}. ${app.name}`);
+                });
+                logger.info(`🔀 Current sort mode: ${this._applicationSortOrder}`);
+                
                 if (this._applicationSortOrder === 'build') {
                     // Sort by build order (dependency order)
                     try {
                         const solutionDir = path.dirname(globalSolutionFile);
                         const resolver = new ProjectDependencyResolver(solutionDir, solution.projects);
+                        
+                        logger.info(`🔍 Analyzing dependencies for ${solution.projects.length} projects...`);
                         await resolver.analyzeDependencies();
+                        
                         const buildOrder = resolver.getBuildOrder();
+                        logger.info(`📊 Build order determined (${buildOrder.length} projects):`);
+                        buildOrder.forEach((project, idx) => {
+                            logger.info(`  ${idx + 1}. ${project.name}`);
+                        });
                         
                         // Create a map of project names to their build order index
                         const buildOrderMap = new Map<string, number>();
                         buildOrder.forEach((project, index) => {
                             buildOrderMap.set(project.name.toLowerCase(), index);
+                            logger.info(`  Map: ${project.name.toLowerCase()} -> ${index}`);
+                        });
+                        
+                        // Log matching process
+                        logger.info(`🔗 Matching applications to projects:`);
+                        orderedApplications.forEach(app => {
+                            const appNameWithoutExt = app.name.replace(/\.app$/i, '').toLowerCase();
+                            const matchedIndex = buildOrderMap.get(appNameWithoutExt);
+                            logger.info(`  ${app.name} (${appNameWithoutExt}) -> ${matchedIndex !== undefined ? 'Found at ' + matchedIndex : 'NOT FOUND'}`);
                         });
                         
                         // Sort applications based on their matching project's build order
@@ -1225,14 +1250,22 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                             const orderA = buildOrderMap.get(nameA) ?? 999999;
                             const orderB = buildOrderMap.get(nameB) ?? 999999;
                             
+                            logger.info(`  Comparing ${a.name}(${orderA}) vs ${b.name}(${orderB}) = ${orderA - orderB}`);
+                            
                             return orderA - orderB;
                         });
                         
-                        logger.info(`✅ Applications sorted by build order`);
+                        logger.info(`✅ Applications sorted by build order:`);
+                        orderedApplications.forEach((app, idx) => {
+                            logger.info(`  ${idx + 1}. ${app.name}`);
+                        });
                     } catch (error) {
                         logger.error(`Failed to sort applications by build order: ${error}`);
+                        logger.error(`Stack: ${error instanceof Error ? error.stack : 'No stack'}`);
                         // Fall back to solution order
                     }
+                } else {
+                    logger.info(`✅ Using solution order (no sorting applied)`);
                 }
 
                 // Add APP file nodes in the determined order
