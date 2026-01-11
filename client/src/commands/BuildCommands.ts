@@ -57,14 +57,16 @@ export function registerBuildCommands(
         
         // Generate All then Build All
         commands.registerCommand('clarion.generateAllAppsThenBuildSolution', async (node) => {
-            // Get all app files from the solution
+            // Get all app files from the solution in their original order
+            // Don't rely on tree order which may be sorted
             const solutionCache = SolutionCache.getInstance();
             const solutionInfo = solutionCache.getSolutionInfo();
             
             if (solutionInfo && solutionInfo.applications && solutionInfo.applications.length > 0) {
-                const appPaths = solutionInfo.applications.map(app => app.absolutePath);
+                // Create a fresh copy of applications to ensure original order
+                const appPaths = [...solutionInfo.applications].map(app => app.absolutePath);
                 
-                // Generate all apps with progress tracking
+                // Generate all apps with progress tracking (in solution order)
                 await clarionClHelper.generateAllAppsWithProgress(appPaths, solutionTreeDataProvider);
                 
                 // Then build the solution with dependency order
