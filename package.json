@@ -398,7 +398,7 @@
             },
             {
                 "command": "clarion.importAppFromTextForSolution",
-                "title": "Import App from Text for Solution"
+                "title": "Import App from Version Control"
             },
             {
                 "command": "clarion.exportAppToVersionControl",
@@ -406,7 +406,7 @@
             },
             {
                 "command": "clarion.importAllAppsFromTextForSolution",
-                "title": "Import All Apps from Text for Solution"
+                "title": "Import All Apps from Version Control"
             },
             {
                 "command": "clarion.exportAllAppsToVersionControl",

@@ -214,7 +214,7 @@ export function registerTreeCommands(solutionTreeDataProvider?: any): Disposable
             try {
                 await clarionClHelper.importAppFromTextForSolution(node.data.absolutePath);
             } catch (error) {
-                logger.error(`Import app from text for solution failed: ${error}`);
+                logger.error(`Import app from Version Control failed: ${error}`);
             }
         }),
 
