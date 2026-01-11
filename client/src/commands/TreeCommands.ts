@@ -315,18 +315,10 @@ export function registerTreeCommands(solutionTreeDataProvider?: any): Disposable
                 const currentOrder = solutionTreeDataProvider.getApplicationSortOrder();
                 const orderName = currentOrder === 'solution' ? 'Solution Order' : 'Build Order (Dependencies)';
                 
-                // Show a message with instructions
-                const message = `Applications sorted by: ${orderName}\n\nTo see debug logs:\n1. Press F12 or Ctrl+Shift+I to open Developer Tools\n2. Go to Console tab\n3. Look for [SolutionTreeDataProvider] and [ProjectDependencyResolver] messages`;
-                
-                window.showInformationMessage(message, 'OK');
+                window.showInformationMessage(`Applications sorted by: ${orderName}`);
             } else {
                 window.showErrorMessage("Solution tree not available.");
             }
-        }),
-
-        // Show sort order debug info
-        commands.registerCommand('clarion.showApplicationSortDebug', async () => {
-            window.showInformationMessage('Check the "Clarion Extension" output channel for application sort debugging information.');
         })
     ];
 }
