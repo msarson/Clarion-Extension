@@ -154,21 +154,25 @@ export class ProjectDependencyResolver {
                 return false;
             }
 
+            const node = this.projectNodes.get(guid);
+            if (!node) {
+                // Project reference doesn't exist in solution - skip it
+                logger.warn(`Skipping missing project reference: ${guid}`);
+                return true;
+            }
+
             visiting.add(guid);
 
-            const node = this.projectNodes.get(guid);
-            if (node) {
-                // Visit all dependencies first
-                for (const depGuid of node.references) {
-                    if (!visit(depGuid)) {
-                        return false;
-                    }
+            // Visit all dependencies first
+            for (const depGuid of node.references) {
+                if (!visit(depGuid)) {
+                    return false;
                 }
-
-                visited.add(guid);
-                visiting.delete(guid);
-                sorted.push(node.project);
             }
+
+            visited.add(guid);
+            visiting.delete(guid);
+            sorted.push(node.project);
 
             return true;
         };
