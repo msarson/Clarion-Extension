@@ -197,10 +197,13 @@ export class ProjectDependencyResolver {
             }
         }
 
+        logger.info(`Before reverse: First=${sorted[0]?.name}, Last=${sorted[sorted.length-1]?.name}`);
+        
         // Reverse the array because DFS post-order gives us reverse topological order
         // Dependencies are added last, but should be built first
         sorted.reverse();
         
+        logger.info(`After reverse: First=${sorted[0]?.name}, Last=${sorted[sorted.length-1]?.name}`);
         logger.info(`Build order determined: ${sorted.map(p => p.name).join(' -> ')}`);
         return sorted;
     }
