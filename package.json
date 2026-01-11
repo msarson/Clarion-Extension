@@ -413,6 +413,11 @@
                 "title": "Export All Apps to Version Control"
             },
             {
+                "command": "clarion.toggleApplicationSortOrder",
+                "title": "Toggle Application Sort Order",
+                "icon": "$(arrow-swap)"
+            },
+            {
                 "command": "clarion.pasteAsString",
                 "title": "Clarion: Paste as String"
             },
@@ -626,6 +631,11 @@
                     "command": "clarion.solutionView.clearFilter",
                     "when": "view == solutionView && clarion.solutionOpen",
                     "group": "navigation@5"
+                },
+                {
+                    "command": "clarion.toggleApplicationSortOrder",
+                    "when": "view == solutionView && clarion.solutionOpen",
+                    "group": "navigation@6"
                 },
                 {
                     "command": "clarion.structureView.expandAll",

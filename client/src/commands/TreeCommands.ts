@@ -12,9 +12,10 @@ const logger = LoggerManager.getLogger("TreeCommands");
 
 /**
  * Registers tree-related context menu commands
+ * @param solutionTreeDataProvider - Optional solution tree data provider for refresh operations
  * @returns Array of disposables for the registered commands
  */
-export function registerTreeCommands(): Disposable[] {
+export function registerTreeCommands(solutionTreeDataProvider?: any): Disposable[] {
     return [
         // Copy file path to clipboard
         commands.registerCommand('clarion.copyFilePath', async (node) => {
@@ -304,6 +305,18 @@ export function registerTreeCommands(): Disposable[] {
                 await clarionClHelper.exportAllAppsToVersionControl(appPaths);
             } catch (error) {
                 logger.error(`Export all apps to version control failed: ${error}`);
+            }
+        }),
+
+        // Toggle application sort order
+        commands.registerCommand('clarion.toggleApplicationSortOrder', async () => {
+            if (solutionTreeDataProvider) {
+                solutionTreeDataProvider.toggleApplicationSortOrder();
+                const currentOrder = solutionTreeDataProvider.getApplicationSortOrder();
+                const orderName = currentOrder === 'solution' ? 'Solution Order' : 'Build Order (Dependencies)';
+                window.showInformationMessage(`Applications sorted by: ${orderName}`);
+            } else {
+                window.showErrorMessage("Solution tree not available.");
             }
         })
     ];

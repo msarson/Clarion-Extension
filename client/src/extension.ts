@@ -153,7 +153,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
         ...registerBuildCommands(diagnosticCollection, solutionTreeDataProvider),
         ...registerRunCommands(solutionTreeDataProvider),
         ...registerSolutionManagementCommands(context, client, initializeSolution, createSolutionTreeView),
-        ...registerTreeCommands()
+        ...registerTreeCommands(solutionTreeDataProvider)
     );
     
     // Create DocumentManager for standalone file support

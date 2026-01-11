@@ -12,6 +12,7 @@ import { getLanguageClient } from './LanguageClientManager';
 import { SolutionScanner, DetectedSolution } from './utils/SolutionScanner';
 import { ClarionInstallationDetector } from './utils/ClarionInstallationDetector';
 import { GlobalSolutionHistory } from './utils/GlobalSolutionHistory';
+import { ProjectDependencyResolver } from './utils/ProjectDependencyResolver';
 
 const logger = LoggerManager.getLogger("SolutionTreeDataProvider");
 logger.setLevel("error");
@@ -60,6 +61,9 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     // Track refresh state
     private refreshInProgress = false;
 
+    // Application sort order: 'solution' (as in .sln) or 'build' (dependency order)
+    private _applicationSortOrder: 'solution' | 'build' = 'solution';
+
     constructor() {
         this.solutionCache = SolutionCache.getInstance();
         this.projectIndex = ProjectIndex.getInstance();
@@ -100,6 +104,18 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     getFilterText(): string {
         return this._filterText;
     }
+
+    // Toggle application sort order
+    toggleApplicationSortOrder(): void {
+        this._applicationSortOrder = this._applicationSortOrder === 'solution' ? 'build' : 'solution';
+        this._onDidChangeTreeData.fire();
+    }
+
+    // Get current application sort order
+    getApplicationSortOrder(): 'solution' | 'build' {
+        return this._applicationSortOrder;
+    }
+
     async refresh(): Promise<void> {
         if (this.refreshInProgress) {
             logger.info("⏭️ Refresh already in progress, skipping...");
@@ -1184,8 +1200,43 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                     solutionNode
                 );
 
-                // Add APP file nodes
-                for (const app of solution.applications) {
+                // Determine application order based on sort preference
+                let orderedApplications = [...solution.applications];
+                
+                if (this._applicationSortOrder === 'build') {
+                    // Sort by build order (dependency order)
+                    try {
+                        const solutionDir = path.dirname(globalSolutionFile);
+                        const resolver = new ProjectDependencyResolver(solutionDir, solution.projects);
+                        await resolver.analyzeDependencies();
+                        const buildOrder = resolver.getBuildOrder();
+                        
+                        // Create a map of project names to their build order index
+                        const buildOrderMap = new Map<string, number>();
+                        buildOrder.forEach((project, index) => {
+                            buildOrderMap.set(project.name.toLowerCase(), index);
+                        });
+                        
+                        // Sort applications based on their matching project's build order
+                        orderedApplications.sort((a, b) => {
+                            const nameA = a.name.replace(/\.app$/i, '').toLowerCase();
+                            const nameB = b.name.replace(/\.app$/i, '').toLowerCase();
+                            
+                            const orderA = buildOrderMap.get(nameA) ?? 999999;
+                            const orderB = buildOrderMap.get(nameB) ?? 999999;
+                            
+                            return orderA - orderB;
+                        });
+                        
+                        logger.info(`✅ Applications sorted by build order`);
+                    } catch (error) {
+                        logger.error(`Failed to sort applications by build order: ${error}`);
+                        // Fall back to solution order
+                    }
+                }
+
+                // Add APP file nodes in the determined order
+                for (const app of orderedApplications) {
                     const appNode = new TreeNode(
                         app.name,
                         TreeItemCollapsibleState.None,
