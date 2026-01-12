@@ -1709,6 +1709,32 @@
       ]
     },
     {
+      "name": "LOG10",
+      "signatures": [
+        {
+          "params": [
+            { "name": "expression", "optional": false }
+          ],
+          "returnType": "REAL",
+          "description": "Returns the base 10 logarithm of an expression. The base 10 logarithm is the power to which 10 must be raised to equal the value. Returns 0 if expression is zero or less (logarithm undefined for values ≤ 0). Example: LOG10(10) returns 1, LOG10(1) returns 0.",
+          "syntax": "LOG10(expression)"
+        }
+      ]
+    },
+    {
+      "name": "LOGE",
+      "signatures": [
+        {
+          "params": [
+            { "name": "expression", "optional": false }
+          ],
+          "returnType": "REAL",
+          "description": "Returns the natural logarithm of an expression. The natural logarithm is the power to which e (2.71828182846) must be raised to equal the value. Returns 0 if expression is less than zero (logarithm undefined for values < 0). Example: LOGE(2.71828) returns 1, LOGE(1) returns 0.",
+          "syntax": "LOGE(expression)"
+        }
+      ]
+    },
+    {
       "name": "MATCH",
       "signatures": [
         {
