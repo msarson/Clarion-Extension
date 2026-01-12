@@ -1340,8 +1340,12 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                         });
                     } catch (error) {
                         logger.error(`Failed to sort applications by build order: ${error}`);
-                        // Fall back to solution order
+                        // Fall back to alphabetical order
+                        orderedApplications.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
                     }
+                } else {
+                    // Default: Sort alphabetically (case-insensitive)
+                    orderedApplications.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
                 }
 
                 // Add APP file nodes in the determined order
@@ -1365,7 +1369,12 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             }
 
             // Add project nodes with minimal information - details will be loaded on demand
-            for (const project of solution.projects.filter(Boolean)) {
+            // Sort projects alphabetically (case-insensitive)
+            const sortedProjects = [...solution.projects.filter(Boolean)].sort((a, b) => 
+                (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: 'base' })
+            );
+            
+            for (const project of sortedProjects) {
                 // Create a project node with no children initially
                 // Add project identity data to allow lazy loading on expand
                 const projectNode = new TreeNode(
