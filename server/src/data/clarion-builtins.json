@@ -3,6 +3,102 @@
   "description": "Clarion built-in function definitions for signature help and IntelliSense",
   "functions": [
     {
+      "name": "ABS",
+      "signatures": [
+        {
+          "params": [
+            { "name": "expression", "optional": false }
+          ],
+          "returnType": "REAL or DECIMAL",
+          "description": "Returns the absolute value of an expression. The absolute value is always positive (or zero). Useful for calculating differences without regard to sign.",
+          "syntax": "ABS(expression)"
+        }
+      ]
+    },
+    {
+      "name": "ACCEPTED",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "SIGNED",
+          "description": "Returns the field number of the control that triggered an EVENT:Accepted event. Returns 0 for all other events. Field numbers are assigned by compiler in declaration order. Used in CASE statements to process post-edit code for specific controls.",
+          "syntax": "ACCEPTED()"
+        }
+      ]
+    },
+    {
+      "name": "ALERT",
+      "signatures": [
+        {
+          "params": [
+            { "name": "first-keycode", "optional": true },
+            { "name": "last-keycode", "optional": true }
+          ],
+          "returnType": "",
+          "description": "Specifies keys that generate field-independent events (EVENT:PreAlertKey and EVENT:AlertKey). Can specify single key or range. ALERT() with no parameters clears all alert keys. Use CYCLE in EVENT:PreAlertKey to allow default action, omit CYCLE to shortstop it.",
+          "syntax": "ALERT([first-keycode] [,last-keycode])"
+        }
+      ]
+    },
+    {
+      "name": "BUFFER",
+      "signatures": [
+        {
+          "params": [
+            { "name": "entity", "optional": false },
+            { "name": "pagesize", "optional": true },
+            { "name": "behind", "optional": true },
+            { "name": "ahead", "optional": true },
+            { "name": "timeout", "optional": true }
+          ],
+          "returnType": "",
+          "description": "Specifies automatic record set buffering for FILE or VIEW. Pagesize sets records per fetch (default 1). Behind saves pages already read. Ahead reads additional pages asynchronously. Timeout sets cache validity in seconds. Dramatically improves browse performance and reduces network traffic in Client/Server environments.",
+          "syntax": "BUFFER(entity [,pagesize] [,behind] [,ahead] [,timeout])"
+        }
+      ]
+    },
+    {
+      "name": "BYTES",
+      "signatures": [
+        {
+          "params": [
+            { "name": "file", "optional": false }
+          ],
+          "returnType": "LONG",
+          "description": "After OPEN: returns file size in bytes. After GET/NEXT/PREVIOUS/ADD/PUT: returns bytes in last record accessed. Useful for variable length records. For SQL tables, returns row count before open, record buffer size after. Files >2GB return negative value; assign to ULONG for correct positive value.",
+          "syntax": "BYTES(file)"
+        }
+      ]
+    },
+    {
+      "name": "CENTER",
+      "signatures": [
+        {
+          "params": [
+            { "name": "string", "optional": false },
+            { "name": "length", "optional": true }
+          ],
+          "returnType": "STRING",
+          "description": "Removes leading and trailing spaces from string, then centers it within specified length by padding with spaces. If length omitted, uses string's declared length. Returns centered string.",
+          "syntax": "CENTER(string [,length])"
+        }
+      ]
+    },
+    {
+      "name": "CHANGE",
+      "signatures": [
+        {
+          "params": [
+            { "name": "control", "optional": false },
+            { "name": "value", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Changes the value displayed in a control. Updates the control's USE variable, clears all pending events, and displays the new value. Use field equate (?FieldName) to specify control.",
+          "syntax": "CHANGE(control, value)"
+        }
+      ]
+    },
+    {
       "name": "CHOOSE",
       "signatures": [
         {
@@ -339,6 +435,20 @@
           "params": ["QUEUE queue", "LONG position"],
           "returnType": "",
           "description": "Retrieves a queue entry at the specified position (1-based) into the queue structure fields."
+        }
+      ]
+    },
+    {
+      "name": "DEFORMAT",
+      "signatures": [
+        {
+          "params": [
+            { "name": "string", "optional": false },
+            { "name": "picture", "optional": true }
+          ],
+          "returnType": "STRING",
+          "description": "Removes formatting characters from a numeric string, returning only the numbers. If picture omitted, uses string's declared picture or returns only valid numeric characters. For date/time pictures, returns Clarion Standard Date/Time. Example: DEFORMAT('$1,234.56') returns '1234.56'.",
+          "syntax": "DEFORMAT(string [,picture])"
         }
       ]
     },
@@ -1228,6 +1338,19 @@
       ]
     },
     {
+      "name": "NUMERIC",
+      "signatures": [
+        {
+          "params": [
+            { "name": "string", "optional": false }
+          ],
+          "returnType": "UNSIGNED",
+          "description": "Returns 1 (true) if string contains only valid numeric characters (0-9, E, leading minus, decimal point), otherwise returns 0 (false). Accepts REAL format (e.g., '1.23E-4'). Use DEFORMAT to remove formatting before testing. Example: NUMERIC('1234.56') returns 1, NUMERIC('1,234.56') returns 0.",
+          "syntax": "NUMERIC(string)"
+        }
+      ]
+    },
+    {
       "name": "NULL",
       "signatures": [
         {
@@ -1259,6 +1382,17 @@
           "returnType": "LONG",
           "description": "Returns operating system date as standard date. Standard date is number of days since December 28, 1800. Range: January 1, 1801 (standard date 4) to December 31, 2099 (standard date 109,211).",
           "syntax": "TODAY()"
+        }
+      ]
+    },
+    {
+      "name": "DATE",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "LONG",
+          "description": "Four-byte date data type. Stores year (1-9999), month (1-12), and day (1-31) in packed format. Used for date calculations and comparisons. See also TODAY() for current date.",
+          "syntax": "DATE"
         }
       ]
     },
