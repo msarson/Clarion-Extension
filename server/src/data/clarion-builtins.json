@@ -27,6 +27,19 @@
       ]
     },
     {
+      "name": "ACOS",
+      "signatures": [
+        {
+          "params": [
+            { "name": "expression", "optional": false }
+          ],
+          "returnType": "REAL",
+          "description": "Returns the inverse cosine (arccosine). The inverse of a cosine is the angle that produces the cosine. Return value is angle in radians. Used for trigonometric calculations. There are 2π radians (360 degrees) in a circle.",
+          "syntax": "ACOS(expression)"
+        }
+      ]
+    },
+    {
       "name": "ALERT",
       "signatures": [
         {
@@ -143,6 +156,19 @@
       ]
     },
     {
+      "name": "TAN",
+      "signatures": [
+        {
+          "params": [
+            { "name": "radians", "optional": false }
+          ],
+          "returnType": "REAL",
+          "description": "Returns the trigonometric tangent of an angle measured in radians. The tangent is the ratio of the angle's opposite side divided by its adjacent side. Convert degrees to radians by multiplying by 0.0174532925199 (Deg2Rad).",
+          "syntax": "TAN(radians)"
+        }
+      ]
+    },
+    {
       "name": "SUB",
       "signatures": [
         {
@@ -231,6 +257,20 @@
       ]
     },
     {
+      "name": "RANDOM",
+      "signatures": [
+        {
+          "params": [
+            { "name": "low", "optional": false },
+            { "name": "high", "optional": false }
+          ],
+          "returnType": "LONG",
+          "description": "Returns a random integer between low and high values, inclusively. Only integer portion of parameters is used for the range. Useful for simulations, games, and random sampling. Example: RANDOM(1,49) returns random number 1-49 inclusive.",
+          "syntax": "RANDOM(low, high)"
+        }
+      ]
+    },
+    {
       "name": "RECORDS",
       "signatures": [
         {
@@ -261,12 +301,36 @@
       ]
     },
     {
+      "name": "COS",
+      "signatures": [
+        {
+          "params": [
+            { "name": "radians", "optional": false }
+          ],
+          "returnType": "REAL",
+          "description": "Returns the trigonometric cosine of an angle measured in radians. The cosine is the ratio of the angle's adjacent side divided by the hypotenuse. Convert degrees to radians by multiplying by 0.0174532925199 (Deg2Rad).",
+          "syntax": "COS(radians)"
+        }
+      ]
+    },
+    {
       "name": "COPY",
       "signatures": [
         {
           "params": ["STRING source", "STRING destination"],
           "returnType": "",
           "description": "Copies a file from source path to destination path. Overwrites destination if it exists. Check ERRORCODE() to verify success."
+        }
+      ]
+    },
+    {
+      "name": "REJECTCODE",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "SIGNED",
+          "description": "Returns the code number for the reason any EVENT:Rejected was posted. Returns zero if no EVENT:Rejected was posted. Use equates from EQUATES.CLW: REJECT:RangeHigh, REJECT:RangeLow, REJECT:Range, REJECT:Invalid. Used to determine why input was rejected.",
+          "syntax": "REJECTCODE()"
         }
       ]
     },
@@ -814,6 +878,19 @@
       ]
     },
     {
+      "name": "SIN",
+      "signatures": [
+        {
+          "params": [
+            { "name": "radians", "optional": false }
+          ],
+          "returnType": "REAL",
+          "description": "Returns the trigonometric sine of an angle measured in radians. The sine is the ratio of the angle's opposite side divided by the hypotenuse. Convert degrees to radians by multiplying by 0.0174532925199 (Deg2Rad).",
+          "syntax": "SIN(radians)"
+        }
+      ]
+    },
+    {
       "name": "SIZE",
       "signatures": [
         {
@@ -864,6 +941,21 @@
           ],
           "returnType": "reference",
           "description": "Allocates heap memory for a new instance of the specified data type. Used on source side of reference assignment (reference &= NEW(datatype)). Memory is automatically initialized to blank/zero and must be explicitly de-allocated with DISPOSE to prevent memory leaks. Parentheses around datatype are optional."
+        }
+      ]
+    },
+    {
+      "name": "DIRECTORY",
+      "signatures": [
+        {
+          "params": [
+            { "name": "queue", "optional": false },
+            { "name": "path", "optional": false },
+            { "name": "attributes", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Gets a file directory listing into specified queue. Queue must have structure starting with name, date, time, size, attrib fields (see EQUATES.CLW for ff_:queue or FILE:queue). Path supports wildcards (* and ?). Attributes specify file types to include. Like DOS DIR command.",
+          "syntax": "DIRECTORY(queue, path, attributes)"
         }
       ]
     },
@@ -923,6 +1015,19 @@
           ],
           "returnType": "",
           "description": "Terminates PROGRAM or PROCEDURE and returns control to caller. Expression required for procedures returning values (may be NULL for reference returns). Automatically closes local APPLICATION/WINDOW/REPORT/VIEW/QUEUE structures. Implicit RETURN occurs at end if not specified. Closes program and files when used in PROGRAM."
+        }
+      ]
+    },
+    {
+      "name": "DUPLICATE",
+      "signatures": [
+        {
+          "params": [
+            { "name": "key", "optional": false }
+          ],
+          "returnType": "LONG",
+          "description": "Checks for duplicate entries in a unique key. Returns 0 if no duplicate, non-zero if duplicate exists. Used after ADD or PUT operations to detect uniqueness violations. Can test specific KEY or entire FILE.",
+          "syntax": "DUPLICATE(key) or DUPLICATE(file)"
         }
       ]
     },
@@ -1019,6 +1124,19 @@
       ]
     },
     {
+      "name": "ATAN",
+      "signatures": [
+        {
+          "params": [
+            { "name": "expression", "optional": false }
+          ],
+          "returnType": "REAL",
+          "description": "Returns the inverse tangent (arctangent). The inverse of a tangent is the angle that produces the tangent. Return value is angle in radians. Used for trigonometric calculations. There are 2π radians (360 degrees) in a circle.",
+          "syntax": "ATAN(expression)"
+        }
+      ]
+    },
+    {
       "name": "BAND",
       "signatures": [
         {
@@ -1106,6 +1224,19 @@
           "returnType": "",
           "description": "Terminates a data declaration structure (GROUP, CLASS, FILE, RECORD, etc.) or compound executable statement (IF, LOOP, CASE, ACCEPT, etc.). Functionally equivalent to period (.). By convention, END aligns with structure start and is used for multi-line structures. Multiple periods on one line can replace multiple END statements.",
           "syntax": "END"
+        }
+      ]
+    },
+    {
+      "name": "ASIN",
+      "signatures": [
+        {
+          "params": [
+            { "name": "expression", "optional": false }
+          ],
+          "returnType": "REAL",
+          "description": "Returns the inverse sine (arcsine). The inverse of a sine is the angle that produces the sine. Return value is angle in radians. Used for trigonometric calculations. There are 2π radians (360 degrees) in a circle.",
+          "syntax": "ASIN(expression)"
         }
       ]
     },
