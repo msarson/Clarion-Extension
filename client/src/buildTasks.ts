@@ -369,6 +369,10 @@ export function prepareBuildParameters(buildConfig: {
  * Executes the build task and processes results
  * Enhanced with additional logging
  */
+/**
+ * Executes the build task and processes results
+ * Enhanced with additional logging
+ */
 export async function executeBuildTask(params: {
     solutionDir: string;
     msBuildPath: string;
@@ -406,15 +410,26 @@ export async function executeBuildTask(params: {
 
         window.showInformationMessage(buildTypeMessage);
 
-        // Pass the target info (and diagnostics) to the completion handler
-        const disposable = setupBuildCompletionHandler(
-            buildLogPath,
-            buildTarget,
-            targetName,
-            diagnosticCollection   // ✅ pass through
-        );
-
-        await tasks.executeTask(task);
+        // Execute the task and wait for it to complete
+        const taskExecution = await tasks.executeTask(task);
+        
+        // Set up a handler for THIS SPECIFIC task execution (not all tasks with the same name)
+        const disposable = tasks.onDidEndTaskProcess((event: TaskProcessEndEvent) => {
+            if (event.execution === taskExecution) {
+                // Dispose the handler immediately since we only care about this one execution
+                disposable.dispose();
+                
+                // Process the completion with the correct targetName
+                processTaskCompletion(
+                    event,
+                    buildLogPath,
+                    buildTarget,
+                    targetName,
+                    diagnosticCollection
+                );
+            }
+        });
+        
     } catch (error) {
         window.showErrorMessage("❌ Failed to start Clarion build task.");
         logger.error("❌ Clarion Build Task Error:", error);
@@ -467,29 +482,6 @@ function createBuildTask(execution: ShellExecution): Task {
 
     return task;
 }
-
-/**
- * Sets up the handler for build completion
- */
-function setupBuildCompletionHandler(
-    buildLogPath: string,
-    buildTarget: "Solution" | "Project",
-    targetName: string,
-    diagnosticCollection: DiagnosticCollection   // ✅ add
-) {
-    return tasks.onDidEndTaskProcess((event: TaskProcessEndEvent) => {
-        if (event.execution.task.name === "Clarion Build") {
-            processTaskCompletion(
-                event,
-                buildLogPath,
-                buildTarget,
-                targetName,
-                diagnosticCollection   // ✅ pass through
-            );
-        }
-    });
-}
-
 
 /**
  * Processes the task completion, reads log file, and shows results
