@@ -147,12 +147,26 @@ export class LocationProvider {
 
         for (let lineIndex = 0; lineIndex < document.lineCount; lineIndex++) {
             const line = document.lineAt(lineIndex).text;
+            
+            // Skip commented lines (lines starting with ! after whitespace)
+            const trimmedLine = line.trim();
+            if (trimmedLine.startsWith('!')) {
+                logger.info(`Skipping commented line ${lineIndex}: ${trimmedLine}`);
+                continue;
+            }
 
             // Reset the pattern's lastIndex to ensure we start from the beginning of each line
             pattern.lastIndex = 0;
 
             let match: RegExpExecArray | null;
             while ((match = pattern.exec(line)) !== null) {
+                // Check if the match is inside a comment (after ! on the same line)
+                const commentIndex = line.indexOf('!');
+                if (commentIndex !== -1 && match.index > commentIndex) {
+                    logger.info(`Skipping match inside comment at line ${lineIndex}: ${match[0]}`);
+                    continue;
+                }
+                
                 logger.info(`Found match at line ${lineIndex}: ${match[0]}`);
                 const customMatch: CustomRegExpMatch = { ...match, lineIndex } as CustomRegExpMatch;
                 matches.push(customMatch);
