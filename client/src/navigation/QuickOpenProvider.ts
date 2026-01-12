@@ -7,7 +7,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("QuickOpenProvider");
-logger.setLevel("info");
+logger.setLevel("error");
 
 /**
  * Shows a quick picker to open Clarion files from the solution

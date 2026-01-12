@@ -6,7 +6,7 @@ import LoggerManager from "../logger";
 import { serverSettings } from "../serverSettings";
 
 const logger = LoggerManager.getLogger("RedirectionParserServer");
-logger.setLevel("info");
+logger.setLevel("error");
 
 /**
  * Represents the source of a resolved file path
