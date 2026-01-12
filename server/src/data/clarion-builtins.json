@@ -235,6 +235,39 @@
       ]
     },
     {
+      "name": "FILEDIALOG",
+      "signatures": [
+        {
+          "params": [
+            { "name": "title", "optional": true },
+            { "name": "file", "optional": false },
+            { "name": "extensions", "optional": true },
+            { "name": "flag", "optional": true }
+          ],
+          "returnType": "STRING",
+          "description": "Displays Windows standard file choice dialog (Open or Save). Returns selected filename in file parameter. Extensions format: 'Description|*.ext|Description2|*.ext2' (pipe-delimited). Flag bitmap: bit 0=0 for Open dialog, bit 0=1 for Save dialog, bit 1=1 saves/restores current directory. Returns file parameter value or empty on cancel.",
+          "syntax": "FILEDIALOG([title], file [,extensions] [,flag])"
+        }
+      ]
+    },
+    {
+      "name": "FILEDIALOGA",
+      "signatures": [
+        {
+          "params": [
+            { "name": "title", "optional": true },
+            { "name": "file", "optional": false },
+            { "name": "extensions", "optional": true },
+            { "name": "flag", "optional": true },
+            { "name": "index", "optional": true }
+          ],
+          "returnType": "STRING",
+          "description": "Extended file dialog with multi-select support. Similar to FILEDIALOG but with index parameter to select default extension by index number. Flag bitmap supports additional options including multiple file selection. Returns selected filename(s) in file parameter. For multiple files, use '|' as delimiter.",
+          "syntax": "FILEDIALOGA([title], file [,extensions] [,flag] [,index])"
+        }
+      ]
+    },
+    {
       "name": "ADD",
       "signatures": [
         {
@@ -1363,6 +1396,21 @@
           "returnType": "",
           "description": "Suspends program execution and displays message window. Offers option to continue or exit. On exit, closes all files and frees memory. Used for debugging and error handling. Message can be up to 64K.",
           "syntax": "STOP([message])"
+        }
+      ]
+    },
+    {
+      "name": "START",
+      "signatures": [
+        {
+          "params": [
+            { "name": "procedure", "optional": false },
+            { "name": "stack", "optional": true },
+            { "name": "passed value", "optional": true }
+          ],
+          "returnType": "SIGNED",
+          "description": "Begins a new execution thread, calling the procedure and returning the thread number (minimum 2). Procedure may not be overloaded. Can pass up to three STRING or GROUP parameters by value. Stack defaults to 20,000 bytes if omitted. Returns 0 on failure (out of memory or system modal). Code continues immediately after START until ACCEPT is executed.",
+          "syntax": "START(procedure [,stack] [,passed value])"
         }
       ]
     },
