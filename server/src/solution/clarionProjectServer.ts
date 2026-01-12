@@ -400,6 +400,12 @@ export class ClarionProjectServer {
                 
                 for (const p of entry.paths) {
                     const resolvedPath = path.isAbsolute(p) ? p : path.resolve(this.path, p);
+                    
+                    // Debug logging for dot paths
+                    if (p === '.' || p === '.\\' || p === './') {
+                        logger.info(`🔍 Resolving '${p}' for project ${this.name}: ${this.path} → ${resolvedPath}`);
+                    }
+                    
                     pathSet.add(resolvedPath);
                 }
             }

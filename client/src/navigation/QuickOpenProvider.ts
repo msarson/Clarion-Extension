@@ -118,6 +118,20 @@ export async function showClarionQuickOpen(): Promise<void> {
             // Use manual recursive listing for all paths to ensure we only scan the specific directory
             // workspace.findFiles() can scan outside the intended path if workspace root differs
             logger.info(`📌 Scanning redirection path: ${searchPath}`);
+            
+            // Safety check: Don't scan root drives or parent directories
+            if (searchPath === 'C:\\' || searchPath === 'D:\\' || searchPath.match(/^[A-Z]:\\$/)) {
+                logger.warn(`⚠️ Skipping root drive scan: ${searchPath}`);
+                continue;
+            }
+            
+            // Safety check: Don't scan if path goes above solution directory
+            const solutionDir = path.dirname(solutionInfo.path);
+            if (!searchPath.startsWith(solutionDir) && !path.isAbsolute(searchPath)) {
+                logger.warn(`⚠️ Skipping path outside solution: ${searchPath}`);
+                continue;
+            }
+            
             const externalFiles = listFilesRecursively(searchPath);
 
             for (const filePath of externalFiles) {
