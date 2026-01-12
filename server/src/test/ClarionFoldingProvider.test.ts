@@ -411,15 +411,11 @@ ThisWindow.Kill PROCEDURE()
             const tokenizer = new ClarionTokenizer(code);
             const tokens = tokenizer.tokenize();
             
-            // Debug: log WINDOW token
-            const windowToken = tokens.find(t => t.value.toUpperCase() === 'WINDOW' && t.type === 16); // TokenType.Structure = 16
-            console.log(`\n=== WINDOW Token Debug ===`);
-            if (windowToken) {
-                console.log(`  Found WINDOW: line ${windowToken.line}, subType: ${windowToken.subType}, finishesAt: ${windowToken.finishesAt}`);
-                console.log(`  isSingleLineWithContinuation: ${windowToken.isSingleLineWithContinuation}`);
-            } else {
-                console.log(`  WINDOW token NOT FOUND!`);
-            }
+            // Debug: log all structure tokens (type 16 = TokenType.Structure)
+            console.log(`\n=== All Structure/Foldable Tokens ===`);
+            tokens.filter(t => t.type === 16 || t.subType === 16).forEach(t => {
+                console.log(`  ${t.value}: line ${t.line}, type: ${t.type}, subType: ${t.subType}, finishesAt: ${t.finishesAt}`);
+            });
             
             const provider = new ClarionFoldingProvider(tokens);
             
