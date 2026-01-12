@@ -119,7 +119,16 @@ Productivity features to write code faster.
 
 ## 🆕 What's New
 
-### Latest: v0.8.6 (2026-01-12)
+### Latest: v0.8.7 (In Development)
+
+**Coming Soon:**
+- New features and improvements in progress
+
+**[See full changelog →](CHANGELOG.md)**
+
+---
+
+### Recent: v0.8.6 (2026-01-12)
 
 #### 🚀 Cross-Project Navigation Performance
 - **50-70% faster Ctrl+F12** - CrossFileCache reduces subsequent navigations to <100ms

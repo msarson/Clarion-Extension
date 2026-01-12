@@ -6,6 +6,16 @@ All notable changes to the Clarion Extension are documented here.
 
 ## Recent Versions
 
+### [0.8.7] - TBD
+**In Development**
+
+**Planned/In Progress:**
+- TBD
+
+[**→ Full details**](docs/changelogs/CHANGELOG-0.8.7.md)
+
+---
+
 ### [0.8.6] - 2026-01-12
 **Cross-Project Navigation & Solution View Enhancements**
 
