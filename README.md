@@ -119,8 +119,32 @@ Productivity features to write code faster.
 
 ## 🆕 What's New
 
-### Latest: v0.8.6 (In Development)
-Stay tuned for upcoming improvements!
+### Latest: v0.8.6 (2026-01-12)
+
+#### 🚀 Cross-Project Navigation Performance
+- **50-70% faster Ctrl+F12** - CrossFileCache reduces subsequent navigations to <100ms
+- First navigation: 2-4 seconds (reads + caches file)
+- Subsequent navigations: **<100ms** (cache hits)
+
+#### 🎯 Routine Support Enhancements
+- **Full namespace prefix support** - `DO DumpQue::SaveQState` now works with hover and Ctrl+F12
+- New RoutineHoverResolver with code preview
+- Added `DO_ROUTINE` and `ROUTINE_LABEL` patterns
+
+#### 🏗️ Solution View Enhancements
+- **Dependency-aware build order** - Projects build in correct dependency order
+- **Application sort toggle** - Switch between Solution Order and Build Order
+- **Build progress indicators** - Spinning icon, build counter (e.g., "Building 2/5")
+- **Batch UpperPark commands** - Import/Export/Show All Differences
+- **New context menu commands** - Build Project, Generate + Build, Copy Path, Open in Clarion IDE
+- **Generate All/Build All** - Build multiple applications in dependency order
+
+#### 🐛 Navigation & Hover Fixes
+- FUNCTION declarations now work with Ctrl+F12 (cross-project)
+- Procedures without parameters show correct hover info
+- Methods named like keywords (e.g., MESSAGE) show method info instead of keyword help
+
+**[See full changelog →](CHANGELOG.md)**
 
 ### Recent: v0.8.5 (2026-01-09)
 
