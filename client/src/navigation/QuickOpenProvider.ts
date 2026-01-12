@@ -115,41 +115,22 @@ export async function showClarionQuickOpen(): Promise<void> {
 
     for (const searchPath of uniqueSearchPaths) {
         try {
-            if (workspace.rootPath && searchPath.startsWith(workspace.rootPath)) {
-                // If the path is inside the workspace, use VS Code's findFiles
-                const files = await workspace.findFiles(`${searchPath}/**/*.*`);
+            // Use manual recursive listing for all paths to ensure we only scan the specific directory
+            // workspace.findFiles() can scan outside the intended path if workspace root differs
+            logger.info(`📌 Scanning redirection path: ${searchPath}`);
+            const externalFiles = listFilesRecursively(searchPath);
 
-                for (const file of files) {
-                    const filePath = file.fsPath;
-                    const ext = path.extname(filePath).toLowerCase();
+            for (const filePath of externalFiles) {
+                const ext = path.extname(filePath).toLowerCase();
 
-                    const baseName = path.basename(filePath).toLowerCase();
-                    if (allowedExtensions.includes(ext) && !seenFiles.has(filePath) && !seenBaseNames.has(baseName)) {
-                        seenFiles.add(filePath);
-                        redirectionFiles.push({
-                            label: getIconForFile(filePath) + " " + path.basename(filePath),
-                            description: `Redirection: ${path.relative(searchPath, path.dirname(filePath))}`,
-                            path: filePath
-                        });
-                    }
-                }
-            } else {
-                // If the path is outside the workspace, use recursive file listing
-                logger.info(`📌 Searching manually outside workspace: ${searchPath}`);
-                const externalFiles = listFilesRecursively(searchPath);
-
-                for (const filePath of externalFiles) {
-                    const ext = path.extname(filePath).toLowerCase();
-
-                    const baseName = path.basename(filePath).toLowerCase();
-                    if (allowedExtensions.includes(ext) && !seenFiles.has(filePath) && !seenBaseNames.has(baseName)) {
-                        seenFiles.add(filePath);
-                        redirectionFiles.push({
-                            label: getIconForFile(filePath) + " " + path.basename(filePath),
-                            description: `Redirection: ${path.relative(searchPath, path.dirname(filePath))}`,
-                            path: filePath
-                        });
-                    }
+                const baseName = path.basename(filePath).toLowerCase();
+                if (allowedExtensions.includes(ext) && !seenFiles.has(filePath) && !seenBaseNames.has(baseName)) {
+                    seenFiles.add(filePath);
+                    redirectionFiles.push({
+                        label: getIconForFile(filePath) + " " + path.basename(filePath),
+                        description: `Redirection: ${path.relative(searchPath, path.dirname(filePath))}`,
+                        path: filePath
+                    });
                 }
             }
         } catch (error) {
