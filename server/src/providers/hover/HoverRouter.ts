@@ -4,6 +4,7 @@ import { ProcedureHoverResolver } from './ProcedureHoverResolver';
 import { MethodHoverResolver } from './MethodHoverResolver';
 import { VariableHoverResolver } from './VariableHoverResolver';
 import { SymbolHoverResolver } from './SymbolHoverResolver';
+import { RoutineHoverResolver } from './RoutineHoverResolver';
 import { ContextualHoverHandler } from './ContextualHoverHandler';
 import { BuiltinFunctionService } from '../../utils/BuiltinFunctionService';
 import { AttributeService } from '../../utils/AttributeService';
@@ -26,6 +27,7 @@ export class HoverRouter {
         private methodResolver: MethodHoverResolver,
         private variableResolver: VariableHoverResolver,
         private symbolResolver: SymbolHoverResolver,
+        private routineResolver: RoutineHoverResolver,
         private contextHandler: ContextualHoverHandler,
         private formatter: HoverFormatter
     ) {}
@@ -40,39 +42,45 @@ export class HoverRouter {
         const keywordHover = this.handleSpecialKeywords(context);
         if (keywordHover) return keywordHover;
 
-        // 2. Handle procedure calls
+        // 2. Handle routine references (DO statements) - check early to handle namespace prefixes
+        const routineHover = await this.routineResolver.resolveRoutineReference(document, position, line);
+        if (routineHover) return routineHover;
+
+        // 3. Handle procedure calls
         const procedureCallHover = await this.procedureResolver.resolveProcedureCall(word, document, position, wordRange, line);
         if (procedureCallHover) return procedureCallHover;
 
-        // 3. Handle data types and controls
-        const symbolHover = this.symbolResolver.resolve(word, { hasLabelBefore, isInWindowContext });
-        if (symbolHover) return symbolHover;
-
-        // 4. Handle attributes
-        const attributeHover = this.handleAttribute(word, line, wordRange, document);
-        if (attributeHover) return attributeHover;
-
-        // 5. Handle built-in functions
-        const builtinHover = this.handleBuiltin(word, line, wordRange, document, position);
-        if (builtinHover) return builtinHover;
-
-        // 6. Handle method implementations
+        // 4. Handle method implementations (BEFORE built-ins to handle methods named like keywords)
         const methodImplHover = await this.methodResolver.resolveMethodImplementation(document, position, line);
         if (methodImplHover) return methodImplHover;
 
-        // 7. Handle procedure implementations
+        // 5. Handle procedure implementations
         const procImplHover = await this.procedureResolver.resolveProcedureImplementation(document, position, line, documentStructure);
         if (procImplHover) return procImplHover;
 
-        // 8. Handle MAP declarations
+        // 6. Handle MAP declarations (check BEFORE method declarations to avoid confusion)
         const mapDeclHover = await this.procedureResolver.resolveMapDeclaration(document, position, line, documentStructure);
         if (mapDeclHover) return mapDeclHover;
 
-        // 9. Handle method declarations
-        const methodDeclHover = await this.methodResolver.resolveMethodDeclaration(document, position, line);
-        if (methodDeclHover) return methodDeclHover;
+        // 7. Handle method declarations (BEFORE built-ins to avoid shadowing by keyword help)
+        if (!isInMapBlock) { // Skip if in MAP/MODULE block to prevent misidentification
+            const methodDeclHover = await this.methodResolver.resolveMethodDeclaration(document, position, line);
+            if (methodDeclHover) return methodDeclHover;
+        }
 
-        // 10. Variables handled by downstream logic (structure access, self.member, local/global vars)
+        // 8. Handle data types and controls
+        const symbolHover = this.symbolResolver.resolve(word, { hasLabelBefore, isInWindowContext });
+        if (symbolHover) return symbolHover;
+
+        // 9. Handle attributes
+        const attributeHover = this.handleAttribute(word, line, wordRange, document);
+        if (attributeHover) return attributeHover;
+
+        // 10. Handle built-in functions (AFTER method declarations to avoid shadowing)
+        const builtinHover = this.handleBuiltin(word, line, wordRange, document, position);
+        if (builtinHover) return builtinHover;
+
+        // 11. Variables handled by downstream logic (structure access, self.member, local/global vars)
         return null; // Let calling code handle variable resolution
     }
 
