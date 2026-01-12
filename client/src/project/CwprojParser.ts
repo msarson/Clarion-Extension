@@ -280,7 +280,9 @@ export class CwprojParser {
         
         while ((itemMatch = itemRegex.exec(itemGroupContent)) !== null) {
             const itemType = itemMatch[1].toLowerCase(); // e.g., "compile", "none", "content"
-            const includePath = itemMatch[2];
+            // Decode URL-encoded characters (e.g., %24 -> $, %20 -> space)
+            // MSBuild/XML uses URL encoding for special characters in file names
+            const includePath = decodeURIComponent(itemMatch[2]);
             
             // Only process Compile items - skip other item types
             if (itemType !== 'compile' && itemType !== 'clwfile') {

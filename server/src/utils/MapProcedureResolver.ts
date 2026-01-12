@@ -20,11 +20,13 @@ logger.setLevel("error");
 
 export class MapProcedureResolver {
     private scopeAnalyzer: ScopeAnalyzer;
+    private crossFileCache?: any; // CrossFileCache type (optional to avoid circular dependency)
 
-    constructor() {
+    constructor(crossFileCache?: any) {
         const tokenCache = TokenCache.getInstance();
         const solutionManager = SolutionManager.getInstance();
         this.scopeAnalyzer = new ScopeAnalyzer(tokenCache, solutionManager);
+        this.crossFileCache = crossFileCache;
     }
 
     /**
@@ -708,7 +710,19 @@ export class MapProcedureResolver {
             
             // At this point, resolvedPath points to a source CLW file
             logger.debug(`📖 Loading source file: ${resolvedPath}`);
-            const content = fs.readFileSync(resolvedPath, 'utf8');
+            
+            // Use cache if available, otherwise read from disk
+            let content: string;
+            if (this.crossFileCache) {
+                const cached = await this.crossFileCache.getOrLoadDocument(resolvedPath);
+                if (cached) {
+                    content = cached.document.getText();
+                } else {
+                    content = fs.readFileSync(resolvedPath, 'utf8');
+                }
+            } else {
+                content = fs.readFileSync(resolvedPath, 'utf8');
+            }
             
             // 🚀 PERFORMANCE: Try fast extraction first - only tokenize the MODULE block we need
             const extracted = this.extractModuleBlockForProcedure(content, procName);

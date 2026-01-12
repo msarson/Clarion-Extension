@@ -9,7 +9,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 
 
 const logger = LoggerManager.getLogger("ClarionProjectServer");
-logger.setLevel("error"); // Production: Only log errors
+logger.setLevel("error");// Production: Only log errors
 
 export class ClarionProjectServer {
     sourceFiles: ClarionSourcerFileServer[] = [];
@@ -209,19 +209,19 @@ export class ClarionProjectServer {
                             
                             if (file) {
                                 if (typeof file === 'string') {
-                                    // If file is directly a string
-                                    fileName = file;
+                                    // If file is directly a string - decode URL encoding
+                                    fileName = decodeURIComponent(file);
                                     logger.info(`📄 File name extracted (string): ${fileName}`);
                                 } else if (typeof file === 'object') {
                                     // Try multiple possible formats based on how xml2js might parse it
                                     if (file.include) {
-                                        fileName = file.include;
+                                        fileName = decodeURIComponent(file.include);
                                         logger.info(`📄 File name extracted (include): ${fileName}`);
                                     } else if (file.$ && file.$.include) {
-                                        fileName = file.$.include;
+                                        fileName = decodeURIComponent(file.$.include);
                                         logger.info(`📄 File name extracted ($.include): ${fileName}`);
                                     } else if (file.Include) {
-                                        fileName = file.Include;
+                                        fileName = decodeURIComponent(file.Include);
                                         logger.info(`📄 File name extracted (Include): ${fileName}`);
                                     } else {
                                         // Log all keys to help diagnose the structure
@@ -234,7 +234,7 @@ export class ClarionProjectServer {
                                                 (key.toLowerCase().includes('include') ||
                                                  file[key].toLowerCase().endsWith('.clw') ||
                                                  file[key].toLowerCase().endsWith('.inc'))) {
-                                                fileName = file[key];
+                                                fileName = decodeURIComponent(file[key]);
                                                 logger.info(`📄 File name extracted (key: ${key}): ${fileName}`);
                                                 break;
                                             }
@@ -389,9 +389,9 @@ export class ClarionProjectServer {
         // Use a Set to avoid duplicates from the beginning
         const pathSet = new Set<string>();
         
-        // Add the project path and its parent directory first (they're always included)
+        // Add the project path first (always included)
         pathSet.add(this.path);
-        pathSet.add(path.dirname(this.path));
+        // Note: Parent directory NOT automatically included - only paths from redirection file
         
         // Process matching entries
         for (const entry of matchingEntries) {
@@ -400,6 +400,12 @@ export class ClarionProjectServer {
                 
                 for (const p of entry.paths) {
                     const resolvedPath = path.isAbsolute(p) ? p : path.resolve(this.path, p);
+                    
+                    // Debug logging for dot paths
+                    if (p === '.' || p === '.\\' || p === './') {
+                        logger.info(`🔍 Resolving '${p}' for project ${this.name}: ${this.path} → ${resolvedPath}`);
+                    }
+                    
                     pathSet.add(resolvedPath);
                 }
             }

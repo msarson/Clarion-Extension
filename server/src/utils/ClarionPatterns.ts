@@ -57,15 +57,17 @@ export class ClarionPatterns {
     
     /**
      * Matches a procedure declaration in a MAP block
-     * Handles both formats:
+     * Handles both formats with and without parameters:
      * - MyProc(params)                         [indented, no PROCEDURE/FUNCTION keyword]
      * - MyProc    PROCEDURE(params)            [column 0, with PROCEDURE keyword]
      * - MyProc    FUNCTION(params)             [column 0, with FUNCTION keyword]
+     * - MyProc    PROCEDURE                    [column 0, no parameters]
+     * - MyProc    FUNCTION                     [column 0, no parameters]
      * 
      * Capture groups:
      * [1] = Procedure name
      */
-    public static readonly MAP_PROCEDURE_DECLARATION = /^\s*(\w+)\s*(?:(?:PROCEDURE|FUNCTION)\s*)?\(/i;
+    public static readonly MAP_PROCEDURE_DECLARATION = /^\s*(\w+)(?:\s*\(|\s+(?:PROCEDURE|FUNCTION)\b)/i;
     
     /**
      * Matches a standalone procedure implementation
@@ -104,6 +106,34 @@ export class ClarionPatterns {
      * [1] = Parameter list
      */
     public static readonly PROCEDURE_WITH_PARAMS = /(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i;
+    
+    // ===================================================================
+    // ROUTINE PATTERNS
+    // ===================================================================
+    
+    /**
+     * Matches a routine label (supports namespace prefixes with : or ::)
+     * Examples:
+     * - SimpleRoutine
+     * - Namespace:RoutineName
+     * - Module::RoutineName
+     * 
+     * Capture groups:
+     * [1] = Full routine label (including prefix)
+     */
+    public static readonly ROUTINE_LABEL = /^([A-Za-z_][A-Za-z0-9_:]*)\s+ROUTINE/i;
+    
+    /**
+     * Matches DO statement with routine name (supports namespace prefixes)
+     * Examples:
+     * - DO SimpleRoutine
+     * - DO Namespace:RoutineName
+     * - DO Module::RoutineName
+     * 
+     * Capture groups:
+     * [1] = Full routine name (including prefix)
+     */
+    public static readonly DO_ROUTINE = /\bDO\s+([A-Za-z_][A-Za-z0-9_:]*)/i;
     
     // ===================================================================
     // CLASS PATTERNS
