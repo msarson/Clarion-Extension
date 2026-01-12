@@ -264,6 +264,14 @@ export class ClarionTokenizer {
                                     }
                                 }
                                 
+                                // ✅ FIX: Check if followed by colon (prefix notation like Queue:FileDrop)
+                                // If the structure keyword is immediately followed by ':', it's a prefix, not a structure
+                                const endPosition = position + match[0].length;
+                                if (endPosition < line.length && line[endPosition] === ':') {
+                                    logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at position ${position} - followed by ':' (prefix notation)`);
+                                    continue; // Try next structure pattern
+                                }
+                                
                                 // Check if inside parentheses or optional parameters
                                 if (isInsideParamsOrTemplate(position)) {
                                     logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at position ${position} - inside parameters or optional params`);
