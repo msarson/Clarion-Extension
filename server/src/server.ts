@@ -388,7 +388,7 @@ connection.onFoldingRanges((params: FoldingRangeParams) => {
         logger.perf('Folding: getTokens', { time_ms: tokenTime.toFixed(2), tokens: tokens.length });
         
         const foldStart = performance.now();
-        const foldingProvider = new ClarionFoldingProvider(tokens);
+        const foldingProvider = new ClarionFoldingProvider(tokens, document);
         const ranges = foldingProvider.computeFoldingRanges();
         const foldTime = performance.now() - foldStart;
         
