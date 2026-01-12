@@ -2,7 +2,7 @@
     "name": "clarion-extensions",
     "displayName": "Clarion Extensions",
     "description": "Extension for Clarion Language",
-    "version": "0.8.5",
+    "version": "0.8.6",
     "publisher": "msarson",
     "repository": {
         "type": "git",
@@ -369,8 +369,61 @@
                 "title": "Generate All Applications"
             },
             {
+                "command": "clarion.generateAllAppsThenBuildSolution",
+                "title": "Generate All/Build All"
+            },
+            {
+                "command": "clarion.buildAllProjects",
+                "title": "Build All"
+            },
+            {
                 "command": "clarion.generateApp",
                 "title": "Generate Application"
+            },
+            {
+                "command": "clarion.buildProjectFromApp",
+                "title": "Build Project"
+            },
+            {
+                "command": "clarion.generateAndBuildApp",
+                "title": "Generate + Build Project"
+            },
+            {
+                "command": "clarion.copyFilePath",
+                "title": "Copy File Path"
+            },
+            {
+                "command": "clarion.copyRelativePath",
+                "title": "Copy Relative Path"
+            },
+            {
+                "command": "clarion.openContainingFolder",
+                "title": "Open Containing Folder"
+            },
+            {
+                "command": "clarion.openInClarionIDE",
+                "title": "Open in Clarion IDE"
+            },
+            {
+                "command": "clarion.importAppFromTextForSolution",
+                "title": "Import App from Version Control"
+            },
+            {
+                "command": "clarion.exportAppToVersionControl",
+                "title": "Export App to Version Control"
+            },
+            {
+                "command": "clarion.importAllAppsFromTextForSolution",
+                "title": "Import All Apps from Version Control"
+            },
+            {
+                "command": "clarion.exportAllAppsToVersionControl",
+                "title": "Export All Apps to Version Control"
+            },
+            {
+                "command": "clarion.toggleApplicationSortOrder",
+                "title": "Toggle Application Sort Order",
+                "icon": "$(arrow-swap)"
             },
             {
                 "command": "clarion.pasteAsString",
@@ -435,12 +488,117 @@
                 {
                     "command": "clarion.generateAllApps",
                     "when": "view == solutionView && viewItem == clarionApplicationsGroup",
-                    "group": "generate"
+                    "group": "generate@1"
+                },
+                {
+                    "command": "clarion.generateAllAppsThenBuildSolution",
+                    "when": "view == solutionView && viewItem == clarionApplicationsGroup",
+                    "group": "generate@2"
+                },
+                {
+                    "command": "clarion.buildAllProjects",
+                    "when": "view == solutionView && viewItem == clarionApplicationsGroup",
+                    "group": "generate@3"
+                },
+                {
+                    "command": "clarion.importAllAppsFromTextForSolution",
+                    "when": "view == solutionView && viewItem == clarionApplicationsGroup",
+                    "group": "versioncontrol"
+                },
+                {
+                    "command": "clarion.exportAllAppsToVersionControl",
+                    "when": "view == solutionView && viewItem == clarionApplicationsGroup",
+                    "group": "versioncontrol"
                 },
                 {
                     "command": "clarion.generateApp",
                     "when": "view == solutionView && viewItem == clarionApp",
                     "group": "generate"
+                },
+                {
+                    "command": "clarion.buildProjectFromApp",
+                    "when": "view == solutionView && viewItem == clarionApp",
+                    "group": "generate"
+                },
+                {
+                    "command": "clarion.generateAndBuildApp",
+                    "when": "view == solutionView && viewItem == clarionApp",
+                    "group": "generate"
+                },
+                {
+                    "command": "clarion.copyFilePath",
+                    "when": "view == solutionView && viewItem == clarionSolution",
+                    "group": "navigation"
+                },
+                {
+                    "command": "clarion.copyRelativePath",
+                    "when": "view == solutionView && viewItem == clarionSolution",
+                    "group": "navigation"
+                },
+                {
+                    "command": "clarion.openContainingFolder",
+                    "when": "view == solutionView && viewItem == clarionSolution",
+                    "group": "navigation"
+                },
+                {
+                    "command": "clarion.openInClarionIDE",
+                    "when": "view == solutionView && viewItem == clarionSolution",
+                    "group": "navigation"
+                },
+                {
+                    "command": "clarion.copyFilePath",
+                    "when": "view == solutionView && viewItem == clarionProject",
+                    "group": "navigation"
+                },
+                {
+                    "command": "clarion.copyRelativePath",
+                    "when": "view == solutionView && viewItem == clarionProject",
+                    "group": "navigation"
+                },
+                {
+                    "command": "clarion.openContainingFolder",
+                    "when": "view == solutionView && viewItem == clarionProject",
+                    "group": "navigation"
+                },
+                {
+                    "command": "clarion.copyFilePath",
+                    "when": "view == solutionView && viewItem == clarionFile",
+                    "group": "navigation"
+                },
+                {
+                    "command": "clarion.copyRelativePath",
+                    "when": "view == solutionView && viewItem == clarionFile",
+                    "group": "navigation"
+                },
+                {
+                    "command": "clarion.openContainingFolder",
+                    "when": "view == solutionView && viewItem == clarionFile",
+                    "group": "navigation"
+                },
+                {
+                    "command": "clarion.copyFilePath",
+                    "when": "view == solutionView && viewItem == clarionApp",
+                    "group": "navigation"
+                },
+                {
+                    "command": "clarion.copyRelativePath",
+                    "when": "view == solutionView && viewItem == clarionApp",
+                    "group": "navigation"
+                },
+                {
+                    "command": "clarion.openContainingFolder",
+                    "when": "view == solutionView && viewItem == clarionApp",
+                    "group": "navigation"
+                },
+                {
+                    "command": "clarion.importAppFromTextForSolution",
+                    "when": "view == solutionView && viewItem == clarionApp",
+                    "group": "versioncontrol"
+                },
+                {
+                    "command": "clarion.exportAppToVersionControl",
+                    "when": "view == solutionView && viewItem == clarionApp",
+                    "group": "versioncontrol"
                 }
             ],
             "commandPalette": [
@@ -491,6 +649,11 @@
                     "command": "clarion.solutionView.clearFilter",
                     "when": "view == solutionView && clarion.solutionOpen",
                     "group": "navigation@5"
+                },
+                {
+                    "command": "clarion.toggleApplicationSortOrder",
+                    "when": "view == solutionView && clarion.solutionOpen",
+                    "group": "navigation@6"
                 },
                 {
                     "command": "clarion.structureView.expandAll",

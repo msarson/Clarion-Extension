@@ -4,6 +4,7 @@ import { ControlService } from '../../utils/ControlService';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("SymbolHoverResolver");
+logger.setLevel("error");
 
 /**
  * Context for symbol resolution

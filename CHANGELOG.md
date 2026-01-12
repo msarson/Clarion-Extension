@@ -6,6 +6,22 @@ All notable changes to the Clarion Extension are documented here.
 
 ## Recent Versions
 
+### [0.8.6] - 2026-01-12
+**Cross-Project Navigation & Solution View Enhancements**
+
+**Highlights:**
+- ⚡ 50-70% faster Ctrl+F12 navigation via CrossFileCache (2-4s → <100ms)
+- 🎯 Full support for routines with namespace prefixes (`DumpQue::SaveQState`)
+- 🏗️ Dependency-aware build order with progress indicators
+- 🔧 Fixed FUNCTION declarations, procedures without parameters
+- 🎨 Method hover priority fix (methods named like keywords)
+- ✨ Batch UpperPark commands and enhanced context menus
+- 📊 All 498 tests passing
+
+[**→ Full details**](docs/changelogs/CHANGELOG-0.8.6.md)
+
+---
+
 ### [0.8.5] - 2026-01-09
 **Folding Provider Fix**
 

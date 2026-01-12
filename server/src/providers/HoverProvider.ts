@@ -24,6 +24,7 @@ import { SymbolHoverResolver } from './hover/SymbolHoverResolver';
 import { VariableHoverResolver } from './hover/VariableHoverResolver';
 import { ProcedureHoverResolver } from './hover/ProcedureHoverResolver';
 import { MethodHoverResolver } from './hover/MethodHoverResolver';
+import { RoutineHoverResolver } from './hover/RoutineHoverResolver';
 import { HoverContextBuilder } from './hover/HoverContextBuilder';
 import { HoverRouter } from './hover/HoverRouter';
 import { StructureFieldResolver } from './hover/StructureFieldResolver';
@@ -46,7 +47,8 @@ export class HoverProvider {
     private tokenCache = TokenCache.getInstance();
     private memberResolver = new ClassMemberResolver();
     private overloadResolver = new MethodOverloadResolver();
-    private mapResolver = new MapProcedureResolver();
+    private crossFileCache: CrossFileCache;
+    private mapResolver: MapProcedureResolver;
     private crossFileResolver = new CrossFileResolver(this.tokenCache);
     private builtinService = BuiltinFunctionService.getInstance();
     private attributeService = AttributeService.getInstance();
@@ -59,11 +61,11 @@ export class HoverProvider {
     private variableResolver: VariableHoverResolver;
     private procedureResolver: ProcedureHoverResolver;
     private methodResolver: MethodHoverResolver;
+    private routineResolver: RoutineHoverResolver;
     private contextBuilder: HoverContextBuilder;
     private router: HoverRouter;
     private structureFieldResolver: StructureFieldResolver;
     private includeVerifier: IncludeVerifier;
-    private crossFileCache: CrossFileCache;
 
     constructor() {
         const solutionManager = SolutionManager.getInstance();
@@ -72,9 +74,11 @@ export class HoverProvider {
         this.contextHandler = new ContextualHoverHandler(this.builtinService, this.attributeService);
         this.symbolResolver = new SymbolHoverResolver(this.dataTypeService, this.controlService);
         this.crossFileCache = new CrossFileCache(this.tokenCache);
+        this.mapResolver = new MapProcedureResolver(this.crossFileCache);
         this.variableResolver = new VariableHoverResolver(this.formatter, this.scopeAnalyzer, this.tokenCache, this.crossFileCache);
         this.procedureResolver = new ProcedureHoverResolver(this.mapResolver, this.crossFileResolver, this.formatter);
         this.methodResolver = new MethodHoverResolver(this.overloadResolver, this.memberResolver, this.formatter);
+        this.routineResolver = new RoutineHoverResolver(this.formatter);
         this.contextBuilder = new HoverContextBuilder();
         this.structureFieldResolver = new StructureFieldResolver(
             this.formatter,
@@ -86,6 +90,7 @@ export class HoverProvider {
             this.methodResolver,
             this.variableResolver,
             this.symbolResolver,
+            this.routineResolver,
             this.contextHandler,
             this.formatter
         );

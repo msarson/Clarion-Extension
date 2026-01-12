@@ -11,6 +11,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("FileWatcherManager");
+logger.setLevel("error");
 
 /**
  * Creates file watchers for solution-specific files

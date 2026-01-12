@@ -10,6 +10,7 @@ import LoggerManager from '../utils/LoggerManager';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("SolutionCommands");
+logger.setLevel("error");
 
 // Type for initializeSolution function
 type InitializeSolutionFn = (context: ExtensionContext, forceRefresh: boolean) => Promise<void>;

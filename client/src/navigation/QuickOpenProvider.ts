@@ -7,6 +7,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("QuickOpenProvider");
+logger.setLevel("error");
 
 /**
  * Shows a quick picker to open Clarion files from the solution
@@ -114,41 +115,36 @@ export async function showClarionQuickOpen(): Promise<void> {
 
     for (const searchPath of uniqueSearchPaths) {
         try {
-            if (workspace.rootPath && searchPath.startsWith(workspace.rootPath)) {
-                // If the path is inside the workspace, use VS Code's findFiles
-                const files = await workspace.findFiles(`${searchPath}/**/*.*`);
+            // Use manual recursive listing for all paths to ensure we only scan the specific directory
+            // workspace.findFiles() can scan outside the intended path if workspace root differs
+            logger.info(`📌 Scanning redirection path: ${searchPath}`);
+            
+            // Safety check: Don't scan root drives or parent directories
+            if (searchPath === 'C:\\' || searchPath === 'D:\\' || searchPath.match(/^[A-Z]:\\$/)) {
+                logger.warn(`⚠️ Skipping root drive scan: ${searchPath}`);
+                continue;
+            }
+            
+            // Safety check: Don't scan if path goes above solution directory
+            const solutionDir = path.dirname(solutionInfo.path);
+            if (!searchPath.startsWith(solutionDir) && !path.isAbsolute(searchPath)) {
+                logger.warn(`⚠️ Skipping path outside solution: ${searchPath}`);
+                continue;
+            }
+            
+            const externalFiles = listFilesRecursively(searchPath);
 
-                for (const file of files) {
-                    const filePath = file.fsPath;
-                    const ext = path.extname(filePath).toLowerCase();
+            for (const filePath of externalFiles) {
+                const ext = path.extname(filePath).toLowerCase();
 
-                    const baseName = path.basename(filePath).toLowerCase();
-                    if (allowedExtensions.includes(ext) && !seenFiles.has(filePath) && !seenBaseNames.has(baseName)) {
-                        seenFiles.add(filePath);
-                        redirectionFiles.push({
-                            label: getIconForFile(filePath) + " " + path.basename(filePath),
-                            description: `Redirection: ${path.relative(searchPath, path.dirname(filePath))}`,
-                            path: filePath
-                        });
-                    }
-                }
-            } else {
-                // If the path is outside the workspace, use recursive file listing
-                logger.info(`📌 Searching manually outside workspace: ${searchPath}`);
-                const externalFiles = listFilesRecursively(searchPath);
-
-                for (const filePath of externalFiles) {
-                    const ext = path.extname(filePath).toLowerCase();
-
-                    const baseName = path.basename(filePath).toLowerCase();
-                    if (allowedExtensions.includes(ext) && !seenFiles.has(filePath) && !seenBaseNames.has(baseName)) {
-                        seenFiles.add(filePath);
-                        redirectionFiles.push({
-                            label: getIconForFile(filePath) + " " + path.basename(filePath),
-                            description: `Redirection: ${path.relative(searchPath, path.dirname(filePath))}`,
-                            path: filePath
-                        });
-                    }
+                const baseName = path.basename(filePath).toLowerCase();
+                if (allowedExtensions.includes(ext) && !seenFiles.has(filePath) && !seenBaseNames.has(baseName)) {
+                    seenFiles.add(filePath);
+                    redirectionFiles.push({
+                        label: getIconForFile(filePath) + " " + path.basename(filePath),
+                        description: `Redirection: ${path.relative(searchPath, path.dirname(filePath))}`,
+                        path: filePath
+                    });
                 }
             }
         } catch (error) {

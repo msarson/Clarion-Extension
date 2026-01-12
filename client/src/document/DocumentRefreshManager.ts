@@ -4,6 +4,7 @@ import { getAllOpenDocuments } from '../utils/ExtensionHelpers';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("DocumentRefreshManager");
+logger.setLevel("error");
 
 /**
  * Refreshes all open documents by updating their document info in the document manager

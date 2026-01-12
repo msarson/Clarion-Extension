@@ -215,7 +215,8 @@ export class ClarionTokenizer {
                             upperSubstring.startsWith('TAB') ||
                             upperSubstring.startsWith('MENU') ||
                             upperSubstring.startsWith('MENUBAR') ||
-                            upperSubstring.startsWith('TOOLBAR');
+                            upperSubstring.startsWith('TOOLBAR') ||
+                            upperSubstring.startsWith('OLE');
                         
                         // Skip DECLARATION structures in CODE section (they're not valid there)
                         // But ALLOW execution structures (IF/LOOP/CASE) - they're needed for control flow
@@ -261,6 +262,14 @@ export class ClarionTokenizer {
                                         logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at position ${position} - preceded by '${prevChar}'`);
                                         continue; // Try next structure pattern
                                     }
+                                }
+                                
+                                // ✅ FIX: Check if followed by colon (prefix notation like Queue:FileDrop)
+                                // If the structure keyword is immediately followed by ':', it's a prefix, not a structure
+                                const endPosition = position + match[0].length;
+                                if (endPosition < line.length && line[endPosition] === ':') {
+                                    logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at position ${position} - followed by ':' (prefix notation)`);
+                                    continue; // Try next structure pattern
                                 }
                                 
                                 // Check if inside parentheses or optional parameters

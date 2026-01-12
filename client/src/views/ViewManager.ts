@@ -6,6 +6,7 @@ import { registerSolutionViewCommands, registerStructureViewCommands } from '../
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("ViewManager");
+logger.setLevel("error");
 
 // Global references to prevent re-creation
 let globalSolutionTreeView: TreeView<any> | undefined;

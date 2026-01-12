@@ -19,6 +19,7 @@ import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { TokenHelper } from '../utils/TokenHelper';
 import LoggerManager from '../logger';
 import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
+import { CrossFileCache } from './hover/CrossFileCache';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -29,10 +30,12 @@ export class ImplementationProvider {
     private tokenCache: TokenCache;
     private mapResolver: MapProcedureResolver;
     private crossFileResolver: CrossFileResolver;
+    private crossFileCache: CrossFileCache;
 
     constructor() {
         this.tokenCache = TokenCache.getInstance();
-        this.mapResolver = new MapProcedureResolver();
+        this.crossFileCache = new CrossFileCache(this.tokenCache);
+        this.mapResolver = new MapProcedureResolver(this.crossFileCache);
         this.crossFileResolver = new CrossFileResolver(this.tokenCache);
     }
 
@@ -77,23 +80,24 @@ export class ImplementationProvider {
                     
                     if (isFromInclude) {
                         logger.info(`MAP declaration is from INCLUDE file: ${mapDeclUri}`);
-                        // Load the INCLUDE file and its tokens
+                        // Load the INCLUDE file and its tokens using cache
                         try {
-                            const fs = require('fs');
                             const decodedPath = decodeURIComponent(mapDeclUri.replace('file:///', ''));
-                            const includeContent = fs.readFileSync(decodedPath, 'utf-8');
-                            const includeDoc = TextDocument.create(mapDeclUri, 'clarion', 1, includeContent);
-                            const includeTokens = this.tokenCache.getTokens(includeDoc);
+                            const cached = await this.crossFileCache.getOrLoadDocument(decodedPath);
                             
-                            // Find implementation using INCLUDE file's document and tokens
-                            const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
-                            implLocation = await this.mapResolver.findProcedureImplementation(
-                                word,
-                                includeTokens,
-                                includeDoc,
-                                mapPosition,
-                                line
-                            );
+                            if (cached) {
+                                const { document: includeDoc, tokens: includeTokens } = cached;
+                                
+                                // Find implementation using INCLUDE file's document and tokens
+                                const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
+                                implLocation = await this.mapResolver.findProcedureImplementation(
+                                    word,
+                                    includeTokens,
+                                    includeDoc,
+                                    mapPosition,
+                                    line
+                                );
+                            }
                         } catch (error) {
                             logger.info(`Error loading INCLUDE file: ${error}`);
                         }
@@ -146,26 +150,27 @@ export class ImplementationProvider {
                     if (memberResult) {
                         logger.info(`✅ Found MAP declaration in parent file at line ${memberResult.line}`);
                         
-                        // Now find implementation from the parent MAP declaration
+                        // Now find implementation from the parent MAP declaration using cache
                         try {
-                            const fs = require('fs');
                             const parentPath = memberResult.file;
-                            const parentContent = fs.readFileSync(parentPath, 'utf-8');
-                            const parentDoc = TextDocument.create(`file:///${parentPath.replace(/\\/g, '/')}`, 'clarion', 1, parentContent);
-                            const parentTokens = this.tokenCache.getTokens(parentDoc);
+                            const cached = await this.crossFileCache.getOrLoadDocument(parentPath);
                             
-                            const mapPosition: Position = { line: memberResult.line, character: 0 };
-                            const implLocation = await this.mapResolver.findProcedureImplementation(
-                                word,
-                                parentTokens,
-                                parentDoc,
-                                mapPosition,
-                                line
-                            );
-                            
-                            if (implLocation) {
-                                logger.info(`✅ Found implementation via parent MAP: ${word}`);
-                                return implLocation;
+                            if (cached) {
+                                const { document: parentDoc, tokens: parentTokens } = cached;
+                                
+                                const mapPosition: Position = { line: memberResult.line, character: 0 };
+                                const implLocation = await this.mapResolver.findProcedureImplementation(
+                                    word,
+                                    parentTokens,
+                                    parentDoc,
+                                    mapPosition,
+                                    line
+                                );
+                                
+                                if (implLocation) {
+                                    logger.info(`✅ Found implementation via parent MAP: ${word}`);
+                                    return implLocation;
+                                }
                             }
                         } catch (error) {
                             logger.info(`Error loading parent file: ${error}`);
@@ -188,7 +193,8 @@ export class ImplementationProvider {
         const isInModule = !isInMap && this.isInModuleBlock(position.line, tokens);
         
         if (isInMap || isInModule) {
-            const mapProcMatch = line.match(/^\s*(\w+)\s*(?:PROCEDURE\s*)?\(/i);
+            // Use ClarionPatterns.MAP_PROCEDURE_DECLARATION which handles both PROCEDURE and FUNCTION
+            const mapProcMatch = line.match(ClarionPatterns.MAP_PROCEDURE_DECLARATION);
             if (mapProcMatch) {
                 const procName = mapProcMatch[1];
                 const procNameStart = line.indexOf(procName);
@@ -240,8 +246,8 @@ export class ImplementationProvider {
         position: Position,
         line: string
     ): Location | null {
-        // Check if cursor is on a word after DO keyword
-        const wordMatch = line.match(/\bDO\s+(\w+)/i);
+        // Check if cursor is on a word after DO keyword (supports namespace prefixes with : or ::)
+        const wordMatch = line.match(ClarionPatterns.DO_ROUTINE);
         if (!wordMatch) {
             return null;
         }
@@ -258,7 +264,7 @@ export class ImplementationProvider {
 
         logger.info(`Looking for routine: ${routineName}`);
 
-        // Search for routine label at column 0
+        // Search for routine label at column 0 (supports namespace prefixes)
         const text = document.getText();
         const lines = text.split(/\r?\n/);
 
@@ -267,7 +273,7 @@ export class ImplementationProvider {
 
             // Check if line starts at column 0 (no leading whitespace)
             if (routineLine.length > 0 && routineLine[0] !== ' ' && routineLine[0] !== '\t') {
-                const match = routineLine.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+ROUTINE/i);
+                const match = routineLine.match(ClarionPatterns.ROUTINE_LABEL);
                 if (match && match[1].toUpperCase() === routineName.toUpperCase()) {
                     logger.info(`✅ Found routine at line ${i}`);
                     return Location.create(

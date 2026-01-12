@@ -12,6 +12,7 @@ import { getLanguageClient } from './LanguageClientManager';
 import { SolutionScanner, DetectedSolution } from './utils/SolutionScanner';
 import { ClarionInstallationDetector } from './utils/ClarionInstallationDetector';
 import { GlobalSolutionHistory } from './utils/GlobalSolutionHistory';
+import { ProjectDependencyResolver } from './utils/ProjectDependencyResolver';
 
 const logger = LoggerManager.getLogger("SolutionTreeDataProvider");
 logger.setLevel("error");
@@ -60,9 +61,73 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     // Track refresh state
     private refreshInProgress = false;
 
+    // Application sort order: 'solution' (as in .sln) or 'build' (dependency order)
+    private _applicationSortOrder: 'solution' | 'build' = 'solution';
+
+    // Track currently building project
+    private _currentlyBuildingProject: string | null = null; // Project name
+    
+    // Track overall build progress
+    private _buildProgress: { current: number; total: number } | null = null;
+    
+    // Track currently generating app
+    private _currentlyGeneratingApp: string | null = null; // App name (without .app)
+    
+    // Track overall generation progress
+    private _generateProgress: { current: number; total: number } | null = null;
+
     constructor() {
         this.solutionCache = SolutionCache.getInstance();
         this.projectIndex = ProjectIndex.getInstance();
+    }
+
+    // Methods to track build status
+    setCurrentlyBuildingProject(projectName: string | null): void {
+        this._currentlyBuildingProject = projectName;
+        this._onDidChangeTreeData.fire();
+    }
+
+    getCurrentlyBuildingProject(): string | null {
+        return this._currentlyBuildingProject;
+    }
+    
+    // Methods to track build progress
+    setBuildProgress(current: number, total: number): void {
+        this._buildProgress = { current, total };
+        this._onDidChangeTreeData.fire();
+    }
+    
+    clearBuildProgress(): void {
+        this._buildProgress = null;
+        this._onDidChangeTreeData.fire();
+    }
+    
+    getBuildProgress(): { current: number; total: number } | null {
+        return this._buildProgress;
+    }
+    
+    // Methods to track generation status
+    setCurrentlyGeneratingApp(appName: string | null): void {
+        this._currentlyGeneratingApp = appName;
+        this._onDidChangeTreeData.fire();
+    }
+    
+    getCurrentlyGeneratingApp(): string | null {
+        return this._currentlyGeneratingApp;
+    }
+    
+    setGenerateProgress(current: number, total: number): void {
+        this._generateProgress = { current, total };
+        this._onDidChangeTreeData.fire();
+    }
+    
+    clearGenerateProgress(): void {
+        this._generateProgress = null;
+        this._onDidChangeTreeData.fire();
+    }
+    
+    getGenerateProgress(): { current: number; total: number } | null {
+        return this._generateProgress;
     }
 
     // Method to set filter text with debouncing
@@ -100,6 +165,32 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     getFilterText(): string {
         return this._filterText;
     }
+
+    // Toggle application sort order
+    async toggleApplicationSortOrder(): Promise<void> {
+        this._applicationSortOrder = this._applicationSortOrder === 'solution' ? 'build' : 'solution';
+        
+        // Force a full refresh to rebuild the tree with new sort order
+        await this.refresh();
+    }
+    
+    // Set application sort order directly
+    async setApplicationSortOrder(order: 'solution' | 'build'): Promise<void> {
+        if (this._applicationSortOrder !== order) {
+            this._applicationSortOrder = order;
+            // Clear the root to force complete rebuild
+            this._root = null;
+            await this.refresh();
+            // Give VS Code a moment to process the tree update
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+    }
+
+    // Get current application sort order
+    getApplicationSortOrder(): 'solution' | 'build' {
+        return this._applicationSortOrder;
+    }
+
     async refresh(): Promise<void> {
         if (this.refreshInProgress) {
             logger.info("⏭️ Refresh already in progress, skipping...");
@@ -860,7 +951,23 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             const appData = data as any;
             const exists = fs.existsSync(appData.absolutePath);
             
-            if (exists) {
+            // Check if this app is currently generating or building
+            // APP file name (without .app) should match project name
+            const appName = appData.name?.replace(/\.app$/i, '');
+            const isGenerating = appName && this._currentlyGeneratingApp === appName;
+            const isBuilding = appName && this._currentlyBuildingProject === appName;
+            
+            if (isGenerating) {
+                // Show generating icon for the app (takes priority over building)
+                treeItem.iconPath = new ThemeIcon('sync~spin');
+                treeItem.description = '(Generating...)';
+                treeItem.tooltip = `${appData.absolutePath} - Generating application...`;
+            } else if (isBuilding) {
+                // Show building icon for the app
+                treeItem.iconPath = new ThemeIcon('sync~spin');
+                treeItem.description = '(Building...)';
+                treeItem.tooltip = `${appData.absolutePath} - Building project...`;
+            } else if (exists) {
                 treeItem.iconPath = new ThemeIcon('symbol-class'); // Application icon
                 treeItem.tooltip = appData.absolutePath;
                 // Don't set a command - APP files are binary and shouldn't open in editor
@@ -923,13 +1030,20 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         if ((data as any)?.guid) {
             const project = data as ClarionProjectInfo;
             
+            // Check if this project is currently building
+            const isBuilding = this._currentlyBuildingProject === project.name;
+            
             // Check if this is the startup project
             const workspaceConfig = workspace.getConfiguration('clarion');
             const startupProjectGuid = workspaceConfig.get<string>('startupProject');
             const isStartupProject = startupProjectGuid && 
                 project.guid.replace(/[{}]/g, '').toLowerCase() === startupProjectGuid.replace(/[{}]/g, '').toLowerCase();
             
-            if (isStartupProject) {
+            if (isBuilding) {
+                // Show building icon with sync/loading indicator
+                treeItem.iconPath = new ThemeIcon('sync~spin');
+                treeItem.description = '(Building...)';
+            } else if (isStartupProject) {
                 // Make startup project bold and add play icon
                 treeItem.iconPath = new ThemeIcon('play');
                 treeItem.description = '(Startup)';
@@ -1054,6 +1168,17 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         treeItem.iconPath = new ThemeIcon('symbol-class');
         treeItem.contextValue = 'clarionSolution';
         treeItem.tooltip = "Right-click for more options";
+        
+        // Add generation progress to description if generating (takes priority)
+        if (this._generateProgress) {
+            treeItem.description = `Generating ${this._generateProgress.current} of ${this._generateProgress.total}`;
+            treeItem.tooltip = `Generating apps: ${this._generateProgress.current} of ${this._generateProgress.total} completed`;
+        } else if (this._buildProgress) {
+            // Add build progress to description if building
+            treeItem.description = `Building ${this._buildProgress.current} of ${this._buildProgress.total}`;
+            treeItem.tooltip = `Building solution: ${this._buildProgress.current} of ${this._buildProgress.total} projects completed`;
+        }
+        
         treeItem.command = {
             title: 'Open Solution File',
             command: 'clarion.openFile',
@@ -1184,8 +1309,47 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                     solutionNode
                 );
 
-                // Add APP file nodes
-                for (const app of solution.applications) {
+                // Determine application order based on sort preference
+                let orderedApplications = [...solution.applications];
+                
+                if (this._applicationSortOrder === 'build') {
+                    // Sort by build order (dependency order)
+                    try {
+                        const solutionDir = path.dirname(globalSolutionFile);
+                        const resolver = new ProjectDependencyResolver(solutionDir, solution.projects);
+                        
+                        await resolver.analyzeDependencies();
+                        
+                        const buildOrder = resolver.getBuildOrder();
+                        
+                        // Create a map of project names to their build order index
+                        const buildOrderMap = new Map<string, number>();
+                        buildOrder.forEach((project, index) => {
+                            buildOrderMap.set(project.name.toLowerCase(), index);
+                        });
+                        
+                        // Sort applications based on their matching project's build order
+                        orderedApplications.sort((a, b) => {
+                            const nameA = a.name.replace(/\.app$/i, '').toLowerCase();
+                            const nameB = b.name.replace(/\.app$/i, '').toLowerCase();
+                            
+                            const orderA = buildOrderMap.get(nameA) ?? 999999;
+                            const orderB = buildOrderMap.get(nameB) ?? 999999;
+                            
+                            return orderA - orderB;
+                        });
+                    } catch (error) {
+                        logger.error(`Failed to sort applications by build order: ${error}`);
+                        // Fall back to alphabetical order
+                        orderedApplications.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+                    }
+                } else {
+                    // Default: Sort alphabetically (case-insensitive)
+                    orderedApplications.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+                }
+
+                // Add APP file nodes in the determined order
+                for (const app of orderedApplications) {
                     const appNode = new TreeNode(
                         app.name,
                         TreeItemCollapsibleState.None,
@@ -1205,7 +1369,12 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             }
 
             // Add project nodes with minimal information - details will be loaded on demand
-            for (const project of solution.projects.filter(Boolean)) {
+            // Sort projects alphabetically (case-insensitive)
+            const sortedProjects = [...solution.projects.filter(Boolean)].sort((a, b) => 
+                (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: 'base' })
+            );
+            
+            for (const project of sortedProjects) {
                 // Create a project node with no children initially
                 // Add project identity data to allow lazy loading on expand
                 const projectNode = new TreeNode(

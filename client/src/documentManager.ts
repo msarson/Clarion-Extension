@@ -297,7 +297,10 @@ export class DocumentManager implements Disposable {
 
     private async onDidOpenTextDocument(document: TextDocument) {
         logger.info(`📄 [EVENT] Document opened: ${document.uri.fsPath}`);
-        await this.updateDocumentInfo(document);
+        // Don't await - let document info update in background so document opens immediately
+        this.updateDocumentInfo(document).catch(error => {
+            logger.error(`Error updating document info for ${document.uri.fsPath}: ${error instanceof Error ? error.message : String(error)}`);
+        });
     }
 
     /**
@@ -319,7 +322,10 @@ export class DocumentManager implements Disposable {
         }
         
         logger.info(`Document changed: ${doc.uri.fsPath}`);
-        await this.updateDocumentInfo(event.document);
+        // Don't await - let document info update in background to avoid blocking typing
+        this.updateDocumentInfo(event.document).catch(error => {
+            logger.error(`Error updating document info for ${doc.uri.fsPath}: ${error instanceof Error ? error.message : String(error)}`);
+        });
     }
 
     /**

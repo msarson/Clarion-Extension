@@ -8,6 +8,7 @@ import * as clarionClHelper from '../clarionClHelper';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("BuildCommands");
+logger.setLevel("error");
 
 /**
  * Registers all build-related commands
@@ -22,13 +23,13 @@ export function registerBuildCommands(
     return [
         // Add solution build command (used by keyboard shortcut - shows prompt)
         commands.registerCommand("clarion.buildSolution", async () => {
-            await buildTasks.runClarionBuild();
+            await buildTasks.runClarionBuild(diagnosticCollection, solutionTreeDataProvider);
         }),
         
         // Add solution build command for context menu (no prompt)
         commands.registerCommand("clarion.buildSolutionDirect", async () => {
-            // User explicitly chose to build the solution from context menu, don't prompt
-            await buildTasks.buildSolutionOrProject("Solution", undefined, diagnosticCollection, solutionTreeDataProvider);
+            // Use dependency-aware build for solution
+            await buildTasks.buildSolutionWithDependencyOrder(diagnosticCollection, solutionTreeDataProvider);
         }),
 
         // Add project build command
@@ -54,12 +55,100 @@ export function registerBuildCommands(
         commands.registerCommand('clarion.generateAllApps', async (node) => {
             await clarionClHelper.generateAllApps();
         }),
+        
+        // Generate All then Build All
+        commands.registerCommand('clarion.generateAllAppsThenBuildSolution', async (node) => {
+            // Get all app files from the solution in their original order
+            // Don't rely on tree order which may be sorted
+            const solutionCache = SolutionCache.getInstance();
+            const solutionInfo = solutionCache.getSolutionInfo();
+            
+            if (solutionInfo && solutionInfo.applications && solutionInfo.applications.length > 0) {
+                // Create a fresh copy of applications to ensure original order
+                const appPaths = [...solutionInfo.applications].map(app => app.absolutePath);
+                
+                // Generate all apps with progress tracking (in solution order)
+                await clarionClHelper.generateAllAppsWithProgress(appPaths, solutionTreeDataProvider);
+                
+                // Then build the solution with dependency order
+                await buildTasks.buildSolutionWithDependencyOrder(diagnosticCollection, solutionTreeDataProvider);
+            } else {
+                window.showInformationMessage('No applications found in solution');
+            }
+        }),
+        
+        // Build All (just kicks off the build we've been working on)
+        commands.registerCommand('clarion.buildAllProjects', async (node) => {
+            await buildTasks.buildSolutionWithDependencyOrder(diagnosticCollection, solutionTreeDataProvider);
+        }),
 
         commands.registerCommand('clarion.generateApp', async (node) => {
             if (node && node.data && node.data.absolutePath) {
                 await clarionClHelper.generateApp(node.data.absolutePath);
             } else {
                 window.showErrorMessage("Cannot determine which application to generate.");
+            }
+        }),
+
+        // Build project from application context
+        commands.registerCommand('clarion.buildProjectFromApp', async (node) => {
+            if (node && node.data && node.data.name) {
+                // Get the application name without extension (e.g., "IBSQuery" from "IBSQuery.app")
+                const appName = node.data.name.replace(/\.app$/i, '');
+                
+                // Find the project with matching name
+                const solutionCache = SolutionCache.getInstance();
+                const solutionInfo = solutionCache.getSolutionInfo();
+                
+                if (solutionInfo) {
+                    // Try to find a project with the same name as the application
+                    const project = solutionInfo.projects.find(p => 
+                        p.name.toLowerCase() === appName.toLowerCase()
+                    );
+                    
+                    if (project) {
+                        await buildTasks.buildSolutionOrProject("Project", project, diagnosticCollection, solutionTreeDataProvider);
+                    } else {
+                        window.showErrorMessage(`Cannot find project "${appName}" for application: ${node.data.name}`);
+                    }
+                } else {
+                    window.showErrorMessage("No solution is currently loaded.");
+                }
+            } else {
+                window.showErrorMessage("Cannot determine which application's project to build.");
+            }
+        }),
+
+        // Generate and build project from application context
+        commands.registerCommand('clarion.generateAndBuildApp', async (node) => {
+            if (node && node.data && node.data.absolutePath && node.data.name) {
+                // Get the application name without extension (e.g., "IBSQuery" from "IBSQuery.app")
+                const appName = node.data.name.replace(/\.app$/i, '');
+                
+                // Find the project with matching name
+                const solutionCache = SolutionCache.getInstance();
+                const solutionInfo = solutionCache.getSolutionInfo();
+                
+                if (solutionInfo) {
+                    // Try to find a project with the same name as the application
+                    const project = solutionInfo.projects.find(p => 
+                        p.name.toLowerCase() === appName.toLowerCase()
+                    );
+                    
+                    if (project) {
+                        // First, generate the application
+                        await clarionClHelper.generateApp(node.data.absolutePath);
+                        
+                        // Then build the project
+                        await buildTasks.buildSolutionOrProject("Project", project, diagnosticCollection, solutionTreeDataProvider);
+                    } else {
+                        window.showErrorMessage(`Cannot find project "${appName}" for application: ${node.data.name}`);
+                    }
+                } else {
+                    window.showErrorMessage("No solution is currently loaded.");
+                }
+            } else {
+                window.showErrorMessage("Cannot determine which application to generate and build.");
             }
         }),
 
@@ -103,7 +192,7 @@ export function registerBuildCommands(
                 }
                 
                 if (selectedOption === "Build Full Solution") {
-                    await buildTasks.buildSolutionOrProject("Solution", undefined, diagnosticCollection, solutionTreeDataProvider);
+                    await buildTasks.buildSolutionWithDependencyOrder(diagnosticCollection, solutionTreeDataProvider);
                 } else {
                     // Extract project name from the selected option
                     const projectName = selectedOption.replace("Build Project: ", "");
@@ -117,7 +206,7 @@ export function registerBuildCommands(
                 }
             } else {
                 // Build the entire solution if no project is found
-                await buildTasks.buildSolutionOrProject("Solution", undefined, diagnosticCollection, solutionTreeDataProvider);
+                await buildTasks.buildSolutionWithDependencyOrder(diagnosticCollection, solutionTreeDataProvider);
             }
         }),
 

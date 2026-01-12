@@ -2,6 +2,7 @@ import * as path from 'path';
 import LoggerManager from './utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("ProjectIndex");
+logger.setLevel("error");
 
 // Create a specialized debug logger for file resolution issues
 const fileResolutionLogger = LoggerManager.getLogger("FileResolution");

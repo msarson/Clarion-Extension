@@ -14,13 +14,17 @@ import processBuildErrors from "./processBuildErrors";
 import LoggerManager from './utils/LoggerManager';
 import { PlatformUtils } from "./platformUtils";
 import { SolutionCache } from "./SolutionCache";
+import { ProjectDependencyResolver } from "./utils/ProjectDependencyResolver";
 import { ClarionProjectInfo } from "../../common/types";
 const logger = LoggerManager.getLogger("BuildTasks");
 logger.setLevel("error"); // Production: Only log errors
 /**
  * Main entry point for the Clarion build process
  */
-export async function runClarionBuild() {
+export async function runClarionBuild(
+    diagnosticCollection?: DiagnosticCollection,
+    solutionTreeDataProvider?: any
+) {
     if (!validateBuildEnvironment()) {
         return;
     }
@@ -38,16 +42,27 @@ export async function runClarionBuild() {
         return;
     }
 
-    // Prepare build task parameters
-    const buildParams = prepareBuildParameters(buildConfig);
-
     // ✅ Ensure we have a diagnostic collection for this extension
-    const diagnosticCollection = languages.createDiagnosticCollection("clarion");
+    const diagCollection = diagnosticCollection || languages.createDiagnosticCollection("clarion");
+
+    // If building full solution, use dependency-aware build
+    if (buildConfig.buildTarget === "Solution") {
+        // Ensure we're in build order mode for solution builds
+        if (solutionTreeDataProvider) {
+            await solutionTreeDataProvider.setApplicationSortOrder('build');
+        }
+        
+        await buildSolutionWithDependencyOrder(diagCollection, solutionTreeDataProvider);
+        return;
+    }
+
+    // Prepare build task parameters for project build
+    const buildParams = prepareBuildParameters(buildConfig);
 
     // Execute the build task with diagnostics
     await executeBuildTask({
         ...buildParams,
-        diagnosticCollection,   // ✅ pass through
+        diagnosticCollection: diagCollection,   // ✅ pass through
     });
 }
 
@@ -308,7 +323,7 @@ export function prepareBuildParameters(buildConfig: {
         "/verbosity:normal",
         "/nologo",
         "/fileLogger",
-        `/fileLoggerParameters:LogFile="${buildLogPath}",verbosity=detailed,encoding=utf-8`
+        `/fileLoggerParameters:LogFile="${buildLogPath}"`
     ];
     
     // Add platform property if we have one
@@ -329,12 +344,12 @@ export function prepareBuildParameters(buildConfig: {
         buildArgs.push(`"${globalSolutionFile}"`);
         logger.info(`🔹 Solution file: ${path.basename(globalSolutionFile)}`);
     } else if (buildConfig.buildTarget === "Project") {
-        const projectDir = path.dirname(buildConfig.selectedProjectPath);
-        buildArgs.push(`/property:ProjectPath="${projectDir}"`);
-        logger.info(`🔹 Project directory: ${projectDir}`);
+        // selectedProjectPath is already the project directory
+        buildArgs.push(`/property:ProjectPath="${buildConfig.selectedProjectPath}"`);
+        logger.info(`🔹 Project directory: ${buildConfig.selectedProjectPath}`);
 
         // Explicitly specify the project file to build
-        const projectFile = buildConfig.projectObject?.filename || path.basename(buildConfig.selectedProjectPath);
+        const projectFile = buildConfig.projectObject?.filename || `${buildConfig.projectObject?.name}.cwproj`;
         const projectFilePath = path.join(buildConfig.selectedProjectPath, projectFile);
         buildArgs.push(`"${projectFilePath}"`);
         logger.info(`🔹 Project file: ${projectFile}`);
@@ -350,6 +365,10 @@ export function prepareBuildParameters(buildConfig: {
     };
 }
 
+/**
+ * Executes the build task and processes results
+ * Enhanced with additional logging
+ */
 /**
  * Executes the build task and processes results
  * Enhanced with additional logging
@@ -371,11 +390,12 @@ export async function executeBuildTask(params: {
     logger.info(`🔹 Build log path: ${buildLogPath}`);
 
     // Create the shell execution
-    const commandLine = `${msBuildPath} ${buildArgs.join(' ')}`;
-    logger.info(`✅ Executing build task: ${commandLine}`);
+    // Use ShellExecution with command and args to properly handle quoting
+    logger.info(`✅ Executing build task: ${msBuildPath} ${buildArgs.join(' ')}`);
     
     const execution = new ShellExecution(
-        commandLine,
+        msBuildPath,
+        buildArgs,
         { cwd: solutionDir }
     );
 
@@ -390,15 +410,26 @@ export async function executeBuildTask(params: {
 
         window.showInformationMessage(buildTypeMessage);
 
-        // Pass the target info (and diagnostics) to the completion handler
-        const disposable = setupBuildCompletionHandler(
-            buildLogPath,
-            buildTarget,
-            targetName,
-            diagnosticCollection   // ✅ pass through
-        );
-
-        await tasks.executeTask(task);
+        // Execute the task and wait for it to complete
+        const taskExecution = await tasks.executeTask(task);
+        
+        // Set up a handler for THIS SPECIFIC task execution (not all tasks with the same name)
+        const disposable = tasks.onDidEndTaskProcess((event: TaskProcessEndEvent) => {
+            if (event.execution === taskExecution) {
+                // Dispose the handler immediately since we only care about this one execution
+                disposable.dispose();
+                
+                // Process the completion with the correct targetName
+                processTaskCompletion(
+                    event,
+                    buildLogPath,
+                    buildTarget,
+                    targetName,
+                    diagnosticCollection
+                );
+            }
+        });
+        
     } catch (error) {
         window.showErrorMessage("❌ Failed to start Clarion build task.");
         logger.error("❌ Clarion Build Task Error:", error);
@@ -451,29 +482,6 @@ function createBuildTask(execution: ShellExecution): Task {
 
     return task;
 }
-
-/**
- * Sets up the handler for build completion
- */
-function setupBuildCompletionHandler(
-    buildLogPath: string,
-    buildTarget: "Solution" | "Project",
-    targetName: string,
-    diagnosticCollection: DiagnosticCollection   // ✅ add
-) {
-    return tasks.onDidEndTaskProcess((event: TaskProcessEndEvent) => {
-        if (event.execution.task.name === "Clarion Build") {
-            processTaskCompletion(
-                event,
-                buildLogPath,
-                buildTarget,
-                targetName,
-                diagnosticCollection   // ✅ pass through
-            );
-        }
-    });
-}
-
 
 /**
  * Processes the task completion, reads log file, and shows results
@@ -592,6 +600,192 @@ function processTaskCompletion(
     });
 }
 
+
+/**
+ * Builds the solution with proper dependency order
+ * @param diagnosticCollection - The diagnostic collection to use for error reporting
+ * @param solutionTreeDataProvider - Optional solution tree provider
+ */
+export async function buildSolutionWithDependencyOrder(
+    diagnosticCollection: DiagnosticCollection,
+    solutionTreeDataProvider?: any
+): Promise<void> {
+    if (!validateBuildEnvironment()) {
+        return;
+    }
+
+    const solutionCache = SolutionCache.getInstance();
+    const solutionInfo = solutionCache.getSolutionInfo();
+
+    if (!solutionInfo) {
+        if (solutionTreeDataProvider) {
+            await solutionTreeDataProvider.refresh();
+        }
+        window.showInformationMessage(
+            "No solution is currently open. Use the 'Open Solution' button in the Solution View."
+        );
+        return;
+    }
+
+    try {
+        // Initialize dependency resolver
+        const solutionDir = path.dirname(globalSolutionFile);
+        const resolver = new ProjectDependencyResolver(solutionDir, solutionInfo.projects);
+        
+        // Analyze dependencies
+        window.showInformationMessage('Analyzing project dependencies...');
+        await resolver.analyzeDependencies();
+        
+        // Get build order
+        const buildOrder = resolver.getBuildOrder();
+        
+        // Log dependency summary
+        logger.info(resolver.getDependencySummary());
+        
+        window.showInformationMessage(`Building ${buildOrder.length} projects in dependency order...`);
+        
+        // Build each project in order
+        let successCount = 0;
+        let failCount = 0;
+        
+        for (let i = 0; i < buildOrder.length; i++) {
+            const project = buildOrder[i];
+            try {
+                logger.info(`Building project: ${project.name}`);
+                window.showInformationMessage(`Building: ${project.name}`);
+                
+                // Notify tree provider of build progress
+                if (solutionTreeDataProvider) {
+                    solutionTreeDataProvider.setCurrentlyBuildingProject(project.name);
+                    solutionTreeDataProvider.setBuildProgress(i + 1, buildOrder.length);
+                }
+                
+                const buildConfig = {
+                    buildTarget: "Project" as const,
+                    selectedProjectPath: project.path,
+                    projectObject: project
+                };
+                
+                const buildParams = {
+                    ...prepareBuildParameters(buildConfig),
+                    diagnosticCollection
+                };
+                
+                // Execute the build synchronously
+                await executeBuildTaskSync(buildParams);
+                successCount++;
+                
+                // Clear building status for this project
+                if (solutionTreeDataProvider) {
+                    solutionTreeDataProvider.setCurrentlyBuildingProject(null);
+                }
+                
+            } catch (error) {
+                // Clear building status on error
+                if (solutionTreeDataProvider) {
+                    solutionTreeDataProvider.setCurrentlyBuildingProject(null);
+                    solutionTreeDataProvider.clearBuildProgress();
+                }
+                
+                failCount++;
+                logger.error(`Failed to build project ${project.name}: ${error}`);
+                window.showErrorMessage(`Build failed for ${project.name}. Stopping build.`);
+                break; // Stop on first error
+            }
+        }
+        
+        // Clear build progress when done
+        if (solutionTreeDataProvider) {
+            solutionTreeDataProvider.clearBuildProgress();
+        }
+        
+        // Show final status
+        if (failCount === 0) {
+            window.showInformationMessage(`✅ Solution build complete: ${successCount} projects built successfully`);
+        } else {
+            window.showWarningMessage(`Solution build stopped: ${successCount} succeeded, ${failCount} failed`);
+        }
+        
+    } catch (error) {
+        logger.error(`Solution build failed: ${error}`);
+        window.showErrorMessage(`Solution build failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
+
+/**
+ * Executes a build task synchronously (waits for completion)
+ */
+async function executeBuildTaskSync(params: {
+    solutionDir: string;
+    msBuildPath: string;
+    buildArgs: string[];
+    buildLogPath: string;
+    buildTarget: "Solution" | "Project";
+    targetName: string;
+    diagnosticCollection: DiagnosticCollection;
+}): Promise<void> {
+    const { solutionDir, msBuildPath, buildArgs, buildLogPath, buildTarget, targetName, diagnosticCollection } = params;
+
+    return new Promise((resolve, reject) => {
+        const commandLine = `${msBuildPath} ${buildArgs.join(' ')}`;
+        logger.info(`Executing: ${commandLine}`);
+        
+        const execution = new ShellExecution(commandLine, { cwd: solutionDir });
+        const task = createBuildTask(execution);
+
+        let taskExecution: any;
+        const disposable = tasks.onDidEndTaskProcess((event: TaskProcessEndEvent) => {
+            if (event.execution === taskExecution) {
+                disposable.dispose();
+                
+                // Read and process the build log
+                fs.readFile(buildLogPath, "utf8", (err, data) => {
+                    if (err) {
+                        logger.error(`Error reading build log: ${err}`);
+                        if (event.exitCode === 0) {
+                            resolve();
+                        } else {
+                            reject(new Error(`Build failed with exit code ${event.exitCode}`));
+                        }
+                        return;
+                    }
+                    
+                    if (event.exitCode !== 0) {
+                        const { errorCount, warningCount, diagnostics } = processBuildErrors(data);
+                        diagnosticCollection.clear();
+                        diagnostics.forEach((arr, file) =>
+                            diagnosticCollection.set(Uri.file(file), arr)
+                        );
+                        
+                        if (errorCount > 0) {
+                            reject(new Error(`Build failed: ${errorCount} error(s), ${warningCount} warning(s)`));
+                        } else {
+                            // No actual errors found, treat as success
+                            diagnosticCollection.clear();
+                            resolve();
+                        }
+                    } else {
+                        diagnosticCollection.clear();
+                        resolve();
+                    }
+                    
+                    // Clean up log file unless preserve is enabled
+                    const preserveLogFile = workspace.getConfiguration("clarion.build").get<boolean>("preserveLogFile", false);
+                    if (!preserveLogFile) {
+                        fs.unlink(buildLogPath, () => {});
+                    }
+                });
+            }
+        });
+
+        tasks.executeTask(task).then(execution => {
+            taskExecution = execution;
+        }, error => {
+            disposable.dispose();
+            reject(error);
+        });
+    });
+}
 
 /**
  * Builds the solution or a specific project

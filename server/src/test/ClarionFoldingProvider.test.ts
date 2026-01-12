@@ -361,6 +361,82 @@ ThisWindow.Kill PROCEDURE()
             const appRange = ranges.find(r => r.startLine === 0 && r.endLine === 6);
             assert.ok(appRange, 'Should find application folding range from line 0 to 6');
         });
+
+        test('Should create folding range for OLE control', () => {
+            const code = `TestWindow WINDOW('Test'),AT(,,600,400)
+              OLE,AT(10,10,200,100),USE(?OLE1)
+              END
+            END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            // Should have ranges for WINDOW and OLE
+            assert.ok(ranges.length >= 2, `Should have at least 2 folding ranges, got ${ranges.length}`);
+            
+            // Check for OLE range
+            const oleRange = ranges.find(r => r.startLine === 1 && r.endLine === 2);
+            assert.ok(oleRange, 'Should find OLE folding range from line 1 to 2');
+        });
+
+        test('Should fold WINDOW with continuation character on first line', () => {
+            const code = `Window               WINDOW('Enter Your Password'),AT(,,388,339),FONT('Segoe UI',8,,FONT:regular),DOUBLE,CENTER, |
+  ICON('ibsmenu.ico'),GRAY,IMM,MASK,SYSTEM
+                        SHEET,AT(3,2,383,305),USE(?SHEET1),WIZARD
+                          TAB('Tab1'),USE(?TAB1)
+                            GROUP,AT(-1,-1,387,165),USE(?GROUP1),HIDE,TRN
+                            END
+                          END
+                        END
+                      END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            // WINDOW should create a fold from line 0 (1-based: line 1) to line 8 (1-based: line 9)
+            const windowRange = ranges.find(r => r.startLine === 0);
+            assert.ok(windowRange, 'Should find WINDOW folding range starting at line 0');
+            assert.ok(windowRange!.endLine >= 7, `Window should fold to at least line 7, got ${windowRange!.endLine}`);
+        });
+
+        test('Should NOT fold LIST control with continuation', () => {
+            const code = `Window WINDOW('Test'),AT(,,388,339)
+                            LIST,AT(117,220,161,10),USE(AAA:CompanyName),VSCROLL,DROP(10),FORMAT('180L(2)|M*@s45@0L' & |
+  '(2)|M*@n2@0L(2)|M*@n3@'),FROM(Queue:FileDrop),IMM
+                      END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            
+            // Debug: log all structure tokens (type 16 = TokenType.Structure)
+            console.log(`\n=== All Structure/Foldable Tokens ===`);
+            tokens.filter(t => t.type === 16 || t.subType === 16).forEach(t => {
+                console.log(`  ${t.value}: line ${t.line}, type: ${t.type}, subType: ${t.subType}, finishesAt: ${t.finishesAt}`);
+            });
+            
+            const provider = new ClarionFoldingProvider(tokens);
+            
+            const ranges = provider.computeFoldingRanges();
+            
+            // Debug: log all ranges
+            console.log(`\n=== LIST Continuation Test Ranges ===`);
+            console.log(`Total ranges: ${ranges.length}`);
+            ranges.forEach((r, i) => console.log(`  Range ${i}: lines ${r.startLine}-${r.endLine}`));
+            
+            // Should only have a fold for the WINDOW, not for the LIST continuation
+            // Window is from line 0 to line 3
+            assert.ok(ranges.length >= 1, 'Should have at least one folding range for WINDOW');
+            const windowRange = ranges.find(r => r.startLine === 0);
+            assert.ok(windowRange, 'Should find WINDOW folding range starting at line 0');
+            assert.strictEqual(windowRange!.endLine, 3, `WINDOW should fold to line 3, got ${windowRange!.endLine}`);
+            
+            // Should NOT have a fold starting at line 1 (the LIST line)
+            const listRange = ranges.find(r => r.startLine === 1);
+            assert.ok(!listRange, 'Should NOT create a fold for LIST continuation');
+        });
     });
 
     suite('computeFoldingRanges - Control Flow (IF/ELSE/ELSIF)', () => {

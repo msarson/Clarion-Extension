@@ -12,6 +12,7 @@ import { registerNavigationCommands } from './commands/NavigationCommands';
 import { registerBuildCommands } from './commands/BuildCommands';
 import { registerRunCommands } from './commands/RunCommands';
 import { registerSolutionManagementCommands, registerSolutionOpeningCommands, registerMiscSolutionCommands } from './commands/SolutionCommands';
+import { registerTreeCommands } from './commands/TreeCommands';
 import { registerProjectFileCommands } from './commands/ProjectFileCommands';
 import { registerStatusCommands } from './commands/ViewCommands';
 import { registerTextEditingCommands } from './commands/TextEditingCommands';
@@ -151,7 +152,8 @@ export async function activate(context: ExtensionContext): Promise<void> {
         ...registerNavigationCommands(treeView, solutionTreeDataProvider),
         ...registerBuildCommands(diagnosticCollection, solutionTreeDataProvider),
         ...registerRunCommands(solutionTreeDataProvider),
-        ...registerSolutionManagementCommands(context, client, initializeSolution, createSolutionTreeView)
+        ...registerSolutionManagementCommands(context, client, initializeSolution, createSolutionTreeView),
+        ...registerTreeCommands(solutionTreeDataProvider)
     );
     
     // Create DocumentManager for standalone file support

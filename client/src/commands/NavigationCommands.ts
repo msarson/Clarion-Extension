@@ -8,6 +8,7 @@ import { ClarionProjectInfo } from 'common/types';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("NavigationCommands");
+logger.setLevel("error");
 
 /**
  * Registers all navigation-related commands

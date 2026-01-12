@@ -7,6 +7,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("ProjectFileCommands");
+logger.setLevel("error");
 
 /**
  * Registers project file management commands (add/remove source files)

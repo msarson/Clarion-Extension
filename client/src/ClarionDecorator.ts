@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import LoggerManager from './utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("ClarionDecorator");
+logger.setLevel("error");
 
 /**
  * Provides text decorations for Clarion code elements:

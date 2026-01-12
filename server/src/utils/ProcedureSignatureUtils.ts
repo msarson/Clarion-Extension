@@ -6,6 +6,7 @@
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ProcedureSignatureUtils");
+logger.setLevel("error");
 
 export class ProcedureSignatureUtils {
     /**

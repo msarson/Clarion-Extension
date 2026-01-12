@@ -5,6 +5,7 @@ import LoggerManager from '../utils/LoggerManager';
 import { showExtensionStatus } from './StatusCommands';
 
 const logger = LoggerManager.getLogger("ViewCommands");
+logger.setLevel("error");
 
 /**
  * Registers solution view commands (filter, clear filter)

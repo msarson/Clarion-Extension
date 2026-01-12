@@ -9,6 +9,7 @@ import { VariableHoverResolver } from './VariableHoverResolver';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("StructureFieldResolver");
+logger.setLevel("error");
 
 /**
  * Resolves hover information for structure field access (e.g., MyGroup.MyVar)
