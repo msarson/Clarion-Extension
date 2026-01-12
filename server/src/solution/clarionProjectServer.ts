@@ -209,19 +209,19 @@ export class ClarionProjectServer {
                             
                             if (file) {
                                 if (typeof file === 'string') {
-                                    // If file is directly a string
-                                    fileName = file;
+                                    // If file is directly a string - decode URL encoding
+                                    fileName = decodeURIComponent(file);
                                     logger.info(`📄 File name extracted (string): ${fileName}`);
                                 } else if (typeof file === 'object') {
                                     // Try multiple possible formats based on how xml2js might parse it
                                     if (file.include) {
-                                        fileName = file.include;
+                                        fileName = decodeURIComponent(file.include);
                                         logger.info(`📄 File name extracted (include): ${fileName}`);
                                     } else if (file.$ && file.$.include) {
-                                        fileName = file.$.include;
+                                        fileName = decodeURIComponent(file.$.include);
                                         logger.info(`📄 File name extracted ($.include): ${fileName}`);
                                     } else if (file.Include) {
-                                        fileName = file.Include;
+                                        fileName = decodeURIComponent(file.Include);
                                         logger.info(`📄 File name extracted (Include): ${fileName}`);
                                     } else {
                                         // Log all keys to help diagnose the structure
@@ -234,7 +234,7 @@ export class ClarionProjectServer {
                                                 (key.toLowerCase().includes('include') ||
                                                  file[key].toLowerCase().endsWith('.clw') ||
                                                  file[key].toLowerCase().endsWith('.inc'))) {
-                                                fileName = file[key];
+                                                fileName = decodeURIComponent(file[key]);
                                                 logger.info(`📄 File name extracted (key: ${key}): ${fileName}`);
                                                 break;
                                             }
