@@ -389,9 +389,9 @@ export class ClarionProjectServer {
         // Use a Set to avoid duplicates from the beginning
         const pathSet = new Set<string>();
         
-        // Add the project path and its parent directory first (they're always included)
+        // Add the project path first (always included)
         pathSet.add(this.path);
-        pathSet.add(path.dirname(this.path));
+        // Note: Parent directory NOT automatically included - only paths from redirection file
         
         // Process matching entries
         for (const entry of matchingEntries) {
