@@ -5,6 +5,7 @@ import * as path from 'path';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("StatusCommands");
+logger.setLevel("error");
 
 // Create a persistent output channel for status
 let statusOutputChannel: vscode.OutputChannel | undefined;

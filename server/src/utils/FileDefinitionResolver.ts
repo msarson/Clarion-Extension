@@ -11,6 +11,7 @@ import * as fs from 'fs';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("FileDefinitionResolver");
+logger.setLevel("error");
 
 export class FileDefinitionResolver {
     /**

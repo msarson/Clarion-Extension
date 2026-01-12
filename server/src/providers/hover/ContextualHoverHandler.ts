@@ -5,6 +5,7 @@ import { AttributeService } from '../../utils/AttributeService';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("ContextualHoverHandler");
+logger.setLevel("error");
 
 /**
  * Handles context-aware hover information for Clarion keywords

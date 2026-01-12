@@ -16,6 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("CrossFileResolver");
+logger.setLevel("error");
 
 export interface MapDeclarationResult {
     token: Token;

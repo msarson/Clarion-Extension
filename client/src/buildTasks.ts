@@ -323,7 +323,7 @@ export function prepareBuildParameters(buildConfig: {
         "/verbosity:normal",
         "/nologo",
         "/fileLogger",
-        `/fileLoggerParameters:LogFile="${buildLogPath}";verbosity=detailed;encoding=utf-8`
+        `/fileLoggerParameters:LogFile="${buildLogPath}"`
     ];
     
     // Add platform property if we have one
@@ -344,12 +344,12 @@ export function prepareBuildParameters(buildConfig: {
         buildArgs.push(`"${globalSolutionFile}"`);
         logger.info(`🔹 Solution file: ${path.basename(globalSolutionFile)}`);
     } else if (buildConfig.buildTarget === "Project") {
-        const projectDir = path.dirname(buildConfig.selectedProjectPath);
-        buildArgs.push(`/property:ProjectPath="${projectDir}"`);
-        logger.info(`🔹 Project directory: ${projectDir}`);
+        // selectedProjectPath is already the project directory
+        buildArgs.push(`/property:ProjectPath="${buildConfig.selectedProjectPath}"`);
+        logger.info(`🔹 Project directory: ${buildConfig.selectedProjectPath}`);
 
         // Explicitly specify the project file to build
-        const projectFile = buildConfig.projectObject?.filename || path.basename(buildConfig.selectedProjectPath);
+        const projectFile = buildConfig.projectObject?.filename || `${buildConfig.projectObject?.name}.cwproj`;
         const projectFilePath = path.join(buildConfig.selectedProjectPath, projectFile);
         buildArgs.push(`"${projectFilePath}"`);
         logger.info(`🔹 Project file: ${projectFile}`);
@@ -386,11 +386,12 @@ export async function executeBuildTask(params: {
     logger.info(`🔹 Build log path: ${buildLogPath}`);
 
     // Create the shell execution
-    const commandLine = `${msBuildPath} ${buildArgs.join(' ')}`;
-    logger.info(`✅ Executing build task: ${commandLine}`);
+    // Use ShellExecution with command and args to properly handle quoting
+    logger.info(`✅ Executing build task: ${msBuildPath} ${buildArgs.join(' ')}`);
     
     const execution = new ShellExecution(
-        commandLine,
+        msBuildPath,
+        buildArgs,
         { cwd: solutionDir }
     );
 

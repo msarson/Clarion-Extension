@@ -5,6 +5,7 @@ import { globalSettings } from '../globals';
 import LoggerManager from './LoggerManager';
 
 const logger = LoggerManager.getLogger("UpperParkDetector");
+logger.setLevel("error");
 
 export interface UpperParkCapabilities {
     hasCreateAppVC: boolean;

@@ -15,6 +15,7 @@ import { GlobalSolutionHistory } from './utils/GlobalSolutionHistory';
 import { ProjectDependencyResolver } from './utils/ProjectDependencyResolver';
 
 const logger = LoggerManager.getLogger("SolutionTreeDataProvider");
+logger.setLevel("error");
 
 // Create a specialized debug logger for file resolution issues
 const fileResolutionLogger = LoggerManager.getLogger("FileResolution");

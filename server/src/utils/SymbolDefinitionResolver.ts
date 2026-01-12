@@ -12,6 +12,7 @@ import { ClarionDocumentSymbolProvider } from '../providers/ClarionDocumentSymbo
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("SymbolDefinitionResolver");
+logger.setLevel("error");
 
 export class SymbolDefinitionResolver {
     private symbolProvider = new ClarionDocumentSymbolProvider();

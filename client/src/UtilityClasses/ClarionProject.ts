@@ -84,6 +84,7 @@ export class ClarionProjectClass {
 
 import LoggerManager from '../utils/LoggerManager';
 const logger = LoggerManager.getLogger("SolutionTreeProvider");
+logger.setLevel("error");
 import path = require('path');
 
 

@@ -4,6 +4,7 @@ import { SolutionCache } from '../SolutionCache';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("StatusBarManager");
+logger.setLevel("error");
 
 /**
  * Status bar items for Clarion extension

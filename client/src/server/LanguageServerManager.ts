@@ -8,6 +8,7 @@ import LoggerManager from '../utils/LoggerManager';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("LanguageServerManager");
+logger.setLevel("error");
 
 /**
  * Initializes and starts the Clarion Language Server

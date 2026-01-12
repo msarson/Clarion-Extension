@@ -5,6 +5,7 @@ import { globalSettings, globalSolutionFile } from './globals';
 import LoggerManager from './utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("ClarionCl");
+logger.setLevel("error");
 
 let outputChannel: OutputChannel | undefined;
 

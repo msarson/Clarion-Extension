@@ -7,6 +7,7 @@ import { OmitCompileDetector } from '../../utils/OmitCompileDetector';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("HoverContextBuilder");
+logger.setLevel("error");
 
 /**
  * Context information for hover resolution

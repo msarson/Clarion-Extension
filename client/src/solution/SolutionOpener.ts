@@ -14,6 +14,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("SolutionOpener");
+logger.setLevel("error");
 
 /**
  * Opens a solution from the configured solutions list

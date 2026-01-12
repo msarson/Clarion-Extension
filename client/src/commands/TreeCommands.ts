@@ -9,6 +9,7 @@ import * as clarionClHelper from '../clarionClHelper';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("TreeCommands");
+logger.setLevel("error");
 
 /**
  * Registers tree-related context menu commands

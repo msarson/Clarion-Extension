@@ -13,6 +13,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("MethodHoverResolver");
+logger.setLevel("error");
 
 /**
  * Resolves hover information for class methods (declarations, implementations, and calls)

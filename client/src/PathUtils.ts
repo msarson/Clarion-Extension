@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import LoggerManager from './utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("PathUtils");
+logger.setLevel("error");
 const fileResolutionLogger = LoggerManager.getLogger("FileResolution");
 
 /**

@@ -6,6 +6,7 @@ import { DocumentManager } from './documentManager';
 import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, setGlobalClarionSelection, globalSettings, getClarionConfigTarget } from './globals';
 import LoggerManager from './utils/LoggerManager';
 const logger = LoggerManager.getLogger("ExtensionCommands");
+logger.setLevel("error");
 
 
 // Example: Updating the stored settings

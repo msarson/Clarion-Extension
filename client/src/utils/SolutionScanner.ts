@@ -4,6 +4,7 @@ import { workspace } from 'vscode';
 import LoggerManager from './LoggerManager';
 
 const logger = LoggerManager.getLogger("SolutionScanner");
+logger.setLevel("error");
 
 export interface DetectedSolution {
     solutionPath: string;

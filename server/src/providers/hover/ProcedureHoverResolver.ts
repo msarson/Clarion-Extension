@@ -11,6 +11,7 @@ import LoggerManager from '../../logger';
 import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("ProcedureHoverResolver");
+logger.setLevel("error");
 
 /**
  * Resolves hover information for procedures (MAP declarations and implementations)

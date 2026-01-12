@@ -15,6 +15,7 @@ import { SignatureInformation, ParameterInformation } from 'vscode-languageserve
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("BuiltinFunctionService");
+logger.setLevel("error");
 
 /**
  * Represents a parameter that can be required or optional

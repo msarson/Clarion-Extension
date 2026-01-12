@@ -4,6 +4,7 @@ import { glob } from 'glob';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("CwprojParser");
+logger.setLevel("error");
 
 // Create a specialized debug logger for file resolution issues
 const fileResolutionLogger = LoggerManager.getLogger("FileResolution");

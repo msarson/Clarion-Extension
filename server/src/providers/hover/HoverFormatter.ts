@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("HoverFormatter");
+logger.setLevel("error");
 
 export interface VariableInfo {
     type: string;

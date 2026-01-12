@@ -3,6 +3,7 @@ import LoggerManager from './utils/LoggerManager';
 import { getClarionConfigTarget } from './globals';
 
 const logger = LoggerManager.getLogger("SettingsManager");
+logger.setLevel("error");
 
 export class ClarionSettingsManager {
     private static instance: ClarionSettingsManager;

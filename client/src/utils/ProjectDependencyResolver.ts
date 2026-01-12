@@ -5,6 +5,7 @@ import { ClarionProjectInfo } from '../../../common/types';
 import LoggerManager from './LoggerManager';
 
 const logger = LoggerManager.getLogger("ProjectDependencyResolver");
+logger.setLevel("error");
 
 export interface ProjectReference {
     projectGuid: string;

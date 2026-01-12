@@ -8,6 +8,7 @@ import * as clarionClHelper from '../clarionClHelper';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("BuildCommands");
+logger.setLevel("error");
 
 /**
  * Registers all build-related commands

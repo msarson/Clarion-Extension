@@ -2,6 +2,7 @@ import { window as vscodeWindow, workspace, TextDocument, TextEditor, Uri } from
 import LoggerManager from './LoggerManager';
 
 const logger = LoggerManager.getLogger("ExtensionHelpers");
+logger.setLevel("error");
 
 /**
  * Escapes special regex characters in a string

@@ -3,6 +3,7 @@ import * as path from 'path';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("DataTypeService");
+logger.setLevel("error");
 
 export interface DataTypeParameter {
     name: string;

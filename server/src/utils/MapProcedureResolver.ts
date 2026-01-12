@@ -16,6 +16,7 @@ import { TokenHelper } from './TokenHelper';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("MapProcedureResolver");
+logger.setLevel("error");
 
 export class MapProcedureResolver {
     private scopeAnalyzer: ScopeAnalyzer;
