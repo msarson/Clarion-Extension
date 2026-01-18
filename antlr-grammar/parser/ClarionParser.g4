@@ -906,7 +906,7 @@ parameterList
     ;
 
 parameter
-    : label? dataType IDENTIFIER? dataAttributes?  // Optional parameter name (for documentation)
+    : dataType IDENTIFIER? dataAttributes?
     | POINTER_VAR
     | AMPERSAND (anyIdentifier | QUALIFIED_IDENTIFIER)  // Reference parameter (e.g., &QueueType)
     ;
