@@ -1,0 +1,15 @@
+# ANTLR generated files (exploratory - not used by extension yet)
+.antlr/
+*.interp
+*.tokens
+*.java
+*.class
+
+# TypeScript generated files (when we generate them)
+*Lexer.ts
+*Parser.ts
+*Listener.ts
+*Visitor.ts
+
+# TypeScript build output
+out/

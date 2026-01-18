@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": ["ES2022"],
+    "outDir": "./out",
+    "rootDir": "./",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "moduleResolution": "node"
+  },
+  "include": [
+    "tests/unit-tests/test-parse.ts",
+    "tests/unit-tests/count-folding.ts",
+    "generated/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "out",
+    "tests/unit-tests/test-folding.ts",
+    "tests/unit-tests/test-current-folding.ts"
+  ]
+}

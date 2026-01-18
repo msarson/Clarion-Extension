@@ -1,0 +1,5 @@
+  PROGRAM
+
+ThisWindow.Ask PROCEDURE
+CODE
+  RETURN

@@ -6,7 +6,7 @@ out/
 Logs/
 temp-help-downloads/
 docs/ai-prompts/
-
+ClarionDocs/
 # Exclude commercial/copyrighted third-party code
 StringTheory.inc
 StringTheory.clw
@@ -17,3 +17,9 @@ ai/
 
 # PowerShell scripts
 *.ps1
+
+# ANTLR generated files (exploratory)
+antlr-grammar/.antlr/
+antlr-grammar/generated/
+antlr-grammar/**/*.interp
+antlr-grammar/**/*.tokens
