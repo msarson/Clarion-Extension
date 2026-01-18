@@ -65,9 +65,13 @@ import { URI } from 'vscode-languageserver';
 import { setServerInitialized, serverInitialized } from './serverState';
 import * as fs from 'fs';
 import * as path from 'path';
+import { AntlrFoldingProvider } from './providers/AntlrFoldingProvider';
 
 const logger = LoggerManager.getLogger("Server");
 logger.setLevel("error");
+
+// 🧪 EXPERIMENTAL: Toggle ANTLR-based folding provider
+const USE_ANTLR_FOLDING = true; // Set to false to use original tokenizer-based provider
 
 // Track if a solution operation is in progress
 export let solutionOperationInProgress = false;
@@ -343,7 +347,7 @@ function getTokens(document: TextDocument): Token[] {
 
 
 // ✅ Handle Folding Ranges (Uses Cached Tokens & Caches Results)
-connection.onFoldingRanges((params: FoldingRangeParams) => {
+connection.onFoldingRanges(async (params: FoldingRangeParams) => {
     const perfStart = performance.now();
     try {
         logger.info(`📂 [DEBUG] Received onFoldingRanges request for: ${params.textDocument.uri}`);
@@ -388,8 +392,19 @@ connection.onFoldingRanges((params: FoldingRangeParams) => {
         logger.perf('Folding: getTokens', { time_ms: tokenTime.toFixed(2), tokens: tokens.length });
         
         const foldStart = performance.now();
-        const foldingProvider = new ClarionFoldingProvider(tokens, document);
-        const ranges = foldingProvider.computeFoldingRanges();
+        let ranges: FoldingRange[];
+        
+        if (USE_ANTLR_FOLDING) {
+            // 🧪 Use ANTLR-based folding provider
+            logger.info(`🧪 [EXPERIMENTAL] Using ANTLR folding provider`);
+            const antlrProvider = new AntlrFoldingProvider(document);
+            ranges = await antlrProvider.computeFoldingRanges();
+        } else {
+            // Use original tokenizer-based provider
+            const foldingProvider = new ClarionFoldingProvider(tokens, document);
+            ranges = foldingProvider.computeFoldingRanges();
+        }
+        
         const foldTime = performance.now() - foldStart;
         
         // 🚀 PERF: Cache the folding ranges
