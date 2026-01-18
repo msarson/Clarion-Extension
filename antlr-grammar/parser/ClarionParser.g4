@@ -72,7 +72,12 @@ procedurePrototypeShort
     ;
 
 moduleReference
-    : MODULE LPAREN STRING_LITERAL RPAREN procedurePrototype* (END | DOT)  // MODULE in MAP requires END or DOT
+    : MODULE LPAREN STRING_LITERAL RPAREN moduleContent* (END | DOT)
+    ;
+
+moduleContent
+    : procedurePrototype
+    | compileDirective
     ;
 
 // ============================================================================
