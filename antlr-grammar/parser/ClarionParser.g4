@@ -363,7 +363,7 @@ sheetControl
 // Specialized control: TAB (inside SHEET)
 tabControl
     : label? TAB (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)?
-      genericControl*
+      controlDeclaration*
       END
     ;
 

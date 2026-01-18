@@ -8,7 +8,9 @@ import { ClarionParser, ProcedureDeclarationContext, MapSectionContext,
          QueueDeclarationContext, FileDeclarationContext, ClassDeclarationContext,
          RoutineDeclarationContext, RecordDeclarationContext, ViewDeclarationContext,
          ApplicationDeclarationContext, MethodDeclarationContext, ModuleReferenceContext,
-         DoStatementContext, WindowControlsContext, TabControlContext, SheetControlContext } from '../generated/ClarionParser';
+         DoStatementContext, WindowControlsContext, TabControlContext, SheetControlContext,
+         GroupControlContext, OptionControlContext, OleControlContext,
+         MenubarDeclarationContext, MenuDeclarationContext, MenuItemDeclarationContext } from '../generated/ClarionParser';
 import { ParserRuleContext } from 'antlr4ng';
 import LoggerManager from '../logger';
 
@@ -162,6 +164,24 @@ export class AntlrFoldingProvider {
             return { startLine, endLine };
         }
         else if (ctx instanceof SheetControlContext) {
+            return { startLine, endLine };
+        }
+        else if (ctx instanceof GroupControlContext) {
+            return { startLine, endLine };
+        }
+        else if (ctx instanceof OptionControlContext) {
+            return { startLine, endLine };
+        }
+        else if (ctx instanceof OleControlContext) {
+            return { startLine, endLine };
+        }
+        else if (ctx instanceof MenubarDeclarationContext) {
+            return { startLine, endLine };
+        }
+        else if (ctx instanceof MenuDeclarationContext) {
+            return { startLine, endLine };
+        }
+        else if (ctx instanceof MenuItemDeclarationContext) {
             return { startLine, endLine };
         }
 
