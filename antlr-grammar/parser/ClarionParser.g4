@@ -866,28 +866,29 @@ label
     ;
 
 dataType
-    : BYTE (LPAREN expression RPAREN)?
-    | SHORT (LPAREN expression RPAREN)?
-    | USHORT (LPAREN expression RPAREN)?
-    | LONG (LPAREN expression RPAREN)?
-    | ULONG (LPAREN expression RPAREN)?
-    | REAL (LPAREN expression RPAREN)?
-    | SREAL (LPAREN expression RPAREN)?
-    | DECIMAL (LPAREN expression (COMMA expression)* RPAREN)?
-    | PDECIMAL (LPAREN expression (COMMA expression)* RPAREN)?
-    | STRING (LPAREN expression RPAREN)?
-    | CSTRING (LPAREN expression RPAREN)?
-    | PSTRING (LPAREN expression RPAREN)?
-    | ASTRING (LPAREN expression RPAREN)?
-    | BSTRING (LPAREN expression RPAREN)?
-    | DATE (LPAREN expression RPAREN)?
-    | TIME (LPAREN expression RPAREN)?
-    | MEMO (LPAREN expression RPAREN)?
-    | BLOB (LPAREN expression RPAREN)?
+    : ASTERISK? BYTE (LPAREN expression RPAREN)?
+    | ASTERISK? SHORT (LPAREN expression RPAREN)?
+    | ASTERISK? USHORT (LPAREN expression RPAREN)?
+    | ASTERISK? LONG (LPAREN expression RPAREN)?
+    | ASTERISK? ULONG (LPAREN expression RPAREN)?
+    | ASTERISK? UNSIGNED (LPAREN expression RPAREN)?
+    | ASTERISK? REAL (LPAREN expression RPAREN)?
+    | ASTERISK? SREAL (LPAREN expression RPAREN)?
+    | ASTERISK? DECIMAL (LPAREN expression (COMMA expression)* RPAREN)?
+    | ASTERISK? PDECIMAL (LPAREN expression (COMMA expression)* RPAREN)?
+    | ASTERISK? STRING (LPAREN expression RPAREN)?
+    | ASTERISK? CSTRING (LPAREN expression RPAREN)?
+    | ASTERISK? PSTRING (LPAREN expression RPAREN)?
+    | ASTERISK? ASTRING (LPAREN expression RPAREN)?
+    | ASTERISK? BSTRING (LPAREN expression RPAREN)?
+    | ASTERISK? DATE (LPAREN expression RPAREN)?
+    | ASTERISK? TIME (LPAREN expression RPAREN)?
+    | ASTERISK? MEMO (LPAREN expression RPAREN)?
+    | ASTERISK? BLOB (LPAREN expression RPAREN)?
     | ANY
     | LIKE LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER) RPAREN  // Inherited data type
     | GROUP | QUEUE | CLASS
-    | IDENTIFIER  // User-defined types (e.g., PersonType)
+    | ASTERISK? IDENTIFIER  // User-defined types (e.g., PersonType) with optional pointer
     ;
 
 controlType
@@ -905,7 +906,7 @@ parameterList
     ;
 
 parameter
-    : label? dataType dataAttributes?
+    : label? dataType IDENTIFIER? dataAttributes?  // Optional parameter name (for documentation)
     | POINTER_VAR
     | AMPERSAND (anyIdentifier | QUALIFIED_IDENTIFIER)  // Reference parameter (e.g., &QueueType)
     ;
