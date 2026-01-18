@@ -23,3 +23,6 @@ antlr-grammar/.antlr/
 antlr-grammar/generated/
 antlr-grammar/**/*.interp
 antlr-grammar/**/*.tokens
+
+# ANTLR generated files (server integration)
+server/src/generated/
