@@ -6,6 +6,7 @@
     "sourceMap": true,
     "strict": true,
     "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
     "baseUrl": ".",
     "paths": {
       "common/*": ["common/*"]

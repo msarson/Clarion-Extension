@@ -12,6 +12,7 @@
         "url": "https://github.com/msarson/Clarion-Extension"
     },
     "dependencies": {
+        "antlr4ng": "^3.0.16",
         "vscode-languageserver": "^7.0.0",
         "vscode-languageserver-protocol-foldingprovider": "^2.0.1",
         "vscode-languageserver-textdocument": "^1.0.1",

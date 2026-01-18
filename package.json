@@ -113,14 +113,30 @@
             {
                 "language": "clarion",
                 "scopes": {
-                    "keywordControl": ["keyword.control.clarion"],
-                    "keywordStructure": ["storage.type.structure.clarion"],
-                    "keywordStructure.endStructure": ["storage.type.structure.clarion"],
-                    "keywordOop": ["keyword.oop.clarion"],
-                    "keywordOop.endOop": ["keyword.oop.clarion"],
-                    "keywordWindow": ["storage.type.control.clarion"],
-                    "keywordWindow.endWindow": ["storage.type.control.clarion"],
-                    "keywordControl.endControl": ["keyword.control.clarion"]
+                    "keywordControl": [
+                        "keyword.control.clarion"
+                    ],
+                    "keywordStructure": [
+                        "storage.type.structure.clarion"
+                    ],
+                    "keywordStructure.endStructure": [
+                        "storage.type.structure.clarion"
+                    ],
+                    "keywordOop": [
+                        "keyword.oop.clarion"
+                    ],
+                    "keywordOop.endOop": [
+                        "keyword.oop.clarion"
+                    ],
+                    "keywordWindow": [
+                        "storage.type.control.clarion"
+                    ],
+                    "keywordWindow.endWindow": [
+                        "storage.type.control.clarion"
+                    ],
+                    "keywordControl.endControl": [
+                        "keyword.control.clarion"
+                    ]
                 }
             }
         ],
@@ -1201,6 +1217,7 @@
         "typescript": "^4.2.4"
     },
     "dependencies": {
+        "antlr4ng": "^3.0.16",
         "glob": "^12.0.0",
         "minimatch": "^10.0.1",
         "minimist": "^1.2.6",
