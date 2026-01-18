@@ -63,7 +63,21 @@ ID                LONG              ! In queues
 Name              STRING(50)
 Balance           DECIMAL(12,2)
                 END
-
+! Test GROUP with TYPE - can be reused
+PersonType  GROUP,TYPE
+FirstName     STRING(30)
+LastName      STRING(30)
+            END
+  
+Person1     PersonType              ! Using TYPE as data type
+  
+  ! Test QUEUE with PRE and TYPE
+CustomerQType QUEUE,PRE(CQ),TYPE
+CQ:ID           LONG
+CQ:Name         STRING(50)
+              END
+  
+Customers   CustomerQType           ! Using QUEUE TYPE
   CODE
   ! Test typing new variables here:
   ! Try typing: NewVar STRING(
@@ -76,20 +90,6 @@ Balance           DECIMAL(12,2)
   ! Hover over GROUP, QUEUE, CLASS keywords
   ! Hover over TYPE, PRE, BINDABLE attributes
   
-  ! Test GROUP with TYPE - can be reused
-  PersonType  GROUP,TYPE
-  FirstName     STRING(30)
-  LastName      STRING(30)
-              END
   
-  Person1     PersonType              ! Using TYPE as data type
-  
-  ! Test QUEUE with PRE and TYPE
-  CustomerQType QUEUE,PRE(CQ),TYPE
-  CQ:ID           LONG
-  CQ:Name         STRING(50)
-                END
-  
-  Customers   CustomerQType           ! Using QUEUE TYPE
   
   RETURN

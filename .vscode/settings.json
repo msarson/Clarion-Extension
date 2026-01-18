@@ -5,5 +5,13 @@
   ],
   "mochaExplorer.watch": [
     "out/server/src/**/*.js"
-  ]
+  ],
+  "files.exclude": {
+    "**/.antlr": true,
+    "antlr-grammar/generated": true
+  },
+  "search.exclude": {
+    "**/.antlr": true,
+    "antlr-grammar/generated": true
+  }
 }

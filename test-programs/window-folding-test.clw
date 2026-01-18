@@ -1,3 +1,8 @@
+  PROGRAM
+
+  MAP
+  END
+
 AppFrame             APPLICATION('IBS Main Menu'),AT(,,600,400),FONT('Segoe UI',8,COLOR:Black,FONT:regular,CHARSET:ANSI), |
   RESIZE,CENTERED,HVSCROLL,CENTER,ICON('IBSMenu.ico'),IMM,MAX,STATUS(-1,220,120,45,80),SYSTEM, |
   TIMER(6000)
@@ -69,3 +74,4 @@ AppFrame             APPLICATION('IBS Main Menu'),AT(,,600,400),FONT('Segoe UI',
                        TOOLBAR,AT(0,0,600,31),USE(?TOOLBAR1),COLOR(COLOR:White)
                        END
                      END
+  CODE

@@ -8,7 +8,7 @@ import { ClarionParser, ProcedureDeclarationContext, MapSectionContext,
          QueueDeclarationContext, FileDeclarationContext, ClassDeclarationContext,
          RoutineDeclarationContext, RecordDeclarationContext, ViewDeclarationContext,
          ApplicationDeclarationContext, MethodDeclarationContext, ModuleReferenceContext,
-         DoStatementContext, WindowControlsContext } from '../generated/ClarionParser';
+         DoStatementContext, WindowControlsContext, TabControlContext, SheetControlContext } from '../generated/ClarionParser';
 import { ParserRuleContext } from 'antlr4ng';
 import LoggerManager from '../logger';
 
@@ -156,6 +156,12 @@ export class AntlrFoldingProvider {
             return { startLine, endLine };
         }
         else if (ctx instanceof ModuleReferenceContext) {
+            return { startLine, endLine };
+        }
+        else if (ctx instanceof TabControlContext) {
+            return { startLine, endLine };
+        }
+        else if (ctx instanceof SheetControlContext) {
             return { startLine, endLine };
         }
 

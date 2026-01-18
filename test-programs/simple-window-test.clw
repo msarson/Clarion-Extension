@@ -1,3 +1,8 @@
+  PROGRAM
+
+  MAP
+  END
+
 TestWindow  WINDOW('Test'),AT(,,600,400)
               MENUBAR,USE(?MENUBAR1)
                 MENU('&File'),USE(?FileMenu)
@@ -8,3 +13,5 @@ TestWindow  WINDOW('Test'),AT(,,600,400)
                 END
               END
             END
+
+  CODE
