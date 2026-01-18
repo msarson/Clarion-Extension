@@ -927,8 +927,9 @@ includeDirective
     ;
 
 compileDirective
-    : COMPILE LPAREN STRING_LITERAL RPAREN
+    : COMPILE LPAREN STRING_LITERAL (COMMA omitCondition)? RPAREN
     | OMIT LPAREN STRING_LITERAL (COMMA omitCondition)? RPAREN
+    | PRAGMA LPAREN STRING_LITERAL RPAREN
     ;
 
 // OMIT has a restricted expression syntax: equate, equate=value, equate<>value, etc.
