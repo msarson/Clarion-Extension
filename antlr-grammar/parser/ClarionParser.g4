@@ -355,35 +355,35 @@ controlDeclaration
 
 // Specialized control: SHEET (MUST have TABs)
 sheetControl
-    : label? SHEET (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)?
+    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? SHEET (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)?
       tabControl+
       END
     ;
 
 // Specialized control: TAB (inside SHEET)
 tabControl
-    : label? TAB (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)?
+    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? TAB (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)?
       controlDeclaration*
       END
     ;
 
 // Specialized control: OPTION (has child controls, typically RADIO)
 optionControl
-    : label? OPTION (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)?
+    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? OPTION (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)?
       genericControl+
       END
     ;
 
 // Specialized control: GROUP (has nested controls)
 groupControl
-    : label? GROUP (COMMA controlAttributes)?
+    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? GROUP (COMMA controlAttributes)?
       controlDeclaration*
       END
     ;
 
 // Specialized control: OLE (optional MENUBAR)
 oleControl
-    : label? OLE (COMMA controlAttributes)?
+    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? OLE (COMMA controlAttributes)?
       menubarDeclaration?
       END
     ;
