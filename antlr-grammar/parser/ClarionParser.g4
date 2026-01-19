@@ -214,8 +214,9 @@ assignmentStatement
 // Multi-line:  IF expr [THEN]\n [stmts]\n [ELSIF...]\n [ELSE...]\n END/DOT
 // Single-line: IF expr [THEN] [stmt;...] END/DOT
 ifStatement
-    : IF expression THEN? NEWLINE statementList? elsifClause* elseClause? (END | DOT) NEWLINE*  // Multi-line form (try first)
-    | IF expression THEN? (statement (SEMICOLON statement)*)? (END | DOT) NEWLINE*              // Single-line form
+    : IF expression THEN? 
+      (NEWLINE statementList? elsifClause* elseClause? | (statement (SEMICOLON statement)*)?)
+      (END | DOT) NEWLINE*
     ;
 
 elsifClause
