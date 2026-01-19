@@ -197,18 +197,17 @@ structureStatement
     | loopStatement
     | caseStatement
     | executeStatement
-    | debugStatement
-    ;
-
-// Debug conditional: ? statement (at column 0) - only compiled in debug mode
-// TODO: Column 0 check should be in lexer, not parser
-debugStatement
-    : QUESTION statement
     ;
 
 assignmentStatement
     : postfixExpression (EQ | ASSIGN | DEEP_ASSIGN | PLUS_EQ | MINUS_EQ | MULT_EQ | DIV_EQ | AMP_EQ) expression
     ;
+    
+// Note: We use postfixExpression (not just fieldRef) because Clarion allows:
+//   - array[i] = value (subscript)
+//   - field{PROP:Text} = value (property)
+//   - obj.method() = value (rare but possible)
+// And compound assignments: x += 5, count *= 2, etc.
 
 // IF statement - simplified to match reference grammar
 ifStatement
