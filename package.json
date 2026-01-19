@@ -1192,8 +1192,11 @@
     "scripts": {
         "vscode:prepublish": "npm run compile && npm run copy-data",
         "compile": "npm run compile:dev",
-        "compile:dev": "tsc -b && npm run copy-data",
-        "compile:release": "tsc -b && npm run copy-data",
+        "compile:dev": "npm run antlr:build && tsc -b && npm run copy-data",
+        "compile:release": "npm run antlr:build && tsc -b && npm run copy-data",
+        "antlr:generate": "cd antlr-grammar && npm run generate",
+        "antlr:build": "cd antlr-grammar && npm run generate && npm run build && cd .. && npm run antlr:copy",
+        "antlr:copy": "node -e \"const fs=require('fs'),path=require('path'); const src='antlr-grammar/generated'; const dest='server/src/generated'; fs.readdirSync(src).filter(f=>f.endsWith('.ts')).forEach(f=>fs.copyFileSync(path.join(src,f),path.join(dest,f))); console.log('✅ Copied ANTLR generated files to server');\"",
         "copy-data": "node -e \"const fs=require('fs'),path=require('path'); fs.mkdirSync('out/server/src/data',{recursive:true}); fs.copyFileSync('server/src/data/clarion-builtins.json','out/server/src/data/clarion-builtins.json'); fs.copyFileSync('server/src/data/clarion-attributes.json','out/server/src/data/clarion-attributes.json'); fs.copyFileSync('server/src/data/clarion-controls.json','out/server/src/data/clarion-controls.json'); fs.copyFileSync('server/src/data/clarion-datatypes.json','out/server/src/data/clarion-datatypes.json');\"",
         "package": "npm run compile:dev && vsce package",
         "package:release": "npm run compile:release && vsce package --allow-star-activation",

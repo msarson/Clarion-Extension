@@ -40,7 +40,9 @@ OCTAL_LITERAL
 
 // Decimal (integer or floating point)
 DECIMAL_LITERAL
-    : [0-9]+ ('.' [0-9]+)? ( [eE] [+-]? [0-9]+ )?
+    : [0-9]+ '.' [0-9]+ ( [eE] [+-]? [0-9]+ )?  // Decimal with fractional part (e.g., 3.14)
+    | [0-9]+ [eE] [+-]? [0-9]+                  // Scientific notation without decimal point (e.g., 1e10)
+    | [0-9]+                                     // Integer (e.g., 42)
     ;
 
 // Picture format number (e.g., @N10.2~value~)

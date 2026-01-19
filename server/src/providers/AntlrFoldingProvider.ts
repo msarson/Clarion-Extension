@@ -1,21 +1,31 @@
 import { FoldingRange, FoldingRangeKind } from "vscode-languageserver-types";
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { CharStream, CommonTokenStream } from 'antlr4ng';
+import { CharStream, CommonTokenStream, ParserRuleContext } from 'antlr4ng';
 import { ClarionLexer } from '../generated/ClarionLexer';
 import { ClarionParser, ProcedureDeclarationContext, MapSectionContext, 
          CodeSectionContext, IfStatementContext, LoopStatementContext, 
-         CaseStatementContext, WindowDeclarationContext, GroupDeclarationContext,
+         CaseStatementContext, ExecuteStatementContext, WindowDeclarationContext, GroupDeclarationContext,
          QueueDeclarationContext, FileDeclarationContext, ClassDeclarationContext,
          RoutineDeclarationContext, RecordDeclarationContext, ViewDeclarationContext,
          ApplicationDeclarationContext, MethodDeclarationContext, ModuleReferenceContext,
          DoStatementContext, WindowControlsContext, TabControlContext, SheetControlContext,
          GroupControlContext, OptionControlContext, OleControlContext,
-         MenubarDeclarationContext, MenuDeclarationContext, MenuItemDeclarationContext } from '../generated/ClarionParser';
-import { ParserRuleContext } from 'antlr4ng';
+         MenubarDeclarationContext, MenuDeclarationContext, MenuItemDeclarationContext,
+         ElsifClauseContext, ElseClauseContext } from '../generated/ClarionParser';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("AntlrFoldingProvider");
-logger.setLevel("info");
+logger.setLevel("debug");
+
+// Cache parse trees per document to avoid re-parsing
+interface ParseTreeCache {
+    version: number;
+    tree: ParserRuleContext;
+    timestamp: number;
+}
+
+const parseTreeCache = new Map<string, ParseTreeCache>();
+const CACHE_MAX_AGE = 5000; // 5 seconds
 
 /**
  * ANTLR-based folding provider
@@ -36,18 +46,44 @@ export class AntlrFoldingProvider {
         
         try {
             const text = this.document.getText();
+            const uri = this.document.uri;
+            const version = this.document.version;
             
-            // Create ANTLR lexer and parser
-            const inputStream = CharStream.fromString(text);
-            const lexer = new ClarionLexer(inputStream);
-            const tokenStream = new CommonTokenStream(lexer);
-            const parser = new ClarionParser(tokenStream);
+            // TEMP: Always reparse during debugging
+            parseTreeCache.delete(uri);
             
-            // Disable error console output
-            parser.removeErrorListeners();
+            // Check cache first
+            const cached = parseTreeCache.get(uri);
+            const now = Date.now();
             
-            // Parse the document
-            const tree = parser.compilationUnit();
+            let tree: ParserRuleContext;
+            
+            if (cached && cached.version === version && (now - cached.timestamp) < CACHE_MAX_AGE) {
+                // Use cached parse tree
+                tree = cached.tree;
+                logger.info(`✅ Using cached parse tree for ${uri.substring(uri.lastIndexOf('/') + 1)}`);
+            } else {
+                // Parse and cache
+                const inputStream = CharStream.fromString(text);
+                const lexer = new ClarionLexer(inputStream);
+                const tokenStream = new CommonTokenStream(lexer);
+                const parser = new ClarionParser(tokenStream);
+                
+                // Disable error console output
+                parser.removeErrorListeners();
+                
+                // Parse the document
+                tree = parser.compilationUnit();
+                
+                // Store in cache
+                parseTreeCache.set(uri, {
+                    version,
+                    tree,
+                    timestamp: now
+                });
+                
+                logger.info(`📦 Cached parse tree for ${uri.substring(uri.lastIndexOf('/') + 1)}`);
+            }
             
             // Collect folding ranges from parse tree
             const ranges: FoldingRange[] = [];
@@ -95,8 +131,39 @@ export class AntlrFoldingProvider {
         const startLine = ctx.start.line - 1; // Convert to 0-based
         const endLine = ctx.stop.line - 1;     // Convert to 0-based
 
+        // Guard: Skip if line numbers are invalid (can happen with empty optional rules)
+        if (endLine < startLine) {
+            // logger.debug(`  -> Skipped (invalid lines): startLine=${startLine}, endLine=${endLine}`);
+            return null;
+        }
+
+        // WORKAROUND for parser ambiguity with single-line IF statements
+        // TODO: Fix the grammar to properly distinguish between:
+        //   - Single-line: "IF condition THEN statement." (DOT terminates immediately)
+        //   - Multi-line:  "IF condition THEN\n  statements...\n." (DOT after multiple statements)
+        // The issue: statementList is greedy and consumes statements across lines until finding DOT/END
+        // Current behavior: Parser sees "IF x THEN y." and continues to next line, choosing the first
+        //                   DOT it finds (e.g., in "self.Method") as the IF terminator
+        if (ctx instanceof IfStatementContext) {
+            // If IF starts on one line but terminator DOT is on a different line, check if there's 
+            // a DOT on the IF line itself (indicating single-line IF where parser chose wrong DOT)
+            if (ctx.stop.type === 4 && ctx.stop.line > ctx.start.line) {  // 4 is DOT
+                const ifLineText = this.document.getText({
+                    start: { line: startLine, character: 0 },
+                    end: { line: startLine + 1, character: 0 }
+                });
+                
+                // If the IF line contains THEN and ends with DOT (possibly followed by comment), skip fold
+                if (/THEN/i.test(ifLineText) && /\.\s*(?:!.*)?[\r\n]*$/.test(ifLineText)) {
+                    logger.debug(`  -> Skipped (single-line IF with DOT on same line, parser chose wrong DOT)`);
+                    return null;
+                }
+            }
+        }
+
         // Only create folding range if it spans multiple lines
         if (endLine <= startLine) {
+            // logger.debug(`  -> Skipped (single line): startLine=${startLine}, endLine=${endLine}`);
             return null;
         }
 
@@ -104,24 +171,81 @@ export class AntlrFoldingProvider {
 
         // Determine folding kind based on context type
         if (ctx instanceof ProcedureDeclarationContext) {
-            return { startLine, endLine };
+            logger.debug(`PROCEDURE: start line=${ctx.start?.line} col=${ctx.start?.column} (${ctx.start?.text}), stop line=${ctx.stop?.line} col=${ctx.stop?.column} (${ctx.stop?.text}, type=${ctx.stop?.type}), startLine=${startLine}, endLine=${endLine}`);
+            if (endLine > startLine) {
+                logger.debug(`  -> Creating fold: startLine=${startLine}, endLine=${endLine}`);
+                return { startLine, endLine };
+            } else {
+                logger.debug(`  -> Skipped (endLine ${endLine} <= startLine ${startLine})`);
+                return null;
+            }
         }
         else if (ctx instanceof RoutineDeclarationContext) {
-            return { startLine, endLine };
+            logger.debug(`ROUTINE: start line=${ctx.start?.line} col=${ctx.start?.column} (${ctx.start?.text}), stop line=${ctx.stop?.line} col=${ctx.stop?.column} (${ctx.stop?.text}, type=${ctx.stop?.type}), startLine=${startLine}, endLine=${endLine}`);
+            if (endLine > startLine) {
+                logger.debug(`  -> Creating fold: startLine=${startLine}, endLine=${endLine}`);
+                return { startLine, endLine };
+            } else {
+                logger.debug(`  -> Skipped (endLine ${endLine} <= startLine ${startLine})`);
+                return null;
+            }
         }
         else if (ctx instanceof MapSectionContext) {
             return { startLine, endLine };
         }
         else if (ctx instanceof CodeSectionContext) {
-            return { startLine, endLine };
+            logger.debug(`CODE SECTION: start line=${ctx.start?.line} col=${ctx.start?.column} (${ctx.start?.text}), stop line=${ctx.stop?.line} col=${ctx.stop?.column} (${ctx.stop?.text}, type=${ctx.stop?.type}), startLine=${startLine}, endLine=${endLine}`);
+            if (endLine > startLine) {
+                logger.debug(`  -> Creating fold: startLine=${startLine}, endLine=${endLine}`);
+                return { startLine, endLine };
+            } else {
+                logger.debug(`  -> Skipped (endLine ${endLine} <= startLine ${startLine})`);
+                return null;
+            }
         }
         else if (ctx instanceof IfStatementContext) {
+            logger.debug(`IF STATEMENT: start line=${ctx.start.line} col=${ctx.start.column} (${ctx.start.text}), stop line=${ctx.stop.line} col=${ctx.stop.column} (${ctx.stop.text}, type=${ctx.stop.type}), startLine=${startLine}, endLine=${endLine}`);
+            logger.debug(`  -> Creating fold: startLine=${startLine}, endLine=${endLine}`);
             return { startLine, endLine };
+        }
+        else if (ctx instanceof ElsifClauseContext) {
+            // ELSIF shares the END with its parent IF statement
+            // Find the parent IF and use its end line
+            const parentIf = ctx.parent as IfStatementContext;
+            if (parentIf && parentIf.stop) {
+                const elsifEndLine = parentIf.stop.line - 1; // Convert to 0-based
+                if (elsifEndLine > startLine) {
+                    return { startLine, endLine: elsifEndLine };
+                }
+            }
+            return null;
+        }
+        else if (ctx instanceof ElseClauseContext) {
+            // ELSE shares the END with its parent IF statement
+            // Find the parent IF and use its end line
+            const parentIf = ctx.parent as IfStatementContext;
+            if (parentIf && parentIf.stop) {
+                const elseEndLine = parentIf.stop.line - 1; // Convert to 0-based
+                if (elseEndLine > startLine) {
+                    return { startLine, endLine: elseEndLine };
+                }
+            }
+            return null;
         }
         else if (ctx instanceof LoopStatementContext) {
-            return { startLine, endLine };
+            logger.debug(`LOOP STATEMENT: start line=${ctx.start?.line} col=${ctx.start?.column} (${ctx.start?.text}), stop line=${ctx.stop?.line} col=${ctx.stop?.column} (${ctx.stop?.text}, type=${ctx.stop?.type}), startLine=${startLine}, endLine=${endLine}`);
+            if (endLine > startLine) {
+                logger.debug(`  -> Creating fold: startLine=${startLine}, endLine=${endLine}`);
+                return { startLine, endLine };
+            } else {
+                logger.debug(`  -> Skipped (endLine ${endLine} <= startLine ${startLine})`);
+                return null;
+            }
         }
         else if (ctx instanceof CaseStatementContext) {
+            return { startLine, endLine };
+        }
+        else if (ctx instanceof ExecuteStatementContext) {
             return { startLine, endLine };
         }
         else if (ctx instanceof DoStatementContext) {
@@ -189,6 +313,22 @@ export class AntlrFoldingProvider {
         // Could also handle: RECORD, VIEW, REPORT, METHOD, MODULE, etc.
 
         return null;
+    }
+    
+    /**
+     * Invalidate cache for a document
+     */
+    public static invalidateCache(uri: string): void {
+        parseTreeCache.delete(uri);
+        logger.info(`🗑️  Invalidated parse tree cache for ${uri.substring(uri.lastIndexOf('/') + 1)}`);
+    }
+    
+    /**
+     * Clear all caches
+     */
+    public static clearCache(): void {
+        parseTreeCache.clear();
+        logger.info('🗑️  Cleared all parse tree caches');
     }
 
     /**

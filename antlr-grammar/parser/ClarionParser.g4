@@ -58,17 +58,18 @@ mapEntry
     | procedurePrototypeShort
     | moduleReference
     | includeDirective
+    | compileDirective
     ;
 
 // Full procedure prototype: label at column 0 with PROCEDURE keyword
 procedurePrototype
-    : IDENTIFIER PROCEDURE parameterList? returnType? procedureAttributes?
-    | LABEL PROCEDURE parameterList? returnType? procedureAttributes?
+    : IDENTIFIER PROCEDURE parameterList? procedureModifiers?
+    | LABEL PROCEDURE parameterList? procedureModifiers?
     ;
 
 // Short procedure prototype: indented, no PROCEDURE keyword
 procedurePrototypeShort
-    : IDENTIFIER parameterList returnType? procedureAttributes?
+    : IDENTIFIER parameterList procedureModifiers?
     ;
 
 moduleReference
@@ -77,7 +78,14 @@ moduleReference
 
 moduleContent
     : procedurePrototype
+    | procedurePrototypeShort  // Allow short-form prototypes inside MODULE
     | compileDirective
+    ;
+
+// Procedure modifiers: comma-separated list of return types and attributes
+// Return type is just a dataType without a keyword prefix
+procedureModifiers
+    : (COMMA (dataType | attribute))*
     ;
 
 // ============================================================================
@@ -170,6 +178,7 @@ statement
     | ifStatement
     | loopStatement
     | caseStatement
+    | executeStatement
     | returnStatement
     | gotoStatement
     | exitStatement
@@ -190,25 +199,68 @@ assignmentStatement
     : postfixExpression (EQ | ASSIGN | DEEP_ASSIGN | PLUS_EQ | MINUS_EQ | MULT_EQ | DIV_EQ | AMP_EQ) expression
     ;
 
+// TODO: This IF statement grammar has an ambiguity issue - FIXED with semantic predicate on terminator
 ifStatement
     : IF expression THEN?
       statementList?
-      (ELSIF expression THEN? statementList?)*
-      (ELSE statementList?)?
-      (END | DOT)  // DOT or END terminates IF statement (REQUIRED)
+      elsifClause*
+      elseClause?
+      ifTerminator
+    ;
+
+elsifClause
+    : ELSIF expression THEN? statementList?
+    ;
+
+elseClause
+    : ELSE statementList?
     ;
 
 loopStatement
-    : LOOP (expression TIMES | TIMES expression | WHILE expression | UNTIL expression)?
+    : LOOP (variable EQ expression TO expression (BY expression)?  // LOOP x = 1 TO 10 [BY 2]
+           | expression TIMES                                       // LOOP n TIMES
+           | TIMES expression                                       // LOOP TIMES n
+           | WHILE expression                                       // LOOP WHILE condition
+           | UNTIL expression)?                                     // LOOP UNTIL condition (or just LOOP)
       statementList?
-      (END | DOT)  // DOT or END terminates structured statement
+      loopTerminator
+    ;
+
+// Shared terminator logic: DOT only if NOT followed by identifier/keyword (to avoid matching member access)
+ifTerminator
+    : END
+    | {(()=>{ const ty = this.tokenStream.LA(2); return !ty || ty===-1 || ty===5 || !(ty === 301 || ty === 295 || (ty >= 8 && ty <= 294)); })()}? DOT
+    ;
+
+// Loop terminator: END or DOT (but DOT only if NOT followed by identifier/keyword for member access)
+loopTerminator
+    : END
+    | {(()=>{ const ty = this.tokenStream.LA(2); return !ty || ty===-1 || ty===5 || !(ty === 301 || ty === 295 || (ty >= 8 && ty <= 294)); })()}? DOT
     ;
 
 caseStatement
     : CASE expression
-      (OF expression (OROF expression)* statementList?)*
+      (OF expression statementList? (OROF expression statementList?)*)*
       (ELSE statementList?)?
-      (END | DOT)  // DOT or END terminates structured statement
+      caseTerminator
+    ;
+
+executeStatement
+    : EXECUTE expression
+      statement+           // One or more statements (one per possible value)
+      (ELSE statement)?    // Optional ELSE clause
+      executeTerminator
+    ;
+
+// Terminators for different structures - all use same logic
+caseTerminator
+    : END
+    | {(()=>{ const ty = this.tokenStream.LA(2); return !ty || ty===-1 || ty===5 || !(ty === 301 || ty === 295 || (ty >= 8 && ty <= 294)); })()}? DOT
+    ;
+
+executeTerminator
+    : END
+    | {(()=>{ const ty = this.tokenStream.LA(2); return !ty || ty===-1 || ty===5 || !(ty === 301 || ty === 295 || (ty >= 8 && ty <= 294)); })()}? DOT
     ;
 
 returnStatement
@@ -241,6 +293,7 @@ procedureCall
     : postfixExpression  // Handles func(), obj.method(), obj{prop}(), etc. via postfix operators
     | DISPOSE LPAREN argumentList? RPAREN  // DISPOSE(reference) - built-in procedure for deallocation
     | DISABLE LPAREN argumentList? RPAREN  // DISABLE(control) - built-in procedure to disable a control
+    | ASSERT LPAREN argumentList? RPAREN   // ASSERT(condition, message) - debug assertion
     | bareIdentifierCall  // Procedure call without parentheses
     ;
 
@@ -288,19 +341,19 @@ keyDeclaration
     ;
 
 groupDeclaration
-    : label GROUP (LPAREN IDENTIFIER? RPAREN)? (COMMA groupAttributes)?
+    : label? GROUP (LPAREN IDENTIFIER? RPAREN)? (COMMA groupAttributes)?
       dataDeclarationList
       (END | DOT)
     ;
 
 queueDeclaration
-    : label QUEUE (LPAREN IDENTIFIER? RPAREN)? (COMMA queueAttributes)?
+    : label? QUEUE (LPAREN IDENTIFIER? RPAREN)? (COMMA queueAttributes)?
       dataDeclarationList
       (END | DOT)
     ;
 
 classDeclaration
-    : label CLASS (LPAREN IDENTIFIER? RPAREN)? (COMMA classAttributes)?
+    : label? CLASS (LPAREN IDENTIFIER? RPAREN)? (COMMA classAttributes)?
       classBody
       (END | DOT)
     ;
@@ -472,7 +525,11 @@ additiveExpression
     ;
 
 multiplicativeExpression
-    : unaryExpression ((MULTIPLY | DIVIDE | MODULO) unaryExpression)*
+    : exponentiationExpression ((MULTIPLY | DIVIDE | MODULO) exponentiationExpression)*
+    ;
+
+exponentiationExpression
+    : unaryExpression (POWER unaryExpression)*
     ;
 
 unaryExpression
@@ -482,20 +539,22 @@ unaryExpression
 
 // Postfix operators bind tighter than any infix operator
 // Property access {prop:xxx}, array subscripting [index], member access .member, and function calls () are all postfix
+// IMPORTANT: Use greedy matching for member access to prevent DOT from being interpreted as structure terminator
 postfixExpression
-    : primaryExpression (postfixOperator)*
+    : primaryExpression postfixOperator*
     ;
 
 postfixOperator
     : LBRACE argumentList RBRACE  // Property access: var{PROP:Text} or 0{prop:hlp}
-    | LBRACKET expression RBRACKET     // Array subscripting: array[index]
-    | DOT (anyIdentifier | QUALIFIED_IDENTIFIER)  // Member access: obj.member
+    | LBRACKET expression (COLON expression)? RBRACKET     // Array subscripting or slicing: array[index] or array[start:end]
+    | DOT (anyIdentifier | QUALIFIED_IDENTIFIER)  // Member access: obj.member - revert to no predicate, let loop terminator handle it
     | LPAREN argumentList? RPAREN  // Function call: func() or obj.method()
     ;
 
 primaryExpression
     : literal           // Literals (numbers, strings, QUESTION, etc.)
     | newExpression     // NEW expression
+    | chooseExpression  // CHOOSE expression
     | variable          // Simple variables (no postfix operators - those are in postfixExpression)
     | LPAREN expression RPAREN
     ;
@@ -503,6 +562,10 @@ primaryExpression
 newExpression
     : NEW LPAREN dataType RPAREN  // NEW(Type)
     | NEW (anyIdentifier | QUALIFIED_IDENTIFIER)  // NEW Type (parentheses optional per ClarionDocs)
+    ;
+
+chooseExpression
+    : CHOOSE LPAREN expression (COMMA expression)+ RPAREN  // CHOOSE(expr, val1, val2[, val3...]) or CHOOSE(cond[, true, false])
     ;
 
 functionCall
@@ -581,6 +644,16 @@ softKeyword
     | IMAGE
     | STRING      // Data type but used as identifier
     | PRIMARY     // Attribute but used as identifier
+    | LINE        // Control type but used as field name
+    | BOX | ELLIPSE | PANEL | PROGRESS | REGION | PROMPT | SPIN | CHECK | RADIO | COMBO
+    // Common attribute keywords that can be used as parameter names
+    | MSG | HLP | TIP | KEY | NAME | TYPE | AUTO | OVER | DIM | PRE
+    | RAW | PASCAL | PROC | DLL | EXTERNAL | PRIVATE | PROTECTED | STATIC | THREAD
+    | AT | USE | FROM | HIDE | DISABLE | READONLY | REQ | DEFAULT | CENTER | CENTERED
+    | ICON | FONT | COLOR | TRN | IMM | ALRT | TIMER | CURSOR
+    | CREATE | RECLAIM | OWNER | ENCRYPT | DRIVER | BINARY
+    | INDEX | OPT | DUP | NOCASE | PRIMARY | INNER | OUTER | FILTER | ORDER
+    | REPLACE  // String method that can be used as identifier
     ;
 
 // Allow keywords to be used as identifiers (Clarion allows this in many contexts)
@@ -620,7 +693,7 @@ programAttributes
     ;
 
 procedureAttributes
-    : attribute*
+    : (COMMA attribute)*  // Procedure attributes preceded by commas
     ;
 
 methodAttributes
@@ -628,11 +701,11 @@ methodAttributes
     ;
 
 dataAttributes
-    : dataAttribute*
+    : dataAttribute (COMMA dataAttribute)*
     ;
 
 fileAttributes
-    : fileAttribute*
+    : fileAttribute (COMMA fileAttribute)*
     ;
 
 groupAttributes
@@ -795,14 +868,15 @@ dataAttribute
 
 // Structure attributes (GROUP, QUEUE, CLASS, FILE)
 structureAttribute
-    : PRE (LPAREN expression RPAREN)?
+    : PRE (LPAREN expression? RPAREN)?
     | DIM (LPAREN expression (COMMA expression)* RPAREN)?
-    | OVER (LPAREN expression RPAREN)?
+    | OVER (LPAREN expression? RPAREN)?
     | STATIC
     | THREAD
     | TYPE
     | BINDABLE
     | EXTERNAL
+    | AUTO
     | DLL (LPAREN expression? (COMMA expression?)* RPAREN)?
     | IDENTIFIER (LPAREN expression? (COMMA expression?)* RPAREN)?
     | IDENTIFIER
@@ -866,29 +940,33 @@ label
     ;
 
 dataType
-    : ASTERISK? BYTE (LPAREN expression RPAREN)?
-    | ASTERISK? SHORT (LPAREN expression RPAREN)?
-    | ASTERISK? USHORT (LPAREN expression RPAREN)?
-    | ASTERISK? LONG (LPAREN expression RPAREN)?
-    | ASTERISK? ULONG (LPAREN expression RPAREN)?
-    | ASTERISK? UNSIGNED (LPAREN expression RPAREN)?
-    | ASTERISK? REAL (LPAREN expression RPAREN)?
-    | ASTERISK? SREAL (LPAREN expression RPAREN)?
-    | ASTERISK? DECIMAL (LPAREN expression (COMMA expression)* RPAREN)?
-    | ASTERISK? PDECIMAL (LPAREN expression (COMMA expression)* RPAREN)?
-    | ASTERISK? STRING (LPAREN expression RPAREN)?
-    | ASTERISK? CSTRING (LPAREN expression RPAREN)?
-    | ASTERISK? PSTRING (LPAREN expression RPAREN)?
-    | ASTERISK? ASTRING (LPAREN expression RPAREN)?
-    | ASTERISK? BSTRING (LPAREN expression RPAREN)?
-    | ASTERISK? DATE (LPAREN expression RPAREN)?
-    | ASTERISK? TIME (LPAREN expression RPAREN)?
-    | ASTERISK? MEMO (LPAREN expression RPAREN)?
-    | ASTERISK? BLOB (LPAREN expression RPAREN)?
+    : ASTERISK? baseType
     | ANY
     | LIKE LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER) RPAREN  // Inherited data type
     | GROUP | QUEUE | CLASS
-    | ASTERISK? IDENTIFIER  // User-defined types (e.g., PersonType) with optional pointer
+    ;
+
+baseType
+    : BYTE (LPAREN expression RPAREN)?
+    | SHORT (LPAREN expression RPAREN)?
+    | USHORT (LPAREN expression RPAREN)?
+    | LONG (LPAREN expression RPAREN)?
+    | ULONG (LPAREN expression RPAREN)?
+    | UNSIGNED (LPAREN expression RPAREN)?
+    | REAL (LPAREN expression RPAREN)?
+    | SREAL (LPAREN expression RPAREN)?
+    | DECIMAL (LPAREN expression (COMMA expression)* RPAREN)?
+    | PDECIMAL (LPAREN expression (COMMA expression)* RPAREN)?
+    | STRING (LPAREN expression RPAREN)?
+    | CSTRING (LPAREN expression RPAREN)?
+    | PSTRING (LPAREN expression RPAREN)?
+    | ASTRING (LPAREN expression RPAREN)?
+    | BSTRING (LPAREN expression RPAREN)?
+    | DATE (LPAREN expression RPAREN)?
+    | TIME (LPAREN expression RPAREN)?
+    | MEMO (LPAREN expression RPAREN)?
+    | BLOB (LPAREN expression RPAREN)?
+    | IDENTIFIER  // User-defined types (e.g., PersonType)
     ;
 
 controlType
@@ -906,8 +984,9 @@ parameterList
     ;
 
 parameter
-    : dataType IDENTIFIER? dataAttributes?
-    | POINTER_VAR
+    : LT dataType anyIdentifier? GT                  // Omittable parameter: <STRING pSep>
+    | dataType anyIdentifier? (EQ expression)?       // Optional documentary parameter name (can be keyword) and default value
+    | POINTER_VAR anyIdentifier? (EQ expression)?    // Pointer variable with optional parameter name and default
     | AMPERSAND (anyIdentifier | QUALIFIED_IDENTIFIER)  // Reference parameter (e.g., &QueueType)
     ;
 

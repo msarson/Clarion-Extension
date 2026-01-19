@@ -39,15 +39,15 @@ CODE      : 'CODE' ;        // FULLY RESERVED
 MAP       : 'MAP' ;         // SOFT KEYWORD (structure type)
 
 // Control Flow - All FULLY RESERVED
-IF        : 'IF' ;          // FULLY RESERVED
-ELSIF     : 'ELSIF' ;       // FULLY RESERVED
-ELSE      : 'ELSE' ;        // FULLY RESERVED
-THEN      : 'THEN' ;        // FULLY RESERVED
-CASE      : 'CASE' ;        // FULLY RESERVED
-OF        : 'OF' ;          // FULLY RESERVED
-OROF      : 'OROF' ;        // FULLY RESERVED
-LOOP      : 'LOOP' ;        // FULLY RESERVED
-WHILE     : 'WHILE' ;       // FULLY RESERVED
+IF        : {this.charPositionInLine > 0}? 'IF' ;          // FULLY RESERVED
+ELSIF     : {this.charPositionInLine > 0}? 'ELSIF' ;       // FULLY RESERVED
+ELSE      : {this.charPositionInLine > 0}? 'ELSE' ;        // FULLY RESERVED
+THEN      : {this.charPositionInLine > 0}? 'THEN' ;        // FULLY RESERVED
+CASE      : {this.charPositionInLine > 0}? 'CASE' ;        // FULLY RESERVED
+OF        : {this.charPositionInLine > 0}? 'OF' ;          // FULLY RESERVED
+OROF      : {this.charPositionInLine > 0}? 'OROF' ;        // FULLY RESERVED
+LOOP      : {this.charPositionInLine > 0}? 'LOOP' ;        // FULLY RESERVED
+WHILE     : {this.charPositionInLine > 0}? 'WHILE' ;       // FULLY RESERVED
 UNTIL     : 'UNTIL' ;       // FULLY RESERVED
 TIMES     : 'TIMES' ;       // FULLY RESERVED
 TO        : 'TO' ;          // FULLY RESERVED

@@ -15,6 +15,7 @@
   "include": [
     "tests/unit-tests/test-parse.ts",
     "tests/unit-tests/count-folding.ts",
+    "tests/unit-tests/test-lex-group.ts",
     "generated/**/*.ts"
   ],
   "exclude": [

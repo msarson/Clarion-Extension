@@ -17,7 +17,7 @@ MINUS     : '-' ;
 MULTIPLY  : '*' ;
 DIVIDE    : '/' ;
 MODULO    : '%' ;
-POWER     : '**' ;            // Exponentiation (if supported)
+POWER     : '^' ;             // Exponentiation: A ^ B raises A to power of B
 INT_DIV   : '//' ;            // Integer division (if supported)
 
 // ============================================================================

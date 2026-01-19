@@ -81,7 +81,7 @@ QUEUE       : {this.charPositionInLine > 0}? 'QUEUE' ;        // SOFT KEYWORD
 RECORD    : {this.charPositionInLine > 0}? 'RECORD' ;       // SOFT KEYWORD
 VIEW      : {this.charPositionInLine > 0}? 'VIEW' ;          // SOFT KEYWORD
 PROJECT   : {this.charPositionInLine > 0}? 'PROJECT' ;       // Not in ClarionDocs
-TABLE     : {this.charPositionInLine > 0}? 'TABLE' ;         // Not in ClarionDocs
+// TABLE removed - not a Clarion keyword, just an identifier
 
 // ============================================================================
 // CONTROL/WINDOW TYPES (All SOFT KEYWORDS per ClarionDocs)

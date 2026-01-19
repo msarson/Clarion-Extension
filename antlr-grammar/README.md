@@ -174,9 +174,37 @@ The `fix-generated` script is necessary because `antlr4ng` generates `this.charP
 
 ## 📚 Resources
 
-- **ClarionDocs/**: Clarion language reference documentation
+- **ClarionDocs/**: Clarion language reference documentation (**ALWAYS check here first before making grammar changes!**)
 - **docs/ai-progress/**: Development history and design decisions
 - **tests/test-files/**: Comprehensive test cases
+
+## 🔍 Development Workflow
+
+When adding or fixing grammar rules:
+
+1. **ALWAYS check ClarionDocs first** - Look up the language feature in the HTML documentation
+   - Search for keywords: `grep -r "CHOOSE" ClarionDocs/`
+   - Check parameter syntax: `ClarionDocs/prototype_parameter_lists.htm`
+   - Verify built-in functions: `ClarionDocs/*function_name*.htm`
+2. **Update the grammar** based on documented behavior
+3. **Regenerate and test**: `npm run generate && npm run build`
+4. **Test with real files**: `node out/tests/unit-tests/test-parse.js <file.clw>`
+
+### Example: Adding CHOOSE support
+```bash
+# 1. Check documentation
+grep -i "choose" ClarionDocs/*.htm
+
+# 2. Read: ClarionDocs/choose__return_chosen_value_.htm
+# Learn: CHOOSE(expr, val1, val2[, val3...]) or CHOOSE(cond[, true, false])
+
+# 3. Update grammar
+chooseExpression : CHOOSE LPAREN expression (COMMA expression)+ RPAREN ;
+
+# 4. Test
+npm run generate && npm run build
+node out/tests/unit-tests/test-parse.js test-choose.clw
+```
 
 ## 🎯 Future Enhancements
 
@@ -184,6 +212,32 @@ The `fix-generated` script is necessary because `antlr4ng` generates `this.charP
 - Add semantic analysis passes
 - Generate symbol table from parse tree
 - Add error recovery strategies
+
+## ⚠️ Known Limitations
+
+### Multi-line IF without THEN
+
+**Issue**: When `IF` statements span multiple lines without the `THEN` keyword, the parser cannot reliably distinguish where the condition expression ends and the statement list begins.
+
+**Example** that fails to parse:
+```clarion
+if self.Base64URLSafe
+  table[63] = '-'   ! Parser tries to include 'table' in the condition expression
+  table[64] = '_'
+end
+```
+
+**Workaround**: Use `THEN` keyword for multi-line IF statements:
+```clarion
+if self.Base64URLSafe THEN
+  table[63] = '-'
+  table[64] = '_'
+end
+```
+
+**Root cause**: Clarion doesn't treat newlines as significant tokens. Without `THEN`, the parser uses greedy matching and may consume identifiers from the next line as part of the condition expression. Fixing this properly would require lexer modes or semantic predicates to make newlines significant in IF contexts.
+
+**Impact**: Folding provider may show incorrect folding ranges or skip IF statements that lack `THEN`.
 
 ## 📄 License
 
