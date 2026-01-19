@@ -582,7 +582,7 @@ fieldRef
       | IMPLICIT_QUOTE     // Implicit STRING(32) with " (e.g., Address")
       | FIELD_EQUATE       // Field equate (e.g., ?FieldName)
       )
-      (DOT IDENTIFIER)*  // Zero or more DOT+ID chains (simplified to just IDENTIFIER)
+      (DOT anyIdentifier)*  // Zero or more DOT+ID chains (allow keywords as field names)
     ;
 
 newExpression
