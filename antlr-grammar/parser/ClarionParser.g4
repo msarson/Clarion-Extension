@@ -211,14 +211,11 @@ assignmentStatement
     ;
 
 // IF statement - handles both single-line and multi-line forms
-// Single-line: IF expr [THEN] [stmt;...] END/DOT (all on one line)
 // Multi-line:  IF expr [THEN]\n [stmts]\n [ELSIF...]\n [ELSE...]\n END/DOT
+// Single-line: IF expr [THEN] [stmt;...] END/DOT
 ifStatement
-    : IF expression THEN? 
-      ( NEWLINE statementList? elsifClause* elseClause?     // Multi-line form (with NEWLINE)
-      | (statement (SEMICOLON statement)*)?                  // Single-line form (no NEWLINE, inline statements)
-      )
-      (END | DOT) NEWLINE*
+    : IF expression THEN? NEWLINE statementList? elsifClause* elseClause? (END | DOT) NEWLINE*  // Multi-line form (try first)
+    | IF expression THEN? (statement (SEMICOLON statement)*)? (END | DOT) NEWLINE*              // Single-line form
     ;
 
 elsifClause
@@ -563,16 +560,31 @@ postfixExpression
 postfixOperator
     : LBRACE argumentList RBRACE  // Property access: var{PROP:Text} or 0{prop:hlp}
     | LBRACKET expression (COLON expression)? RBRACKET     // Array subscripting or slicing: array[index] or array[start:end]
-    | DOT (anyIdentifier | QUALIFIED_IDENTIFIER)  // Member access: obj.member - revert to no predicate, let loop terminator handle it
     | LPAREN argumentList? RPAREN  // Function call: func() or obj.method()
+    // NOTE: DOT member access removed - now handled by fieldRef
     ;
 
 primaryExpression
     : literal           // Literals (numbers, strings, QUESTION, etc.)
     | newExpression     // NEW expression
     | chooseExpression  // CHOOSE expression
-    | variable          // Simple variables (no postfix operators - those are in postfixExpression)
+    | fieldRef          // Field reference with optional DOT chains (self.member, obj.prop.field)
     | LPAREN expression RPAREN
+    ;
+
+// Field reference - handles all DOT-chained member access
+// This rule greedily consumes all DOT+ID sequences before postfix operators
+fieldRef
+    : ( SELF
+      | PARENT
+      | anyIdentifier
+      | QUALIFIED_IDENTIFIER
+      | IMPLICIT_NUMERIC   // Implicit LONG with # (e.g., Counter#)
+      | IMPLICIT_STRING    // Implicit REAL with $ (e.g., Percent$)
+      | IMPLICIT_QUOTE     // Implicit STRING(32) with " (e.g., Address")
+      | FIELD_EQUATE       // Field equate (e.g., ?FieldName)
+      )
+      (DOT (anyIdentifier | QUALIFIED_IDENTIFIER))*  // Zero or more DOT+ID chains
     ;
 
 newExpression
@@ -600,16 +612,6 @@ argument
     |               // OR empty argument (for omitted parameters like func(a,,c))
     ;
 
-variable
-    : SELF          // SELF reference
-    | PARENT        // PARENT reference
-    | anyIdentifier // Regular identifier
-    | QUALIFIED_IDENTIFIER  // Qualified identifier (e.g., PRE:Variable)
-    | IMPLICIT_NUMERIC   // Implicit LONG with # (e.g., Counter#)
-    | IMPLICIT_STRING    // Implicit REAL with $ (e.g., Percent$)
-    | IMPLICIT_QUOTE     // Implicit STRING(32) with " (e.g., Address")
-    | FIELD_EQUATE       // Field equate (e.g., ?FieldName)
-    ;
 
 // ============================================================================
 // SOFT KEYWORDS (can be used as identifiers per ClarionDocs)
