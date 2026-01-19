@@ -1,0 +1,1105 @@
+
+=== ALL TOKENS (lines 10-20) ===
+0: Line 10:0 Type=  7 WHITESPACE                Text="  "
+1: Line 10:2 Type= 14 CODE                      Text="code"
+2: Line 10:6 Type=  5 NEWLINE                   Text="
+"
+3: Line 11:0 Type=  7 WHITESPACE                Text="  "
+4: Line 11:2 Type= 16 IF                        Text="if"
+5: Line 11:4 Type=  7 WHITESPACE                Text=" "
+6: Line 11:5 Type=301 IDENTIFIER                Text="address"
+7: Line 11:12 Type=280 LPAREN                    Text="("
+8: Line 11:13 Type=301 IDENTIFIER                Text="newValue"
+9: Line 11:21 Type=281 RPAREN                    Text=")"
+10: Line 11:22 Type=  7 WHITESPACE                Text=" "
+11: Line 11:23 Type=264 EQ                        Text="="
+12: Line 11:24 Type=  7 WHITESPACE                Text=" "
+13: Line 11:25 Type=301 IDENTIFIER                Text="address"
+14: Line 11:32 Type=280 LPAREN                    Text="("
+15: Line 11:33 Type= 44 SELF                      Text="self"
+16: Line 11:37 Type=  4 DOT                       Text="."
+17: Line 11:38 Type=301 IDENTIFIER                Text="value"
+18: Line 11:43 Type=281 RPAREN                    Text=")"
+19: Line 11:44 Type=  7 WHITESPACE                Text=" "
+20: Line 11:45 Type= 55 AND                       Text="and"
+21: Line 11:48 Type=  7 WHITESPACE                Text=" "
+22: Line 11:49 Type= 57 NOT                       Text="not"
+23: Line 11:52 Type=  7 WHITESPACE                Text=" "
+24: Line 11:53 Type= 44 SELF                      Text="self"
+25: Line 11:57 Type=  4 DOT                       Text="."
+26: Line 11:58 Type=301 IDENTIFIER                Text="streamFileName"
+27: Line 11:72 Type=  7 WHITESPACE                Text=" "
+28: Line 11:73 Type=277 AMP_EQ                    Text="&="
+29: Line 11:75 Type=  7 WHITESPACE                Text=" "
+30: Line 11:76 Type=242 NULL                      Text="null"
+31: Line 11:80 Type=  7 WHITESPACE                Text=" "
+32: Line 11:81 Type=  1 COMMENT                   Text="! appending self so pass by value"
+33: Line 11:114 Type=  5 NEWLINE                   Text="
+"
+34: Line 12:0 Type=  7 WHITESPACE                Text="    "
+35: Line 12:4 Type= 44 SELF                      Text="self"
+36: Line 12:8 Type=  4 DOT                       Text="."
+37: Line 12:9 Type=301 IDENTIFIER                Text="append"
+38: Line 12:15 Type=280 LPAREN                    Text="("
+39: Line 12:16 Type=301 IDENTIFIER                Text="newValue"
+40: Line 12:24 Type=278 AMPERSAND                 Text="&"
+41: Line 12:25 Type=226 STRING_LITERAL            Text="''"
+42: Line 12:27 Type=286 COMMA                     Text=","
+43: Line 12:28 Type=301 IDENTIFIER                Text="pOptions"
+44: Line 12:36 Type=286 COMMA                     Text=","
+45: Line 12:37 Type=301 IDENTIFIER                Text="pSep"
+46: Line 12:41 Type=281 RPAREN                    Text=")"
+47: Line 12:42 Type=  5 NEWLINE                   Text="
+"
+48: Line 13:0 Type=  7 WHITESPACE                Text="    "
+49: Line 13:4 Type= 33 RETURN                    Text="return"
+50: Line 13:10 Type=  5 NEWLINE                   Text="
+"
+51: Line 14:0 Type=  7 WHITESPACE                Text="  "
+52: Line 14:2 Type= 39 END                       Text="end"
+53: Line 14:5 Type=  5 NEWLINE                   Text="
+
+"
+54: Line 16:0 Type=  7 WHITESPACE                Text="  "
+55: Line 16:2 Type= 16 IF                        Text="if"
+56: Line 16:4 Type=  7 WHITESPACE                Text=" "
+57: Line 16:5 Type=301 IDENTIFIER                Text="address"
+58: Line 16:12 Type=280 LPAREN                    Text="("
+59: Line 16:13 Type=301 IDENTIFIER                Text="newValue"
+60: Line 16:21 Type=281 RPAREN                    Text=")"
+61: Line 16:22 Type=  7 WHITESPACE                Text=" "
+62: Line 16:23 Type=264 EQ                        Text="="
+63: Line 16:24 Type=  7 WHITESPACE                Text=" "
+64: Line 16:25 Type=230 DECIMAL_LITERAL           Text="0"
+65: Line 16:26 Type=  5 NEWLINE                   Text="
+"
+66: Line 17:0 Type=  7 WHITESPACE                Text="    "
+67: Line 17:4 Type=301 IDENTIFIER                Text="newLen"
+68: Line 17:10 Type=  7 WHITESPACE                Text=" "
+69: Line 17:11 Type=264 EQ                        Text="="
+70: Line 17:12 Type=  7 WHITESPACE                Text=" "
+71: Line 17:13 Type=230 DECIMAL_LITERAL           Text="0"
+72: Line 17:14 Type=  5 NEWLINE                   Text="
+"
+73: Line 18:0 Type=  7 WHITESPACE                Text="  "
+74: Line 18:2 Type= 18 ELSE                      Text="else"
+75: Line 18:6 Type=  5 NEWLINE                   Text="
+"
+76: Line 19:0 Type=  7 WHITESPACE                Text="    "
+77: Line 19:4 Type=301 IDENTIFIER                Text="newLen"
+78: Line 19:10 Type=  7 WHITESPACE                Text=" "
+79: Line 19:11 Type=264 EQ                        Text="="
+80: Line 19:12 Type=  7 WHITESPACE                Text=" "
+81: Line 19:13 Type= 34 CHOOSE                    Text="Choose"
+82: Line 19:19 Type=280 LPAREN                    Text="("
+83: Line 19:20 Type=301 IDENTIFIER                Text="band"
+84: Line 19:24 Type=280 LPAREN                    Text="("
+85: Line 19:25 Type=301 IDENTIFIER                Text="pOptions"
+86: Line 19:33 Type=286 COMMA                     Text=","
+87: Line 19:34 Type=295 QUALIFIED_IDENTIFIER      Text="st:Clip"
+88: Line 19:41 Type=281 RPAREN                    Text=")"
+89: Line 19:42 Type=264 EQ                        Text="="
+90: Line 19:43 Type=230 DECIMAL_LITERAL           Text="0"
+91: Line 19:44 Type=286 COMMA                     Text=","
+92: Line 19:45 Type=301 IDENTIFIER                Text="size"
+93: Line 19:49 Type=280 LPAREN                    Text="("
+94: Line 19:50 Type=301 IDENTIFIER                Text="NewValue"
+95: Line 19:58 Type=281 RPAREN                    Text=")"
+96: Line 19:59 Type=286 COMMA                     Text=","
+97: Line 19:60 Type= 44 SELF                      Text="self"
+98: Line 19:64 Type=  4 DOT                       Text="."
+99: Line 19:65 Type=301 IDENTIFIER                Text="clipLen"
+100: Line 19:72 Type=280 LPAREN                    Text="("
+101: Line 19:73 Type=301 IDENTIFIER                Text="NewValue"
+102: Line 19:81 Type=281 RPAREN                    Text=")"
+103: Line 19:82 Type=281 RPAREN                    Text=")"
+104: Line 19:83 Type=  5 NEWLINE                   Text="
+"
+105: Line 20:0 Type=  7 WHITESPACE                Text="  "
+106: Line 20:2 Type= 39 END                       Text="end"
+107: Line 20:5 Type=  5 NEWLINE                   Text="
+"
+line 21:50 missing NEWLINE at 'return'
+line 28:36 missing NEWLINE at 'return'
+line 33:21 no viable alternative at input 'self.SetLength(self._DataEnd + sepLen + newLen)\n      if sepLen then stMemCpyLeft'
+line 33:21 missing NEWLINE at 'stMemCpyLeft'
+line 34:21 missing NEWLINE at 'stMemCpyLeft'
+line 38:23 no viable alternative at input '.flush()\n        if sepLen then stMemCpyLeft'
+line 38:23 missing NEWLINE at 'stMemCpyLeft'
+line 39:23 missing NEWLINE at 'stMemCpyLeft'
+line 41:6 no viable alternative at input 'self._DataEnd = sepLen + newLen\n      else'
+line 41:6 mismatched input 'else' expecting <EOF>
+
+================================================================================
+IF STATEMENT FOUND at line 11:2
+================================================================================
+
+IF CONDITION:
+  Start: line 11:5 token="address" type=301
+  Stop:  line 11:76 token="null" type=242
+
+  Tokens in expression:
+    Line 11:5 IDENTIFIER           "address"
+    Line 11:12 LPAREN               "("
+    Line 11:13 IDENTIFIER           "newValue"
+    Line 11:21 RPAREN               ")"
+    Line 11:22 WHITESPACE           " "
+    Line 11:23 EQ                   "="
+    Line 11:24 WHITESPACE           " "
+    Line 11:25 IDENTIFIER           "address"
+    Line 11:32 LPAREN               "("
+    Line 11:33 SELF                 "self"
+    Line 11:37 DOT                  "."
+    Line 11:38 IDENTIFIER           "value"
+    Line 11:43 RPAREN               ")"
+    Line 11:44 WHITESPACE           " "
+    Line 11:45 AND                  "and"
+    Line 11:48 WHITESPACE           " "
+    Line 11:49 NOT                  "not"
+    Line 11:52 WHITESPACE           " "
+    Line 11:53 SELF                 "self"
+    Line 11:57 DOT                  "."
+    Line 11:58 IDENTIFIER           "streamFileName"
+    Line 11:72 WHITESPACE           " "
+    Line 11:73 AMP_EQ               "&="
+    Line 11:75 WHITESPACE           " "
+    Line 11:76 NULL                 "null"
+
+  Expression parse tree:
+    ExpressionContext
+      OrExpressionContext
+        AndExpressionContext
+          XorExpressionContext
+            EqualityExpressionContext
+              RelationalExpressionContext
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: address (line 11:5)
+                          stop:  ) (line 11:21)
+                          PrimaryExpressionContext
+                            FieldRefContext
+                              start: address (line 11:5)
+                              stop:  address (line 11:5)
+                              AnyIdentifierContext
+                                TerminalNode
+                          PostfixOperatorContext
+                            TerminalNode
+                            ArgumentListContext
+                              ArgumentContext
+                                ExpressionContext
+                                  OrExpressionContext
+                                    AndExpressionContext
+                                      XorExpressionContext
+                                        EqualityExpressionContext
+                                          RelationalExpressionContext
+                                            AdditiveExpressionContext
+                                              MultiplicativeExpressionContext
+                                                ExponentiationExpressionContext
+                                                  UnaryExpressionContext
+                                                    PostfixExpressionContext
+                                                      start: newValue (line 11:13)
+                                                      stop:  newValue (line 11:13)
+                                                      PrimaryExpressionContext
+                                                        FieldRefContext
+                                                          start: newValue (line 11:13)
+                                                          stop:  newValue (line 11:13)
+                                                          AnyIdentifierContext
+                                                            TerminalNode
+                            TerminalNode
+              TerminalNode
+              RelationalExpressionContext
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: address (line 11:25)
+                          stop:  ) (line 11:43)
+                          PrimaryExpressionContext
+                            FieldRefContext
+                              start: address (line 11:25)
+                              stop:  address (line 11:25)
+                              AnyIdentifierContext
+                                TerminalNode
+                          PostfixOperatorContext
+                            TerminalNode
+                            ArgumentListContext
+                              ArgumentContext
+                                ExpressionContext
+                                  OrExpressionContext
+                                    AndExpressionContext
+                                      XorExpressionContext
+                                        EqualityExpressionContext
+                                          RelationalExpressionContext
+                                            AdditiveExpressionContext
+                                              MultiplicativeExpressionContext
+                                                ExponentiationExpressionContext
+                                                  UnaryExpressionContext
+                                                    PostfixExpressionContext
+                                                      start: self (line 11:33)
+                                                      stop:  value (line 11:38)
+                                                      PrimaryExpressionContext
+                                                        FieldRefContext
+                                                          start: self (line 11:33)
+                                                          stop:  value (line 11:38)
+                                                          TerminalNode
+                                                          TerminalNode
+                                                          AnyIdentifierContext
+                                                            TerminalNode
+                            TerminalNode
+          TerminalNode
+          XorExpressionContext
+            EqualityExpressionContext
+              RelationalExpressionContext
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        TerminalNode
+                        UnaryExpressionContext
+                          PostfixExpressionContext
+                            start: self (line 11:53)
+                            stop:  streamFileName (line 11:58)
+                            PrimaryExpressionContext
+                              FieldRefContext
+                                start: self (line 11:53)
+                                stop:  streamFileName (line 11:58)
+                                TerminalNode
+                                TerminalNode
+                                AnyIdentifierContext
+                                  TerminalNode
+              TerminalNode
+              RelationalExpressionContext
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: null (line 11:76)
+                          stop:  null (line 11:76)
+                          PrimaryExpressionContext
+                            LiteralContext
+                              TerminalNode
+
+IF STATEMENT END:
+  Stop token: line 14:5 token="
+
+" type=5 (NEWLINE)
+  Next token: line 16:0 token="  " type=7 (WHITESPACE)
+
+WHY DID IF STOP HERE?
+
+================================================================================
+IF STATEMENT FOUND at line 16:2
+================================================================================
+
+IF CONDITION:
+  Start: line 16:5 token="address" type=301
+  Stop:  line 16:25 token="0" type=230
+
+  Tokens in expression:
+    Line 16:5 IDENTIFIER           "address"
+    Line 16:12 LPAREN               "("
+    Line 16:13 IDENTIFIER           "newValue"
+    Line 16:21 RPAREN               ")"
+    Line 16:22 WHITESPACE           " "
+    Line 16:23 EQ                   "="
+    Line 16:24 WHITESPACE           " "
+    Line 16:25 DECIMAL_LITERAL      "0"
+
+  Expression parse tree:
+    ExpressionContext
+      OrExpressionContext
+        AndExpressionContext
+          XorExpressionContext
+            EqualityExpressionContext
+              RelationalExpressionContext
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: address (line 16:5)
+                          stop:  ) (line 16:21)
+                          PrimaryExpressionContext
+                            FieldRefContext
+                              start: address (line 16:5)
+                              stop:  address (line 16:5)
+                              AnyIdentifierContext
+                                TerminalNode
+                          PostfixOperatorContext
+                            TerminalNode
+                            ArgumentListContext
+                              ArgumentContext
+                                ExpressionContext
+                                  OrExpressionContext
+                                    AndExpressionContext
+                                      XorExpressionContext
+                                        EqualityExpressionContext
+                                          RelationalExpressionContext
+                                            AdditiveExpressionContext
+                                              MultiplicativeExpressionContext
+                                                ExponentiationExpressionContext
+                                                  UnaryExpressionContext
+                                                    PostfixExpressionContext
+                                                      start: newValue (line 16:13)
+                                                      stop:  newValue (line 16:13)
+                                                      PrimaryExpressionContext
+                                                        FieldRefContext
+                                                          start: newValue (line 16:13)
+                                                          stop:  newValue (line 16:13)
+                                                          AnyIdentifierContext
+                                                            TerminalNode
+                            TerminalNode
+              TerminalNode
+              RelationalExpressionContext
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: 0 (line 16:25)
+                          stop:  0 (line 16:25)
+                          PrimaryExpressionContext
+                            LiteralContext
+                              TerminalNode
+
+IF STATEMENT END:
+  Stop token: line 20:5 token="
+" type=5 (NEWLINE)
+  Next token: line 21:0 token="  " type=7 (WHITESPACE)
+
+WHY DID IF STOP HERE?
+
+================================================================================
+IF STATEMENT FOUND at line 21:2
+================================================================================
+
+IF CONDITION:
+  Start: line 21:5 token="band" type=301
+  Stop:  line 21:43 token="0" type=230
+
+  Tokens in expression:
+    Line 21:5 IDENTIFIER           "band"
+    Line 21:9 LPAREN               "("
+    Line 21:10 IDENTIFIER           "pOptions"
+    Line 21:18 COMMA                ","
+    Line 21:19 QUALIFIED_IDENTIFIER "st:NoBlanks"
+    Line 21:30 RPAREN               ")"
+    Line 21:31 WHITESPACE           " "
+    Line 21:32 AND                  "and"
+    Line 21:35 WHITESPACE           " "
+    Line 21:36 IDENTIFIER           "newlen"
+    Line 21:42 EQ                   "="
+    Line 21:43 DECIMAL_LITERAL      "0"
+
+  Expression parse tree:
+    ExpressionContext
+      OrExpressionContext
+        AndExpressionContext
+          XorExpressionContext
+            EqualityExpressionContext
+              RelationalExpressionContext
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: band (line 21:5)
+                          stop:  ) (line 21:30)
+                          PrimaryExpressionContext
+                            FieldRefContext
+                              start: band (line 21:5)
+                              stop:  band (line 21:5)
+                              AnyIdentifierContext
+                                TerminalNode
+                          PostfixOperatorContext
+                            TerminalNode
+                            ArgumentListContext
+                              ArgumentContext
+                                ExpressionContext
+                                  OrExpressionContext
+                                    AndExpressionContext
+                                      XorExpressionContext
+                                        EqualityExpressionContext
+                                          RelationalExpressionContext
+                                            AdditiveExpressionContext
+                                              MultiplicativeExpressionContext
+                                                ExponentiationExpressionContext
+                                                  UnaryExpressionContext
+                                                    PostfixExpressionContext
+                                                      start: pOptions (line 21:10)
+                                                      stop:  pOptions (line 21:10)
+                                                      PrimaryExpressionContext
+                                                        FieldRefContext
+                                                          start: pOptions (line 21:10)
+                                                          stop:  pOptions (line 21:10)
+                                                          AnyIdentifierContext
+                                                            TerminalNode
+                              TerminalNode
+                              ArgumentContext
+                                ExpressionContext
+                                  OrExpressionContext
+                                    AndExpressionContext
+                                      XorExpressionContext
+                                        EqualityExpressionContext
+                                          RelationalExpressionContext
+                                            AdditiveExpressionContext
+                                              MultiplicativeExpressionContext
+                                                ExponentiationExpressionContext
+                                                  UnaryExpressionContext
+                                                    PostfixExpressionContext
+                                                      start: st:NoBlanks (line 21:19)
+                                                      stop:  st:NoBlanks (line 21:19)
+                                                      PrimaryExpressionContext
+                                                        FieldRefContext
+                                                          start: st:NoBlanks (line 21:19)
+                                                          stop:  st:NoBlanks (line 21:19)
+                                                          TerminalNode
+                            TerminalNode
+          TerminalNode
+          XorExpressionContext
+            EqualityExpressionContext
+              RelationalExpressionContext
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: newlen (line 21:36)
+                          stop:  newlen (line 21:36)
+                          PrimaryExpressionContext
+                            FieldRefContext
+                              start: newlen (line 21:36)
+                              stop:  newlen (line 21:36)
+                              AnyIdentifierContext
+                                TerminalNode
+              TerminalNode
+              RelationalExpressionContext
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: 0 (line 21:43)
+                          stop:  0 (line 21:43)
+                          PrimaryExpressionContext
+                            LiteralContext
+                              TerminalNode
+
+IF STATEMENT END:
+  Stop token: line 21:57 token="
+
+" type=5 (NEWLINE)
+  Next token: line 23:0 token="  " type=7 (WHITESPACE)
+
+WHY DID IF STOP HERE?
+
+================================================================================
+IF STATEMENT FOUND at line 23:2
+================================================================================
+
+IF CONDITION:
+  Start: line 23:5 token="self" type=44
+  Stop:  line 23:21 token="1" type=230
+
+  Tokens in expression:
+    Line 23:5 SELF                 "self"
+    Line 23:9 DOT                  "."
+    Line 23:10 IDENTIFIER           "_DataEnd"
+    Line 23:18 WHITESPACE           " "
+    Line 23:19 LT                   "<"
+    Line 23:20 WHITESPACE           " "
+    Line 23:21 DECIMAL_LITERAL      "1"
+
+  Expression parse tree:
+    ExpressionContext
+      OrExpressionContext
+        AndExpressionContext
+          XorExpressionContext
+            EqualityExpressionContext
+              RelationalExpressionContext
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: self (line 23:5)
+                          stop:  _DataEnd (line 23:10)
+                          PrimaryExpressionContext
+                            FieldRefContext
+                              start: self (line 23:5)
+                              stop:  _DataEnd (line 23:10)
+                              TerminalNode
+                              TerminalNode
+                              AnyIdentifierContext
+                                TerminalNode
+                TerminalNode
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: 1 (line 23:21)
+                          stop:  1 (line 23:21)
+                          PrimaryExpressionContext
+                            LiteralContext
+                              TerminalNode
+
+IF STATEMENT END:
+  Stop token: line 27:5 token="
+" type=5 (NEWLINE)
+  Next token: line 28:0 token="  " type=7 (WHITESPACE)
+
+WHY DID IF STOP HERE?
+
+================================================================================
+IF STATEMENT FOUND at line 28:2
+================================================================================
+
+IF CONDITION:
+  Start: line 28:5 token="newlen" type=301
+  Stop:  line 28:29 token="0" type=230
+
+  Tokens in expression:
+    Line 28:5 IDENTIFIER           "newlen"
+    Line 28:11 WHITESPACE           " "
+    Line 28:12 EQ                   "="
+    Line 28:13 WHITESPACE           " "
+    Line 28:14 DECIMAL_LITERAL      "0"
+    Line 28:15 WHITESPACE           " "
+    Line 28:16 AND                  "and"
+    Line 28:19 WHITESPACE           " "
+    Line 28:20 IDENTIFIER           "sepLen"
+    Line 28:26 WHITESPACE           " "
+    Line 28:27 EQ                   "="
+    Line 28:28 WHITESPACE           " "
+    Line 28:29 DECIMAL_LITERAL      "0"
+
+  Expression parse tree:
+    ExpressionContext
+      OrExpressionContext
+        AndExpressionContext
+          XorExpressionContext
+            EqualityExpressionContext
+              RelationalExpressionContext
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: newlen (line 28:5)
+                          stop:  newlen (line 28:5)
+                          PrimaryExpressionContext
+                            FieldRefContext
+                              start: newlen (line 28:5)
+                              stop:  newlen (line 28:5)
+                              AnyIdentifierContext
+                                TerminalNode
+              TerminalNode
+              RelationalExpressionContext
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: 0 (line 28:14)
+                          stop:  0 (line 28:14)
+                          PrimaryExpressionContext
+                            LiteralContext
+                              TerminalNode
+          TerminalNode
+          XorExpressionContext
+            EqualityExpressionContext
+              RelationalExpressionContext
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: sepLen (line 28:20)
+                          stop:  sepLen (line 28:20)
+                          PrimaryExpressionContext
+                            FieldRefContext
+                              start: sepLen (line 28:20)
+                              stop:  sepLen (line 28:20)
+                              AnyIdentifierContext
+                                TerminalNode
+              TerminalNode
+              RelationalExpressionContext
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: 0 (line 28:29)
+                          stop:  0 (line 28:29)
+                          PrimaryExpressionContext
+                            LiteralContext
+                              TerminalNode
+
+IF STATEMENT END:
+  Stop token: line 28:43 token="
+
+" type=5 (NEWLINE)
+  Next token: line 30:0 token="  " type=7 (WHITESPACE)
+
+WHY DID IF STOP HERE?
+
+================================================================================
+IF STATEMENT FOUND at line 30:2
+================================================================================
+
+IF CONDITION:
+  Start: line 30:5 token="size" type=301
+  Stop:  line 30:49 token="newLen" type=301
+
+  Tokens in expression:
+    Line 30:5 IDENTIFIER           "size"
+    Line 30:9 LPAREN               "("
+    Line 30:10 SELF                 "self"
+    Line 30:14 DOT                  "."
+    Line 30:15 IDENTIFIER           "value"
+    Line 30:20 RPAREN               ")"
+    Line 30:21 WHITESPACE           " "
+    Line 30:22 LT                   "<"
+    Line 30:23 WHITESPACE           " "
+    Line 30:24 SELF                 "self"
+    Line 30:28 DOT                  "."
+    Line 30:29 IDENTIFIER           "_DataEnd"
+    Line 30:37 WHITESPACE           " "
+    Line 30:38 PLUS                 "+"
+    Line 30:39 WHITESPACE           " "
+    Line 30:40 IDENTIFIER           "sepLen"
+    Line 30:46 WHITESPACE           " "
+    Line 30:47 PLUS                 "+"
+    Line 30:48 WHITESPACE           " "
+    Line 30:49 IDENTIFIER           "newLen"
+
+  Expression parse tree:
+    ExpressionContext
+      OrExpressionContext
+        AndExpressionContext
+          XorExpressionContext
+            EqualityExpressionContext
+              RelationalExpressionContext
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: size (line 30:5)
+                          stop:  ) (line 30:20)
+                          PrimaryExpressionContext
+                            FieldRefContext
+                              start: size (line 30:5)
+                              stop:  size (line 30:5)
+                              AnyIdentifierContext
+                                TerminalNode
+                          PostfixOperatorContext
+                            TerminalNode
+                            ArgumentListContext
+                              ArgumentContext
+                                ExpressionContext
+                                  OrExpressionContext
+                                    AndExpressionContext
+                                      XorExpressionContext
+                                        EqualityExpressionContext
+                                          RelationalExpressionContext
+                                            AdditiveExpressionContext
+                                              MultiplicativeExpressionContext
+                                                ExponentiationExpressionContext
+                                                  UnaryExpressionContext
+                                                    PostfixExpressionContext
+                                                      start: self (line 30:10)
+                                                      stop:  value (line 30:15)
+                                                      PrimaryExpressionContext
+                                                        FieldRefContext
+                                                          start: self (line 30:10)
+                                                          stop:  value (line 30:15)
+                                                          TerminalNode
+                                                          TerminalNode
+                                                          AnyIdentifierContext
+                                                            TerminalNode
+                            TerminalNode
+                TerminalNode
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: self (line 30:24)
+                          stop:  _DataEnd (line 30:29)
+                          PrimaryExpressionContext
+                            FieldRefContext
+                              start: self (line 30:24)
+                              stop:  _DataEnd (line 30:29)
+                              TerminalNode
+                              TerminalNode
+                              AnyIdentifierContext
+                                TerminalNode
+                  TerminalNode
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: sepLen (line 30:40)
+                          stop:  sepLen (line 30:40)
+                          PrimaryExpressionContext
+                            FieldRefContext
+                              start: sepLen (line 30:40)
+                              stop:  sepLen (line 30:40)
+                              AnyIdentifierContext
+                                TerminalNode
+                  TerminalNode
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: newLen (line 30:49)
+                          stop:  newLen (line 30:49)
+                          PrimaryExpressionContext
+                            FieldRefContext
+                              start: newLen (line 30:49)
+                              stop:  newLen (line 30:49)
+                              AnyIdentifierContext
+                                TerminalNode
+
+IF STATEMENT END:
+  Stop token: line 40:12 token="." type=4 (DOT)
+  Next token: line 40:13 token="_DataEnd" type=301 (IDENTIFIER)
+
+WHY DID IF STOP HERE?
+  ÔØî IF terminated by DOT token
+  ÔÜá´©Å  This suggests the expression parser stopped early!
+  Expected: Expression should consume "self.UseBuffer" fully
+  Actual: Expression stopped at "self" and DOT was interpreted as IF terminator
+
+================================================================================
+IF STATEMENT FOUND at line 31:4
+================================================================================
+
+IF CONDITION:
+  Start: line 31:7 token="self" type=44
+  Stop:  line 31:30 token="null" type=242
+
+  Tokens in expression:
+    Line 31:7 SELF                 "self"
+    Line 31:11 DOT                  "."
+    Line 31:12 IDENTIFIER           "streamFileName"
+    Line 31:26 WHITESPACE           " "
+    Line 31:27 AMP_EQ               "&="
+    Line 31:29 WHITESPACE           " "
+    Line 31:30 NULL                 "null"
+
+  Expression parse tree:
+    ExpressionContext
+      OrExpressionContext
+        AndExpressionContext
+          XorExpressionContext
+            EqualityExpressionContext
+              RelationalExpressionContext
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: self (line 31:7)
+                          stop:  streamFileName (line 31:12)
+                          PrimaryExpressionContext
+                            FieldRefContext
+                              start: self (line 31:7)
+                              stop:  streamFileName (line 31:12)
+                              TerminalNode
+                              TerminalNode
+                              AnyIdentifierContext
+                                TerminalNode
+              TerminalNode
+              RelationalExpressionContext
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: null (line 31:30)
+                          stop:  null (line 31:30)
+                          PrimaryExpressionContext
+                            LiteralContext
+                              TerminalNode
+
+IF STATEMENT END:
+  Stop token: line 32:10 token="." type=4 (DOT)
+  Next token: line 32:11 token="SetLength" type=301 (IDENTIFIER)
+
+WHY DID IF STOP HERE?
+  ÔØî IF terminated by DOT token
+  ÔÜá´©Å  This suggests the expression parser stopped early!
+  Expected: Expression should consume "self.UseBuffer" fully
+  Actual: Expression stopped at "self" and DOT was interpreted as IF terminator
+
+================================================================================
+IF STATEMENT FOUND at line 33:6
+================================================================================
+
+IF CONDITION:
+  Start: line 33:9 token="sepLen" type=301
+  Stop:  line 33:9 token="sepLen" type=301
+
+  Tokens in expression:
+    Line 33:9 IDENTIFIER           "sepLen"
+
+  Expression parse tree:
+    ExpressionContext
+      OrExpressionContext
+        AndExpressionContext
+          XorExpressionContext
+            EqualityExpressionContext
+              RelationalExpressionContext
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: sepLen (line 33:9)
+                          stop:  sepLen (line 33:9)
+                          PrimaryExpressionContext
+                            FieldRefContext
+                              start: sepLen (line 33:9)
+                              stop:  sepLen (line 33:9)
+                              AnyIdentifierContext
+                                TerminalNode
+
+IF STATEMENT END:
+  Stop token: line 33:106 token="
+" type=5 (NEWLINE)
+  Next token: line 34:0 token="      " type=7 (WHITESPACE)
+
+WHY DID IF STOP HERE?
+
+================================================================================
+IF STATEMENT FOUND at line 34:6
+================================================================================
+
+IF CONDITION:
+  Start: line 34:9 token="newLen" type=301
+  Stop:  line 34:9 token="newLen" type=301
+
+  Tokens in expression:
+    Line 34:9 IDENTIFIER           "newLen"
+
+  Expression parse tree:
+    ExpressionContext
+      OrExpressionContext
+        AndExpressionContext
+          XorExpressionContext
+            EqualityExpressionContext
+              RelationalExpressionContext
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: newLen (line 34:9)
+                          stop:  newLen (line 34:9)
+                          PrimaryExpressionContext
+                            FieldRefContext
+                              start: newLen (line 34:9)
+                              stop:  newLen (line 34:9)
+                              AnyIdentifierContext
+                                TerminalNode
+
+IF STATEMENT END:
+  Stop token: line 34:103 token="
+" type=5 (NEWLINE)
+  Next token: line 35:0 token="    " type=7 (WHITESPACE)
+
+WHY DID IF STOP HERE?
+
+================================================================================
+IF STATEMENT FOUND at line 36:6
+================================================================================
+
+IF CONDITION:
+  Start: line 36:9 token="sepLen" type=301
+  Stop:  line 36:42 token=")" type=281
+
+  Tokens in expression:
+    Line 36:9 IDENTIFIER           "sepLen"
+    Line 36:15 WHITESPACE           " "
+    Line 36:16 PLUS                 "+"
+    Line 36:17 WHITESPACE           " "
+    Line 36:18 IDENTIFIER           "newLen"
+    Line 36:24 WHITESPACE           " "
+    Line 36:25 LT                   "<"
+    Line 36:26 WHITESPACE           " "
+    Line 36:27 IDENTIFIER           "size"
+    Line 36:31 LPAREN               "("
+    Line 36:32 SELF                 "self"
+    Line 36:36 DOT                  "."
+    Line 36:37 IDENTIFIER           "value"
+    Line 36:42 RPAREN               ")"
+
+  Expression parse tree:
+    ExpressionContext
+      OrExpressionContext
+        AndExpressionContext
+          XorExpressionContext
+            EqualityExpressionContext
+              RelationalExpressionContext
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: sepLen (line 36:9)
+                          stop:  sepLen (line 36:9)
+                          PrimaryExpressionContext
+                            FieldRefContext
+                              start: sepLen (line 36:9)
+                              stop:  sepLen (line 36:9)
+                              AnyIdentifierContext
+                                TerminalNode
+                  TerminalNode
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: newLen (line 36:18)
+                          stop:  newLen (line 36:18)
+                          PrimaryExpressionContext
+                            FieldRefContext
+                              start: newLen (line 36:18)
+                              stop:  newLen (line 36:18)
+                              AnyIdentifierContext
+                                TerminalNode
+                TerminalNode
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: size (line 36:27)
+                          stop:  ) (line 36:42)
+                          PrimaryExpressionContext
+                            FieldRefContext
+                              start: size (line 36:27)
+                              stop:  size (line 36:27)
+                              AnyIdentifierContext
+                                TerminalNode
+                          PostfixOperatorContext
+                            TerminalNode
+                            ArgumentListContext
+                              ArgumentContext
+                                ExpressionContext
+                                  OrExpressionContext
+                                    AndExpressionContext
+                                      XorExpressionContext
+                                        EqualityExpressionContext
+                                          RelationalExpressionContext
+                                            AdditiveExpressionContext
+                                              MultiplicativeExpressionContext
+                                                ExponentiationExpressionContext
+                                                  UnaryExpressionContext
+                                                    PostfixExpressionContext
+                                                      start: self (line 36:32)
+                                                      stop:  value (line 36:37)
+                                                      PrimaryExpressionContext
+                                                        FieldRefContext
+                                                          start: self (line 36:32)
+                                                          stop:  value (line 36:37)
+                                                          TerminalNode
+                                                          TerminalNode
+                                                          AnyIdentifierContext
+                                                            TerminalNode
+                            TerminalNode
+
+IF STATEMENT END:
+  Stop token: line 37:12 token="." type=4 (DOT)
+  Next token: line 37:13 token="flush" type=301 (IDENTIFIER)
+
+WHY DID IF STOP HERE?
+  ÔØî IF terminated by DOT token
+  ÔÜá´©Å  This suggests the expression parser stopped early!
+  Expected: Expression should consume "self.UseBuffer" fully
+  Actual: Expression stopped at "self" and DOT was interpreted as IF terminator
+
+================================================================================
+IF STATEMENT FOUND at line 38:8
+================================================================================
+
+IF CONDITION:
+  Start: line 38:11 token="sepLen" type=301
+  Stop:  line 38:11 token="sepLen" type=301
+
+  Tokens in expression:
+    Line 38:11 IDENTIFIER           "sepLen"
+
+  Expression parse tree:
+    ExpressionContext
+      OrExpressionContext
+        AndExpressionContext
+          XorExpressionContext
+            EqualityExpressionContext
+              RelationalExpressionContext
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: sepLen (line 38:11)
+                          stop:  sepLen (line 38:11)
+                          PrimaryExpressionContext
+                            FieldRefContext
+                              start: sepLen (line 38:11)
+                              stop:  sepLen (line 38:11)
+                              AnyIdentifierContext
+                                TerminalNode
+
+IF STATEMENT END:
+  Stop token: line 38:80 token="
+" type=5 (NEWLINE)
+  Next token: line 39:0 token="        " type=7 (WHITESPACE)
+
+WHY DID IF STOP HERE?
+
+================================================================================
+IF STATEMENT FOUND at line 39:8
+================================================================================
+
+IF CONDITION:
+  Start: line 39:11 token="newLen" type=301
+  Stop:  line 39:11 token="newLen" type=301
+
+  Tokens in expression:
+    Line 39:11 IDENTIFIER           "newLen"
+
+  Expression parse tree:
+    ExpressionContext
+      OrExpressionContext
+        AndExpressionContext
+          XorExpressionContext
+            EqualityExpressionContext
+              RelationalExpressionContext
+                AdditiveExpressionContext
+                  MultiplicativeExpressionContext
+                    ExponentiationExpressionContext
+                      UnaryExpressionContext
+                        PostfixExpressionContext
+                          start: newLen (line 39:11)
+                          stop:  newLen (line 39:11)
+                          PrimaryExpressionContext
+                            FieldRefContext
+                              start: newLen (line 39:11)
+                              stop:  newLen (line 39:11)
+                              AnyIdentifierContext
+                                TerminalNode
+
+IF STATEMENT END:
+  Stop token: line 39:91 token="
+" type=5 (NEWLINE)
+  Next token: line 40:0 token="        " type=7 (WHITESPACE)
+
+WHY DID IF STOP HERE?

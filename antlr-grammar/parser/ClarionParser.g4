@@ -215,7 +215,7 @@ ifStatement
       statement*
       elsifClause*
       elseClause?
-      (END | DOT) NEWLINE*
+      (END | DOT) NEWLINE+  // Require NEWLINE after terminator to avoid ambiguity with DOT in statements
     ;
 
 elsifClause
@@ -236,7 +236,7 @@ loopStatement
            | UNTIL expression)?                                     // LOOP UNTIL condition (or just LOOP)
       NEWLINE
       statement*
-      (END | DOT) NEWLINE*
+      (END | DOT) NEWLINE+  // Require NEWLINE after terminator to avoid ambiguity with DOT in statements
     ;
 
 // CASE statement - simplified to match reference grammar
@@ -244,7 +244,7 @@ caseStatement
     : CASE expression NEWLINE
       (ofClause | orofClause)* 
       elseCaseClause?
-      (END | DOT) NEWLINE*
+      (END | DOT) NEWLINE+  // Require NEWLINE after terminator to avoid ambiguity with DOT in statements
     ;
 
 ofClause
@@ -271,7 +271,7 @@ executeStatement
     : EXECUTE expression NEWLINE
       statement+
       (ELSE statement)?
-      (END | DOT) NEWLINE*
+      (END | DOT) NEWLINE+  // Require NEWLINE after terminator to avoid ambiguity with DOT in statements
     ;
 
 returnStatement
