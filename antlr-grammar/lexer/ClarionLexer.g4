@@ -22,9 +22,10 @@ COMMENT
     -> channel(HIDDEN)
     ;
 
-// Alternate comment with | (also line continuation)
+// Alternate comment with | (also line continuation) - includes the newline
 PIPE_COMMENT
-    : '|' ~[\r\n]*
+    : '|' ~[\r\n]* [\r\n]+
+    -> channel(HIDDEN)
     ;
 
 // ============================================================================
@@ -48,10 +49,9 @@ DOT
 // WHITESPACE AND NEWLINES
 // ============================================================================
 
-// Newline (statement separator)
+// Newline (statement separator) - VISIBLE to parser for statement boundaries
 NEWLINE
     : [\r\n]+
-    -> channel(HIDDEN)
     ;
 
 // Semicolon (alternative statement separator)

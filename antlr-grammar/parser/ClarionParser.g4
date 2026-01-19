@@ -17,10 +17,10 @@ options {
 // TOP-LEVEL RULES
 // ============================================================================
 
-// A Clarion source file
+// A Clarion source file (allow leading blank lines/comments)
 compilationUnit
-    : programDeclaration EOF
-    | memberDeclaration EOF
+    : NEWLINE* programDeclaration EOF
+    | NEWLINE* memberDeclaration EOF
     ;
 
 // ============================================================================
@@ -28,8 +28,8 @@ compilationUnit
 // ============================================================================
 
 programDeclaration
-    : IDENTIFIER? PROGRAM programAttributes?
-      (mapSection | dataDeclaration | codeSection)*
+    : IDENTIFIER? PROGRAM programAttributes? NEWLINE
+      (NEWLINE | mapSection | dataDeclaration | codeSection)*
       procedureList?
     ;
 
@@ -38,8 +38,8 @@ programDeclaration
 // ============================================================================
 
 memberDeclaration
-    : IDENTIFIER? MEMBER (LPAREN STRING_LITERAL RPAREN)? programAttributes?
-      (mapSection | dataDeclaration | codeSection)*
+    : IDENTIFIER? MEMBER (LPAREN STRING_LITERAL RPAREN)? programAttributes? NEWLINE
+      (NEWLINE | mapSection | dataDeclaration | codeSection)*
       procedureList?
     ;
 
@@ -48,17 +48,17 @@ memberDeclaration
 // ============================================================================
 
 mapSection
-    : MAP
-      mapEntry*
-      END
+    : MAP NEWLINE
+      (NEWLINE* mapEntry)*
+      END NEWLINE*
     ;
 
 mapEntry
-    : procedurePrototype
-    | procedurePrototypeShort
+    : procedurePrototype NEWLINE
+    | procedurePrototypeShort NEWLINE
     | moduleReference
-    | includeDirective
-    | compileDirective
+    | includeDirective NEWLINE
+    | compileDirective NEWLINE
     ;
 
 // Full procedure prototype: label at column 0 with PROCEDURE keyword
@@ -73,13 +73,13 @@ procedurePrototypeShort
     ;
 
 moduleReference
-    : MODULE LPAREN STRING_LITERAL RPAREN moduleContent* (END | DOT)
+    : MODULE LPAREN STRING_LITERAL RPAREN NEWLINE (NEWLINE* moduleContent)* (END | DOT) NEWLINE*
     ;
 
 moduleContent
-    : procedurePrototype
-    | procedurePrototypeShort  // Allow short-form prototypes inside MODULE
-    | compileDirective
+    : procedurePrototype NEWLINE
+    | procedurePrototypeShort NEWLINE
+    | compileDirective NEWLINE
     ;
 
 // Procedure modifiers: comma-separated list of return types and attributes
@@ -103,10 +103,10 @@ dataDeclarationList
     ;
 
 dataDeclaration
-    : variableDeclaration
+    : variableDeclaration NEWLINE
     | structureDeclaration
-    | includeDirective
-    | compileDirective
+    | includeDirective NEWLINE
+    | compileDirective NEWLINE
     ;
 
 // Simple variable declaration (label can be IDENTIFIER, LABEL, QUALIFIED_IDENTIFIER, or keyword used as identifier)
@@ -130,20 +130,20 @@ procedureList
 // ============================================================================
 
 procedureDeclaration
-    : IDENTIFIER (DOT IDENTIFIER)? PROCEDURE parameterList? returnType? procedureAttributes?
-      dataDeclarationList?
-      codeSection?
-    | LABEL DOT IDENTIFIER PROCEDURE parameterList? returnType? procedureAttributes?
-      dataDeclarationList?
-      codeSection?
-    | LABEL PROCEDURE parameterList? returnType? procedureAttributes?
-      dataDeclarationList?
-      codeSection?
+    : IDENTIFIER (DOT IDENTIFIER)? PROCEDURE parameterList? returnType? procedureAttributes? NEWLINE
+      NEWLINE* dataDeclarationList?
+      NEWLINE* codeSection?
+    | LABEL DOT IDENTIFIER PROCEDURE parameterList? returnType? procedureAttributes? NEWLINE
+      NEWLINE* dataDeclarationList?
+      NEWLINE* codeSection?
+    | LABEL PROCEDURE parameterList? returnType? procedureAttributes? NEWLINE
+      NEWLINE* dataDeclarationList?
+      NEWLINE* codeSection?
     ;
 
 routineDeclaration
-    : IDENTIFIER ROUTINE (routineDataSection routineCodeSection | statementList?)
-    | LABEL ROUTINE (routineDataSection routineCodeSection | statementList?)
+    : IDENTIFIER ROUTINE NEWLINE (routineDataSection routineCodeSection | statementList?)
+    | LABEL ROUTINE NEWLINE (routineDataSection routineCodeSection | statementList?)
     ;
 
 // Routine-specific data section (requires CODE keyword after)
@@ -153,7 +153,7 @@ routineDataSection
 
 // Routine-specific code section (follows DATA section)
 routineCodeSection
-    : CODE statementList?
+    : CODE NEWLINE statementList?
     ;
 
 // ============================================================================
@@ -161,32 +161,43 @@ routineCodeSection
 // ============================================================================
 
 codeSection
-    : CODE
+    : CODE NEWLINE
       statementList?
     ;
 
 statementList
-    : statement*
+    : (NEWLINE* statementWithNewline)*
     ;
 
-// ============================================================================
-// BASIC ELEMENTS (Placeholder - will be expanded)
-// ============================================================================
+// Statement that requires trailing NEWLINE (for use in statementList)
+statementWithNewline
+    : simpleStatement NEWLINE+
+    | structureStatement
+    ;
 
+// Statement without trailing NEWLINE (for use in single-line structures)
 statement
+    : simpleStatement
+    | structureStatement
+    ;
+
+simpleStatement
     : assignmentStatement
-    | ifStatement
-    | loopStatement
-    | caseStatement
-    | executeStatement
     | returnStatement
     | gotoStatement
     | exitStatement
     | breakStatement
     | cycleStatement
     | doStatement
-    | debugStatement
     | procedureCall
+    ;
+
+structureStatement
+    : ifStatement
+    | loopStatement
+    | caseStatement
+    | executeStatement
+    | debugStatement
     ;
 
 // Debug conditional: ? statement (at column 0) - only compiled in debug mode
@@ -199,21 +210,25 @@ assignmentStatement
     : postfixExpression (EQ | ASSIGN | DEEP_ASSIGN | PLUS_EQ | MINUS_EQ | MULT_EQ | DIV_EQ | AMP_EQ) expression
     ;
 
-// TODO: This IF statement grammar has an ambiguity issue - FIXED with semantic predicate on terminator
+// IF statement - handles both single-line and multi-line forms
+// Single-line: IF expr [THEN] [stmt;...] END/DOT (all on one line)
+// Multi-line:  IF expr [THEN]\n [stmts]\n [ELSIF...]\n [ELSE...]\n END/DOT
 ifStatement
-    : IF expression THEN?
-      statementList?
-      elsifClause*
-      elseClause?
-      ifTerminator
+    : IF expression THEN? 
+      ( NEWLINE statementList? elsifClause* elseClause?     // Multi-line form (with NEWLINE)
+      | (statement (SEMICOLON statement)*)?                  // Single-line form (no NEWLINE, inline statements)
+      )
+      (END | DOT) NEWLINE*
     ;
 
 elsifClause
-    : ELSIF expression THEN? statementList?
+    : ELSIF expression THEN? NEWLINE
+      statementList?
     ;
 
 elseClause
-    : ELSE statementList?
+    : ELSE NEWLINE
+      statementList?
     ;
 
 loopStatement
@@ -222,45 +237,46 @@ loopStatement
            | TIMES expression                                       // LOOP TIMES n
            | WHILE expression                                       // LOOP WHILE condition
            | UNTIL expression)?                                     // LOOP UNTIL condition (or just LOOP)
-      statementList?
-      loopTerminator
+      ( NEWLINE statementList                                       // Multi-line form
+      | (statement (SEMICOLON statement)*)?                         // Single-line form
+      )
+      (END | DOT) NEWLINE*
     ;
 
-// Shared terminator logic: DOT only if NOT followed by identifier/keyword (to avoid matching member access)
-ifTerminator
-    : END
-    | {(()=>{ const ty = this.tokenStream.LA(2); return !ty || ty===-1 || ty===5 || !(ty === 301 || ty === 295 || (ty >= 8 && ty <= 294)); })()}? DOT
-    ;
-
-// Loop terminator: END or DOT (but DOT only if NOT followed by identifier/keyword for member access)
-loopTerminator
-    : END
-    | {(()=>{ const ty = this.tokenStream.LA(2); return !ty || ty===-1 || ty===5 || !(ty === 301 || ty === 295 || (ty >= 8 && ty <= 294)); })()}? DOT
-    ;
-
+// CASE statement - simplified to match IF/LOOP/EXECUTE pattern
 caseStatement
-    : CASE expression
-      (OF expression statementList? (OROF expression statementList?)*)*
-      (ELSE statementList?)?
-      caseTerminator
+    : CASE expression 
+      ( NEWLINE                                                     // Multi-line form
+        (ofClause | orofClause)* 
+        elseCaseClause?
+      | (statement (SEMICOLON statement)*)?                         // Single-line form (rare)
+      )
+      (END | DOT) NEWLINE*
+    ;
+
+ofClause
+    : OF ofExpression NEWLINE? statementList?
+    ;
+
+orofClause
+    : OROF ofExpression NEWLINE? statementList?
+    ;
+
+// OF expression can be a single value or a range (e.g., OF 1 TO 10)
+ofExpression
+    : expression (TO expression)?
+    ;
+
+elseCaseClause
+    : ELSE NEWLINE? statementList?
     ;
 
 executeStatement
     : EXECUTE expression
-      statement+           // One or more statements (one per possible value)
-      (ELSE statement)?    // Optional ELSE clause
-      executeTerminator
-    ;
-
-// Terminators for different structures - all use same logic
-caseTerminator
-    : END
-    | {(()=>{ const ty = this.tokenStream.LA(2); return !ty || ty===-1 || ty===5 || !(ty === 301 || ty === 295 || (ty >= 8 && ty <= 294)); })()}? DOT
-    ;
-
-executeTerminator
-    : END
-    | {(()=>{ const ty = this.tokenStream.LA(2); return !ty || ty===-1 || ty===5 || !(ty === 301 || ty === 295 || (ty >= 8 && ty <= 294)); })()}? DOT
+      ( NEWLINE statementWithNewline+ (ELSE statementWithNewline)?      // Multi-line form (statements with NEWLINE)
+      | statement+ (ELSE statement)?                                    // Single-line form (statements without NEWLINE)
+      )
+      (END | DOT) NEWLINE*
     ;
 
 returnStatement
@@ -321,14 +337,14 @@ structureDeclaration
     ;
 
 fileDeclaration
-    : label FILE fileAttributes?
-      recordDeclaration?
-      keyDeclarations?
-      (END | DOT)
+    : label FILE fileAttributes? NEWLINE
+      NEWLINE* recordDeclaration?
+      NEWLINE* keyDeclarations?
+      (END | DOT) NEWLINE
     ;
 
 recordDeclaration
-    : RECORD
+    : RECORD NEWLINE
       dataDeclarationList
     ;
 
@@ -337,39 +353,39 @@ keyDeclarations
     ;
 
 keyDeclaration
-    : label KEY keyAttributes? componentList
+    : label KEY keyAttributes? componentList NEWLINE
     ;
 
 groupDeclaration
-    : label? GROUP (LPAREN IDENTIFIER? RPAREN)? (COMMA groupAttributes)?
-      dataDeclarationList
-      (END | DOT)
+    : label? GROUP (LPAREN IDENTIFIER? RPAREN)? (COMMA groupAttributes)? NEWLINE
+      NEWLINE* dataDeclarationList
+      (END | DOT) NEWLINE?
     ;
 
 queueDeclaration
-    : label? QUEUE (LPAREN IDENTIFIER? RPAREN)? (COMMA queueAttributes)?
-      dataDeclarationList
-      (END | DOT)
+    : label? QUEUE (LPAREN IDENTIFIER? RPAREN)? (COMMA queueAttributes)? NEWLINE
+      NEWLINE* dataDeclarationList
+      (END | DOT) NEWLINE
     ;
 
 classDeclaration
-    : label? CLASS (LPAREN IDENTIFIER? RPAREN)? (COMMA classAttributes)?
-      classBody
-      (END | DOT)
+    : label? CLASS (LPAREN IDENTIFIER? RPAREN)? (COMMA classAttributes)? NEWLINE
+      NEWLINE* classBody
+      (END | DOT) NEWLINE
     ;
 
 classBody
-    : (methodDeclaration | variableDeclaration)*
+    : (NEWLINE* methodDeclaration | variableDeclaration NEWLINE)*
     ;
 
 methodDeclaration
-    : label PROCEDURE parameterList? returnType? methodAttributes?
+    : label PROCEDURE parameterList? returnType? methodAttributes? NEWLINE
     ;
 
 viewDeclaration
-    : label VIEW (LPAREN IDENTIFIER? RPAREN)? (COMMA viewAttributes)?
-      projectList
-      (END | DOT)
+    : label VIEW (LPAREN IDENTIFIER? RPAREN)? (COMMA viewAttributes)? NEWLINE
+      NEWLINE* projectList
+      (END | DOT) NEWLINE
     ;
 
 projectList
@@ -377,7 +393,7 @@ projectList
     ;
 
 projectDeclaration
-    : PROJECT LPAREN expression (COMMA expression)* RPAREN
+    : PROJECT LPAREN expression (COMMA expression)* RPAREN NEWLINE
     ;
 
 viewAttributes
@@ -385,20 +401,20 @@ viewAttributes
     ;
 
 windowDeclaration
-    : IDENTIFIER WINDOW LPAREN STRING_LITERAL? RPAREN (COMMA attribute)* windowControls END
-    | LABEL WINDOW LPAREN STRING_LITERAL? RPAREN (COMMA attribute)* windowControls END
-    | IDENTIFIER WINDOW LPAREN STRING_LITERAL? RPAREN (COMMA attribute)* END
-    | LABEL WINDOW LPAREN STRING_LITERAL? RPAREN (COMMA attribute)* END
+    : IDENTIFIER WINDOW LPAREN STRING_LITERAL? RPAREN (COMMA attribute)* NEWLINE NEWLINE* windowControls END NEWLINE
+    | LABEL WINDOW LPAREN STRING_LITERAL? RPAREN (COMMA attribute)* NEWLINE NEWLINE* windowControls END NEWLINE
+    | IDENTIFIER WINDOW LPAREN STRING_LITERAL? RPAREN (COMMA attribute)* NEWLINE END NEWLINE
+    | LABEL WINDOW LPAREN STRING_LITERAL? RPAREN (COMMA attribute)* NEWLINE END NEWLINE
     ;
 
 applicationDeclaration
-    : label APPLICATION LPAREN expression RPAREN (COMMA windowAttributes)?
-      windowControls?
-      END
+    : label APPLICATION LPAREN expression RPAREN (COMMA windowAttributes)? NEWLINE
+      NEWLINE* windowControls?
+      END NEWLINE
     ;
 
 windowControls
-    : controlDeclaration+
+    : (NEWLINE* controlDeclaration)+
     ;
 
 // Control declaration - dispatches to specialized rules
@@ -413,61 +429,61 @@ controlDeclaration
 
 // Specialized control: SHEET (MUST have TABs)
 sheetControl
-    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? SHEET (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)?
-      tabControl+
-      END
+    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? SHEET (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE
+      NEWLINE* tabControl+
+      END NEWLINE
     ;
 
 // Specialized control: TAB (inside SHEET)
 tabControl
-    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? TAB (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)?
-      controlDeclaration*
-      END
+    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? TAB (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE
+      NEWLINE* controlDeclaration*
+      END NEWLINE
     ;
 
 // Specialized control: OPTION (has child controls, typically RADIO)
 optionControl
-    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? OPTION (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)?
-      genericControl+
-      END
+    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? OPTION (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE
+      NEWLINE* genericControl+
+      END NEWLINE
     ;
 
 // Specialized control: GROUP (has nested controls)
 groupControl
-    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? GROUP (COMMA controlAttributes)?
-      controlDeclaration*
-      END
+    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? GROUP (COMMA controlAttributes)? NEWLINE
+      NEWLINE* controlDeclaration*
+      END NEWLINE
     ;
 
 // Specialized control: OLE (optional MENUBAR)
 oleControl
-    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? OLE (COMMA controlAttributes)?
-      menubarDeclaration?
-      END
+    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? OLE (COMMA controlAttributes)? NEWLINE
+      NEWLINE* menubarDeclaration?
+      END NEWLINE
     ;
 
 // MENUBAR within OLE
 menubarDeclaration
-    : MENUBAR (COMMA controlAttributes)?
-      menuDeclaration*
-      END
+    : MENUBAR (COMMA controlAttributes)? NEWLINE
+      NEWLINE* menuDeclaration*
+      END NEWLINE
     ;
 
 // MENU within MENUBAR
 menuDeclaration
-    : label? MENU (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)?
-      menuItemDeclaration*
-      END
+    : label? MENU (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE
+      NEWLINE* menuItemDeclaration*
+      END NEWLINE
     ;
 
 // ITEM within MENU
 menuItemDeclaration
-    : label? ITEM (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)?
+    : label? ITEM (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE
     ;
 
 // Generic control (all others)
 genericControl
-    : label? genericControlType (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)?
+    : label? genericControlType (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE
     ;
 
 genericControlType
@@ -478,18 +494,18 @@ genericControlType
     ;
 
 reportDeclaration
-    : label REPORT reportAttributes?
-      reportStructure?
-      END
+    : label REPORT reportAttributes? NEWLINE
+      NEWLINE* reportStructure?
+      END NEWLINE
     ;
 
 reportStructure
-    : (reportBand)*
+    : (NEWLINE* reportBand)*
     ;
 
 reportBand
-    : (DETAIL | HEADER | FOOTER | BREAK | FORM) reportBandAttributes?
-      controlDeclaration*
+    : (DETAIL | HEADER | FOOTER | BREAK | FORM) reportBandAttributes? NEWLINE
+      NEWLINE* controlDeclaration*
     ;
 
 // ============================================================================
