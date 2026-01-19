@@ -171,14 +171,14 @@ statementList
 
 // Statement that requires trailing NEWLINE (for use in statementList)
 statementWithNewline
-    : simpleStatement NEWLINE+
-    | structureStatement
+    : QUESTION? simpleStatement NEWLINE+
+    | QUESTION? structureStatement
     ;
 
 // Statement without trailing NEWLINE (for use in single-line structures)
 statement
-    : simpleStatement
-    | structureStatement
+    : QUESTION? simpleStatement
+    | QUESTION? structureStatement
     ;
 
 simpleStatement
