@@ -209,9 +209,10 @@ assignmentStatement
 //   - obj.method() = value (rare but possible)
 // And compound assignments: x += 5, count *= 2, etc.
 
-// IF statement - simplified to match reference grammar
+// IF statement - supports both single-line and multi-line forms
 ifStatement
-    : IF expression THEN? NEWLINE
+    : IF expression THEN statement (DOT | END)  // Single-line: IF x THEN statement. or IF x THEN statement END
+    | IF expression THEN? NEWLINE               // Multi-line: IF x NEWLINE statements END
       statement*
       elsifClause*
       elseClause?
@@ -670,6 +671,7 @@ softKeyword
     | CREATE | RECLAIM | OWNER | ENCRYPT | DRIVER | BINARY
     | INDEX | OPT | DUP | NOCASE | PRIMARY | INNER | OUTER | FILTER | ORDER
     | REPLACE  // String method that can be used as identifier
+    | RIGHT    // String method (st.right()) that can be used as identifier
     ;
 
 // Allow keywords to be used as identifiers (Clarion allows this in many contexts)
