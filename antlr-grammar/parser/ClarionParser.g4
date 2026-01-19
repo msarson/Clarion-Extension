@@ -211,8 +211,8 @@ assignmentStatement
 
 // IF statement - supports both single-line and multi-line forms
 ifStatement
-    : IF expression THEN statement (DOT | END)  // Single-line: IF x THEN statement. or IF x THEN statement END
-    | IF expression THEN? NEWLINE               // Multi-line: IF x NEWLINE statements END
+    : IF expression THEN statement (ELSE statement)? (DOT | END)  // Single-line: IF x THEN stmt [ELSE stmt] . or END
+    | IF expression THEN? NEWLINE                                  // Multi-line: IF x NEWLINE statements END
       statement*
       elsifClause*
       elseClause?
