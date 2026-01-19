@@ -9,18 +9,18 @@ const tokens = new CommonTokenStream(lexer);
 tokens.fill();
 
 const allTokens = tokens.getTokens();
-const line36Tokens = allTokens.filter(t => t.line === 36);
-const line37Tokens = allTokens.filter(t => t.line === 37);
+const line14Tokens = allTokens.filter(t => t.line === 14);
+const line15Tokens = allTokens.filter(t => t.line === 15);
 
-console.log('Line 36 tokens:');
-line36Tokens.forEach((t, i) => {
+console.log('Line 14 tokens:');
+line14Tokens.forEach((t, i) => {
   const typeName = lexer.symbolicNames[t.type] || 'UNKNOWN';
   const text = t.text.replace(/\n/g, '\\n').replace(/\r/g, '\\r');
   console.log(`  ${i}: col ${t.column} ${typeName.padEnd(20)} "${text}"`);
 });
 
-console.log('\nLine 37 tokens:');
-line37Tokens.forEach((t, i) => {
+console.log('\nLine 15 tokens:');
+line15Tokens.forEach((t, i) => {
   const typeName = lexer.symbolicNames[t.type] || 'UNKNOWN';
   const text = t.text.replace(/\n/g, '\\n').replace(/\r/g, '\\r');
   console.log(`  ${i}: col ${t.column} ${typeName.padEnd(20)} "${text}"`);

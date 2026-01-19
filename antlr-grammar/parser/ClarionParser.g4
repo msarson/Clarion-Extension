@@ -99,7 +99,7 @@ globalDataSection
 // Note: localDataSection was for routines, removed. Procedures have data directly, routines use routineDataSection
 
 dataDeclarationList
-    : dataDeclaration*
+    : (NEWLINE | dataDeclaration)*  // Allow blank lines and comments between declarations
     ;
 
 dataDeclaration
