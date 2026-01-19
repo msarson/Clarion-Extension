@@ -567,10 +567,10 @@ postfixOperator
 
 primaryExpression
     : literal           // Literals (numbers, strings, QUESTION, etc.)
+    | LPAREN expression RPAREN  // Parenthesized expression (before fieldRef to avoid ambiguity)
     | newExpression     // NEW expression
     | chooseExpression  // CHOOSE expression
     | fieldRef          // Field reference with optional DOT chains (self.member, obj.prop.field)
-    | LPAREN expression RPAREN
     ;
 
 // Field reference - handles all DOT-chained member access
@@ -585,7 +585,7 @@ fieldRef
       | IMPLICIT_QUOTE     // Implicit STRING(32) with " (e.g., Address")
       | FIELD_EQUATE       // Field equate (e.g., ?FieldName)
       )
-      (DOT (anyIdentifier | QUALIFIED_IDENTIFIER))*  // Zero or more DOT+ID chains
+      (DOT IDENTIFIER)*  // Zero or more DOT+ID chains (simplified to just IDENTIFIER)
     ;
 
 newExpression

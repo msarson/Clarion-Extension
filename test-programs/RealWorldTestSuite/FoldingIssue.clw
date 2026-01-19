@@ -1,19 +1,21 @@
-    PROGRAM
+PROGRAM
+MAP
+END
+CODE
 
-    MAP
-    END
-
-    code
-
-StringTheory.CSVEncode             Procedure ()
-  Code
-      if sepLen + newLen < size(self.value)
-        self.flush()
-        if sepLen then stMemCpyLeft(address(self.value), address(pSep), sepLen).
-        if newLen then stMemCpyLeft(address(self.value)+sepLen, address(newValue), newLen).
-        self._DataEnd = sepLen + newLen
+Test Procedure()
+code
+  if a = 1
+    x = 1
+  else
+    if self.UseBuffer
+      if b = 2
+        y = 1
       else
-        if sepLen then self.flush(pSep).                 ! room to optimize this as it will be a very small write.
-        if newLen then self.flush(newValue[1 : newlen]).
+        z = 1
       end
-      
+?     assert(1=1,'test')
+    elsif c = 3
+      w = 1
+    end
+  end
