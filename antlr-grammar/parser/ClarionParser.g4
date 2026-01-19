@@ -172,7 +172,7 @@ statementList
 // QUESTION may prefix any core statement (DEBUG-mode marker),
 // NEWLINE alone is a blank/empty statement.
 statement
-    : QUESTION? coreStatement NEWLINE+
+    : QUESTION? coreStatement
     | NEWLINE
     ;
 
@@ -210,23 +210,23 @@ assignmentStatement
     : postfixExpression (EQ | ASSIGN | DEEP_ASSIGN | PLUS_EQ | MINUS_EQ | MULT_EQ | DIV_EQ | AMP_EQ) expression
     ;
 
-// IF statement - handles both single-line and multi-line forms
-// Multi-line:  IF expr [THEN]\n [stmts]\n [ELSIF...]\n [ELSE...]\n END/DOT
-// Single-line: IF expr [THEN] [stmt;...] END/DOT (no newlines)
+// IF statement - simplified to match reference grammar
 ifStatement
-    : IF expression THEN? 
-      (NEWLINE statementList elsifClause* elseClause? | (QUESTION? coreStatement (SEMICOLON QUESTION? coreStatement)*)?)
+    : IF expression THEN? NEWLINE
+      statement*
+      elsifClause*
+      elseClause?
       (END | DOT) NEWLINE*
     ;
 
 elsifClause
     : ELSIF expression THEN? NEWLINE
-      statementList
+      statement*
     ;
 
 elseClause
     : ELSE NEWLINE
-      statementList
+      statement*
     ;
 
 loopStatement
@@ -235,29 +235,27 @@ loopStatement
            | TIMES expression                                       // LOOP TIMES n
            | WHILE expression                                       // LOOP WHILE condition
            | UNTIL expression)?                                     // LOOP UNTIL condition (or just LOOP)
-      ( NEWLINE statementList                                       // Multi-line form
-      | (QUESTION? coreStatement (SEMICOLON QUESTION? coreStatement)*)?  // Single-line form
-      )
+      NEWLINE
+      statement*
       (END | DOT) NEWLINE*
     ;
 
-// CASE statement - simplified to match IF/LOOP/EXECUTE pattern
+// CASE statement - simplified to match reference grammar
 caseStatement
-    : CASE expression 
-      ( NEWLINE                                                     // Multi-line form
-        (ofClause | orofClause)* 
-        elseCaseClause?
-      | (QUESTION? coreStatement (SEMICOLON QUESTION? coreStatement)*)?  // Single-line form (rare)
-      )
+    : CASE expression NEWLINE
+      (ofClause | orofClause)* 
+      elseCaseClause?
       (END | DOT) NEWLINE*
     ;
 
 ofClause
-    : OF ofExpression NEWLINE? statementList
+    : OF ofExpression NEWLINE?
+      statement*
     ;
 
 orofClause
-    : OROF ofExpression NEWLINE? statementList
+    : OROF ofExpression NEWLINE?
+      statement*
     ;
 
 // OF expression can be a single value or a range (e.g., OF 1 TO 10)
@@ -266,14 +264,14 @@ ofExpression
     ;
 
 elseCaseClause
-    : ELSE NEWLINE? statementList
+    : ELSE NEWLINE?
+      statement*
     ;
 
 executeStatement
-    : EXECUTE expression
-      ( NEWLINE statement+ (ELSE statement)?                        // Multi-line form
-      | (QUESTION? coreStatement)+ (ELSE QUESTION? coreStatement)?  // Single-line form
-      )
+    : EXECUTE expression NEWLINE
+      statement+
+      (ELSE statement)?
       (END | DOT) NEWLINE*
     ;
 
