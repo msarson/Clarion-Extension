@@ -229,7 +229,7 @@ elseClause
     ;
 
 loopStatement
-    : LOOP (variable EQ expression TO expression (BY expression)?  // LOOP x = 1 TO 10 [BY 2]
+    : LOOP (fieldRef EQ expression TO expression (BY expression)?  // LOOP x = 1 TO 10 [BY 2]
            | expression TIMES                                       // LOOP n TIMES
            | TIMES expression                                       // LOOP TIMES n
            | WHILE expression                                       // LOOP WHILE condition
@@ -1011,7 +1011,7 @@ returnType
     ;
 
 componentList
-    : LPAREN variable (COMMA variable)* RPAREN
+    : LPAREN fieldRef (COMMA fieldRef)* RPAREN
     ;
 
 // ============================================================================
