@@ -11,41 +11,100 @@ encLen          long, auto
 SaveNoWrap      long, auto
 result          long(st:ok)
   code
-  if self._DataEnd = 0 then return result.
-  if self.base64
-    self.Trace('Base64Encode: String is Already base 64 encoded : base64 property is true')
-    return result
-  end
-  encLen = self._DataEnd
-  datalen = int((encLen+2)/3) * 4                   ! Calculate the correct length, plus padding�
-  SaveNoWrap = self.base64nowrap
-  if band(pOptions,st:URLSafe + st:NoWrap) > 0 then self.base64nowrap = true.  ! respect original setting, might be set before this call
-  if band(pOptions,st:URLSafe) > 0 then self.base64URLSafe = true else self.base64URLSafe = false.
-  if self.base64nowrap = 0                          ! Option for no line wrapping
-    dataLen += (int(dataLen / 76) * 2) + 2
-  end
-
-  encData &= new string(dataLen)
-  if encData &= null
-    self.ErrorTrap('Base64Encode','Memory allocation failed trying to get ' & dataLen & ' bytes.',true)
-    self.base64nowrap = SaveNoWrap
-    return result
-  end
-
-  result = self.Base64Encode(encData, encLen)
-  Dispose(self.value)
-  self.value &= encData
-  self.valuePtr &= self.value
-  self._DataEnd = size(self.value)
-  self.clip()
-  if band(pOptions,st:NoPadding) > 0
-    if self._DataEnd > 1 and self.value[self._DataEnd -1 : self._DataEnd] = '=='
-       self.SetLength(self._DataEnd-2)
-    elsif self._DataEnd > 0 and self.value[self._DataEnd] = '='
-       self.SetLength(self._DataEnd-1)
+  if self._DataEnd = 0 then return st:ok.
+  if not omitted(pAlphabet) and pAlphabet <> ''
+    case size(pAlphabet)
+    of 33
+      alphabet = pAlphabet
+    of 32
+      alphabet = pAlphabet & '='                 ! position 33 is padding character
+    else
+      self.free()
+      self.errorTrap('Base32Encode','Provided alphabet is incorrect length',true)
+      return st:notOk
     end
   end
-  self.base64 = true
-  self.base64nowrap = SaveNoWrap
-  return result
+  if band(pOptions,st:NoWrap) then wrapLen = 0.
+
+  x = int((self._DataEnd+4)/5) * 8               ! calculate output length: each 5 bytes gets converted to 8 bytes
+  if wrapLen then x += 2 * int(x / wrapLen).     ! add 2 chars for each line break
+  out &= new string(x)                           ! allocate output buffer
+  if out &= null or len(out) <> x
+    self.free()
+    self.errorTrap('Base32Encode','Failed to acquire memory for output buffer',true)
+    return st:notOk
+  end
+
+  
+  loop x = 1 to self._dataEnd by 5
+    blockSize = self._dataEnd - x + 1
+    if blockSize > 5
+      blockSize = 5                              ! we do 5 chars at a time
+    elsif blockSize < 5
+      clear(out8,-1)
+    end
+    in5 = self.value[x : x+blockSize - 1]
+
+    case blockSize                               ! convert 5 chars into 8 - we put 5 bits of each input byte (i1-i5) into output bytes (o1-o8)
+    of   5
+      o8 = band(i5, 31)
+      o7 = bshift(band(i5, 224), -5)
+    orof 4                                       ! nota bene: we deliberately use 'orof' not 'of' so we fall through
+      o7 = bor(o7, bshift(band(i4, 3), 3))
+      o6 = bshift(band(i4, 124), -2)
+      o5 = bshift(band(i4, 128), -7)
+    orof 3
+      o5 = bor(o5, bshift(band(i3, 15), 1))
+      o4 = bshift(band(i3, 240), -4)
+    orof 2
+      o4 = bor(o4, bshift(band(i2, 1), 4))
+      o3 = bshift(band(i2,  62), -1)
+      o2 = bshift(band(i2, 192), -6)
+    orof 1
+      o2 = bor(o2, bshift(band(i1, 7), 2))
+      o1 = bshift(band(i1, 248), -3)
+    end
+
+    execute blockSize  ! set number of padding chars to use
+      padchars = 6
+      padchars = 4
+      padchars = 3
+      padchars = 1
+      padchars = 0
+    end
+
+    y = 8 - padchars
+    loop z = 1 to y
+      myLong = outByte[z] + 1
+      case myLong
+      of 1 to 32
+        outIdx += 1
+        out[outIdx] = Alphabet[myLong]
+      else
+        dispose(out)
+        self.free()
+        self.errorTrap('Base32Encode','Logic error: value over 32',true)
+        return st:notOK              ! logic error - should never happen
+      end
+    end
+    if padChars and band(pOptions,st:NoPadding) = 0
+      loop padChars times
+        outIdx += 1
+        out[outIdx] = alphabet[33]   ! pad char is usually '=' (it is the last char of alphabet)
+      end
+    end
+  end ! loop
+
+  self._StealValue(out)              ! point our object to our output
+  out &= null                        ! guard against anyone wrongly thinking they should dispose out
+
+  self.setLength(outIdx)
+
+! note: new method insertEvery written because the following could fail when low memory (very large data):
+!  if wrapLen and self._DataEnd > wrapLen
+!    self.splitEvery(wrapLen)
+!    self.join(CRLF)
+!  end
+  if wrapLen then self.insertEvery(wrapLen, CRLF).
+  return st:ok
 

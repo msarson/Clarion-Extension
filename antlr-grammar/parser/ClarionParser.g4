@@ -211,7 +211,7 @@ assignmentStatement
 
 // IF statement - supports both single-line and multi-line forms
 ifStatement
-    : IF expression THEN statement (ELSE statement)? (DOT | END)  // Single-line: IF x THEN stmt [ELSE stmt] . or END
+    : IF expression THEN statement (ELSE statement)? (DOT | END) NEWLINE  // Single-line: IF x THEN stmt [ELSE stmt] . NEWLINE (DOT/END must be followed by NEWLINE)
     | IF expression THEN? NEWLINE                                  // Multi-line: IF x NEWLINE statements END
       statement*
       elsifClause*
@@ -298,7 +298,6 @@ cycleStatement
 // DO statement - calls a routine or procedure
 doStatement
     : DO IDENTIFIER  // DO RoutineName (calls a ROUTINE)
-    | DO IDENTIFIER LPAREN argumentList? RPAREN  // DO ProcedureName(...) - rare but valid
     ;
 
 procedureCall

@@ -56,8 +56,10 @@ IMPLICIT_QUOTE
 //     ;
 
 // Pointer variable (with *)
+// Pointer variable - only used in parameters, no space after *
+// Example: Procedure(*string pValue, *long pLength)
 POINTER_VAR
-    : '*' [ \t]* [A-Za-z_][A-Za-z0-9_]*
+    : '*' [A-Za-z_][A-Za-z0-9_]*
     ;
 
 // Column-0 LABEL - matches at column 0 only, allows keyword text
