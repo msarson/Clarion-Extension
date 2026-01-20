@@ -59,7 +59,7 @@ LBRACE    : '{' ;
 RBRACE    : '}' ;
 COMMA     : ',' ;
 COLON     : ':' ;
-SEMICOLON : ';' ;
+// Semicolon removed - defined in ClarionLexer.g4 as STATEMENT_SEPARATOR
 QUESTION  : '?' ;             // Field equate prefix / Ternary
 // Note: DOT and ASTERISK are defined in main lexer to avoid conflicts
 

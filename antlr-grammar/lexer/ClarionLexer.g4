@@ -54,10 +54,10 @@ NEWLINE
     : [\r\n]+
     ;
 
-// Semicolon (alternative statement separator)
+// Semicolon (statement separator on same line)
+// Made visible because needed for single-line IF: if x then stmt1; stmt2.
 STATEMENT_SEPARATOR
     : ';'
-    -> channel(HIDDEN)
     ;
 
 WHITESPACE
