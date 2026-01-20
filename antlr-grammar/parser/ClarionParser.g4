@@ -283,7 +283,7 @@ ofExpression
 
 elseCaseClause
     : ELSE statementSeparator+
-      statement (statementSeparator+ statement)*
+      (statement (statementSeparator+ statement)*)? statementSeparator*
     ;
 
 // ============================================================================
