@@ -261,13 +261,13 @@ elseClause
 // LOOP STATEMENT
 // ============================================================================
 loopStatement
-    : LOOP (fieldRef EQ expression TO expression (BY expression)?  // LOOP x = 1 TO 10 [BY 2]
-           | expression TIMES                                       // LOOP n TIMES
-           | TIMES expression                                       // LOOP TIMES n
-           | WHILE expression                                       // LOOP WHILE condition
-           | UNTIL expression)?                                     // LOOP UNTIL condition (or just LOOP)
+    : LOOP (fieldRef EQ expression TO expression (BY expression)?
+           | expression TIMES
+           | TIMES expression
+           | WHILE expression
+           | UNTIL expression)?
       statementSeparator+
-      (nonEmptyStatement (statementSeparator+ nonEmptyStatement)*)? statementSeparator*
+      statementBlock
       (DOT | END)
     ;
 
@@ -282,13 +282,11 @@ caseStatement
     ;
 
 ofClause
-    : OF ofExpression NEWLINE (nonEmptyStatement (statementSeparator+ nonEmptyStatement)*)? statementSeparator*
-    | OF ofExpression statementSeparator nonEmptyStatement (statementSeparator nonEmptyStatement)*
+    : OF ofExpression statementSeparator+ statementBlock
     ;
 
 orofClause
-    : OROF ofExpression NEWLINE (nonEmptyStatement (statementSeparator+ nonEmptyStatement)*)? statementSeparator*
-    | OROF ofExpression statementSeparator nonEmptyStatement (statementSeparator nonEmptyStatement)*
+    : OROF ofExpression statementSeparator+ statementBlock
     ;
 
 // OF expression can be a single value or a range (e.g., OF 1 TO 10)
@@ -297,8 +295,7 @@ ofExpression
     ;
 
 elseCaseClause
-    : ELSE statementSeparator+
-      (nonEmptyStatement (statementSeparator+ nonEmptyStatement)*)? statementSeparator*
+    : ELSE statementSeparator+ statementBlock
     ;
 
 // ============================================================================
