@@ -90,7 +90,14 @@ export class AntlrFoldingProvider {
             this.collectFoldingRanges(tree, ranges);
             
             const perfEnd = performance.now();
-            logger.info(`ANTLR Folding: Computed ${ranges.length} ranges in ${(perfEnd - perfStart).toFixed(2)}ms`);
+            
+            // Log last fold range for debugging
+            if (ranges.length > 0) {
+                const lastRange = ranges[ranges.length - 1];
+                logger.info(`ANTLR Folding: Computed ${ranges.length} ranges in ${(perfEnd - perfStart).toFixed(2)}ms (last fold: lines ${lastRange.startLine + 1}-${lastRange.endLine + 1})`);
+            } else {
+                logger.info(`ANTLR Folding: Computed ${ranges.length} ranges in ${(perfEnd - perfStart).toFixed(2)}ms`);
+            }
             
             return ranges;
             
