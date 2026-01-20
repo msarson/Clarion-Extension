@@ -1001,10 +1001,10 @@ parameterList
     ;
 
 parameter
-    : LT dataType anyIdentifier? GT                  // Omittable parameter: <STRING pSep>
-    | dataType anyIdentifier? (EQ expression)?       // Optional documentary parameter name (can be keyword) and default value
-    | MULT dataType anyIdentifier? (EQ expression)?  // Pointer variable: *string pValue or *long
-    | AMPERSAND (anyIdentifier | QUALIFIED_IDENTIFIER)  // Reference parameter (e.g., &QueueType)
+    : LT dataType anyIdentifier? GT                            // Omittable parameter: <STRING pSep>
+    | dataType anyIdentifier? (EQ expression)?                 // Optional documentary parameter name (can be keyword) and default value
+    | MULT (dataType | anyIdentifier) anyIdentifier? (EQ expression)?  // Pointer: *string pValue or *MyType pValue
+    | AMPERSAND (anyIdentifier | QUALIFIED_IDENTIFIER)         // Reference parameter (e.g., &QueueType)
     ;
 
 returnType
