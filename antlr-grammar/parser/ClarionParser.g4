@@ -233,7 +233,7 @@ assignmentStatement
 // DOT disambiguation: fieldRef greedily consumes (DOT identifier)* chains,
 // so only "orphan" DOTs (not followed by identifier) match as terminators
 ifStatement
-    : IF expression THEN statementSeparator* singleLineStatements (DOT | END)
+    : IF expression THEN statementSeparator* singleLineStatements (ELSE singleLineStatements)? (DOT | END)
     | IF expression statementSeparator+ statementBlock elsifClause* elseClause? (DOT | END)
     ;
 
