@@ -39,7 +39,10 @@ function diagnose(filePath) {
     parser.addErrorListener({
         syntaxError: (recognizer, offendingSymbol, line, column, msg, e) => {
             errors.push({ line, column, msg, token: offendingSymbol?.text });
-        }
+        },
+        reportAmbiguity: () => {},
+        reportAttemptingFullContext: () => {},
+        reportContextSensitivity: () => {}
     });
 
     const startTime = Date.now();
