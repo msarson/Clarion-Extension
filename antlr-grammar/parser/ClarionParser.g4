@@ -296,8 +296,7 @@ executeStatement
     ;
 
 returnStatement
-    : RETURN
-    | RETURN expression
+    : RETURN expression?
     ;
 
 gotoStatement
