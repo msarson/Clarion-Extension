@@ -251,8 +251,8 @@ loopStatement
            | WHILE expression                                       // LOOP WHILE condition
            | UNTIL expression)?                                     // LOOP UNTIL condition (or just LOOP)
       statementSeparator+
-      statement (statementSeparator+ statement)*
-      (END | DOT)
+      (nonEmptyStatement (statementSeparator+ nonEmptyStatement)*)? statementSeparator*
+      (DOT | END)
     ;
 
 // ============================================================================
