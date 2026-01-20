@@ -266,13 +266,13 @@ caseStatement
     ;
 
 ofClause
-    : OF ofExpression NEWLINE (statement (statementSeparator+ statement)*)? statementSeparator*
-    | OF ofExpression statementSeparator statement (statementSeparator statement)*
+    : OF ofExpression NEWLINE (nonEmptyStatement (statementSeparator+ nonEmptyStatement)*)? statementSeparator*
+    | OF ofExpression statementSeparator nonEmptyStatement (statementSeparator nonEmptyStatement)*
     ;
 
 orofClause
-    : OROF ofExpression NEWLINE (statement (statementSeparator+ statement)*)? statementSeparator*
-    | OROF ofExpression statementSeparator statement (statementSeparator statement)*
+    : OROF ofExpression NEWLINE (nonEmptyStatement (statementSeparator+ nonEmptyStatement)*)? statementSeparator*
+    | OROF ofExpression statementSeparator nonEmptyStatement (statementSeparator nonEmptyStatement)*
     ;
 
 // OF expression can be a single value or a range (e.g., OF 1 TO 10)
@@ -282,7 +282,7 @@ ofExpression
 
 elseCaseClause
     : ELSE statementSeparator+
-      (statement (statementSeparator+ statement)*)? statementSeparator*
+      (nonEmptyStatement (statementSeparator+ nonEmptyStatement)*)? statementSeparator*
     ;
 
 // ============================================================================
