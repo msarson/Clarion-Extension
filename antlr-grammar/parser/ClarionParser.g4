@@ -211,12 +211,17 @@ assignmentStatement
 
 // IF statement - supports both single-line and multi-line forms
 ifStatement
-    : IF expression THEN simpleStatement (SEMICOLON simpleStatement)* (ELSE simpleStatement (SEMICOLON simpleStatement)*)? (DOT | END) NEWLINE  // Single-line: IF x THEN stmt1; stmt2 ELSE stmt3. NEWLINE
-    | IF expression THEN? NEWLINE                                  // Multi-line: IF x NEWLINE statements END
+    : IF expression THEN simpleStatement (SEMICOLON simpleStatement)* (ELSE simpleStatement (SEMICOLON simpleStatement)*)? (DOT | END) NEWLINE  // Single-line: IF x THEN stmt1; stmt2 ELSE stmt3. NEWLINE (must come first for precedence)
+    | IF expression NEWLINE                                        // Multi-line without THEN: IF x NEWLINE statements END
       statement*
       elsifClause*
       elseClause?
-      (END | DOT) NEWLINE+  // Require NEWLINE after terminator to avoid ambiguity with DOT in statements
+      (END | DOT) NEWLINE+
+    | IF expression THEN NEWLINE                                   // Multi-line with THEN: IF x THEN NEWLINE statements END
+      statement*
+      elsifClause*
+      elseClause?
+      (END | DOT) NEWLINE+
     ;
 
 elsifClause
