@@ -612,7 +612,7 @@ newExpression
     ;
 
 chooseExpression
-    : CHOOSE LPAREN expression (COMMA expression)+ RPAREN  // CHOOSE(expr, val1, val2[, val3...]) or CHOOSE(cond[, true, false])
+    : CHOOSE LPAREN expression (COMMA expression)* RPAREN
     ;
 
 functionCall
