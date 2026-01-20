@@ -265,11 +265,11 @@ caseStatement
     ;
 
 ofClause
-    : OF ofExpression (statementSeparator+ statement (statementSeparator+ statement)*)?
+    : OF ofExpression statementSeparator+ statement (statementSeparator+ statement)*
     ;
 
 orofClause
-    : OROF ofExpression (statementSeparator+ statement (statementSeparator+ statement)*)?
+    : OROF ofExpression statementSeparator+ statement (statementSeparator+ statement)*
     ;
 
 // OF expression can be a single value or a range (e.g., OF 1 TO 10)
