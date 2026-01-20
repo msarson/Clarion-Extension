@@ -69,7 +69,7 @@ procedurePrototype
 
 // Short procedure prototype: indented, no PROCEDURE keyword
 procedurePrototypeShort
-    : IDENTIFIER parameterList procedureModifiers?
+    : (IDENTIFIER | LABEL) parameterList procedureModifiers?
     ;
 
 moduleReference
