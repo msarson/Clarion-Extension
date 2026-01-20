@@ -189,6 +189,10 @@ nonEmptyStatement
     : QUESTION? coreStatement
     ;
 
+statementBlock
+    : (nonEmptyStatement statementSeparator+)*
+    ;
+
 coreStatement
     : simpleStatement
     | structureStatement
@@ -229,17 +233,29 @@ assignmentStatement
 // DOT disambiguation: fieldRef greedily consumes (DOT identifier)* chains,
 // so only "orphan" DOTs (not followed by identifier) match as terminators
 ifStatement
-    : IF expression THEN statementSeparator* (nonEmptyStatement (statementSeparator+ nonEmptyStatement)*)? statementSeparator* (DOT | END)
-    | IF expression statementSeparator+ (nonEmptyStatement (statementSeparator+ nonEmptyStatement)*)? statementSeparator* elsifClause* elseClause? (DOT | END)
+    : IF expression THEN?
+      statementSeparator*
+      (nonEmptyStatement (statementSeparator+ nonEmptyStatement)*)?
+      statementSeparator+          // ← THIS is the key fix
+      elsifClause*
+      elseClause?
+      (DOT | END)
     ;
 
 elsifClause
-    : ELSIF expression THEN? statementSeparator+ nonEmptyStatement (statementSeparator+ nonEmptyStatement)* statementSeparator*
+    : ELSIF expression THEN?
+      statementSeparator+
+      nonEmptyStatement
+      (statementSeparator+ nonEmptyStatement)*
     ;
 
 elseClause
-    : ELSE statementSeparator+ nonEmptyStatement (statementSeparator+ nonEmptyStatement)* statementSeparator*
+    : ELSE
+      statementSeparator+
+      nonEmptyStatement
+      (statementSeparator+ nonEmptyStatement)*
     ;
+
 
 // ============================================================================
 // LOOP STATEMENT
