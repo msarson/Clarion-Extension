@@ -226,7 +226,7 @@ assignmentStatement
 // so only "orphan" DOTs (not followed by identifier) match as terminators
 ifStatement
     : IF expression THEN? statementSeparator*
-      statement (statementSeparator+ statement)*
+      (statement (statementSeparator+ statement)*)? statementSeparator*
       elsifClause*
       elseClause?
       (DOT | END)
@@ -234,12 +234,12 @@ ifStatement
 
 elsifClause
     : ELSIF expression THEN? statementSeparator+
-      statement (statementSeparator+ statement)*
+      (statement (statementSeparator+ statement)*)? statementSeparator*
     ;
 
 elseClause
     : ELSE statementSeparator+
-      statement (statementSeparator+ statement)*
+      (statement (statementSeparator+ statement)*)? statementSeparator*
     ;
 
 // ============================================================================
