@@ -267,12 +267,12 @@ caseStatement
     ;
 
 ofClause
-    : OF ofExpression NEWLINE statement (statementSeparator+ statement)*
+    : OF ofExpression NEWLINE (statement (statementSeparator+ statement)*)? statementSeparator*
     | OF ofExpression statementSeparator statement (statementSeparator statement)*
     ;
 
 orofClause
-    : OROF ofExpression NEWLINE statement (statementSeparator+ statement)*
+    : OROF ofExpression NEWLINE (statement (statementSeparator+ statement)*)? statementSeparator*
     | OROF ofExpression statementSeparator statement (statementSeparator statement)*
     ;
 
