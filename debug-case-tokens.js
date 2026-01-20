@@ -8,11 +8,11 @@ const tokens = new CommonTokenStream(lexer);
 tokens.fill();
 
 const toks = tokens.getTokens();
-const line11 = toks.filter(t => t.line === 11);
-const line12 = toks.filter(t => t.line === 12);
+const line5 = toks.filter(t => t.line === 5);
+const line6 = toks.filter(t => t.line === 6);
 
-console.log('Line 11 tokens:');
-line11.forEach(t => console.log(`  col=${t.column} type=${t.type} text='${t.text.replace(/\n/g,'\\n')}'`));
+console.log('Line 5 tokens:');
+line5.forEach(t => console.log(`  col=${t.column} type=${t.type} text='${t.text.replace(/\n/g,'\\n')}'`));
 
-console.log('\nLine 12 tokens:');
-line12.forEach(t => console.log(`  col=${t.column} type=${t.type} text='${t.text.replace(/\n/g,'\\n')}'`));
+console.log('\nLine 6 tokens:');
+line6.forEach(t => console.log(`  col=${t.column} type=${t.type} text='${t.text.replace(/\n/g,'\\n')}'`));
