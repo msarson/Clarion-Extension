@@ -167,6 +167,8 @@ codeSection
 
 statementList
     : statement*
+    ;
+
 // ============================================================================
 // STATEMENT SEPARATION
 // ============================================================================
@@ -265,8 +267,8 @@ caseStatement
     ;
 
 ofClause
-    : OF ofExpression NEWLINE statement (statementSeparator+ statement)*         // Multi-line form
-    | OF ofExpression statementSeparator statement (statementSeparator statement)*  // Single-line form with separator
+    : OF ofExpression NEWLINE statement (statementSeparator+ statement)*
+    | OF ofExpression statementSeparator statement (statementSeparator statement)*
     ;
 
 orofClause
