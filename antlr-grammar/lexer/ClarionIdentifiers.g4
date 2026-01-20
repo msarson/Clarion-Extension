@@ -55,12 +55,9 @@ IMPLICIT_QUOTE
 //     : '&' [A-Za-z_][A-Za-z0-9_:]* ('::' [A-Za-z_][A-Za-z0-9_]*)?
 //     ;
 
-// Pointer variable (with *)
-// Pointer variable - only used in parameters, no space after *
-// Example: Procedure(*string pValue, *long pLength)
-POINTER_VAR
-    : '*' [A-Za-z_][A-Za-z0-9_]*
-    ;
+// Note: Pointer variables (*type) are only used in procedure parameters
+// and are handled at parser level as MULT + anyIdentifier, not as a lexer token.
+// This avoids ambiguity with multiplication operator: x=3*int(y)
 
 // Column-0 LABEL - matches at column 0 only, allows keyword text
 // This MUST appear before IDENTIFIER to get priority at column 0
