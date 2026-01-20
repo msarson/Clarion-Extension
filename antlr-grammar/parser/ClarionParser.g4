@@ -259,18 +259,18 @@ loopStatement
 // ============================================================================
 caseStatement
     : CASE expression statementSeparator+
-      (ofClause | orofClause)* 
+      (ofClause | orofClause)+ 
       elseCaseClause?
       (END | DOT)
     ;
 
 ofClause
-    : OF ofExpression statementSeparator*
+    : OF ofExpression statementSeparator+
       statement (statementSeparator+ statement)*
     ;
 
 orofClause
-    : OROF ofExpression statementSeparator*
+    : OROF ofExpression statementSeparator+
       statement (statementSeparator+ statement)*
     ;
 
@@ -280,7 +280,7 @@ ofExpression
     ;
 
 elseCaseClause
-    : ELSE statementSeparator*
+    : ELSE statementSeparator+
       statement (statementSeparator+ statement)*
     ;
 
