@@ -167,13 +167,20 @@ codeSection
 
 statementList
     : statement*
+// ============================================================================
+// STATEMENT SEPARATION
+// ============================================================================
+// Semicolon and NEWLINE are equivalent statement separators
+statementSeparator
+    : NEWLINE
+    | STATEMENT_SEPARATOR
     ;
 
-// QUESTION may prefix any core statement (DEBUG-mode marker),
-// NEWLINE alone is a blank/empty statement.
+// QUESTION may prefix any core statement (DEBUG-mode marker)
+// Blank lines are just separators
 statement
     : QUESTION? coreStatement
-    | NEWLINE
+    | statementSeparator
     ;
 
 coreStatement
@@ -209,58 +216,62 @@ assignmentStatement
 //   - obj.method() = value (rare but possible)
 // And compound assignments: x += 5, count *= 2, etc.
 
-// IF statement - supports both single-line and multi-line forms
+// ============================================================================
+// IF STATEMENT
+// ============================================================================
+// Unified rule: semicolons and newlines both separate statements
+// DOT disambiguation: fieldRef greedily consumes (DOT identifier)* chains,
+// so only "orphan" DOTs (not followed by identifier) match as terminators
 ifStatement
-    : IF expression THEN simpleStatement (STATEMENT_SEPARATOR simpleStatement)* (ELSE simpleStatement (STATEMENT_SEPARATOR simpleStatement)*)? (DOT | END) NEWLINE  // Single-line: IF x THEN stmt1; stmt2 ELSE stmt3. NEWLINE (must come first for precedence)
-    | IF expression NEWLINE                                        // Multi-line without THEN: IF x NEWLINE statements END
-      statement*
+    : IF expression THEN? statementSeparator*
+      statement (statementSeparator+ statement)*
       elsifClause*
       elseClause?
-      (END | DOT) NEWLINE+
-    | IF expression THEN NEWLINE                                   // Multi-line with THEN: IF x THEN NEWLINE statements END
-      statement*
-      elsifClause*
-      elseClause?
-      (END | DOT) NEWLINE+
+      (DOT | END)
     ;
 
 elsifClause
-    : ELSIF expression THEN? NEWLINE
-      statement*
+    : ELSIF expression THEN? statementSeparator+
+      statement (statementSeparator+ statement)*
     ;
 
 elseClause
-    : ELSE NEWLINE
-      statement*
+    : ELSE statementSeparator+
+      statement (statementSeparator+ statement)*
     ;
 
+// ============================================================================
+// LOOP STATEMENT
+// ============================================================================
 loopStatement
     : LOOP (fieldRef EQ expression TO expression (BY expression)?  // LOOP x = 1 TO 10 [BY 2]
            | expression TIMES                                       // LOOP n TIMES
            | TIMES expression                                       // LOOP TIMES n
            | WHILE expression                                       // LOOP WHILE condition
            | UNTIL expression)?                                     // LOOP UNTIL condition (or just LOOP)
-      NEWLINE
-      statement*
-      (END | DOT) NEWLINE+  // Require NEWLINE after terminator to avoid ambiguity with DOT in statements
+      statementSeparator+
+      statement (statementSeparator+ statement)*
+      (END | DOT)
     ;
 
-// CASE statement - simplified to match reference grammar
+// ============================================================================
+// CASE STATEMENT
+// ============================================================================
 caseStatement
-    : CASE expression NEWLINE
+    : CASE expression statementSeparator+
       (ofClause | orofClause)* 
       elseCaseClause?
-      (END | DOT) NEWLINE+  // Require NEWLINE after terminator to avoid ambiguity with DOT in statements
+      (END | DOT)
     ;
 
 ofClause
-    : OF ofExpression NEWLINE?
-      statement*
+    : OF ofExpression statementSeparator*
+      statement (statementSeparator+ statement)*
     ;
 
 orofClause
-    : OROF ofExpression NEWLINE?
-      statement*
+    : OROF ofExpression statementSeparator*
+      statement (statementSeparator+ statement)*
     ;
 
 // OF expression can be a single value or a range (e.g., OF 1 TO 10)
@@ -269,15 +280,18 @@ ofExpression
     ;
 
 elseCaseClause
-    : ELSE NEWLINE?
-      statement*
+    : ELSE statementSeparator*
+      statement (statementSeparator+ statement)*
     ;
 
+// ============================================================================
+// EXECUTE STATEMENT
+// ============================================================================
 executeStatement
-    : EXECUTE expression NEWLINE
-      statement+
-      (ELSE statement)?
-      (END | DOT) NEWLINE+  // Require NEWLINE after terminator to avoid ambiguity with DOT in statements
+    : EXECUTE expression statementSeparator+
+      statement (statementSeparator+ statement)*
+      (ELSE statementSeparator+ statement (statementSeparator+ statement)*)?
+      (END | DOT)
     ;
 
 returnStatement
