@@ -168,7 +168,7 @@ routineDeclaration
 
 // Routine-specific data section (requires CODE keyword after)
 routineDataSection
-    : DATA dataDeclarationList
+    : DATA NEWLINE dataDeclarationList
     ;
 
 // Routine-specific code section (follows DATA section)
