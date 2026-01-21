@@ -1158,11 +1158,11 @@ parameterList
 parameter
     : LT MULTIPLY QUESTION parameterNameWithDefault? GT                        // Omittable untyped pointer: <*? pParent>
     | LT MULTIPLY? parameterDataType parameterNameWithDefault? GT              // Omittable parameter: <STRING pSep> or <*String pStr>
-    | parameterDataType LBRACKET RBRACKET parameterNameWithDefault?            // Array parameter: string[] pValue
+    | parameterDataType LBRACKET (COMMA)* RBRACKET parameterNameWithDefault?   // Array parameter: string[] or long[,] or byte[,,]
     | parameterDataType parameterNameWithDefault?                              // Optional documentary parameter name (can be keyword) and default value
     | MULTIPLY QUESTION parameterNameWithDefault?                              // Untyped pointer: *? pVal
     | QUESTION parameterNameWithDefault?                                       // Untyped parameter: ? pVal
-    | MULTIPLY (parameterDataType | anyIdentifier) LBRACKET RBRACKET parameterNameWithDefault?  // Pointer to array: *string[] pValue
+    | MULTIPLY (parameterDataType | anyIdentifier) LBRACKET (COMMA)* RBRACKET parameterNameWithDefault?  // Pointer to array: *string[] or *long[,]
     | MULTIPLY (parameterDataType | anyIdentifier) parameterNameWithDefault?   // Pointer: *string pValue or *MyType pValue
     | AMPERSAND (anyIdentifier | QUALIFIED_IDENTIFIER)                         // Reference parameter (e.g., &QueueType)
     ;
