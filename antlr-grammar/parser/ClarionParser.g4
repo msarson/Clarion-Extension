@@ -701,63 +701,35 @@ argument
 // ============================================================================
 
 softKeyword
-    : APPLICATION
-    | CLASS
-    | INTERFACE   // OOP structure type
-    | DETAIL
-    | FILE
-    | FOOTER
-    | FORM
-    | GROUP
-    | HEADER
-    | ITEM
-    | ITEMIZE
-    | JOIN
-    | MAP
-    | MENU
-    | MENUBAR
-    | MODULE
-    | OLE
-    | OPTION
-    | PARENT
-    | QUEUE
-    | RECORD
-    | REPORT
-    | SELF
-    | SHEET
-    | TAB
-    | TOOLBAR
-    | VIEW
-    | WINDOW
-    // Additional soft keywords from control types (not in ClarionDocs but behave as soft)
-    | BUTTON
-    | ENTRY
-    | TEXT
-    | LIST
-    | IMAGE
-    | STRING      // Data type but used as identifier
-    | PRIMARY     // Attribute but used as identifier
-    | LINE        // Control type but used as field name
-    | BOX | ELLIPSE | PANEL | PROGRESS | REGION | PROMPT | SPIN | CHECK | RADIO | COMBO
-    // Common attribute keywords that can be used as parameter names
-    | MSG | HLP | TIP | KEY | NAME | TYPE | AUTO | OVER | DIM | PRE
-    | RAW | PASCAL | PROC | DLL | EXTERNAL | PRIVATE | PROTECTED | STATIC | THREAD
-    | FUNCTION  // Function keyword (used in procedures, but can appear in identifiers like "FunctionCalled")
-    // Section keywords that can be used as field/variable names
-    | DATA      // Can be used as field name: self.fontQ.data
-    | CODE      // Can be used as field name (rare but valid)
-    | AT | USE | FROM | HIDE | DISABLE | READONLY | REQ | DEFAULT | CENTER | CENTERED
-    | ICON | FONT | COLOR | TRN | IMM | ALRT | TIMER | CURSOR | LINK | RESIZE
-    // System and other structure keywords
-    | SYSTEM      // SYSTEM{PROP:CharSet} - system menu/properties
-    | CREATE | RECLAIM | OWNER | ENCRYPT | DRIVER | BINARY
-    | LEFT | RIGHT  // Alignment constants used as variable names (e.g., StringTheory.clw)
-    | INDEX | OPT | DUP | NOCASE | PRIMARY | INNER | OUTER | FILTER | ORDER
-    | REPLACE  // String method that can be used as identifier
-    | DISPOSE  // Statement keyword that can be used as field name (e.g., Children.Dispose)
-    | RIGHT    // String method (st.right()) that can be used as identifier
-    // Type keywords that can be used as parameter/variable names
-    | BYTE | SHORT | USHORT | LONG | ULONG | UNSIGNED
+    // Instead of listing every possible soft keyword individually, we accept most keywords as identifiers.
+    // The lexer already handles column-0 restrictions with predicates.
+    // Only truly reserved keywords (control flow, structural) are excluded.
+    : APPLICATION | CLASS | INTERFACE | DETAIL | FILE | FOOTER | FORM | GROUP | HEADER | ITEM | ITEMIZE
+    | JOIN | MAP | MENU | MENUBAR | MODULE | OLE | OPTION | PARENT | QUEUE | RECORD | REPORT | SELF
+    | SHEET | TAB | TOOLBAR | VIEW | WINDOW | PROJECT | TOOLBOX | PALETTE
+    // Control types
+    | BUTTON | ENTRY | TEXT | LIST | IMAGE | LINE | BOX | ELLIPSE | PANEL | PROGRESS | REGION
+    | PROMPT | SPIN | CHECK | RADIO | COMBO | OCX | OLECONTROL | VBX
+    // Data types  
+    | STRING | CSTRING | PSTRING | ASTRING | BSTRING | USTRING
+    | BYTE | SHORT | USHORT | LONG | ULONG | SIGNED | UNSIGNED
+    | REAL | SREAL | DECIMAL | PDECIMAL | DATE | TIME | MEMO | BLOB | BOOL | ANY | VARIANT
+    // Attributes and modifiers (all soft)
+    | AT | USE | FROM | HIDE | DISABLE | READONLY | REQ | DEFAULT | CENTER | CENTERED | RESIZE
+    | ICON | FONT | COLOR | TRN | IMM | INS | OVR | ALRT | TIMER | CURSOR | LINK | VCR | STD
+    | MSG | HLP | TIP | KEY | NAME | TYPE | AUTO | OVER | DIM | PRE | BINDABLE
+    | RAW | PASCAL | PROC | DLL | EXTERNAL | PRIVATE | PROTECTED | PUBLIC | INTERNAL | STATIC | THREAD
+    | FLAT | BOXED | DROP | SCROLL | GRAY | FULL | ZOOOM | DOCK | DOCKED | NOFRAME | NOSHEET
+    | MODAL | MDI | SYSTEM | MAXIMIZE | ICONIZE | WALLPAPER | PAGE | PAPER | LANDSCAPE | PREVIEW | ALONE | OEM
+    // File/database attributes
+    | DRIVER | CREATE | RECLAIM | OWNER | ENCRYPT | BINARY | INDEX | OPT | DUP | NOCASE | PRIMARY
+    | INNER | OUTER | FILTER | ORDER
+    // Special method/field names that can conflict
+    | FUNCTION | DATA | CODE | DISPOSE | REPLACE | DERIVED | VIRTUAL | IMPLEMENTS
+    | LEFT | RIGHT  // Alignment/string methods
+    // Structural keywords when used as identifiers
+    | CONST | EQUATE | ONCE | STRUCT | ENUM | UNION | LIKE
+    ;
     | REAL | SREAL | DECIMAL | PDECIMAL
     | PSTRING | CSTRING | ASTRING | BSTRING
     | DATE | TIME | MEMO | BLOB | BOOL
