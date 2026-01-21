@@ -27,9 +27,9 @@ INT_DIV   : '//' ;            // Integer division (if supported)
 EQ        : '=' ;             // Equal / Assignment
 LT        : '<' ;             // Less than
 GT        : '>' ;             // Greater than
-LE        : '<=' ;            // Less than or equal
-GE        : '>=' ;            // Greater than or equal
-NE        : '<>' ;            // Not equal (primary)
+LE        : '<=' | '=<' ;     // Less than or equal (both forms valid in Clarion)
+GE        : '>=' | '=>' ;     // Greater than or equal (both forms valid in Clarion)
+NE        : '<>' | '><' ;     // Not equal (both forms valid in Clarion)
 NE_ALT    : '!=' ;            // Not equal (alternative)
 PATTERN_MATCH : '~=' ;        // Pattern match operator
 
