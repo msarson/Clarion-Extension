@@ -34,8 +34,8 @@ FUNCTION  : {this.charPositionInLine > 0}? 'FUNCTION' ;    // SOFT - can be used
 ROUTINE   : 'ROUTINE' ;     // FULLY RESERVED
 
 // Section Keywords
-DATA      : 'DATA' ;        // FULLY RESERVED
-CODE      : 'CODE' ;        // FULLY RESERVED
+DATA      : 'DATA' ;        // FULLY RESERVED - but can be used as field name (softKeyword in parser)
+CODE      : 'CODE' ;        // FULLY RESERVED - but can be used as field name (softKeyword in parser)
 MAP       : 'MAP' ;         // SOFT KEYWORD (structure type)
 
 // Control Flow - All FULLY RESERVED

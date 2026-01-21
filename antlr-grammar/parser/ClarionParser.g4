@@ -743,6 +743,9 @@ softKeyword
     | MSG | HLP | TIP | KEY | NAME | TYPE | AUTO | OVER | DIM | PRE
     | RAW | PASCAL | PROC | DLL | EXTERNAL | PRIVATE | PROTECTED | STATIC | THREAD
     | FUNCTION  // Function keyword (used in procedures, but can appear in identifiers like "FunctionCalled")
+    // Section keywords that can be used as field/variable names
+    | DATA      // Can be used as field name: self.fontQ.data
+    | CODE      // Can be used as field name (rare but valid)
     | AT | USE | FROM | HIDE | DISABLE | READONLY | REQ | DEFAULT | CENTER | CENTERED
     | ICON | FONT | COLOR | TRN | IMM | ALRT | TIMER | CURSOR | LINK
     // System and other structure keywords
@@ -1072,7 +1075,7 @@ parameterBaseType
     | REAL | SREAL | DECIMAL | PDECIMAL
     | STRING | CSTRING | PSTRING | ASTRING | BSTRING
     | DATE | TIME | MEMO | BLOB | BOOL
-    | FILE | VIEW | RECORD | KEY  // Structure types that can be used as reference types
+    | FILE | VIEW | RECORD | KEY | REPORT  // Structure types that can be used as reference types
     | IDENTIFIER  // User-defined types
     ;
 
