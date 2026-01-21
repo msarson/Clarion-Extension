@@ -210,8 +210,8 @@ GRAY : 'GRAY' ;         // Gray background
 WALLPAPER : 'WALLPAPER' ; // Background image
 FULL : 'FULL' ;         // Full screen
 ZOOOM : 'ZOOOM' ;         // Zoom
-TOOLBOX : 'TOOLBOX' ;   // Toolbox window
-PALETTE : 'PALETTE' ;   // Palette window
+TOOLBOX : {this.charPositionInLine > 0}? 'TOOLBOX' ;   // SOFT KEYWORD - Toolbox window
+PALETTE : {this.charPositionInLine > 0}? 'PALETTE' ;   // SOFT KEYWORD - Palette window
 DOCK : 'DOCK' ;         // Dockable
 DOCKED : 'DOCKED' ;     // Initially docked
 NOFRAME : 'NOFRAME' ;   // Frameless
