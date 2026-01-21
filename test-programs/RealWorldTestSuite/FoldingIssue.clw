@@ -13,7 +13,5 @@ yearnumber  long
 yearpart  long
 sep   string(1)
   Code
-  if chordEndX < chordStartX  
-  if ycenter+y>=chordstarty and ycenter+y=<chordendy
-  END
-  END
+DrawClass.Resize          Procedure  (long width=-1, long height=-1, long copyData=0)
+  Code

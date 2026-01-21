@@ -603,7 +603,7 @@ equalityExpression
     ;
 
 relationalExpression
-    : additiveExpression ((LT | GT | LE | GE) additiveExpression)*
+    : additiveExpression ((LT | GT | LE | GE | EQ LT | EQ GT | GT LT | LT GT) additiveExpression)*
     ;
 
 additiveExpression
@@ -747,7 +747,7 @@ softKeyword
     | DATA      // Can be used as field name: self.fontQ.data
     | CODE      // Can be used as field name (rare but valid)
     | AT | USE | FROM | HIDE | DISABLE | READONLY | REQ | DEFAULT | CENTER | CENTERED
-    | ICON | FONT | COLOR | TRN | IMM | ALRT | TIMER | CURSOR | LINK
+    | ICON | FONT | COLOR | TRN | IMM | ALRT | TIMER | CURSOR | LINK | RESIZE
     // System and other structure keywords
     | SYSTEM      // SYSTEM{PROP:CharSet} - system menu/properties
     | CREATE | RECLAIM | OWNER | ENCRYPT | DRIVER | BINARY
