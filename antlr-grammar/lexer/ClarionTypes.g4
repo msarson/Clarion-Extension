@@ -134,11 +134,10 @@ VBX       : {this.charPositionInLine > 0}? 'VBX' ;            // Not in ClarionD
 DIM : 'DIM' ;           // Array dimensions
 OVER : 'OVER' ;         // Overlay on another variable
 PRE : 'PRE' ;           // Prefix for structure fields
-NAME : 'NAME' ;         // External name
+NAME : {this.charPositionInLine > 0}? 'NAME' ;         // SOFT - External name, can be field name
 BINDABLE : 'BINDABLE' ; // Runtime binding
 TYPE : 'TYPE' ;         // Type casting/definition
 AUTO : 'AUTO' ;         // Automatic variable
-INLINE : 'INLINE' ;     // Inline code
 
 // ============================================================================
 // FILE/INDEX ATTRIBUTES
@@ -146,8 +145,8 @@ INLINE : 'INLINE' ;     // Inline code
 
 KEY : 'KEY' ;           // Index key
 INDEX : 'INDEX' ;       // Alternative to KEY
-DRIVER : 'DRIVER' ;     // File driver specification
-CREATE : 'CREATE' ;     // Create file if not exists
+DRIVER : {this.charPositionInLine > 0}? 'DRIVER' ;     // SOFT - File driver, can be field name
+CREATE : {this.charPositionInLine > 0}? 'CREATE' ;     // SOFT - Create file if not exists, can be field
 RECLAIM : 'RECLAIM' ;   // Reuse deleted space
 ENCRYPT : 'ENCRYPT' ;   // Encrypt file
 OWNER : 'OWNER' ;       // File owner/password

@@ -133,6 +133,6 @@ BUTTON_OK : 'BUTTON_OK' ;
 BUTTON_CANCEL : 'BUTTON_CANCEL' ;
 
 // Alignment constants
-CENTER : 'CENTER' ;
-LEFT : 'LEFT' ;
-RIGHT : 'RIGHT' ;
+CENTER : {this.charPositionInLine > 0}? 'CENTER' ;
+LEFT : {this.charPositionInLine > 0}? 'LEFT' ;
+RIGHT : {this.charPositionInLine > 0}? 'RIGHT' ;

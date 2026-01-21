@@ -21,6 +21,15 @@ options {
 compilationUnit
     : NEWLINE* programDeclaration EOF
     | NEWLINE* memberDeclaration EOF
+    | NEWLINE* includeFile EOF  // Include files (.INC) without PROGRAM/MEMBER
+    ;
+
+// ============================================================================
+// INCLUDE FILE (no PROGRAM/MEMBER header)
+// ============================================================================
+
+includeFile
+    : (NEWLINE | mapSection | dataDeclaration | structureDeclaration | moduleContent)*
     ;
 
 // ============================================================================
@@ -63,13 +72,14 @@ mapEntry
 
 // Full procedure prototype: label at column 0 with PROCEDURE keyword
 procedurePrototype
-    : IDENTIFIER PROCEDURE parameterList? procedureModifiers?
-    | LABEL PROCEDURE parameterList? procedureModifiers?
+    : anyIdentifier (DOT anyIdentifier)* PROCEDURE parameterList? procedureModifiers?  // Support 0+ dots
+    | LABEL (DOT anyIdentifier)* PROCEDURE parameterList? procedureModifiers?          // Label with optional dots
     ;
 
 // Short procedure prototype: indented, no PROCEDURE keyword
 procedurePrototypeShort
-    : (IDENTIFIER | LABEL) parameterList procedureModifiers?
+    : anyIdentifier (DOT anyIdentifier)* parameterList procedureModifiers?   // Support 0+ dots
+    | LABEL parameterList procedureModifiers?
     ;
 
 moduleReference
@@ -99,22 +109,28 @@ globalDataSection
 // Note: localDataSection was for routines, removed. Procedures have data directly, routines use routineDataSection
 
 dataDeclarationList
-    : (NEWLINE | dataDeclaration)*  // Allow blank lines and comments between declarations
+    : (statementSeparator | dataDeclaration)*  // Allow blank lines, semicolons, and comments between declarations
     ;
 
 dataDeclaration
-    : variableDeclaration NEWLINE
-    | structureDeclaration
-    | includeDirective NEWLINE
-    | compileDirective NEWLINE
+    : structureDeclaration
+    | variableDeclaration (statementSeparator | DOT)+  // Variable declarations can end with NEWLINE, semicolon, or DOT
+    | includeDirective statementSeparator
+    | compileDirective statementSeparator
     ;
 
-// Simple variable declaration (label can be IDENTIFIER, LABEL, QUALIFIED_IDENTIFIER, or keyword used as identifier)
+// Simple variable declaration
+// NOTE: Using anyIdentifier to allow keywords as variable names (e.g., "left Long,auto")
+// Real-world Clarion code (StringTheory.clw) uses keywords liberally as identifiers
+// The compiler is more permissive than documentation suggests, so we match actual behavior
+// This is acceptable for folding/parsing - strict validation is the compiler's job
+// If stricter validation is needed later, revert to: (IDENTIFIER | LABEL | QUALIFIED_IDENTIFIER)
+// Anonymous fields: In GROUP/QUEUE structures, fields can be unnamed (e.g., string('\') for padding)
 variableDeclaration
-    : (IDENTIFIER | LABEL | QUALIFIED_IDENTIFIER | NAME | TYPE | AUTO | OVER | DIM | PRE) dataType (COMMA dataAttributes)?
-    | (IDENTIFIER | LABEL | QUALIFIED_IDENTIFIER) AMPERSAND (anyIdentifier | QUALIFIED_IDENTIFIER)  // Reference variable: Q &QueueType
-    | (IDENTIFIER | LABEL | QUALIFIED_IDENTIFIER) EQUATE LPAREN expression RPAREN  // EQUATE declarations
-    | (IDENTIFIER | LABEL | QUALIFIED_IDENTIFIER) CLASS LPAREN anyIdentifier RPAREN DOT?  // Class instantiation: name CLASS(type) or name CLASS(type).
+    : (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER)? nonStructureDataType (COMMA dataAttributes)?
+    | (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER) AMPERSAND (baseType | anyIdentifier | QUALIFIED_IDENTIFIER) (COMMA dataAttributes)?  // Reference variable: Q &QueueType, b &byte, or allowedChars &string,Auto
+    | (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER) EQUATE LPAREN expression RPAREN  // EQUATE declarations
+    | (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER) CLASS LPAREN anyIdentifier RPAREN DOT?  // Class instantiation: name CLASS(type) or name CLASS(type).
     ;
 
 // ============================================================================
@@ -122,23 +138,23 @@ variableDeclaration
 // ============================================================================
 
 procedureList
-    : (procedureDeclaration | routineDeclaration)*
+    : (procedureImplementation | routineDeclaration)*
     ;
 
 // ============================================================================
-// PROCEDURE DECLARATION
+// PROCEDURE IMPLEMENTATIONS (in MEMBER sections)
 // ============================================================================
+// Implementations have NO attributes/modifiers (end with ) then NEWLINE)
+// Three forms:
+//   Label PROCEDURE(...) - standalone procedure implementation
+//   Label.Method PROCEDURE(...) - method implementation (1 dot)
+//   Label.Interface.Method PROCEDURE(...) - interface method implementation (2+ dots)
 
-procedureDeclaration
-    : IDENTIFIER (DOT IDENTIFIER)? PROCEDURE parameterList? returnType? procedureAttributes? NEWLINE
-      NEWLINE* dataDeclarationList?
-      NEWLINE* codeSection?
-    | LABEL DOT IDENTIFIER PROCEDURE parameterList? returnType? procedureAttributes? NEWLINE
-      NEWLINE* dataDeclarationList?
-      NEWLINE* codeSection?
-    | LABEL PROCEDURE parameterList? returnType? procedureAttributes? NEWLINE
-      NEWLINE* dataDeclarationList?
-      NEWLINE* codeSection?
+procedureImplementation
+    : anyIdentifier (DOT anyIdentifier)* (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE
+      NEWLINE* dataDeclarationList NEWLINE* codeSection?
+    | anyIdentifier (DOT anyIdentifier)* (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE
+      NEWLINE* codeSection
     ;
 
 routineDeclaration
@@ -207,13 +223,14 @@ simpleStatement
     | cycleStatement
     | doStatement
     | procedureCall
+    | compileDirective
     ;
 
 structureStatement
-    : ifStatement
-    | loopStatement
-    | caseStatement
-    | executeStatement
+    : LABEL? ifStatement
+    | LABEL? loopStatement
+    | LABEL? caseStatement
+    | LABEL? executeStatement
     ;
 
 assignmentStatement
@@ -229,12 +246,15 @@ assignmentStatement
 // ============================================================================
 // IF STATEMENT
 // ============================================================================
-// Unified rule: semicolons and newlines both separate statements
-// DOT disambiguation: fieldRef greedily consumes (DOT identifier)* chains,
-// so only "orphan" DOTs (not followed by identifier) match as terminators
+// Clarion IF supports multiple forms:
+// 1. THEN with ELSIF (single-line THEN stmt followed by multiline ELSIF/ELSE)
+// 2. THEN with optional inline ELSE (single-line: if x then a else b.)
+// 3. Multiline form (no THEN or THEN with newline, then statementBlock)
+// Order matters: ELSIF variant must come before simple ELSE variant
 ifStatement
-    : IF expression THEN statementSeparator* singleLineStatements (ELSE singleLineStatements)? (DOT | END)
-    | IF expression statementSeparator+ statementBlock elsifClause* elseClause? (DOT | END)
+    : IF expression THEN singleLineStatements statementSeparator+ elsifClause+ elseClause? (DOT | QUESTION? END)
+    | IF expression THEN singleLineStatements statementSeparator* (ELSE statementSeparator* singleLineStatements)? (DOT | QUESTION? END)
+    | IF expression THEN? statementSeparator+ statementBlock elsifClause* elseClause? (DOT | QUESTION? END)
     ;
 
 singleLineStatements
@@ -242,17 +262,24 @@ singleLineStatements
     ;
 
 elsifClause
-    : ELSIF expression THEN? statementSeparator+ statementBlock
+    : QUESTION? ELSIF expression THEN singleLineStatements statementSeparator+  // Single-line: elsif x then stmt
+    | QUESTION? ELSIF expression THEN? statementSeparator+ statementBlock       // Multi-line: elsif x\n stmts
     ;
 
 elseClause
-    : ELSE statementSeparator+ statementBlock
+    : QUESTION? ELSE singleLineStatements statementSeparator+  // Single-line: else stmt
+    | QUESTION? ELSE statementSeparator+ statementBlock        // Multi-line: else\n stmts
     ;
 
 
 // ============================================================================
 // LOOP STATEMENT
 // ============================================================================
+// LOOP STATEMENT
+// ============================================================================
+// Clarion supports both pre-condition and post-condition WHILE/UNTIL
+// Pre-condition: LOOP WHILE x > 0 ... END
+// Post-condition: LOOP ... UNTIL x > 10
 loopStatement
     : LOOP (fieldRef EQ expression TO expression (BY expression)?
            | expression TIMES
@@ -261,7 +288,14 @@ loopStatement
            | UNTIL expression)?
       statementSeparator+
       statementBlock
-      (DOT | END)
+      endLoopStatement
+    ;
+
+endLoopStatement
+    : UNTIL expression    // Post-condition: loop executes at least once, then tests
+    | WHILE expression    // Post-condition (rare but valid)
+    | DOT                 // Standard terminator
+    | END                 // Standard terminator
     ;
 
 // ============================================================================
@@ -271,15 +305,15 @@ caseStatement
     : CASE expression statementSeparator+
       (ofClause | orofClause)+ 
       elseCaseClause?
-      (END | DOT)
+      (QUESTION? END | DOT)
     ;
 
 ofClause
-    : OF ofExpression statementSeparator+ statementBlock
+    : QUESTION? OF ofExpression (OROF ofExpression)* statementSeparator+ statementBlock
     ;
 
 orofClause
-    : OROF ofExpression statementSeparator+ statementBlock
+    : QUESTION? OROF ofExpression (OROF ofExpression)* statementSeparator+ statementBlock
     ;
 
 // OF expression can be a single value or a range (e.g., OF 1 TO 10)
@@ -296,8 +330,8 @@ elseCaseClause
 // ============================================================================
 executeStatement
     : EXECUTE expression statementSeparator+
-      statement (statementSeparator+ statement)*
-      (ELSE statementSeparator+ statement (statementSeparator+ statement)*)?
+      statementBlock
+      (ELSE statementSeparator+ statementBlock)?
       (END | DOT)
     ;
 
@@ -314,11 +348,11 @@ exitStatement
     ;
 
 breakStatement
-    : BREAK
+    : BREAK IDENTIFIER?  // BREAK optionally takes a label to specify which loop to exit
     ;
 
 cycleStatement
-    : CYCLE
+    : CYCLE IDENTIFIER?  // CYCLE optionally takes a label to specify which loop to cycle
     ;
 
 // DO statement - calls a routine or procedure
@@ -358,15 +392,16 @@ structureDeclaration
     ;
 
 fileDeclaration
-    : label FILE fileAttributes? NEWLINE
+    : label FILE (COMMA fileAttributes)? NEWLINE
       NEWLINE* recordDeclaration?
       NEWLINE* keyDeclarations?
       (END | DOT) NEWLINE
     ;
 
 recordDeclaration
-    : RECORD NEWLINE
+    : label? RECORD NEWLINE
       dataDeclarationList
+      (END | DOT) NEWLINE
     ;
 
 keyDeclarations
@@ -396,11 +431,12 @@ classDeclaration
     ;
 
 classBody
-    : (NEWLINE* methodDeclaration | variableDeclaration NEWLINE)*
+    : (NEWLINE* classBodyElement)*
     ;
 
-methodDeclaration
-    : label PROCEDURE parameterList? returnType? methodAttributes? NEWLINE
+classBodyElement
+    :  (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER) (PROCEDURE | FUNCTION) parameterList? procedureModifiers? NEWLINE  // Method declaration
+    | variableDeclaration NEWLINE  // Field/property declaration
     ;
 
 viewDeclaration
@@ -550,7 +586,7 @@ xorExpression
     ;
 
 equalityExpression
-    : relationalExpression ((EQ | NE | NE_ALT | AMP_EQ) relationalExpression)*
+    : relationalExpression ((EQ | NE | NE_ALT | PATTERN_MATCH | AMP_EQ) relationalExpression)*
     ;
 
 relationalExpression
@@ -570,7 +606,7 @@ exponentiationExpression
     ;
 
 unaryExpression
-    : (MINUS | NOT | AMPERSAND | TILDE) unaryExpression
+    : (PLUS | MINUS | NOT | AMPERSAND | TILDE) unaryExpression
     | postfixExpression
     ;
 
@@ -583,9 +619,9 @@ postfixExpression
 
 postfixOperator
     : LBRACE argumentList RBRACE  // Property access: var{PROP:Text} or 0{prop:hlp}
-    | LBRACKET expression (COLON expression)? RBRACKET     // Array subscripting or slicing: array[index] or array[start:end]
+    | LBRACKET expression (COLON expression | COMMA expression)? RBRACKET     // Array subscripting: array[index], array[start:end], or array[start,length]
     | LPAREN argumentList? RPAREN  // Function call: func() or obj.method()
-    // NOTE: DOT member access removed - now handled by fieldRef
+    | DOT anyIdentifier    // Member access after subscript/call: deltas[i].lo, func().value
     ;
 
 primaryExpression
@@ -613,7 +649,8 @@ fieldRef
 
 newExpression
     : NEW LPAREN dataType RPAREN  // NEW(Type)
-    | NEW (anyIdentifier | QUALIFIED_IDENTIFIER)  // NEW Type (parentheses optional per ClarionDocs)
+    | NEW baseType (LPAREN argumentList? RPAREN)?  // NEW cstring(size) or NEW cstring
+    | NEW (anyIdentifier | QUALIFIED_IDENTIFIER) (LPAREN argumentList? RPAREN)?  // NEW Type(args) or NEW Type
     ;
 
 chooseExpression
@@ -653,6 +690,7 @@ argument
 softKeyword
     : APPLICATION
     | CLASS
+    | INTERFACE   // OOP structure type
     | DETAIL
     | FILE
     | FOOTER
@@ -691,18 +729,29 @@ softKeyword
     // Common attribute keywords that can be used as parameter names
     | MSG | HLP | TIP | KEY | NAME | TYPE | AUTO | OVER | DIM | PRE
     | RAW | PASCAL | PROC | DLL | EXTERNAL | PRIVATE | PROTECTED | STATIC | THREAD
+    | FUNCTION  // Function keyword (used in procedures, but can appear in identifiers like "FunctionCalled")
     | AT | USE | FROM | HIDE | DISABLE | READONLY | REQ | DEFAULT | CENTER | CENTERED
-    | ICON | FONT | COLOR | TRN | IMM | ALRT | TIMER | CURSOR
+    | ICON | FONT | COLOR | TRN | IMM | ALRT | TIMER | CURSOR | LINK
+    // System and other structure keywords
+    | SYSTEM      // SYSTEM{PROP:CharSet} - system menu/properties
     | CREATE | RECLAIM | OWNER | ENCRYPT | DRIVER | BINARY
+    | LEFT | RIGHT  // Alignment constants used as variable names (e.g., StringTheory.clw)
     | INDEX | OPT | DUP | NOCASE | PRIMARY | INNER | OUTER | FILTER | ORDER
     | REPLACE  // String method that can be used as identifier
     | RIGHT    // String method (st.right()) that can be used as identifier
+    // Type keywords that can be used as parameter/variable names
+    | BYTE | SHORT | USHORT | LONG | ULONG | UNSIGNED
+    | REAL | SREAL | DECIMAL | PDECIMAL
+    | PSTRING | CSTRING | ASTRING | BSTRING
+    | DATE | TIME | MEMO | BLOB | BOOL
     ;
 
 // Allow keywords to be used as identifiers (Clarion allows this in many contexts)
 // This includes IDENTIFIER plus all soft keywords
+// Also include LABEL so qualified names at column 0 work
 anyIdentifier
     : IDENTIFIER
+    | LABEL
     | softKeyword
     ;
 
@@ -905,6 +954,8 @@ dataAttribute
     | DLL (LPAREN expression? (COMMA expression?)* RPAREN)?
     | BINDABLE
     | LIKE (LPAREN expression RPAREN)?
+    | DRIVER (LPAREN expression (COMMA expression?)* RPAREN)?  // FILE-specific but allowed in variable context too
+    | CREATE (LPAREN expression? RPAREN)?  // FILE-specific but allowed in variable context too
     | IDENTIFIER (LPAREN expression? (COMMA expression?)* RPAREN)?
     | IDENTIFIER
     ;
@@ -920,6 +971,8 @@ structureAttribute
     | BINDABLE
     | EXTERNAL
     | AUTO
+    | PRIVATE
+    | PROTECTED
     | DLL (LPAREN expression? (COMMA expression?)* RPAREN)?
     | IDENTIFIER (LPAREN expression? (COMMA expression?)* RPAREN)?
     | IDENTIFIER
@@ -939,10 +992,11 @@ fileAttribute
 // CLASS-specific attributes
 classAttribute
     : structureAttribute
-    | IMPLEMENTS (LPAREN expression RPAREN)?
-    | MODULE (LPAREN expression RPAREN)?
-    | LINK (LPAREN expression RPAREN)?
-    | DERIVED (LPAREN expression RPAREN)?
+    | IMPLEMENTS (LPAREN argumentList? RPAREN)?
+    | MODULE (LPAREN argumentList? RPAREN)?
+    | LINK (LPAREN argumentList? RPAREN)?
+    | DERIVED (LPAREN argumentList? RPAREN)?
+    | DLL (LPAREN argumentList? RPAREN)?
     | VIRTUAL
     ;
 
@@ -983,10 +1037,36 @@ label
     ;
 
 dataType
-    : ASTERISK? baseType
+    : MULTIPLY? baseType
     | ANY
     | LIKE LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER) RPAREN  // Inherited data type
-    | GROUP | QUEUE | CLASS
+    | (GROUP | QUEUE | CLASS) (LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER) RPAREN)?  // Structure with optional pre-defined type: GROUP(ContextType)
+    ;
+
+// Non-structure data types (excludes FILE/VIEW/RECORD which require & or are structures)
+nonStructureDataType
+    : MULTIPLY? nonStructureBaseType
+    | ANY
+    | LIKE LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER) RPAREN
+    | (GROUP | QUEUE | CLASS) (LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER) RPAREN)?
+    ;
+
+// Parameter types - same as baseType but WITHOUT size specifications
+// In Clarion, parameters never include size: STRING pParam, not STRING(100) pParam
+parameterBaseType
+    : BYTE | SHORT | USHORT | LONG | ULONG | UNSIGNED | SIGNED
+    | REAL | SREAL | DECIMAL | PDECIMAL
+    | STRING | CSTRING | PSTRING | ASTRING | BSTRING
+    | DATE | TIME | MEMO | BLOB | BOOL
+    | FILE | VIEW | RECORD | KEY  // Structure types that can be used as reference types
+    | IDENTIFIER  // User-defined types
+    ;
+
+parameterDataType
+    : MULTIPLY? parameterBaseType
+    | ANY
+    | LIKE LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER) RPAREN
+    | (GROUP | QUEUE | CLASS) (LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER) RPAREN)?
     ;
 
 baseType
@@ -996,6 +1076,7 @@ baseType
     | LONG (LPAREN expression RPAREN)?
     | ULONG (LPAREN expression RPAREN)?
     | UNSIGNED (LPAREN expression RPAREN)?
+    | SIGNED (LPAREN expression RPAREN)?
     | REAL (LPAREN expression RPAREN)?
     | SREAL (LPAREN expression RPAREN)?
     | DECIMAL (LPAREN expression (COMMA expression)* RPAREN)?
@@ -1009,6 +1090,37 @@ baseType
     | TIME (LPAREN expression RPAREN)?
     | MEMO (LPAREN expression RPAREN)?
     | BLOB (LPAREN expression RPAREN)?
+    | BOOL (LPAREN expression RPAREN)?
+    | FILE  // FILE structure type (often used as reference: &FILE)
+    | VIEW  // VIEW structure type (often used as reference: &VIEW)
+    | RECORD  // RECORD structure type (often used as reference: &RECORD)
+    | IDENTIFIER  // User-defined types (e.g., PersonType)
+    ;
+
+// Base types excluding structure types (FILE, VIEW, RECORD)
+// Used in variableDeclaration where structures need explicit declaration
+nonStructureBaseType
+    : BYTE (LPAREN expression RPAREN)?
+    | SHORT (LPAREN expression RPAREN)?
+    | USHORT (LPAREN expression RPAREN)?
+    | LONG (LPAREN expression RPAREN)?
+    | ULONG (LPAREN expression RPAREN)?
+    | UNSIGNED (LPAREN expression RPAREN)?
+    | SIGNED (LPAREN expression RPAREN)?
+    | REAL (LPAREN expression RPAREN)?
+    | SREAL (LPAREN expression RPAREN)?
+    | DECIMAL (LPAREN expression (COMMA expression)* RPAREN)?
+    | PDECIMAL (LPAREN expression (COMMA expression)* RPAREN)?
+    | STRING (LPAREN expression RPAREN)?
+    | CSTRING (LPAREN expression RPAREN)?
+    | PSTRING (LPAREN expression RPAREN)?
+    | ASTRING (LPAREN expression RPAREN)?
+    | BSTRING (LPAREN expression RPAREN)?
+    | DATE (LPAREN expression RPAREN)?
+    | TIME (LPAREN expression RPAREN)?
+    | MEMO (LPAREN expression RPAREN)?
+    | BLOB (LPAREN expression RPAREN)?
+    | BOOL (LPAREN expression RPAREN)?
     | IDENTIFIER  // User-defined types (e.g., PersonType)
     ;
 
@@ -1027,14 +1139,16 @@ parameterList
     ;
 
 parameter
-    : LT dataType anyIdentifier? GT                            // Omittable parameter: <STRING pSep>
-    | dataType anyIdentifier? (EQ expression)?                 // Optional documentary parameter name (can be keyword) and default value
-    | MULTIPLY (dataType | anyIdentifier) anyIdentifier? (EQ expression)?  // Pointer: *string pValue or *MyType pValue
-    | AMPERSAND (anyIdentifier | QUALIFIED_IDENTIFIER)         // Reference parameter (e.g., &QueueType)
+    : LT MULTIPLY? parameterDataType anyIdentifier? GT                          // Omittable parameter: <STRING pSep> or <*String pStr>
+    | parameterDataType anyIdentifier? (EQ expression)?                         // Optional documentary parameter name (can be keyword) and default value
+    | MULTIPLY QUESTION anyIdentifier? (EQ expression)?                         // Untyped pointer: *? pVal
+    | QUESTION anyIdentifier? (EQ expression)?                                  // Untyped parameter: ? pVal
+    | MULTIPLY (parameterDataType | anyIdentifier) anyIdentifier? (EQ expression)?  // Pointer: *string pValue or *MyType pValue
+    | AMPERSAND (anyIdentifier | QUALIFIED_IDENTIFIER)                          // Reference parameter (e.g., &QueueType)
     ;
 
 returnType
-    : COMMA dataType
+    : COMMA MULTIPLY? dataType  // Support pointer return types: ,*STRING or ,STRING
     ;
 
 componentList

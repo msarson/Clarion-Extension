@@ -1,18 +1,19 @@
 import { FoldingRange, FoldingRangeKind } from "vscode-languageserver-types";
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { CharStream, CommonTokenStream, ParserRuleContext } from 'antlr4ng';
+import { CharStream, CommonTokenStream, ParserRuleContext, PredictionMode } from 'antlr4ng';
 import { ClarionLexer } from '../generated/ClarionLexer';
-import { ClarionParser, ProcedureDeclarationContext, MapSectionContext, 
+import { ClarionParser, ProcedureImplementationContext, MapSectionContext, 
          CodeSectionContext, IfStatementContext, LoopStatementContext, 
          CaseStatementContext, ExecuteStatementContext, WindowDeclarationContext, GroupDeclarationContext,
          QueueDeclarationContext, FileDeclarationContext, ClassDeclarationContext,
          RoutineDeclarationContext, RecordDeclarationContext, ViewDeclarationContext,
-         ApplicationDeclarationContext, MethodDeclarationContext, ModuleReferenceContext,
+         ApplicationDeclarationContext, ModuleReferenceContext,
          DoStatementContext, WindowControlsContext, TabControlContext, SheetControlContext,
          GroupControlContext, OptionControlContext, OleControlContext,
          MenubarDeclarationContext, MenuDeclarationContext, MenuItemDeclarationContext,
          ElsifClauseContext, ElseClauseContext } from '../generated/ClarionParser';
 import LoggerManager from '../logger';
+import { ClarionPreprocessor } from '../utils/ClarionPreprocessor';
 
 const logger = LoggerManager.getLogger("AntlrFoldingProvider");
 logger.setLevel("debug");
@@ -64,16 +65,105 @@ export class AntlrFoldingProvider {
                 logger.info(`✅ Using cached parse tree for ${uri.substring(uri.lastIndexOf('/') + 1)}`);
             } else {
                 // Parse and cache
-                const inputStream = CharStream.fromString(text);
+                const text = this.document.getText();
+                
+                // PREPROCESSING: Handle COMPILE/OMIT blocks before parsing
+                // These blocks have dynamic terminators that can't be parsed by CFG
+                const preprocessResult = ClarionPreprocessor.preprocess(text);
+                const textToParse = preprocessResult.transformedText;
+                
+                if (preprocessResult.blocksProcessed > 0) {
+                    logger.debug(`🔄 Preprocessed ${preprocessResult.blocksProcessed} COMPILE/OMIT blocks (${preprocessResult.linesRemoved} lines replaced)`);
+                }
+                
+                const inputStream = CharStream.fromString(textToParse);
                 const lexer = new ClarionLexer(inputStream);
                 const tokenStream = new CommonTokenStream(lexer);
                 const parser = new ClarionParser(tokenStream);
                 
-                // Disable error console output
-                parser.removeErrorListeners();
+                // Two-stage parsing: Try fast SLL mode first, fall back to LL if needed
+                // TEMPORARILY DISABLED: SLL mode has issues with some constructs (ambiguous labels)
+                const useSLL = false;  // TODO: Re-enable when grammar ambiguities are resolved
                 
-                // Parse the document
-                tree = parser.compilationUnit();
+                try {
+                    if (useSLL) {
+                        // SLL + LL two-stage parsing
+                        const sllErrors: Array<{line: number, col: number, msg: string}> = [];
+                        
+                        parser.removeErrorListeners();
+                        parser.addErrorListener({
+                            syntaxError: (recognizer, offendingSymbol, line, charPositionInLine, msg) => {
+                                sllErrors.push({line, col: charPositionInLine, msg});
+                            },
+                            reportAmbiguity: () => {},
+                            reportAttemptingFullContext: () => {},
+                            reportContextSensitivity: () => {}
+                        });
+                        
+                        parser.interpreter.predictionMode = PredictionMode.SLL;
+                        
+                        // Try SLL mode first (faster)
+                        tree = parser.compilationUnit();
+                        
+                        // If SLL had errors, retry with LL for better error recovery
+                        if (sllErrors.length > 0) {
+                            logger.debug(`⚠️ SLL mode had ${sllErrors.length} error(s), retrying with LL mode for better recovery`);
+                            sllErrors.slice(0, 3).forEach(err => {
+                                logger.debug(`   • Line ${err.line}:${err.col} - ${err.msg}`);
+                            });
+                            if (sllErrors.length > 3) {
+                                logger.debug(`   • ... and ${sllErrors.length - 3} more errors`);
+                            }
+                            tokenStream.seek(0);
+                            parser.reset();
+                            
+                            // Track LL errors too for debugging
+                            const llErrors: Array<{line: number, col: number, msg: string}> = [];
+                            parser.removeErrorListeners();
+                            parser.addErrorListener({
+                                syntaxError: (recognizer, offendingSymbol, line, charPositionInLine, msg) => {
+                                    llErrors.push({line, col: charPositionInLine, msg});
+                                },
+                                reportAmbiguity: () => {},
+                                reportAttemptingFullContext: () => {},
+                                reportContextSensitivity: () => {}
+                            });
+                            
+                            parser.interpreter.predictionMode = PredictionMode.LL;
+                            tree = parser.compilationUnit();
+                            
+                            if (llErrors.length > 0) {
+                                logger.debug(`⚠️ LL mode also had ${llErrors.length} error(s):`);
+                                llErrors.slice(0, 3).forEach(err => {
+                                    logger.debug(`   • Line ${err.line}:${err.col} - ${err.msg}`);
+                                });
+                            } else {
+                                logger.debug(`✅ LL mode succeeded without errors`);
+                            }
+                        } else {
+                            logger.debug(`✨ SLL mode succeeded without errors`);
+                        }
+                    } else {
+                        // Use LL mode directly (SLL disabled)
+                        parser.removeErrorListeners();  // Remove default error listeners
+                        parser.interpreter.predictionMode = PredictionMode.LL;
+                        tree = parser.compilationUnit();
+                        logger.debug(`📊 Using LL mode (SLL temporarily disabled)`);
+                    }
+                } catch (e) {
+                    // Fallback to LL mode on exception
+                    logger.debug(`⚠️ Parser exception, using LL mode`);
+                    tokenStream.seek(0);
+                    parser.reset();
+                    parser.removeErrorListeners();
+                    parser.interpreter.predictionMode = PredictionMode.LL;
+                    tree = parser.compilationUnit();
+                }
+                
+                // Ensure tree was created
+                if (!tree) {
+                    throw new Error("Failed to create parse tree");
+                }
                 
                 // Store in cache
                 parseTreeCache.set(uri, {
@@ -109,19 +199,30 @@ export class AntlrFoldingProvider {
 
     /**
      * Recursively collect folding ranges from parse tree
+     * Error-resilient: continues processing even if individual nodes fail
      */
     private collectFoldingRanges(ctx: ParserRuleContext, ranges: FoldingRange[]): void {
-        // Check if this context should create a folding range
-        const range = this.createFoldingRange(ctx);
-        if (range) {
-            ranges.push(range);
+        try {
+            // Check if this context should create a folding range
+            const range = this.createFoldingRange(ctx);
+            if (range) {
+                ranges.push(range);
+            }
+        } catch (error) {
+            // Log error but continue processing
+            logger.warn(`Error creating fold range for ${ctx.constructor.name}: ${error}`);
         }
 
-        // Recursively process children
+        // Recursively process children - even if parent failed
         if (ctx.children) {
             for (const child of ctx.children) {
                 if (child instanceof ParserRuleContext) {
-                    this.collectFoldingRanges(child, ranges);
+                    try {
+                        this.collectFoldingRanges(child, ranges);
+                    } catch (error) {
+                        // Log error but continue with other children
+                        logger.warn(`Error processing child ${child.constructor.name}: ${error}`);
+                    }
                 }
             }
         }
@@ -129,17 +230,25 @@ export class AntlrFoldingProvider {
 
     /**
      * Create a folding range for specific parse tree contexts
+     * Returns null for invalid or single-line contexts
      */
     private createFoldingRange(ctx: ParserRuleContext): FoldingRange | null {
+        // Guard: Ensure start and stop tokens exist
         if (!ctx.start || !ctx.stop) {
+            return null;
+        }
+
+        // Guard: Ensure line numbers are valid (can be undefined for error nodes)
+        if (typeof ctx.start.line !== 'number' || typeof ctx.stop.line !== 'number') {
+            logger.warn(`Invalid line numbers in ${ctx.constructor.name}: start=${ctx.start.line}, stop=${ctx.stop.line}`);
             return null;
         }
 
         const startLine = ctx.start.line - 1; // Convert to 0-based
         const endLine = ctx.stop.line - 1;     // Convert to 0-based
 
-        // Guard: Skip if line numbers are invalid (can happen with empty optional rules)
-        if (endLine < startLine) {
+        // Guard: Skip if line numbers are invalid (can happen with empty optional rules or error recovery)
+        if (endLine < startLine || startLine < 0 || endLine < 0) {
             // logger.debug(`  -> Skipped (invalid lines): startLine=${startLine}, endLine=${endLine}`);
             return null;
         }
@@ -177,7 +286,7 @@ export class AntlrFoldingProvider {
         let kind: FoldingRangeKind | undefined = undefined;
 
         // Determine folding kind based on context type
-        if (ctx instanceof ProcedureDeclarationContext) {
+        if (ctx instanceof ProcedureImplementationContext) {
             logger.debug(`PROCEDURE: start line=${ctx.start?.line} col=${ctx.start?.column} (${ctx.start?.text}), stop line=${ctx.stop?.line} col=${ctx.stop?.column} (${ctx.stop?.text}, type=${ctx.stop?.type}), startLine=${startLine}, endLine=${endLine}`);
             if (endLine > startLine) {
                 logger.debug(`  -> Creating fold: startLine=${startLine}, endLine=${endLine}`);
@@ -283,9 +392,6 @@ export class AntlrFoldingProvider {
             return { startLine, endLine };
         }
         else if (ctx instanceof ClassDeclarationContext) {
-            return { startLine, endLine };
-        }
-        else if (ctx instanceof MethodDeclarationContext) {
             return { startLine, endLine };
         }
         else if (ctx instanceof ModuleReferenceContext) {

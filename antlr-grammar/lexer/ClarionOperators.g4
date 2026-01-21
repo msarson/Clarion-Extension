@@ -31,6 +31,7 @@ LE        : '<=' ;            // Less than or equal
 GE        : '>=' ;            // Greater than or equal
 NE        : '<>' ;            // Not equal (primary)
 NE_ALT    : '!=' ;            // Not equal (alternative)
+PATTERN_MATCH : '~=' ;        // Pattern match operator
 
 // ============================================================================
 // ASSIGNMENT AND SPECIAL OPERATORS

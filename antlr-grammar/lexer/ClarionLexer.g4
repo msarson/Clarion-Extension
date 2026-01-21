@@ -22,20 +22,16 @@ COMMENT
     -> channel(HIDDEN)
     ;
 
-// Alternate comment with | (also line continuation) - includes the newline
-PIPE_COMMENT
-    : '|' ~[\r\n]* [\r\n]+
-    -> channel(HIDDEN)
-    ;
-
 // ============================================================================
 // SPECIAL TOKENS
 // ============================================================================
 
-// Line continuation: | at end of line (whitespace and newline after |)
-// When & | appears, the & is a concatenation operator, | is continuation
+// Line continuation: | continues statement to next line
+// Everything after | on the same line is treated as a comment and ignored
+// If the next line starts with ? (debug marker), that ? is also consumed
+// so that continued lines with ? are treated as part of the same statement
 LINE_CONTINUATION
-    : '|' [ \t]* [\r\n]
+    : '|' ~[\r\n]* [\r\n]+ [ \t]* '?'?
     -> skip
     ;
 
