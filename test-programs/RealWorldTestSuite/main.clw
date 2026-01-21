@@ -79,7 +79,7 @@
        !Could be written as
 IncrementCounter  PROCEDURE()
 GetCounter        PROCEDURE(),LONG       
-       !***
+       ***
      END
 GlobalHelper PROCEDURE()  ! Declare the global procedure so it can be called from utils.clw
    END
