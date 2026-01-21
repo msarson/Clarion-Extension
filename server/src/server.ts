@@ -57,6 +57,7 @@ import { DefinitionProvider } from './providers/DefinitionProvider';
 import { HoverProvider } from './providers/HoverProvider';
 import { ClassConstantsCodeActionProvider } from './providers/ClassConstantsCodeActionProvider';
 import { DiagnosticProvider } from './providers/DiagnosticProvider';
+import { AntlrDiagnosticProvider } from './providers/AntlrDiagnosticProvider';
 import { SignatureHelpProvider } from './providers/SignatureHelpProvider';
 import { ImplementationProvider } from './providers/ImplementationProvider';
 import { UnreachableCodeProvider } from './providers/UnreachableCodeProvider';
@@ -70,8 +71,9 @@ import { AntlrFoldingProvider } from './providers/AntlrFoldingProvider';
 const logger = LoggerManager.getLogger("Server");
 logger.setLevel("error");
 
-// 🧪 EXPERIMENTAL: Toggle ANTLR-based folding provider
+// 🧪 EXPERIMENTAL: Toggle ANTLR-based providers
 const USE_ANTLR_FOLDING = true; // Set to false to use original tokenizer-based provider
+const USE_ANTLR_DIAGNOSTICS = true; // Set to false to use original tokenizer-based diagnostics
 
 // Track if a solution operation is in progress
 export let solutionOperationInProgress = false;
@@ -288,9 +290,15 @@ function validateTextDocument(document: TextDocument, caller: string = 'unknown'
 
         logger.info(`🔍 Validating document: ${document.uri} (caller: ${caller})`);
         
-        // PERFORMANCE: Use cached tokens instead of re-tokenizing
-        const tokens = getTokens(document);
-        const diagnostics = DiagnosticProvider.validateDocument(document, tokens, caller);
+        // Choose diagnostic provider based on setting
+        let diagnostics;
+        if (USE_ANTLR_DIAGNOSTICS) {
+            diagnostics = AntlrDiagnosticProvider.validateDocument(document);
+        } else {
+            // PERFORMANCE: Use cached tokens instead of re-tokenizing
+            const tokens = getTokens(document);
+            diagnostics = DiagnosticProvider.validateDocument(document, tokens, caller);
+        }
         
         // Remember we validated this version
         lastValidatedVersions.set(document.uri, document.version);
