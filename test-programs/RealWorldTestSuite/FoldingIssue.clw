@@ -15,3 +15,6 @@ sep   string(1)
   Code
 DrawClass.Resize          Procedure  (long width=-1, long height=-1, long copyData=0)
   Code
+    if ix < = 1
+    END
+

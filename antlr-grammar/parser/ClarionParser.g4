@@ -603,7 +603,7 @@ equalityExpression
     ;
 
 relationalExpression
-    : additiveExpression ((LT | GT | LE | GE | EQ LT | EQ GT | GT LT | LT GT) additiveExpression)*
+    : additiveExpression ((LT | GT | LE | GE | EQ LT | LT EQ | EQ GT | GT EQ | GT LT | LT GT) additiveExpression)*
     ;
 
 additiveExpression
