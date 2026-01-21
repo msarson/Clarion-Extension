@@ -78,8 +78,8 @@ procedurePrototype
 
 // Short procedure prototype: indented, no PROCEDURE keyword
 procedurePrototypeShort
-    : anyIdentifier (DOT anyIdentifier)* parameterList procedureModifiers?   // Support 0+ dots
-    | LABEL parameterList procedureModifiers?
+    : anyIdentifier (DOT anyIdentifier)* parameterList? procedureModifiers?   // Support 0+ dots, optional params
+    | LABEL parameterList? procedureModifiers?
     ;
 
 moduleReference
@@ -127,7 +127,7 @@ dataDeclaration
 // If stricter validation is needed later, revert to: (IDENTIFIER | LABEL | QUALIFIED_IDENTIFIER)
 // Anonymous fields: In GROUP/QUEUE structures, fields can be unnamed (e.g., string('\') for padding)
 variableDeclaration
-    : (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER)? nonStructureDataType (COMMA dataAttributes)?
+    : (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER)? nonStructureDataType (LPAREN expression RPAREN)? (COMMA dataAttributes)?  // With optional initialization: hr HRESULT(value)
     | (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER) AMPERSAND (baseType | anyIdentifier | QUALIFIED_IDENTIFIER) (COMMA dataAttributes)?  // Reference variable: Q &QueueType, b &byte, or allowedChars &string,Auto
     | (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER) EQUATE LPAREN expression RPAREN  // EQUATE declarations
     | (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER) CLASS LPAREN anyIdentifier RPAREN DOT?  // Class instantiation: name CLASS(type) or name CLASS(type).
@@ -256,6 +256,7 @@ ifStatement
     | IF expression THEN singleLineStatements statementSeparator+ elsifClause+ elseClause? (DOT | QUESTION? END)
     | IF expression THEN singleLineStatements ELSE singleLineStatements (DOT | QUESTION? END)  // Inline else without separator: stmt else stmt
     | IF expression THEN singleLineStatements statementSeparator* (ELSE statementSeparator* singleLineStatements)? (DOT | QUESTION? END)
+    | IF expression THEN? statementSeparator+ statementBlock nonEmptyStatement DOT  // Multi-line with last statement ending in DOT
     | IF expression THEN? statementSeparator+ statementBlock elsifClause* elseClause? (DOT | QUESTION? END)
     ;
 
