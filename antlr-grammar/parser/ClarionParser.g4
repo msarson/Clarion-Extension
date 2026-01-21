@@ -72,14 +72,18 @@ mapEntry
 
 // Full procedure prototype: label at column 0 with PROCEDURE keyword
 procedurePrototype
-    : anyIdentifier (DOT anyIdentifier)* PROCEDURE parameterList? procedureModifiers?  // Support 0+ dots
-    | LABEL (DOT anyIdentifier)* PROCEDURE parameterList? procedureModifiers?          // Label with optional dots
+    : procedureName PROCEDURE parameterList? procedureModifiers?
     ;
 
 // Short procedure prototype: indented, no PROCEDURE keyword
 procedurePrototypeShort
-    : anyIdentifier (DOT anyIdentifier)* parameterList? procedureModifiers?   // Support 0+ dots, optional params
-    | LABEL parameterList? procedureModifiers?
+    : procedureName parameterList? procedureModifiers?
+    ;
+
+// Common procedure name pattern: supports multi-dot names
+procedureName
+    : anyIdentifier (DOT anyIdentifier)*
+    | LABEL (DOT anyIdentifier)*
     ;
 
 moduleReference
@@ -253,11 +257,17 @@ assignmentStatement
 // Order matters: ELSIF variant must come before simple ELSE variant
 ifStatement
     : IF expression DOT  // Single-line IF with just condition: if x.
-    | IF expression THEN singleLineStatements statementSeparator+ elsifClause+ elseClause? (DOT | QUESTION? END)
-    | IF expression THEN singleLineStatements ELSE singleLineStatements (DOT | QUESTION? END)  // Inline else without separator: stmt else stmt
-    | IF expression THEN singleLineStatements statementSeparator* (ELSE statementSeparator* singleLineStatements)? (DOT | QUESTION? END)
+    | IF expression THEN singleLineStatements statementSeparator+ elsifClause+ elseClause? statementTerminator
+    | IF expression THEN singleLineStatements ELSE singleLineStatements statementTerminator  // Inline else without separator: stmt else stmt
+    | IF expression THEN singleLineStatements statementSeparator* (ELSE statementSeparator* singleLineStatements)? statementTerminator
     | IF expression THEN? statementSeparator+ statementBlock nonEmptyStatement DOT  // Multi-line with last statement ending in DOT
-    | IF expression THEN? statementSeparator+ statementBlock elsifClause* elseClause? (DOT | QUESTION? END)
+    | IF expression THEN? statementSeparator+ statementBlock elsifClause* elseClause? statementTerminator
+    ;
+
+// Common termination pattern for structured statements
+statementTerminator
+    : DOT
+    | QUESTION? END
     ;
 
 singleLineStatements
@@ -1143,15 +1153,20 @@ parameterList
     ;
 
 parameter
-    : LT MULTIPLY QUESTION anyIdentifier? GT                                    // Omittable untyped pointer: <*? pParent>
-    | LT MULTIPLY? parameterDataType anyIdentifier? GT                          // Omittable parameter: <STRING pSep> or <*String pStr>
-    | parameterDataType LBRACKET RBRACKET anyIdentifier? (EQ expression)?       // Array parameter: string[] pValue
-    | parameterDataType anyIdentifier? (EQ expression)?                         // Optional documentary parameter name (can be keyword) and default value
-    | MULTIPLY QUESTION anyIdentifier? (EQ expression)?                         // Untyped pointer: *? pVal
-    | QUESTION anyIdentifier? (EQ expression)?                                  // Untyped parameter: ? pVal
-    | MULTIPLY (parameterDataType | anyIdentifier) LBRACKET RBRACKET anyIdentifier? (EQ expression)?  // Pointer to array: *string[] pValue
-    | MULTIPLY (parameterDataType | anyIdentifier) anyIdentifier? (EQ expression)?  // Pointer: *string pValue or *MyType pValue
-    | AMPERSAND (anyIdentifier | QUALIFIED_IDENTIFIER)                          // Reference parameter (e.g., &QueueType)
+    : LT MULTIPLY QUESTION parameterNameWithDefault? GT                        // Omittable untyped pointer: <*? pParent>
+    | LT MULTIPLY? parameterDataType parameterNameWithDefault? GT              // Omittable parameter: <STRING pSep> or <*String pStr>
+    | parameterDataType LBRACKET RBRACKET parameterNameWithDefault?            // Array parameter: string[] pValue
+    | parameterDataType parameterNameWithDefault?                              // Optional documentary parameter name (can be keyword) and default value
+    | MULTIPLY QUESTION parameterNameWithDefault?                              // Untyped pointer: *? pVal
+    | QUESTION parameterNameWithDefault?                                       // Untyped parameter: ? pVal
+    | MULTIPLY (parameterDataType | anyIdentifier) LBRACKET RBRACKET parameterNameWithDefault?  // Pointer to array: *string[] pValue
+    | MULTIPLY (parameterDataType | anyIdentifier) parameterNameWithDefault?   // Pointer: *string pValue or *MyType pValue
+    | AMPERSAND (anyIdentifier | QUALIFIED_IDENTIFIER)                         // Reference parameter (e.g., &QueueType)
+    ;
+
+// Parameter name with optional default value
+parameterNameWithDefault
+    : anyIdentifier (EQ expression)?
     ;
 
 returnType
