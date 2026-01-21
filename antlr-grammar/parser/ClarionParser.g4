@@ -202,7 +202,7 @@ statement
     ;
 
 nonEmptyStatement
-    : QUESTION? coreStatement
+    : QUESTION? coreStatement (ELSE coreStatement)?  // Allow inline else: stmt else stmt
     ;
 
 statementBlock
@@ -252,7 +252,9 @@ assignmentStatement
 // 3. Multiline form (no THEN or THEN with newline, then statementBlock)
 // Order matters: ELSIF variant must come before simple ELSE variant
 ifStatement
-    : IF expression THEN singleLineStatements statementSeparator+ elsifClause+ elseClause? (DOT | QUESTION? END)
+    : IF expression DOT  // Single-line IF with just condition: if x.
+    | IF expression THEN singleLineStatements statementSeparator+ elsifClause+ elseClause? (DOT | QUESTION? END)
+    | IF expression THEN singleLineStatements ELSE singleLineStatements (DOT | QUESTION? END)  // Inline else without separator: stmt else stmt
     | IF expression THEN singleLineStatements statementSeparator* (ELSE statementSeparator* singleLineStatements)? (DOT | QUESTION? END)
     | IF expression THEN? statementSeparator+ statementBlock elsifClause* elseClause? (DOT | QUESTION? END)
     ;
@@ -738,6 +740,7 @@ softKeyword
     | LEFT | RIGHT  // Alignment constants used as variable names (e.g., StringTheory.clw)
     | INDEX | OPT | DUP | NOCASE | PRIMARY | INNER | OUTER | FILTER | ORDER
     | REPLACE  // String method that can be used as identifier
+    | DISPOSE  // Statement keyword that can be used as field name (e.g., Children.Dispose)
     | RIGHT    // String method (st.right()) that can be used as identifier
     // Type keywords that can be used as parameter/variable names
     | BYTE | SHORT | USHORT | LONG | ULONG | UNSIGNED
@@ -1139,10 +1142,13 @@ parameterList
     ;
 
 parameter
-    : LT MULTIPLY? parameterDataType anyIdentifier? GT                          // Omittable parameter: <STRING pSep> or <*String pStr>
+    : LT MULTIPLY QUESTION anyIdentifier? GT                                    // Omittable untyped pointer: <*? pParent>
+    | LT MULTIPLY? parameterDataType anyIdentifier? GT                          // Omittable parameter: <STRING pSep> or <*String pStr>
+    | parameterDataType LBRACKET RBRACKET anyIdentifier? (EQ expression)?       // Array parameter: string[] pValue
     | parameterDataType anyIdentifier? (EQ expression)?                         // Optional documentary parameter name (can be keyword) and default value
     | MULTIPLY QUESTION anyIdentifier? (EQ expression)?                         // Untyped pointer: *? pVal
     | QUESTION anyIdentifier? (EQ expression)?                                  // Untyped parameter: ? pVal
+    | MULTIPLY (parameterDataType | anyIdentifier) LBRACKET RBRACKET anyIdentifier? (EQ expression)?  // Pointer to array: *string[] pValue
     | MULTIPLY (parameterDataType | anyIdentifier) anyIdentifier? (EQ expression)?  // Pointer: *string pValue or *MyType pValue
     | AMPERSAND (anyIdentifier | QUALIFIED_IDENTIFIER)                          // Reference parameter (e.g., &QueueType)
     ;
