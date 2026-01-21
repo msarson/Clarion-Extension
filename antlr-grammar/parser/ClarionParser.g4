@@ -47,7 +47,7 @@ programDeclaration
 // ============================================================================
 
 memberDeclaration
-    : IDENTIFIER? MEMBER (LPAREN STRING_LITERAL RPAREN)? programAttributes? NEWLINE
+    : IDENTIFIER? MEMBER (LPAREN STRING_LITERAL? RPAREN)? programAttributes? NEWLINE
       (NEWLINE | mapSection | dataDeclaration | codeSection)*
       procedureList?
     ;
