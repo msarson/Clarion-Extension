@@ -192,8 +192,8 @@ routineCodeSection
 // ============================================================================
 
 codeSection
-    : CODE NEWLINE
-      statementList?
+    : CODE NEWLINE+ statementList?
+    | CODE EOF
     ;
 
 statementList
