@@ -713,12 +713,13 @@ primaryExpression
 // Field reference - handles all DOT-chained member access
 // This rule greedily consumes all DOT+ID sequences before postfix operators
 fieldRef
-    : ( SELF
+    : IMPLICIT_STRING anyIdentifier  // Handle xWin$xFEQ pattern ($ as subscript, not type suffix)
+    | ( SELF
       | PARENT
       | anyIdentifier
       | QUALIFIED_IDENTIFIER
       | IMPLICIT_NUMERIC   // Implicit LONG with # (e.g., Counter#)
-      | IMPLICIT_STRING    // Implicit REAL with $ (e.g., Percent$)
+      | IMPLICIT_STRING    // Implicit STRING with $ (e.g., Percent$)
       | IMPLICIT_QUOTE     // Implicit STRING(32) with " (e.g., Address")
       | FIELD_EQUATE       // Field equate (e.g., ?FieldName)
       )
