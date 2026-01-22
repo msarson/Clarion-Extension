@@ -186,7 +186,7 @@ SCROLL : 'SCROLL' ;     // Scrollbar
 RESIZE : 'RESIZE' ;     // Resizable
 CENTER : 'CENTER' ;     // Centered (also a constant)
 CENTERED : 'CENTERED' ; // Centered (alternative)
-ICON : 'ICON' ;         // Icon specification
+ICON : {this.charPositionInLine > 0}? 'ICON' ;         // SOFT - Icon specification - can be field name
 FONT : 'FONT' ;         // Font specification
 COLOR : 'COLOR' ;       // Color specification
 TIP : 'TIP' ;           // Tooltip
