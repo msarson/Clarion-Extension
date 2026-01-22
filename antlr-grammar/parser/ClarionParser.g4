@@ -488,7 +488,8 @@ itemizeDeclaration
     ;
 
 classDeclaration
-    : label? CLASS (LPAREN ((IDENTIFIER | QUALIFIED_IDENTIFIER | SELF) (DOT (IDENTIFIER | QUALIFIED_IDENTIFIER))*)? RPAREN)? (COMMA? classAttributes)? (DOT | NEWLINE+ NEWLINE* classBody (END | DOT) NEWLINE*)
+    : label? CLASS (LPAREN ((IDENTIFIER | QUALIFIED_IDENTIFIER | SELF) (DOT (IDENTIFIER | QUALIFIED_IDENTIFIER))*)? RPAREN)? (COMMA? classAttributes)? STATEMENT_SEPARATOR (END | DOT)  // One-line with semicolon: CLASS attrs; END
+    | label? CLASS (LPAREN ((IDENTIFIER | QUALIFIED_IDENTIFIER | SELF) (DOT (IDENTIFIER | QUALIFIED_IDENTIFIER))*)? RPAREN)? (COMMA? classAttributes)? (DOT | NEWLINE+ NEWLINE* classBody (END | DOT) NEWLINE*)
     ;
 
 interfaceDeclaration
