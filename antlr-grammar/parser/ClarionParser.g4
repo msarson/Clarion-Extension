@@ -247,6 +247,7 @@ structureStatement
     | LABEL? acceptStatement
     | LABEL? caseStatement
     | LABEL? executeStatement
+    | LABEL? beginStatement
     ;
 
 assignmentStatement
@@ -371,6 +372,12 @@ executeStatement
     : EXECUTE expression statementSeparator+
       statementBlock
       (ELSE statementSeparator+ statementBlock)?
+      (END | DOT)
+    ;
+
+beginStatement
+    : BEGIN (SEMICOLON | statementSeparator+)
+      statementList?
       (END | DOT)
     ;
 
