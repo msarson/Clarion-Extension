@@ -163,13 +163,13 @@ procedureList
 
 procedureImplementation
     : anyIdentifier (DOT anyIdentifier)* DOT (QUALIFIED_IDENTIFIER | anyIdentifier) (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE+
-      NEWLINE* dataDeclarationList NEWLINE* codeSection?
+      NEWLINE* dataDeclarationList NEWLINE* mapSection? NEWLINE* codeSection?
     | anyIdentifier (DOT anyIdentifier)* DOT (QUALIFIED_IDENTIFIER | anyIdentifier) (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE+
-      NEWLINE* codeSection
+      NEWLINE* mapSection? NEWLINE* codeSection
     | (QUALIFIED_IDENTIFIER | LABEL | anyIdentifier) (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE+
-      NEWLINE* dataDeclarationList NEWLINE* codeSection?
+      NEWLINE* dataDeclarationList NEWLINE* mapSection? NEWLINE* codeSection?
     | (QUALIFIED_IDENTIFIER | LABEL | anyIdentifier) (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE+
-      NEWLINE* codeSection
+      NEWLINE* mapSection? NEWLINE* codeSection
     ;
 
 routineDeclaration
