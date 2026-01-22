@@ -264,48 +264,63 @@ assignmentStatement
 // ============================================================================
 // IF STATEMENT
 // ============================================================================
-// Clarion IF supports multiple forms:
-// 1. THEN with ELSIF (single-line THEN stmt followed by multiline ELSIF/ELSE)
-// 2. THEN with optional inline ELSE (single-line: if x then a else b.)
-// 3. Multiline form (no THEN or THEN with newline, then statementBlock)
-// 4. Empty THEN (if x then . - do nothing if true)
-// Order matters: ELSIF variant must come before simple ELSE variant
+// Architectural principle: IF structure is separate from statement layout
+// - Structure: IF / ELSIF / ELSE / terminator
+// - Layout: inline (semicolon-separated) vs block (newline-separated)
+// - Termination: DOT or END
+// By separating these concerns, we avoid combinatorial explosion of alternatives
+
 ifStatement
-    : IF expression STATEMENT_SEPARATOR singleLineStatements statementTerminator  // One-line IF with semicolon: IF cond; stmt END
-    | IF expression DOT  // Single-line IF with just condition: if x.
-    | IF expression THEN DOT  // Single-line IF with THEN but no statement: if x then .
-    | IF expression THEN singleLineStatements statementSeparator+ elsifClause+ DOT  // ELSIF variant ending with DOT (terminates IF)
-    | IF expression THEN singleLineStatements statementSeparator+ elsifClause+ elseClause? statementTerminator  // ELSIF variant with terminator
-    | IF expression THEN? statementSeparator+ statementBlock elsifClause+ DOT  // Multi-line with ELSIF ending with DOT
-    | IF expression THEN? statementSeparator+ statementBlock elsifClause* elseClause DOT  // Multi-line with ELSE ending with DOT
-    | IF expression THEN singleLineStatements statementSeparator ELSE singleLineStatements statementSeparator* statementTerminator  // IF THEN stmt NEWLINE ELSE stmt NEWLINE END
-    | IF expression THEN singleLineStatements ELSE singleLineStatements statementTerminator  // Inline: stmt ELSE stmt  
-    | IF expression THEN? statementSeparator+ statementBlock elsifClause* elseClause? statementTerminator  // Multi-line with terminator
-    | IF expression THEN? statementSeparator+ statementBlock nonEmptyStatement DOT  // Multi-line with last statement ending in DOT
-    | IF expression THEN singleLineStatements statementSeparator* statementTerminator  // IF THEN stmt (no ELSE) - must be last single-line variant
+    : IF expression thenClause? statementSuite? elsifClause* elseClause? structureTerminator
     ;
 
-// Common termination pattern for structured statements
-statementTerminator
+thenClause
+    : THEN
+    ;
+
+// Statement suite: can be inline (same line, semicolon-separated) or block (multi-line)
+statementSuite
+    : inlineStatements
+    | blockStatements
+    ;
+
+// Inline statements: same line or semicolon-separated (no DOT here - DOT is structure terminator only)
+inlineStatements
+    : nonEmptyStatement (statementSeparator nonEmptyStatement)*
+    ;
+
+// Block statements: newline-separated, can be empty
+blockStatements
+    : statementSeparator+ (nonEmptyStatement (statementSeparator+ nonEmptyStatement)* statementSeparator*)?
+    ;
+
+elsifClause
+    : QUESTION? ELSIF expression thenClause? statementSuite?
+    ;
+
+elseClause
+    : QUESTION? ELSE statementSuite?
+    ;
+
+// Structure terminator: single point of truth for how structures end
+structureTerminator
     : DOT
     | QUESTION? END
     ;
 
-singleLineStatements
-    : nonEmptyStatement (statementSeparator nonEmptyStatement)* DOT?  // Optional DOT at end
-    ;
+// ============================================================================
+// DEPRECATED (kept for reference, remove after validation)
+// ============================================================================
+// Old statementTerminator - replaced by structureTerminator
+// statementTerminator
+//     : DOT
+//     | QUESTION? END
+//     ;
 
-elsifClause
-    : QUESTION? ELSIF expression THEN singleLineStatements DOT  // Single-line with DOT terminator: elsif x then stmt. (terminates entire IF)
-    | QUESTION? ELSIF expression THEN singleLineStatements statementSeparator+  // Single-line: elsif x then stmt (continues IF)
-    | QUESTION? ELSIF expression THEN? statementSeparator+ statementBlock       // Multi-line: elsif x\n stmts
-    ;
-
-elseClause
-    : QUESTION? ELSE singleLineStatements DOT  // Single-line with DOT terminator: else stmt. (terminates entire IF)
-    | QUESTION? ELSE singleLineStatements statementSeparator+  // Single-line: else stmt (continues IF)
-    | QUESTION? ELSE statementSeparator+ statementBlock        // Multi-line: else\n stmts
-    ;
+// Old singleLineStatements - replaced by inlineStatements
+// singleLineStatements
+//     : nonEmptyStatement (statementSeparator nonEmptyStatement)* DOT?
+//     ;
 
 
 // ============================================================================
@@ -357,11 +372,11 @@ caseStatement
     ;
 
 ofClause
-    : QUESTION? OF ofExpression statementSeparator+ statementBlock
+    : QUESTION? OF ofExpression statementSuite?
     ;
 
 orofClause
-    : QUESTION? OROF ofExpression statementSeparator+ statementBlock
+    : QUESTION? OROF ofExpression statementSuite?
     ;
 
 // OF expression can be a single value or a range (e.g., OF 1 TO 10)
@@ -370,8 +385,7 @@ ofExpression
     ;
 
 elseCaseClause
-    : ELSE singleLineStatements statementSeparator+  // Single-line: ELSE stmt NEWLINE
-    | ELSE statementSeparator+ statementBlock        // Multi-line: ELSE NEWLINE stmts
+    : ELSE statementSuite?
     ;
 
 // ============================================================================

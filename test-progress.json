@@ -1,5 +1,5 @@
 {
-  "lastTestedFile": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\libcurlws.clw",
+  "lastTestedFile": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\netwebsessionsInterface.inc",
   "passedFiles": [
     "DrawAPI.clw",
     "DrawC002.clw",
@@ -190,12 +190,36 @@
     "libcurlmime.clw",
     "libcurlmulti.clw",
     "libcurlurl.clw",
-    "libcurlws.clw"
+    "libcurlws.clw",
+    "mo.clw",
+    "mo.inc",
+    "mytable.clw",
+    "mytable.inc",
+    "netacme.clw",
+    "netacme.inc",
+    "netftp.clw",
+    "netftp.inc",
+    "nethttp.clw",
+    "nethttp.inc",
+    "netldap.clw",
+    "netldap.inc",
+    "netmem.clw",
+    "netmem.inc",
+    "netsms.clw",
+    "netsms.inc",
+    "netwebm.clw",
+    "netwebm.inc",
+    "netwebsessions.clw",
+    "netwebsessions.inc",
+    "netwebsessionsInterface.inc"
   ],
   "failedFile": {
-    "file": "mo.clw",
-    "path": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\mo.clw",
-    "errorLine": "302",
-    "errorCount": 1
-  }
+    "file": "netwebsocket.clw",
+    "path": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\netwebsocket.clw",
+    "errorLine": "1",
+    "errorCount": 2
+  },
+  "skipped": [
+    "netwebsocket.clw"
+  ]
 }
