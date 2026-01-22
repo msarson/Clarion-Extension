@@ -78,7 +78,7 @@
   "failedFile": {
     "file": "RightReportsPrinter.clw",
     "path": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\RightReportsPrinter.clw",
-    "errorLine": "1745",
-    "errorCount": 1
+    "errorLine": "4150",
+    "errorCount": 3
   }
 }

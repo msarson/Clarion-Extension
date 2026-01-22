@@ -217,6 +217,7 @@ DOCK : 'DOCK' ;         // Dockable
 DOCKED : 'DOCKED' ;     // Initially docked
 NOFRAME : 'NOFRAME' ;   // Frameless
 NOSHEET : 'NOSHEET' ;   // No tab control appearance
+WIZARD : 'WIZARD' ;     // Wizard-style sheet
 
 // ============================================================================
 // REPORT ATTRIBUTES
