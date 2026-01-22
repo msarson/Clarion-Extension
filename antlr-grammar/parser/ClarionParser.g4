@@ -289,7 +289,7 @@ statementTerminator
     ;
 
 singleLineStatements
-    : nonEmptyStatement (statementSeparator nonEmptyStatement)*
+    : nonEmptyStatement (statementSeparator nonEmptyStatement)* DOT?  // Optional DOT at end
     ;
 
 elsifClause
