@@ -194,15 +194,16 @@ export class ClarionPreprocessor {
             }
         }
         
-        // Just a symbol by itself (no operator) - assume it's true if non-zero
-        // Since we assume all symbols = 1, this is always true
+        // Just a symbol by itself (no operator) - don't assume its value
+        // Without knowing its actual value, conservatively assume false to skip the block
         const symbolPattern = /^[_a-zA-Z][_a-zA-Z0-9]*$/;
         if (symbolPattern.test(expr)) {
-            return true; // Symbol assumed = 1, which is true
+            return false; // Unknown symbol value - conservatively skip block
         }
         
-        // Unknown expression format - default to true to be safe
-        return true;
+        // Unknown expression format - default to false (skip documentation blocks)
+        // This ensures we don't parse invalid code in COMPILE blocks with unresolved symbols
+        return false;
     }
     
     /**
