@@ -1215,16 +1215,16 @@ parameterList
     ;
 
 parameter
-    : LT MULTIPLY QUESTION parameterNameWithDefault? GT                        // Omittable untyped pointer: <*? pParent>
+    : LT CONST? MULTIPLY QUESTION parameterNameWithDefault? GT                        // Omittable untyped pointer: <*? pParent> or <CONST *? pParent>
     | LT QUESTION parameterNameWithDefault? GT                                 // Omittable untyped parameter: <? pValue>
-    | LT MULTIPLY? parameterDataType LBRACKET (COMMA)* RBRACKET parameterNameWithDefault? GT  // Omittable array parameter: <*String[]> or <Long[,]>
-    | LT MULTIPLY? parameterDataType parameterNameWithDefault? GT              // Omittable parameter: <STRING pSep> or <*String pStr>
+    | LT CONST? MULTIPLY? parameterDataType LBRACKET (COMMA)* RBRACKET parameterNameWithDefault? GT  // Omittable array parameter: <*String[]> or <Long[,]> or <CONST *String[]>
+    | LT CONST? MULTIPLY? parameterDataType parameterNameWithDefault? GT              // Omittable parameter: <STRING pSep> or <*String pStr> or <CONST *String pStr>
     | parameterDataType LBRACKET (COMMA)* RBRACKET parameterNameWithDefault?   // Array parameter: string[] or long[,] or byte[,,]
     | parameterDataType ((anyIdentifier | QUALIFIED_IDENTIFIER) (EQ expression)? | EQ expression)?      // Parameter with optional name and/or default: unsigned, unsigned pVal, unsigned=0, unsigned pVal=0, unsigned par:Name
-    | MULTIPLY QUESTION parameterNameWithDefault?                              // Untyped pointer: *? pVal
+    | CONST? MULTIPLY QUESTION parameterNameWithDefault?                              // Untyped pointer: *? pVal or CONST *? pVal
     | QUESTION parameterNameWithDefault?                                       // Untyped parameter: ? pVal
-    | MULTIPLY (parameterDataType | anyIdentifier) LBRACKET (COMMA)* RBRACKET parameterNameWithDefault?  // Pointer to array: *string[] or *long[,]
-    | MULTIPLY (parameterDataType | anyIdentifier) parameterNameWithDefault?   // Pointer: *string pValue or *MyType pValue
+    | CONST? MULTIPLY (parameterDataType | anyIdentifier) LBRACKET (COMMA)* RBRACKET parameterNameWithDefault?  // Pointer to array: *string[] or *long[,] or CONST *string[]
+    | CONST? MULTIPLY (parameterDataType | anyIdentifier) parameterNameWithDefault?   // Pointer: *string pValue or *MyType pValue or CONST *CSTRING Value
     | AMPERSAND (anyIdentifier | QUALIFIED_IDENTIFIER)                         // Reference parameter (e.g., &QueueType)
     ;
 
