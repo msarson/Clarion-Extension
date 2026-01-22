@@ -1,5 +1,5 @@
 {
-  "lastTestedFile": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\StringTheory.inc",
+  "lastTestedFile": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\UltimateDB.inc",
   "passedFiles": [
     "DrawAPI.clw",
     "DrawC002.clw",
@@ -84,12 +84,14 @@
     "SendTo.inc",
     "SendToBase.clw",
     "StringTheory.clw",
-    "StringTheory.inc"
+    "StringTheory.inc",
+    "UltimateDB.clw",
+    "UltimateDB.inc"
   ],
   "failedFile": {
-    "file": "UltimateDB.clw",
-    "path": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\UltimateDB.clw",
-    "errorLine": "10",
-    "errorCount": 10
+    "file": "UltimateDebug.clw",
+    "path": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\UltimateDebug.clw",
+    "errorLine": "414",
+    "errorCount": 2
   }
 }

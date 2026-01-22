@@ -59,7 +59,7 @@ memberDeclaration
 mapSection
     : MAP NEWLINE+
       (NEWLINE* mapEntry)*
-      END NEWLINE*
+      (END | DOT) NEWLINE*
     ;
 
 mapEntry
