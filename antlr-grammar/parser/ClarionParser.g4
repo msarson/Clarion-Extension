@@ -29,7 +29,7 @@ compilationUnit
 // ============================================================================
 
 includeFile
-    : (NEWLINE | mapSection | dataDeclaration | structureDeclaration | moduleContent)*
+    : (NEWLINE | mapSection | moduleReference | dataDeclaration | structureDeclaration | moduleContent)*
     ;
 
 // ============================================================================
@@ -84,6 +84,7 @@ procedurePrototypeShort
 procedureName
     : anyIdentifier (DOT anyIdentifier)*
     | LABEL (DOT anyIdentifier)*
+    | QUALIFIED_IDENTIFIER (DOT anyIdentifier)*  // Handles qualified names at column 0 like NYS950:GlobalObjectsWindow
     ;
 
 moduleReference
@@ -99,7 +100,7 @@ moduleContent
 // Procedure modifiers: comma-separated list of return types and attributes
 // Return type is just a dataType without a keyword prefix
 procedureModifiers
-    : (COMMA (dataType | attribute))*
+    : (COMMA? (dataType | attribute))+  // Modifiers with optional commas between them
     ;
 
 // ============================================================================
@@ -133,8 +134,8 @@ dataDeclaration
 variableDeclaration
     : (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER)? nonStructureDataType (LPAREN expression RPAREN)? (COMMA dataAttributes)?  // With optional initialization: hr HRESULT(value)
     | (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER) AMPERSAND (baseType | anyIdentifier | QUALIFIED_IDENTIFIER) (COMMA dataAttributes)?  // Reference variable: Q &QueueType, b &byte, or allowedChars &string,Auto
-    | (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER) EQUATE LPAREN expression RPAREN  // EQUATE declarations
-    | (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER) CLASS LPAREN anyIdentifier RPAREN DOT?  // Class instantiation: name CLASS(type) or name CLASS(type).
+    | (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER) EQUATE (LPAREN expression RPAREN)?  // EQUATE declarations: with or without value (for ITEMIZE)
+    | (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER) (CLASS | anyIdentifier | QUALIFIED_IDENTIFIER) LPAREN (anyIdentifier | QUALIFIED_IDENTIFIER)? RPAREN DOT?  // Class instantiation: name CLASS(type), name CLASS(type)., or loc:class StringTheory()
     ;
 
 // ============================================================================
@@ -155,14 +156,18 @@ procedureList
 //   Label.Interface.Method PROCEDURE(...) - interface method implementation (2+ dots)
 
 procedureImplementation
-    : anyIdentifier (DOT anyIdentifier)* (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE
+    : anyIdentifier (DOT anyIdentifier)* DOT (QUALIFIED_IDENTIFIER | anyIdentifier) (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE
       NEWLINE* dataDeclarationList NEWLINE* codeSection?
-    | anyIdentifier (DOT anyIdentifier)* (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE
+    | anyIdentifier (DOT anyIdentifier)* DOT (QUALIFIED_IDENTIFIER | anyIdentifier) (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE
+      NEWLINE* codeSection
+    | (QUALIFIED_IDENTIFIER | LABEL | anyIdentifier) (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE
+      NEWLINE* dataDeclarationList NEWLINE* codeSection?
+    | (QUALIFIED_IDENTIFIER | LABEL | anyIdentifier) (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE
       NEWLINE* codeSection
     ;
 
 routineDeclaration
-    : IDENTIFIER ROUTINE NEWLINE (routineDataSection routineCodeSection | statementList?)
+    : (QUALIFIED_IDENTIFIER | IDENTIFIER) ROUTINE NEWLINE (routineDataSection routineCodeSection | statementList?)
     | LABEL ROUTINE NEWLINE (routineDataSection routineCodeSection | statementList?)
     ;
 
@@ -233,12 +238,13 @@ simpleStatement
 structureStatement
     : LABEL? ifStatement
     | LABEL? loopStatement
+    | LABEL? acceptStatement
     | LABEL? caseStatement
     | LABEL? executeStatement
     ;
 
 assignmentStatement
-    : postfixExpression (EQ | ASSIGN | DEEP_ASSIGN | PLUS_EQ | MINUS_EQ | MULT_EQ | DIV_EQ | AMP_EQ) expression
+    : postfixExpression (EQ | ASSIGN | DEEP_ASSIGN | PLUS_EQ | MINUS_EQ | MULT_EQ | DIV_EQ | MODULO_EQ | AMP_EQ) expression
     ;
     
 // Note: We use postfixExpression (not just fieldRef) because Clarion allows:
@@ -254,9 +260,11 @@ assignmentStatement
 // 1. THEN with ELSIF (single-line THEN stmt followed by multiline ELSIF/ELSE)
 // 2. THEN with optional inline ELSE (single-line: if x then a else b.)
 // 3. Multiline form (no THEN or THEN with newline, then statementBlock)
+// 4. Empty THEN (if x then . - do nothing if true)
 // Order matters: ELSIF variant must come before simple ELSE variant
 ifStatement
     : IF expression DOT  // Single-line IF with just condition: if x.
+    | IF expression THEN DOT  // Single-line IF with THEN but no statement: if x then .
     | IF expression THEN singleLineStatements statementSeparator+ elsifClause+ elseClause? statementTerminator
     | IF expression THEN singleLineStatements ELSE singleLineStatements statementTerminator  // Inline else without separator: stmt else stmt
     | IF expression THEN singleLineStatements statementSeparator* (ELSE statementSeparator* singleLineStatements)? statementTerminator
@@ -294,7 +302,8 @@ elseClause
 // Pre-condition: LOOP WHILE x > 0 ... END
 // Post-condition: LOOP ... UNTIL x > 10
 loopStatement
-    : LOOP (fieldRef EQ expression TO expression (BY expression)?
+    : LOOP (WHILE | UNTIL) expression DOT  // Single-line LOOP with just condition: loop until x.
+    | LOOP (fieldRef EQ expression TO expression (BY expression)?
            | expression TIMES
            | TIMES expression
            | WHILE expression
@@ -309,6 +318,17 @@ endLoopStatement
     | WHILE expression    // Post-condition (rare but valid)
     | DOT                 // Standard terminator
     | END                 // Standard terminator
+    ;
+
+// ============================================================================
+// ACCEPT STATEMENT
+// ============================================================================
+// ACCEPT is an event-driven loop structure used for processing UI events
+// Syntax: ACCEPT ... END or ACCEPT ... END. (with DOT)
+acceptStatement
+    : ACCEPT statementSeparator+
+      statementBlock
+      (END | DOT)
     ;
 
 // ============================================================================
@@ -370,7 +390,7 @@ cycleStatement
 
 // DO statement - calls a routine or procedure
 doStatement
-    : DO IDENTIFIER  // DO RoutineName (calls a ROUTINE)
+    : DO (QUALIFIED_IDENTIFIER | anyIdentifier)  // DO RoutineName (calls a ROUTINE) - supports r:AddItem and keywords like Header, Footer
     ;
 
 procedureCall
@@ -398,21 +418,32 @@ structureDeclaration
     | groupDeclaration
     | queueDeclaration
     | classDeclaration
+    | interfaceDeclaration
     | viewDeclaration
     | windowDeclaration
     | applicationDeclaration
     | reportDeclaration
+    | itemizeDeclaration
     ;
 
 fileDeclaration
     : label FILE (COMMA fileAttributes)? NEWLINE
-      NEWLINE* recordDeclaration?
       NEWLINE* keyDeclarations?
+      NEWLINE* blobDeclarations?
+      NEWLINE* recordDeclaration?
       (END | DOT) NEWLINE
     ;
 
+blobDeclarations
+    : (blobDeclaration NEWLINE+)+
+    ;
+
+blobDeclaration
+    : (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER) (BLOB | MEMO) (LPAREN expression RPAREN)? (COMMA dataAttributes)?
+    ;
+
 recordDeclaration
-    : label? RECORD NEWLINE
+    : label? RECORD (COMMA (structureAttribute (COMMA structureAttribute)*))?  NEWLINE
       dataDeclarationList
       (END | DOT) NEWLINE
     ;
@@ -422,24 +453,36 @@ keyDeclarations
     ;
 
 keyDeclaration
-    : label KEY keyAttributes? componentList NEWLINE
+    : label KEY componentList (COMMA keyAttributes)? NEWLINE
     ;
 
 groupDeclaration
-    : label? GROUP (LPAREN IDENTIFIER? RPAREN)? (COMMA groupAttributes)? NEWLINE
+    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? GROUP (LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER)? RPAREN)? (COMMA groupAttributes)? NEWLINE
       NEWLINE* dataDeclarationList
       (END | DOT) NEWLINE?
     ;
 
 queueDeclaration
-    : label? QUEUE (LPAREN IDENTIFIER? RPAREN)? (COMMA queueAttributes)? NEWLINE
+    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? QUEUE (LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER)? RPAREN)? (COMMA queueAttributes)? NEWLINE
       NEWLINE* dataDeclarationList
       (END | DOT) NEWLINE
     ;
 
+itemizeDeclaration
+    : label? ITEMIZE (LPAREN expression? RPAREN)? (COMMA itemizeAttributes)? NEWLINE
+      NEWLINE* (variableDeclaration (statementSeparator | DOT)+)*  // EQUATE declarations
+      END NEWLINE
+    ;
+
 classDeclaration
-    : label? CLASS (LPAREN IDENTIFIER? RPAREN)? (COMMA classAttributes)? NEWLINE
+    : label? CLASS (LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER)? RPAREN)? (COMMA? classAttributes)? NEWLINE
       NEWLINE* classBody
+      (END | DOT) NEWLINE
+    ;
+
+interfaceDeclaration
+    : label? INTERFACE (LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER)? RPAREN)? (COMMA interfaceAttributes)? NEWLINE
+      NEWLINE* interfaceBody
       (END | DOT) NEWLINE
     ;
 
@@ -449,7 +492,16 @@ classBody
 
 classBodyElement
     :  (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER) (PROCEDURE | FUNCTION) parameterList? procedureModifiers? NEWLINE  // Method declaration
+    | groupDeclaration  // Group declaration
     | variableDeclaration NEWLINE  // Field/property declaration
+    ;
+
+interfaceBody
+    : (NEWLINE* interfaceBodyElement)*
+    ;
+
+interfaceBodyElement
+    : (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER) (PROCEDURE | FUNCTION) parameterList? procedureModifiers? NEWLINE  // Method prototype only - no properties allowed
     ;
 
 viewDeclaration
@@ -471,14 +523,14 @@ viewAttributes
     ;
 
 windowDeclaration
-    : IDENTIFIER WINDOW LPAREN STRING_LITERAL? RPAREN (COMMA attribute)* NEWLINE NEWLINE* windowControls END NEWLINE
-    | LABEL WINDOW LPAREN STRING_LITERAL? RPAREN (COMMA attribute)* NEWLINE NEWLINE* windowControls END NEWLINE
-    | IDENTIFIER WINDOW LPAREN STRING_LITERAL? RPAREN (COMMA attribute)* NEWLINE END NEWLINE
-    | LABEL WINDOW LPAREN STRING_LITERAL? RPAREN (COMMA attribute)* NEWLINE END NEWLINE
+    : IDENTIFIER WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE NEWLINE* windowControls END NEWLINE
+    | LABEL WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE NEWLINE* windowControls END NEWLINE
+    | IDENTIFIER WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE END NEWLINE
+    | LABEL WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE END NEWLINE
     ;
 
 applicationDeclaration
-    : label APPLICATION LPAREN expression RPAREN (COMMA windowAttributes)? NEWLINE
+    : label APPLICATION (LPAREN expression RPAREN)? (COMMA windowAttributes)? NEWLINE
       NEWLINE* windowControls?
       END NEWLINE
     ;
@@ -520,7 +572,7 @@ optionControl
 
 // Specialized control: GROUP (has nested controls)
 groupControl
-    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? GROUP (COMMA controlAttributes)? NEWLINE
+    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? GROUP (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE
       NEWLINE* controlDeclaration*
       END NEWLINE
     ;
@@ -574,8 +626,12 @@ reportStructure
     ;
 
 reportBand
-    : (DETAIL | HEADER | FOOTER | BREAK | FORM) reportBandAttributes? NEWLINE
+    : label? (DETAIL | HEADER | FOOTER | FORM) reportBandAttributes? NEWLINE
       NEWLINE* controlDeclaration*
+      END NEWLINE
+    | label? BREAK (LPAREN expression? (COMMA expression?)* RPAREN)? reportBandAttributes? NEWLINE
+      NEWLINE* reportBand*
+      END NEWLINE
     ;
 
 // ============================================================================
@@ -632,9 +688,9 @@ postfixExpression
 
 postfixOperator
     : LBRACE argumentList RBRACE  // Property access: var{PROP:Text} or 0{prop:hlp}
-    | LBRACKET expression (COLON expression | COMMA expression)? RBRACKET     // Array subscripting: array[index], array[start:end], or array[start,length]
+    | LBRACKET expression (COLON expression)? (COMMA expression (COLON expression)?)* RBRACKET     // Array subscripting: array[index], array[start:end], array[dim1,dim2], or array[dim1, start:end]
     | LPAREN argumentList? RPAREN  // Function call: func() or obj.method()
-    | DOT anyIdentifier    // Member access after subscript/call: deltas[i].lo, func().value
+    | DOT (QUALIFIED_IDENTIFIER | anyIdentifier)    // Member access: obj.field or obj.Free:qLegend
     ;
 
 primaryExpression
@@ -720,7 +776,7 @@ softKeyword
     | MSG | HLP | TIP | KEY | NAME | TYPE | AUTO | OVER | DIM | PRE | BINDABLE
     | RAW | PASCAL | PROC | DLL | EXTERNAL | PRIVATE | PROTECTED | PUBLIC | INTERNAL | STATIC | THREAD
     | FLAT | BOXED | DROP | SCROLL | GRAY | FULL | ZOOOM | DOCK | DOCKED | NOFRAME | NOSHEET
-    | MODAL | MDI | SYSTEM | MAXIMIZE | ICONIZE | WALLPAPER | PAGE | PAPER | LANDSCAPE | PREVIEW | ALONE | OEM
+    | MODAL | MDI | SYSTEM | MAXIMIZE | ICONIZE | WALLPAPER | PAGE | PAPER | LANDSCAPE | PREVIEW | ALONE | OEM | THOUS
     // File/database attributes
     | DRIVER | CREATE | RECLAIM | OWNER | ENCRYPT | BINARY | INDEX | OPT | DUP | NOCASE | PRIMARY
     | INNER | OUTER | FILTER | ORDER
@@ -729,10 +785,6 @@ softKeyword
     | LEFT | RIGHT  // Alignment/string methods
     // Structural keywords when used as identifiers
     | CONST | EQUATE | ONCE | STRUCT | ENUM | UNION | LIKE
-    ;
-    | REAL | SREAL | DECIMAL | PDECIMAL
-    | PSTRING | CSTRING | ASTRING | BSTRING
-    | DATE | TIME | MEMO | BLOB | BOOL
     ;
 
 // Allow keywords to be used as identifiers (Clarion allows this in many contexts)
@@ -797,8 +849,16 @@ queueAttributes
     : structureAttribute (COMMA structureAttribute)*
     ;
 
+itemizeAttributes
+    : structureAttribute (COMMA structureAttribute)*
+    ;
+
 classAttributes
     : classAttribute (COMMA classAttribute)*
+    ;
+
+interfaceAttributes
+    : interfaceAttribute (COMMA interfaceAttribute)*
     ;
 
 windowAttributes
@@ -810,15 +870,15 @@ controlAttributes
     ;
 
 reportAttributes
-    : attribute*
+    : (COMMA attribute)*
     ;
 
 reportBandAttributes
-    : attribute*
+    : (COMMA attribute)*
     ;
 
 keyAttributes
-    : attribute*
+    : attribute (COMMA attribute)*
     ;
 
 // ============================================================================
@@ -889,6 +949,7 @@ controlAttribute
     | KEY (LPAREN expression? (COMMA expression?)* RPAREN)?
     | TIP (LPAREN expression? (COMMA expression?)* RPAREN)?
     | FROM (LPAREN expression? (COMMA expression?)* RPAREN)?
+    | ALRT (LPAREN expression? (COMMA expression?)* RPAREN)?  // Alert on keyboard/mouse events
     | HIDE
     | DISABLE
     | IMM
@@ -940,8 +1001,10 @@ dataAttribute
     | AUTO
     | PRIVATE
     | PROTECTED
+    | BINARY
     | DLL (LPAREN expression? (COMMA expression?)* RPAREN)?
     | BINDABLE
+    | TYPE  // Makes structure act as a TYPE definition for reuse
     | LIKE (LPAREN expression RPAREN)?
     | DRIVER (LPAREN expression (COMMA expression?)* RPAREN)?  // FILE-specific but allowed in variable context too
     | CREATE (LPAREN expression? RPAREN)?  // FILE-specific but allowed in variable context too
@@ -954,6 +1017,7 @@ structureAttribute
     : PRE (LPAREN expression? RPAREN)?
     | DIM (LPAREN expression (COMMA expression)* RPAREN)?
     | OVER (LPAREN expression? RPAREN)?
+    | NAME (LPAREN expression RPAREN)?
     | STATIC
     | THREAD
     | TYPE
@@ -989,14 +1053,21 @@ classAttribute
     | VIRTUAL
     ;
 
+// INTERFACE-specific attributes
+interfaceAttribute
+    : structureAttribute
+    | TYPE
+    | COM
+    ;
+
 // Generic attribute (fallback for unknown attributes and legacy support)
 attribute
-    : (IDENTIFIER | ALRT | AT | AUTO | BEVEL | BINDABLE | BOXED | CAP | CENTER | CENTERED | CHECK | COLOR | COLUMN | CREATE | DECIMAL | DEFAULT 
-      | DERIVED | DIM | DISABLE | DLL | DOCK | DOCKED | DOUBLE | DRIVER | DROP | ENCRYPT | EXTERNAL | FILL | FLAT | FONT | FORMAT 
+    : (IDENTIFIER | ALRT | AT | AUTO | BEVEL | BINARY | BINDABLE | BOXED | CAP | CENTER | CENTERED | CHECK | COLOR | COLUMN | CREATE | CURSOR | DECIMAL | DEFAULT 
+      | DERIVED | DIM | DISABLE | DLL | DOCK | DOCKED | DOUBLE | DRIVER | DROP | DUP | ENCRYPT | EXTERNAL | FILL | FLAT | FONT | FORMAT 
       | FROM | FULL | GRAY | GRID | HIDE | HLP | HSCROLL | HVSCROLL | ICON | ICONIZE | IMM | IMPLEMENTS | INS | KEY | LEFT | LINK | MARK 
-      | MASK | MAX | MAXIMIZE | MDI | MODAL | MODULE | MSG | NAME | NOBAR | NOFRAME | ONCE | OVR | OVER | OWNER | PASCAL | PASSWORD 
-      | PRE | PRIVATE | PROC | PROTECTED | RADIO | RANGE | RAW | READONLY | RECLAIM | REPLACE | REQ | RESIZE | RIGHT | SCROLL | SEPARATOR 
-      | SINGLE | SKIP | STATIC | STATUS | STD | SYSTEM | THREAD | TILED | TIMER | TIP | TRN | TOOLBOX | TYPE | UPR | USE | VALUE | VIRTUAL 
+      | MASK | MAX | MAXIMIZE | MDI | MODAL | MODULE | MSG | NAME | NOBAR | NOCASE | NOFRAME | ONCE | OPT | OVR | OVER | OWNER | PAPER | PASCAL | PASSWORD 
+      | PRE | PRIMARY | PRIVATE | PROC | PROTECTED | RADIO | RANGE | RAW | READONLY | RECLAIM | REPLACE | REQ | RESIZE | RIGHT | SCROLL | SEPARATOR 
+      | SINGLE | SKIP | STATIC | STATUS | STD | SYSTEM | THREAD | THOUS | TILED | TIMER | TIP | TRN | TOOLBOX | TYPE | UPR | USE | VALUE | VIRTUAL 
       | VSCROLL | WALLPAPER | INDEX | VCR | PALETTE) 
       (LPAREN expression? (COMMA expression?)* RPAREN)?
     ;
@@ -1028,7 +1099,9 @@ label
 dataType
     : MULTIPLY? baseType
     | ANY
-    | LIKE LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER) RPAREN  // Inherited data type
+    | MULTIPLY? QUESTION  // Untyped/variant return type, with optional pointer
+    | MULTIPLY? (FILE | KEY)  // Pointer to FILE or KEY
+    | LIKE LPAREN ((QUALIFIED_IDENTIFIER | anyIdentifier | SELF) (DOT (QUALIFIED_IDENTIFIER | anyIdentifier))*) RPAREN  // Inherited data type - supports Type.field and SELF.field
     | (GROUP | QUEUE | CLASS) (LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER) RPAREN)?  // Structure with optional pre-defined type: GROUP(ContextType)
     ;
 
@@ -1036,7 +1109,7 @@ dataType
 nonStructureDataType
     : MULTIPLY? nonStructureBaseType
     | ANY
-    | LIKE LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER) RPAREN
+    | LIKE LPAREN ((QUALIFIED_IDENTIFIER | anyIdentifier | SELF) (DOT (QUALIFIED_IDENTIFIER | anyIdentifier))*) RPAREN  // Supports Type.field and SELF.field
     | (GROUP | QUEUE | CLASS) (LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER) RPAREN)?
     ;
 
@@ -1047,14 +1120,14 @@ parameterBaseType
     | REAL | SREAL | DECIMAL | PDECIMAL
     | STRING | CSTRING | PSTRING | ASTRING | BSTRING
     | DATE | TIME | MEMO | BLOB | BOOL
-    | FILE | VIEW | RECORD | KEY | REPORT  // Structure types that can be used as reference types
-    | IDENTIFIER  // User-defined types
+    | FILE | VIEW | RECORD | KEY | REPORT | WINDOW  // Structure types that can be used as reference types
+    | IDENTIFIER | QUALIFIED_IDENTIFIER  // User-defined types
     ;
 
 parameterDataType
     : MULTIPLY? parameterBaseType
     | ANY
-    | LIKE LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER) RPAREN
+    | LIKE LPAREN ((QUALIFIED_IDENTIFIER | anyIdentifier | SELF) (DOT (QUALIFIED_IDENTIFIER | anyIdentifier))*) RPAREN  // Supports Type.field and SELF.field
     | (GROUP | QUEUE | CLASS) (LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER) RPAREN)?
     ;
 
@@ -1083,7 +1156,7 @@ baseType
     | FILE  // FILE structure type (often used as reference: &FILE)
     | VIEW  // VIEW structure type (often used as reference: &VIEW)
     | RECORD  // RECORD structure type (often used as reference: &RECORD)
-    | IDENTIFIER  // User-defined types (e.g., PersonType)
+    | IDENTIFIER | QUALIFIED_IDENTIFIER  // User-defined types (e.g., PersonType or XF:DWORD)
     ;
 
 // Base types excluding structure types (FILE, VIEW, RECORD)
@@ -1110,7 +1183,7 @@ nonStructureBaseType
     | MEMO (LPAREN expression RPAREN)?
     | BLOB (LPAREN expression RPAREN)?
     | BOOL (LPAREN expression RPAREN)?
-    | IDENTIFIER  // User-defined types (e.g., PersonType)
+    | IDENTIFIER | QUALIFIED_IDENTIFIER  // User-defined types (e.g., PersonType or XF:DWORD)
     ;
 
 controlType
@@ -1129,9 +1202,11 @@ parameterList
 
 parameter
     : LT MULTIPLY QUESTION parameterNameWithDefault? GT                        // Omittable untyped pointer: <*? pParent>
+    | LT QUESTION parameterNameWithDefault? GT                                 // Omittable untyped parameter: <? pValue>
+    | LT MULTIPLY? parameterDataType LBRACKET (COMMA)* RBRACKET parameterNameWithDefault? GT  // Omittable array parameter: <*String[]> or <Long[,]>
     | LT MULTIPLY? parameterDataType parameterNameWithDefault? GT              // Omittable parameter: <STRING pSep> or <*String pStr>
     | parameterDataType LBRACKET (COMMA)* RBRACKET parameterNameWithDefault?   // Array parameter: string[] or long[,] or byte[,,]
-    | parameterDataType parameterNameWithDefault?                              // Optional documentary parameter name (can be keyword) and default value
+    | parameterDataType ((anyIdentifier | QUALIFIED_IDENTIFIER) (EQ expression)? | EQ expression)?      // Parameter with optional name and/or default: unsigned, unsigned pVal, unsigned=0, unsigned pVal=0, unsigned par:Name
     | MULTIPLY QUESTION parameterNameWithDefault?                              // Untyped pointer: *? pVal
     | QUESTION parameterNameWithDefault?                                       // Untyped parameter: ? pVal
     | MULTIPLY (parameterDataType | anyIdentifier) LBRACKET (COMMA)* RBRACKET parameterNameWithDefault?  // Pointer to array: *string[] or *long[,]
@@ -1141,7 +1216,7 @@ parameter
 
 // Parameter name with optional default value
 parameterNameWithDefault
-    : anyIdentifier (EQ expression)?
+    : (anyIdentifier | QUALIFIED_IDENTIFIER) (EQ expression)?
     ;
 
 returnType

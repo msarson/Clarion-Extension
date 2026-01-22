@@ -74,10 +74,9 @@ END       : 'END' ;         // FULLY RESERVED
 // Object-Oriented Keywords
 // CLASS and INTERFACE - used in data declarations
 // CLASS is used in declarations and instantiations
-// INTERFACE has been removed as a keyword - treat as regular identifier
-// Parser context determines when CLASS is a keyword vs identifier
+// Parser context determines when CLASS/INTERFACE are keywords vs identifiers
 CLASS     : 'CLASS' ;
-// INTERFACE : 'INTERFACE' ;  // Commented out - use as identifier only
+INTERFACE : 'INTERFACE' ;
 NEW       : 'NEW' ;        // FULLY RESERVED
 DISPOSE   : {this.charPositionInLine > 0}? 'DISPOSE' ;    // SOFT - can be field name
 SELF      : 'SELF' ;       // SPECIAL - always refers to current object
@@ -88,6 +87,7 @@ DERIVED   : {this.charPositionInLine > 0}? 'DERIVED' ;     // SOFT - can be fiel
 REPLACE   : {this.charPositionInLine > 0}? 'REPLACE' ;     // SOFT - can be field name
 VIRTUAL   : {this.charPositionInLine > 0}? 'VIRTUAL' ;     // SOFT - can be field name
 IMPLEMENTS: {this.charPositionInLine > 0}? 'IMPLEMENTS' ;  // SOFT - can be field name
+COM       : {this.charPositionInLine > 0}? 'COM' ;         // SOFT - INTERFACE attribute, can be field name
 
 // ============================================================================
 // ACCESS MODIFIERS
@@ -140,6 +140,12 @@ LIKE      : {this.charPositionInLine > 0}? 'LIKE' ;        // SOFT - can be fiel
 PASCAL    : {this.charPositionInLine > 0}? 'PASCAL' ;  // SOFT - can be field name
 RAW       : {this.charPositionInLine > 0}? 'RAW' ;     // SOFT - can be field name
 PROC      : {this.charPositionInLine > 0}? 'PROC' ;    // SOFT - can be field name
+
+// KEY-specific attributes
+NOCASE    : {this.charPositionInLine > 0}? 'NOCASE' ;  // SOFT - KEY attribute
+DUP       : {this.charPositionInLine > 0}? 'DUP' ;     // SOFT - KEY attribute  
+OPT       : {this.charPositionInLine > 0}? 'OPT' ;     // SOFT - KEY attribute
+PRIMARY   : {this.charPositionInLine > 0}? 'PRIMARY' ; // SOFT - KEY attribute
 
 // Special Constructs - SOFT to allow as field names
 ITEMIZE   : {this.charPositionInLine > 0}? 'ITEMIZE' ;     // SOFT - can be field name
