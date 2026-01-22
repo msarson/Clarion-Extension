@@ -1028,7 +1028,7 @@ dataAttribute
 
 // Structure attributes (GROUP, QUEUE, CLASS, FILE)
 structureAttribute
-    : PRE (LPAREN expression? RPAREN)?
+    : PRE (LPAREN expression? COLON? RPAREN)?
     | DIM (LPAREN expression (COMMA expression)* RPAREN)?
     | OVER (LPAREN expression? RPAREN)?
     | NAME (LPAREN expression RPAREN)?
@@ -1074,9 +1074,16 @@ interfaceAttribute
     | COM
     ;
 
+// PRE attribute with optional trailing colon in the prefix value
+// E.g., PRE(MyPrefix:) results in fields like MyPrefix::FieldName
+preAttribute
+    : PRE LPAREN expression? COLON? RPAREN
+    ;
+
 // Generic attribute (fallback for unknown attributes and legacy support)
 attribute
-    : (IDENTIFIER | ALRT | AT | AUTO | BEVEL | BINARY | BINDABLE | BOXED | CAP | CENTER | CENTERED | CHECK | COLOR | COLUMN | CREATE | CURSOR | DECIMAL | DEFAULT 
+    : preAttribute
+    | (IDENTIFIER | ALRT | AT | AUTO | BEVEL | BINARY | BINDABLE | BOXED | CAP | CENTER | CENTERED | CHECK | COLOR | COLUMN | CREATE | CURSOR | DECIMAL | DEFAULT 
       | DERIVED | DIM | DISABLE | DLL | DOCK | DOCKED | DOUBLE | DRIVER | DROP | DUP | ENCRYPT | EXTERNAL | FILL | FLAT | FONT | FORMAT 
       | FROM | FULL | GRAY | GRID | HIDE | HLP | HSCROLL | HVSCROLL | ICON | ICONIZE | IMM | IMPLEMENTS | INS | KEY | LEFT | LINK | MARK 
       | MASK | MAX | MAXIMIZE | MDI | MODAL | MODULE | MSG | NAME | NOBAR | NOCASE | NOFRAME | NOSHEET | ONCE | OPT | OVR | OVER | OWNER | PAPER | PASCAL | PASSWORD 
