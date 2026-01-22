@@ -446,7 +446,7 @@ fileDeclaration
       NEWLINE* keyDeclarations?
       NEWLINE* blobDeclarations?
       NEWLINE* recordDeclaration?
-      (END | DOT) NEWLINE
+      (END | DOT) NEWLINE*
     ;
 
 blobDeclarations
@@ -460,7 +460,7 @@ blobDeclaration
 recordDeclaration
     : label? RECORD (COMMA (structureAttribute (COMMA structureAttribute)*))?  NEWLINE+
       dataDeclarationList
-      (END | DOT) NEWLINE
+      (END | DOT) NEWLINE*
     ;
 
 keyDeclarations
@@ -472,29 +472,29 @@ keyDeclaration
     ;
 
 groupDeclaration
-    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? GROUP (LPAREN ((IDENTIFIER | QUALIFIED_IDENTIFIER | SELF) (DOT (IDENTIFIER | QUALIFIED_IDENTIFIER))*)? RPAREN)? (COMMA groupAttributes)? (DOT | NEWLINE NEWLINE* dataDeclarationList (END | DOT) NEWLINE?)
+    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? GROUP (LPAREN ((IDENTIFIER | QUALIFIED_IDENTIFIER | SELF) (DOT (IDENTIFIER | QUALIFIED_IDENTIFIER))*)? RPAREN)? (COMMA groupAttributes)? (DOT | NEWLINE NEWLINE* dataDeclarationList (END | DOT) NEWLINE*)
     ;
 
 queueDeclaration
-    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? QUEUE (LPAREN ((IDENTIFIER | QUALIFIED_IDENTIFIER | SELF) (DOT (IDENTIFIER | QUALIFIED_IDENTIFIER))*)? RPAREN)? (COMMA queueAttributes)? (DOT | NEWLINE NEWLINE* dataDeclarationList (END | DOT) NEWLINE)
+    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? QUEUE (LPAREN ((IDENTIFIER | QUALIFIED_IDENTIFIER | SELF) (DOT (IDENTIFIER | QUALIFIED_IDENTIFIER))*)? RPAREN)? (COMMA queueAttributes)? (DOT | NEWLINE NEWLINE* dataDeclarationList (END | DOT) NEWLINE*)
     ;
 
 itemizeDeclaration
     : label? ITEMIZE (LPAREN expression? RPAREN)? (COMMA itemizeAttributes)? NEWLINE+
       NEWLINE* (variableDeclaration (statementSeparator | DOT)+)*  // EQUATE declarations
-      END NEWLINE
+      (END | DOT) NEWLINE*
     ;
 
 classDeclaration
     : label? CLASS (LPAREN ((IDENTIFIER | QUALIFIED_IDENTIFIER | SELF) (DOT (IDENTIFIER | QUALIFIED_IDENTIFIER))*)? RPAREN)? (COMMA? classAttributes)? NEWLINE+
       NEWLINE* classBody
-      (END | DOT) NEWLINE
+      (END | DOT) NEWLINE*
     ;
 
 interfaceDeclaration
     : label? INTERFACE (LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER)? RPAREN)? (COMMA interfaceAttributes)? NEWLINE+
       NEWLINE* interfaceBody
-      (END | DOT) NEWLINE
+      (END | DOT) NEWLINE*
     ;
 
 classBody
@@ -518,7 +518,7 @@ interfaceBodyElement
 viewDeclaration
     : label VIEW (LPAREN IDENTIFIER? RPAREN)? (COMMA viewAttributes)? NEWLINE
       NEWLINE* projectList
-      (END | DOT) NEWLINE
+      (END | DOT) NEWLINE*
     ;
 
 projectList
@@ -534,16 +534,16 @@ viewAttributes
     ;
 
 windowDeclaration
-    : IDENTIFIER WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE+ windowControls END NEWLINE*
-    | LABEL WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE+ windowControls END NEWLINE*
-    | IDENTIFIER WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE+ END NEWLINE*
-    | LABEL WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE+ END NEWLINE*
+    : IDENTIFIER WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE+ windowControls (END | DOT) NEWLINE*
+    | LABEL WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE+ windowControls (END | DOT) NEWLINE*
+    | IDENTIFIER WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE+ (END | DOT) NEWLINE*
+    | LABEL WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE+ (END | DOT) NEWLINE*
     ;
 
 applicationDeclaration
     : label APPLICATION (LPAREN expression RPAREN)? (COMMA windowAttributes)? NEWLINE+
       NEWLINE* windowControls?
-      END NEWLINE*
+      (END | DOT) NEWLINE*
     ;
 
 windowControls
@@ -564,49 +564,49 @@ controlDeclaration
 sheetControl
     : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? SHEET (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE+
       NEWLINE* tabControl+
-      END NEWLINE*
+      (END | DOT) NEWLINE*
     ;
 
 // Specialized control: TAB (inside SHEET)
 tabControl
     : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? TAB (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE+
       NEWLINE* controlDeclaration*
-      END NEWLINE*
+      (END | DOT) NEWLINE*
     ;
 
 // Specialized control: OPTION (has child controls, typically RADIO)
 optionControl
     : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? OPTION (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE+
       NEWLINE* genericControl+
-      END NEWLINE*
+      (END | DOT) NEWLINE*
     ;
 
 // Specialized control: GROUP (has nested controls)
 groupControl
     : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? GROUP (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE+
       NEWLINE* controlDeclaration*
-      END NEWLINE*
+      (END | DOT) NEWLINE*
     ;
 
 // Specialized control: OLE (optional MENUBAR)
 oleControl
     : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? OLE (COMMA controlAttributes)? NEWLINE
       NEWLINE* menubarDeclaration?
-      END NEWLINE*
+      (END | DOT) NEWLINE*
     ;
 
 // MENUBAR within OLE
 menubarDeclaration
     : MENUBAR (COMMA controlAttributes)? NEWLINE
       NEWLINE* menuDeclaration*
-      END NEWLINE*
+      (END | DOT) NEWLINE*
     ;
 
 // MENU within MENUBAR
 menuDeclaration
     : label? MENU (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE+
       NEWLINE* menuItemDeclaration*
-      END NEWLINE*
+      (END | DOT) NEWLINE*
     ;
 
 // ITEM within MENU
@@ -629,7 +629,7 @@ genericControlType
 reportDeclaration
     : label REPORT (LPAREN expression? RPAREN)? reportAttributes? NEWLINE+
       NEWLINE* reportStructure?
-      END NEWLINE*
+      (END | DOT) NEWLINE*
     ;
 
 reportStructure
@@ -639,10 +639,10 @@ reportStructure
 reportBand
     : label? (DETAIL | HEADER | FOOTER | FORM) reportBandAttributes? NEWLINE
       NEWLINE* controlDeclaration*
-      END NEWLINE*
+      (END | DOT) NEWLINE*
     | label? BREAK (LPAREN expression? (COMMA expression?)* RPAREN)? reportBandAttributes? NEWLINE
       NEWLINE* reportBand*
-      END NEWLINE*
+      (END | DOT) NEWLINE*
     ;
 
 // ============================================================================
