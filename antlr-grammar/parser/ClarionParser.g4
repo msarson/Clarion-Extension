@@ -29,7 +29,8 @@ compilationUnit
 // ============================================================================
 
 includeFile
-    : (NEWLINE | mapSection | moduleReference | dataDeclaration | structureDeclaration | moduleContent)*
+    : (NEWLINE | mapSection | moduleReference | dataDeclaration | structureDeclaration | moduleContent 
+       | windowDeclaration | applicationDeclaration | reportDeclaration | menuDeclaration)*
     ;
 
 // ============================================================================
@@ -533,16 +534,16 @@ viewAttributes
     ;
 
 windowDeclaration
-    : IDENTIFIER WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE+ windowControls END NEWLINE
-    | LABEL WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE+ windowControls END NEWLINE
-    | IDENTIFIER WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE+ END NEWLINE
-    | LABEL WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE+ END NEWLINE
+    : IDENTIFIER WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE+ windowControls END NEWLINE*
+    | LABEL WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE+ windowControls END NEWLINE*
+    | IDENTIFIER WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE+ END NEWLINE*
+    | LABEL WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE+ END NEWLINE*
     ;
 
 applicationDeclaration
     : label APPLICATION (LPAREN expression RPAREN)? (COMMA windowAttributes)? NEWLINE+
       NEWLINE* windowControls?
-      END NEWLINE
+      END NEWLINE*
     ;
 
 windowControls
@@ -563,49 +564,49 @@ controlDeclaration
 sheetControl
     : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? SHEET (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE+
       NEWLINE* tabControl+
-      END NEWLINE
+      END NEWLINE*
     ;
 
 // Specialized control: TAB (inside SHEET)
 tabControl
     : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? TAB (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE+
       NEWLINE* controlDeclaration*
-      END NEWLINE
+      END NEWLINE*
     ;
 
 // Specialized control: OPTION (has child controls, typically RADIO)
 optionControl
     : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? OPTION (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE+
       NEWLINE* genericControl+
-      END NEWLINE
+      END NEWLINE*
     ;
 
 // Specialized control: GROUP (has nested controls)
 groupControl
     : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? GROUP (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE+
       NEWLINE* controlDeclaration*
-      END NEWLINE
+      END NEWLINE*
     ;
 
 // Specialized control: OLE (optional MENUBAR)
 oleControl
     : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? OLE (COMMA controlAttributes)? NEWLINE
       NEWLINE* menubarDeclaration?
-      END NEWLINE
+      END NEWLINE*
     ;
 
 // MENUBAR within OLE
 menubarDeclaration
     : MENUBAR (COMMA controlAttributes)? NEWLINE
       NEWLINE* menuDeclaration*
-      END NEWLINE
+      END NEWLINE*
     ;
 
 // MENU within MENUBAR
 menuDeclaration
     : label? MENU (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE+
       NEWLINE* menuItemDeclaration*
-      END NEWLINE
+      END NEWLINE*
     ;
 
 // ITEM within MENU
@@ -628,7 +629,7 @@ genericControlType
 reportDeclaration
     : label REPORT (LPAREN expression? RPAREN)? reportAttributes? NEWLINE+
       NEWLINE* reportStructure?
-      END NEWLINE
+      END NEWLINE*
     ;
 
 reportStructure
@@ -638,10 +639,10 @@ reportStructure
 reportBand
     : label? (DETAIL | HEADER | FOOTER | FORM) reportBandAttributes? NEWLINE
       NEWLINE* controlDeclaration*
-      END NEWLINE
+      END NEWLINE*
     | label? BREAK (LPAREN expression? (COMMA expression?)* RPAREN)? reportBandAttributes? NEWLINE
       NEWLINE* reportBand*
-      END NEWLINE
+      END NEWLINE*
     ;
 
 // ============================================================================
