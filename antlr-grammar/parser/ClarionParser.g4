@@ -274,11 +274,12 @@ ifStatement
     : IF expression STATEMENT_SEPARATOR singleLineStatements statementTerminator  // One-line IF with semicolon: IF cond; stmt END
     | IF expression DOT  // Single-line IF with just condition: if x.
     | IF expression THEN DOT  // Single-line IF with THEN but no statement: if x then .
-    | IF expression THEN singleLineStatements statementSeparator+ elsifClause+ elseClause? statementTerminator
-    | IF expression THEN singleLineStatements ELSE singleLineStatements statementTerminator  // Inline else without separator: stmt else stmt
-    | IF expression THEN singleLineStatements statementSeparator* (ELSE statementSeparator* singleLineStatements)? statementTerminator
+    | IF expression THEN singleLineStatements statementSeparator+ elsifClause+ elseClause? statementTerminator  // ELSIF variant
+    | IF expression THEN singleLineStatements statementSeparator ELSE singleLineStatements statementSeparator* statementTerminator  // IF THEN stmt NEWLINE ELSE stmt NEWLINE END
+    | IF expression THEN singleLineStatements ELSE singleLineStatements statementTerminator  // Inline: stmt ELSE stmt  
+    | IF expression THEN? statementSeparator+ statementBlock elsifClause* elseClause? statementTerminator  // Multi-line
     | IF expression THEN? statementSeparator+ statementBlock nonEmptyStatement DOT  // Multi-line with last statement ending in DOT
-    | IF expression THEN? statementSeparator+ statementBlock elsifClause* elseClause? statementTerminator
+    | IF expression THEN singleLineStatements statementSeparator* statementTerminator  // IF THEN stmt (no ELSE) - must be last single-line variant
     ;
 
 // Common termination pattern for structured statements
