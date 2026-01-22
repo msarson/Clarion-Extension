@@ -132,9 +132,14 @@ dataDeclaration
 // This is acceptable for folding/parsing - strict validation is the compiler's job
 // If stricter validation is needed later, revert to: (IDENTIFIER | LABEL | QUALIFIED_IDENTIFIER)
 // Anonymous fields: In GROUP/QUEUE structures, fields can be unnamed (e.g., string('\') for padding)
+//
+// COMPILER QUIRK: The comma before attributes is optional! The compiler accepts both:
+//   - Standard:  power  long, auto
+//   - Alternate: power  long auto   (discovered in StringTheory.clw line 6792)
+// While the comma syntax is documented and recommended, we support both for compatibility.
 variableDeclaration
-    : (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER)? nonStructureDataType (LPAREN expression RPAREN)? (COMMA dataAttributes)?  // With optional initialization: hr HRESULT(value)
-    | (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER) AMPERSAND (baseType | FILE | GROUP | QUEUE | KEY | REPORT | WINDOW | anyIdentifier | QUALIFIED_IDENTIFIER) (COMMA dataAttributes)?  // Reference variable: Q &QueueType, f &File, b &byte, or allowedChars &string,Auto
+    : (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER)? nonStructureDataType (LPAREN expression RPAREN)? (COMMA? dataAttributes)?  // With optional initialization: hr HRESULT(value)
+    | (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER) AMPERSAND (baseType | FILE | GROUP | QUEUE | KEY | REPORT | WINDOW | anyIdentifier | QUALIFIED_IDENTIFIER) (COMMA? dataAttributes)?  // Reference variable: Q &QueueType, f &File, b &byte, or allowedChars &string,Auto
     | (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER) EQUATE (LPAREN expression RPAREN)?  // EQUATE declarations: with or without value (for ITEMIZE)
     | (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER) (CLASS | anyIdentifier | QUALIFIED_IDENTIFIER) LPAREN (anyIdentifier | QUALIFIED_IDENTIFIER)? RPAREN DOT?  // Class instantiation: name CLASS(type), name CLASS(type)., or loc:class StringTheory()
     ;
