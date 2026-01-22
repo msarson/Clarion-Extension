@@ -1,0 +1,7 @@
+Window WINDOW('Test'),AT(,,100,100)
+  SHEET,AT(2,2,90,90),USE(?SHEET1)
+    TAB('Tab1'),USE(?TAB1)
+      BUTTON('OK'),AT(10,10,40,14),USE(?OK)
+    END
+  END
+END

@@ -235,6 +235,7 @@ ALONE : 'ALONE' ;       // Print alone
 // ============================================================================
 
 PRIVATE : 'PRIVATE' ;   // Private access
+PREVIEW : 'PREVIEW' ;   // Preview attribute for reports
 PROTECTED : 'PROTECTED' ; // Protected access
 PASCAL : 'PASCAL' ;     // Pascal calling convention
 // Note: 'C' keyword handled separately to avoid conflict with fragment C

@@ -626,7 +626,8 @@ genericControlType
     ;
 
 reportDeclaration
-    : label REPORT (LPAREN expression? RPAREN)? reportAttributes? NEWLINE+
+    : label REPORT (LPAREN expression? RPAREN)? reportAttributes? NEWLINE
+    | label REPORT (LPAREN expression? RPAREN)? reportAttributes? NEWLINE+
       NEWLINE* reportStructure?
       (END | DOT) NEWLINE*
     ;
@@ -1085,12 +1086,12 @@ attribute
     : preAttribute
     | (IDENTIFIER | ALRT | AT | AUTO | BEVEL | BINARY | BINDABLE | BOXED | CAP | CENTER | CENTERED | CHECK | COLOR | COLUMN | CREATE | CURSOR | DECIMAL | DEFAULT 
       | DERIVED | DIM | DISABLE | DLL | DOCK | DOCKED | DOUBLE | DRIVER | DROP | DUP | ENCRYPT | EXTERNAL | FILL | FLAT | FONT | FORMAT 
-      | FROM | FULL | GRAY | GRID | HIDE | HLP | HSCROLL | HVSCROLL | ICON | ICONIZE | IMM | IMPLEMENTS | INS | KEY | LEFT | LINK | MARK 
+      | FROM | FULL | GRAY | GRID | HIDE | HLP | HSCROLL | HVSCROLL | ICON | ICONIZE | IMM | IMPLEMENTS | INS | KEY | LANDSCAPE | LEFT | LINK | MARK 
       | MASK | MAX | MAXIMIZE | MDI | MODAL | MODULE | MSG | NAME | NOBAR | NOCASE | NOFRAME | NOSHEET | ONCE | OPT | OVR | OVER | OWNER | PAPER | PASCAL | PASSWORD 
-      | PRE | PRIMARY | PRIVATE | PROC | PROTECTED | RADIO | RANGE | RAW | READONLY | RECLAIM | REPLACE | REQ | RESIZE | RIGHT | SCROLL | SEPARATOR 
+      | PRE | PREVIEW | PRIMARY | PRIVATE | PROC | PROTECTED | RADIO | RANGE | RAW | READONLY | RECLAIM | REPLACE | REQ | RESIZE | RIGHT | SCROLL | SEPARATOR 
       | SINGLE | SKIP | STATIC | STATUS | STD | SYSTEM | THREAD | THOUS | TILED | TIMER | TIP | TRN | TOOLBOX | TYPE | UPR | USE | VALUE | VIRTUAL 
       | VSCROLL | WALLPAPER | WIZARD | INDEX | VCR | PALETTE) 
-      (LPAREN expression? (COMMA expression?)* RPAREN)?
+      (LPAREN argumentList? RPAREN)?
     ;
 
 // ============================================================================

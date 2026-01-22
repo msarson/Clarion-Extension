@@ -31,12 +31,11 @@ This skill helps diagnose parse errors in Clarion source files using the ANTLR g
 │  - Parses with LL mode  │  ← Two-stage SLL→LL parsing
 │  - Collects errors      │  ← Tracks line/col/message
 └────────┬────────────────┘
-         
          ▼
 ┌─────────────────────────┐
 │  Error Report           │
 │  - Line numbers         │
-│  - Error messages       │th
+│  - Error messages       │
 │  - Code context         │
 │  - Parse time stats     │
 └─────────────────────────┘
