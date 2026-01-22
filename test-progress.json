@@ -1,5 +1,5 @@
 {
-  "lastTestedFile": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\RightReportsPreview.inc",
+  "lastTestedFile": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\RightReportsTree.inc",
   "passedFiles": [
     "DrawAPI.clw",
     "DrawC002.clw",
@@ -73,12 +73,16 @@
     "RightReportsFormula.clw",
     "RightReportsFormula.inc",
     "RightReportsPreview.clw",
-    "RightReportsPreview.inc"
+    "RightReportsPreview.inc",
+    "RightReportsPrinter.clw",
+    "RightReportsPrinter.inc",
+    "RightReportsTree.clw",
+    "RightReportsTree.inc"
   ],
   "failedFile": {
-    "file": "RightReportsPrinter.clw",
-    "path": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\RightReportsPrinter.clw",
-    "errorLine": "4150",
-    "errorCount": 3
+    "file": "SelfService.clw",
+    "path": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\SelfService.clw",
+    "errorLine": "87",
+    "errorCount": 1
   }
 }

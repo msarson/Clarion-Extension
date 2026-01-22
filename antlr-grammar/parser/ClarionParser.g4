@@ -336,7 +336,7 @@ acceptStatement
 // ============================================================================
 caseStatement
     : CASE expression statementSeparator+
-      (ofClause | orofClause)+ 
+      (ofClause | orofClause)* 
       elseCaseClause?
       (QUESTION? END | DOT)
     ;
