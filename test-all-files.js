@@ -35,12 +35,16 @@ function loadProgress() {
     if (fs.existsSync(PROGRESS_FILE)) {
         try {
             const data = JSON.parse(fs.readFileSync(PROGRESS_FILE, 'utf8'));
+            // Ensure skipped array exists
+            if (!data.skipped) {
+                data.skipped = [];
+            }
             return data;
         } catch (e) {
             log(`Warning: Could not load progress file: ${e.message}`, 'yellow');
         }
     }
-    return { lastTestedFile: null, passedFiles: [], failedFile: null };
+    return { lastTestedFile: null, passedFiles: [], failedFile: null, skipped: [] };
 }
 
 function saveProgress(progress) {
@@ -154,6 +158,15 @@ function main() {
     for (let i = startIndex; i < allFiles.length; i++) {
         const file = allFiles[i];
         const fileName = path.basename(file);
+        
+        // Skip files in the skipped list
+        if (progress.skipped && progress.skipped.includes(fileName)) {
+            log(`\n[${i + 1}/${allFiles.length}] ${fileName}`, 'bright');
+            log(`  ⊘ SKIPPED (in skip list)`, 'yellow');
+            progress.lastTestedFile = file;
+            saveProgress(progress);
+            continue;
+        }
         
         log(`\n[${i + 1}/${allFiles.length}] ${fileName}`, 'bright');
         

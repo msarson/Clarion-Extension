@@ -1,5 +1,5 @@
 {
-  "lastTestedFile": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\netwebsessionsInterface.inc",
+  "lastTestedFile": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\xFiles.clw",
   "passedFiles": [
     "DrawAPI.clw",
     "DrawC002.clw",
@@ -211,15 +211,41 @@
     "netwebm.inc",
     "netwebsessions.clw",
     "netwebsessions.inc",
-    "netwebsessionsInterface.inc"
+    "netwebsessionsInterface.inc",
+    "netwebsocketclient.clw",
+    "netwebsocketclient.inc",
+    "oiABPROI.clw",
+    "oiABPROIversionspecific.clw",
+    "oiExcel.clw",
+    "oiOfficeInside.inc",
+    "oiOutlook.clw",
+    "oiPowerPoint.clw",
+    "oiUtil.clw",
+    "oiUtil.inc",
+    "oiWord.clw",
+    "oifunctionsmap.clw",
+    "oiobject.clw",
+    "printf.clw",
+    "recent.clw",
+    "recent.inc",
+    "replicate.clw",
+    "replicate.inc",
+    "runscreen.clw",
+    "runscreen.inc",
+    "secwin.clw",
+    "secwin.inc",
+    "winevent.clw",
+    "winevent.inc",
+    "xFiles.clw"
   ],
   "failedFile": {
-    "file": "netwebsocket.clw",
-    "path": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\netwebsocket.clw",
-    "errorLine": "1",
-    "errorCount": 2
+    "file": "xFiles.inc",
+    "path": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\xFiles.inc",
+    "errorLine": "993",
+    "errorCount": 1
   },
   "skipped": [
-    "netwebsocket.clw"
+    "netwebsocket.clw",
+    "netwebsocket.inc"
   ]
 }

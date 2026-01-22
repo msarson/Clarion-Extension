@@ -279,9 +279,10 @@ thenClause
     ;
 
 // Statement suite: can be inline (same line, semicolon-separated) or block (multi-line)
+// or hybrid (inline followed by block)
 statementSuite
-    : inlineStatements
-    | blockStatements
+    : inlineStatements blockStatements?  // Allows: IF x THEN stmt\n  more stmts END
+    | blockStatements                     // Pure block form
     ;
 
 // Inline statements: same line or semicolon-separated (no DOT here - DOT is structure terminator only)
@@ -493,11 +494,11 @@ keyDeclaration
     ;
 
 groupDeclaration
-    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? GROUP (LPAREN ((IDENTIFIER | QUALIFIED_IDENTIFIER | SELF) (DOT (IDENTIFIER | QUALIFIED_IDENTIFIER))*)? RPAREN)? (COMMA groupAttributes)? (DOT | NEWLINE NEWLINE* dataDeclarationList (END | DOT) NEWLINE*)
+    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? GROUP (LPAREN ((IDENTIFIER | QUALIFIED_IDENTIFIER | SELF) (DOT (IDENTIFIER | QUALIFIED_IDENTIFIER))*)? RPAREN)? (COMMA groupAttributes)? (DOT | NEWLINE NEWLINE* dataDeclarationList (END | DOT))
     ;
 
 queueDeclaration
-    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? QUEUE (LPAREN ((IDENTIFIER | QUALIFIED_IDENTIFIER | SELF) (DOT (IDENTIFIER | QUALIFIED_IDENTIFIER))*)? RPAREN)? (COMMA queueAttributes)? (DOT | NEWLINE NEWLINE* dataDeclarationList (END | DOT) NEWLINE*)
+    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? QUEUE (LPAREN ((IDENTIFIER | QUALIFIED_IDENTIFIER | SELF) (DOT (IDENTIFIER | QUALIFIED_IDENTIFIER))*)? RPAREN)? (COMMA queueAttributes)? (DOT | NEWLINE NEWLINE* dataDeclarationList (END | DOT))
     ;
 
 itemizeDeclaration
