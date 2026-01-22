@@ -274,10 +274,13 @@ ifStatement
     : IF expression STATEMENT_SEPARATOR singleLineStatements statementTerminator  // One-line IF with semicolon: IF cond; stmt END
     | IF expression DOT  // Single-line IF with just condition: if x.
     | IF expression THEN DOT  // Single-line IF with THEN but no statement: if x then .
-    | IF expression THEN singleLineStatements statementSeparator+ elsifClause+ elseClause? statementTerminator  // ELSIF variant
+    | IF expression THEN singleLineStatements statementSeparator+ elsifClause+ DOT  // ELSIF variant ending with DOT (terminates IF)
+    | IF expression THEN singleLineStatements statementSeparator+ elsifClause+ elseClause? statementTerminator  // ELSIF variant with terminator
+    | IF expression THEN? statementSeparator+ statementBlock elsifClause+ DOT  // Multi-line with ELSIF ending with DOT
+    | IF expression THEN? statementSeparator+ statementBlock elsifClause* elseClause DOT  // Multi-line with ELSE ending with DOT
     | IF expression THEN singleLineStatements statementSeparator ELSE singleLineStatements statementSeparator* statementTerminator  // IF THEN stmt NEWLINE ELSE stmt NEWLINE END
     | IF expression THEN singleLineStatements ELSE singleLineStatements statementTerminator  // Inline: stmt ELSE stmt  
-    | IF expression THEN? statementSeparator+ statementBlock elsifClause* elseClause? statementTerminator  // Multi-line
+    | IF expression THEN? statementSeparator+ statementBlock elsifClause* elseClause? statementTerminator  // Multi-line with terminator
     | IF expression THEN? statementSeparator+ statementBlock nonEmptyStatement DOT  // Multi-line with last statement ending in DOT
     | IF expression THEN singleLineStatements statementSeparator* statementTerminator  // IF THEN stmt (no ELSE) - must be last single-line variant
     ;
@@ -293,12 +296,14 @@ singleLineStatements
     ;
 
 elsifClause
-    : QUESTION? ELSIF expression THEN singleLineStatements statementSeparator+  // Single-line: elsif x then stmt
+    : QUESTION? ELSIF expression THEN singleLineStatements DOT  // Single-line with DOT terminator: elsif x then stmt. (terminates entire IF)
+    | QUESTION? ELSIF expression THEN singleLineStatements statementSeparator+  // Single-line: elsif x then stmt (continues IF)
     | QUESTION? ELSIF expression THEN? statementSeparator+ statementBlock       // Multi-line: elsif x\n stmts
     ;
 
 elseClause
-    : QUESTION? ELSE singleLineStatements statementSeparator+  // Single-line: else stmt
+    : QUESTION? ELSE singleLineStatements DOT  // Single-line with DOT terminator: else stmt. (terminates entire IF)
+    | QUESTION? ELSE singleLineStatements statementSeparator+  // Single-line: else stmt (continues IF)
     | QUESTION? ELSE statementSeparator+ statementBlock        // Multi-line: else\n stmts
     ;
 
@@ -352,11 +357,11 @@ caseStatement
     ;
 
 ofClause
-    : QUESTION? OF ofExpression (OROF ofExpression)* statementSeparator+ statementBlock
+    : QUESTION? OF ofExpression statementSeparator+ statementBlock
     ;
 
 orofClause
-    : QUESTION? OROF ofExpression (OROF ofExpression)* statementSeparator+ statementBlock
+    : QUESTION? OROF ofExpression statementSeparator+ statementBlock
     ;
 
 // OF expression can be a single value or a range (e.g., OF 1 TO 10)
@@ -716,16 +721,15 @@ primaryExpression
 // This rule greedily consumes all DOT+ID sequences before postfix operators
 fieldRef
     : IMPLICIT_STRING anyIdentifier  // Handle xWin$xFEQ pattern ($ as subscript, not type suffix)
-    | ( SELF
-      | PARENT
-      | anyIdentifier
-      | QUALIFIED_IDENTIFIER
-      | IMPLICIT_NUMERIC   // Implicit LONG with # (e.g., Counter#)
-      | IMPLICIT_STRING    // Implicit STRING with $ (e.g., Percent$)
-      | IMPLICIT_QUOTE     // Implicit STRING(32) with " (e.g., Address")
-      | FIELD_EQUATE       // Field equate (e.g., ?FieldName)
-      )
-      (DOT anyIdentifier)*  // Zero or more DOT+ID chains (allow keywords as field names)
+    | anyIdentifier (COLON anyIdentifier)+  // Qualified ID: prefix:field or prefix:field:subfield (allows keywords after colon)
+    | anyIdentifier (DOT anyIdentifier)*    // Identifier with optional DOT chains
+    | QUALIFIED_IDENTIFIER (DOT anyIdentifier)*  // Lexer-level qualified ID with optional DOT chains
+    | SELF (DOT anyIdentifier)*
+    | PARENT (DOT anyIdentifier)*
+    | IMPLICIT_NUMERIC (DOT anyIdentifier)*   // Implicit LONG with # (e.g., Counter#)
+    | IMPLICIT_STRING (DOT anyIdentifier)*    // Implicit STRING with $ (e.g., Percent$)
+    | IMPLICIT_QUOTE (DOT anyIdentifier)*     // Implicit STRING(32) with " (e.g., Address")
+    | FIELD_EQUATE (DOT anyIdentifier)*       // Field equate (e.g., ?FieldName)
     ;
 
 newExpression

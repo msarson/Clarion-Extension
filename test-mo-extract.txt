@@ -1,0 +1,40 @@
+
+    of create:check
+    orof create:radio
+      if ThisField{prop:icon} <> ''
+        if self.CoolButtons[WinType]
+          cooltype = create:image
+          border = color:none
+          do MakeCool
+        end
+        ThisField{prop:flat} = 1
+        if ThisField{prop:inToolBar}
+          if self.ToolBarFontColor <> 0 then ThisField{prop:fontcolor} = self.ToolBarFontColor.
+        elsif self.ButtonFontColor[WinType] <> color:none then ThisField{prop:fontcolor} = self.ButtonFontColor[WinType].
+      else
+        do OnTab
+        if self.xp = 0
+          ThisField{prop:trn} = 1
+        else
+          ThisField{prop:flat} = 0
+          ThisField{prop:trn} = 1
+        end
+        if ThisField{prop:inToolBar}
+          if self.ToolBarFontColor <> 0 then ThisField{prop:fontcolor} = self.ToolBarFontColor.
+        elsif FieldOnTab
+          if self.OnTabFontColor[WinType] <> color:none then ThisField{prop:fontcolor} = self.OnTabFontColor[WinType].
+        elsif self.TextFontColor[WinType] <> color:none then ThisField{prop:fontcolor} = self.TextFontColor[WinType].
+      end
+      if ThisField{prop:type} = create:check
+        do SetOnTabColor
+      end
+    of create:string
+    orof create:sstring
+    orof create:prompt
+      if Thisfield{prop:color} < 0  ! string background color
+        do OnTab
+        ThisField{prop:trn} = 1
+        if ThisField{prop:inToolBar}
+          if self.ToolBarFontColor <> 0 then ThisField{prop:fontcolor} = self.ToolBarFontColor.
+        elsif FieldOnTab
+          if self.OnTabFontColor[WinType] <> color:none then ThisField{prop:fontcolor} = self.OnTabFontColor[WinType].

@@ -1,5 +1,5 @@
 {
-  "lastTestedFile": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\fm3equ.clw",
+  "lastTestedFile": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\libcurlws.clw",
   "passedFiles": [
     "DrawAPI.clw",
     "DrawC002.clw",
@@ -173,12 +173,29 @@
     "ezhmap.clw",
     "fe.inc",
     "feMedia.inc",
-    "fm3equ.clw"
+    "fm3equ.clw",
+    "hotdates.clw",
+    "hotdates.inc",
+    "hyper.clw",
+    "hyper.inc",
+    "insighte.clw",
+    "jFiles.clw",
+    "jFiles.inc",
+    "libcurl.clw",
+    "libcurl.inc",
+    "libcurldropbox.clw",
+    "libcurlftp.clw",
+    "libcurlhttp.clw",
+    "libcurlmail.clw",
+    "libcurlmime.clw",
+    "libcurlmulti.clw",
+    "libcurlurl.clw",
+    "libcurlws.clw"
   ],
   "failedFile": {
-    "file": "hotdates.clw",
-    "path": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\hotdates.clw",
-    "errorLine": "1474",
+    "file": "mo.clw",
+    "path": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\mo.clw",
+    "errorLine": "302",
     "errorCount": 1
   }
 }
