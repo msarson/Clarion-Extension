@@ -508,7 +508,7 @@ classBodyElement
     ;
 
 interfaceBody
-    : (NEWLINE* interfaceBodyElement)*
+    : (interfaceBodyElement | NEWLINE)*
     ;
 
 interfaceBodyElement
