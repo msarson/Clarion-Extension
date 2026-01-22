@@ -121,7 +121,7 @@ dataDeclarationList
 
 dataDeclaration
     : structureDeclaration
-    | variableDeclaration (statementSeparator | DOT)+  // Variable declarations can end with NEWLINE, semicolon, or DOT
+    | variableDeclaration (statementSeparator | DOT)*  // Variable declarations can end with NEWLINE, semicolon, DOT, or EOF
     | includeDirective statementSeparator
     | compileDirective statementSeparator
     ;
