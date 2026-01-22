@@ -57,7 +57,7 @@ memberDeclaration
 // ============================================================================
 
 mapSection
-    : MAP NEWLINE
+    : MAP NEWLINE+
       (NEWLINE* mapEntry)*
       END NEWLINE*
     ;
@@ -156,13 +156,13 @@ procedureList
 //   Label.Interface.Method PROCEDURE(...) - interface method implementation (2+ dots)
 
 procedureImplementation
-    : anyIdentifier (DOT anyIdentifier)* DOT (QUALIFIED_IDENTIFIER | anyIdentifier) (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE
+    : anyIdentifier (DOT anyIdentifier)* DOT (QUALIFIED_IDENTIFIER | anyIdentifier) (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE+
       NEWLINE* dataDeclarationList NEWLINE* codeSection?
-    | anyIdentifier (DOT anyIdentifier)* DOT (QUALIFIED_IDENTIFIER | anyIdentifier) (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE
+    | anyIdentifier (DOT anyIdentifier)* DOT (QUALIFIED_IDENTIFIER | anyIdentifier) (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE+
       NEWLINE* codeSection
-    | (QUALIFIED_IDENTIFIER | LABEL | anyIdentifier) (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE
+    | (QUALIFIED_IDENTIFIER | LABEL | anyIdentifier) (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE+
       NEWLINE* dataDeclarationList NEWLINE* codeSection?
-    | (QUALIFIED_IDENTIFIER | LABEL | anyIdentifier) (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE
+    | (QUALIFIED_IDENTIFIER | LABEL | anyIdentifier) (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE+
       NEWLINE* codeSection
     ;
 
@@ -427,7 +427,7 @@ structureDeclaration
     ;
 
 fileDeclaration
-    : label FILE (COMMA fileAttributes)? NEWLINE
+    : label FILE (COMMA fileAttributes)? NEWLINE+
       NEWLINE* keyDeclarations?
       NEWLINE* blobDeclarations?
       NEWLINE* recordDeclaration?
@@ -443,7 +443,7 @@ blobDeclaration
     ;
 
 recordDeclaration
-    : label? RECORD (COMMA (structureAttribute (COMMA structureAttribute)*))?  NEWLINE
+    : label? RECORD (COMMA (structureAttribute (COMMA structureAttribute)*))?  NEWLINE+
       dataDeclarationList
       (END | DOT) NEWLINE
     ;
@@ -465,19 +465,19 @@ queueDeclaration
     ;
 
 itemizeDeclaration
-    : label? ITEMIZE (LPAREN expression? RPAREN)? (COMMA itemizeAttributes)? NEWLINE
+    : label? ITEMIZE (LPAREN expression? RPAREN)? (COMMA itemizeAttributes)? NEWLINE+
       NEWLINE* (variableDeclaration (statementSeparator | DOT)+)*  // EQUATE declarations
       END NEWLINE
     ;
 
 classDeclaration
-    : label? CLASS (LPAREN ((IDENTIFIER | QUALIFIED_IDENTIFIER | SELF) (DOT (IDENTIFIER | QUALIFIED_IDENTIFIER))*)? RPAREN)? (COMMA? classAttributes)? NEWLINE
+    : label? CLASS (LPAREN ((IDENTIFIER | QUALIFIED_IDENTIFIER | SELF) (DOT (IDENTIFIER | QUALIFIED_IDENTIFIER))*)? RPAREN)? (COMMA? classAttributes)? NEWLINE+
       NEWLINE* classBody
       (END | DOT) NEWLINE
     ;
 
 interfaceDeclaration
-    : label? INTERFACE (LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER)? RPAREN)? (COMMA interfaceAttributes)? NEWLINE
+    : label? INTERFACE (LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER)? RPAREN)? (COMMA interfaceAttributes)? NEWLINE+
       NEWLINE* interfaceBody
       (END | DOT) NEWLINE
     ;
@@ -519,14 +519,14 @@ viewAttributes
     ;
 
 windowDeclaration
-    : IDENTIFIER WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE NEWLINE* windowControls END NEWLINE
-    | LABEL WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE NEWLINE* windowControls END NEWLINE
-    | IDENTIFIER WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE END NEWLINE
-    | LABEL WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE END NEWLINE
+    : IDENTIFIER WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE+ windowControls END NEWLINE
+    | LABEL WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE+ windowControls END NEWLINE
+    | IDENTIFIER WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE+ END NEWLINE
+    | LABEL WINDOW (LPAREN STRING_LITERAL? RPAREN)? (COMMA attribute)* NEWLINE+ END NEWLINE
     ;
 
 applicationDeclaration
-    : label APPLICATION (LPAREN expression RPAREN)? (COMMA windowAttributes)? NEWLINE
+    : label APPLICATION (LPAREN expression RPAREN)? (COMMA windowAttributes)? NEWLINE+
       NEWLINE* windowControls?
       END NEWLINE
     ;
@@ -547,28 +547,28 @@ controlDeclaration
 
 // Specialized control: SHEET (MUST have TABs)
 sheetControl
-    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? SHEET (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE
+    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? SHEET (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE+
       NEWLINE* tabControl+
       END NEWLINE
     ;
 
 // Specialized control: TAB (inside SHEET)
 tabControl
-    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? TAB (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE
+    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? TAB (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE+
       NEWLINE* controlDeclaration*
       END NEWLINE
     ;
 
 // Specialized control: OPTION (has child controls, typically RADIO)
 optionControl
-    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? OPTION (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE
+    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? OPTION (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE+
       NEWLINE* genericControl+
       END NEWLINE
     ;
 
 // Specialized control: GROUP (has nested controls)
 groupControl
-    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? GROUP (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE
+    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? GROUP (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE+
       NEWLINE* controlDeclaration*
       END NEWLINE
     ;
@@ -589,7 +589,7 @@ menubarDeclaration
 
 // MENU within MENUBAR
 menuDeclaration
-    : label? MENU (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE
+    : label? MENU (LPAREN expression? (COMMA expression?)* RPAREN)? (COMMA controlAttributes)? NEWLINE+
       NEWLINE* menuItemDeclaration*
       END NEWLINE
     ;
@@ -612,7 +612,7 @@ genericControlType
     ;
 
 reportDeclaration
-    : label REPORT (LPAREN expression? RPAREN)? reportAttributes? NEWLINE
+    : label REPORT (LPAREN expression? RPAREN)? reportAttributes? NEWLINE+
       NEWLINE* reportStructure?
       END NEWLINE
     ;
