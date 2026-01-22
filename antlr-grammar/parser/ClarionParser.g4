@@ -486,15 +486,11 @@ itemizeDeclaration
     ;
 
 classDeclaration
-    : label? CLASS (LPAREN ((IDENTIFIER | QUALIFIED_IDENTIFIER | SELF) (DOT (IDENTIFIER | QUALIFIED_IDENTIFIER))*)? RPAREN)? (COMMA? classAttributes)? NEWLINE+
-      NEWLINE* classBody
-      (END | DOT) NEWLINE*
+    : label? CLASS (LPAREN ((IDENTIFIER | QUALIFIED_IDENTIFIER | SELF) (DOT (IDENTIFIER | QUALIFIED_IDENTIFIER))*)? RPAREN)? (COMMA? classAttributes)? (DOT | NEWLINE+ NEWLINE* classBody (END | DOT) NEWLINE*)
     ;
 
 interfaceDeclaration
-    : label? INTERFACE (LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER)? RPAREN)? (COMMA interfaceAttributes)? NEWLINE+
-      NEWLINE* interfaceBody
-      (END | DOT) NEWLINE*
+    : label? INTERFACE (LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER)? RPAREN)? (COMMA interfaceAttributes)? (DOT | NEWLINE+ NEWLINE* interfaceBody (END | DOT) NEWLINE*)
     ;
 
 classBody
