@@ -1,5 +1,5 @@
 {
-  "lastTestedFile": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\RightReports.inc",
+  "lastTestedFile": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\RightReportsPreview.inc",
   "passedFiles": [
     "DrawAPI.clw",
     "DrawC002.clw",
@@ -64,12 +64,21 @@
     "Premiere.inc",
     "PrintF.inc",
     "RightReports.clw",
-    "RightReports.inc"
+    "RightReports.inc",
+    "RightReportsData.clw",
+    "RightReportsData.inc",
+    "RightReportsE.inc",
+    "RightReportsEditor.clw",
+    "RightReportsEditor.inc",
+    "RightReportsFormula.clw",
+    "RightReportsFormula.inc",
+    "RightReportsPreview.clw",
+    "RightReportsPreview.inc"
   ],
   "failedFile": {
-    "file": "RightReportsData.clw",
-    "path": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\RightReportsData.clw",
-    "errorLine": "2725",
+    "file": "RightReportsPrinter.clw",
+    "path": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\RightReportsPrinter.clw",
+    "errorLine": "1745",
     "errorCount": 1
   }
 }

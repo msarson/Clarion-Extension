@@ -133,7 +133,7 @@ dataDeclaration
 // Anonymous fields: In GROUP/QUEUE structures, fields can be unnamed (e.g., string('\') for padding)
 variableDeclaration
     : (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER)? nonStructureDataType (LPAREN expression RPAREN)? (COMMA dataAttributes)?  // With optional initialization: hr HRESULT(value)
-    | (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER) AMPERSAND (baseType | anyIdentifier | QUALIFIED_IDENTIFIER) (COMMA dataAttributes)?  // Reference variable: Q &QueueType, b &byte, or allowedChars &string,Auto
+    | (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER) AMPERSAND (baseType | FILE | GROUP | QUEUE | KEY | REPORT | WINDOW | anyIdentifier | QUALIFIED_IDENTIFIER) (COMMA dataAttributes)?  // Reference variable: Q &QueueType, f &File, b &byte, or allowedChars &string,Auto
     | (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER) EQUATE (LPAREN expression RPAREN)?  // EQUATE declarations: with or without value (for ITEMIZE)
     | (anyIdentifier | LABEL | QUALIFIED_IDENTIFIER) (CLASS | anyIdentifier | QUALIFIED_IDENTIFIER) LPAREN (anyIdentifier | QUALIFIED_IDENTIFIER)? RPAREN DOT?  // Class instantiation: name CLASS(type), name CLASS(type)., or loc:class StringTheory()
     ;
@@ -167,8 +167,8 @@ procedureImplementation
     ;
 
 routineDeclaration
-    : (QUALIFIED_IDENTIFIER | IDENTIFIER) ROUTINE NEWLINE (routineDataSection routineCodeSection | statementList?)
-    | LABEL ROUTINE NEWLINE (routineDataSection routineCodeSection | statementList?)
+    : (QUALIFIED_IDENTIFIER | IDENTIFIER) ROUTINE NEWLINE+ (routineDataSection routineCodeSection | statementList?)
+    | LABEL ROUTINE NEWLINE+ (routineDataSection routineCodeSection | statementList?)
     ;
 
 // Routine-specific data section (requires CODE keyword after)
