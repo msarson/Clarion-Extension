@@ -1122,7 +1122,7 @@ dataType
     : MULTIPLY? baseType
     | ANY
     | MULTIPLY? QUESTION  // Untyped/variant return type, with optional pointer
-    | MULTIPLY? (FILE | KEY)  // Pointer to FILE or KEY
+    | MULTIPLY? (FILE | KEY | QUEUE | GROUP | CLASS)  // Pointer to FILE, KEY, QUEUE, GROUP, or CLASS
     | LIKE LPAREN ((QUALIFIED_IDENTIFIER | anyIdentifier | SELF) (DOT (QUALIFIED_IDENTIFIER | anyIdentifier))*) RPAREN  // Inherited data type - supports Type.field and SELF.field
     | (GROUP | QUEUE | CLASS) (LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER) RPAREN)?  // Structure with optional pre-defined type: GROUP(ContextType)
     ;
