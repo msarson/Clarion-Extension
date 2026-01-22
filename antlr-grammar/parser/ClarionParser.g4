@@ -365,7 +365,8 @@ ofExpression
     ;
 
 elseCaseClause
-    : ELSE statementSeparator+ statementBlock
+    : ELSE singleLineStatements statementSeparator+  // Single-line: ELSE stmt NEWLINE
+    | ELSE statementSeparator+ statementBlock        // Multi-line: ELSE NEWLINE stmts
     ;
 
 // ============================================================================
