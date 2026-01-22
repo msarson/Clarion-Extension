@@ -1,5 +1,5 @@
 {
-  "lastTestedFile": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\RightReportsTree.inc",
+  "lastTestedFile": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\SendToBase.clw",
   "passedFiles": [
     "DrawAPI.clw",
     "DrawC002.clw",
@@ -77,12 +77,17 @@
     "RightReportsPrinter.clw",
     "RightReportsPrinter.inc",
     "RightReportsTree.clw",
-    "RightReportsTree.inc"
+    "RightReportsTree.inc",
+    "SelfService.clw",
+    "SelfService.inc",
+    "SendTo.clw",
+    "SendTo.inc",
+    "SendToBase.clw"
   ],
   "failedFile": {
-    "file": "SelfService.clw",
-    "path": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\SelfService.clw",
-    "errorLine": "87",
+    "file": "StringTheory.clw",
+    "path": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\StringTheory.clw",
+    "errorLine": "6792",
     "errorCount": 1
   }
 }

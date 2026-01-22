@@ -95,6 +95,7 @@ moduleContent
     : procedurePrototype NEWLINE
     | procedurePrototypeShort NEWLINE
     | compileDirective NEWLINE
+    | NEWLINE  // Allow blank lines and comment lines
     ;
 
 // Procedure modifiers: comma-separated list of return types and attributes
