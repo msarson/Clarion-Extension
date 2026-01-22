@@ -270,7 +270,8 @@ assignmentStatement
 // 4. Empty THEN (if x then . - do nothing if true)
 // Order matters: ELSIF variant must come before simple ELSE variant
 ifStatement
-    : IF expression DOT  // Single-line IF with just condition: if x.
+    : IF expression STATEMENT_SEPARATOR singleLineStatements statementTerminator  // One-line IF with semicolon: IF cond; stmt END
+    | IF expression DOT  // Single-line IF with just condition: if x.
     | IF expression THEN DOT  // Single-line IF with THEN but no statement: if x then .
     | IF expression THEN singleLineStatements statementSeparator+ elsifClause+ elseClause? statementTerminator
     | IF expression THEN singleLineStatements ELSE singleLineStatements statementTerminator  // Inline else without separator: stmt else stmt
