@@ -314,10 +314,10 @@ loopStatement
     ;
 
 endLoopStatement
-    : UNTIL expression    // Post-condition: loop executes at least once, then tests
-    | WHILE expression    // Post-condition (rare but valid)
-    | DOT                 // Standard terminator
-    | END                 // Standard terminator
+    : QUESTION? UNTIL expression    // Post-condition: loop executes at least once, then tests
+    | QUESTION? WHILE expression    // Post-condition (rare but valid)
+    | QUESTION? DOT                 // Standard terminator
+    | QUESTION? END                 // Standard terminator
     ;
 
 // ============================================================================
