@@ -81,9 +81,10 @@ procedurePrototypeShort
     : procedureName parameterList? procedureModifiers?
     ;
 
-// Common procedure name pattern: supports multi-dot names
+// Common procedure name pattern: supports multi-dot names and qualified identifiers
 procedureName
-    : anyIdentifier (DOT anyIdentifier)*
+    : anyIdentifier (DOT anyIdentifier)* (DOT QUALIFIED_IDENTIFIER)?  // Simple name with optional qualified method: Class.Method::Overload
+    | anyIdentifier (DOT anyIdentifier)* DOT anyIdentifier              // Method in class: Class.Method
     | LABEL (DOT anyIdentifier)*
     | QUALIFIED_IDENTIFIER (DOT anyIdentifier)*  // Handles qualified names at column 0 like NYS950:GlobalObjectsWindow
     ;
@@ -115,15 +116,18 @@ globalDataSection
 
 // Note: localDataSection was for routines, removed. Procedures have data directly, routines use routineDataSection
 
+// FIX #1: Eliminate double-optional separators that cause exponential ambiguity
+// Policy: dataDeclarationList owns ALL separator consumption
+// Individual declarations do NOT consume trailing separators
 dataDeclarationList
-    : (statementSeparator | dataDeclaration)*  // Allow blank lines, semicolons, and comments between declarations
+    : (statementSeparator* dataDeclaration)* statementSeparator*
     ;
 
 dataDeclaration
     : structureDeclaration
-    | variableDeclaration (statementSeparator | DOT)*  // Variable declarations can end with NEWLINE, semicolon, DOT, or EOF
-    | includeDirective statementSeparator
-    | compileDirective statementSeparator
+    | variableDeclaration
+    | includeDirective
+    | compileDirective
     ;
 
 // Simple variable declaration
@@ -162,15 +166,13 @@ procedureList
 //   Label.Method PROCEDURE(...) - method implementation (1 dot)
 //   Label.Interface.Method PROCEDURE(...) - interface method implementation (2+ dots)
 
+// FIX #2: Collapse 4 redundant alternatives into 1
+// The 4 alternatives differed only in:
+//   - With/without DOT chains in name (handled by procedureName rule)
+//   - Optional vs mandatory codeSection (make it always optional - Clarion allows empty procedures)
 procedureImplementation
-    : anyIdentifier (DOT anyIdentifier)* DOT (QUALIFIED_IDENTIFIER | anyIdentifier) (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE+
+    : procedureName (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE+
       NEWLINE* dataDeclarationList? NEWLINE* mapSection? NEWLINE* dataDeclarationList? NEWLINE* codeSection?
-    | anyIdentifier (DOT anyIdentifier)* DOT (QUALIFIED_IDENTIFIER | anyIdentifier) (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE+
-      NEWLINE* dataDeclarationList? NEWLINE* mapSection? NEWLINE* dataDeclarationList? NEWLINE* codeSection
-    | (QUALIFIED_IDENTIFIER | LABEL | anyIdentifier) (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE+
-      NEWLINE* dataDeclarationList? NEWLINE* mapSection? NEWLINE* dataDeclarationList? NEWLINE* codeSection?
-    | (QUALIFIED_IDENTIFIER | LABEL | anyIdentifier) (PROCEDURE | FUNCTION) parameterList? returnType? NEWLINE+
-      NEWLINE* dataDeclarationList? NEWLINE* mapSection? NEWLINE* dataDeclarationList? NEWLINE* codeSection
     ;
 
 routineDeclaration
