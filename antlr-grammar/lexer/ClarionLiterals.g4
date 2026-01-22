@@ -106,9 +106,9 @@ NULL : 'NULL' ;
 // EQUATE CONSTANTS
 // ============================================================================
 
-// Field equate prefix: ?FieldName or ?Prefix:FieldName:Suffix
+// Field equate prefix: ?FieldName or ?Prefix:FieldName:Suffix or ?Field:2 (with instance numbers)
 FIELD_EQUATE
-    : '?' [A-Za-z_] [A-Za-z0-9_]* (':' [A-Za-z_] [A-Za-z0-9_]*)*
+    : '?' [A-Za-z_] [A-Za-z0-9_]* (':' [A-Za-z0-9_] [A-Za-z0-9_]*)*
     ;
 
 // ============================================================================

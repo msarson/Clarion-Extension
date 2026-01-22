@@ -1,8 +1,12 @@
 /**
  * Clarion Preprocessor
  * 
- * Handles COMPILE/OMIT blocks with dynamic terminators by replacing them with blank lines
- * before ANTLR parsing. This preserves line numbers for folding and symbol resolution.
+ * Handles COMPILE/OMIT blocks with dynamic terminators before ANTLR parsing.
+ * This preserves line numbers for folding and symbol resolution.
+ * 
+ * Parser Strategy:
+ * The parser assumes COMPILE conditions are true and OMIT conditions are false.
+ * Code inside OMIT blocks is ignored for structural analysis.
  * 
  * COMPILE/OMIT blocks use arbitrary string terminators that cannot be handled by a 
  * context-free grammar. Example:
@@ -14,9 +18,9 @@
  * 
  * The preprocessor:
  * 1. Detects COMPILE(terminator, condition) or OMIT(terminator, condition)
- * 2. Extracts the terminator string from the first argument
- * 3. Skips lines until it finds a line containing that terminator string
- * 4. Replaces all skipped lines with blank lines (preserving line count)
+ * 2. For COMPILE blocks: Removes directive/terminator lines, keeps code inside
+ * 3. For OMIT blocks: Removes directive/terminator lines AND code inside
+ * 4. Replaces all removed lines with blank lines (preserving line count)
  */
 
 export interface PreprocessorResult {
@@ -46,29 +50,44 @@ export class ClarionPreprocessor {
             const match = this.matchCompileOmitDirective(line);
             
             if (match) {
-                const { terminator, startLine } = match;
+                const { terminator, startLine, isCompile, condition } = match;
                 
-                // Keep the COMPILE/OMIT directive line itself (as comment to preserve structure)
-                result.push(`! ${line.trim()} !PREPROCESSED`);
+                // Evaluate the condition
+                const conditionResult = this.evaluateCondition(condition);
+                
+                // Determine if we should keep or remove the block
+                // COMPILE: keep if condition is TRUE, remove if FALSE
+                // OMIT: remove if condition is TRUE, keep if FALSE
+                const shouldKeepBlock = isCompile ? conditionResult : !conditionResult;
+                
+                // Remove the COMPILE/OMIT directive line itself
+                result.push('');
+                linesRemoved++;
                 i++;
                 
-                // Skip lines until we find the terminator
+                // Process lines until we find the terminator
                 let foundTerminator = false;
                 while (i < lines.length) {
                     const currentLine = lines[i];
                     
                     // Check if this line contains the terminator string
-                    // Per Clarion docs: "ends with the line that contains the same string constant"
                     if (this.lineContainsTerminator(currentLine, terminator)) {
-                        // Found terminator - replace with blank and stop skipping
-                        result.push(`! ${currentLine.trim()} !PREPROCESSED`);
+                        // Found terminator - remove it (blank line)
+                        result.push('');
+                        linesRemoved++;
                         foundTerminator = true;
                         i++;
                         break;
                     } else {
-                        // Inside block - replace with blank line
-                        result.push('');
-                        linesRemoved++;
+                        // Inside block - keep or remove based on condition evaluation
+                        if (shouldKeepBlock) {
+                            // Keep the code
+                            result.push(currentLine);
+                        } else {
+                            // Remove the code
+                            result.push('');
+                            linesRemoved++;
+                        }
                         i++;
                     }
                 }
@@ -94,28 +113,96 @@ export class ClarionPreprocessor {
     }
     
     /**
-     * Match COMPILE or OMIT directive and extract terminator string
+     * Match COMPILE or OMIT directive and extract terminator string, directive type, and condition
      * Pattern: COMPILE('terminator', condition) or OMIT('terminator', condition)
      */
-    private static matchCompileOmitDirective(line: string): { terminator: string; startLine: string } | null {
-        // Match COMPILE or OMIT with string literal
-        // Pattern: (COMPILE|OMIT)\s*\(\s*'([^']+)'
-        // Also handle double quotes: (COMPILE|OMIT)\s*\(\s*"([^"]+)"
+    private static matchCompileOmitDirective(line: string): { terminator: string; startLine: string; isCompile: boolean; condition: string | null } | null {
+        // Match COMPILE or OMIT with string literal and optional condition
+        // Pattern: (COMPILE|OMIT)\s*\(\s*'([^']+)'(\s*,\s*(.+?))?\s*\)
+        // Also handle double quotes
         
-        const singleQuotePattern = /\b(COMPILE|OMIT)\s*\(\s*'([^']+)'/i;
-        const doubleQuotePattern = /\b(COMPILE|OMIT)\s*\(\s*"([^"]+)"/i;
+        const singleQuotePattern = /\b(COMPILE|OMIT)\s*\(\s*'([^']+)'(?:\s*,\s*(.+?))?\s*\)/i;
+        const doubleQuotePattern = /\b(COMPILE|OMIT)\s*\(\s*"([^"]+)"(?:\s*,\s*(.+?))?\s*\)/i;
         
         let match = line.match(singleQuotePattern);
         if (match) {
-            return { terminator: match[2], startLine: line };
+            return { 
+                terminator: match[2], 
+                startLine: line,
+                isCompile: match[1].toUpperCase() === 'COMPILE',
+                condition: match[3] ? match[3].trim() : null
+            };
         }
         
         match = line.match(doubleQuotePattern);
         if (match) {
-            return { terminator: match[2], startLine: line };
+            return { 
+                terminator: match[2], 
+                startLine: line,
+                isCompile: match[1].toUpperCase() === 'COMPILE',
+                condition: match[3] ? match[3].trim() : null
+            };
         }
         
         return null;
+    }
+    
+    /**
+     * Evaluate a COMPILE/OMIT condition expression
+     * Assumes all symbols equal 1 (TRUE)
+     * Supported forms: symbol, symbol=int, symbol<>int, symbol>int, symbol<int, symbol>=int, symbol<=int
+     * Returns: true if condition evaluates to true, false otherwise
+     */
+    private static evaluateCondition(condition: string | null): boolean {
+        if (!condition) {
+            // No condition means unconditional
+            return true;
+        }
+        
+        // Remove whitespace for easier parsing
+        const expr = condition.trim();
+        
+        // Try to match: symbol operator integer
+        // Operators: =, <>, >, <, >=, <=
+        const comparisonPattern = /^([_a-zA-Z][_a-zA-Z0-9]*)\s*(=|<>|>=|<=|>|<)\s*(-?\d+)$/;
+        const match = expr.match(comparisonPattern);
+        
+        if (match) {
+            const symbol = match[1];
+            const operator = match[2];
+            const value = parseInt(match[3], 10);
+            
+            // Assume symbol = 1
+            const symbolValue = 1;
+            
+            // Evaluate comparison
+            switch (operator) {
+                case '=':
+                    return symbolValue === value;
+                case '<>':
+                    return symbolValue !== value;
+                case '>':
+                    return symbolValue > value;
+                case '<':
+                    return symbolValue < value;
+                case '>=':
+                    return symbolValue >= value;
+                case '<=':
+                    return symbolValue <= value;
+                default:
+                    return false;
+            }
+        }
+        
+        // Just a symbol by itself (no operator) - assume it's true if non-zero
+        // Since we assume all symbols = 1, this is always true
+        const symbolPattern = /^[_a-zA-Z][_a-zA-Z0-9]*$/;
+        if (symbolPattern.test(expr)) {
+            return true; // Symbol assumed = 1, which is true
+        }
+        
+        // Unknown expression format - default to true to be safe
+        return true;
     }
     
     /**

@@ -3,15 +3,17 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { CharStream, CommonTokenStream, ParserRuleContext, PredictionMode } from 'antlr4ng';
 import { ClarionLexer } from '../generated/ClarionLexer';
 import { ClarionParser, ProcedureImplementationContext, MapSectionContext, 
-         CodeSectionContext, IfStatementContext, LoopStatementContext, 
+         CodeSectionContext, IfStatementContext, LoopStatementContext, AcceptStatementContext,
          CaseStatementContext, ExecuteStatementContext, WindowDeclarationContext, GroupDeclarationContext,
-         QueueDeclarationContext, FileDeclarationContext, ClassDeclarationContext,
-         RoutineDeclarationContext, RecordDeclarationContext, ViewDeclarationContext,
+         QueueDeclarationContext, FileDeclarationContext, ClassDeclarationContext, InterfaceDeclarationContext,
+         ItemizeDeclarationContext, RoutineDeclarationContext, RecordDeclarationContext, ViewDeclarationContext,
          ApplicationDeclarationContext, ModuleReferenceContext,
          DoStatementContext, WindowControlsContext, TabControlContext, SheetControlContext,
          GroupControlContext, OptionControlContext, OleControlContext,
          MenubarDeclarationContext, MenuDeclarationContext, MenuItemDeclarationContext,
-         ElsifClauseContext, ElseClauseContext } from '../generated/ClarionParser';
+         ElsifClauseContext, ElseClauseContext,
+         ReportDeclarationContext, ReportBandContext,
+         OfClauseContext, OrofClauseContext, ElseCaseClauseContext } from '../generated/ClarionParser';
 import LoggerManager from '../logger';
 import { ClarionPreprocessor } from '../utils/ClarionPreprocessor';
 
@@ -358,8 +360,87 @@ export class AntlrFoldingProvider {
                 return null;
             }
         }
+        else if (ctx instanceof AcceptStatementContext) {
+            logger.debug(`ACCEPT STATEMENT: start line=${ctx.start?.line} col=${ctx.start?.column} (${ctx.start?.text}), stop line=${ctx.stop?.line} col=${ctx.stop?.column} (${ctx.stop?.text}, type=${ctx.stop?.type}), startLine=${startLine}, endLine=${endLine}`);
+            if (endLine > startLine) {
+                logger.debug(`  -> Creating fold: startLine=${startLine}, endLine=${endLine}`);
+                return { startLine, endLine };
+            } else {
+                logger.debug(`  -> Skipped (endLine ${endLine} <= startLine ${startLine})`);
+                return null;
+            }
+        }
         else if (ctx instanceof CaseStatementContext) {
             return { startLine, endLine };
+        }
+        else if (ctx instanceof OfClauseContext) {
+            // OF should fold to just before the next OF/OROF/ELSE, or to END if last
+            const parentCase = ctx.parent as CaseStatementContext;
+            if (parentCase && parentCase.children) {
+                // Find this clause's index in parent's children
+                const myIndex = parentCase.children.indexOf(ctx);
+                
+                // Look for the next OF/OROF/ELSE clause
+                for (let i = myIndex + 1; i < parentCase.children.length; i++) {
+                    const sibling = parentCase.children[i];
+                    if (sibling instanceof OfClauseContext || 
+                        sibling instanceof OrofClauseContext || 
+                        sibling instanceof ElseCaseClauseContext) {
+                        // Fold to the line before the next clause
+                        const nextClauseStartLine = (sibling as ParserRuleContext).start?.line;
+                        if (nextClauseStartLine && nextClauseStartLine > ctx.start.line) {
+                            const foldEndLine = nextClauseStartLine - 2; // -1 for 0-based, -1 for line before
+                            if (foldEndLine > startLine) {
+                                return { startLine, endLine: foldEndLine };
+                            }
+                        }
+                    }
+                }
+                
+                // No next clause found, fold to END
+                if (parentCase.stop && parentCase.stop.line > ctx.start.line) {
+                    return { startLine, endLine: parentCase.stop.line - 1 };
+                }
+            }
+            return null;
+        }
+        else if (ctx instanceof OrofClauseContext) {
+            // OROF should fold to just before the next OF/OROF/ELSE, or to END if last
+            const parentCase = ctx.parent as CaseStatementContext;
+            if (parentCase && parentCase.children) {
+                const myIndex = parentCase.children.indexOf(ctx);
+                
+                for (let i = myIndex + 1; i < parentCase.children.length; i++) {
+                    const sibling = parentCase.children[i];
+                    if (sibling instanceof OfClauseContext || 
+                        sibling instanceof OrofClauseContext || 
+                        sibling instanceof ElseCaseClauseContext) {
+                        const nextClauseStartLine = (sibling as ParserRuleContext).start?.line;
+                        if (nextClauseStartLine && nextClauseStartLine > ctx.start.line) {
+                            const foldEndLine = nextClauseStartLine - 2;
+                            if (foldEndLine > startLine) {
+                                return { startLine, endLine: foldEndLine };
+                            }
+                        }
+                    }
+                }
+                
+                if (parentCase.stop && parentCase.stop.line > ctx.start.line) {
+                    return { startLine, endLine: parentCase.stop.line - 1 };
+                }
+            }
+            return null;
+        }
+        else if (ctx instanceof ElseCaseClauseContext) {
+            // ELSE always folds to END (it's always last)
+            const parentCase = ctx.parent as CaseStatementContext;
+            if (parentCase && parentCase.stop) {
+                const elseEndLine = parentCase.stop.line - 1;
+                if (elseEndLine > startLine) {
+                    return { startLine, endLine: elseEndLine };
+                }
+            }
+            return null;
         }
         else if (ctx instanceof ExecuteStatementContext) {
             return { startLine, endLine };
@@ -382,6 +463,9 @@ export class AntlrFoldingProvider {
         else if (ctx instanceof QueueDeclarationContext) {
             return { startLine, endLine };
         }
+        else if (ctx instanceof ItemizeDeclarationContext) {
+            return { startLine, endLine };
+        }
         else if (ctx instanceof FileDeclarationContext) {
             return { startLine, endLine };
         }
@@ -392,6 +476,9 @@ export class AntlrFoldingProvider {
             return { startLine, endLine };
         }
         else if (ctx instanceof ClassDeclarationContext) {
+            return { startLine, endLine };
+        }
+        else if (ctx instanceof InterfaceDeclarationContext) {
             return { startLine, endLine };
         }
         else if (ctx instanceof ModuleReferenceContext) {
@@ -419,6 +506,12 @@ export class AntlrFoldingProvider {
             return { startLine, endLine };
         }
         else if (ctx instanceof MenuItemDeclarationContext) {
+            return { startLine, endLine };
+        }
+        else if (ctx instanceof ReportDeclarationContext) {
+            return { startLine, endLine };
+        }
+        else if (ctx instanceof ReportBandContext) {
             return { startLine, endLine };
         }
 

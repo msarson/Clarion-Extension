@@ -457,15 +457,11 @@ keyDeclaration
     ;
 
 groupDeclaration
-    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? GROUP (LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER)? RPAREN)? (COMMA groupAttributes)? NEWLINE
-      NEWLINE* dataDeclarationList
-      (END | DOT) NEWLINE?
+    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? GROUP (LPAREN ((IDENTIFIER | QUALIFIED_IDENTIFIER | SELF) (DOT (IDENTIFIER | QUALIFIED_IDENTIFIER))*)? RPAREN)? (COMMA groupAttributes)? (DOT | NEWLINE NEWLINE* dataDeclarationList (END | DOT) NEWLINE?)
     ;
 
 queueDeclaration
-    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? QUEUE (LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER)? RPAREN)? (COMMA queueAttributes)? NEWLINE
-      NEWLINE* dataDeclarationList
-      (END | DOT) NEWLINE
+    : (LABEL | QUALIFIED_IDENTIFIER | IDENTIFIER)? QUEUE (LPAREN ((IDENTIFIER | QUALIFIED_IDENTIFIER | SELF) (DOT (IDENTIFIER | QUALIFIED_IDENTIFIER))*)? RPAREN)? (COMMA queueAttributes)? (DOT | NEWLINE NEWLINE* dataDeclarationList (END | DOT) NEWLINE)
     ;
 
 itemizeDeclaration
@@ -475,7 +471,7 @@ itemizeDeclaration
     ;
 
 classDeclaration
-    : label? CLASS (LPAREN (IDENTIFIER | QUALIFIED_IDENTIFIER)? RPAREN)? (COMMA? classAttributes)? NEWLINE
+    : label? CLASS (LPAREN ((IDENTIFIER | QUALIFIED_IDENTIFIER | SELF) (DOT (IDENTIFIER | QUALIFIED_IDENTIFIER))*)? RPAREN)? (COMMA? classAttributes)? NEWLINE
       NEWLINE* classBody
       (END | DOT) NEWLINE
     ;
@@ -487,7 +483,7 @@ interfaceDeclaration
     ;
 
 classBody
-    : (NEWLINE* classBodyElement)*
+    : (classBodyElement | NEWLINE)*
     ;
 
 classBodyElement
@@ -616,7 +612,7 @@ genericControlType
     ;
 
 reportDeclaration
-    : label REPORT reportAttributes? NEWLINE
+    : label REPORT (LPAREN expression? RPAREN)? reportAttributes? NEWLINE
       NEWLINE* reportStructure?
       END NEWLINE
     ;
@@ -1020,7 +1016,7 @@ structureAttribute
     | NAME (LPAREN expression RPAREN)?
     | STATIC
     | THREAD
-    | TYPE
+    | TYPE (LPAREN RPAREN)?  // TYPE or TYPE() - compiler allows empty parens even though docs don't mention it
     | BINDABLE
     | EXTERNAL
     | AUTO

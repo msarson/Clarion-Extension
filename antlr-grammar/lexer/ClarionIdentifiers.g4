@@ -24,9 +24,9 @@ options { caseInsensitive = true; }
 // Also supports namespace qualification: History::PYA:Record
 // Case-insensitive for Clarion
 QUALIFIED_IDENTIFIER
-    : [A-Za-z_][A-Za-z0-9_]* '::' [A-Za-z_][A-Za-z0-9_]* ':' [A-Za-z_][A-Za-z0-9_]*  // Namespace::Prefix:Field
-    | [A-Za-z_][A-Za-z0-9_]* '::' [A-Za-z_][A-Za-z0-9_]*  // Namespace::Identifier
-    | [A-Za-z_][A-Za-z0-9_]* (':' [A-Za-z_][A-Za-z0-9_]*)+  // Prefix:Field or Prefix:Part1:Part2:...
+    : [A-Za-z_][A-Za-z0-9_]* '::' [A-Za-z_][A-Za-z0-9_]* ':' [A-Za-z0-9_][A-Za-z0-9_]*  // Namespace::Prefix:Field (field can start with digit)
+    | [A-Za-z_][A-Za-z0-9_]* '::' [A-Za-z0-9_][A-Za-z0-9_]*  // Namespace::Identifier (can start with digit after ::)
+    | [A-Za-z_][A-Za-z0-9_]* (':' [A-Za-z0-9_][A-Za-z0-9_]*)+  // Prefix:Field (field can start with digit) - e.g., event:3DON
     ;
 
 // NOTE: Member access (e.g., Object.Method) is handled in the parser

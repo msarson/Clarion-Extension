@@ -19,7 +19,7 @@ This skill helps diagnose parse errors in Clarion source files using the ANTLR g
 
 ### The Diagnostic Process
 
-```
+```this
 ┌─────────────────┐
 │  Clarion File   │
 └────────┬────────┘
@@ -31,12 +31,12 @@ This skill helps diagnose parse errors in Clarion source files using the ANTLR g
 │  - Parses with LL mode  │  ← Two-stage SLL→LL parsing
 │  - Collects errors      │  ← Tracks line/col/message
 └────────┬────────────────┘
-         │
+         
          ▼
 ┌─────────────────────────┐
 │  Error Report           │
 │  - Line numbers         │
-│  - Error messages       │
+│  - Error messages       │th
 │  - Code context         │
 │  - Parse time stats     │
 └─────────────────────────┘

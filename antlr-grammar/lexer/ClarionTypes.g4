@@ -66,6 +66,7 @@ TIME      : {this.charPositionInLine > 0}? 'TIME' ;
 
 MEMO      : {this.charPositionInLine > 0}? 'MEMO' ;
 BLOB      : {this.charPositionInLine > 0}? 'BLOB' ;
+BINARY    : {this.charPositionInLine > 0}? 'BINARY' ;  // Attribute for BLOB/MEMO to indicate binary storage
 ANY       : {this.charPositionInLine > 0}? 'ANY' ;
 BOOL      : {this.charPositionInLine > 0}? 'BOOL' ;
 VARIANT   : {this.charPositionInLine > 0}? 'VARIANT' ;
@@ -223,6 +224,7 @@ NOSHEET : 'NOSHEET' ;   // No tab control appearance
 
 PAGE : 'PAGE' ;         // Page attribute
 PAPER : 'PAPER' ;       // Paper size
+THOUS : 'THOUS' ;       // Thousands separator
 LANDSCAPE : 'LANDSCAPE' ; // Landscape orientation
 PREVIEW : 'PREVIEW' ;   // Preview mode
 ALONE : 'ALONE' ;       // Print alone

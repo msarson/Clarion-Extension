@@ -1,5 +1,5 @@
 {
-  "lastTestedFile": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\OddJob.clw",
+  "lastTestedFile": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\RightReports.inc",
   "passedFiles": [
     "DrawAPI.clw",
     "DrawC002.clw",
@@ -57,12 +57,19 @@
     "NetWebSocketServer.inc",
     "NetWww.clw",
     "NetWww.inc",
-    "OddJob.clw"
+    "OddJob.clw",
+    "OddJob.inc",
+    "OddJobEq.inc",
+    "Premiere.clw",
+    "Premiere.inc",
+    "PrintF.inc",
+    "RightReports.clw",
+    "RightReports.inc"
   ],
   "failedFile": {
-    "file": "OddJob.inc",
-    "path": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\OddJob.inc",
-    "errorLine": "208",
-    "errorCount": 1
+    "file": "RightReportsData.clw",
+    "path": "C:\\Clarion\\Clarion11.1\\accessory\\libsrc\\win\\RightReportsData.clw",
+    "errorLine": "861",
+    "errorCount": 3
   }
 }

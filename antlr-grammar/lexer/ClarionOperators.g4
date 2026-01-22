@@ -43,6 +43,7 @@ PLUS_EQ     : '+=' ;            // Compound assignment
 MINUS_EQ    : '-=' ;            // Compound assignment
 MULT_EQ     : '*=' ;            // Compound assignment
 DIV_EQ      : '/=' ;            // Compound assignment
+MODULO_EQ   : '%=' ;            // Compound assignment (modulo)
 AMP_EQ      : '&=' ;            // String concatenation assignment
 AMPERSAND   : '&' ;             // String concatenation / Reference
 TILDE       : '~' ;             // Bitwise NOT / Picture format delimiter
