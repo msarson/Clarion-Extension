@@ -36,7 +36,7 @@ export const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     // ✅ VIEW changed to use word boundary instead of requiring leading space
     VIEW: /\bVIEW\b/i,
     WINDOW: /\bWINDOW\b(?=\s*(\(|,))/i,
-    OPTION: /\bOPTION\b(?=\s*(\(|,))/i,
+    OPTION: /\bOPTION\b/i,
     ITEMIZE: /\bITEMIZE\b/i,
     EXECUTE: /\bEXECUTE\b/i,
     BEGIN: /\bBEGIN\b/i,  // ✅ Re-added
@@ -77,7 +77,7 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Operator]: /[\+\-\*\/\=\>\<\&\|\~]/,
     [TokenType.Delimiter]: /[\(\)\[\]\{\}\,\:\;]/,
     [TokenType.Label]: /^(?!(?:COMPILE|OMIT|EMBED|SECTION|ENDSECTION|MODULE|MAP|CLASS|FILE|GROUP|QUEUE|VIEW|WINDOW|REPORT|INTERFACE|RECORD|PROGRAM|MEMBER|END)\b)[A-Za-z_][A-Za-z0-9_:]*/i,  // Starts at column 0, can include colons, but NOT directive keywords, structure keywords, document keywords, or END
-    [TokenType.Variable]: /\b(?!(?:IF|LOOP|CASE|ACCEPT|EXECUTE|BEGIN|FILE|QUEUE|GROUP|RECORD|CLASS|WINDOW|REPORT|MODULE|MAP|VIEW|INTERFACE|OPTION|SHEET|TAB|END)\b)[A-Za-z_][A-Za-z0-9_]*\b/i,  // Exclude structure keywords to allow them to match Structure type first
+    [TokenType.Variable]: /\b(?!(?:IF|LOOP|CASE|ACCEPT|EXECUTE|BEGIN|FILE|QUEUE|GROUP|RECORD|CLASS|WINDOW|REPORT|MODULE|MAP|VIEW|INTERFACE|END)\b)[A-Za-z_][A-Za-z0-9_]*\b/i,  // Exclude structure keywords to allow them to match Structure type first
     [TokenType.ImplicitVariable]: /\b[A-Za-z_][A-Za-z0-9_]*[$#"]/i,  // ✅ Variables ending with implicit type suffixes
     [TokenType.Function]: /\b[A-Za-z_][A-Za-z0-9_]*(?=\()/i,
     [TokenType.ReferenceVariable]: /&\s*[A-Za-z_][A-Za-z0-9_]*/i,
