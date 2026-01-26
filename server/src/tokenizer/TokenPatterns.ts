@@ -36,7 +36,7 @@ export const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     // ✅ VIEW changed to use word boundary instead of requiring leading space
     VIEW: /\bVIEW\b/i,
     WINDOW: /\bWINDOW\b(?=\s*(\(|,))/i,
-    OPTION: /\bOPTION\b/i,
+    OPTION: /\bOPTION\b(?=\s*(\(|,))/i,
     ITEMIZE: /\bITEMIZE\b/i,
     EXECUTE: /\bEXECUTE\b/i,
     BEGIN: /\bBEGIN\b/i,  // ✅ Re-added

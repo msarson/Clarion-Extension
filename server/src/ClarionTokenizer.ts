@@ -215,6 +215,7 @@ export class ClarionTokenizer {
                             upperSubstring.startsWith('VIEW') ||
                             upperSubstring.startsWith('SHEET') ||
                             upperSubstring.startsWith('TAB') ||
+                            upperSubstring.startsWith('OPTION') ||
                             upperSubstring.startsWith('MENU') ||
                             upperSubstring.startsWith('MENUBAR') ||
                             upperSubstring.startsWith('TOOLBAR') ||

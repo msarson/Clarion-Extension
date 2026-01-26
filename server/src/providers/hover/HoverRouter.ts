@@ -12,7 +12,7 @@ import { HoverFormatter } from './HoverFormatter';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("HoverRouter");
-logger.setLevel("error");
+logger.setLevel("info");
 
 /**
  * Routes hover requests to appropriate resolvers based on context
