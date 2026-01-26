@@ -916,6 +916,7 @@ export class DocumentStructure {
         const isOf = nextValue === 'OF';
         
         // This END/period terminates a structure from the stack
+        // Simply pop the last opened structure - Clarion uses explicit END markers, not indentation
         const lastStructure = this.structureStack.pop();
         if (lastStructure) {
             lastStructure.finishesAt = token.line;
