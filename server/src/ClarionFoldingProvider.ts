@@ -34,6 +34,7 @@ class ClarionFoldingProvider {
             // Collect foldable tokens
             if (t.subType === TokenType.Procedure ||
                 t.subType === TokenType.Structure ||
+                t.type === TokenType.Structure ||  // Window, Queue, Group, etc.
                 t.subType === TokenType.Routine ||
                 t.subType === TokenType.Class ||
                 t.subType === TokenType.MapProcedure ||
@@ -141,7 +142,7 @@ class ClarionFoldingProvider {
             return; // Skip single-line with continuation
         }
     
-        // Only fold these subtypes:
+        // Only fold these subtypes or types:
         const foldableSubTypes = [
             TokenType.Procedure,
             TokenType.GlobalProcedure,
@@ -151,7 +152,9 @@ class ClarionFoldingProvider {
             TokenType.Structure
         ];
     
-        if (token.subType === undefined || !foldableSubTypes.includes(token.subType)) {
+        // Allow folding if subType matches OR if type is Structure (for WINDOW, QUEUE, GROUP, etc.)
+        if (token.type !== TokenType.Structure && 
+            (token.subType === undefined || !foldableSubTypes.includes(token.subType))) {
             return;
         }
     
@@ -163,7 +166,7 @@ class ClarionFoldingProvider {
             kind: FoldingRangeKind.Region
         });
     
-        logger.info(`✅ [FoldingProvider] Folded '${token.value}' (${TokenType[token.subType]}) from Line ${token.line} to ${token.finishesAt}`);
+        logger.info(`✅ [FoldingProvider] Folded '${token.value}' (${TokenType[token.subType ?? token.type]}) from Line ${token.line} to ${token.finishesAt}`);
     
         // ✅ Fold CODE block if applicable
         if (
