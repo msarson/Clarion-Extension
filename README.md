@@ -51,7 +51,9 @@ Open any Clarion solution - just open the folder.
 Jump to definitions, find implementations - works in same file immediately, cross-file with solution.
 - Press **F12** to go to definition (same file: no solution needed!)
 - Press **Ctrl+F12** to go to implementation
-- Hover for documentation and previews
+- Hover for documentation and previews — including declaration + implementation preview
+- **Chained navigation**: `SELF.Order.RangeList.Init` — hover, F12 and Ctrl+F12 all resolve through CLASS, QUEUE, and GROUP type chains
+- **SELF/PARENT properties**: F12 on `SELF.List` navigates to the class member declaration
 - Cross-file navigation requires solution
 - **[Learn more about Navigation →](docs/features/navigation.md)**
 

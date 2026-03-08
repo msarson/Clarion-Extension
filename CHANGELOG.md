@@ -7,10 +7,15 @@ All notable changes to the Clarion Extension are documented here.
 ## Recent Versions
 
 ### [0.8.7] - TBD
-**In Development**
+**Deep Class Navigation & Bug Fixes**
 
-**Planned/In Progress:**
-- TBD
+**Highlights:**
+- 🔗 Chained property/method navigation: `SELF.Order.RangeList.Init` — hover, F12, Ctrl+F12
+- 🎯 F12 on `SELF.property` (no-parens properties, not just method calls)
+- 🐛 Fixed OMIT/COMPILE block detection breaking hover in large files
+- 🐛 Fixed `<Key K>` optional parameter syntax in hover, F12, SignatureHelp
+- 🏗️ CLASS, QUEUE, and GROUP types all supported in chain resolution
+- 📊 535 tests passing
 
 [**→ Full details**](docs/changelogs/CHANGELOG-0.8.7.md)
 
