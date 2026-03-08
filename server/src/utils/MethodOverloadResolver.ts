@@ -384,6 +384,35 @@ export class MethodOverloadResolver {
      * Handles omittable parameters like <LONG SomeVar> and default values LONG SomeVar=1
      */
     /**
+     * Given a declaration signature and an array of candidate implementation signatures,
+     * returns the index of the best matching implementation.
+     * Matches first by parameter count, then by parameter types (e.g. STRING vs *STRING).
+     */
+    public findBestMatchingImplementation(declarationSignature: string, candidateSignatures: string[]): number {
+        if (candidateSignatures.length <= 1) return 0;
+
+        const declParamCount = ClarionPatterns.countParameters(declarationSignature);
+
+        const countMatches = candidateSignatures
+            .map((sig, idx) => ({ sig, idx, count: ClarionPatterns.countParameters(sig) }))
+            .filter(c => c.count === declParamCount);
+
+        if (countMatches.length === 0) return 0;
+        if (countMatches.length === 1) return countMatches[0].idx;
+
+        // Multiple candidates with same count — use type-based matching
+        const declTypes = this.extractParameterTypes(declarationSignature);
+        for (const candidate of countMatches) {
+            const implTypes = this.extractParameterTypes(candidate.sig);
+            if (this.parametersMatch(declTypes, implTypes)) {
+                return candidate.idx;
+            }
+        }
+
+        return countMatches[0].idx;
+    }
+
+    /**
      * Counts parameters in a procedure declaration
      * @deprecated Use ClarionPatterns.countParameters() instead
      */

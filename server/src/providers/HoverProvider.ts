@@ -38,7 +38,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("HoverProvider");
-logger.setLevel("error"); // Production: Only log errors
+logger.setLevel("error");
 
 /**
  * Provides hover information for local variables and parameters
@@ -114,15 +114,15 @@ export class HoverProvider {
 
             // Route through the router for keywords, procedures, methods, symbols, attributes, builtins
             const routedHover = await this.router.route(context);
-            if (routedHover) return routedHover;
+            if (routedHover) { return routedHover; }
 
             // Check for structure.field access (e.g., MyGroup.MyVar)
             const structureHover = await this.structureFieldResolver.resolveStructureAccess(word, line, position, document);
-            if (structureHover) return structureHover;
+            if (structureHover) { return structureHover; }
 
             // Check for field access after dot (e.g., self.member or variable.member)
             const fieldHover = await this.structureFieldResolver.resolveFieldAccess(word, line, position, document, this.countParametersInCall.bind(this));
-            if (fieldHover) return fieldHover;
+            if (fieldHover) { return fieldHover; }
 
             // currentScope already destructured above from context
 
@@ -727,7 +727,7 @@ export class HoverProvider {
      */
     private async checkClassTypeHover(word: string, document: TextDocument): Promise<Hover | null> {
         try {
-            const classIndexer = new ClassDefinitionIndexer();
+            const classIndexer = ClassDefinitionIndexer.getInstance();
             
             // Get project path from document URI
             const docPath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');

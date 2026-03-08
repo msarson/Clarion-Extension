@@ -29,7 +29,7 @@ export class VariableHoverResolver {
         private tokenCache: TokenCache,
         private crossFileCache?: CrossFileCache
     ) {
-        this.classIndexer = new ClassDefinitionIndexer();
+        this.classIndexer = ClassDefinitionIndexer.getInstance();
         this.symbolFinder = new SymbolFinderService(tokenCache, scopeAnalyzer);
     }
 

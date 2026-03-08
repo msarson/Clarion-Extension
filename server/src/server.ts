@@ -1444,7 +1444,7 @@ connection.onShutdown(() => {
         const timestamp = new Date().toISOString();
         const fullMsg = `[${timestamp}] ${msg}\n`;
         logger.info(msg);
-        console.log(`🛑 ${msg}`);
+        console.error(`🛑 ${msg}`);
         try {
             fs.appendFileSync(shutdownLogPath, fullMsg);
         } catch (e) {
@@ -1467,7 +1467,7 @@ connection.onShutdown(() => {
 connection.onExit(() => {
     const timestamp = new Date().toISOString();
     logger.info("SERVER EXIT: onExit handler called");
-    console.log(`🛑 SERVER EXIT: onExit handler called at ${timestamp}`);
+    console.error(`🛑 SERVER EXIT: onExit handler called at ${timestamp}`);
     const shutdownLogPath = path.join(__dirname, '..', '..', 'shutdown.log');
     try {
         fs.appendFileSync(shutdownLogPath, `[${timestamp}] SERVER EXIT: onExit handler called\n`);
@@ -1478,7 +1478,7 @@ connection.onExit(() => {
 
 // Listen on the connection
 logger.info("🚀 SERVER: Starting to listen on connection");
-console.log("🚀 SERVER: Starting to listen on connection at " + new Date().toISOString());
+console.error("🚀 SERVER: Starting to listen on connection at " + new Date().toISOString());
 connection.listen();
 
 // Add a handler for getting performance metrics

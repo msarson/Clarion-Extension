@@ -234,6 +234,43 @@ export class MethodHoverResolver {
     }
 
     /**
+     * Resolves hover for a PARENT.MethodName() call — looks up the method starting
+     * from the parent class of the current scope's class.
+     */
+    async resolveParentMethodCall(
+        fieldName: string,
+        document: TextDocument,
+        position: Position,
+        line: string,
+        paramCount?: number
+    ): Promise<Hover | null> {
+        const tokens = this.tokenCache.getTokens(document);
+        const memberInfo = await this.memberResolver.findParentClassMemberInfo(fieldName, document, position.line, tokens, paramCount);
+
+        if (!memberInfo) {
+            logger.info(`❌ findParentClassMemberInfo returned null for ${fieldName} in PARENT context`);
+            return null;
+        }
+
+        const isMethod = memberInfo.type.toUpperCase().includes('PROCEDURE') || memberInfo.type.toUpperCase().includes('FUNCTION');
+
+        if (isMethod) {
+            const implLocation = await this.findMethodImplementationCrossFile(
+                memberInfo.className,
+                fieldName,
+                document,
+                paramCount,
+                null
+            );
+            if (implLocation) {
+                return this.formatter.formatMethodCall(fieldName, memberInfo, implLocation);
+            }
+        }
+
+        return this.formatter.formatClassMember(fieldName, memberInfo);
+    }
+
+    /**
      * Find the CLASS token for a method declaration
      */
     private findClassTokenForMethodDeclaration(tokens: Token[], methodLine: number): Token | null {

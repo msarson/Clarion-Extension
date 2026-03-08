@@ -112,6 +112,17 @@ export class DefinitionProvider {
                             );
                         }
                     }
+
+                    if (hasParentheses && (beforeDot.toLowerCase() === 'parent' || beforeDot.toLowerCase().endsWith('parent'))) {
+                        // PARENT.Method() — look up the method starting from the parent class
+                        logger.info(`F12 on PARENT method call: PARENT.${methodName}()`);
+                        const paramCount = this.memberResolver.countParametersInCall(line, methodName);
+                        const memberInfo = await this.memberResolver.findParentClassMemberInfo(methodName, document, position.line, tokens, paramCount);
+                        if (memberInfo) {
+                            logger.info(`✅ Found PARENT method declaration at ${memberInfo.file}:${memberInfo.line}`);
+                            return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
+                        }
+                    }
                 }
             }
 

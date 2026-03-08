@@ -3,6 +3,7 @@ import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
 import { TokenHelper } from './TokenHelper';
+import { ClassDefinitionIndexer } from './ClassDefinitionIndexer';
 import * as path from 'path';
 import * as fs from 'fs';
 import LoggerManager from '../logger';
@@ -10,12 +11,15 @@ import LoggerManager from '../logger';
 const logger = LoggerManager.getLogger("ClassMemberResolver");
 logger.setLevel("error");
 
+type MemberInfo = { type: string; className: string; line: number; file: string };
+
 /**
  * Shared utility for resolving class members (methods, properties)
  * Used by both HoverProvider and DefinitionProvider
  */
 export class ClassMemberResolver {
     private tokenCache = TokenCache.getInstance();
+    private classIndexer = ClassDefinitionIndexer.getInstance();
 
     /**
      * Finds class member info for a given member name
@@ -32,7 +36,7 @@ export class ClassMemberResolver {
         currentLine: number,
         tokens: Token[],
         paramCount?: number
-    ): { type: string; className: string; line: number; file: string } | null {
+    ): MemberInfo | null {
         logger.info(`🔍 findClassMemberInfo called for member: ${memberName}${paramCount !== undefined ? ` with ${paramCount} parameters` : ''}`);
         
         const structure = this.tokenCache.getStructure(document); // 🚀 PERFORMANCE: Get cached structure
@@ -80,12 +84,11 @@ export class ClassMemberResolver {
         logger.info(`Looking for member ${memberName} in class ${className}`);
         
         // Search in current file first
-        const classTokens = TokenHelper.findClassStructures(tokens)
-            .filter(token => token.line > 0);
+        const classTokens = TokenHelper.findClassStructures(tokens);
         
         for (const classToken of classTokens) {
             const labelToken = tokens.find(t =>
-                t.type === TokenType.Label &&
+                (t.type === TokenType.Label || t.type === TokenType.Variable) &&
                 t.line === classToken.line &&
                 t.value.toLowerCase() === className!.toLowerCase()
             );
@@ -106,22 +109,25 @@ export class ClassMemberResolver {
                     // Only process tokens after the class start
                     if (token.line <= labelToken.line) continue;
                     
-                    // Stop at END token at column 0
-                    if (token.type === TokenType.Keyword &&
-                        token.value.toUpperCase() === 'END' && 
+                    // Stop at END token at column 0 (closes the CLASS body)
+                    // END is tokenized as EndStatement (not Keyword)
+                    if ((token.type === TokenType.EndStatement || 
+                         (token.type === TokenType.Keyword && token.value.toUpperCase() === 'END')) && 
                         token.start === 0) {
                         break;
                     }
                     
-                    // Debug: Log all label tokens in the class for troubleshooting
-                    if (token.type === TokenType.Label && token.start === 0) {
-                        logger.info(`📋 Class member candidate: "${token.value}" at line ${token.line}, type=${token.type}`);
+                    // Debug: Log all member-like tokens in the class for troubleshooting
+                    // Class members are tokenized as Variable (properties) or Label (col-0 identifiers)
+                    if (token.type === TokenType.Variable || token.type === TokenType.Label) {
+                        logger.info(`📋 Class member candidate: "${token.value}" at line ${token.line}, col ${token.start} type=${token.type}`);
                     }
                     
-                    // Check if this is a member at start of line
-                    if (token.type === TokenType.Label &&
-                        token.value.toLowerCase() === memberName.toLowerCase() && 
-                        token.start === 0) {
+                    // Check if this is a member inside this class.
+                    // Class members (properties and method names) are tokenized as Variable when
+                    // indented inside the CLASS body; Label is used for col-0 identifiers.
+                    if ((token.type === TokenType.Variable || token.type === TokenType.Label) &&
+                        token.value.toLowerCase() === memberName.toLowerCase()) {
                         
                         const i = token.line;
                         logger.info(`✅ Found member ${memberName} at line ${i} in current file`);
@@ -152,6 +158,16 @@ export class ClassMemberResolver {
                 if (bestMatch) {
                     return { type: bestMatch.type, className, line: bestMatch.line, file: document.uri };
                 }
+
+                // Member not in this class — walk the inheritance chain
+                const classDecLine = lines[labelToken.line];
+                const parentMatch = classDecLine.match(/CLASS\s*\(\s*(\w+)\s*\)/i);
+                if (parentMatch) {
+                    const parentResult = this.findMemberInParentChain(
+                        parentMatch[1], memberName, paramCount, new Set([className!.toLowerCase()])
+                    );
+                    if (parentResult) return parentResult;
+                }
             }
         }
         
@@ -168,7 +184,7 @@ export class ClassMemberResolver {
         memberName: string,
         document: TextDocument,
         paramCount?: number
-    ): { type: string; className: string; line: number; file: string } | null {
+    ): MemberInfo | null {
         const content = document.getText();
         const lines = content.split('\n');
         
@@ -223,9 +239,23 @@ export class ClassMemberResolver {
                         const candidates: { type: string; line: number; paramCount: number }[] = [];
                         
                         // Find all members with this name
+                        // Track nesting depth so nested GROUP/QUEUE/RECORD ENDs don't
+                        // terminate the scan prematurely
+                        let nestDepth = 0;
                         for (let k = j + 1; k < includeLines.length; k++) {
                             const memberLine = includeLines[k];
-                            if (memberLine.match(/^\s*END\s*$/i) || memberLine.match(/^END\s*$/i)) {
+                            const stripped = memberLine.replace(/\s*!.*$/, '').trim(); // strip comments
+
+                            // Detect nested scope openers (GROUP/QUEUE/RECORD as type keyword)
+                            if (/\b(GROUP|QUEUE|RECORD)\b/i.test(stripped) && !stripped.match(/^\s*END\s*$/i)) {
+                                nestDepth++;
+                            }
+
+                            if (/^\s*END\s*$/i.test(stripped)) {
+                                if (nestDepth > 0) {
+                                    nestDepth--;
+                                    continue;
+                                }
                                 break;
                             }
                             
@@ -258,6 +288,15 @@ export class ClassMemberResolver {
                             const fileUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
                             return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri };
                         }
+
+                        // Member not in this class — walk the inheritance chain
+                        const parentMatch = includeLine.match(/CLASS\s*\(\s*(\w+)\s*\)/i);
+                        if (parentMatch) {
+                            const parentResult = this.findMemberInParentChain(
+                                parentMatch[1], memberName, paramCount, new Set([className.toLowerCase()])
+                            );
+                            if (parentResult) return parentResult;
+                        }
                     }
                 }
             }
@@ -266,9 +305,6 @@ export class ClassMemberResolver {
         return null;
     }
 
-    /**
-     * Selects the best overload match based on parameter count
-     */
     private selectBestOverload(
         candidates: { type: string; line: number; paramCount: number }[],
         paramCount?: number
@@ -341,6 +377,294 @@ export class ClassMemberResolver {
         }
         
         return hasContent ? commaCount + 1 : 0;
+    }
+
+    /**
+     * Finds a member starting from the PARENT class of the current scope's class.
+     * Used for PARENT.Method() navigation.
+     * Async because it may need to trigger ClassDefinitionIndexer index build.
+     */
+    public async findParentClassMemberInfo(
+        memberName: string,
+        document: TextDocument,
+        currentLine: number,
+        tokens: Token[],
+        paramCount?: number
+    ): Promise<MemberInfo | null> {
+        const structure = this.tokenCache.getStructure(document);
+        let currentScope = TokenHelper.getInnermostScopeAtLine(structure, currentLine);
+        if (!currentScope) return null;
+
+        if (currentScope.subType === TokenType.Routine) {
+            const parentScope = TokenHelper.getParentScopeOfRoutine(structure, currentScope);
+            if (parentScope) currentScope = parentScope;
+            else return null;
+        }
+
+        let className: string | null = null;
+        if (currentScope.value.includes('.')) {
+            className = currentScope.value.split('.')[0];
+        } else {
+            const lines = document.getText().split('\n');
+            const scopeLine = lines[currentScope.line];
+            const m = scopeLine.match(/^(\w+)\.(\w+)\s+PROCEDURE/i);
+            if (m) className = m[1];
+        }
+        if (!className) return null;
+
+        // Ensure the class index is built — it's needed for parent chain resolution
+        await this.ensureIndexBuilt(document);
+
+        // Find this class's parent in current file tokens
+        const content = document.getText();
+        const lines = content.split('\n');
+        const classTokens = TokenHelper.findClassStructures(tokens);
+        for (const classToken of classTokens) {
+            const labelToken = tokens.find(t =>
+                t.type === TokenType.Label &&
+                t.line === classToken.line &&
+                t.value.toLowerCase() === className!.toLowerCase()
+            );
+            if (labelToken) {
+                const classDecLine = lines[labelToken.line];
+                const parentMatch = classDecLine.match(/CLASS\s*\(\s*(\w+)\s*\)/i);
+                if (parentMatch) {
+                    return this.findMemberInParentChain(
+                        parentMatch[1], memberName, paramCount, new Set([className.toLowerCase()])
+                    );
+                }
+                return null; // Class found but has no parent
+            }
+        }
+
+        // Class not in current file — find its declaration in includes to extract the parent
+        const parentClassName = this.findParentClassNameInIncludes(className, document);
+        if (parentClassName) {
+            return this.findMemberInParentChain(parentClassName, memberName, paramCount, new Set([className.toLowerCase()]));
+        }
+        return null;
+    }
+
+    /**
+     * Resolves the parent class name and MODULE file for the class at the current scope.
+     * Used by ImplementationProvider to find PARENT.Method() implementations.
+     * Returns { parentClassName, moduleFile? } or null if not determinable.
+     */
+    public async getParentClassInfo(
+        document: TextDocument,
+        currentLine: number,
+        tokens: Token[]
+    ): Promise<{ parentClassName: string; moduleFile?: string } | null> {
+        const structure = this.tokenCache.getStructure(document);
+        let currentScope = TokenHelper.getInnermostScopeAtLine(structure, currentLine);
+        if (!currentScope) return null;
+
+        if (currentScope.subType === TokenType.Routine) {
+            const parentScope = TokenHelper.getParentScopeOfRoutine(structure, currentScope);
+            if (parentScope) currentScope = parentScope;
+            else return null;
+        }
+
+        let className: string | null = null;
+        if (currentScope.value.includes('.')) {
+            className = currentScope.value.split('.')[0];
+        } else {
+            const lines = document.getText().split('\n');
+            const scopeLine = lines[currentScope.line];
+            const m = scopeLine.match(/^(\w+)\.(\w+)\s+PROCEDURE/i);
+            if (m) className = m[1];
+        }
+        if (!className) return null;
+
+        await this.ensureIndexBuilt(document);
+
+        // Try to find parent class name in current file tokens first
+        const content = document.getText();
+        const docLines = content.split('\n');
+        const classTokens = TokenHelper.findClassStructures(tokens);
+        let parentClassName: string | null = null;
+
+        for (const classToken of classTokens) {
+            const labelToken = tokens.find(t =>
+                t.type === TokenType.Label &&
+                t.line === classToken.line &&
+                t.value.toLowerCase() === className!.toLowerCase()
+            );
+            if (labelToken) {
+                const classDecLine = docLines[labelToken.line];
+                const parentMatch = classDecLine.match(/CLASS\s*\(\s*(\w+)\s*\)/i);
+                parentClassName = parentMatch ? parentMatch[1] : null;
+                break;
+            }
+        }
+
+        // Fall back to scanning include files / classIndexer
+        if (!parentClassName) {
+            parentClassName = this.findParentClassNameInIncludes(className, document);
+        }
+
+        if (!parentClassName) return null;
+
+        // Resolve the parent class MODULE file from the classIndexer
+        let moduleFile: string | undefined;
+        const parentInfos = this.classIndexer.findClass(parentClassName);
+        if (parentInfos && parentInfos.length > 0) {
+            const parentInfo = parentInfos.find(d => !d.isType) || parentInfos[0];
+            const moduleMatch = parentInfo.lineContent.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i);
+            if (moduleMatch) moduleFile = moduleMatch[1];
+        }
+
+        return { parentClassName, moduleFile };
+    }
+
+    /**
+     * Ensures the ClassDefinitionIndexer has indexed all projects in the current solution.
+     * Called before parent-chain resolution since the index is built lazily.
+     */
+    private async ensureIndexBuilt(document: TextDocument): Promise<void> {
+        const solutionManager = SolutionManager.getInstance();
+        if (!solutionManager?.solution) return;
+        for (const project of solutionManager.solution.projects) {
+            await this.classIndexer.getOrBuildIndex(project.path);
+        }
+    }
+
+    /**
+     * Finds the parent class name for a given class by scanning INCLUDE files.
+     * Returns the parent class name string, or null if not found.
+     */
+    private findParentClassNameInIncludes(className: string, document: TextDocument): string | null {
+        const filePath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
+        const content = document.getText();
+        const lines = content.split('\n');
+
+        for (let i = 0; i < lines.length; i++) {
+            const includeMatch = lines[i].match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
+            if (!includeMatch) continue;
+
+            let resolvedPath: string | null = null;
+            const solutionManager = SolutionManager.getInstance();
+            if (solutionManager && solutionManager.solution) {
+                for (const project of solutionManager.solution.projects) {
+                    const resolved = project.getRedirectionParser().findFile(includeMatch[1]);
+                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
+                        resolvedPath = resolved.path;
+                        break;
+                    }
+                }
+            }
+            if (!resolvedPath) {
+                const rel = path.join(path.dirname(filePath), includeMatch[1]);
+                if (fs.existsSync(rel)) resolvedPath = rel;
+            }
+
+            if (resolvedPath) {
+                const includeLines = fs.readFileSync(resolvedPath, 'utf8').split('\n');
+                for (let j = 0; j < includeLines.length; j++) {
+                    if (!new RegExp(`^${className}\\s+CLASS`, 'i').test(includeLines[j])) continue;
+                    const parentMatch = includeLines[j].match(/CLASS\s*\(\s*(\w+)\s*\)/i);
+                    return parentMatch ? parentMatch[1] : null;
+                }
+            }
+        }
+
+        // Also try the ClassDefinitionIndexer (covers libsrc paths)
+        const classInfos = this.classIndexer.findClass(className);
+        if (classInfos && classInfos.length > 0) {
+            const def = classInfos.find(d => !d.isType) || classInfos[0];
+            return def.parentClass || null;
+        }
+
+        return null;
+    }
+
+    /**
+     * Walks up the CLASS(Parent) inheritance chain looking for a member.
+     * Uses ClassDefinitionIndexer for fast class-to-file resolution.
+     * Visited set prevents infinite loops from circular inheritance (which Clarion
+     * shouldn't have, but defensive programming is worthwhile).
+     */
+    private findMemberInParentChain(
+        className: string,
+        memberName: string,
+        paramCount: number | undefined,
+        visited: Set<string>
+    ): MemberInfo | null {
+        const key = className.toLowerCase();
+        if (visited.has(key)) {
+            logger.info(`Cycle detected in inheritance chain at ${className}`);
+            return null;
+        }
+        visited.add(key);
+
+        logger.info(`Searching parent class ${className} for member ${memberName}`);
+
+        const classInfos = this.classIndexer.findClass(className);
+        if (!classInfos || classInfos.length === 0) {
+            logger.info(`Parent class ${className} not found in index`);
+            return null;
+        }
+
+        // Prefer a non-TYPE definition (TYPE classes are templates, not instances)
+        const classInfo = classInfos.find(d => !d.isType) || classInfos[0];
+
+        const result = this.searchFileForMember(classInfo.filePath, className, memberName, paramCount);
+        if (result) return result;
+
+        // Recurse into grandparent if present
+        if (classInfo.parentClass) {
+            return this.findMemberInParentChain(classInfo.parentClass, memberName, paramCount, visited);
+        }
+
+        return null;
+    }
+
+    /**
+     * Reads a file and searches for a member inside a specific class body.
+     * Returns the member info or null if not found.
+     */
+    private searchFileForMember(
+        filePath: string,
+        className: string,
+        memberName: string,
+        paramCount: number | undefined
+    ): MemberInfo | null {
+        try {
+            const content = fs.readFileSync(filePath, 'utf8');
+            const lines = content.split('\n');
+
+            for (let j = 0; j < lines.length; j++) {
+                if (!new RegExp(`^${className}\\s+CLASS`, 'i').test(lines[j])) continue;
+
+                logger.info(`Found class ${className} in ${path.basename(filePath)} at line ${j}`);
+                const candidates: { type: string; line: number; paramCount: number }[] = [];
+
+                for (let k = j + 1; k < lines.length; k++) {
+                    const memberLine = lines[k];
+                    if (/^\s*END\s*$/i.test(memberLine) || /^END\s*$/i.test(memberLine)) break;
+
+                    const memberMatch = memberLine.match(new RegExp(`^\\s*(${memberName})\\s+`, 'i'));
+                    if (memberMatch) {
+                        const afterMember = memberLine.substring(memberMatch[0].length).trim();
+                        const type = (afterMember.split(/\s*!/).shift() || afterMember).trim() || 'Unknown';
+                        let declParamCount = 0;
+                        if (type.toUpperCase().startsWith('PROCEDURE')) {
+                            declParamCount = this.countParametersInDeclaration(memberLine);
+                        }
+                        candidates.push({ type, line: k, paramCount: declParamCount });
+                    }
+                }
+
+                const bestMatch = this.selectBestOverload(candidates, paramCount);
+                if (bestMatch) {
+                    const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
+                    return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri };
+                }
+            }
+        } catch (error) {
+            logger.error(`Error reading ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        return null;
     }
 
     /**

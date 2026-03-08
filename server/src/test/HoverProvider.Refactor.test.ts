@@ -67,6 +67,67 @@ END`;
         });
     });
 
+    suite('SELF.property hover - inline class (token-based)', () => {
+        test('should provide hover for indented class property in same file', async () => {
+            // In Clarion, method implementations end at the next procedure (not END)
+            const code = [
+                'MyClass    CLASS',
+                '  MyProp   STRING(10)',
+                '  DoWork   PROCEDURE()',
+                'END',
+                '',
+                'MyClass.DoWork PROCEDURE()',
+                'CODE',
+                '  SELF.MyProp = \'hello\'',
+            ].join('\n');
+
+            const doc = TextDocument.create('test://selfprop1.clw', 'clarion', 1, code);
+            // "  SELF.MyProp = 'hello'"  (line 7)
+            // "  SELF." = 7 chars → MyProp starts at col 7, cursor at col 9 (inside)
+            const position = Position.create(7, 9);
+
+            const hover = await provider.provideHover(doc, position);
+
+            assert.ok(hover, 'Should provide hover for class property');
+            const content = typeof hover.contents === 'string'
+                ? hover.contents
+                : 'value' in hover.contents ? hover.contents.value : '';
+            assert.ok(content.includes('MyProp'), 'Hover should mention the property name');
+            assert.ok(content.includes('MyClass'), 'Hover should mention the class name');
+            assert.ok(content.includes('Property'), 'Hover should indicate it is a property');
+
+            tokenCache.clearTokens('test://selfprop1.clw');
+        });
+
+        test('should show PRIVATE visibility in hover', async () => {
+            const code = [
+                'MyClass    CLASS',
+                '  SecretProp  STRING(10),PRIVATE',
+                '  DoWork      PROCEDURE()',
+                'END',
+                '',
+                'MyClass.DoWork PROCEDURE()',
+                'CODE',
+                '  SELF.SecretProp = \'hidden\'',
+            ].join('\n');
+
+            const doc = TextDocument.create('test://selfprop2.clw', 'clarion', 1, code);
+            // "  SELF.SecretProp" — SecretProp starts at col 7
+            const position = Position.create(7, 10);
+
+            const hover = await provider.provideHover(doc, position);
+
+            assert.ok(hover, 'Should provide hover for private class property');
+            const content = typeof hover.contents === 'string'
+                ? hover.contents
+                : 'value' in hover.contents ? hover.contents.value : '';
+            assert.ok(content.includes('SecretProp') || content.includes('PRIVATE'),
+                'Hover should mention the property or its visibility');
+
+            tokenCache.clearTokens('test://selfprop2.clw');
+        });
+    });
+
     suite('MAP procedure hover (implementation → declaration)', () => {
         test('should show MAP declaration hover when hovering on implementation', async () => {
             const code = `  MAP

@@ -148,9 +148,20 @@ export class HoverFormatter {
     formatClassMember(name: string, info: ClassMemberInfo): Hover {
         const isMethod = info.type.toUpperCase().includes('PROCEDURE') || info.type.toUpperCase().includes('FUNCTION');
         const memberType = isMethod ? 'Method' : 'Property';
-        
+
+        // Extract visibility modifier from type string (e.g. ",PRIVATE" or ",PROTECTED")
+        let visibility = 'PUBLIC';
+        let visibilityIcon = '';
+        if (/,\s*PRIVATE\b/i.test(info.type)) {
+            visibility = 'PRIVATE';
+            visibilityIcon = '🔒 ';
+        } else if (/,\s*PROTECTED\b/i.test(info.type)) {
+            visibility = 'PROTECTED';
+            visibilityIcon = '🔐 ';
+        }
+
         const markdown = [
-            `**${name}** (Class ${memberType})`,
+            `**${visibilityIcon}${name}** (${visibility} Class ${memberType})`,
             ``,
             `**Class:** ${info.className}`,
             ``

@@ -33,13 +33,14 @@ export class StructureFieldResolver {
         document: TextDocument
     ): Promise<Hover | null> {
         // Check if this is a structure/group name followed by a dot (e.g., hovering over "MyGroup" in "MyGroup.MyVar")
-        // BUT: Skip SELF.member - those are class method calls handled separately
+        // BUT: Skip SELF.member and PARENT.member - those are class method calls handled separately
         const wordStartInLine = line.indexOf(word, Math.max(0, position.character - word.length));
         const dotIndex = line.indexOf('.', wordStartInLine);
         
         const isSelfMember = word.toUpperCase().startsWith('SELF.');
+        const isParentMember = word.toUpperCase().startsWith('PARENT.');
         
-        if (dotIndex > wordStartInLine && dotIndex < wordStartInLine + word.length + 5 && !isSelfMember) {
+        if (dotIndex > wordStartInLine && dotIndex < wordStartInLine + word.length + 5 && !isSelfMember && !isParentMember) {
             // There's a dot right after the word - this looks like structure.field notation
             logger.info(`Detected dot notation for word: ${word}, dotIndex: ${dotIndex}`);
             
@@ -101,6 +102,7 @@ export class StructureFieldResolver {
         // Check if beforeDot ends with 'self' as a complete word (not part of another word)
         // Handles: "self", "address(self", "x = self", etc.
         const isSelfMember = /\bself$/i.test(beforeDot);
+        const isParentMember = /\bparent$/i.test(beforeDot);
         logger.info(`resolveFieldAccess: Checking if beforeDot ends with 'self': "${beforeDot}" matches \\bself$ = ${isSelfMember}`);
         
         // This is a member access (hovering over the field after the dot)
@@ -114,6 +116,14 @@ export class StructureFieldResolver {
             }
             
             return await this.methodResolver.resolveMethodCall(fieldName, document, position, line, paramCount);
+        } else if (isParentMember) {
+            // parent.member - inherited class member
+            let paramCount: number | undefined;
+            if (hasParentheses) {
+                paramCount = countParametersInCall(line, fieldName) ?? undefined;
+                logger.info(`PARENT method call detected with ${paramCount} parameters`);
+            }
+            return await this.methodResolver.resolveParentMethodCall(fieldName, document, position, line, paramCount);
         } else {
             // variable.member - structure field access (e.g., MyGroup.MyVar)
             const structureNameMatch = beforeDot.match(/(\w+)\s*$/);

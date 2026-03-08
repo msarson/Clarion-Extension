@@ -33,8 +33,16 @@ export interface ClassIndex {
  * Provides fast lookup of class definitions by name
  */
 export class ClassDefinitionIndexer {
+    private static instance: ClassDefinitionIndexer;
     private indexes: Map<string, ClassIndex> = new Map(); // projectPath -> ClassIndex
     private static readonly CLASS_PATTERN = /^(\w+)\s+CLASS\s*([\(,\s]|$)/i;
+
+    public static getInstance(): ClassDefinitionIndexer {
+        if (!ClassDefinitionIndexer.instance) {
+            ClassDefinitionIndexer.instance = new ClassDefinitionIndexer();
+        }
+        return ClassDefinitionIndexer.instance;
+    }
 
     /**
      * Gets or builds the class index for a project
