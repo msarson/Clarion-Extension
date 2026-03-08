@@ -126,7 +126,7 @@ export class StructureFieldResolver {
                 logger.info(`PARENT method call detected with ${paramCount} parameters`);
             }
             return await this.methodResolver.resolveParentMethodCall(fieldName, document, position, line, paramCount);
-        } else if (/\b(self|parent)\b.+/i.test(beforeDot)) {
+        } else if (/^\s*(self|parent)\b/i.test(beforeDot) && beforeDot.includes('.')) {
             // Chained access: SELF.Order.MainKey or PARENT.Foo.Bar
             let paramCount: number | undefined;
             if (hasParentheses) {

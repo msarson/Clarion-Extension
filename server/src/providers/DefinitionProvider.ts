@@ -127,7 +127,7 @@ export class DefinitionProvider {
                     }
 
                     // Chained access: SELF.Order.MainKey or PARENT.Foo.Bar
-                    if (/\b(self|parent)\b.+\./i.test(beforeDot)) {
+                    if (/^\s*(self|parent)\b/i.test(beforeDot) && beforeDot.includes('.')) {
                         const paramCount = hasParentheses
                             ? this.memberResolver.countParametersInCall(line, methodName)
                             : undefined;
