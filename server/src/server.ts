@@ -31,7 +31,8 @@ import {
     ColorPresentationParams,
     ColorPresentation,
     TextDocumentSyncKind,
-    SignatureHelp
+    SignatureHelp,
+    ReferenceParams
 } from 'vscode-languageserver-protocol';
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
@@ -59,6 +60,7 @@ import { ClassConstantsCodeActionProvider } from './providers/ClassConstantsCode
 import { DiagnosticProvider } from './providers/DiagnosticProvider';
 import { SignatureHelpProvider } from './providers/SignatureHelpProvider';
 import { ImplementationProvider } from './providers/ImplementationProvider';
+import { ReferencesProvider } from './providers/ReferencesProvider';
 import { UnreachableCodeProvider } from './providers/UnreachableCodeProvider';
 import { ClarionSolutionInfo } from 'common/types';
 import { URI } from 'vscode-languageserver';
@@ -83,6 +85,7 @@ const definitionProvider = new DefinitionProvider();
 const hoverProvider = new HoverProvider();
 const signatureHelpProvider = new SignatureHelpProvider();
 const implementationProvider = new ImplementationProvider();
+const referencesProvider = new ReferencesProvider();
 
 // ✅ Create Connection and Documents Manager
 const connection = createConnection(ProposedFeatures.all);
@@ -141,6 +144,7 @@ connection.onInitialize((params) => {
                 colorProvider: true,
                 definitionProvider: true,
                 implementationProvider: true,
+                referencesProvider: true,
                 hoverProvider: true,
                 codeActionProvider: true,
                 signatureHelpProvider: {
@@ -1284,6 +1288,31 @@ connection.onImplementation(async (params) => {
         return implementation;
     } catch (error) {
         logger.error(`❌ Error providing implementation: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+    }
+});
+
+// Handle find all references requests
+connection.onReferences(async (params: ReferenceParams) => {
+    logger.info(`📂 Received references request for: ${params.textDocument.uri} at ${params.position.line}:${params.position.character}`);
+
+    if (!serverInitialized) {
+        logger.info(`⚠️ [DELAY] Server not initialized yet, delaying references request`);
+        return null;
+    }
+
+    const document = documents.get(params.textDocument.uri);
+    if (!document) {
+        logger.info(`⚠️ Document not found: ${params.textDocument.uri}`);
+        return null;
+    }
+
+    try {
+        const references = await referencesProvider.provideReferences(document, params.position, params.context);
+        logger.info(references ? `✅ Found ${references.length} reference(s)` : `⚠️ No references found`);
+        return references;
+    } catch (error) {
+        logger.error(`❌ Error providing references: ${error instanceof Error ? error.message : String(error)}`);
         return null;
     }
 });
