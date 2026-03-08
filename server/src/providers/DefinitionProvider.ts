@@ -138,6 +138,19 @@ export class DefinitionProvider {
                             return Location.create(chainedInfo.file, Range.create(chainedInfo.line, 0, chainedInfo.line, 0));
                         }
                     }
+
+                    // SELF.property or PARENT.property (no parentheses) — find the class member declaration
+                    if (!hasParentheses && /^\s*(self|parent)\b/i.test(beforeDot)) {
+                        const isSelf = /\bself$/i.test(beforeDot);
+                        logger.info(`F12 on ${isSelf ? 'SELF' : 'PARENT'} property: ${methodName}`);
+                        const memberInfo = isSelf
+                            ? this.memberResolver.findClassMemberInfo(methodName, document, position.line, tokens, undefined)
+                            : await this.memberResolver.findParentClassMemberInfo(methodName, document, position.line, tokens, undefined);
+                        if (memberInfo) {
+                            logger.info(`✅ Found property declaration at ${memberInfo.file}:${memberInfo.line}`);
+                            return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
+                        }
+                    }
                 }
             }
 

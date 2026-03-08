@@ -271,6 +271,68 @@ export class MethodHoverResolver {
     }
 
     /**
+     * Resolves hover for a chained method call like SELF.Order.RangeList.Init.
+     * chainedInfo already has the resolved className and declaration location.
+     * For PROCEDURE members, also finds the implementation and shows it.
+     */
+    async resolveChainedMethodCall(
+        fieldName: string,
+        chainedInfo: { type: string; className: string; line: number; file: string },
+        document: TextDocument,
+        paramCount?: number
+    ): Promise<Hover | null> {
+        const isMethod = chainedInfo.type.toUpperCase().includes('PROCEDURE') ||
+                         chainedInfo.type.toUpperCase().includes('FUNCTION');
+
+        if (isMethod) {
+            // Try solution-based cross-file search first
+            let implLocation = await this.findMethodImplementationCrossFile(
+                chainedInfo.className, fieldName, document, paramCount, null
+            );
+
+            // Fallback: derive CLW filename from the declaration INC file and use redirection
+            if (!implLocation) {
+                let declFilePath = chainedInfo.file;
+                if (declFilePath.startsWith('file:///')) {
+                    declFilePath = decodeURIComponent(declFilePath.replace('file:///', '')).replace(/\//g, '\\');
+                }
+                const declBase = path.basename(declFilePath, path.extname(declFilePath));
+                const implFileName = declBase + '.clw';
+                const currentPath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
+                const sm = SolutionManager.getInstance();
+                if (sm?.solution) {
+                    for (const project of sm.solution.projects) {
+                        const resolved = project.getRedirectionParser().findFile(implFileName, currentPath);
+                        if (resolved?.path && fs.existsSync(resolved.path)) {
+                            const implLine = this.searchFileForImplementation(resolved.path, chainedInfo.className, fieldName, paramCount);
+                            if (implLine !== null) {
+                                implLocation = `file:///${resolved.path.replace(/\\/g, '/')}:${implLine}`;
+                                break;
+                            }
+                        }
+                    }
+                }
+                // Last resort: same directory as declaration
+                if (!implLocation) {
+                    const directPath = path.join(path.dirname(declFilePath), implFileName);
+                    if (fs.existsSync(directPath)) {
+                        const implLine = this.searchFileForImplementation(directPath, chainedInfo.className, fieldName, paramCount);
+                        if (implLine !== null) {
+                            implLocation = `file:///${directPath.replace(/\\/g, '/')}:${implLine}`;
+                        }
+                    }
+                }
+            }
+
+            if (implLocation) {
+                return this.formatter.formatMethodCall(fieldName, chainedInfo, implLocation);
+            }
+        }
+
+        return this.formatter.formatClassMember(fieldName, chainedInfo);
+    }
+
+    /**
      * Find the CLASS token for a method declaration
      */
     private findClassTokenForMethodDeclaration(tokens: Token[], methodLine: number): Token | null {

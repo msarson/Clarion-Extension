@@ -135,7 +135,7 @@ export class StructureFieldResolver {
             }
             const chainedInfo = await this.chainedResolver.resolve(beforeDot, fieldName, document, position, paramCount);
             if (chainedInfo) {
-                return this.formatter.formatClassMember(fieldName, chainedInfo);
+                return this.methodResolver.resolveChainedMethodCall(fieldName, chainedInfo, document, paramCount);
             }
         } else {
             // variable.member - structure field access (e.g., MyGroup.MyVar)
