@@ -33,6 +33,17 @@ export class ChainedPropertyResolver {
     private memberResolver = new ClassMemberResolver();
 
     /**
+     * Extracts the rightmost SELF/PARENT chain from a full line prefix.
+     * Handles assignment expressions like "SELF.Order.X &= SELF.Primary"
+     * where we only want "SELF.Primary" (the rightmost chain).
+     */
+    public static extractChain(rawBeforeDot: string): string {
+        const matches = [...rawBeforeDot.matchAll(/\b(self|parent)\b/gi)];
+        if (matches.length === 0) return rawBeforeDot;
+        return rawBeforeDot.substring(matches[matches.length - 1].index!);
+    }
+
+    /**
      * Resolves a chained member access expression.
      *
      * @param beforeDot  Everything on the current line before the final dot,

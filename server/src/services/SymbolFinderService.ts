@@ -117,8 +117,10 @@ export class SymbolFinderService {
         
         for (const param of params) {
             const trimmedParam = param.trim();
+            // Strip optional-parameter angle brackets: <Key K> → Key K
+            const stripped = trimmedParam.replace(/^<(.*)>$/, '$1').trim();
             // Match: [*&]? TYPE NAME [= default]
-            const paramMatch = trimmedParam.match(/([*&]?\s*\w+)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*=.*)?$/i);
+            const paramMatch = stripped.match(/([*&]?\s*\w+)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*=.*)?$/i);
             
             if (paramMatch) {
                 const type = paramMatch[1].trim();
@@ -148,7 +150,7 @@ export class SymbolFinderService {
                             line: scopeToken.line,
                             character: paramToken.start
                         },
-                        declaration: trimmedParam,
+                        declaration: stripped,
                         originalWord: word,
                         searchWord: word
                     };

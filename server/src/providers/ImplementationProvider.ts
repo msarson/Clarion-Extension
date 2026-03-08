@@ -326,7 +326,8 @@ export class ImplementationProvider {
         {
             const dotBeforeIndex = line.lastIndexOf('.', position.character - 1);
             if (dotBeforeIndex > 0) {
-                const beforeDot = line.substring(0, dotBeforeIndex).trim();
+                const rawBeforeDot = line.substring(0, dotBeforeIndex).trim();
+                const beforeDot = ChainedPropertyResolver.extractChain(rawBeforeDot);
                 if (/^\s*(self|parent)\b/i.test(beforeDot) && beforeDot.includes('.')) {
                     const afterDot = line.substring(dotBeforeIndex + 1).trim();
                     const methodMatch = afterDot.match(/^(\w+)/);

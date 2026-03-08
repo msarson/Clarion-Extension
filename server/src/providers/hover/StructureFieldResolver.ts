@@ -83,7 +83,8 @@ export class StructureFieldResolver {
             return null;
         }
 
-        const beforeDot = line.substring(0, dotBeforeIndex).trim();
+        const rawBeforeDot = line.substring(0, dotBeforeIndex).trim();
+        const beforeDot = ChainedPropertyResolver.extractChain(rawBeforeDot);
         const afterDot = line.substring(dotBeforeIndex + 1).trim();
         const fieldMatch = afterDot.match(/^(\w+)/);
         

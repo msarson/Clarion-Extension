@@ -282,8 +282,10 @@ export class HoverProvider {
 
         for (const param of params) {
             const trimmedParam = param.trim();
+            // Strip optional-parameter angle brackets: <Key K> → Key K
+            const stripped = trimmedParam.replace(/^<(.*)>$/, '$1').trim();
             // Extract parameter: TYPE paramName or TYPE paramName=default
-            const paramMatch = trimmedParam.match(/([*&]?\s*\w+)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*=.*)?$/i);
+            const paramMatch = stripped.match(/([*&]?\s*\w+)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*=.*)?$/i);
             if (paramMatch) {
                 const type = paramMatch[1].trim();
                 const paramName = paramMatch[2];

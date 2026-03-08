@@ -81,7 +81,8 @@ export class DefinitionProvider {
             // Check if this is a method call (e.g., "self.SaveFile()" or "obj.Method()")
             const dotBeforeIndex = line.lastIndexOf('.', position.character - 1);
             if (dotBeforeIndex > 0) {
-                const beforeDot = line.substring(0, dotBeforeIndex).trim();
+                const rawBeforeDot = line.substring(0, dotBeforeIndex).trim();
+                const beforeDot = ChainedPropertyResolver.extractChain(rawBeforeDot);
                 const afterDot = line.substring(dotBeforeIndex + 1).trim();
                 const methodMatch = afterDot.match(/^(\w+)/);
                 
@@ -1756,12 +1757,14 @@ export class DefinitionProvider {
         
         for (const param of params) {
             const trimmedParam = param.trim();
-            logger.info(`Checking parameter: "${trimmedParam}"`);
+            // Strip optional-parameter angle brackets: <Key K> → Key K
+            const stripped = trimmedParam.replace(/^<(.*)>$/, '$1').trim();
+            logger.info(`Checking parameter: "${stripped}"`);
             
             // Extract parameter name (last word before = or end of parameter)
             // Format: TYPE paramName or TYPE paramName=default or *TYPE paramName or &TYPE paramName
             // Match pattern: optional pointer/reference, whitespace, type, whitespace, paramName, optional =default
-            const paramMatch = trimmedParam.match(/[*&]?\s*\w+\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*=.*)?$/i);
+            const paramMatch = stripped.match(/[*&]?\s*\w+\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*=.*)?$/i);
             if (paramMatch) {
                 const paramName = paramMatch[1];
                 logger.info(`Extracted parameter name: "${paramName}"`);
