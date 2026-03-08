@@ -9,7 +9,7 @@
  */
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { Location, Position } from 'vscode-languageserver-protocol';
+import { Location, Position, Range } from 'vscode-languageserver-protocol';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { MapProcedureResolver } from '../utils/MapProcedureResolver';
@@ -22,6 +22,7 @@ import LoggerManager from '../logger';
 import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { CrossFileCache } from './hover/CrossFileCache';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -35,6 +36,7 @@ export class ImplementationProvider {
     private crossFileCache: CrossFileCache;
     private overloadResolver: MethodOverloadResolver;
     private memberResolver: ClassMemberResolver;
+    private chainedResolver: ChainedPropertyResolver;
 
     constructor() {
         this.tokenCache = TokenCache.getInstance();
@@ -43,6 +45,7 @@ export class ImplementationProvider {
         this.crossFileResolver = new CrossFileResolver(this.tokenCache);
         this.overloadResolver = new MethodOverloadResolver();
         this.memberResolver = new ClassMemberResolver();
+        this.chainedResolver = new ChainedPropertyResolver();
     }
 
     /**
@@ -316,6 +319,42 @@ export class ImplementationProvider {
         position: Position,
         line: string
     ): Promise<Location | null> {
+        // Pattern 1b: Chained access like SELF.Order.MainKey or PARENT.Foo.Bar
+        // Must be checked BEFORE Pattern 1 because Pattern 1's regex matches the last
+        // X.Y( pair in a chain (e.g. RangeList.Init() from SELF.Order.RangeList.Init())
+        // and returns before reaching this block.
+        {
+            const dotBeforeIndex = line.lastIndexOf('.', position.character - 1);
+            if (dotBeforeIndex > 0) {
+                const beforeDot = line.substring(0, dotBeforeIndex).trim();
+                if (/\b(self|parent)\b.+\./i.test(beforeDot)) {
+                    const afterDot = line.substring(dotBeforeIndex + 1).trim();
+                    const methodMatch = afterDot.match(/^(\w+)/);
+                    if (methodMatch) {
+                        const memberName = methodMatch[1];
+                        const tokens = this.tokenCache.getTokens(document);
+                        const hasParens = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
+                        const paramCount = hasParens
+                            ? this.memberResolver.countParametersInCall(line, memberName)
+                            : 0;
+                        const chainedInfo = await this.chainedResolver.resolve(beforeDot, memberName, document, position, paramCount);
+                        if (chainedInfo) {
+                            logger.info(`✅ Chained Ctrl+F12: "${memberName}" → impl lookup at ${chainedInfo.file}:${chainedInfo.line}`);
+                            // For methods, try to find the implementation; for properties just return declaration
+                            if (chainedInfo.type.toUpperCase().startsWith('PROCEDURE')) {
+                                const implLoc = await this.findMethodImplementationCrossFile(
+                                    chainedInfo.className, memberName, document, paramCount, null, line,
+                                    chainedInfo.file
+                                );
+                                if (implLoc) return implLoc;
+                            }
+                            return Location.create(chainedInfo.file, Range.create(chainedInfo.line, 0, chainedInfo.line, 0));
+                        }
+                    }
+                }
+            }
+        }
+
         // Pattern 1: Method call like SELF.MethodName() or PARENT.MethodName() or object.MethodName()
         const methodCallMatch = line.match(/(\w+)\.(\w+)\s*\(/gi);
         if (methodCallMatch) {
@@ -585,7 +624,8 @@ export class ImplementationProvider {
         currentDocument: TextDocument,
         paramCount?: number,
         moduleFile?: string | null,
-        declarationSignature?: string
+        declarationSignature?: string,
+        declarationFile?: string
     ): Promise<Location | null> {
         logger.info(`Searching for ${className}.${methodName} implementation cross-file`);
         
@@ -684,7 +724,49 @@ export class ImplementationProvider {
                 }
             }
         }
-        
+
+        // Fallback: use the redirection parser to find the CLW file that corresponds to
+        // the class declaration file (same base name, .clw extension).
+        // e.g. ABUTIL.INC → look up ABUTIL.CLW via redirection.
+        if (declarationFile) {
+            // declarationFile may be a URI — convert to filesystem path
+            let declFilePath = declarationFile;
+            if (declFilePath.startsWith('file:///')) {
+                declFilePath = decodeURIComponent(declFilePath.replace('file:///', '')).replace(/\//g, '\\');
+            }
+            const declBase = path.basename(declFilePath, path.extname(declFilePath));
+            const implFileName = declBase + '.clw';
+            const currentPath = decodeURIComponent(currentDocument.uri.replace('file:///', '')).replace(/\//g, '\\');
+
+            logger.info(`Searching for ${className}.${methodName} via redirection: ${implFileName}`);
+
+            const sm = SolutionManager.getInstance();
+            if (sm?.solution) {
+                for (const project of sm.solution.projects) {
+                    const redirectionParser = project.getRedirectionParser();
+                    const resolved = redirectionParser.findFile(implFileName, currentPath);
+                    if (resolved?.path && fs.existsSync(resolved.path)) {
+                        logger.info(`Redirection resolved ${implFileName} → ${resolved.path}`);
+                        const implLocation = this.searchFileForMethodImplementation(
+                            resolved.path, className, methodName, paramCount, declarationSignature
+                        );
+                        if (implLocation) return implLocation;
+                    }
+                }
+            }
+
+            // No solution / redirection failed — fall back to same directory as declaration
+            const declDir = path.dirname(declFilePath);
+            const directPath = path.join(declDir, implFileName);
+            if (fs.existsSync(directPath)) {
+                logger.info(`Direct fallback: ${directPath}`);
+                const implLocation = this.searchFileForMethodImplementation(
+                    directPath, className, methodName, paramCount, declarationSignature
+                );
+                if (implLocation) return implLocation;
+            }
+        }
+
         logger.info(`❌ No implementation found for ${className}.${methodName}`);
         return null;
     }

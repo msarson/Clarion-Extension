@@ -8,6 +8,7 @@ import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
@@ -31,6 +32,7 @@ export class DefinitionProvider {
     private tokenCache = TokenCache.getInstance();
     private symbolProvider = new ClarionDocumentSymbolProvider();
     private memberResolver = new ClassMemberResolver();
+    private chainedResolver = new ChainedPropertyResolver();
     private overloadResolver = new MethodOverloadResolver();
     private mapResolver = new MapProcedureResolver();
     private symbolResolver = new SymbolDefinitionResolver();
@@ -121,6 +123,18 @@ export class DefinitionProvider {
                         if (memberInfo) {
                             logger.info(`✅ Found PARENT method declaration at ${memberInfo.file}:${memberInfo.line}`);
                             return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
+                        }
+                    }
+
+                    // Chained access: SELF.Order.MainKey or PARENT.Foo.Bar
+                    if (/\b(self|parent)\b.+\./i.test(beforeDot)) {
+                        const paramCount = hasParentheses
+                            ? this.memberResolver.countParametersInCall(line, methodName)
+                            : undefined;
+                        const chainedInfo = await this.chainedResolver.resolve(beforeDot, methodName, document, position, paramCount ?? undefined);
+                        if (chainedInfo) {
+                            logger.info(`✅ Chained F12: "${methodName}" resolved at ${chainedInfo.file}:${chainedInfo.line}`);
+                            return Location.create(chainedInfo.file, Range.create(chainedInfo.line, 0, chainedInfo.line, 0));
                         }
                     }
                 }

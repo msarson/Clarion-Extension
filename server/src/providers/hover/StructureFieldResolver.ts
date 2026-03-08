@@ -6,6 +6,7 @@ import { TokenHelper } from '../../utils/TokenHelper';
 import { HoverFormatter } from './HoverFormatter';
 import { MethodHoverResolver } from './MethodHoverResolver';
 import { VariableHoverResolver } from './VariableHoverResolver';
+import { ChainedPropertyResolver } from '../../utils/ChainedPropertyResolver';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("StructureFieldResolver");
@@ -16,6 +17,7 @@ logger.setLevel("error");
  */
 export class StructureFieldResolver {
     private tokenCache = TokenCache.getInstance();
+    private chainedResolver = new ChainedPropertyResolver();
     
     constructor(
         private formatter: HoverFormatter,
@@ -124,6 +126,16 @@ export class StructureFieldResolver {
                 logger.info(`PARENT method call detected with ${paramCount} parameters`);
             }
             return await this.methodResolver.resolveParentMethodCall(fieldName, document, position, line, paramCount);
+        } else if (/\b(self|parent)\b.+/i.test(beforeDot)) {
+            // Chained access: SELF.Order.MainKey or PARENT.Foo.Bar
+            let paramCount: number | undefined;
+            if (hasParentheses) {
+                paramCount = countParametersInCall(line, fieldName) ?? undefined;
+            }
+            const chainedInfo = await this.chainedResolver.resolve(beforeDot, fieldName, document, position, paramCount);
+            if (chainedInfo) {
+                return this.formatter.formatClassMember(fieldName, chainedInfo);
+            }
         } else {
             // variable.member - structure field access (e.g., MyGroup.MyVar)
             const structureNameMatch = beforeDot.match(/(\w+)\s*$/);

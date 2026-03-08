@@ -228,10 +228,10 @@ export class ClassMemberResolver {
                 const includeContent = fs.readFileSync(resolvedPath, 'utf8');
                 const includeLines = includeContent.split('\n');
                 
-                // Find the class
+                // Find the class/queue/group structure
                 for (let j = 0; j < includeLines.length; j++) {
                     const includeLine = includeLines[j];
-                    const classMatch = includeLine.match(new RegExp(`^${className}\\s+CLASS`, 'i'));
+                    const classMatch = includeLine.match(new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP)`, 'i'));
                     if (classMatch) {
                         logger.info(`Found class ${className} in INCLUDE at line ${j}`);
                         
@@ -289,8 +289,8 @@ export class ClassMemberResolver {
                             return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri };
                         }
 
-                        // Member not in this class — walk the inheritance chain
-                        const parentMatch = includeLine.match(/CLASS\s*\(\s*(\w+)\s*\)/i);
+                        // Member not in this class/queue/group — walk the inheritance chain
+                        const parentMatch = includeLine.match(/(?:CLASS|QUEUE|GROUP)\s*\(\s*(\w+)\s*\)/i);
                         if (parentMatch) {
                             const parentResult = this.findMemberInParentChain(
                                 parentMatch[1], memberName, paramCount, new Set([className.toLowerCase()])
@@ -561,8 +561,8 @@ export class ClassMemberResolver {
             if (resolvedPath) {
                 const includeLines = fs.readFileSync(resolvedPath, 'utf8').split('\n');
                 for (let j = 0; j < includeLines.length; j++) {
-                    if (!new RegExp(`^${className}\\s+CLASS`, 'i').test(includeLines[j])) continue;
-                    const parentMatch = includeLines[j].match(/CLASS\s*\(\s*(\w+)\s*\)/i);
+                    if (!new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP)`, 'i').test(includeLines[j])) continue;
+                    const parentMatch = includeLines[j].match(/(?:CLASS|QUEUE|GROUP)\s*\(\s*(\w+)\s*\)/i);
                     return parentMatch ? parentMatch[1] : null;
                 }
             }
@@ -608,7 +608,7 @@ export class ClassMemberResolver {
         // Prefer a non-TYPE definition (TYPE classes are templates, not instances)
         const classInfo = classInfos.find(d => !d.isType) || classInfos[0];
 
-        const result = this.searchFileForMember(classInfo.filePath, className, memberName, paramCount);
+        const result = this.searchFileForMember(classInfo.filePath, className, memberName, paramCount, classInfo.structureType);
         if (result) return result;
 
         // Recurse into grandparent if present
@@ -620,23 +620,26 @@ export class ClassMemberResolver {
     }
 
     /**
-     * Reads a file and searches for a member inside a specific class body.
+     * Reads a file and searches for a member inside a specific class/queue/group body.
      * Returns the member info or null if not found.
      */
     private searchFileForMember(
         filePath: string,
         className: string,
         memberName: string,
-        paramCount: number | undefined
+        paramCount: number | undefined,
+        structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS'
     ): MemberInfo | null {
         try {
             const content = fs.readFileSync(filePath, 'utf8');
             const lines = content.split('\n');
+            // Match CLASS, QUEUE, or GROUP header for this structure name
+            const headerPattern = new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP)`, 'i');
 
             for (let j = 0; j < lines.length; j++) {
-                if (!new RegExp(`^${className}\\s+CLASS`, 'i').test(lines[j])) continue;
+                if (!headerPattern.test(lines[j])) continue;
 
-                logger.info(`Found class ${className} in ${path.basename(filePath)} at line ${j}`);
+                logger.info(`Found structure ${className} in ${path.basename(filePath)} at line ${j}`);
                 const candidates: { type: string; line: number; paramCount: number }[] = [];
 
                 for (let k = j + 1; k < lines.length; k++) {
@@ -663,6 +666,72 @@ export class ClassMemberResolver {
             }
         } catch (error) {
             logger.error(`Error reading ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        return null;
+    }
+
+    /**
+     * Extracts a navigable structure name from a Clarion type string.
+     * Returns the plain name, or null if the type is a primitive or PROCEDURE.
+     * Examples:
+     *   "&SortOrder"           → "SortOrder"
+     *   "&SortOrder,PROTECTED" → "SortOrder"
+     *   "SortOrder,DIM(10)"    → "SortOrder"
+     *   "PROCEDURE"            → null
+     *   "STRING(20)"           → null
+     *   "LONG"                 → null
+     */
+    public static extractClassName(typeStr: string): string | null {
+        const CLARION_PRIMITIVES = new Set([
+            'PROCEDURE', 'ROUTINE',
+            'STRING', 'CSTRING', 'PSTRING', 'USTRING',
+            'LONG', 'ULONG', 'SHORT', 'USHORT', 'BYTE', 'SBYTE',
+            'REAL', 'SREAL', 'BFLOAT4', 'BFLOAT8',
+            'DECIMAL', 'PDECIMAL',
+            'DATE', 'TIME', 'CLOCK',
+            'BOOL', 'ANY', 'ASTRING', 'MEMO', 'BLOB', 'BFILE',
+            'SIGNED', 'UNSIGNED', 'VARIANT', 'LIKE',
+            'FILE', 'VIEW', 'REPORT', 'WINDOW', 'APPLICATION',
+            'QUEUE', 'GROUP', 'RECORD', 'KEY', 'INDEX',
+            'THREAD', 'MODULE', 'EQUATE',
+        ]);
+
+        // Strip leading & (reference prefix)
+        let name = typeStr.trim().replace(/^&/, '');
+        // Take only the part before comma or parenthesis (attributes/dimensions)
+        name = name.split(/[,(]/)[0].trim();
+
+        if (!name || CLARION_PRIMITIVES.has(name.toUpperCase())) {
+            return null;
+        }
+        return name;
+    }
+
+    /**
+     * Finds a member inside a specific named structure (CLASS, QUEUE, or GROUP)
+     * identified by structureName. Unlike findClassMemberInfo, this does NOT infer
+     * the current class from scope — it searches for structureName directly.
+     * Used by ChainedPropertyResolver for chained access like SELF.Order.MainKey.
+     */
+    public async findMemberInNamedStructure(
+        memberName: string,
+        structureName: string,
+        document: TextDocument,
+        paramCount?: number
+    ): Promise<MemberInfo | null> {
+        logger.info(`findMemberInNamedStructure: "${memberName}" in "${structureName}"`);
+
+        await this.ensureIndexBuilt(document);
+
+        const infos = this.classIndexer.findClass(structureName);
+        if (infos && infos.length > 0) {
+            const info = infos.find(d => !d.isType) || infos[0];
+            const result = this.searchFileForMember(info.filePath, structureName, memberName, paramCount, info.structureType);
+            if (result) return result;
+            // Walk parent chain for CLASS types
+            if (info.structureType === 'CLASS' && info.parentClass) {
+                return this.findMemberInParentChain(info.parentClass, memberName, paramCount, new Set([structureName.toLowerCase()]));
+            }
         }
         return null;
     }
