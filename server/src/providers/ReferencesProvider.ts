@@ -49,8 +49,32 @@ export class ReferencesProvider {
         const wordRange = TokenHelper.getWordRangeAtPosition(document, position);
         if (!wordRange) return null;
 
-        const word = document.getText(wordRange);
+        let word = document.getText(wordRange);
         if (!word || word.length === 0) return null;
+
+        // When cursor lands on a middle segment of a chained expression
+        // (e.g. "Order" in SELF.Order.MainKey), getWordRangeAtPosition returns just
+        // the segment because the dot-after check prevents prefix inclusion.
+        // Detect this by checking whether the character immediately before the word
+        // is a dot, then walk back to find the SELF/PARENT anchor.
+        if (!word.includes('.') && wordRange.start.character > 0) {
+            const charBefore = document.getText({
+                start: { line: position.line, character: wordRange.start.character - 1 },
+                end: { line: position.line, character: wordRange.start.character }
+            });
+            if (charBefore === '.') {
+                const textBeforeDot = document.getText({
+                    start: { line: position.line, character: 0 },
+                    end: { line: position.line, character: wordRange.start.character - 1 }
+                });
+                // Match the nearest SELF/PARENT anchor and any intermediate segments
+                const anchorMatch = textBeforeDot.match(/\b(SELF|PARENT)(?:\.[A-Za-z0-9_:]+)*$/i);
+                if (anchorMatch) {
+                    word = anchorMatch[0] + '.' + word;
+                    logger.info(`🔗 Reconstructed chained word: "${word}" from middle-segment cursor`);
+                }
+            }
+        }
 
         logger.info(`🔍 Finding references for "${word}" at ${position.line}:${position.character}`);
 

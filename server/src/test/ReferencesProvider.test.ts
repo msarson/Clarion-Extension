@@ -84,6 +84,36 @@ suite('ReferencesProvider – member access (SELF.Member)', () => {
             'Should include at least one chained or plain SELF.Order usage');
     });
 
+    /**
+     * Middle-segment cursor: cursor on "Order" in SELF.Order.MainKey.
+     * getWordRangeAtPosition returns just "Order" (dot after → no prefix included).
+     * ReferencesProvider must detect the preceding dot and reconstruct "SELF.Order".
+     */
+    test('Finds SELF.Member references when cursor is on middle segment of chained expression', async () => {
+        const code = [
+            "  MEMBER('Main')",            // line 0
+            '',                             // line 1
+            'MyClass.Init PROCEDURE',       // line 2
+            '  CODE',                       // line 3
+            '  SELF.Order.MainKey &= K',   // line 4 — cursor on "Order" here
+            '  SELF.Order &= NULL',         // line 5 — plain (no trailing dot)
+            '  RETURN',                     // line 6
+        ].join('\n');
+
+        const doc = createDocument(code, 'file:///middle-segment.clw');
+        seedCache(doc);
+
+        // Cursor on "Order" (col 7) in "  SELF.Order.MainKey &= K" — dot follows Order
+        const refs = await provider.provideReferences(doc, { line: 4, character: 7 },
+            { includeDeclaration: true });
+
+        assert.ok(refs !== null, 'Should find references even with dot after cursor word');
+        assert.ok(refs!.length >= 1, `Expected at least 1 reference, got ${refs?.length ?? 0}`);
+        const refLines = refs!.map(r => r.range.start.line);
+        assert.ok(refLines.includes(4) || refLines.includes(5),
+            'Should find SELF.Order usage on line 4 or 5');
+    });
+
     test('Highlight range covers only member name, not SELF prefix', async () => {
         // "  SELF.Order &= NULL" — no dot after Order, so getWordRangeAtPosition returns "SELF.Order"
         const code = [
