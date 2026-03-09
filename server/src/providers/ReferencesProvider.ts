@@ -10,10 +10,13 @@ import { SymbolFinderService, SymbolInfo } from '../services/SymbolFinderService
 import { TokenHelper } from '../utils/TokenHelper';
 import { ChainedPropertyResolver, ChainedMemberInfo } from '../utils/ChainedPropertyResolver';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { ClarionPatterns } from '../utils/ClarionPatterns';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
 logger.setLevel("info");
+
+type OverloadFilter = { minArgs: number; maxArgs: number; declarationLine: number; declarationFileNorm: string };
 
 /**
  * Provides "Find All References" for Clarion symbols.
@@ -171,6 +174,14 @@ export class ReferencesProvider {
 
         if (!memberName) return null;
 
+        // Count call args at cursor position for overload-specific resolution
+        const cursorLineText = document.getText({
+            start: { line: position.line, character: 0 },
+            end: { line: position.line, character: 10000 }
+        });
+        const callArgCount = this.memberResolver.countParametersInCall(cursorLineText, memberName);
+        logger.info(`📊 Call arg count at cursor: ${callArgCount} for "${memberName}"`);
+
         let declarationFile: string | null = null;
         let declarationLine: number = -1;
         let className: string | null = knownClassName ?? null;
@@ -180,7 +191,7 @@ export class ReferencesProvider {
 
         if (isSelfOrParent) {
             const tokens = this.tokenCache.getTokens(document);
-            const info = this.memberResolver.findClassMemberInfo(memberName, document, position.line, tokens);
+            const info = this.memberResolver.findClassMemberInfo(memberName, document, position.line, tokens, callArgCount);
             if (info) {
                 declarationFile = info.file;
                 declarationLine = info.line;
@@ -208,7 +219,7 @@ export class ReferencesProvider {
                 const implMethod = dotIdx > 0 ? implToken.label.substring(dotIdx + 1).toLowerCase() : '';
                 if (implClass && implMethod === memberName.toLowerCase()) {
                     // Treat exactly like SELF.Member resolution but with a known class name
-                    const info = this.memberResolver.findClassMemberInfo(memberName, document, position.line, tokens);
+                    const info = this.memberResolver.findClassMemberInfo(memberName, document, position.line, tokens, callArgCount);
                     if (info) {
                         declarationFile = info.file;
                         declarationLine = info.line;
@@ -258,7 +269,7 @@ export class ReferencesProvider {
                 let info: ChainedMemberInfo | null = await chainedResolver.resolve(beforeDot, memberName, document, vsPos);
 
                 if (!info) {
-                    info = await this.resolveViaVariableType(beforeDot, memberName, document, position);
+                    info = await this.resolveViaVariableType(beforeDot, memberName, document, position, callArgCount);
                 }
 
                 if (!info) {
@@ -295,6 +306,24 @@ export class ReferencesProvider {
 
         logger.info(`🔍 Searching ${filesToSearch.length} file(s) for ${className ?? '?'}.${memberName}`);
 
+        // Build overload filter: use the matched declaration to determine which arg-count range to accept
+        let overloadFilter: OverloadFilter | undefined;
+        if (declarationFile && declarationLine >= 0) {
+            const declLineText = ClassMemberResolver.getDeclarationLineText(declarationFile, declarationLine);
+            if (declLineText && /PROCEDURE/i.test(declLineText)) {
+                const maxArgs = this.memberResolver.countParametersInDeclaration(declLineText);
+                const defaultCount = ClarionPatterns.countDefaultParams(declLineText);
+                const minArgs = maxArgs - defaultCount;
+                overloadFilter = {
+                    minArgs,
+                    maxArgs,
+                    declarationLine,
+                    declarationFileNorm: declarationFile.toLowerCase()
+                };
+                logger.info(`🎯 Overload filter: args ${minArgs}–${maxArgs} (decl at line ${declarationLine} in ${declarationFile.split('/').pop()})`);
+            }
+        }
+
         // Build class family (declaring class + all subclasses) so that SELF.Member
         // references in subclass method implementations are included.
         const classFamily = className
@@ -319,7 +348,7 @@ export class ReferencesProvider {
         }
 
         for (const fileUri of filesToSearch) {
-            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined);
+            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter);
             locations.push(...hits);
         }
 
@@ -351,7 +380,8 @@ export class ReferencesProvider {
         variableName: string,
         memberName: string,
         document: TextDocument,
-        position: { line: number; character: number }
+        position: { line: number; character: number },
+        callArgCount?: number
     ): Promise<ChainedMemberInfo | null> {
         // Must be a plain identifier (no dots), not SELF/PARENT
         if (variableName.includes('.') || /^(self|parent)$/i.test(variableName)) return null;
@@ -363,7 +393,7 @@ export class ReferencesProvider {
         if (!typeName) return null;
 
         logger.info(`Tier2: "${variableName}" has type "${typeName}", looking up member "${memberName}"`);
-        const info = await this.memberResolver.findMemberInNamedStructure(memberName, typeName, document);
+        const info = await this.memberResolver.findMemberInNamedStructure(memberName, typeName, document, callArgCount);
         return info ?? null;
     }
 
@@ -606,6 +636,44 @@ export class ReferencesProvider {
     }
 
     /**
+     * Counts call arguments from the token stream starting after a given token index.
+     * Looks for '(' on the same line, then counts top-level commas until matching ')'.
+     * Returns -1 if no parentheses found (property access, not a call).
+     * Returns 0 if empty parens found.
+     */
+    private countCallArgsFromTokens(tokens: Token[], afterIndex: number): number {
+        const callLine = tokens[afterIndex].line;
+        let j = afterIndex + 1;
+        while (j < tokens.length && tokens[j].line === callLine) {
+            const t = tokens[j];
+            if (t.type === TokenType.Delimiter && t.value === '(') {
+                let depth = 1;
+                let commas = 0;
+                let hasContent = false;
+                j++;
+                while (j < tokens.length && depth > 0) {
+                    const inner = tokens[j];
+                    if (inner.type === TokenType.Delimiter) {
+                        if (inner.value === '(') depth++;
+                        else if (inner.value === ')') {
+                            depth--;
+                        } else if (inner.value === ',' && depth === 1) {
+                            commas++;
+                        }
+                    } else if (inner.type !== TokenType.Comment) {
+                        hasContent = true;
+                    }
+                    j++;
+                }
+                return (hasContent || commas > 0) ? commas + 1 : 0;
+            }
+            if (t.type !== TokenType.Comment) break;
+            j++;
+        }
+        return -1;
+    }
+
+    /**
      * Find every occurrence of `memberName` used in dot-notation in a single file.
      * When `className` is provided, SELF.Member matches are restricted to method
      * implementations belonging to that class or any of its subclasses (`classFamily`).
@@ -626,7 +694,8 @@ export class ReferencesProvider {
         memberName: string,
         className?: string,
         classFamily?: Set<string>,
-        chainPrefix?: string
+        chainPrefix?: string,
+        overloadFilter?: OverloadFilter
     ): Location[] {
         const tokens = this.getTokensForUri(fileUri);
         if (!tokens || tokens.length === 0) return [];
@@ -663,6 +732,29 @@ export class ReferencesProvider {
             return classFamily ? classFamily.has(scope.classLower) : scope.classLower === classLower;
         };
 
+        // Read file lines once for overload-filtered MethodImplementation param checking
+        let fileLines: string[] | null = null;
+        if (overloadFilter) {
+            try {
+                const filePath = decodeURIComponent(fileUri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+                fileLines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
+            } catch { fileLines = null; }
+        }
+        const fileUriNorm = fileUri.toLowerCase();
+
+        /** Checks if a given arg count is compatible with the overload filter's range. */
+        const isCompatibleArgCount = (argCount: number): boolean => {
+            if (!overloadFilter) return true;
+            if (argCount < 0) return true; // no parens = property access, always include
+            return argCount >= overloadFilter.minArgs && argCount <= overloadFilter.maxArgs;
+        };
+
+        /** Checks if a declaration line is the matched overload's declaration. */
+        const isMatchedDeclaration = (line: number, fileNorm: string): boolean => {
+            if (!overloadFilter) return true;
+            return line === overloadFilter.declarationLine && fileNorm === overloadFilter.declarationFileNorm;
+        };
+
         for (let i = 0; i < tokens.length; i++) {
             const token = tokens[i];
             if (token.type === TokenType.Comment || token.type === TokenType.String) continue;
@@ -676,9 +768,11 @@ export class ReferencesProvider {
 
                     if ((penultimate === 'self' || penultimate === 'parent') && isInTargetClass(token.line)) {
                         // 2-segment: SELF.Member — direct access, filter by enclosing method class
-                        locations.push(Location.create(fileUri,
-                            Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
-                                         token.line, token.start + token.value.length)));
+                        if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                            locations.push(Location.create(fileUri,
+                                Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
+                                             token.line, token.start + token.value.length)));
+                        }
 
                     } else if (parts.length >= 3 &&
                                (parts[0].toLowerCase() === 'self' || parts[0].toLowerCase() === 'parent') &&
@@ -686,9 +780,11 @@ export class ReferencesProvider {
                         // 3+ segment all-in-one: SELF.X.Member (e.g. SELF.Sort.Thumb tokenized as one token)
                         const prefixOfToken = token.value.substring(0, token.value.lastIndexOf('.')).toLowerCase();
                         if (!chainPrefixLower || prefixOfToken === chainPrefixLower) {
-                            locations.push(Location.create(fileUri,
-                                Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
-                                             token.line, token.start + token.value.length)));
+                            if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                                locations.push(Location.create(fileUri,
+                                    Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
+                                                 token.line, token.start + token.value.length)));
+                            }
                         }
 
                     } else if (parts[0].toLowerCase() !== 'self' && parts[0].toLowerCase() !== 'parent') {
@@ -707,17 +803,21 @@ export class ReferencesProvider {
                                 ? chainPrefixLower + '.' + memberLower
                                 : null;
                             if (!expectedChain || fullChain === expectedChain) {
-                                locations.push(Location.create(fileUri,
-                                    Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
-                                                 token.line, token.start + token.value.length)));
+                                if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                                    locations.push(Location.create(fileUri,
+                                        Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
+                                                     token.line, token.start + token.value.length)));
+                                }
                             }
                         } else if (parts.length === 2 && chainPrefixLower &&
                                    parts[0].toLowerCase() === chainPrefixLower) {
                             // Typed variable direct access: e.g. INIMgr.Init
                             // where chainPrefix is the variable name (INIMgr).
-                            locations.push(Location.create(fileUri,
-                                Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
-                                             token.line, token.start + token.value.length)));
+                            if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                                locations.push(Location.create(fileUri,
+                                    Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
+                                                 token.line, token.start + token.value.length)));
+                            }
                         }
                     }
                 } else {
@@ -742,16 +842,22 @@ export class ReferencesProvider {
                             const beforeDotToken = tokens[i - 2];
                             if (beforeDotToken && beforeDotToken.line === token.line &&
                                 beforeDotToken.value.toLowerCase() === chainPrefixLower) {
-                                locations.push(Location.create(fileUri,
-                                    Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                                if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                                    locations.push(Location.create(fileUri,
+                                        Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                                }
                             } else if (isInTargetClass(token.line)) {
-                                locations.push(Location.create(fileUri,
-                                    Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                                if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                                    locations.push(Location.create(fileUri,
+                                        Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                                }
                             }
                         } else if (isInTargetClass(token.line)) {
                             // Explicit dot: e.g. var.Thumb where var is resolved to the right class
-                            locations.push(Location.create(fileUri,
-                                Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                            if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                                locations.push(Location.create(fileUri,
+                                    Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                            }
                         }
                     } else if (prev.type === TokenType.StructureField &&
                                prev.line === token.line &&
@@ -761,8 +867,10 @@ export class ReferencesProvider {
                         // (tokenizer splits SELF.Sort.Thumb into StructureField + Variable).
                         // If we know the exact chain prefix, verify the StructureField value matches it.
                         if (!chainPrefixLower || prev.value.toLowerCase() === chainPrefixLower) {
-                            locations.push(Location.create(fileUri,
-                                Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                            if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                                locations.push(Location.create(fileUri,
+                                    Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                            }
                         }
                     }
                 }
@@ -780,8 +888,10 @@ export class ReferencesProvider {
                 if (enclosingStruct && enclosingStruct.subType === TokenType.Class) {
                     // When className is known, verify the label of the CLASS matches
                     if (!classLower || (enclosingStruct.label ?? '').toLowerCase() === classLower) {
-                        locations.push(Location.create(fileUri,
-                            Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                        if (isMatchedDeclaration(token.line, fileUriNorm)) {
+                            locations.push(Location.create(fileUri,
+                                Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                        }
                     }
                 }
             }
@@ -798,6 +908,14 @@ export class ReferencesProvider {
                     const implMethod = token.label.substring(dotIdx + 1).toLowerCase();
                     const inFamily = classFamily ? classFamily.has(implClass) : implClass === classLower;
                     if (implMethod === memberLower && (!classLower || inFamily)) {
+                        // Filter by overload: count params in this implementation's signature
+                        if (overloadFilter && fileLines) {
+                            const implLineText = fileLines[token.line] ?? '';
+                            const implParamCount = this.memberResolver.countParametersInDeclaration(implLineText);
+                            if (implParamCount < overloadFilter.minArgs || implParamCount > overloadFilter.maxArgs) {
+                                continue; // wrong overload
+                            }
+                        }
                         // The method-name token is the Variable immediately before PROCEDURE on the same line
                         const nameToken = i > 0 && tokens[i - 1].line === token.line &&
                             tokens[i - 1].value.toLowerCase() === implMethod ? tokens[i - 1] : null;
