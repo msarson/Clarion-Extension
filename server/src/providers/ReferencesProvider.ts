@@ -273,8 +273,9 @@ export class ReferencesProvider {
     }
 
     /**
-     * Resolve a MODULE('file.clw') filename to a file URI by searching the same
-     * directory as the source INC file and configured redirection paths.
+     * Resolve a MODULE('file.clw') filename to a file URI by searching:
+     * 1. Same directory as the source INC file
+     * 2. All project search paths via SolutionManager.findFileWithExtension
      */
     private resolveModuleFile(moduleFileName: string, sourceUri: string): string | null {
         try {
@@ -287,13 +288,18 @@ export class ReferencesProvider {
                 return `file:///${candidate.replace(/\\/g, '/')}`;
             }
 
-            // 2. Search redirection paths via SolutionManager
+            // 2. Search via project redirection paths
             const solutionManager = SolutionManager.getInstance();
-            const searchPaths = solutionManager?.getSearchPaths?.() ?? [];
-            for (const searchPath of searchPaths) {
-                const candidate2 = `${searchPath}\\${moduleFileName}`;
-                if (fs.existsSync(candidate2)) {
-                    return `file:///${candidate2.replace(/\\/g, '/')}`;
+            if (solutionManager?.solution?.projects?.length) {
+                const ext = moduleFileName.substring(moduleFileName.lastIndexOf('.'));
+                for (const project of solutionManager.solution.projects) {
+                    const searchPaths = project.getSearchPaths(ext);
+                    for (const searchPath of searchPaths) {
+                        const candidate2 = `${searchPath}\\${moduleFileName}`;
+                        if (fs.existsSync(candidate2)) {
+                            return `file:///${candidate2.replace(/\\/g, '/')}`;
+                        }
+                    }
                 }
             }
         } catch {
