@@ -198,7 +198,19 @@ export class ReferencesProvider {
         }
 
         // --- Determine files to search -----------------------------------
-        const filesToSearch = this.getMemberSearchFiles(document, declarationFile, classModuleFile);
+        // If we resolved a declarationFile (INC) and no classModuleFile was passed in,
+        // extract the MODULE('xyz.clw') attribute from the CLASS declaration in that INC.
+        // This ensures FieldPairsClass.Init PROCEDURE in ABUTIL.CLW is found even when
+        // the chain was resolved dynamically (not via CLASS body detection).
+        let effectiveModuleFile = classModuleFile;
+        if (!effectiveModuleFile && declarationFile && className) {
+            effectiveModuleFile = this.extractModuleFileFromClass(declarationFile, className) ?? undefined;
+            if (effectiveModuleFile) {
+                logger.info(`📦 Extracted MODULE file "${effectiveModuleFile}" from class "${className}"`);
+            }
+        }
+
+        const filesToSearch = this.getMemberSearchFiles(document, declarationFile, effectiveModuleFile);
 
         logger.info(`🔍 Searching ${filesToSearch.length} file(s) for ${className ?? '?'}.${memberName}`);
 
@@ -349,7 +361,44 @@ export class ReferencesProvider {
     }
 
     /**
-     * Build a map of className.toLowerCase() → parentClassName.toLowerCase()
+     * Given a resolved INC file URI and a class name, find the CLASS declaration token
+     * in that file and extract its MODULE('filename.clw') attribute.
+     * Returns the resolved file URI of the module, or null if not found.
+     */
+    private extractModuleFileFromClass(declarationFileUri: string, className: string): string | null {
+        const tokens = this.getTokensForUri(declarationFileUri);
+        if (!tokens) return null;
+
+        const classLower = className.toLowerCase();
+        for (const t of tokens) {
+            if (t.type === TokenType.Structure && t.subType === TokenType.Class &&
+                (t.label ?? '').toLowerCase() === classLower) {
+                // Read the raw line to extract MODULE attribute
+                const fileContent = this.getFileContent(declarationFileUri);
+                if (!fileContent) return null;
+                const lines = fileContent.split('\n');
+                const classLine = lines[t.line] ?? '';
+                const moduleMatch = classLine.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i);
+                if (moduleMatch) {
+                    return this.resolveModuleFile(moduleMatch[1], declarationFileUri);
+                }
+                return null;
+            }
+        }
+        return null;
+    }
+
+    /** Read raw file content for a URI, using TokenCache file map or fs. */
+    private getFileContent(fileUri: string): string | null {
+        try {
+            const path = decodeURIComponent(fileUri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+            return fs.readFileSync(path, 'utf8');
+        } catch {
+            return null;
+        }
+    }
+
+    /**
      * by scanning all provided file URIs for CLASS declarations with parent class attributes.
      *
      * In Clarion: `ClassB CLASS(ClassA)` — the token after the CLASS structure token
