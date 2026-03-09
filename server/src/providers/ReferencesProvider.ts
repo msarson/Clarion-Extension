@@ -13,7 +13,7 @@ import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
-logger.setLevel("error");
+logger.setLevel("info");
 
 /**
  * Provides "Find All References" for Clarion symbols.
@@ -83,31 +83,31 @@ export class ReferencesProvider {
             return this.provideMemberReferences(word, document, position, context);
         }
 
+        // Check if the cursor is inside a CLASS body BEFORE trying plain symbol search.
+        // findSymbol may resolve the word as a different same-named module variable declared
+        // before the CLASS, so we must detect CLASS context first.
+        const tokens = this.tokenCache.getTokens(document);
+        const enclosingClass = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.subType === TokenType.Class &&
+            t.line < position.line &&          // CLASS keyword is strictly before cursor line
+            t.finishesAt !== undefined &&
+            t.finishesAt >= position.line
+        );
+        if (enclosingClass) {
+            const classLine = document.getText({
+                start: { line: enclosingClass.line, character: 0 },
+                end: { line: enclosingClass.line, character: 999 }
+            });
+            const moduleMatch = classLine.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i);
+            const classModuleFile = moduleMatch?.[1];
+            logger.info(`🏛️ "${word}" is inside CLASS body (module=${classModuleFile ?? 'none'}) — routing to member-access path`);
+            return this.provideMemberReferences(`SELF.${word}`, document, position, context, classModuleFile);
+        }
+
         // Plain symbol path
         const symbolInfo = await this.symbolFinder.findSymbol(word, document, position);
         if (!symbolInfo) {
-            // Fallback: check if this plain word is a class field declaration.
-            // CLASS blocks don't form a procedure scope so findSymbol returns null,
-            // but we can detect it by finding a CLASS token that spans this line.
-            const tokens = this.tokenCache.getTokens(document);
-            const classToken = tokens.find(t =>
-                t.type === TokenType.Structure &&
-                t.subType === TokenType.Class &&
-                t.line <= position.line &&
-                t.finishesAt !== undefined &&
-                t.finishesAt >= position.line
-            );
-            if (classToken) {
-                // Extract MODULE('file.clw') from the CLASS line to find the implementation file
-                const classLine = document.getText({
-                    start: { line: classToken.line, character: 0 },
-                    end: { line: classToken.line, character: 999 }
-                });
-                const moduleMatch = classLine.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i);
-                const classModuleFile = moduleMatch?.[1];
-                logger.info(`🏛️ "${word}" is a class field inside CLASS (module=${classModuleFile ?? 'none'}) — routing to member-access path`);
-                return this.provideMemberReferences(`SELF.${word}`, document, position, context, classModuleFile);
-            }
             logger.info(`❌ No symbol found for "${word}"`);
             return null;
         }
