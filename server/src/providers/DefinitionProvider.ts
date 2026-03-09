@@ -1904,7 +1904,8 @@ export class DefinitionProvider {
         const varTokens = tokens.filter(token =>
             (token.type === TokenType.Variable ||
                 token.type === TokenType.ReferenceVariable ||
-                token.type === TokenType.ImplicitVariable) &&
+                token.type === TokenType.ImplicitVariable ||
+                token.type === TokenType.Label) &&
             token.value.toLowerCase() === variableName.toLowerCase() &&
             token.start === 0
         );

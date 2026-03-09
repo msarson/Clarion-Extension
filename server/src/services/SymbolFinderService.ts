@@ -287,6 +287,8 @@ export class SymbolFinderService {
                     typeInfo = nextToken.value;
                 } else if (nextToken.type === TokenType.Structure) {
                     typeInfo = nextToken.value.toUpperCase(); // CLASS, GROUP, QUEUE
+                } else if (nextToken.type === TokenType.Variable || nextToken.type === TokenType.Label) {
+                    typeInfo = nextToken.value; // user-defined class name
                 }
                 
                 // Try to build full declaration
@@ -380,6 +382,8 @@ export class SymbolFinderService {
                         typeInfo = nextToken.value;
                     } else if (nextToken.type === TokenType.Structure) {
                         typeInfo = nextToken.value.toUpperCase(); // CLASS, GROUP, QUEUE
+                    } else if (nextToken.type === TokenType.Variable || nextToken.type === TokenType.Label) {
+                        typeInfo = nextToken.value; // user-defined class name
                     }
                     
                     // Try to build full declaration
@@ -490,6 +494,8 @@ export class SymbolFinderService {
                             typeInfo = nextToken.value;
                         } else if (nextToken.type === TokenType.Structure) {
                             typeInfo = nextToken.value.toUpperCase(); // CLASS, GROUP, QUEUE
+                        } else if (nextToken.type === TokenType.Variable || nextToken.type === TokenType.Label) {
+                            typeInfo = nextToken.value; // user-defined class name
                         }
                         
                         // Try to build full declaration

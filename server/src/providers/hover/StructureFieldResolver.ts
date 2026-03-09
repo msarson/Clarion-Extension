@@ -1,12 +1,13 @@
 import { Hover, Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { Token } from '../../ClarionTokenizer';
+import { Token, TokenType } from '../../ClarionTokenizer';
 import { TokenCache } from '../../TokenCache';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { HoverFormatter } from './HoverFormatter';
 import { MethodHoverResolver } from './MethodHoverResolver';
 import { VariableHoverResolver } from './VariableHoverResolver';
 import { ChainedPropertyResolver } from '../../utils/ChainedPropertyResolver';
+import { ClassMemberResolver } from '../../utils/ClassMemberResolver';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("StructureFieldResolver");
@@ -18,6 +19,7 @@ logger.setLevel("error");
 export class StructureFieldResolver {
     private tokenCache = TokenCache.getInstance();
     private chainedResolver = new ChainedPropertyResolver();
+    private memberResolver = new ClassMemberResolver();
     
     constructor(
         private formatter: HoverFormatter,
@@ -139,6 +141,7 @@ export class StructureFieldResolver {
             }
         } else {
             // variable.member - structure field access (e.g., MyGroup.MyVar)
+            // or typed class variable access (e.g., st.GetValue() where st is StringTheory)
             const structureNameMatch = beforeDot.match(/(\w+)\s*$/);
             if (structureNameMatch) {
                 const structureName = structureNameMatch[1];
@@ -156,9 +159,53 @@ export class StructureFieldResolver {
                         return this.formatter.formatVariable(fullReference, variableInfo, currentScope, document);
                     }
                 }
+
+                // Try typed class variable: find what class type structureName is,
+                // then look up the member in that class (e.g., st.GetValue() where st StringTheory)
+                const varType = await this.resolveVariableClassType(structureName, tokens, document);
+                if (varType) {
+                    logger.info(`✅ Variable "${structureName}" has class type "${varType}", looking up member "${fieldName}"`);
+                    let paramCount: number | undefined;
+                    if (hasParentheses) {
+                        paramCount = countParametersInCall(line, fieldName) ?? undefined;
+                    }
+                    const memberInfo = await this.memberResolver.findMemberInNamedStructure(fieldName, varType, document, paramCount);
+                    if (memberInfo) {
+                        logger.info(`✅ Found member "${fieldName}" in "${varType}"`);
+                        return await this.methodResolver.resolveChainedMethodCall(fieldName, memberInfo, document, paramCount);
+                    }
+                }
             }
         }
         
+        return null;
+    }
+
+    /**
+     * Resolves the class type of a variable name by searching local, module, and global scope.
+     * Returns the class name (e.g. "StringTheory") or null if not a class-typed variable.
+     */
+    private async resolveVariableClassType(varName: string, tokens: Token[], document: TextDocument): Promise<string | null> {
+        // Search tokens for the variable declaration at column 0
+        const varToken = tokens.find(t =>
+            t.start === 0 &&
+            t.value.toLowerCase() === varName.toLowerCase()
+        );
+        if (!varToken) return null;
+
+        const idx = tokens.indexOf(varToken);
+        if (idx + 1 >= tokens.length) return null;
+
+        const nextToken = tokens[idx + 1];
+        if (nextToken.line !== varToken.line) return null;
+
+        // Only return user-defined (non-primitive) class names
+        if (nextToken.type === TokenType.Type || nextToken.type === TokenType.Structure || nextToken.type === TokenType.Keyword) {
+            return null; // built-in type — not a class instance
+        }
+        if (nextToken.type === TokenType.Variable || nextToken.type === TokenType.Label) {
+            return nextToken.value; // user-defined class name
+        }
         return null;
     }
 }
