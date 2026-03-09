@@ -869,6 +869,40 @@ export class ReferencesProvider {
     }
 
     /**
+     * Given a token array, find the line number of a procedure declaration for `wordLower`.
+     *
+     * A procedure declaration is identified by a line that contains BOTH:
+     *   - A Label/Variable token with value === wordLower (the procedure name label)
+     *   - A Procedure keyword token with subType in `procedureSubTypes`
+     *
+     * Returns the line number, or null if not found.
+     */
+    private findProcedureLabelLine(
+        wordLower: string,
+        tokens: Token[],
+        procedureSubTypes: Set<TokenType>
+    ): number | null {
+        // Build a set of lines that have a PROCEDURE keyword with a procedure subType
+        const procedureLines = new Set<number>();
+        for (const t of tokens) {
+            if (t.type === TokenType.Procedure && t.subType !== undefined && procedureSubTypes.has(t.subType)) {
+                procedureLines.add(t.line);
+            }
+        }
+        if (procedureLines.size === 0) return null;
+
+        // Find a Label/Variable on a procedure line with value matching wordLower
+        for (const t of tokens) {
+            if (!procedureLines.has(t.line)) continue;
+            if ((t.type === TokenType.Label || t.type === TokenType.Variable) &&
+                t.value.toLowerCase() === wordLower) {
+                return t.line;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Procedure fallback for Find All References.
      *
      * When `findSymbol` returns null (word is not a variable/parameter), check whether
@@ -876,9 +910,10 @@ export class ReferencesProvider {
      * all project source files for references to that procedure name.
      *
      * Detection strategy (in priority order):
-     * 1. Any token in current-file tokens with value===word and a procedure subType
-     * 2. Any project source-file token cache entry with value===word and procedure subType
-     * 3. MAP INCLUDE files referenced from the current file
+     * 1. Any line in current-file tokens where a Label/Variable === word precedes a
+     *    PROCEDURE keyword with a procedure subType (GlobalProcedure / MapProcedure / etc.)
+     * 2. Same check across all cached project source files
+     * 3. Same check after walking MAP INCLUDE files from the current CLW
      */
     private async findProcedureReferences(
         word: string,
@@ -895,13 +930,9 @@ export class ReferencesProvider {
         ]);
 
         // 1. Check current-file tokens
-        const localDecl = currentTokens.find(t =>
-            t.value.toLowerCase() === wordLower &&
-            t.subType !== undefined && procedureSubTypes.has(t.subType)
-        );
-
-        let declarationUri: string | null = localDecl ? document.uri : null;
-        let declarationLine: number = localDecl ? localDecl.line : 0;
+        const localDeclLine = this.findProcedureLabelLine(wordLower, currentTokens, procedureSubTypes);
+        let declarationUri: string | null = localDeclLine !== null ? document.uri : null;
+        let declarationLine: number = localDeclLine ?? 0;
 
         if (!declarationUri) {
             // 2. Check all cached project files
@@ -912,13 +943,10 @@ export class ReferencesProvider {
                         const fullPath = `${project.path}\\${sourceFile.relativePath}`;
                         const uri = `file:///${fullPath.replace(/\\/g, '/')}`;
                         const fileTokens = this.getTokensForUri(uri);
-                        const decl = fileTokens.find(t =>
-                            t.value.toLowerCase() === wordLower &&
-                            t.subType !== undefined && procedureSubTypes.has(t.subType)
-                        );
-                        if (decl) {
+                        const declLine = this.findProcedureLabelLine(wordLower, fileTokens, procedureSubTypes);
+                        if (declLine !== null) {
                             declarationUri = uri;
-                            declarationLine = decl.line;
+                            declarationLine = declLine;
                             break outerLoop;
                         }
                     }
@@ -1027,11 +1055,8 @@ export class ReferencesProvider {
 
             const incUri = `file:///${incPath.replace(/\\/g, '/')}`;
             const incTokens = this.getTokensForUri(incUri);
-            const decl = incTokens.find(t =>
-                t.value.toLowerCase() === wordLower &&
-                t.subType !== undefined && procedureSubTypes.has(t.subType)
-            );
-            if (decl) return { uri: incUri, line: decl.line };
+            const declLine = this.findProcedureLabelLine(wordLower, incTokens, procedureSubTypes);
+            if (declLine !== null) return { uri: incUri, line: declLine };
 
             // Recurse into nested INCLUDEs
             const nested = await this.findProcedureInMapIncludes(wordLower, incPath, procedureSubTypes, visited);
