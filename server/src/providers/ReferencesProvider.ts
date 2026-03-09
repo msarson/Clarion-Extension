@@ -68,11 +68,18 @@ export class ReferencesProvider {
                     start: { line: position.line, character: 0 },
                     end: { line: position.line, character: wordRange.start.character - 1 }
                 });
-                // Match the nearest SELF/PARENT anchor and any intermediate segments
+                // Match SELF/PARENT anchor with optional intermediate segments
                 const anchorMatch = textBeforeDot.match(/\b(SELF|PARENT)(?:\.[A-Za-z0-9_:]+)*$/i);
                 if (anchorMatch) {
                     word = anchorMatch[0] + '.' + word;
                     logger.info(`🔗 Reconstructed chained word: "${word}" from middle-segment cursor`);
+                } else {
+                    // Typed variable access: e.g. INIMgr.Init — pick the nearest identifier before the dot
+                    const varMatch = textBeforeDot.match(/\b([A-Za-z_][A-Za-z0-9_]*)$/);
+                    if (varMatch) {
+                        word = varMatch[1] + '.' + word;
+                        logger.info(`🔗 Reconstructed typed-variable word: "${word}" from before-dot identifier`);
+                    }
                 }
             }
         }
@@ -704,6 +711,13 @@ export class ReferencesProvider {
                                     Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
                                                  token.line, token.start + token.value.length)));
                             }
+                        } else if (parts.length === 2 && chainPrefixLower &&
+                                   parts[0].toLowerCase() === chainPrefixLower) {
+                            // Typed variable direct access: e.g. INIMgr.Init
+                            // where chainPrefix is the variable name (INIMgr).
+                            locations.push(Location.create(fileUri,
+                                Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
+                                             token.line, token.start + token.value.length)));
                         }
                     }
                 } else {
@@ -721,10 +735,24 @@ export class ReferencesProvider {
             if (token.type === TokenType.Variable && token.value.toLowerCase() === memberLower) {
                 const prev = tokens[i - 1];
                 if (prev && prev.line === token.line) {
-                    if (prev.type === TokenType.Delimiter && prev.value === '.' && isInTargetClass(token.line)) {
-                        // Explicit dot: e.g. var.Thumb where var is resolved to the right class
-                        locations.push(Location.create(fileUri,
-                            Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                    if (prev.type === TokenType.Delimiter && prev.value === '.') {
+                        // Check for typed variable access first: INIMgr.Init
+                        // where the token before the dot is the variable name matching chainPrefixLower.
+                        if (chainPrefixLower && i >= 2) {
+                            const beforeDotToken = tokens[i - 2];
+                            if (beforeDotToken && beforeDotToken.line === token.line &&
+                                beforeDotToken.value.toLowerCase() === chainPrefixLower) {
+                                locations.push(Location.create(fileUri,
+                                    Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                            } else if (isInTargetClass(token.line)) {
+                                locations.push(Location.create(fileUri,
+                                    Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                            }
+                        } else if (isInTargetClass(token.line)) {
+                            // Explicit dot: e.g. var.Thumb where var is resolved to the right class
+                            locations.push(Location.create(fileUri,
+                                Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                        }
                     } else if (prev.type === TokenType.StructureField &&
                                prev.line === token.line &&
                                /^(self|parent)\b/i.test(prev.value) &&
