@@ -192,9 +192,40 @@ export class ReferencesProvider {
                         declarationLine = info.line;
                         className = info.className ?? implClass;
                     } else {
+                        // findClassMemberInfo failed — CLASS is in an INCLUDE file.
+                        // Walk the INCLUDE statements of the current CLW to find the INC
+                        // that declares this class, then look up the member there.
                         className = implClass;
+                        const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+                        const incUri = await this.findClassDeclarationInIncludes(implClass, currentPath);
+                        if (incUri) {
+                            const incTokens = this.getTokensForUri(incUri);
+                            if (incTokens) {
+                                // Find the label token for the member inside the class body
+                                const classToken = incTokens.find(t =>
+                                    t.type === TokenType.Structure &&
+                                    t.subType === TokenType.Class &&
+                                    (t.label ?? '').toLowerCase() === implClass.toLowerCase()
+                                );
+                                if (classToken) {
+                                    const memberToken = incTokens.find(t =>
+                                        t.type === TokenType.Label &&
+                                        t.value.toLowerCase() === memberName.toLowerCase() &&
+                                        t.line > classToken.line &&
+                                        classToken.finishesAt !== undefined &&
+                                        t.line <= classToken.finishesAt
+                                    );
+                                    if (memberToken) {
+                                        declarationFile = incUri;
+                                        declarationLine = memberToken.line;
+                                    } else {
+                                        declarationFile = incUri;
+                                    }
+                                }
+                            }
+                        }
                     }
-                    logger.info(`✅ MethodImpl cursor: "${implClass}.${memberName}" → class="${className}"`);
+                    logger.info(`✅ MethodImpl cursor: "${implClass}.${memberName}" → class="${className}", decl=${declarationFile ?? 'unknown'}`);
                 }
             }
 
@@ -398,7 +429,69 @@ export class ReferencesProvider {
     }
 
     /**
-     * Given a resolved INC file URI and a class name, find the CLASS declaration token
+     * Walk INCLUDE('...') statements in the given CLW file (using redirection paths)
+     * and return the URI of the first file that contains a CLASS declaration with
+     * the given class name. Returns null if not found.
+     */
+    private async findClassDeclarationInIncludes(className: string, fromPath: string, visited: Set<string> = new Set()): Promise<string | null> {
+        if (visited.has(fromPath.toLowerCase())) return null;
+        visited.add(fromPath.toLowerCase());
+
+        let content: string;
+        try { content = fs.readFileSync(fromPath, 'utf8'); } catch { return null; }
+
+        const classLower = className.toLowerCase();
+        const lines = content.split('\n');
+        const solutionManager = SolutionManager.getInstance();
+        const fromDir = fromPath.substring(0, fromPath.lastIndexOf('\\'));
+
+        for (const line of lines) {
+            const includeMatch = line.match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
+            if (!includeMatch) continue;
+
+            const includeFileName = includeMatch[1];
+
+            // Resolve: same dir first, then redirection
+            let resolvedPath: string | null = null;
+            const candidate = `${fromDir}\\${includeFileName}`;
+            if (fs.existsSync(candidate)) {
+                resolvedPath = candidate;
+            } else if (solutionManager?.solution?.projects?.length) {
+                const ext = includeFileName.substring(includeFileName.lastIndexOf('.'));
+                for (const project of solutionManager.solution.projects) {
+                    for (const sp of project.getSearchPaths(ext)) {
+                        const c2 = `${sp}\\${includeFileName}`;
+                        if (fs.existsSync(c2)) { resolvedPath = c2; break; }
+                    }
+                    if (resolvedPath) break;
+                }
+            }
+            if (!resolvedPath) continue;
+
+            const incUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+
+            // Check token cache for a CLASS with this label
+            const incTokens = this.getTokensForUri(incUri);
+            if (incTokens) {
+                const found = incTokens.find(t =>
+                    t.type === TokenType.Structure &&
+                    t.subType === TokenType.Class &&
+                    (t.label ?? '').toLowerCase() === classLower
+                );
+                if (found) return incUri;
+            } else {
+                // Not cached — scan the raw file for the class name
+                try {
+                    const incContent = fs.readFileSync(resolvedPath, 'utf8');
+                    const rx = new RegExp(`^\\s*${className}\\s+CLASS\\b`, 'im');
+                    if (rx.test(incContent)) return incUri;
+                } catch { /* ignore */ }
+            }
+        }
+        return null;
+    }
+
+    /**
      * in that file and extract the raw MODULE('filename.clw') attribute string.
      * Returns the raw filename (e.g. "ABUTIL.CLW"), not a URI — caller resolves it.
      */
