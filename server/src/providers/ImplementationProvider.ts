@@ -357,7 +357,8 @@ export class ImplementationProvider {
         }
 
         // Pattern 1: Method call like SELF.MethodName() or PARENT.MethodName() or object.MethodName()
-        const methodCallMatch = line.match(/(\w+)\.(\w+)\s*\(/gi);
+        // Also handles no-paren calls: FuzzyMatcher.Init (Clarion allows no-param methods without ())
+        const methodCallMatch = line.match(/(\w+)\.(\w+)\s*\(?/gi);
         if (methodCallMatch) {
             const callInfo = this.extractMethodCall(line, position);
             if (callInfo) {
@@ -507,6 +508,7 @@ export class ImplementationProvider {
         line: string,
         position: Position
     ): { objectName: string; methodName: string; paramCount: number } | null {
+        // First try with parens: Object.Method(...) or Object.Method()
         const regex = /(\w+)\.(\w+)\s*\((.*?)\)/gi;
         let match: RegExpExecArray | null;
 
@@ -521,6 +523,18 @@ export class ImplementationProvider {
                 const paramCount = paramList === '' ? 0 : paramList.split(',').length;
 
                 return { objectName, methodName, paramCount };
+            }
+        }
+
+        // Fallback: no-paren dotted call — Object.Method (Clarion allows calling
+        // no-parameter methods without parentheses)
+        const noParenRegex = /(\w+)\.(\w+)(?!\s*\()/gi;
+        while ((match = noParenRegex.exec(line)) !== null) {
+            const callStart = match.index;
+            const callEnd = match.index + match[0].length;
+
+            if (position.character >= callStart && position.character <= callEnd) {
+                return { objectName: match[1], methodName: match[2], paramCount: 0 };
             }
         }
 
