@@ -108,15 +108,19 @@ export class ReferencesProvider {
 
         if (isSelfOrParent) {
             // Single-level SELF.Member / PARENT.Member
-            const tokens = this.tokenCache.getTokensByUri(document.uri) ?? [];
+            // Use getTokens(document) — not getTokensByUri — so we always get real tokens
+            // even when the file has not yet been cached by an open-document event.
+            const tokens = this.tokenCache.getTokens(document);
             const info = this.memberResolver.findClassMemberInfo(memberName, document, position.line, tokens);
-            if (!info) {
-                logger.info(`❌ Member "${memberName}" not found via ClassMemberResolver`);
-                return null;
+            if (info) {
+                declarationFile = info.file;
+                declarationLine = info.line;
+                logger.info(`✅ SELF.${memberName} → class="${info.className}" at ${info.file}:${info.line}`);
+            } else {
+                // Resolution failed (complex class hierarchy / scope issue) but we can still
+                // do a best-effort search for any "*.memberName" patterns in the current file.
+                logger.info(`⚠️ SELF.${memberName}: class resolution failed, doing best-effort search`);
             }
-            declarationFile = info.file;
-            declarationLine = info.line;
-            logger.info(`✅ SELF.${memberName} → class="${info.className}" at ${info.file}:${info.line}`);
         } else {
             // Multi-level chain (SELF.A.B) or Tier 2 local variable (mgr.Member)
             const chainedResolver = new ChainedPropertyResolver();
