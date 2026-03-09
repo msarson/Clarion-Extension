@@ -151,6 +151,26 @@ export class DefinitionProvider {
                             return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
                         }
                     }
+
+                    // Typed variable member: st.GetValue() where st is declared as "st StringTheory"
+                    if (!/^\s*(self|parent)\b/i.test(beforeDot)) {
+                        const structureNameMatch = beforeDot.match(/(\w+)\s*$/);
+                        if (structureNameMatch) {
+                            const structureName = structureNameMatch[1];
+                            const classType = this.findVariableType(tokens, structureName, position.line);
+                            if (classType) {
+                                logger.info(`Variable "${structureName}" is type "${classType}", looking for member "${methodName}"`);
+                                const paramCount = hasParentheses
+                                    ? this.memberResolver.countParametersInCall(line, methodName) ?? undefined
+                                    : undefined;
+                                const result = await this.findClassMemberInType(tokens, classType, methodName, document);
+                                if (result) {
+                                    logger.info(`✅ Found typed variable member "${methodName}" in "${classType}"`);
+                                    return result;
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
