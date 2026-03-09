@@ -509,7 +509,14 @@ export class DocumentStructure {
 
     private handleStructureToken(token: Token): void {
         if (!token.subType) {
-            token.subType = TokenType.Structure;
+            // Assign the specific subType that matches the structure keyword so that
+            // consumers can check token.subType === TokenType.Class etc. reliably.
+            switch (token.value.toUpperCase()) {
+                case 'CLASS':     token.subType = TokenType.Class; break;
+                case 'QUEUE':     token.subType = TokenType.Structure; break;
+                case 'GROUP':     token.subType = TokenType.Structure; break;
+                default:          token.subType = TokenType.Structure; break;
+            }
         }
 
         // 🛑 Special handling: Skip MODULE structures that are part of CLASS attribute list

@@ -86,6 +86,21 @@ export class ReferencesProvider {
         // Plain symbol path
         const symbolInfo = await this.symbolFinder.findSymbol(word, document, position);
         if (!symbolInfo) {
+            // Fallback: check if this plain word is a class field declaration.
+            // CLASS blocks don't form a procedure scope so findSymbol returns null,
+            // but we can detect it by finding a CLASS token that spans this line.
+            const tokens = this.tokenCache.getTokens(document);
+            const classToken = tokens.find(t =>
+                t.type === TokenType.Structure &&
+                t.subType === TokenType.Class &&
+                t.line <= position.line &&
+                t.finishesAt !== undefined &&
+                t.finishesAt >= position.line
+            );
+            if (classToken) {
+                logger.info(`🏛️ "${word}" is a class field declaration inside ${classToken.value} — routing to member-access path`);
+                return this.provideMemberReferences(`SELF.${word}`, document, position, context);
+            }
             logger.info(`❌ No symbol found for "${word}"`);
             return null;
         }
