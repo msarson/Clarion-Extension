@@ -1,4 +1,4 @@
-import { Location, Range } from 'vscode-languageserver-protocol';
+import { Location, Range, Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import * as fs from 'fs';
 import { ClarionTokenizer, Token, TokenType } from '../ClarionTokenizer';
@@ -8,6 +8,8 @@ import { SolutionManager } from '../solution/solutionManager';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { SymbolFinderService, SymbolInfo } from '../services/SymbolFinderService';
 import { TokenHelper } from '../utils/TokenHelper';
+import { ChainedPropertyResolver, ChainedMemberInfo } from '../utils/ChainedPropertyResolver';
+import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
@@ -16,21 +18,24 @@ logger.setLevel("error");
 /**
  * Provides "Find All References" for Clarion symbols.
  *
- * Search scope is determined by the declaration's scope level:
- *   parameter / local / routine  → current file only, within procedure boundaries
- *   module                       → declaring file only
- *   global                       → all project source files (requires solution)
+ * Two resolution paths:
+ *   1. Plain symbol (no dot) — scope-aware variable search (parameter/local/module/global)
+ *   2. Member access (has dot, e.g. SELF.Order or mgr.Order) — class member search:
+ *      - SELF.Member / SELF.A.B  → resolve via ClassMemberResolver / ChainedPropertyResolver
+ *      - localVar.Member         → resolve variable type, then look up member (Tier 2 inference)
  */
 export class ReferencesProvider {
     private tokenCache: TokenCache;
     private scopeAnalyzer: ScopeAnalyzer;
     private symbolFinder: SymbolFinderService;
+    private memberResolver: ClassMemberResolver;
 
     constructor() {
         this.tokenCache = TokenCache.getInstance();
         const solutionManager = SolutionManager.getInstance();
         this.scopeAnalyzer = new ScopeAnalyzer(this.tokenCache, solutionManager);
         this.symbolFinder = new SymbolFinderService(this.tokenCache, this.scopeAnalyzer);
+        this.memberResolver = new ClassMemberResolver();
     }
 
     /**
@@ -49,6 +54,12 @@ export class ReferencesProvider {
 
         logger.info(`🔍 Finding references for "${word}" at ${position.line}:${position.character}`);
 
+        // Route to member-access path when word contains a dot
+        if (word.includes('.')) {
+            return this.provideMemberReferences(word, document, position, context);
+        }
+
+        // Plain symbol path
         const symbolInfo = await this.symbolFinder.findSymbol(word, document, position);
         if (!symbolInfo) {
             logger.info(`❌ No symbol found for "${word}"`);
@@ -57,9 +68,7 @@ export class ReferencesProvider {
 
         logger.info(`✅ Symbol "${word}" found — scope: ${symbolInfo.scope.type}, declared at ${symbolInfo.location.uri}:${symbolInfo.location.line}`);
 
-        // The actual name to match across files (use the declaration token's value)
         const searchWord = symbolInfo.token.value;
-
         const filesToSearch = this.getFilesToSearch(symbolInfo, document);
         logger.info(`📁 Searching ${filesToSearch.length} file(s) for "${searchWord}"`);
 
@@ -73,18 +82,195 @@ export class ReferencesProvider {
         return locations.length > 0 ? locations : null;
     }
 
+    // ─── Member access (SELF.Order, mgr.Order) ───────────────────────────────
+
+    /**
+     * Handle Find All References for a dotted member access expression.
+     * Resolves the declaring class then searches for all usages of that member.
+     */
+    private async provideMemberReferences(
+        word: string,
+        document: TextDocument,
+        position: { line: number; character: number },
+        context: { includeDeclaration: boolean }
+    ): Promise<Location[] | null> {
+        const lastDot = word.lastIndexOf('.');
+        const beforeDot = word.substring(0, lastDot);
+        const memberName = word.substring(lastDot + 1);
+
+        if (!memberName) return null;
+
+        let declarationFile: string | null = null;
+        let declarationLine: number = -1;
+
+        // --- Resolve the declaring class ---------------------------------
+        const isSelfOrParent = /^(self|parent)$/i.test(beforeDot);
+
+        if (isSelfOrParent) {
+            // Single-level SELF.Member / PARENT.Member
+            const tokens = this.tokenCache.getTokensByUri(document.uri) ?? [];
+            const info = this.memberResolver.findClassMemberInfo(memberName, document, position.line, tokens);
+            if (!info) {
+                logger.info(`❌ Member "${memberName}" not found via ClassMemberResolver`);
+                return null;
+            }
+            declarationFile = info.file;
+            declarationLine = info.line;
+            logger.info(`✅ SELF.${memberName} → class="${info.className}" at ${info.file}:${info.line}`);
+        } else {
+            // Multi-level chain (SELF.A.B) or Tier 2 local variable (mgr.Member)
+            const chainedResolver = new ChainedPropertyResolver();
+            const vsPos: Position = { line: position.line, character: position.character };
+            let info: ChainedMemberInfo | null = await chainedResolver.resolve(beforeDot, memberName, document, vsPos);
+
+            if (!info) {
+                // Tier 2: try resolving beforeDot as a typed local/module/global variable
+                info = await this.resolveViaVariableType(beforeDot, memberName, document, position);
+            }
+
+            if (!info) {
+                logger.info(`❌ Member "${memberName}" could not be resolved for beforeDot="${beforeDot}"`);
+                return null;
+            }
+            declarationFile = info.file;
+            declarationLine = info.line;
+            logger.info(`✅ ${beforeDot}.${memberName} → class="${info.className}" at ${info.file}:${info.line}`);
+        }
+
+        // --- Determine files to search -----------------------------------
+        const filesToSearch = this.getMemberSearchFiles(document, declarationFile);
+
+        // --- Scan files for member usages --------------------------------
+        const locations: Location[] = [];
+        for (const fileUri of filesToSearch) {
+            const hits = this.findMemberReferencesInFile(fileUri, memberName);
+            locations.push(...hits);
+        }
+
+        // Optionally strip the declaration itself
+        if (!context.includeDeclaration && declarationFile && declarationLine >= 0) {
+            const normDecl = declarationFile.toLowerCase();
+            return locations.filter(loc =>
+                !(loc.uri.toLowerCase() === normDecl && loc.range.start.line === declarationLine)
+            );
+        }
+
+        logger.info(`✅ Found ${locations.length} member reference(s) to "${memberName}"`);
+        return locations.length > 0 ? locations : null;
+    }
+
+    /**
+     * Tier 2: resolve `variableName.memberName` by looking up the variable's declared type.
+     * e.g. `mgr &ViewManager` → type=ViewManager → find `memberName` in ViewManager.
+     */
+    private async resolveViaVariableType(
+        variableName: string,
+        memberName: string,
+        document: TextDocument,
+        position: { line: number; character: number }
+    ): Promise<ChainedMemberInfo | null> {
+        // Must be a plain identifier (no dots), not SELF/PARENT
+        if (variableName.includes('.') || /^(self|parent)$/i.test(variableName)) return null;
+
+        const symbolInfo = await this.symbolFinder.findSymbol(variableName, document, position);
+        if (!symbolInfo) return null;
+
+        const typeName = ClassMemberResolver.extractClassName(symbolInfo.type);
+        if (!typeName) return null;
+
+        logger.info(`Tier2: "${variableName}" has type "${typeName}", looking up member "${memberName}"`);
+        const info = await this.memberResolver.findMemberInNamedStructure(memberName, typeName, document);
+        return info ?? null;
+    }
+
+    /**
+     * Files to search for member references.
+     * For SELF-based access: always the current file (SELF is only valid inside that class).
+     * Include the declaration file too (it holds the member declaration in the .INC).
+     */
+    private getMemberSearchFiles(document: TextDocument, declarationFile: string | null): string[] {
+        const files = new Set<string>();
+        files.add(document.uri);
+        if (declarationFile && declarationFile !== document.uri) {
+            files.add(declarationFile);
+        }
+        return Array.from(files);
+    }
+
+    /**
+     * Find every occurrence of `memberName` used in dot-notation in a single file.
+     * Covers three token patterns:
+     *   1. StructureField  "SELF.Order"       — last segment is the member
+     *   2. StructureField  "Order.Something"  — first segment after a preceding dot
+     *   3. Variable        "Order"            — terminal access preceded by a Delimiter '.'
+     *   4. Label (col 0)   "Order"            — the member declaration line in the class body
+     */
+    private findMemberReferencesInFile(fileUri: string, memberName: string): Location[] {
+        const tokens = this.getTokensForUri(fileUri);
+        if (!tokens || tokens.length === 0) return [];
+
+        const memberLower = memberName.toLowerCase();
+        const locations: Location[] = [];
+
+        for (let i = 0; i < tokens.length; i++) {
+            const token = tokens[i];
+            if (token.type === TokenType.Comment || token.type === TokenType.String) continue;
+
+            if (token.type === TokenType.StructureField) {
+                const lastDot = token.value.lastIndexOf('.');
+                const lastSeg = token.value.substring(lastDot + 1).toLowerCase();
+
+                if (lastSeg === memberLower) {
+                    // e.g. "SELF.Order" — highlight the "Order" part
+                    locations.push(Location.create(fileUri,
+                        Range.create(token.line, token.start + lastDot + 1,
+                                     token.line, token.start + token.value.length)));
+                } else {
+                    const firstDot = token.value.indexOf('.');
+                    const firstSeg = token.value.substring(0, firstDot).toLowerCase();
+                    if (firstSeg === memberLower) {
+                        // e.g. "Order.MainKey" appearing as the second-level token in a chain
+                        locations.push(Location.create(fileUri,
+                            Range.create(token.line, token.start,
+                                         token.line, token.start + firstDot)));
+                    }
+                }
+                continue;
+            }
+
+            if (token.type === TokenType.Variable && token.value.toLowerCase() === memberLower) {
+                // Terminal access: SELF.Primary.Order where "Order" is a plain Variable after '.'
+                const prev = tokens[i - 1];
+                if (prev && prev.type === TokenType.Delimiter && prev.value === '.' && prev.line === token.line) {
+                    locations.push(Location.create(fileUri,
+                        Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                }
+                continue;
+            }
+
+            // Member declaration in class body (Label at column 0)
+            if (token.type === TokenType.Label && token.start === 0 &&
+                token.value.toLowerCase() === memberLower) {
+                locations.push(Location.create(fileUri,
+                    Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+            }
+        }
+
+        return locations;
+    }
+
+    // ─── Plain symbol helpers ─────────────────────────────────────────────────
+
     /**
      * Determine the set of file URIs to scan based on the symbol's scope.
      */
     private getFilesToSearch(symbolInfo: SymbolInfo, currentDocument: TextDocument): string[] {
         const scopeType = symbolInfo.scope.type;
 
-        // Narrow scopes: search only the current file (procedure boundaries applied later)
         if (scopeType === 'local' || scopeType === 'parameter' || scopeType === 'routine') {
             return [currentDocument.uri];
         }
 
-        // Module-local: only the declaring file
         if (scopeType === 'module') {
             return [symbolInfo.location.uri];
         }
@@ -103,13 +289,11 @@ export class ReferencesProvider {
             if (allFiles.length > 0) return allFiles;
         }
 
-        // Fallback: just the current file
         return [currentDocument.uri];
     }
 
     /**
-     * Find all matching token locations in a single file.
-     * Applies procedure-boundary constraints for narrow-scope symbols.
+     * Find all matching token locations in a single file for a plain symbol.
      */
     private findReferencesInFile(
         fileUri: string,
@@ -124,7 +308,6 @@ export class ReferencesProvider {
             const tokens = this.getTokensForUri(fileUri);
             if (!tokens || tokens.length === 0) return locations;
 
-            // For narrow scopes, constrain to the containing procedure's line range
             const scopeType = symbolInfo.scope.type;
             let startLine = 0;
             let endLine = Number.MAX_SAFE_INTEGER;
@@ -140,24 +323,18 @@ export class ReferencesProvider {
 
             for (const token of tokens) {
                 if (token.line < startLine || token.line > endLine) continue;
-
-                // Ignore comments and string literals — not real references
                 if (token.type === TokenType.Comment || token.type === TokenType.String) continue;
 
                 let matchStart = token.start;
                 let matchLength = token.value.length;
 
                 if (token.value.toLowerCase() === searchWordLower) {
-                    // Exact match (Variable, Label, etc.)
-                } else if (
-                    token.type === TokenType.StructureField ||
-                    token.type === TokenType.Class
-                ) {
-                    // StructureField tokens combine object+field: "st.SetValue"
-                    // Check if the prefix (before the dot) is the symbol we're looking for
+                    // Exact match
+                } else if (token.type === TokenType.StructureField || token.type === TokenType.Class) {
+                    // Object prefix of a StructureField: "st.SetValue" when searching for "st"
                     const dotIndex = token.value.indexOf('.');
                     if (dotIndex > 0 && token.value.substring(0, dotIndex).toLowerCase() === searchWordLower) {
-                        matchLength = dotIndex; // highlight only the object prefix
+                        matchLength = dotIndex;
                     } else {
                         continue;
                     }
@@ -165,7 +342,6 @@ export class ReferencesProvider {
                     continue;
                 }
 
-                // Optionally exclude the declaration itself
                 if (!includeDeclaration && fileUri === declarationUri && token.line === declarationLine) continue;
 
                 locations.push(Location.create(
@@ -185,11 +361,9 @@ export class ReferencesProvider {
      * falls back to reading and tokenizing from disk for closed files.
      */
     private getTokensForUri(uri: string): Token[] {
-        // Fast path: document is open and cached
         const cached = this.tokenCache.getTokensByUri(uri);
         if (cached) return cached;
 
-        // Slow path: read from disk
         try {
             const filePath = decodeURIComponent(uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
             if (!fs.existsSync(filePath)) return [];
@@ -206,3 +380,4 @@ export class ReferencesProvider {
         }
     }
 }
+
