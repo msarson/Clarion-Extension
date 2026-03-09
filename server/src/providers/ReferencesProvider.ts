@@ -98,8 +98,15 @@ export class ReferencesProvider {
                 t.finishesAt >= position.line
             );
             if (classToken) {
-                logger.info(`🏛️ "${word}" is a class field declaration inside ${classToken.value} — routing to member-access path`);
-                return this.provideMemberReferences(`SELF.${word}`, document, position, context);
+                // Extract MODULE('file.clw') from the CLASS line to find the implementation file
+                const classLine = document.getText({
+                    start: { line: classToken.line, character: 0 },
+                    end: { line: classToken.line, character: 999 }
+                });
+                const moduleMatch = classLine.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i);
+                const classModuleFile = moduleMatch?.[1];
+                logger.info(`🏛️ "${word}" is a class field inside CLASS (module=${classModuleFile ?? 'none'}) — routing to member-access path`);
+                return this.provideMemberReferences(`SELF.${word}`, document, position, context, classModuleFile);
             }
             logger.info(`❌ No symbol found for "${word}"`);
             return null;
@@ -131,7 +138,8 @@ export class ReferencesProvider {
         word: string,
         document: TextDocument,
         position: { line: number; character: number },
-        context: { includeDeclaration: boolean }
+        context: { includeDeclaration: boolean },
+        classModuleFile?: string
     ): Promise<Location[] | null> {
         const lastDot = word.lastIndexOf('.');
         const beforeDot = word.substring(0, lastDot);
@@ -181,7 +189,7 @@ export class ReferencesProvider {
         }
 
         // --- Determine files to search -----------------------------------
-        const filesToSearch = this.getMemberSearchFiles(document, declarationFile);
+        const filesToSearch = this.getMemberSearchFiles(document, declarationFile, classModuleFile);
 
         // --- Scan files for member usages --------------------------------
         const locations: Location[] = [];
@@ -228,16 +236,70 @@ export class ReferencesProvider {
 
     /**
      * Files to search for member references.
-     * For SELF-based access: always the current file (SELF is only valid inside that class).
-     * Include the declaration file too (it holds the member declaration in the .INC).
+     * Always includes: the current document, the declaration file (INC), and all project CLW files.
+     * Also adds any MODULE('file.clw') referenced by the enclosing CLASS declaration.
+     * Class members (SELF.Order) can be used in any implementation file in the project.
      */
-    private getMemberSearchFiles(document: TextDocument, declarationFile: string | null): string[] {
+    private getMemberSearchFiles(
+        document: TextDocument,
+        declarationFile: string | null,
+        classModuleFile?: string
+    ): string[] {
         const files = new Set<string>();
         files.add(document.uri);
-        if (declarationFile && declarationFile !== document.uri) {
+        if (declarationFile) {
             files.add(declarationFile);
         }
+
+        // If the CLASS has a MODULE('xyz.clw') attribute, resolve and add that file
+        if (classModuleFile) {
+            const resolved = this.resolveModuleFile(classModuleFile, document.uri);
+            if (resolved) files.add(resolved);
+        }
+
+        // Search all project source files — class members can be used in any CLW
+        const solutionManager = SolutionManager.getInstance();
+        if (solutionManager?.solution?.projects?.length) {
+            for (const project of solutionManager.solution.projects) {
+                for (const sourceFile of project.sourceFiles) {
+                    const fullPath = `${project.path}\\${sourceFile.relativePath}`;
+                    const uri = `file:///${fullPath.replace(/\\/g, '/')}`;
+                    files.add(uri);
+                }
+            }
+        }
+
         return Array.from(files);
+    }
+
+    /**
+     * Resolve a MODULE('file.clw') filename to a file URI by searching the same
+     * directory as the source INC file and configured redirection paths.
+     */
+    private resolveModuleFile(moduleFileName: string, sourceUri: string): string | null {
+        try {
+            const sourcePath = decodeURIComponent(sourceUri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+            const sourceDir = sourcePath.substring(0, sourcePath.lastIndexOf('\\'));
+
+            // 1. Same directory as the INC
+            const candidate = `${sourceDir}\\${moduleFileName}`;
+            if (fs.existsSync(candidate)) {
+                return `file:///${candidate.replace(/\\/g, '/')}`;
+            }
+
+            // 2. Search redirection paths via SolutionManager
+            const solutionManager = SolutionManager.getInstance();
+            const searchPaths = solutionManager?.getSearchPaths?.() ?? [];
+            for (const searchPath of searchPaths) {
+                const candidate2 = `${searchPath}\\${moduleFileName}`;
+                if (fs.existsSync(candidate2)) {
+                    return `file:///${candidate2.replace(/\\/g, '/')}`;
+                }
+            }
+        } catch {
+            // ignore resolution errors
+        }
+        return null;
     }
 
     /**
