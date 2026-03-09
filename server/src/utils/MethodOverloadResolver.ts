@@ -220,22 +220,20 @@ export class MethodOverloadResolver {
         implementationSignature?: string
     ): MethodDeclarationInfo | null {
         if (candidates.length === 0) return null;
-        
-        // If no parameter count provided, return first candidate
+
+        // 1. No parameter count provided → return first candidate
         if (paramCount === undefined) {
             logger.info(`Returning first candidate (no param matching needed)`);
             return candidates[0];
         }
-        
-        // Filter candidates by parameter count first
+
+        // 2. Exact count match
         const exactCountMatches = candidates.filter(c => c.paramCount === paramCount);
-        
-        // If we have implementation signature and multiple matches with same count, try type matching
+
         if (implementationSignature && exactCountMatches.length > 1) {
             logger.info(`Multiple overloads with ${paramCount} parameters, attempting type matching`);
             const implParams = this.extractParameterTypes(implementationSignature);
-            
-            // Try to find exact type match
+
             for (const candidate of exactCountMatches) {
                 const declParams = this.extractParameterTypes(candidate.signature);
                 if (this.parametersMatch(implParams, declParams)) {
@@ -243,28 +241,40 @@ export class MethodOverloadResolver {
                     return candidate;
                 }
             }
-            
+
             logger.info(`No exact type match found, returning first candidate with matching count`);
         }
-        
+
         if (exactCountMatches.length > 0) {
             logger.info(`Found exact match with ${paramCount} parameters`);
             return exactCountMatches[0];
         }
-        
-        // If no exact match, find closest (prefer higher param count for optional params)
+
+        // 3. Compatible match: callArgs within [paramCount - defaultCount, paramCount]
+        const compatibleCandidates = candidates
+            .filter(c => {
+                const defaults = ClarionPatterns.countDefaultParams(c.signature);
+                return paramCount >= (c.paramCount - defaults) && paramCount <= c.paramCount;
+            })
+            .sort((a, b) => (a.paramCount - paramCount) - (b.paramCount - paramCount));
+
+        if (compatibleCandidates.length > 0) {
+            logger.info(`Selected compatible overload with ${compatibleCandidates[0].paramCount} parameters (call had ${paramCount})`);
+            return compatibleCandidates[0];
+        }
+
+        // 4. Fallback: closest absolute distance, prefer higher param count on tie
         const bestMatch = candidates.reduce((best, curr) => {
             const bestDiff = Math.abs(best.paramCount - paramCount);
             const currDiff = Math.abs(curr.paramCount - paramCount);
-            
-            // If same distance, prefer the one with MORE parameters (optional params)
+
             if (currDiff === bestDiff) {
                 return curr.paramCount > best.paramCount ? curr : best;
             }
-            
+
             return currDiff < bestDiff ? curr : best;
         });
-        
+
         logger.info(`Selected overload with ${bestMatch.paramCount} parameters (implementation had ${paramCount})`);
         return bestMatch;
     }

@@ -1,9 +1,12 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import { Location, Range } from 'vscode-languageserver-protocol';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
 import { TokenHelper } from './TokenHelper';
 import { ClassDefinitionIndexer } from './ClassDefinitionIndexer';
+import { ClarionPatterns } from './ClarionPatterns';
+import { MethodOverloadResolver } from './MethodOverloadResolver';
 import * as path from 'path';
 import * as fs from 'fs';
 import LoggerManager from '../logger';
@@ -11,7 +14,7 @@ import LoggerManager from '../logger';
 const logger = LoggerManager.getLogger("ClassMemberResolver");
 logger.setLevel("error");
 
-type MemberInfo = { type: string; className: string; line: number; file: string };
+export type MemberInfo = { type: string; className: string; line: number; file: string };
 
 /**
  * Shared utility for resolving class members (methods, properties)
@@ -20,6 +23,7 @@ type MemberInfo = { type: string; className: string; line: number; file: string 
 export class ClassMemberResolver {
     private tokenCache = TokenCache.getInstance();
     private classIndexer = ClassDefinitionIndexer.getInstance();
+    private overloadResolver = new MethodOverloadResolver();
 
     /**
      * Finds class member info for a given member name
@@ -306,35 +310,47 @@ export class ClassMemberResolver {
     }
 
     private selectBestOverload(
-        candidates: { type: string; line: number; paramCount: number }[],
+        candidates: { type: string; line: number; paramCount: number; signature?: string }[],
         paramCount?: number
-    ): { type: string; line: number; paramCount: number } | null {
+    ): { type: string; line: number; paramCount: number; signature?: string } | null {
         if (candidates.length === 0) return null;
-        
-        // If no parameter count provided, return first candidate
+
+        // 1. No callArgs → first candidate
         if (paramCount === undefined) {
             logger.info(`Returning first candidate (no param matching needed)`);
             return candidates[0];
         }
-        
-        // Find exact match first
-        let bestMatch = candidates.find(c => c.paramCount === paramCount);
-        
-        // If no exact match, find closest (prefer higher param count for optional params)
-        if (!bestMatch) {
-            bestMatch = candidates.reduce((best, curr) => {
-                const bestDiff = Math.abs(best.paramCount - paramCount);
-                const currDiff = Math.abs(curr.paramCount - paramCount);
-                
-                // If same distance, prefer the one with MORE parameters (optional params)
-                if (currDiff === bestDiff) {
-                    return curr.paramCount > best.paramCount ? curr : best;
-                }
-                
-                return currDiff < bestDiff ? curr : best;
-            });
+
+        // 2. Exact match
+        const exact = candidates.find(c => c.paramCount === paramCount);
+        if (exact) {
+            logger.info(`Selected overload with ${exact.paramCount} parameters (exact match)`);
+            return exact;
         }
-        
+
+        // 3. Compatible match: callArgs within [paramCount - defaultCount, paramCount]
+        const compatible = candidates
+            .filter(c => {
+                const defaults = ClarionPatterns.countDefaultParams(c.signature ?? '');
+                return paramCount >= (c.paramCount - defaults) && paramCount <= c.paramCount;
+            })
+            .sort((a, b) => (a.paramCount - paramCount) - (b.paramCount - paramCount));
+
+        if (compatible.length > 0) {
+            logger.info(`Selected compatible overload with ${compatible[0].paramCount} parameters (call had ${paramCount})`);
+            return compatible[0];
+        }
+
+        // 4. Fallback: closest absolute distance, prefer higher count on tie
+        const bestMatch = candidates.reduce((best, curr) => {
+            const bestDiff = Math.abs(best.paramCount - paramCount);
+            const currDiff = Math.abs(curr.paramCount - paramCount);
+            if (currDiff === bestDiff) {
+                return curr.paramCount > best.paramCount ? curr : best;
+            }
+            return currDiff < bestDiff ? curr : best;
+        });
+
         logger.info(`Selected overload with ${bestMatch.paramCount} parameters (call had ${paramCount})`);
         return bestMatch;
     }
@@ -640,7 +656,7 @@ export class ClassMemberResolver {
                 if (!headerPattern.test(lines[j])) continue;
 
                 logger.info(`Found structure ${className} in ${path.basename(filePath)} at line ${j}`);
-                const candidates: { type: string; line: number; paramCount: number }[] = [];
+                const candidates: { type: string; line: number; paramCount: number; signature?: string }[] = [];
 
                 for (let k = j + 1; k < lines.length; k++) {
                     const memberLine = lines[k];
@@ -654,7 +670,7 @@ export class ClassMemberResolver {
                         if (type.toUpperCase().startsWith('PROCEDURE')) {
                             declParamCount = this.countParametersInDeclaration(memberLine);
                         }
-                        candidates.push({ type, line: k, paramCount: declParamCount });
+                        candidates.push({ type, line: k, paramCount: declParamCount, signature: memberLine });
                     }
                 }
 
@@ -764,5 +780,121 @@ export class ClassMemberResolver {
         }
         
         return commaCount + 1;
+    }
+
+    /**
+     * Returns the raw text of a specific line from a file given its URI and line number.
+     * Used to retrieve the declaration signature for overload resolution.
+     */
+    public static getDeclarationLineText(fileUri: string, line: number): string | null {
+        try {
+            let filePath = fileUri;
+            if (filePath.startsWith('file:///')) {
+                filePath = decodeURIComponent(filePath.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+            }
+            const content = fs.readFileSync(filePath, 'utf8');
+            const lines = content.split(/\r?\n/);
+            return lines[line] ?? null;
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * Searches a single CLW file for all ClassName.MethodName PROCEDURE lines
+     * and returns the Location of the best match.
+     * If declarationSig is provided, uses type-based overload matching.
+     */
+    public findImplementationInFile(
+        filePath: string,
+        className: string,
+        methodName: string,
+        declarationSig?: string
+    ): Location | null {
+        try {
+            const content = fs.readFileSync(filePath, 'utf8');
+            const lines = content.split(/\r?\n/);
+            const candidates: { lineNum: number; sig: string }[] = [];
+
+            for (let i = 0; i < lines.length; i++) {
+                const m = lines[i].match(ClarionPatterns.METHOD_IMPLEMENTATION);
+                if (m &&
+                    m[1].toUpperCase() === className.toUpperCase() &&
+                    m[2].toUpperCase() === methodName.toUpperCase()) {
+                    candidates.push({ lineNum: i, sig: lines[i].trim() });
+                }
+            }
+
+            if (candidates.length === 0) return null;
+
+            let bestIdx = 0;
+            if (candidates.length > 1 && declarationSig) {
+                bestIdx = this.overloadResolver.findBestMatchingImplementation(
+                    declarationSig,
+                    candidates.map(c => c.sig)
+                );
+            }
+
+            const best = candidates[bestIdx];
+            const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
+            return Location.create(fileUri, Range.create(best.lineNum, 0, best.lineNum, 0));
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * Declaration-first cross-file implementation search.
+     * Reads the declaration signature from memberInfo, then searches CLW files
+     * using type-based overload matching so default-param overloads resolve correctly.
+     */
+    public async findImplementationCrossFile(
+        className: string,
+        methodName: string,
+        memberInfo: MemberInfo,
+        document: TextDocument
+    ): Promise<Location | null> {
+        const declarationSig = ClassMemberResolver.getDeclarationLineText(memberInfo.file, memberInfo.line) ?? undefined;
+        const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const sm = SolutionManager.getInstance();
+
+        // 1. Try CLW with same base name as the declaration file (via redirection)
+        if (memberInfo.file) {
+            let declPath = memberInfo.file;
+            if (declPath.startsWith('file:///')) {
+                declPath = decodeURIComponent(declPath.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+            }
+            const implFileName = path.basename(declPath, path.extname(declPath)) + '.clw';
+
+            if (sm?.solution) {
+                for (const project of sm.solution.projects) {
+                    const resolved = project.getRedirectionParser().findFile(implFileName, currentPath);
+                    if (resolved?.path && fs.existsSync(resolved.path)) {
+                        const loc = this.findImplementationInFile(resolved.path, className, methodName, declarationSig);
+                        if (loc) return loc;
+                    }
+                }
+            }
+            // Fallback: same directory as the declaration file
+            const directPath = path.join(path.dirname(declPath), implFileName);
+            if (fs.existsSync(directPath)) {
+                const loc = this.findImplementationInFile(directPath, className, methodName, declarationSig);
+                if (loc) return loc;
+            }
+        }
+
+        // 2. Search all project CLW source files
+        if (sm?.solution) {
+            for (const project of sm.solution.projects) {
+                for (const sf of project.sourceFiles) {
+                    const fullPath = path.join(project.path, sf.relativePath);
+                    if (!fullPath.toLowerCase().endsWith('.clw') || !fs.existsSync(fullPath)) continue;
+                    const loc = this.findImplementationInFile(fullPath, className, methodName, declarationSig);
+                    if (loc) return loc;
+                }
+            }
+        }
+
+        return null;
     }
 }

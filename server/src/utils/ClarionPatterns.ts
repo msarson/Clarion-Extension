@@ -217,4 +217,34 @@ export class ClarionPatterns {
         
         return commaCount + 1;
     }
+
+    /**
+     * Counts parameters with default values in a procedure declaration.
+     * A parameter has a default if it contains ' = ' (assignment) outside nested parens/angles.
+     * Example: PROCEDURE(STRING s, UNSIGNED nvType, LONG extraData = 0) → 1
+     */
+    public static countDefaultParams(line: string): number {
+        const match = line.match(this.PROCEDURE_WITH_PARAMS);
+        if (!match) return 0;
+        const paramList = match[1].trim();
+        if (paramList === '') return 0;
+
+        let depth = 0, angleDepth = 0, defaults = 0;
+        let currentParam = '';
+        for (let i = 0; i < paramList.length; i++) {
+            const ch = paramList[i];
+            if (ch === '(') depth++;
+            else if (ch === ')') depth--;
+            else if (ch === '<') angleDepth++;
+            else if (ch === '>') angleDepth--;
+            else if (ch === ',' && depth === 0 && angleDepth === 0) {
+                if (/=/.test(currentParam)) defaults++;
+                currentParam = '';
+                continue;
+            }
+            currentParam += ch;
+        }
+        if (currentParam.trim() && /=/.test(currentParam)) defaults++;
+        return defaults;
+    }
 }

@@ -398,19 +398,14 @@ export class ImplementationProvider {
                             callInfo.methodName, classType, document, callInfo.paramCount
                         );
                         if (memberInfo) {
-                            // Same pattern as chained resolver: moduleFile=null, declarationFile=memberInfo.file
-                            const impl = await this.findMethodImplementationCrossFile(
-                                classType,
-                                callInfo.methodName,
-                                document,
-                                callInfo.paramCount,
-                                null,
-                                line,
-                                memberInfo.file
-                            );
-                            if (impl) {
-                                logger.info(`✅ Found typed variable impl "${callInfo.methodName}" in "${classType}"`);
-                                return impl;
+                            if (memberInfo.type.toUpperCase().includes('PROCEDURE')) {
+                                const impl = await this.memberResolver.findImplementationCrossFile(
+                                    classType, callInfo.methodName, memberInfo, document
+                                );
+                                if (impl) {
+                                    logger.info(`✅ Found typed variable impl "${callInfo.methodName}" in "${classType}"`);
+                                    return impl;
+                                }
                             }
                             return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
                         }
@@ -887,10 +882,27 @@ export class ImplementationProvider {
                         candidates.map(c => c.signature)
                     );
                 } else if (paramCount !== undefined) {
-                    const countMatch = candidates.findIndex(c =>
+                    // Exact match first
+                    const exactMatch = candidates.findIndex(c =>
                         ClarionPatterns.countParameters(c.signature) === paramCount
                     );
-                    if (countMatch !== -1) bestIdx = countMatch;
+                    if (exactMatch !== -1) {
+                        bestIdx = exactMatch;
+                    } else {
+                        // No exact match — find closest, preferring higher param count
+                        // (implementations have no default-param markers, so a 3-param
+                        // implementation is the right target for a 2-arg call when the
+                        // declaration has a default on the 3rd param)
+                        bestIdx = candidates.reduce((bestI, c, i) => {
+                            const bestCount = ClarionPatterns.countParameters(candidates[bestI].signature);
+                            const currCount = ClarionPatterns.countParameters(c.signature);
+                            const bestDiff = Math.abs(bestCount - paramCount);
+                            const currDiff = Math.abs(currCount - paramCount);
+                            if (currDiff < bestDiff) return i;
+                            if (currDiff === bestDiff && currCount > bestCount) return i;
+                            return bestI;
+                        }, 0);
+                    }
                 }
             }
 

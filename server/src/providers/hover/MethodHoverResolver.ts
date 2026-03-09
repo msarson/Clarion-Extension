@@ -285,47 +285,12 @@ export class MethodHoverResolver {
                          chainedInfo.type.toUpperCase().includes('FUNCTION');
 
         if (isMethod) {
-            // Try solution-based cross-file search first
-            let implLocation = await this.findMethodImplementationCrossFile(
-                chainedInfo.className, fieldName, document, paramCount, null
+            const implLoc = await this.memberResolver.findImplementationCrossFile(
+                chainedInfo.className, fieldName, chainedInfo, document
             );
-
-            // Fallback: derive CLW filename from the declaration INC file and use redirection
-            if (!implLocation) {
-                let declFilePath = chainedInfo.file;
-                if (declFilePath.startsWith('file:///')) {
-                    declFilePath = decodeURIComponent(declFilePath.replace('file:///', '')).replace(/\//g, '\\');
-                }
-                const declBase = path.basename(declFilePath, path.extname(declFilePath));
-                const implFileName = declBase + '.clw';
-                const currentPath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
-                const sm = SolutionManager.getInstance();
-                if (sm?.solution) {
-                    for (const project of sm.solution.projects) {
-                        const resolved = project.getRedirectionParser().findFile(implFileName, currentPath);
-                        if (resolved?.path && fs.existsSync(resolved.path)) {
-                            const implLine = this.searchFileForImplementation(resolved.path, chainedInfo.className, fieldName, paramCount);
-                            if (implLine !== null) {
-                                implLocation = `file:///${resolved.path.replace(/\\/g, '/')}:${implLine}`;
-                                break;
-                            }
-                        }
-                    }
-                }
-                // Last resort: same directory as declaration
-                if (!implLocation) {
-                    const directPath = path.join(path.dirname(declFilePath), implFileName);
-                    if (fs.existsSync(directPath)) {
-                        const implLine = this.searchFileForImplementation(directPath, chainedInfo.className, fieldName, paramCount);
-                        if (implLine !== null) {
-                            implLocation = `file:///${directPath.replace(/\\/g, '/')}:${implLine}`;
-                        }
-                    }
-                }
-            }
-
-            if (implLocation) {
-                return this.formatter.formatMethodCall(fieldName, chainedInfo, implLocation);
+            if (implLoc) {
+                const implLocationStr = `${implLoc.uri}:${implLoc.range.start.line}`;
+                return this.formatter.formatMethodCall(fieldName, chainedInfo, implLocationStr);
             }
         }
 
@@ -477,6 +442,7 @@ export class MethodHoverResolver {
             const lines = content.split(/\r?\n/);
             
             // Search for method implementation: ClassName.MethodName PROCEDURE
+            const candidates: { lineNum: number; implParamCount: number }[] = [];
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
                 const implMatch = line.match(ClarionPatterns.METHOD_IMPLEMENTATION);
@@ -484,22 +450,38 @@ export class MethodHoverResolver {
                 if (implMatch && 
                     implMatch[1].toUpperCase() === className.toUpperCase() &&
                     implMatch[2].toUpperCase() === methodName.toUpperCase()) {
-                    
-                    // Found a potential match - check parameter count if specified
-                    if (paramCount !== undefined) {
-                        const params = implMatch[3] ? implMatch[3].trim() : '';
-                        const implParamCount = params === '' ? 0 : params.split(',').length;
-                        
-                        if (implParamCount !== paramCount) {
-                            logger.info(`Parameter count mismatch: expected ${paramCount}, found ${implParamCount}`);
-                            continue;
-                        }
-                    }
-                    
-                    logger.info(`✅ Found implementation in ${filePath} at line ${i}`);
-                    return i;
+                    const params = implMatch[3] ? implMatch[3].trim() : '';
+                    const implParamCount = params === '' ? 0 : params.split(',').length;
+                    candidates.push({ lineNum: i, implParamCount });
                 }
             }
+
+            if (candidates.length === 0) return null;
+            if (candidates.length === 1) {
+                logger.info(`✅ Found implementation in ${filePath} at line ${candidates[0].lineNum}`);
+                return candidates[0].lineNum;
+            }
+
+            // Multiple overloads — pick best match
+            if (paramCount !== undefined) {
+                const exact = candidates.find(c => c.implParamCount === paramCount);
+                if (exact) {
+                    logger.info(`✅ Found exact-param implementation in ${filePath} at line ${exact.lineNum}`);
+                    return exact.lineNum;
+                }
+                // Closest match, prefer higher param count on tie
+                const best = candidates.reduce((b, c) => {
+                    const bd = Math.abs(b.implParamCount - paramCount);
+                    const cd = Math.abs(c.implParamCount - paramCount);
+                    if (cd < bd) return c;
+                    if (cd === bd && c.implParamCount > b.implParamCount) return c;
+                    return b;
+                });
+                logger.info(`✅ Found closest-param implementation in ${filePath} at line ${best.lineNum}`);
+                return best.lineNum;
+            }
+            logger.info(`✅ Found implementation in ${filePath} at line ${candidates[0].lineNum}`);
+            return candidates[0].lineNum;
         } catch (error) {
             logger.error(`Error reading file ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
         }
