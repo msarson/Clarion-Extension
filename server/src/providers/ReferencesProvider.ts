@@ -168,32 +168,60 @@ export class ReferencesProvider {
                 logger.info(`⚠️ SELF.${memberName}: class resolution failed, doing best-effort search`);
             }
         } else {
-            // Multi-level chain (SELF.A.B) or Tier 2 local variable (mgr.Member)
-            const chainedResolver = new ChainedPropertyResolver();
-            const vsPos: Position = { line: position.line, character: position.character };
-            let info: ChainedMemberInfo | null = await chainedResolver.resolve(beforeDot, memberName, document, vsPos);
+            // Multi-level chain (SELF.A.B), Tier 2 local variable (mgr.Member),
+            // or cursor on MethodImplementation line (ClassName.Method PROCEDURE).
+            const tokens = this.tokenCache.getTokens(document);
 
-            if (!info) {
-                info = await this.resolveViaVariableType(beforeDot, memberName, document, position);
+            // Fast path: check if the cursor line IS a MethodImplementation —
+            // e.g. "FieldPairsClass.Init PROCEDURE". In that case beforeDot IS the
+            // class name; skip variable-type resolution and go straight to member search.
+            const implToken = tokens.find(t =>
+                t.subType === TokenType.MethodImplementation &&
+                t.label &&
+                t.line === position.line
+            );
+            if (implToken && implToken.label) {
+                const dotIdx = implToken.label.indexOf('.');
+                const implClass = dotIdx > 0 ? implToken.label.substring(0, dotIdx) : null;
+                const implMethod = dotIdx > 0 ? implToken.label.substring(dotIdx + 1).toLowerCase() : '';
+                if (implClass && implMethod === memberName.toLowerCase()) {
+                    // Treat exactly like SELF.Member resolution but with a known class name
+                    const info = this.memberResolver.findClassMemberInfo(memberName, document, position.line, tokens);
+                    if (info) {
+                        declarationFile = info.file;
+                        declarationLine = info.line;
+                        className = info.className ?? implClass;
+                    } else {
+                        className = implClass;
+                    }
+                    logger.info(`✅ MethodImpl cursor: "${implClass}.${memberName}" → class="${className}"`);
+                }
             }
 
-            if (!info) {
-                // Chain resolution failed. If beforeDot is a SELF/PARENT-rooted chain
-                // (e.g. "SELF.Sort"), do a best-effort search for the member name with
-                // no class filter — the 3+ segment token matching will still narrow results
-                // to SELF.*.Member patterns, avoiding unrelated false positives.
-                const isSelfChain = /^(self|parent)\b/i.test(beforeDot);
-                if (isSelfChain) {
-                    logger.info(`⚠️ Chain resolution failed for "${beforeDot}.${memberName}", doing best-effort SELF chain search`);
-                } else {
-                    logger.info(`❌ Member "${memberName}" could not be resolved for beforeDot="${beforeDot}"`);
-                    return null;
+            if (!className) {
+                // Normal chain / Tier 2 resolution
+                const chainedResolver = new ChainedPropertyResolver();
+                const vsPos: Position = { line: position.line, character: position.character };
+                let info: ChainedMemberInfo | null = await chainedResolver.resolve(beforeDot, memberName, document, vsPos);
+
+                if (!info) {
+                    info = await this.resolveViaVariableType(beforeDot, memberName, document, position);
                 }
-            } else {
-                declarationFile = info.file;
-                declarationLine = info.line;
-                className = info.className;
-                logger.info(`✅ ${beforeDot}.${memberName} → class="${info.className}" at ${info.file}:${info.line}`);
+
+                if (!info) {
+                    const isSelfChain = /^(self|parent)\b/i.test(beforeDot);
+                    if (isSelfChain) {
+                        logger.info(`⚠️ Chain resolution failed for "${beforeDot}.${memberName}", doing best-effort SELF chain search`);
+                    } else {
+                        logger.info(`❌ Member "${memberName}" could not be resolved for beforeDot="${beforeDot}"`);
+                        return null;
+                    }
+                } else {
+                    declarationFile = info.file;
+                    declarationLine = info.line;
+                    className = info.className;
+                    logger.info(`✅ ${beforeDot}.${memberName} → class="${info.className}" at ${info.file}:${info.line}`);
+                }
             }
         }
 
