@@ -39,7 +39,13 @@ async function switchToSolutionWorkspaceIfNeeded(solutionFilePath: string): Prom
     logger.info(`🔄 Solution is in a different folder: ${solutionFolder} (current: ${currentFolderNorm || 'none'})`);
 
     // Save to global history BEFORE switching so it's remembered after the reload
-    await GlobalSolutionHistory.addSolution(solutionFilePath, solutionFolder);
+    await GlobalSolutionHistory.addSolution(
+        solutionFilePath,
+        solutionFolder,
+        globalClarionPropertiesFile || undefined,
+        globalClarionVersion || undefined,
+        globalSettings.configuration || undefined
+    );
     logger.info(`✅ Saved solution to global history before folder switch`);
 
     // Find any .code-workspace file in the solution folder

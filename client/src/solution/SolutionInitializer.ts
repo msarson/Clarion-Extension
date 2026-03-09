@@ -10,6 +10,7 @@ import { registerLanguageFeatures } from '../providers/LanguageFeatureManager';
 import { createSolutionFileWatchers } from '../providers/FileWatcherManager';
 import { isClientReady, getClientReadyPromise } from '../LanguageClientManager';
 import { refreshOpenDocuments } from '../document/DocumentRefreshManager';
+import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
 import LoggerManager from '../utils/LoggerManager';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -63,7 +64,26 @@ export async function workspaceHasBeenTrusted(
     if (globalSolutionFile) {
         logger.info("✅ Solution file found. Proceeding with initialization...");
         
-        // If properties file or version is missing, try to set defaults
+        // If properties file or version is missing, check global history first
+        // (they may have been stored during a cross-workspace switch)
+        if (!globalClarionPropertiesFile || !globalClarionVersion) {
+            logger.info("🔍 Settings incomplete — checking GlobalSolutionHistory for stored settings...");
+            const history = await GlobalSolutionHistory.getReferences();
+            const historyEntry = history.find(r =>
+                r.solutionFile.toLowerCase() === globalSolutionFile.toLowerCase()
+            );
+            if (historyEntry?.propertiesFile && historyEntry?.version) {
+                logger.info(`✅ Restoring settings from global history: propertiesFile=${historyEntry.propertiesFile}, version=${historyEntry.version}`);
+                await setGlobalClarionSelection(
+                    globalSolutionFile,
+                    historyEntry.propertiesFile,
+                    historyEntry.version,
+                    historyEntry.configuration || globalSettings.configuration || 'Release'
+                );
+            }
+        }
+
+        // If still missing, try defaults as a last resort
         if (!globalClarionPropertiesFile || !globalClarionVersion) {
             logger.warn("⚠️ Missing Clarion properties file or version. Attempting to use defaults...");
             
@@ -78,7 +98,6 @@ export async function workspaceHasBeenTrusted(
                         await config.update('propertiesFile', defaultPropertiesPath, target);
                     }
                     
-                    // Use the setGlobalClarionSelection function to update the global variables
                     await setGlobalClarionSelection(
                         globalSolutionFile,
                         defaultPropertiesPath,
@@ -98,7 +117,6 @@ export async function workspaceHasBeenTrusted(
                     await config.update('version', defaultVersion, target);
                 }
                 
-                // Use the setGlobalClarionSelection function to update the global variables
                 await setGlobalClarionSelection(
                     globalSolutionFile,
                     globalClarionPropertiesFile,
@@ -115,6 +133,22 @@ export async function workspaceHasBeenTrusted(
             
             // ✅ Register language features NOW
             registerLanguageFeatures(context, documentManager);
+
+            // After initialization, check if redirection path was resolved.
+            // If empty, settings are incomplete — prompt the user to configure.
+            if (globalSolutionFile && !globalSettings.redirectionPath) {
+                logger.warn("⚠️ Initialization completed but redirectionPath is empty — settings may be incomplete.");
+                const action = await vscodeWindow.showWarningMessage(
+                    `Clarion settings are incomplete for "${path.basename(globalSolutionFile)}". ` +
+                    `ClarionProperties.xml or Clarion version may be missing or incorrect. ` +
+                    `Build and language features may not work.`,
+                    "Configure Now",
+                    "Dismiss"
+                );
+                if (action === "Configure Now") {
+                    await commands.executeCommand('clarion.openSolution');
+                }
+            }
         } catch (error) {
             logger.error(`❌ Error initializing solution: ${error instanceof Error ? error.message : String(error)}`);
             vscodeWindow.showErrorMessage(`Error initializing Clarion solution. Try using the "Reinitialize Solution" command.`);
