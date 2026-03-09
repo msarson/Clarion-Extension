@@ -226,7 +226,7 @@ export class ReferencesProvider {
         }
 
         for (const fileUri of filesToSearch) {
-            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily);
+            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined);
             locations.push(...hits);
         }
 
@@ -414,22 +414,32 @@ export class ReferencesProvider {
      * implementations belonging to that class or any of its subclasses (`classFamily`).
      *
      * Token patterns covered:
-     *   1. StructureField  "SELF.Order"       — penultimate segment is SELF/PARENT, within correct class scope
-     *   2. StructureField  "Order.Something"  — first segment matches (chain continuation token)
-     *   3. Variable        "Order"            — terminal access preceded by a Delimiter '.'
-     *   4. Label (col 0)   "Order"            — declaration inside a CLASS body of the right class
+     *   1. StructureField  "SELF.Order"       — penultimate is SELF/PARENT, filtered by enclosing method class
+     *   2. StructureField  "SELF.Sort.Thumb"  — 3+ segments; filtered by chainPrefix when known
+     *   3. StructureField  "Order.Something"  — first segment matches (chain continuation token)
+     *   4. Variable        "Order"            — terminal access preceded by Delimiter '.' or StructureField
+     *   5. Label (col 0)   "Order"            — declaration inside a CLASS body of the right class
+     *
+     * @param chainPrefix  The full expression before the final member (e.g. "SELF.Sort" for SELF.Sort.Thumb).
+     *                     When provided, 3-level chain matches are restricted to this exact prefix,
+     *                     preventing false positives from same-named members on different intermediate props.
      */
     private findMemberReferencesInFile(
         fileUri: string,
         memberName: string,
         className?: string,
-        classFamily?: Set<string>
+        classFamily?: Set<string>,
+        chainPrefix?: string
     ): Location[] {
         const tokens = this.getTokensForUri(fileUri);
         if (!tokens || tokens.length === 0) return [];
 
         const memberLower = memberName.toLowerCase();
         const classLower = className?.toLowerCase();
+        // Normalize chainPrefix: when it's just SELF/PARENT we don't use it for 3-level filtering
+        const chainPrefixLower = chainPrefix && !/^(self|parent)$/i.test(chainPrefix)
+            ? chainPrefix.toLowerCase()
+            : undefined;
         const locations: Location[] = [];
 
         // Pre-build method scope map: for each MethodImplementation, record its class name
@@ -476,15 +486,16 @@ export class ReferencesProvider {
                     } else if (parts.length >= 3 &&
                                (parts[0].toLowerCase() === 'self' || parts[0].toLowerCase() === 'parent') &&
                                penultimate !== memberLower) {
-                        // 3+ segment: SELF.X.Member — member accessed via intermediate property.
-                        // isInTargetClass is NOT applied: the enclosing method belongs to a different
-                        // class than the member's declaring class (e.g. SELF.Sort.Thumb inside
-                        // BrowseClass methods, where Thumb is declared in BrowseSortOrder).
-                        // Guard: penultimate !== memberLower excludes SELF.X.X (same-name coincidence
-                        // like SELF.Order.Order which would be a false positive for ViewManager.Order).
-                        locations.push(Location.create(fileUri,
-                            Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
-                                         token.line, token.start + token.value.length)));
+                        // 3+ segment: SELF.X.Member via StructureField token (e.g. SELF.Sort.Thumb all-in-one).
+                        // If we know the exact chain prefix (e.g. "SELF.Sort"), require the token value
+                        // minus the last segment to match it exactly — prevents SELF.Filter.Thumb matching
+                        // when searching for BrowseSortOrder.Thumb accessed via SELF.Sort.
+                        const prefixOfToken = token.value.substring(0, token.value.lastIndexOf('.')).toLowerCase();
+                        if (!chainPrefixLower || prefixOfToken === chainPrefixLower) {
+                            locations.push(Location.create(fileUri,
+                                Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
+                                             token.line, token.start + token.value.length)));
+                        }
                     }
                 } else {
                     const firstDot = token.value.indexOf('.');
@@ -510,10 +521,12 @@ export class ReferencesProvider {
                                /^(self|parent)\b/i.test(prev.value) &&
                                !prev.value.toLowerCase().endsWith('.' + memberLower)) {
                         // Implicit dot: StructureField "SELF.Sort" immediately before Variable "Thumb"
-                        // means the full access is SELF.Sort.Thumb (3+ level chain).
-                        // Guard: prev must NOT end with .memberName to avoid SELF.Order + Order false positives.
-                        locations.push(Location.create(fileUri,
-                            Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                        // (tokenizer splits SELF.Sort.Thumb into StructureField + Variable).
+                        // If we know the exact chain prefix, verify the StructureField value matches it.
+                        if (!chainPrefixLower || prev.value.toLowerCase() === chainPrefixLower) {
+                            locations.push(Location.create(fileUri,
+                                Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                        }
                     }
                 }
                 continue;
