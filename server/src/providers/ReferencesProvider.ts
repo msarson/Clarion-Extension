@@ -303,10 +303,17 @@ export class ReferencesProvider {
             files.add(declarationFile);
         }
 
-        // If the CLASS has a MODULE('xyz.clw') attribute, resolve and add that file
+        // If the CLASS has a MODULE('xyz.clw') attribute, resolve and add that file.
+        // classModuleFile may be either a raw filename ("ABUTIL.CLW") or an already-resolved URI.
         if (classModuleFile) {
-            const resolved = this.resolveModuleFile(classModuleFile, document.uri);
-            if (resolved) files.add(resolved);
+            if (classModuleFile.startsWith('file:///')) {
+                files.add(classModuleFile);
+            } else {
+                // Resolve relative to the declaration file first, then document, then redirection
+                const context = declarationFile ?? document.uri;
+                const resolved = this.resolveModuleFile(classModuleFile, context);
+                if (resolved) files.add(resolved);
+            }
         }
 
         // Search all project source files — class members can be used in any CLW
@@ -321,7 +328,9 @@ export class ReferencesProvider {
             }
         }
 
-        return Array.from(files);
+        const result = Array.from(files);
+        logger.info(`📂 Search file list: ${result.map(f => f.split('/').pop()).join(', ')}`);
+        return result;
     }
 
     /**
@@ -362,8 +371,8 @@ export class ReferencesProvider {
 
     /**
      * Given a resolved INC file URI and a class name, find the CLASS declaration token
-     * in that file and extract its MODULE('filename.clw') attribute.
-     * Returns the resolved file URI of the module, or null if not found.
+     * in that file and extract the raw MODULE('filename.clw') attribute string.
+     * Returns the raw filename (e.g. "ABUTIL.CLW"), not a URI — caller resolves it.
      */
     private extractModuleFileFromClass(declarationFileUri: string, className: string): string | null {
         const tokens = this.getTokensForUri(declarationFileUri);
@@ -373,16 +382,12 @@ export class ReferencesProvider {
         for (const t of tokens) {
             if (t.type === TokenType.Structure && t.subType === TokenType.Class &&
                 (t.label ?? '').toLowerCase() === classLower) {
-                // Read the raw line to extract MODULE attribute
                 const fileContent = this.getFileContent(declarationFileUri);
                 if (!fileContent) return null;
                 const lines = fileContent.split('\n');
                 const classLine = lines[t.line] ?? '';
                 const moduleMatch = classLine.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i);
-                if (moduleMatch) {
-                    return this.resolveModuleFile(moduleMatch[1], declarationFileUri);
-                }
-                return null;
+                return moduleMatch?.[1] ?? null;
             }
         }
         return null;
