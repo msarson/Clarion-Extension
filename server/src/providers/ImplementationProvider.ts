@@ -397,13 +397,15 @@ export class ImplementationProvider {
                             callInfo.methodName, classType, document, callInfo.paramCount
                         );
                         if (memberInfo) {
+                            // Same pattern as chained resolver: moduleFile=null, declarationFile=memberInfo.file
                             const impl = await this.findMethodImplementationCrossFile(
                                 classType,
                                 callInfo.methodName,
                                 document,
                                 callInfo.paramCount,
-                                memberInfo.file,
-                                line
+                                null,
+                                line,
+                                memberInfo.file
                             );
                             if (impl) {
                                 logger.info(`✅ Found typed variable impl "${callInfo.methodName}" in "${classType}"`);
