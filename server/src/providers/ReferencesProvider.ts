@@ -799,9 +799,12 @@ export class ReferencesProvider {
         }
 
         if (scopeType === 'module') {
-            // A procedure in a MEMBER file is program-scoped (accessible from all MEMBER files).
-            // Detect this by checking if the declaration file has a MEMBER statement at the top.
-            if (this.isMemberFile(symbolInfo.location.uri)) {
+            // A procedure declaration (MAP-level) is program-scoped — its implementation
+            // lives in a MEMBER file, so we must search all project files.
+            // Detect: declaration file has MEMBER (module scope in a member file)
+            //      OR the symbol token's declaration line has a PROCEDURE keyword.
+            if (this.isMemberFile(symbolInfo.location.uri) ||
+                this.isProcedureDeclaration(symbolInfo.location.uri, symbolInfo.location.line)) {
                 // Fall through to global search below
             } else {
                 return [symbolInfo.location.uri];
@@ -833,6 +836,27 @@ export class ReferencesProvider {
         try {
             const tokens = this.getTokensForUri(uri);
             return tokens.some(t => t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'MEMBER');
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * Returns true if the given line in the file is a MAP/MODULE procedure declaration
+     * (i.e. a PROCEDURE keyword with MapProcedure subType on that line).
+     * Used to detect when a 'module'-scoped symbol is actually a procedure that can
+     * be called from any MEMBER file in the program.
+     */
+    private isProcedureDeclaration(uri: string, line: number): boolean {
+        try {
+            const tokens = this.getTokensForUri(uri);
+            return tokens.some(t =>
+                t.line === line &&
+                t.type === TokenType.Procedure &&
+                (t.subType === TokenType.MapProcedure ||
+                 t.subType === TokenType.GlobalProcedure ||
+                 t.subType === TokenType.MethodDeclaration)
+            );
         } catch {
             return false;
         }
