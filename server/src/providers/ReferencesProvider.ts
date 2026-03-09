@@ -101,8 +101,8 @@ export class ReferencesProvider {
             });
             const moduleMatch = classLine.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i);
             const classModuleFile = moduleMatch?.[1];
-            logger.info(`🏛️ "${word}" is inside CLASS body (module=${classModuleFile ?? 'none'}) — routing to member-access path`);
-            return this.provideMemberReferences(`SELF.${word}`, document, position, context, classModuleFile);
+            logger.info(`🏛️ "${word}" is inside CLASS body (class=${enclosingClass.label ?? '?'}, module=${classModuleFile ?? 'none'}) — routing to member-access path`);
+            return this.provideMemberReferences(`SELF.${word}`, document, position, context, classModuleFile, enclosingClass.label);
         }
 
         // Plain symbol path
@@ -139,7 +139,8 @@ export class ReferencesProvider {
         document: TextDocument,
         position: { line: number; character: number },
         context: { includeDeclaration: boolean },
-        classModuleFile?: string
+        classModuleFile?: string,
+        knownClassName?: string
     ): Promise<Location[] | null> {
         const lastDot = word.lastIndexOf('.');
         const beforeDot = word.substring(0, lastDot);
@@ -149,23 +150,20 @@ export class ReferencesProvider {
 
         let declarationFile: string | null = null;
         let declarationLine: number = -1;
+        let className: string | null = knownClassName ?? null;
 
         // --- Resolve the declaring class ---------------------------------
         const isSelfOrParent = /^(self|parent)$/i.test(beforeDot);
 
         if (isSelfOrParent) {
-            // Single-level SELF.Member / PARENT.Member
-            // Use getTokens(document) — not getTokensByUri — so we always get real tokens
-            // even when the file has not yet been cached by an open-document event.
             const tokens = this.tokenCache.getTokens(document);
             const info = this.memberResolver.findClassMemberInfo(memberName, document, position.line, tokens);
             if (info) {
                 declarationFile = info.file;
                 declarationLine = info.line;
+                className = info.className;
                 logger.info(`✅ SELF.${memberName} → class="${info.className}" at ${info.file}:${info.line}`);
             } else {
-                // Resolution failed (complex class hierarchy / scope issue) but we can still
-                // do a best-effort search for any "*.memberName" patterns in the current file.
                 logger.info(`⚠️ SELF.${memberName}: class resolution failed, doing best-effort search`);
             }
         } else {
@@ -175,7 +173,6 @@ export class ReferencesProvider {
             let info: ChainedMemberInfo | null = await chainedResolver.resolve(beforeDot, memberName, document, vsPos);
 
             if (!info) {
-                // Tier 2: try resolving beforeDot as a typed local/module/global variable
                 info = await this.resolveViaVariableType(beforeDot, memberName, document, position);
             }
 
@@ -185,16 +182,19 @@ export class ReferencesProvider {
             }
             declarationFile = info.file;
             declarationLine = info.line;
+            className = info.className;
             logger.info(`✅ ${beforeDot}.${memberName} → class="${info.className}" at ${info.file}:${info.line}`);
         }
 
         // --- Determine files to search -----------------------------------
         const filesToSearch = this.getMemberSearchFiles(document, declarationFile, classModuleFile);
 
+        logger.info(`🔍 Searching ${filesToSearch.length} file(s) for ${className ?? '?'}.${memberName}`);
+
         // --- Scan files for member usages --------------------------------
         const locations: Location[] = [];
         for (const fileUri of filesToSearch) {
-            const hits = this.findMemberReferencesInFile(fileUri, memberName);
+            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined);
             locations.push(...hits);
         }
 
@@ -310,18 +310,45 @@ export class ReferencesProvider {
 
     /**
      * Find every occurrence of `memberName` used in dot-notation in a single file.
-     * Covers three token patterns:
-     *   1. StructureField  "SELF.Order"       — last segment matches, penultimate is SELF/PARENT
+     * When `className` is provided, SELF.Member matches are restricted to method
+     * implementations belonging to that class (token.label starts with "ClassName.").
+     *
+     * Token patterns covered:
+     *   1. StructureField  "SELF.Order"       — penultimate segment is SELF/PARENT, within correct class scope
      *   2. StructureField  "Order.Something"  — first segment matches (chain continuation token)
      *   3. Variable        "Order"            — terminal access preceded by a Delimiter '.'
-     *   4. Label (col 0)   "Order"            — declaration inside a CLASS body only
+     *   4. Label (col 0)   "Order"            — declaration inside a CLASS body of the right class
      */
-    private findMemberReferencesInFile(fileUri: string, memberName: string): Location[] {
+    private findMemberReferencesInFile(fileUri: string, memberName: string, className?: string): Location[] {
         const tokens = this.getTokensForUri(fileUri);
         if (!tokens || tokens.length === 0) return [];
 
         const memberLower = memberName.toLowerCase();
+        const classLower = className?.toLowerCase();
         const locations: Location[] = [];
+
+        // Pre-build method scope map: for each MethodImplementation, record its class name
+        // and line range so we can filter SELF.Member matches by class.
+        // token.label = "ClassName.MethodName" for MethodImplementation tokens.
+        type MethodScope = { classLower: string; startLine: number; endLine: number };
+        const methodScopes: MethodScope[] = [];
+        if (classLower) {
+            for (const t of tokens) {
+                if (t.subType === TokenType.MethodImplementation && t.label && t.finishesAt !== undefined) {
+                    const dotIdx = t.label.indexOf('.');
+                    const methodClass = dotIdx > 0 ? t.label.substring(0, dotIdx).toLowerCase() : '';
+                    methodScopes.push({ classLower: methodClass, startLine: t.line, endLine: t.finishesAt });
+                }
+            }
+        }
+
+        /** Returns true if the given line falls inside a method implementation of the target class. */
+        const isInTargetClass = (line: number): boolean => {
+            if (!classLower) return true; // no class filter — accept all
+            const scope = methodScopes.find(s => line >= s.startLine && line <= s.endLine);
+            if (!scope) return false; // not inside any known method
+            return scope.classLower === classLower;
+        };
 
         for (let i = 0; i < tokens.length; i++) {
             const token = tokens[i];
@@ -332,11 +359,8 @@ export class ReferencesProvider {
                 const lastSeg = parts[parts.length - 1].toLowerCase();
 
                 if (lastSeg === memberLower) {
-                    // e.g. "SELF.Order" — only match if the segment before is SELF or PARENT.
-                    // This prevents "SELF.Order.Order" (SortOrder.Order) from matching as
-                    // a ViewManager.Order reference when the penultimate segment is "Order".
                     const penultimate = parts.length >= 2 ? parts[parts.length - 2].toLowerCase() : '';
-                    if (penultimate === 'self' || penultimate === 'parent') {
+                    if ((penultimate === 'self' || penultimate === 'parent') && isInTargetClass(token.line)) {
                         locations.push(Location.create(fileUri,
                             Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
                                          token.line, token.start + token.value.length)));
@@ -344,8 +368,7 @@ export class ReferencesProvider {
                 } else {
                     const firstDot = token.value.indexOf('.');
                     const firstSeg = token.value.substring(0, firstDot).toLowerCase();
-                    if (firstSeg === memberLower) {
-                        // e.g. "Order.MainKey" — chain continuation where Order is the instance
+                    if (firstSeg === memberLower && isInTargetClass(token.line)) {
                         locations.push(Location.create(fileUri,
                             Range.create(token.line, token.start,
                                          token.line, token.start + firstDot)));
@@ -355,27 +378,29 @@ export class ReferencesProvider {
             }
 
             if (token.type === TokenType.Variable && token.value.toLowerCase() === memberLower) {
-                // Terminal access: SELF.Primary.Order where "Order" is a plain Variable after '.'
                 const prev = tokens[i - 1];
-                if (prev && prev.type === TokenType.Delimiter && prev.value === '.' && prev.line === token.line) {
+                if (prev && prev.type === TokenType.Delimiter && prev.value === '.' && prev.line === token.line
+                    && isInTargetClass(token.line)) {
                     locations.push(Location.create(fileUri,
                         Range.create(token.line, token.start, token.line, token.start + token.value.length)));
                 }
                 continue;
             }
 
-            // Member declaration at column 0 — only match if inside a CLASS body, not QUEUE/GROUP
+            // Member declaration at column 0 — only inside the correct CLASS body
             if (token.type === TokenType.Label && token.start === 0 &&
                 token.value.toLowerCase() === memberLower) {
-                // Find the innermost enclosing structure that spans this line
                 const enclosingStruct = tokens.slice(0, i).reverse().find(t =>
                     t.type === TokenType.Structure &&
                     t.finishesAt !== undefined &&
                     t.finishesAt >= token.line
                 );
                 if (enclosingStruct && enclosingStruct.subType === TokenType.Class) {
-                    locations.push(Location.create(fileUri,
-                        Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                    // When className is known, verify the label of the CLASS matches
+                    if (!classLower || (enclosingStruct.label ?? '').toLowerCase() === classLower) {
+                        locations.push(Location.create(fileUri,
+                            Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                    }
                 }
             }
         }
