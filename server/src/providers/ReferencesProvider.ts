@@ -52,12 +52,13 @@ export class ReferencesProvider {
         let word = document.getText(wordRange);
         if (!word || word.length === 0) return null;
 
-        // When cursor lands on a middle segment of a chained expression
-        // (e.g. "Order" in SELF.Order.MainKey), getWordRangeAtPosition returns just
-        // the segment because the dot-after check prevents prefix inclusion.
+        // When cursor lands on any segment of a chained expression (e.g. "Order" in
+        // SELF.Order.MainKey, or "Thumb" in SELF.Sort.Thumb), getWordRangeAtPosition
+        // may return a partial chain missing the SELF/PARENT anchor.
         // Detect this by checking whether the character immediately before the word
-        // is a dot, then walk back to find the SELF/PARENT anchor.
-        if (!word.includes('.') && wordRange.start.character > 0) {
+        // is a dot, then walk back to find the SELF/PARENT anchor and reconstruct
+        // the full chain (e.g. "Sort.Thumb" → "SELF.Sort.Thumb").
+        if (wordRange.start.character > 0) {
             const charBefore = document.getText({
                 start: { line: position.line, character: wordRange.start.character - 1 },
                 end: { line: position.line, character: wordRange.start.character }

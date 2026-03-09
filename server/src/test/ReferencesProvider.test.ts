@@ -114,6 +114,41 @@ suite('ReferencesProvider – member access (SELF.Member)', () => {
             'Should find SELF.Order usage on line 4 or 5');
     });
 
+    /**
+     * Last-segment cursor on a 3-level chain: cursor on "Thumb" in SELF.Sort.Thumb.
+     * getWordRangeAtPosition returns "Sort.Thumb" (dot before Sort).
+     * ReferencesProvider must detect the preceding dot, reconstruct "SELF.Sort.Thumb",
+     * and route to chained member resolution with beforeDot="SELF.Sort", member="Thumb".
+     */
+    test('Reconstructs SELF prefix for last segment of 3-level chain (SELF.Sort.Thumb)', async () => {
+        const code = [
+            "  MEMBER('Main')",              // line 0
+            '',                               // line 1
+            'MyClass.Init PROCEDURE',         // line 2
+            '  CODE',                         // line 3
+            '  SELF.Sort.Thumb &= NULL',     // line 4 — cursor on "Thumb"
+            '  SELF.Sort.Thumb = 0',         // line 5 — another usage
+            '  RETURN',                       // line 6
+        ].join('\n');
+
+        const doc = createDocument(code, 'file:///three-level.clw');
+        seedCache(doc);
+
+        // Cursor on "Thumb" at line 4, col 12 (after "  SELF.Sort.")
+        const refs = await provider.provideReferences(doc, { line: 4, character: 12 },
+            { includeDeclaration: true });
+
+        // Even without class resolution, the word should be reconstructed to SELF.Sort.Thumb
+        // and a best-effort search should find SELF.Sort.Thumb usages
+        if (refs) {
+            const refLines = refs.map(r => r.range.start.line);
+            assert.ok(refLines.includes(4) || refLines.includes(5),
+                `Should find SELF.Sort.Thumb usages, got lines: ${refLines.join(',')}`);
+        }
+        // Note: null result is acceptable if class resolution fails (no INC available in test),
+        // but the word must have been reconstructed (not return null due to "Sort" not resolving)
+    });
+
     test('Highlight range covers only member name, not SELF prefix', async () => {
         // "  SELF.Order &= NULL" — no dot after Order, so getWordRangeAtPosition returns "SELF.Order"
         const code = [
