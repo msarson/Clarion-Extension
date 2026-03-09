@@ -1054,6 +1054,11 @@ export class ReferencesProvider {
                     } else {
                         continue;
                     }
+                } else if (token.label?.toLowerCase() === searchWordLower &&
+                           token.value.toLowerCase() !== searchWordLower) {
+                    // MAP shorthand entry: value="WindowsZipTest()" but label="WindowsZipTest"
+                    // Highlight only the name portion (same length as label)
+                    matchLength = token.label!.length;
                 } else {
                     continue;
                 }
@@ -1093,9 +1098,9 @@ export class ReferencesProvider {
                 procedureLines.add(t.line);
             }
         }
-        if (procedureLines.size === 0) return null;
 
         // Find a Label/Variable on a procedure line with value matching wordLower
+        // (handles explicit syntax: "WindowsZipTest  PROCEDURE()")
         for (const t of tokens) {
             if (!procedureLines.has(t.line)) continue;
             if ((t.type === TokenType.Label || t.type === TokenType.Variable) &&
@@ -1103,6 +1108,18 @@ export class ReferencesProvider {
                 return t.line;
             }
         }
+
+        // Also handle MAP shorthand syntax where the token itself carries the subType:
+        //   Pattern 1 (single token): value="WindowsZipTest()", label="WindowsZipTest", subType=MapProcedure
+        //   Pattern 2 (separate tokens): value="WindowsZipTest", label="WindowsZipTest", subType=MapProcedure
+        // (same logic DocumentStructure uses in findProceduresInMap)
+        for (const t of tokens) {
+            if (t.subType !== undefined && procedureSubTypes.has(t.subType) &&
+                t.label?.toLowerCase() === wordLower) {
+                return t.line;
+            }
+        }
+
         return null;
     }
 
