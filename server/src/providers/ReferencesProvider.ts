@@ -1058,7 +1058,23 @@ export class ReferencesProvider {
                 let matchLength = token.value.length;
 
                 if (token.value.toLowerCase() === searchWordLower) {
-                    // Exact match
+                    // Exact match — for field scope, skip other structure field declarations
+                    // (col-0 Label with a parent Structure) that are not the declaration line itself
+                    if (scopeType === 'field' &&
+                        token.start === 0 &&
+                        token.parent !== undefined &&
+                        !(fileUri === declarationUri && token.line === declarationLine)) {
+                        continue;
+                    }
+                } else if (scopeType === 'field' && (token.type === TokenType.StructureField || token.type === TokenType.Class)) {
+                    // Field reference via dot-notation: "QZipF.version" when searching for "version"
+                    const dotIndex = token.value.lastIndexOf('.');
+                    if (dotIndex >= 0 && token.value.substring(dotIndex + 1).toLowerCase() === searchWordLower) {
+                        matchStart = token.start + dotIndex + 1;
+                        matchLength = searchWord.length;
+                    } else {
+                        continue;
+                    }
                 } else if (token.type === TokenType.StructureField || token.type === TokenType.Class) {
                     // Object prefix of a StructureField: "st.SetValue" when searching for "st"
                     const dotIndex = token.value.indexOf('.');
@@ -1069,9 +1085,10 @@ export class ReferencesProvider {
                     }
                 } else if (token.label?.toLowerCase() === searchWordLower &&
                            token.value.toLowerCase() !== searchWordLower &&
-                           token.type !== TokenType.Procedure) {
-                    // MAP shorthand entry: value="WindowsZipTest()" but label="WindowsZipTest"
-                    // Exclude Procedure tokens — their label duplicates the Label token on the same line
+                           token.type !== TokenType.Procedure &&
+                           token.type !== TokenType.Structure) {
+                    // MAP shorthand / structure label: the Structure/Procedure token itself carries
+                    // label="ZipQueueType" but the Label token on the same line already matches.
                     matchLength = token.label!.length;
                 } else {
                     continue;
@@ -1089,6 +1106,72 @@ export class ReferencesProvider {
         }
 
         return locations;
+    }
+
+    /**
+     * Find a col-0 Label token matching wordLower — used for type/structure definitions
+     * like QUEUE, GROUP, CLASS, FILE that aren't procedures.
+     * Skips tokens that are children of a Structure (those are fields, not standalone labels).
+     */
+    private findLabelDeclarationLine(wordLower: string, tokens: Token[]): number | null {
+        for (const t of tokens) {
+            if (t.start === 0 &&
+                t.parent === undefined &&   // exclude structure fields
+                (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+                t.value.toLowerCase() === wordLower) {
+                return t.line;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Walk all INCLUDE files reachable from the given source file and find a
+     * col-0 Label declaration matching wordLower.
+     */
+    private async findLabelInIncludes(
+        wordLower: string,
+        fromPath: string,
+        visited: Set<string> = new Set()
+    ): Promise<{ uri: string; line: number } | null> {
+        if (visited.has(fromPath.toLowerCase())) return null;
+        visited.add(fromPath.toLowerCase());
+
+        let content: string;
+        try { content = fs.readFileSync(fromPath, 'utf-8'); } catch { return null; }
+
+        const fromDir = fromPath.substring(0, fromPath.lastIndexOf('\\'));
+        const includePattern = /INCLUDE\s*\(\s*['"]([^'"]+)['"]\s*(?:,\s*ONCE)?\s*\)/gi;
+        let match: RegExpExecArray | null;
+        while ((match = includePattern.exec(content)) !== null) {
+            const incFileName = match[1];
+            let incPath: string | null = null;
+            const sameDirCandidate = `${fromDir}\\${incFileName}`;
+            if (fs.existsSync(sameDirCandidate)) {
+                incPath = sameDirCandidate;
+            } else {
+                const solutionManager = SolutionManager.getInstance();
+                if (solutionManager?.solution?.projects?.length) {
+                    const ext = incFileName.substring(incFileName.lastIndexOf('.'));
+                    for (const project of solutionManager.solution.projects) {
+                        const searchPaths = project.getSearchPaths(ext);
+                        for (const sp of searchPaths) {
+                            const candidate = `${sp}\\${incFileName}`;
+                            if (fs.existsSync(candidate)) { incPath = candidate; break; }
+                        }
+                        if (incPath) break;
+                    }
+                }
+            }
+            if (!incPath) continue;
+            const incUri = `file:///${incPath.replace(/\\/g, '/')}`;
+            const incTokens = this.getTokensForUri(incUri);
+            const line = this.findLabelDeclarationLine(wordLower, incTokens);
+            if (line !== null) return { uri: incUri, line };
+            const nested = await this.findLabelInIncludes(wordLower, incPath, visited);
+            if (nested) return nested;
+        }
+        return null;
     }
 
     /**
@@ -1197,6 +1280,36 @@ export class ReferencesProvider {
         if (!declarationUri && incDecl) {
             declarationUri = incDecl.uri;
             declarationLine = incDecl.line;
+        }
+
+        if (!declarationUri) {
+            // 4. Last resort: find any col-0 Label declaration across project + INCLUDE files
+            //    This handles type names (ZipQueueType, MyClass, etc.) that are structure
+            //    definitions rather than procedures.
+            const labelLine = this.findLabelDeclarationLine(wordLower, currentTokens);
+            if (labelLine !== null) {
+                declarationUri = document.uri;
+                declarationLine = labelLine;
+            } else {
+                // Search project files
+                const solutionManager = SolutionManager.getInstance();
+                if (solutionManager?.solution?.projects?.length) {
+                    outerLoop2: for (const project of solutionManager.solution.projects) {
+                        for (const sourceFile of project.sourceFiles) {
+                            const fullPath = path.isAbsolute(sourceFile.relativePath) ? sourceFile.relativePath : path.join(project.path, sourceFile.relativePath);
+                            const uri = `file:///${fullPath.replace(/\\/g, '/')}`;
+                            const fileTokens = this.getTokensForUri(uri);
+                            const ll = this.findLabelDeclarationLine(wordLower, fileTokens);
+                            if (ll !== null) { declarationUri = uri; declarationLine = ll; break outerLoop2; }
+                        }
+                    }
+                }
+                // Also walk INCLUDE files
+                if (!declarationUri) {
+                    const incDecl2 = await this.findLabelInIncludes(wordLower, currentPath);
+                    if (incDecl2) { declarationUri = incDecl2.uri; declarationLine = incDecl2.line; }
+                }
+            }
         }
 
         if (!declarationUri) {

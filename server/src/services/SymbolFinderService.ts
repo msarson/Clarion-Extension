@@ -24,7 +24,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("SymbolFinderService");
-logger.setLevel("error");
+logger.setLevel("info");
 
 /**
  * Information about a found symbol
@@ -39,7 +39,7 @@ export interface SymbolInfo {
     /** Scope where symbol was found */
     scope: {
         token: Token;
-        type: 'parameter' | 'local' | 'module' | 'global' | 'routine';
+        type: 'parameter' | 'local' | 'module' | 'global' | 'routine' | 'field';
     };
     
     /** Location information */
@@ -282,10 +282,11 @@ export class SymbolFinderService {
         
         const moduleScopeEndLine = firstProcToken ? firstProcToken.line : Number.MAX_SAFE_INTEGER;
         
-        // Find variable in module scope
+        // Find variable in module scope (exclude structure fields which have a parent token)
         const candidateVars = tokens.filter(t =>
             t.type === TokenType.Label &&
             t.start === 0 &&
+            t.parent === undefined &&
             t.line < moduleScopeEndLine &&
             t.value.toLowerCase() === word.toLowerCase()
         );
@@ -341,6 +342,47 @@ export class SymbolFinderService {
     }
     
     /**
+     * Find a structure field declaration — a col-0 Label whose parent token is a Structure (QUEUE, GROUP, CLASS, FILE).
+     * Used when the cursor is on a field declaration line inside a structure definition.
+     */
+    findStructureField(word: string, tokens: Token[], line: number, document: TextDocument): SymbolInfo | null {
+        const fieldToken = tokens.find(t =>
+            t.type === TokenType.Label &&
+            t.start === 0 &&
+            t.line === line &&
+            t.parent !== undefined &&
+            t.parent.type === TokenType.Structure &&
+            t.value.toLowerCase() === word.toLowerCase()
+        );
+
+        if (!fieldToken) {
+            return null;
+        }
+
+        logger.info(`✅ Found structure field: ${fieldToken.value} at line ${fieldToken.line} (parent: ${fieldToken.parent!.value})`);
+
+        const lineTokens = tokens.filter(t => t.line === fieldToken.line);
+        const declaration = lineTokens.map(t => t.value).join(' ');
+
+        return {
+            token: fieldToken,
+            type: 'field',
+            scope: {
+                token: fieldToken.parent!,
+                type: 'field'
+            },
+            location: {
+                uri: document.uri,
+                line: fieldToken.line,
+                character: fieldToken.start
+            },
+            declaration,
+            originalWord: word,
+            searchWord: word
+        };
+    }
+
+    /**
      * Find a global variable definition
      * 
      * Global variables are declared at the start of a PROGRAM file, before the first CODE section.
@@ -388,6 +430,7 @@ export class SymbolFinderService {
         const globalVar = tokens.find(t =>
             t.type === TokenType.Label &&
             t.start === 0 &&
+            t.parent === undefined &&
             t.line < globalScopeEndLine &&
             t.value.toLowerCase() === word.toLowerCase()
         );
@@ -588,6 +631,10 @@ export class SymbolFinderService {
             // Try global variable
             const globalResult = await this.findGlobalVariable(word, tokens, document);
             if (globalResult) return globalResult;
+
+            // Try structure field (col-0 Label with a parent Structure token, e.g. queue/group fields in INC)
+            const fieldResult = this.findStructureField(word, tokens, position.line, document);
+            if (fieldResult) return fieldResult;
             
             return null;
         }
