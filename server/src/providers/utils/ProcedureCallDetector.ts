@@ -37,8 +37,13 @@ export class ProcedureCallDetector {
         // Check for START() call: word preceded by START(
         const isInStartCall = beforeWord.match(/\bSTART\s*\(\s*$/i);
 
+        // Check for no-param procedure call: word is preceded only by whitespace
+        // (column 0 or indented), and followed only by whitespace or a comment.
+        // e.g. "  Main" or "  Main  !" — Clarion allows calling no-param procedures without ()
+        const isStandaloneCall = /^\s*$/.test(beforeWord) && /^\s*(!.*)?$/.test(afterWord);
+
         return {
-            isProcedure: hasParenthesesAfter || !!isInStartCall,
+            isProcedure: hasParenthesesAfter || !!isInStartCall || isStandaloneCall,
             isStartCall: !!isInStartCall
         };
     }

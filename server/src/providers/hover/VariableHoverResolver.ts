@@ -202,6 +202,8 @@ export class VariableHoverResolver {
                     typeInfo = nextToken.value.toUpperCase();
                 } else if (nextToken.type === TokenType.Variable || nextToken.type === TokenType.Label) {
                     typeInfo = nextToken.value; // user-defined class name
+                } else if (nextToken.type === TokenType.Procedure) {
+                    typeInfo = 'PROCEDURE';
                 }
             }
         }
@@ -214,9 +216,13 @@ export class VariableHoverResolver {
             ``
         ];
         
+        const isProcedure = typeInfo === 'PROCEDURE';
+
         if (scopeInfo) {
             const scopeIcon = scopeInfo.type === 'global' ? '🌍' : '📦';
-            const scopeLabel = scopeInfo.type === 'global' ? 'Global variable' : 'Module variable';
+            const scopeLabel = isProcedure
+                ? (scopeInfo.type === 'global' ? 'Global procedure' : 'Module procedure')
+                : (scopeInfo.type === 'global' ? 'Global variable' : 'Module variable');
             markdown.push(`${scopeIcon} ${scopeLabel}`);
         }
         
@@ -224,7 +230,7 @@ export class VariableHoverResolver {
         const lineNumber = globalVar.line + 1;
         // Append "Declared in" to the same line as scope label if it exists
         const lastLine = markdown[markdown.length - 1];
-        if (lastLine && lastLine.includes('variable')) {
+        if (lastLine && (lastLine.includes('variable') || lastLine.includes('procedure'))) {
             markdown[markdown.length - 1] = `${lastLine} Declared in ${fileName}:${lineNumber}`;
         } else {
             markdown.push(`Declared in ${fileName}:${lineNumber}`);
