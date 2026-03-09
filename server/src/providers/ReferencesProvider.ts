@@ -210,6 +210,21 @@ export class ReferencesProvider {
 
         // --- Scan files for member usages --------------------------------
         const locations: Location[] = [];
+
+        // When we know the exact declaration location (resolved from INC/CLASS), inject it
+        // directly rather than relying on the scanner — the scanner only matches Label tokens
+        // inside CLASS bodies, which misses declarations in QUEUE/GROUP/RECORD structures.
+        if (context.includeDeclaration && declarationFile && declarationLine >= 0) {
+            const memberLen = memberName.length;
+            // Find the actual column of the member name on that line
+            const declTokens = this.getTokensForUri(declarationFile);
+            const declToken = declTokens?.find(t =>
+                t.line === declarationLine && t.value.toLowerCase() === memberName.toLowerCase());
+            const col = declToken?.start ?? 0;
+            locations.push(Location.create(declarationFile,
+                Range.create(declarationLine, col, declarationLine, col + memberLen)));
+        }
+
         for (const fileUri of filesToSearch) {
             const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily);
             locations.push(...hits);
@@ -224,7 +239,15 @@ export class ReferencesProvider {
         }
 
         logger.info(`✅ Found ${locations.length} member reference(s) to "${memberName}"`);
-        return locations.length > 0 ? locations : null;
+        // Deduplicate by uri+line (declaration may be found both by direct injection and scanner)
+        const seen = new Set<string>();
+        const deduped = locations.filter(loc => {
+            const key = `${loc.uri}:${loc.range.start.line}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+        return deduped.length > 0 ? deduped : null;
     }
 
     /**
