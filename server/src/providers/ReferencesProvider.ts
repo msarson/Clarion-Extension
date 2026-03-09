@@ -1,6 +1,7 @@
 import { Location, Range, Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import * as fs from 'fs';
+import * as path from 'path';
 import { ClarionTokenizer, Token, TokenType } from '../ClarionTokenizer';
 import { DocumentStructure } from '../DocumentStructure';
 import { TokenCache } from '../TokenCache';
@@ -432,7 +433,7 @@ export class ReferencesProvider {
         if (solutionManager?.solution?.projects?.length) {
             for (const project of solutionManager.solution.projects) {
                 for (const sourceFile of project.sourceFiles) {
-                    const fullPath = `${project.path}\\${sourceFile.relativePath}`;
+                    const fullPath = path.isAbsolute(sourceFile.relativePath) ? sourceFile.relativePath : path.join(project.path, sourceFile.relativePath);
                     const uri = `file:///${fullPath.replace(/\\/g, '/')}`;
                     files.add(uri);
                 }
@@ -945,12 +946,10 @@ export class ReferencesProvider {
         }
 
         if (scopeType === 'module') {
-            // A procedure declaration (MAP-level) is program-scoped — its implementation
-            // lives in a MEMBER file, so we must search all project files.
-            // Detect: declaration file has MEMBER (module scope in a member file)
-            //      OR the symbol token's declaration line has a PROCEDURE keyword.
-            if (this.isMemberFile(symbolInfo.location.uri) ||
-                this.isProcedureDeclaration(symbolInfo.location.uri, symbolInfo.location.line)) {
+            const isMember = this.isMemberFile(symbolInfo.location.uri);
+            const isProcDecl = this.isProcedureDeclaration(symbolInfo.location.uri, symbolInfo.location.line);
+            logger.info(`🔎 module scope: isMemberFile=${isMember}, isProcedureDeclaration=${isProcDecl} (line=${symbolInfo.location.line})`);
+            if (isMember || isProcDecl) {
                 // Fall through to global search below
             } else {
                 return [symbolInfo.location.uri];
@@ -959,19 +958,33 @@ export class ReferencesProvider {
 
         // Global (or MEMBER-file procedure): all project source files when a solution is loaded
         const solutionManager = SolutionManager.getInstance();
+        const alwaysInclude = new Set<string>([
+            currentDocument.uri,
+            symbolInfo.location.uri  // always search the declaration file
+        ]);
+        // Track basenames already covered by alwaysInclude to avoid searching
+        // redirection-resolved duplicates (e.g. C:\Clarion\...\ZipClassTesting.clw
+        // when F:\Playground\ZipTest\ZipClassTesting.clw is already included)
+        const alwaysIncludeNames = new Set<string>(
+            [...alwaysInclude].map(u => path.basename(decodeURIComponent(u)).toLowerCase())
+        );
+
         if (solutionManager?.solution?.projects?.length) {
-            const allFiles: string[] = [];
+            const allFiles: string[] = [...alwaysInclude];
             for (const project of solutionManager.solution.projects) {
                 for (const sourceFile of project.sourceFiles) {
-                    const fullPath = `${project.path}\\${sourceFile.relativePath}`;
+                    const fullPath = path.isAbsolute(sourceFile.relativePath) ? sourceFile.relativePath : path.join(project.path, sourceFile.relativePath);
                     const uri = `file:///${fullPath.replace(/\\/g, '/')}`;
-                    allFiles.push(uri);
+                    const basename = path.basename(fullPath).toLowerCase();
+                    if (!alwaysInclude.has(uri) && !alwaysIncludeNames.has(basename)) {
+                        allFiles.push(uri);
+                    }
                 }
             }
-            if (allFiles.length > 0) return allFiles;
+            return allFiles;
         }
 
-        return [currentDocument.uri];
+        return [...alwaysInclude];
     }
 
     /**
@@ -1055,9 +1068,10 @@ export class ReferencesProvider {
                         continue;
                     }
                 } else if (token.label?.toLowerCase() === searchWordLower &&
-                           token.value.toLowerCase() !== searchWordLower) {
+                           token.value.toLowerCase() !== searchWordLower &&
+                           token.type !== TokenType.Procedure) {
                     // MAP shorthand entry: value="WindowsZipTest()" but label="WindowsZipTest"
-                    // Highlight only the name portion (same length as label)
+                    // Exclude Procedure tokens — their label duplicates the Label token on the same line
                     matchLength = token.label!.length;
                 } else {
                     continue;
@@ -1161,7 +1175,7 @@ export class ReferencesProvider {
             if (solutionManager?.solution?.projects?.length) {
                 outerLoop: for (const project of solutionManager.solution.projects) {
                     for (const sourceFile of project.sourceFiles) {
-                        const fullPath = `${project.path}\\${sourceFile.relativePath}`;
+                        const fullPath = path.isAbsolute(sourceFile.relativePath) ? sourceFile.relativePath : path.join(project.path, sourceFile.relativePath);
                         const uri = `file:///${fullPath.replace(/\\/g, '/')}`;
                         const fileTokens = this.getTokensForUri(uri);
                         const declLine = this.findProcedureLabelLine(wordLower, fileTokens, procedureSubTypes);

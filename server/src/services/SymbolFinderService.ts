@@ -194,7 +194,32 @@ export class SymbolFinderService {
         const varSymbol = this.findVariableInSymbol(procedureSymbol, searchText);
         
         if (!varSymbol) {
-            logger.info(`❌ Variable "${searchText}" not found in procedure ${procedureSymbol.name}`);
+            logger.info(`❌ Variable "${searchText}" not found in symbol tree — falling back to token scan`);
+
+            // Fallback: scan tokens directly for a Label token at the start of a line (column 0)
+            // within the procedure's scope. This catches variables whose symbol names don't match
+            // (e.g. QUEUE/GROUP/FILE structures where the symbol name is "QUEUE" not "QZipF").
+            // Column 0 check ensures we only match declarations, not usage sites.
+            const scopeStart = scopeToken.line;
+            const scopeEnd = scopeToken.finishesAt ?? Number.MAX_SAFE_INTEGER;
+            const wordLower = searchText.toLowerCase();
+            const labelToken = tokens.find(t =>
+                t.line >= scopeStart && t.line <= scopeEnd &&
+                t.start === 0 &&
+                (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+                t.value.toLowerCase() === wordLower
+            );
+            if (labelToken) {
+                logger.info(`✅ Found "${searchText}" via token fallback at line ${labelToken.line}`);
+                return {
+                    token: labelToken,
+                    type: 'UNKNOWN',
+                    scope: { token: scopeToken, type: 'local' },
+                    location: { uri: document.uri, line: labelToken.line, character: labelToken.start },
+                    originalWord: originalWord || word,
+                    searchWord: word
+                };
+            }
             return null;
         }
         
