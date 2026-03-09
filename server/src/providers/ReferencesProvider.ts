@@ -109,8 +109,8 @@ export class ReferencesProvider {
         // Plain symbol path
         const symbolInfo = await this.symbolFinder.findSymbol(word, document, position);
         if (!symbolInfo) {
-            logger.info(`❌ No symbol found for "${word}"`);
-            return null;
+            // Fallback: check if word is a MAP/MODULE-declared procedure (not a variable)
+            return this.findProcedureReferences(word, document, tokens, context.includeDeclaration);
         }
 
         logger.info(`✅ Symbol "${word}" found — scope: ${symbolInfo.scope.type}, declared at ${symbolInfo.location.uri}:${symbolInfo.location.line}`);
@@ -866,6 +866,179 @@ export class ReferencesProvider {
         }
 
         return locations;
+    }
+
+    /**
+     * Procedure fallback for Find All References.
+     *
+     * When `findSymbol` returns null (word is not a variable/parameter), check whether
+     * the word is a MAP/MODULE-declared procedure or a GlobalProcedure. If so, search
+     * all project source files for references to that procedure name.
+     *
+     * Detection strategy (in priority order):
+     * 1. Any token in current-file tokens with value===word and a procedure subType
+     * 2. Any project source-file token cache entry with value===word and procedure subType
+     * 3. MAP INCLUDE files referenced from the current file
+     */
+    private async findProcedureReferences(
+        word: string,
+        document: TextDocument,
+        currentTokens: Token[],
+        includeDeclaration: boolean
+    ): Promise<Location[] | null> {
+        const wordLower = word.toLowerCase();
+        const procedureSubTypes = new Set([
+            TokenType.GlobalProcedure,
+            TokenType.MapProcedure,
+            TokenType.MethodDeclaration,
+            TokenType.MethodImplementation
+        ]);
+
+        // 1. Check current-file tokens
+        const localDecl = currentTokens.find(t =>
+            t.value.toLowerCase() === wordLower &&
+            t.subType !== undefined && procedureSubTypes.has(t.subType)
+        );
+
+        let declarationUri: string | null = localDecl ? document.uri : null;
+        let declarationLine: number = localDecl ? localDecl.line : 0;
+
+        if (!declarationUri) {
+            // 2. Check all cached project files
+            const solutionManager = SolutionManager.getInstance();
+            if (solutionManager?.solution?.projects?.length) {
+                outerLoop: for (const project of solutionManager.solution.projects) {
+                    for (const sourceFile of project.sourceFiles) {
+                        const fullPath = `${project.path}\\${sourceFile.relativePath}`;
+                        const uri = `file:///${fullPath.replace(/\\/g, '/')}`;
+                        const fileTokens = this.getTokensForUri(uri);
+                        const decl = fileTokens.find(t =>
+                            t.value.toLowerCase() === wordLower &&
+                            t.subType !== undefined && procedureSubTypes.has(t.subType)
+                        );
+                        if (decl) {
+                            declarationUri = uri;
+                            declarationLine = decl.line;
+                            break outerLoop;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!declarationUri) {
+            // 3. Walk MAP INCLUDE files from current CLW
+            const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+            const incUri = await this.findProcedureInMapIncludes(wordLower, currentPath, procedureSubTypes);
+            if (incUri) {
+                declarationUri = incUri.uri;
+                declarationLine = incUri.line;
+            }
+        }
+
+        if (!declarationUri) {
+            logger.info(`❌ No symbol found for "${word}"`);
+            return null;
+        }
+
+        logger.info(`✅ "${word}" identified as procedure — global search from declaration ${declarationUri}:${declarationLine}`);
+
+        // Build a synthetic SymbolInfo with global scope so getFilesToSearch returns all project files
+        const dummyScopeToken: Token = {
+            type: TokenType.Variable,
+            subType: undefined,
+            value: word,
+            line: 0,
+            start: 0,
+            maxLabelLength: 0,
+            parent: undefined,
+            children: []
+        };
+        const syntheticInfo: SymbolInfo = {
+            token: dummyScopeToken,
+            type: 'PROCEDURE',
+            scope: { token: dummyScopeToken, type: 'global' },
+            location: { uri: declarationUri, line: declarationLine, character: 0 },
+            originalWord: word,
+            searchWord: word
+        };
+
+        const filesToSearch = this.getFilesToSearch(syntheticInfo, document);
+        logger.info(`📁 Searching ${filesToSearch.length} file(s) for procedure "${word}"`);
+
+        const locations: Location[] = [];
+        for (const fileUri of filesToSearch) {
+            locations.push(...this.findReferencesInFile(fileUri, word, syntheticInfo, includeDeclaration));
+        }
+
+        logger.info(`✅ Found ${locations.length} reference(s) to procedure "${word}"`);
+        return locations.length > 0 ? locations : null;
+    }
+
+    /**
+     * Walk MAP INCLUDE files referenced from the given CLW source file.
+     * Returns the URI + line of the first INCLUDE file that declares the word
+     * as a MAP/MODULE procedure.
+     */
+    private async findProcedureInMapIncludes(
+        wordLower: string,
+        fromPath: string,
+        procedureSubTypes: Set<TokenType>,
+        visited: Set<string> = new Set()
+    ): Promise<{ uri: string; line: number } | null> {
+        if (visited.has(fromPath.toLowerCase())) return null;
+        visited.add(fromPath.toLowerCase());
+
+        let content: string;
+        try {
+            content = fs.readFileSync(fromPath, 'utf-8');
+        } catch {
+            return null;
+        }
+
+        const fromDir = fromPath.substring(0, fromPath.lastIndexOf('\\'));
+        const includePattern = /INCLUDE\s*\(\s*['"]([^'"]+)['"]\s*(?:,\s*ONCE)?\s*\)/gi;
+        let match: RegExpExecArray | null;
+
+        while ((match = includePattern.exec(content)) !== null) {
+            const incFileName = match[1];
+
+            // Resolve via same-dir first, then project redirection
+            let incPath: string | null = null;
+            const sameDirCandidate = `${fromDir}\\${incFileName}`;
+            if (fs.existsSync(sameDirCandidate)) {
+                incPath = sameDirCandidate;
+            } else {
+                const solutionManager = SolutionManager.getInstance();
+                if (solutionManager?.solution?.projects?.length) {
+                    const ext = incFileName.substring(incFileName.lastIndexOf('.'));
+                    for (const project of solutionManager.solution.projects) {
+                        const searchPaths = project.getSearchPaths(ext);
+                        for (const sp of searchPaths) {
+                            const candidate = `${sp}\\${incFileName}`;
+                            if (fs.existsSync(candidate)) { incPath = candidate; break; }
+                        }
+                        if (incPath) break;
+                    }
+                }
+            }
+
+            if (!incPath) continue;
+
+            const incUri = `file:///${incPath.replace(/\\/g, '/')}`;
+            const incTokens = this.getTokensForUri(incUri);
+            const decl = incTokens.find(t =>
+                t.value.toLowerCase() === wordLower &&
+                t.subType !== undefined && procedureSubTypes.has(t.subType)
+            );
+            if (decl) return { uri: incUri, line: decl.line };
+
+            // Recurse into nested INCLUDEs
+            const nested = await this.findProcedureInMapIncludes(wordLower, incPath, procedureSubTypes, visited);
+            if (nested) return nested;
+        }
+
+        return null;
     }
 
     /**
