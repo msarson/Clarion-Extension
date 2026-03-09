@@ -17,6 +17,59 @@ const logger = LoggerManager.getLogger("SolutionOpener");
 logger.setLevel("error");
 
 /**
+ * Checks whether the selected solution lives in a different folder than the current
+ * VS Code workspace. If it does, locates a .code-workspace file in the target folder
+ * (or falls back to the folder itself), saves the solution to global history so it
+ * survives the reload, then opens the target workspace/folder.
+ *
+ * @returns true if a folder/workspace switch was initiated (caller must return — VS Code
+ *          will reload and re-activate the extension), false if the solution is already
+ *          in the current workspace (caller should proceed with normal initialization).
+ */
+async function switchToSolutionWorkspaceIfNeeded(solutionFilePath: string): Promise<boolean> {
+    const solutionFolder = path.normalize(path.dirname(solutionFilePath));
+    const currentFolder = workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const currentFolderNorm = currentFolder ? path.normalize(currentFolder) : '';
+
+    // Case-insensitive comparison (Windows paths)
+    if (solutionFolder.toLowerCase() === currentFolderNorm.toLowerCase()) {
+        return false; // Same folder — no switch needed
+    }
+
+    logger.info(`🔄 Solution is in a different folder: ${solutionFolder} (current: ${currentFolderNorm || 'none'})`);
+
+    // Save to global history BEFORE switching so it's remembered after the reload
+    await GlobalSolutionHistory.addSolution(solutionFilePath, solutionFolder);
+    logger.info(`✅ Saved solution to global history before folder switch`);
+
+    // Find any .code-workspace file in the solution folder
+    let targetUri: Uri = Uri.file(solutionFolder);
+    try {
+        const entries = fs.readdirSync(solutionFolder);
+        const workspaceFiles = entries.filter(f => f.toLowerCase().endsWith('.code-workspace'));
+        if (workspaceFiles.length === 1) {
+            targetUri = Uri.file(path.join(solutionFolder, workspaceFiles[0]));
+            logger.info(`📂 Found workspace file: ${workspaceFiles[0]}`);
+        } else if (workspaceFiles.length > 1) {
+            const pick = await vscodeWindow.showQuickPick(
+                workspaceFiles.map(f => ({ label: f, detail: path.join(solutionFolder, f) })),
+                { placeHolder: 'Multiple workspace files found — select one to open' }
+            );
+            if (pick) {
+                targetUri = Uri.file(pick.detail);
+            }
+            // If user cancels the pick, fall through and open the folder
+        }
+    } catch {
+        // readdirSync failed — fall back to folder
+    }
+
+    logger.info(`📂 Switching workspace to: ${targetUri.fsPath}`);
+    await commands.executeCommand('vscode.openFolder', targetUri, false);
+    return true; // VS Code will reload — caller must return immediately
+}
+
+/**
  * Opens a solution from the configured solutions list
  * @param context - Extension context
  * @param initializeSolution - Function to initialize the solution
@@ -59,6 +112,11 @@ export async function openSolutionFromList(
             return; // User cancelled
         }
         
+        // If the selected solution is in a different folder/workspace, switch to it and reload
+        if (await switchToSolutionWorkspaceIfNeeded(selectedItem.solution.solutionFile)) {
+            return; // VS Code is reloading with the new workspace
+        }
+
         // Check if a solution is already open
         if (globalSolutionFile) {
             logger.info(`🔄 Closing current solution before opening: ${selectedItem.solution.solutionFile}`);
@@ -177,6 +235,11 @@ export async function openClarionSolution(
             if (selectedItem.solution) {
                 logger.info(`📂 Selected existing Clarion solution: ${selectedItem.solution.solutionFile}`);
                 
+                // If the solution is in a different folder/workspace, switch to it and reload
+                if (await switchToSolutionWorkspaceIfNeeded(selectedItem.solution.solutionFile)) {
+                    return; // VS Code is reloading with the new workspace
+                }
+
                 // Use the existing solution settings
                 await setGlobalClarionSelection(
                     selectedItem.solution.solutionFile,
@@ -226,6 +289,12 @@ export async function openClarionSolution(
 
         solutionFilePath = selectedFileUri[0].fsPath;
         logger.info(`📂 Selected new Clarion solution: ${solutionFilePath}`);
+
+        // If the solution is in a different folder/workspace, switch to it and reload.
+        // Settings (properties file, version) will be prompted again after the reload.
+        if (await switchToSolutionWorkspaceIfNeeded(solutionFilePath)) {
+            return; // VS Code is reloading with the new workspace
+        }
 
         // ✅ Step 2: Select or retrieve ClarionProperties.xml
         if (!globalClarionPropertiesFile || !fs.existsSync(globalClarionPropertiesFile)) {
