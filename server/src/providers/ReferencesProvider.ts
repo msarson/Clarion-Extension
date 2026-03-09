@@ -117,6 +117,21 @@ export class ReferencesProvider {
 
         const searchWord = symbolInfo.token.value;
         const filesToSearch = this.getFilesToSearch(symbolInfo, document);
+
+        // When the declaration is in a MEMBER file, also walk MAP INCLUDE files to find
+        // the MODULE declaration (e.g. startproc.inc) and add it to the search list.
+        if (this.isMemberFile(symbolInfo.location.uri)) {
+            const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+            const procedureSubTypes = new Set([
+                TokenType.GlobalProcedure, TokenType.MapProcedure,
+                TokenType.MethodDeclaration, TokenType.MethodImplementation
+            ]);
+            const incDecl = await this.findProcedureInMapIncludes(searchWord.toLowerCase(), currentPath, procedureSubTypes);
+            if (incDecl && !filesToSearch.includes(incDecl.uri)) {
+                filesToSearch.push(incDecl.uri);
+            }
+        }
+
         logger.info(`📁 Searching ${filesToSearch.length} file(s) for "${searchWord}"`);
 
         const locations: Location[] = [];
@@ -784,10 +799,16 @@ export class ReferencesProvider {
         }
 
         if (scopeType === 'module') {
-            return [symbolInfo.location.uri];
+            // A procedure in a MEMBER file is program-scoped (accessible from all MEMBER files).
+            // Detect this by checking if the declaration file has a MEMBER statement at the top.
+            if (this.isMemberFile(symbolInfo.location.uri)) {
+                // Fall through to global search below
+            } else {
+                return [symbolInfo.location.uri];
+            }
         }
 
-        // Global: all project source files when a solution is loaded
+        // Global (or MEMBER-file procedure): all project source files when a solution is loaded
         const solutionManager = SolutionManager.getInstance();
         if (solutionManager?.solution?.projects?.length) {
             const allFiles: string[] = [];
@@ -802,6 +823,19 @@ export class ReferencesProvider {
         }
 
         return [currentDocument.uri];
+    }
+
+    /**
+     * Returns true if the given file URI contains a MEMBER statement,
+     * indicating it is a member file of a Clarion program (not a standalone program).
+     */
+    private isMemberFile(uri: string): boolean {
+        try {
+            const tokens = this.getTokensForUri(uri);
+            return tokens.some(t => t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'MEMBER');
+        } catch {
+            return false;
+        }
     }
 
     /**
