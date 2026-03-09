@@ -475,6 +475,30 @@ export class ReferencesProvider {
                     }
                 }
             }
+
+            // Procedure implementation: "ClassName.MethodName PROCEDURE" at col 0
+            // The PROCEDURE token has subType=MethodImplementation and label="ClassName.MethodName".
+            // The method name itself is the Variable token immediately before PROCEDURE on the same line.
+            // All overloads of the same method name are included (overload resolution at
+            // call sites requires full type inference, so we aggregate them).
+            if (token.subType === TokenType.MethodImplementation && token.label) {
+                const dotIdx = token.label.indexOf('.');
+                if (dotIdx > 0) {
+                    const implClass = token.label.substring(0, dotIdx).toLowerCase();
+                    const implMethod = token.label.substring(dotIdx + 1).toLowerCase();
+                    const inFamily = classFamily ? classFamily.has(implClass) : implClass === classLower;
+                    if (implMethod === memberLower && (!classLower || inFamily)) {
+                        // The method-name token is the Variable immediately before PROCEDURE on the same line
+                        const nameToken = i > 0 && tokens[i - 1].line === token.line &&
+                            tokens[i - 1].value.toLowerCase() === implMethod ? tokens[i - 1] : null;
+                        if (nameToken) {
+                            locations.push(Location.create(fileUri,
+                                Range.create(nameToken.line, nameToken.start,
+                                             nameToken.line, nameToken.start + nameToken.value.length)));
+                        }
+                    }
+                }
+            }
         }
 
         return locations;

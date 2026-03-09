@@ -258,4 +258,41 @@ suite('ReferencesProvider – member access (SELF.Member)', () => {
         assert.ok(!refLines.includes(13),
             `ClassB.Init usage (line 13) should NOT appear when ClassB doesn't inherit ClassA — got lines: ${refLines.join(',')}`);
     });
+
+    // ─── procedure implementation finding ───────────────────────────────────
+
+    test('Find All References includes procedure implementations (ClassName.Method PROCEDURE)', async () => {
+        // Searching for AddRelation should find:
+        //   line 1  — declaration in CLASS body
+        //   line 5  — first overload implementation  (AddRelation(RM))
+        //   line 9  — second overload implementation (AddRelation(RM,UpdateMode,...))
+        //   line 12 — SELF.AddRelation call site
+        const code = [
+            'MyClass CLASS,TYPE',                          // line 0
+            'AddRelation  PROCEDURE(BYTE X),PROTECTED',   // line 1  — declaration
+            '             PROCEDURE(BYTE X,BYTE Y)',      // line 2  — second overload declaration
+            '             END',                           // line 3
+            '',                                           // line 4
+            'MyClass.AddRelation PROCEDURE(BYTE X)',      // line 5  — impl 1
+            '  CODE',                                     // line 6
+            '  RETURN',                                   // line 7
+            '',                                           // line 8
+            'MyClass.AddRelation PROCEDURE(BYTE X,BYTE Y)', // line 9  — impl 2 (overload)
+            '  CODE',                                     // line 10
+            '  RETURN',                                   // line 11
+        ].join('\n');
+
+        const doc = createDocument(code);
+        seedCache(doc);
+
+        // Cursor on "AddRelation" in CLASS body, line 1, col 0
+        const refs = await provider.provideReferences(doc, { line: 1, character: 0 },
+            { includeDeclaration: true });
+
+        assert.ok(refs !== null, 'Should find references to AddRelation');
+        const refLines = refs!.map(r => r.range.start.line);
+        assert.ok(refLines.includes(1), 'Should find CLASS declaration (line 1)');
+        assert.ok(refLines.includes(5), 'Should find first implementation (line 5)');
+        assert.ok(refLines.includes(9), 'Should find second overload implementation (line 9)');
+    });
 });
