@@ -311,10 +311,10 @@ export class ReferencesProvider {
     /**
      * Find every occurrence of `memberName` used in dot-notation in a single file.
      * Covers three token patterns:
-     *   1. StructureField  "SELF.Order"       — last segment is the member
-     *   2. StructureField  "Order.Something"  — first segment after a preceding dot
+     *   1. StructureField  "SELF.Order"       — last segment matches, penultimate is SELF/PARENT
+     *   2. StructureField  "Order.Something"  — first segment matches (chain continuation token)
      *   3. Variable        "Order"            — terminal access preceded by a Delimiter '.'
-     *   4. Label (col 0)   "Order"            — the member declaration line in the class body
+     *   4. Label (col 0)   "Order"            — declaration inside a CLASS body only
      */
     private findMemberReferencesInFile(fileUri: string, memberName: string): Location[] {
         const tokens = this.getTokensForUri(fileUri);
@@ -328,19 +328,24 @@ export class ReferencesProvider {
             if (token.type === TokenType.Comment || token.type === TokenType.String) continue;
 
             if (token.type === TokenType.StructureField) {
-                const lastDot = token.value.lastIndexOf('.');
-                const lastSeg = token.value.substring(lastDot + 1).toLowerCase();
+                const parts = token.value.split('.');
+                const lastSeg = parts[parts.length - 1].toLowerCase();
 
                 if (lastSeg === memberLower) {
-                    // e.g. "SELF.Order" — highlight the "Order" part
-                    locations.push(Location.create(fileUri,
-                        Range.create(token.line, token.start + lastDot + 1,
-                                     token.line, token.start + token.value.length)));
+                    // e.g. "SELF.Order" — only match if the segment before is SELF or PARENT.
+                    // This prevents "SELF.Order.Order" (SortOrder.Order) from matching as
+                    // a ViewManager.Order reference when the penultimate segment is "Order".
+                    const penultimate = parts.length >= 2 ? parts[parts.length - 2].toLowerCase() : '';
+                    if (penultimate === 'self' || penultimate === 'parent') {
+                        locations.push(Location.create(fileUri,
+                            Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
+                                         token.line, token.start + token.value.length)));
+                    }
                 } else {
                     const firstDot = token.value.indexOf('.');
                     const firstSeg = token.value.substring(0, firstDot).toLowerCase();
                     if (firstSeg === memberLower) {
-                        // e.g. "Order.MainKey" appearing as the second-level token in a chain
+                        // e.g. "Order.MainKey" — chain continuation where Order is the instance
                         locations.push(Location.create(fileUri,
                             Range.create(token.line, token.start,
                                          token.line, token.start + firstDot)));
@@ -359,11 +364,19 @@ export class ReferencesProvider {
                 continue;
             }
 
-            // Member declaration in class body (Label at column 0)
+            // Member declaration at column 0 — only match if inside a CLASS body, not QUEUE/GROUP
             if (token.type === TokenType.Label && token.start === 0 &&
                 token.value.toLowerCase() === memberLower) {
-                locations.push(Location.create(fileUri,
-                    Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                // Find the innermost enclosing structure that spans this line
+                const enclosingStruct = tokens.slice(0, i).reverse().find(t =>
+                    t.type === TokenType.Structure &&
+                    t.finishesAt !== undefined &&
+                    t.finishesAt >= token.line
+                );
+                if (enclosingStruct && enclosingStruct.subType === TokenType.Class) {
+                    locations.push(Location.create(fileUri,
+                        Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                }
             }
         }
 
