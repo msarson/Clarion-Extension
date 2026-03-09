@@ -189,4 +189,73 @@ suite('ReferencesProvider – member access (SELF.Member)', () => {
         assert.ok(refLines.includes(4), 'Should find lowercase usage on line 4');
         assert.ok(refLines.includes(5), 'Should find uppercase usage on line 5 (case-insensitive)');
     });
+
+    // ─── class inheritance scoping ───────────────────────────────────────────
+
+    test('SELF.Order in ClassB implementation is found when searching ClassA.Order (inheritance)', async () => {
+        // All in one file: ClassA declares Order, ClassB inherits ClassA,
+        // both implementations use SELF.Order — searching from ClassA.Order label
+        // must find the usage in ClassB.Init as well.
+        const code = [
+            'ClassA CLASS,TYPE',         // line 0
+            'Order    BYTE',             // line 1
+            '         END',             // line 2
+            'ClassB CLASS(ClassA),TYPE', // line 3
+            '         END',             // line 4
+            '',                          // line 5
+            'ClassA.Init PROCEDURE',     // line 6
+            '  CODE',                    // line 7
+            '  SELF.Order = 1',          // line 8 — ClassA.Init usage
+            '',                          // line 9
+            'ClassB.Init PROCEDURE',     // line 10
+            '  CODE',                    // line 11
+            '  SELF.Order = 2',          // line 12 — ClassB.Init usage (inherited)
+        ].join('\n');
+
+        const doc = createDocument(code);
+        seedCache(doc);
+
+        // Cursor on "Order" declaration in ClassA body (line 1, col 0)
+        const refs = await provider.provideReferences(doc, { line: 1, character: 0 },
+            { includeDeclaration: true });
+
+        assert.ok(refs !== null, 'Should find references for inherited member');
+        const refLines = refs!.map(r => r.range.start.line);
+        assert.ok(refLines.includes(8), 'Should find usage in ClassA.Init (line 8)');
+        assert.ok(refLines.includes(12),
+            `Should find usage in ClassB.Init (line 12) via inheritance — got lines: ${refLines.join(',')}`);
+    });
+
+    test('SELF.Order in ClassB.Init is NOT found when searching ClassA.Order if ClassB does not inherit ClassA', async () => {
+        // ClassA and ClassB are unrelated; only ClassA.Init usage should match
+        const code = [
+            'ClassA CLASS,TYPE',     // line 0
+            'Order    BYTE',         // line 1
+            '         END',         // line 2
+            'ClassB CLASS,TYPE',     // line 3  — no inheritance from ClassA
+            'Order    BYTE',         // line 4
+            '         END',         // line 5
+            '',                      // line 6
+            'ClassA.Init PROCEDURE', // line 7
+            '  CODE',                // line 8
+            '  SELF.Order = 1',      // line 9  — should match
+            '',                      // line 10
+            'ClassB.Init PROCEDURE', // line 11
+            '  CODE',                // line 12
+            '  SELF.Order = 2',      // line 13 — should NOT match
+        ].join('\n');
+
+        const doc = createDocument(code);
+        seedCache(doc);
+
+        // Cursor on "Order" declaration in ClassA body (line 1, col 0)
+        const refs = await provider.provideReferences(doc, { line: 1, character: 0 },
+            { includeDeclaration: true });
+
+        assert.ok(refs !== null, 'Should find at least the ClassA.Init usage');
+        const refLines = refs!.map(r => r.range.start.line);
+        assert.ok(refLines.includes(9), 'Should find ClassA.Init usage on line 9');
+        assert.ok(!refLines.includes(13),
+            `ClassB.Init usage (line 13) should NOT appear when ClassB doesn't inherit ClassA — got lines: ${refLines.join(',')}`);
+    });
 });

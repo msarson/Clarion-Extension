@@ -191,10 +191,16 @@ export class ReferencesProvider {
 
         logger.info(`🔍 Searching ${filesToSearch.length} file(s) for ${className ?? '?'}.${memberName}`);
 
+        // Build class family (declaring class + all subclasses) so that SELF.Member
+        // references in subclass method implementations are included.
+        const classFamily = className
+            ? this.buildClassFamily(className, filesToSearch)
+            : undefined;
+
         // --- Scan files for member usages --------------------------------
         const locations: Location[] = [];
         for (const fileUri of filesToSearch) {
-            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined);
+            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily);
             locations.push(...hits);
         }
 
@@ -309,9 +315,69 @@ export class ReferencesProvider {
     }
 
     /**
+     * Build a map of className.toLowerCase() → parentClassName.toLowerCase()
+     * by scanning all provided file URIs for CLASS declarations with parent class attributes.
+     *
+     * In Clarion: `ClassB CLASS(ClassA)` — the token after the CLASS structure token
+     * is a `(` delimiter, followed by a Variable token naming the parent class.
+     */
+    private buildInheritanceMap(fileUris: string[]): Map<string, string> {
+        const map = new Map<string, string>();
+        for (const uri of fileUris) {
+            const tokens = this.getTokensForUri(uri);
+            if (!tokens) continue;
+            for (let i = 0; i < tokens.length; i++) {
+                const t = tokens[i];
+                if (t.type === TokenType.Structure && t.subType === TokenType.Class && t.label) {
+                    // Look for ( Variable ) immediately after CLASS on the same line
+                    const next = tokens[i + 1];
+                    const parent = tokens[i + 2];
+                    if (next && next.type === TokenType.Delimiter && next.value === '(' &&
+                        next.line === t.line &&
+                        parent && parent.type === TokenType.Variable &&
+                        parent.line === t.line) {
+                        map.set(t.label.toLowerCase(), parent.value.toLowerCase());
+                    }
+                }
+            }
+        }
+        return map;
+    }
+
+    /**
+     * Given a declaring class name and an inheritance map, return the full set of classes
+     * that should be accepted when filtering SELF.Member references: the declaring class
+     * itself plus every class that directly or indirectly inherits from it.
+     */
+    private buildClassFamily(declaringClass: string, fileUris: string[]): Set<string> {
+        const inheritanceMap = this.buildInheritanceMap(fileUris);
+        const declaringLower = declaringClass.toLowerCase();
+
+        // family starts with the declaring class
+        const family = new Set<string>([declaringLower]);
+
+        // Collect all children/descendants (BFS)
+        let changed = true;
+        while (changed) {
+            changed = false;
+            for (const [child, parentLower] of inheritanceMap) {
+                if (family.has(parentLower) && !family.has(child)) {
+                    family.add(child);
+                    changed = true;
+                }
+            }
+        }
+
+        if (family.size > 1) {
+            logger.info(`🧬 Class family for "${declaringClass}": [${Array.from(family).join(', ')}]`);
+        }
+        return family;
+    }
+
+    /**
      * Find every occurrence of `memberName` used in dot-notation in a single file.
      * When `className` is provided, SELF.Member matches are restricted to method
-     * implementations belonging to that class (token.label starts with "ClassName.").
+     * implementations belonging to that class or any of its subclasses (`classFamily`).
      *
      * Token patterns covered:
      *   1. StructureField  "SELF.Order"       — penultimate segment is SELF/PARENT, within correct class scope
@@ -319,7 +385,12 @@ export class ReferencesProvider {
      *   3. Variable        "Order"            — terminal access preceded by a Delimiter '.'
      *   4. Label (col 0)   "Order"            — declaration inside a CLASS body of the right class
      */
-    private findMemberReferencesInFile(fileUri: string, memberName: string, className?: string): Location[] {
+    private findMemberReferencesInFile(
+        fileUri: string,
+        memberName: string,
+        className?: string,
+        classFamily?: Set<string>
+    ): Location[] {
         const tokens = this.getTokensForUri(fileUri);
         if (!tokens || tokens.length === 0) return [];
 
@@ -342,12 +413,13 @@ export class ReferencesProvider {
             }
         }
 
-        /** Returns true if the given line falls inside a method implementation of the target class. */
+        /** Returns true if the given line falls inside a method implementation of the target class family. */
         const isInTargetClass = (line: number): boolean => {
             if (!classLower) return true; // no class filter — accept all
             const scope = methodScopes.find(s => line >= s.startLine && line <= s.endLine);
             if (!scope) return false; // not inside any known method
-            return scope.classLower === classLower;
+            // Accept if the method's class is the declaring class or any subclass
+            return classFamily ? classFamily.has(scope.classLower) : scope.classLower === classLower;
         };
 
         for (let i = 0; i < tokens.length; i++) {
