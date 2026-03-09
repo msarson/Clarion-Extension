@@ -163,7 +163,7 @@ export class DefinitionProvider {
                                 const paramCount = hasParentheses
                                     ? this.memberResolver.countParametersInCall(line, methodName) ?? undefined
                                     : undefined;
-                                const result = await this.findClassMemberInType(tokens, classType, methodName, document);
+                                const result = await this.findClassMemberInType(tokens, classType, methodName, document, paramCount);
                                 if (result) {
                                     logger.info(`✅ Found typed variable member "${methodName}" in "${classType}"`);
                                     return result;
@@ -1881,7 +1881,7 @@ export class DefinitionProvider {
     /**
      * Finds a class member in a specific class type
      */
-    private async findClassMemberInType(tokens: Token[], className: string, memberName: string, document: TextDocument): Promise<Location | null> {
+    private async findClassMemberInType(tokens: Token[], className: string, memberName: string, document: TextDocument, paramCount?: number): Promise<Location | null> {
         logger.info(`Looking for member ${memberName} in class ${className}`);
 
         // Find the CLASS structure definition
@@ -1909,9 +1909,13 @@ export class DefinitionProvider {
             }
         }
 
-        // If not found in current file, search in INCLUDE files
-        logger.info(`Class ${className} not found in current file, searching includes`);
-        return this.findClassMemberInIncludes(className, memberName, document.uri);
+        // If not found in current file, use ClassMemberResolver which handles INC files with overload resolution
+        logger.info(`Class ${className} not found in current file, searching via class index`);
+        const memberInfo = await this.memberResolver.findMemberInNamedStructure(memberName, className, document, paramCount);
+        if (memberInfo) {
+            return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
+        }
+        return null;
     }
 
     /**
