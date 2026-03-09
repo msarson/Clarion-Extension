@@ -200,6 +200,8 @@ export class VariableHoverResolver {
                     typeInfo = nextToken.value;
                 } else if (nextToken.type === TokenType.Structure) {
                     typeInfo = nextToken.value.toUpperCase();
+                } else if (nextToken.type === TokenType.Variable || nextToken.type === TokenType.Label) {
+                    typeInfo = nextToken.value; // user-defined class name
                 }
             }
         }
