@@ -540,15 +540,34 @@ export class ReferencesProvider {
                     } else if (parts.length >= 3 &&
                                (parts[0].toLowerCase() === 'self' || parts[0].toLowerCase() === 'parent') &&
                                penultimate !== memberLower) {
-                        // 3+ segment: SELF.X.Member via StructureField token (e.g. SELF.Sort.Thumb all-in-one).
-                        // If we know the exact chain prefix (e.g. "SELF.Sort"), require the token value
-                        // minus the last segment to match it exactly — prevents SELF.Filter.Thumb matching
-                        // when searching for BrowseSortOrder.Thumb accessed via SELF.Sort.
+                        // 3+ segment all-in-one: SELF.X.Member (e.g. SELF.Sort.Thumb tokenized as one token)
                         const prefixOfToken = token.value.substring(0, token.value.lastIndexOf('.')).toLowerCase();
                         if (!chainPrefixLower || prefixOfToken === chainPrefixLower) {
                             locations.push(Location.create(fileUri,
                                 Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
                                              token.line, token.start + token.value.length)));
+                        }
+
+                    } else if (parts[0].toLowerCase() !== 'self' && parts[0].toLowerCase() !== 'parent') {
+                        // Split chain: tokenizer split "SELF.Sort.Resets.Init" into
+                        // StructureField("SELF.Sort") + StructureField("Resets.Init").
+                        // Check whether the preceding token on the same line is a SELF-rooted
+                        // StructureField whose value + "." + this token's value reconstructs
+                        // the expected chainPrefix + "." + memberName.
+                        const prev = i > 0 ? tokens[i - 1] : null;
+                        if (prev && prev.type === TokenType.StructureField &&
+                            prev.line === token.line &&
+                            /^(self|parent)\b/i.test(prev.value)) {
+                            // Full chain = prev.value + "." + token.value
+                            const fullChain = (prev.value + '.' + token.value).toLowerCase();
+                            const expectedChain = chainPrefixLower
+                                ? chainPrefixLower + '.' + memberLower
+                                : null;
+                            if (!expectedChain || fullChain === expectedChain) {
+                                locations.push(Location.create(fileUri,
+                                    Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
+                                                 token.line, token.start + token.value.length)));
+                            }
                         }
                     }
                 } else {
