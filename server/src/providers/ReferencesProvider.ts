@@ -954,14 +954,14 @@ export class ReferencesProvider {
             }
         }
 
-        if (!declarationUri) {
-            // 3. Walk MAP INCLUDE files from current CLW
-            const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-            const incUri = await this.findProcedureInMapIncludes(wordLower, currentPath, procedureSubTypes);
-            if (incUri) {
-                declarationUri = incUri.uri;
-                declarationLine = incUri.line;
-            }
+        // 3. Walk MAP INCLUDE files from current CLW — always, so we can include the INC
+        //    declaration site in results even when a project-file implementation was found first.
+        const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const incDecl = await this.findProcedureInMapIncludes(wordLower, currentPath, procedureSubTypes);
+
+        if (!declarationUri && incDecl) {
+            declarationUri = incDecl.uri;
+            declarationLine = incDecl.line;
         }
 
         if (!declarationUri) {
@@ -991,7 +991,11 @@ export class ReferencesProvider {
             searchWord: word
         };
 
+        // Search all project files, plus any INC file where the MAP/MODULE declaration lives.
         const filesToSearch = this.getFilesToSearch(syntheticInfo, document);
+        if (incDecl && !filesToSearch.includes(incDecl.uri)) {
+            filesToSearch.push(incDecl.uri);
+        }
         logger.info(`📁 Searching ${filesToSearch.length} file(s) for procedure "${word}"`);
 
         const locations: Location[] = [];
