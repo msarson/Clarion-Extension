@@ -178,13 +178,23 @@ export class ReferencesProvider {
             }
 
             if (!info) {
-                logger.info(`❌ Member "${memberName}" could not be resolved for beforeDot="${beforeDot}"`);
-                return null;
+                // Chain resolution failed. If beforeDot is a SELF/PARENT-rooted chain
+                // (e.g. "SELF.Sort"), do a best-effort search for the member name with
+                // no class filter — the 3+ segment token matching will still narrow results
+                // to SELF.*.Member patterns, avoiding unrelated false positives.
+                const isSelfChain = /^(self|parent)\b/i.test(beforeDot);
+                if (isSelfChain) {
+                    logger.info(`⚠️ Chain resolution failed for "${beforeDot}.${memberName}", doing best-effort SELF chain search`);
+                } else {
+                    logger.info(`❌ Member "${memberName}" could not be resolved for beforeDot="${beforeDot}"`);
+                    return null;
+                }
+            } else {
+                declarationFile = info.file;
+                declarationLine = info.line;
+                className = info.className;
+                logger.info(`✅ ${beforeDot}.${memberName} → class="${info.className}" at ${info.file}:${info.line}`);
             }
-            declarationFile = info.file;
-            declarationLine = info.line;
-            className = info.className;
-            logger.info(`✅ ${beforeDot}.${memberName} → class="${info.className}" at ${info.file}:${info.line}`);
         }
 
         // --- Determine files to search -----------------------------------
@@ -433,7 +443,22 @@ export class ReferencesProvider {
 
                 if (lastSeg === memberLower) {
                     const penultimate = parts.length >= 2 ? parts[parts.length - 2].toLowerCase() : '';
+
                     if ((penultimate === 'self' || penultimate === 'parent') && isInTargetClass(token.line)) {
+                        // 2-segment: SELF.Member — direct access, filter by enclosing method class
+                        locations.push(Location.create(fileUri,
+                            Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
+                                         token.line, token.start + token.value.length)));
+
+                    } else if (parts.length >= 3 &&
+                               (parts[0].toLowerCase() === 'self' || parts[0].toLowerCase() === 'parent') &&
+                               penultimate !== memberLower) {
+                        // 3+ segment: SELF.X.Member — member accessed via intermediate property.
+                        // isInTargetClass is NOT applied: the enclosing method belongs to a different
+                        // class than the member's declaring class (e.g. SELF.Sort.Thumb inside
+                        // BrowseClass methods, where Thumb is declared in BrowseSortOrder).
+                        // Guard: penultimate !== memberLower excludes SELF.X.X (same-name coincidence
+                        // like SELF.Order.Order which would be a false positive for ViewManager.Order).
                         locations.push(Location.create(fileUri,
                             Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
                                          token.line, token.start + token.value.length)));
@@ -452,10 +477,21 @@ export class ReferencesProvider {
 
             if (token.type === TokenType.Variable && token.value.toLowerCase() === memberLower) {
                 const prev = tokens[i - 1];
-                if (prev && prev.type === TokenType.Delimiter && prev.value === '.' && prev.line === token.line
-                    && isInTargetClass(token.line)) {
-                    locations.push(Location.create(fileUri,
-                        Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                if (prev && prev.line === token.line) {
+                    if (prev.type === TokenType.Delimiter && prev.value === '.' && isInTargetClass(token.line)) {
+                        // Explicit dot: e.g. var.Thumb where var is resolved to the right class
+                        locations.push(Location.create(fileUri,
+                            Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                    } else if (prev.type === TokenType.StructureField &&
+                               prev.line === token.line &&
+                               /^(self|parent)\b/i.test(prev.value) &&
+                               !prev.value.toLowerCase().endsWith('.' + memberLower)) {
+                        // Implicit dot: StructureField "SELF.Sort" immediately before Variable "Thumb"
+                        // means the full access is SELF.Sort.Thumb (3+ level chain).
+                        // Guard: prev must NOT end with .memberName to avoid SELF.Order + Order false positives.
+                        locations.push(Location.create(fileUri,
+                            Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                    }
                 }
                 continue;
             }

@@ -140,13 +140,10 @@ suite('ReferencesProvider – member access (SELF.Member)', () => {
 
         // Even without class resolution, the word should be reconstructed to SELF.Sort.Thumb
         // and a best-effort search should find SELF.Sort.Thumb usages
-        if (refs) {
-            const refLines = refs.map(r => r.range.start.line);
-            assert.ok(refLines.includes(4) || refLines.includes(5),
-                `Should find SELF.Sort.Thumb usages, got lines: ${refLines.join(',')}`);
-        }
-        // Note: null result is acceptable if class resolution fails (no INC available in test),
-        // but the word must have been reconstructed (not return null due to "Sort" not resolving)
+        assert.ok(refs !== null, 'Should find SELF.Sort.Thumb usages via 3-level chain matching');
+        const refLines = refs!.map(r => r.range.start.line);
+        assert.ok(refLines.includes(4) || refLines.includes(5),
+            `Should find SELF.Sort.Thumb usages on line 4 or 5, got lines: ${refLines.join(',')}`);
     });
 
     test('Highlight range covers only member name, not SELF prefix', async () => {
