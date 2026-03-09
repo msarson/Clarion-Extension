@@ -144,14 +144,33 @@ export class ReferencesProvider {
                 // Ignore comments and string literals — not real references
                 if (token.type === TokenType.Comment || token.type === TokenType.String) continue;
 
-                if (token.value.toLowerCase() !== searchWordLower) continue;
+                let matchStart = token.start;
+                let matchLength = token.value.length;
+
+                if (token.value.toLowerCase() === searchWordLower) {
+                    // Exact match (Variable, Label, etc.)
+                } else if (
+                    token.type === TokenType.StructureField ||
+                    token.type === TokenType.Class
+                ) {
+                    // StructureField tokens combine object+field: "st.SetValue"
+                    // Check if the prefix (before the dot) is the symbol we're looking for
+                    const dotIndex = token.value.indexOf('.');
+                    if (dotIndex > 0 && token.value.substring(0, dotIndex).toLowerCase() === searchWordLower) {
+                        matchLength = dotIndex; // highlight only the object prefix
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
 
                 // Optionally exclude the declaration itself
                 if (!includeDeclaration && fileUri === declarationUri && token.line === declarationLine) continue;
 
                 locations.push(Location.create(
                     fileUri,
-                    Range.create(token.line, token.start, token.line, token.start + token.value.length)
+                    Range.create(token.line, matchStart, token.line, matchStart + matchLength)
                 ));
             }
         } catch (error) {
