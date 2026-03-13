@@ -328,3 +328,103 @@ suite('ReferencesProvider – member access (SELF.Member)', () => {
         assert.ok(refLines.includes(9), 'Should find second overload implementation (line 9)');
     });
 });
+
+// ---------------------------------------------------------------------------
+// ReferencesProvider — QUEUE field dot-notation references
+// ---------------------------------------------------------------------------
+
+suite('ReferencesProvider – QUEUE field dot-notation', () => {
+    let provider: ReferencesProvider;
+
+    setup(() => {
+        setServerInitialized(true);
+        TokenCache.getInstance().clearAllTokens();
+        provider = new ReferencesProvider();
+    });
+
+    test('Finds field references via dot notation (QZipF.ZipFileName)', async () => {
+        // ZipQueueType is declared in an INC; here we inline it directly
+        // to test the dot-notation reference scan in a single file
+        const code = [
+            'ZipQueueType    QUEUE,TYPE',   // line 0 — structure type
+            'ZipFileName       CSTRING(256)',// line 1 — field
+            'END',                           // line 2
+            'MyProc  PROCEDURE()',           // line 3
+            'QZipF     QUEUE(ZipQueueType)', // line 4 — local queue var
+            'CODE',                          // line 5
+            '  x = QZipF.ZipFileName',       // line 6 — reference
+            '  QZipF.ZipFileName = "test"',  // line 7 — reference
+            'END',                           // line 8
+        ].join('\n');
+
+        const doc = createDocument(code);
+        seedCache(doc);
+
+        // Position on "ZipFileName" in line 1 (the declaration, col 0)
+        const refs = await provider.provideReferences(doc, { line: 1, character: 2 }, { includeDeclaration: true });
+        assert.ok(refs !== null && refs.length >= 1, `Expected references, got ${refs?.length ?? 0}`);
+        const refLines = refs!.map(r => r.range.start.line);
+        assert.ok(refLines.includes(1), 'Should include declaration line');
+        assert.ok(refLines.some(l => l === 6 || l === 7), 'Should find dot-notation references on lines 6 and 7');
+    });
+
+    test('Finds field reference in dot-notation from usage site', async () => {
+        const code = [
+            'ZipQueueType    QUEUE,TYPE',   // line 0
+            'ZipFileName       CSTRING(256)',// line 1
+            'END',                           // line 2
+            'MyProc  PROCEDURE()',           // line 3
+            'QZipF     QUEUE(ZipQueueType)', // line 4
+            'CODE',                          // line 5
+            '  x = QZipF.ZipFileName',       // line 6
+            '  QZipF.ZipFileName = "test"',  // line 7
+            'END',                           // line 8
+        ].join('\n');
+
+        const doc = createDocument(code);
+        seedCache(doc);
+
+        // Position on "ZipFileName" in the declaration (line 1, col 2) — field scope search
+        const refs = await provider.provideReferences(doc, { line: 1, character: 2 }, { includeDeclaration: true });
+        assert.ok(refs !== null && refs.length >= 2, `Expected >= 2 references, got ${refs?.length ?? 0}`);
+        const refLines = refs!.map(r => r.range.start.line);
+        assert.ok(refLines.includes(6) || refLines.includes(7), 'Should find dot-notation references on lines 6 or 7');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// ReferencesProvider — LIKE typed variable
+// ---------------------------------------------------------------------------
+
+suite('ReferencesProvider – LIKE typed variable', () => {
+    let provider: ReferencesProvider;
+
+    setup(() => {
+        setServerInitialized(true);
+        TokenCache.getInstance().clearAllTokens();
+        provider = new ReferencesProvider();
+    });
+
+    test('Finds references to variable declared with LIKE', async () => {
+        const code = [
+            'MyGroup GROUP,TYPE',        // line 0
+            'Name      CSTRING(64)',     // line 1
+            'END',                       // line 2
+            'MyProc  PROCEDURE()',       // line 3
+            'myVar   LIKE(MyGroup)',     // line 4 — LIKE declaration
+            'CODE',                      // line 5
+            '  myVar.Name = "hi"',       // line 6 — usage
+            'END',                       // line 7
+        ].join('\n');
+
+        const doc = createDocument(code);
+        seedCache(doc);
+
+        // Position on "myVar" on line 4 (declaration)
+        const refs = await provider.provideReferences(doc, { line: 4, character: 2 }, { includeDeclaration: true });
+        assert.ok(refs !== null && refs.length >= 1, `Expected references for LIKE variable, got ${refs?.length ?? 0}`);
+        const refLines = refs!.map(r => r.range.start.line);
+        assert.ok(refLines.includes(4), 'Should include declaration');
+        assert.ok(refLines.includes(6), 'Should find usage on line 6');
+    });
+});
