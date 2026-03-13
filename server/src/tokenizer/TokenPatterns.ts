@@ -76,7 +76,7 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Number]: /\b[0-9]+(\.[0-9]+)?\b/i,
     [TokenType.Operator]: /[\+\-\*\/\=\>\<\&\|\~]/,
     [TokenType.Delimiter]: /[\(\)\[\]\{\}\,\:\;]/,
-    [TokenType.Label]: /^(?!(?:COMPILE|OMIT|EMBED|SECTION|ENDSECTION|MODULE|MAP|CLASS|FILE|GROUP|QUEUE|VIEW|WINDOW|REPORT|INTERFACE|RECORD|PROGRAM|MEMBER|END)\b)[A-Za-z_][A-Za-z0-9_:]*/i,  // Starts at column 0, can include colons, but NOT directive keywords, structure keywords, document keywords, or END
+    [TokenType.Label]: /^(?!(?:COMPILE|OMIT|EMBED|SECTION|ENDSECTION|MODULE|MAP|CLASS|FILE|GROUP|QUEUE|VIEW|WINDOW|REPORT|INTERFACE|RECORD|PROGRAM|MEMBER|END)(?![:\w]))[A-Za-z_][A-Za-z0-9_:]*/i,  // Starts at column 0, can include colons. Excludes bare keywords but NOT colon-qualified names like FILE:Queue
     [TokenType.Variable]: /\b(?!(?:IF|LOOP|CASE|ACCEPT|EXECUTE|BEGIN|FILE|QUEUE|GROUP|RECORD|CLASS|WINDOW|REPORT|MODULE|MAP|VIEW|INTERFACE|END)\b)[A-Za-z_][A-Za-z0-9_]*\b/i,  // Exclude structure keywords to allow them to match Structure type first
     [TokenType.ImplicitVariable]: /\b[A-Za-z_][A-Za-z0-9_]*[$#"]/i,  // ✅ Variables ending with implicit type suffixes
     [TokenType.Function]: /\b[A-Za-z_][A-Za-z0-9_]*(?=\()/i,
@@ -89,6 +89,8 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.StructureField]: /\b[A-Z][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*/i,
     // ✅ DataTypeParameter: captures (255) in STRING(255) or (20,2) in DECIMAL(20,2)
     [TokenType.DataTypeParameter]: /\(\s*\d+\s*(?:,\s*\d+\s*)?\)/,
+    // ✅ TypeReference: LIKE(TypeName) — type-mirroring keyword, matched before Function
+    [TokenType.TypeReference]: /\bLIKE\b(?=\s*\()/i,
 };
 
 /** ✅ Ordered token types for pattern matching priority */
@@ -102,7 +104,7 @@ export const orderedTokenTypes: TokenType[] = [
     TokenType.StructurePrefix, TokenType.StructureField,
     // ✅ Add WindowElement after Structure elements but before other types
     TokenType.WindowElement,
-    TokenType.ConditionalContinuation, TokenType.Function,  // ✅ Placed after Structure, before FunctionArgumentParameter
+    TokenType.ConditionalContinuation, TokenType.TypeReference, TokenType.Function,  // ✅ TypeReference (LIKE) before Function
     TokenType.FunctionArgumentParameter, TokenType.TypeAnnotation, TokenType.PictureFormat, TokenType.Number,
     TokenType.EndStatement,  // ✅ MOVED AFTER Number to avoid matching dots in decimals
     TokenType.Operator, TokenType.Class, TokenType.Attribute, TokenType.Constant, TokenType.Variable,

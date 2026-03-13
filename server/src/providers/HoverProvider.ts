@@ -139,6 +139,9 @@ export class HoverProvider {
                 logger.info(`Checking if ${word} is a CLASS type...`);
                 const classTypeHover = await this.checkClassTypeHover(word, document);
                 if (classTypeHover) return classTypeHover;
+
+                const structTypeHover = await this.structureFieldResolver.resolveTypeNameHover(word, document);
+                if (structTypeHover) return structTypeHover;
                 
                 return null;
             }
@@ -249,6 +252,14 @@ export class HoverProvider {
             if (classTypeHover) {
                 logger.info(`✅ HOVER-RETURN: Found CLASS type hover for ${word}`);
                 return classTypeHover;
+            }
+
+            // 🔍 Check if this word is a structure type (QUEUE/GROUP) declared in an INCLUDE file
+            // Handles hovering over type names in LIKE(TypeName), QUEUE(TypeName), etc.
+            const structTypeHover = await this.structureFieldResolver.resolveTypeNameHover(word, document);
+            if (structTypeHover) {
+                logger.info(`✅ HOVER-RETURN: Found structure type hover for ${word}`);
+                return structTypeHover;
             }
             
             logger.info(`❌ HOVER-RETURN: No hover information found for ${word}`);

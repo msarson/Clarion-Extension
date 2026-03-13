@@ -199,7 +199,23 @@ export class VariableHoverResolver {
                 if (nextToken.type === TokenType.Type) {
                     typeInfo = nextToken.value;
                 } else if (nextToken.type === TokenType.Structure) {
-                    typeInfo = nextToken.value.toUpperCase();
+                    // Handle QUEUE(TypeName), GROUP(TypeName), etc.
+                    const lineTokens = tokens.filter(t => t.line === globalVar.line && t.start > nextToken.start);
+                    const typeArg = lineTokens.find(t =>
+                        (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+                        t.value !== '(' && t.value !== ')'
+                    );
+                    typeInfo = typeArg
+                        ? `${nextToken.value.toUpperCase()}(${typeArg.value})`
+                        : nextToken.value.toUpperCase();
+                } else if (nextToken.type === TokenType.TypeReference) {
+                    // Handle LIKE(TypeName)
+                    const lineTokens = tokens.filter(t => t.line === globalVar.line && t.start > nextToken.start);
+                    const typeArg = lineTokens.find(t =>
+                        (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+                        t.value !== '(' && t.value !== ')'
+                    );
+                    typeInfo = typeArg ? `LIKE(${typeArg.value})` : 'LIKE';
                 } else if (nextToken.type === TokenType.Variable || nextToken.type === TokenType.Label) {
                     typeInfo = nextToken.value; // user-defined class name
                 } else if (nextToken.type === TokenType.Procedure) {

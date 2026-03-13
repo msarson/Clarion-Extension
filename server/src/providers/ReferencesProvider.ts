@@ -15,7 +15,7 @@ import { ClarionPatterns } from '../utils/ClarionPatterns';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
-logger.setLevel("info");
+logger.setLevel("error");
 
 type OverloadFilter = { minArgs: number; maxArgs: number; declarationLine: number; declarationFileNorm: string };
 
@@ -145,9 +145,18 @@ export class ReferencesProvider {
 
         logger.info(`📁 Searching ${filesToSearch.length} file(s) for "${searchWord}"`);
 
+        // For structure field scope, collect all PRE prefixes that map to this field
+        const fieldPrefixes = symbolInfo.scope.type === 'field'
+            ? this.collectFieldPrefixes(symbolInfo, document)
+            : undefined;
+
+        if (fieldPrefixes && fieldPrefixes.size > 0) {
+            logger.info(`🔑 Field prefixes for "${searchWord}": ${[...fieldPrefixes].join(', ')}`);
+        }
+
         const locations: Location[] = [];
         for (const fileUri of filesToSearch) {
-            const fileLocations = this.findReferencesInFile(fileUri, searchWord, symbolInfo, context.includeDeclaration);
+            const fileLocations = this.findReferencesInFile(fileUri, searchWord, symbolInfo, context.includeDeclaration, fieldPrefixes);
             locations.push(...fileLocations);
         }
 
@@ -1028,7 +1037,8 @@ export class ReferencesProvider {
         fileUri: string,
         searchWord: string,
         symbolInfo: SymbolInfo,
-        includeDeclaration: boolean
+        includeDeclaration: boolean,
+        fieldPrefixes?: Set<string>
     ): Location[] {
         const locations: Location[] = [];
         const searchWordLower = searchWord.toLowerCase();
@@ -1075,6 +1085,21 @@ export class ReferencesProvider {
                     } else {
                         continue;
                     }
+                } else if (scopeType === 'field' && fieldPrefixes && fieldPrefixes.size > 0) {
+                    // PRE:field notation — e.g. "QDir:version" where QDir is PRE() of the queue
+                    const colonIndex = token.value.lastIndexOf(':');
+                    if (colonIndex > 0) {
+                        const prefix = token.value.substring(0, colonIndex);
+                        const field = token.value.substring(colonIndex + 1);
+                        if (field.toLowerCase() === searchWordLower && fieldPrefixes.has(prefix.toLowerCase())) {
+                            matchStart = token.start + colonIndex + 1;
+                            matchLength = searchWord.length;
+                        } else {
+                            continue;
+                        }
+                    } else {
+                        continue;
+                    }
                 } else if (token.type === TokenType.StructureField || token.type === TokenType.Class) {
                     // Object prefix of a StructureField: "st.SetValue" when searching for "st"
                     const dotIndex = token.value.indexOf('.');
@@ -1106,6 +1131,52 @@ export class ReferencesProvider {
         }
 
         return locations;
+    }
+
+    /**
+     * Collect all PRE prefixes that reference fields of the same structure as the given field.
+     *
+     * Strategy:
+     * 1. The field token itself may carry structurePrefix (from DocumentStructure).
+     * 2. Also find variables in the current file (and searched files) declared as the
+     *    same queue/group type (parent structure label) and collect their prefixes.
+     *
+     * Returns a Set of lowercase prefix strings (e.g. {"qdir", "qzipf"}).
+     */
+    private collectFieldPrefixes(symbolInfo: SymbolInfo, document: TextDocument): Set<string> {
+        const prefixes = new Set<string>();
+
+        // 1. Direct prefix from the field token (set by DocumentStructure/StructureProcessor)
+        const directPrefix = symbolInfo.token.structurePrefix;
+        if (directPrefix) {
+            prefixes.add(directPrefix.toLowerCase());
+        }
+
+        // 2. The parent structure token's prefix
+        const parentStructureToken = symbolInfo.scope.token; // set to fieldToken.parent! in findStructureField
+        if (parentStructureToken?.structurePrefix) {
+            prefixes.add(parentStructureToken.structurePrefix.toLowerCase());
+        }
+
+        // 3. Find any variables declared as the same structure type (e.g. QZipF QUEUE(ZipQueueType))
+        //    and collect their prefixes too. Search declaration file tokens.
+        try {
+            const declTokens = this.getTokensForUri(symbolInfo.location.uri);
+            const parentLabel = parentStructureToken?.label?.toLowerCase();
+
+            for (const t of declTokens) {
+                if (t.type === TokenType.Structure && t.structurePrefix && t.label && parentLabel) {
+                    // Match variables whose type references the parent structure label
+                    if (t.label.toLowerCase() === parentLabel || t.structurePrefix.toLowerCase() === parentLabel) {
+                        prefixes.add(t.structurePrefix.toLowerCase());
+                    }
+                }
+            }
+        } catch {
+            // ignore
+        }
+
+        return prefixes;
     }
 
     /**

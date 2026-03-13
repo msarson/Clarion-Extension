@@ -47,7 +47,8 @@ export enum TokenType {
     InterfaceMethod,           // Optional: inside INTERFACE structure
     // ✅ Window structure elements
     WindowElement,             // Elements that appear in window structures (BUTTON, LIST, ITEM)
-    PictureFormat              // Picture format specifiers (e.g., @N10.2)
+    PictureFormat,             // Picture format specifiers (e.g., @N10.2)
+    TypeReference              // Type-referencing keywords: LIKE (e.g., uzOptions LIKE(UnzipOptionsType))
 }
 
 export interface Token {
