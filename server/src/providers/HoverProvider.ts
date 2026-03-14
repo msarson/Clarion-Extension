@@ -112,6 +112,10 @@ export class HoverProvider {
             
             const { word, wordRange, line, tokens, currentScope } = context;
 
+            // ✅ Hover on IMPLEMENTS(InterfaceName): show interface method signatures
+            const implementsHover = await this.buildImplementsHover(word, line, position, document, tokens);
+            if (implementsHover) return implementsHover;
+
             // Route through the router for keywords, procedures, methods, symbols, attributes, builtins
             const routedHover = await this.router.route(context);
             if (routedHover) { return routedHover; }
@@ -881,6 +885,79 @@ export class HoverProvider {
      */
     public clearCache(): void {
         this.crossFileCache.clear();
+    }
+
+    /**
+     * Hover on IMPLEMENTS(InterfaceName) — show the interface's method signatures.
+     * Returns null if the cursor isn't on an interface name inside IMPLEMENTS().
+     */
+    private async buildImplementsHover(
+        word: string,
+        line: string,
+        position: Position,
+        document: TextDocument,
+        tokens: Token[]
+    ): Promise<Hover | null> {
+        // Check if word appears as the argument of IMPLEMENTS(...)
+        const implementsRe = /\bIMPLEMENTS\s*\(\s*(\w+)\s*\)/gi;
+        let m: RegExpExecArray | null;
+        while ((m = implementsRe.exec(line)) !== null) {
+            const ifaceName = m[1];
+            if (ifaceName.toLowerCase() !== word.toLowerCase()) continue;
+            const nameStart = m.index + m[0].indexOf(ifaceName);
+            const nameEnd = nameStart + ifaceName.length;
+            if (position.character < nameStart || position.character > nameEnd) continue;
+
+            const ifaceToken = await this.findInterfaceToken(ifaceName, document, tokens);
+            if (!ifaceToken) return null;
+
+            return this.buildInterfaceHover(ifaceToken, ifaceName);
+        }
+
+        // Also hover directly on an INTERFACE structure's label token (col 0)
+        const ifaceStruct = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.subType === TokenType.Interface &&
+            t.line === position.line
+        );
+        if (ifaceStruct && ifaceStruct.label?.toLowerCase() === word.toLowerCase()) {
+            return this.buildInterfaceHover(ifaceStruct, word);
+        }
+
+        return null;
+    }
+
+    /** Find an INTERFACE token by name in the current file or equates */
+    private async findInterfaceToken(ifaceName: string, document: TextDocument, tokens: Token[]): Promise<Token | null> {
+        const local = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.subType === TokenType.Interface &&
+            t.label?.toLowerCase() === ifaceName.toLowerCase()
+        );
+        if (local) return local;
+
+        const sm = SolutionManager.getInstance();
+        const equatesTokens = sm?.getEquatesTokens();
+        if (equatesTokens) {
+            const eq = equatesTokens.find(t =>
+                t.type === TokenType.Structure &&
+                t.subType === TokenType.Interface &&
+                t.label?.toLowerCase() === ifaceName.toLowerCase()
+            );
+            if (eq) return eq;
+        }
+        return null;
+    }
+
+    /** Build a Hover card for an INTERFACE, listing its method prototypes */
+    private buildInterfaceHover(ifaceToken: Token, ifaceName: string): Hover {
+        const methods = (ifaceToken.children ?? [])
+            .filter(c => c.subType === TokenType.InterfaceMethod)
+            .map(c => `  ${c.label ?? c.value}`)
+            .join('\n');
+        const body = methods ? `\n${methods}\n` : '';
+        const content = `\`\`\`clarion\n${ifaceName} INTERFACE${body}END\n\`\`\`\n\n*Interface — defines a contract implemented by classes.*`;
+        return { contents: { kind: 'markdown', value: content } };
     }
 
 }

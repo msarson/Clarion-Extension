@@ -174,6 +174,41 @@ export class DefinitionProvider {
                 }
             }
 
+            // ✅ IMPLEMENTS(InterfaceName) navigation: F12 on interface name → INTERFACE declaration
+            const implementsMatch = line.match(/\bIMPLEMENTS\s*\(\s*(\w+)\s*\)/gi);
+            if (implementsMatch) {
+                for (const match of implementsMatch) {
+                    const nameMatch = match.match(/\bIMPLEMENTS\s*\(\s*(\w+)\s*\)/i);
+                    if (nameMatch) {
+                        const ifaceName = nameMatch[1];
+                        const nameStart = line.indexOf(ifaceName, line.indexOf(match));
+                        const nameEnd = nameStart + ifaceName.length;
+                        if (position.character >= nameStart && position.character <= nameEnd) {
+                            logger.info(`F12 on IMPLEMENTS(${ifaceName}) — looking for INTERFACE declaration`);
+                            const ifaceLocation = await this.findInterfaceDeclaration(ifaceName, document, tokens);
+                            if (ifaceLocation) {
+                                logger.info(`✅ Found INTERFACE '${ifaceName}' declaration`);
+                                return ifaceLocation;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ✅ 3-part method implementation: ClassName.InterfaceName.MethodName PROCEDURE
+            // When cursor is on the InterfaceName segment, navigate to the INTERFACE declaration
+            const threePartMatch = line.match(/^(\w+)\.(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)/i);
+            if (threePartMatch) {
+                const [, clsName, ifacePart, methodPart] = threePartMatch;
+                const ifaceStart = line.indexOf(ifacePart, clsName.length + 1);
+                const ifaceEnd = ifaceStart + ifacePart.length;
+                if (position.character >= ifaceStart && position.character <= ifaceEnd) {
+                    logger.info(`F12 on interface name in 3-part method: ${ifacePart}`);
+                    const ifaceLocation = await this.findInterfaceDeclaration(ifacePart, document, tokens);
+                    if (ifaceLocation) return ifaceLocation;
+                }
+            }
+
             // Check if this is a procedure call in CODE (e.g., "MyProcedure()" or "ProcessOrder(param)")
             // OR if this is inside a START() call (e.g., "START(ProcName, ...)")
             // Navigate to the MAP declaration or PROCEDURE implementation
@@ -249,12 +284,14 @@ export class DefinitionProvider {
             // and navigate to the declaration in the CLASS
             const methodImplMatch = line.match(ClarionPatterns.METHOD_IMPLEMENTATION_STRICT);
             if (methodImplMatch) {
-                const className = methodImplMatch[1];
-                const methodName = methodImplMatch[2];
+                const parts = ClarionPatterns.getMethodImplParts(line);
+                const className = parts?.className ?? methodImplMatch[1];
+                // For 3-part (Class.Interface.Method), use the actual method name
+                const methodName = parts?.methodName ?? methodImplMatch[2];
                 
-                logger.info(`🔍 Detected method implementation line: ${className}.${methodName}`);
+                logger.info(`🔍 Detected method implementation line: ${className}.${parts?.interfaceName ? parts.interfaceName + '.' : ''}${methodName}`);
                 
-                // Check if cursor is on the class or method name
+                // Check if cursor is on the class, interface, or method name segment
                 const classStart = line.indexOf(className);
                 const classEnd = classStart + className.length;
                 const methodStart = line.indexOf(methodName, classEnd);
@@ -2016,6 +2053,46 @@ export class DefinitionProvider {
     }
 
     /**
+     * Find INTERFACE declaration by name, searching:
+     * 1. Current document tokens
+     * 2. INCLUDE files
+     * 3. equates.clw
+     */
+    private async findInterfaceDeclaration(ifaceName: string, document: TextDocument, tokens: Token[]): Promise<Location | null> {
+        // Search current document
+        const local = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.subType === TokenType.Interface &&
+            t.label?.toLowerCase() === ifaceName.toLowerCase()
+        );
+        if (local) {
+            return Location.create(document.uri, Range.create(local.line, 0, local.line, 0));
+        }
+
+        // Search INCLUDE files
+        const result = await this.findTypeDeclarationInIncludes(ifaceName, decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\'), new Set());
+        if (result) return result;
+
+        // Search equates.clw
+        const sm = SolutionManager.getInstance();
+        const equatesTokens = sm?.getEquatesTokens();
+        const equatesPath = sm?.getEquatesPath();
+        if (equatesTokens && equatesPath) {
+            const eq = equatesTokens.find(t =>
+                t.type === TokenType.Structure &&
+                t.subType === TokenType.Interface &&
+                t.label?.toLowerCase() === ifaceName.toLowerCase()
+            );
+            if (eq) {
+                const uri = `file:///${equatesPath.replace(/\\/g, '/')}`;
+                return Location.create(uri, Range.create(eq.line, 0, eq.line, 0));
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Walk INCLUDE files reachable from the document and find a structure (QUEUE/GROUP/FILE/CLASS)
      * declaration with label = typeName. Returns a Location pointing to that declaration line.
      */
@@ -2280,8 +2357,8 @@ export class DefinitionProvider {
             return false;
         }
         
-        // Rule out method implementations (ClassName.MethodName PROCEDURE)
-        const isMethodImplementation = /^\s*\w+\.\w+\s+(PROCEDURE|FUNCTION)/i.test(line);
+        // Rule out method implementations: ClassName.MethodName or ClassName.IFace.MethodName PROCEDURE
+        const isMethodImplementation = /^\s*\w+\.\w+(?:\.\w+)?\s+(PROCEDURE|FUNCTION)/i.test(line);
         if (isMethodImplementation) {
             return false;
         }

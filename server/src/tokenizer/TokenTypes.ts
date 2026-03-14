@@ -48,7 +48,8 @@ export enum TokenType {
     // ✅ Window structure elements
     WindowElement,             // Elements that appear in window structures (BUTTON, LIST, ITEM)
     PictureFormat,             // Picture format specifiers (e.g., @N10.2)
-    TypeReference              // Type-referencing keywords: LIKE (e.g., uzOptions LIKE(UnzipOptionsType))
+    TypeReference,             // Type-referencing keywords: LIKE (e.g., uzOptions LIKE(UnzipOptionsType))
+    Interface                  // Subtype for INTERFACE structure tokens (distinct from generic Structure)
 }
 
 export interface Token {
@@ -79,4 +80,5 @@ export interface Token {
         includeFile: string;
         parentFile: string;   // File that has the INCLUDE statement
     };
+    implementedInterfaces?: string[];  // Names of interfaces a CLASS implements (from IMPLEMENTS() attributes)
 }

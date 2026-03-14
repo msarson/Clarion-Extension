@@ -19,28 +19,28 @@ export class ClarionPatterns {
     
     /**
      * Matches a method implementation line: ClassName.MethodName PROCEDURE
+     * Also supports 3-part interface methods: ClassName.InterfaceName.MethodName PROCEDURE
      * Supports both with and without parentheses:
      * - ThisWindow.Ask PROCEDURE
      * - ThisWindow.Ask PROCEDURE()
      * - ThisWindow.Ask PROCEDURE(LONG x, STRING y)
+     * - CSocketConnection.IConnection.CloseSocket PROCEDURE
      * 
      * Capture groups:
      * [1] = Class name
-     * [2] = Method name
-     * [3] = Parameter list (undefined if no parens, empty string if ())
+     * [2] = Interface name (undefined for 2-part) OR Method name (for 2-part)
+     * [3] = Method name (for 3-part) OR Parameter list (for 2-part)
+     * [4] = Parameter list (for 3-part; undefined if no parens)
      * 
-     * Examples:
-     * - "ThisWindow.Ask PROCEDURE" → ["ThisWindow", "Ask", undefined]
-     * - "ThisWindow.Ask PROCEDURE()" → ["ThisWindow", "Ask", ""]
-     * - "ThisWindow.Ask PROCEDURE(LONG x)" → ["ThisWindow", "Ask", "LONG x"]
+     * Use getMethodImplParts() for a unified API.
      */
-    public static readonly METHOD_IMPLEMENTATION = /^\s*(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)\s*(?:\(([^)]*)\))?/i;
+    public static readonly METHOD_IMPLEMENTATION = /^\s*(\w+)\.(\w+)(?:\.(\w+))?\s+(?:PROCEDURE|FUNCTION)\s*(?:\(([^)]*)\))?/i;
     
     /**
      * Matches a method implementation line (strict - must be at start of line)
      * Same as METHOD_IMPLEMENTATION but enforces no leading whitespace
      */
-    public static readonly METHOD_IMPLEMENTATION_STRICT = /^(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)\s*(?:\(([^)]*)\))?/i;
+    public static readonly METHOD_IMPLEMENTATION_STRICT = /^(\w+)\.(\w+)(?:\.(\w+))?\s+(?:PROCEDURE|FUNCTION)\s*(?:\(([^)]*)\))?/i;
     
     /**
      * Matches a method implementation line (legacy - requires parentheses)
@@ -50,11 +50,27 @@ export class ClarionPatterns {
     public static readonly METHOD_IMPLEMENTATION_LEGACY = /^(\w+)\.(\w+)\s+PROCEDURE\s*\((.*?)\)/i;
     
     /**
-     * Tests if a line is a method implementation
+     * Tests if a line is a method implementation (2-part or 3-part)
      * Works with both PROCEDURE and FUNCTION
      */
-    public static readonly IS_METHOD_IMPLEMENTATION = /^\s*\w+\.\w+\s+(PROCEDURE|FUNCTION)/i;
-    
+    public static readonly IS_METHOD_IMPLEMENTATION = /^\s*\w+\.\w+(?:\.\w+)?\s+(PROCEDURE|FUNCTION)/i;
+
+    /**
+     * Unified extraction for method implementation parts.
+     * Returns { className, interfaceName (optional), methodName, params (optional) }
+     */
+    public static getMethodImplParts(line: string): { className: string; interfaceName?: string; methodName: string; params?: string } | null {
+        const m = line.match(this.METHOD_IMPLEMENTATION_STRICT);
+        if (!m) return null;
+        if (m[3] !== undefined) {
+            // 3-part: Class.Interface.Method
+            return { className: m[1], interfaceName: m[2], methodName: m[3], params: m[4] };
+        } else {
+            // 2-part: Class.Method
+            return { className: m[1], methodName: m[2], params: m[4] };
+        }
+    }
+     
     /**
      * Matches a procedure declaration in a MAP block
      * Handles both formats with and without parameters:
@@ -166,20 +182,22 @@ export class ClarionPatterns {
     
     /**
      * Parses a method implementation line
-     * Returns null if not a valid method implementation
+     * Returns null if not a valid method implementation.
+     * For 3-part names (Class.Interface.Method), methodName = Method.
      */
     public static parseMethodImplementation(line: string): {
         className: string;
+        interfaceName?: string;
         methodName: string;
         paramList: string | undefined;
     } | null {
-        const match = line.match(this.METHOD_IMPLEMENTATION);
-        if (!match) return null;
-        
+        const parts = this.getMethodImplParts(line.trimStart());
+        if (!parts) return null;
         return {
-            className: match[1],
-            methodName: match[2],
-            paramList: match[3]
+            className: parts.className,
+            interfaceName: parts.interfaceName,
+            methodName: parts.methodName,
+            paramList: parts.params
         };
     }
     
