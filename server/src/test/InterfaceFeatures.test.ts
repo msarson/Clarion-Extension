@@ -268,6 +268,36 @@ suite('DefinitionProvider — INTERFACE navigation', () => {
             assert.strictEqual(result.range.start.line, 0, `Expected line 0 (INTERFACE declaration), got ${result.range.start.line}`);
         }
     });
+
+    test('F12 on method-name segment of 3-part implementation navigates to interface method', async () => {
+        const code = [
+            'IConn  INTERFACE,TYPE',          // line 0
+            '  CloseSocket  PROCEDURE',        // line 1
+            'END',                              // line 2
+            '',                                 // line 3
+            'CSocketConn  CLASS,IMPLEMENTS(IConn),TYPE,MODULE(\'test.clw\')',  // line 4
+            '  CloseSocket  PROCEDURE,VIRTUAL', // line 5
+            'END',                              // line 6
+            '',                                 // line 7
+            'MEMBER()',                         // line 8
+            '',                                 // line 9
+            'CSocketConn.IConn.CloseSocket  PROCEDURE',  // line 10
+            'CODE',                             // line 11
+            'END',                              // line 12
+        ].join('\n');
+
+        const doc = createDocument(code);
+        seedCache(doc);
+
+        // F12 on "CloseSocket" segment of line 10
+        const implLine = 'CSocketConn.IConn.CloseSocket  PROCEDURE';
+        const methodStart = implLine.indexOf('CloseSocket', implLine.indexOf('IConn') + 1);
+        const result = await provider.provideDefinition(doc, { line: 10, character: methodStart + 3 });
+        assert.ok(result !== null, 'Expected a definition result for method name in 3-part implementation');
+        if (result && !Array.isArray(result)) {
+            assert.strictEqual(result.range.start.line, 1, `Expected line 1 (InterfaceMethod declaration), got ${result.range.start.line}`);
+        }
+    });
 });
 
 // ---------------------------------------------------------------------------
@@ -307,5 +337,39 @@ suite('HoverProvider — INTERFACE hover', () => {
             ? hover!.contents
             : (hover!.contents as any).value ?? JSON.stringify(hover!.contents);
         assert.ok(content.includes('INTERFACE'), `Hover should mention INTERFACE, got: ${content}`);
+    });
+
+    test('Hover on method-name segment of 3-part implementation shows method hover', async () => {
+        const code = [
+            'IConn  INTERFACE,TYPE',          // line 0
+            '  CloseSocket  PROCEDURE',        // line 1
+            'END',                              // line 2
+            '',                                 // line 3
+            'CSocketConn  CLASS,IMPLEMENTS(IConn),TYPE,MODULE(\'test.clw\')',  // line 4
+            '  CloseSocket  PROCEDURE,VIRTUAL', // line 5
+            'END',                              // line 6
+            '',                                 // line 7
+            'MEMBER()',                         // line 8
+            '',                                 // line 9
+            'CSocketConn.IConn.CloseSocket  PROCEDURE',  // line 10
+            'CODE',                             // line 11
+            'END',                              // line 12
+        ].join('\n');
+
+        const doc = createDocument(code);
+        seedCache(doc);
+
+        const implLine = 'CSocketConn.IConn.CloseSocket  PROCEDURE';
+        const methodStart = implLine.indexOf('CloseSocket', implLine.indexOf('IConn') + 1);
+        const hover = await provider.provideHover(doc, { line: 10, character: methodStart + 3 });
+        assert.ok(hover !== null, 'Expected hover for method name in 3-part implementation');
+
+        const content = typeof hover!.contents === 'string'
+            ? hover!.contents
+            : (hover!.contents as any).value ?? JSON.stringify(hover!.contents);
+        assert.ok(
+            content.toLowerCase().includes('closesocket'),
+            `Hover should mention CloseSocket, got: ${content}`
+        );
     });
 });

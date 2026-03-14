@@ -68,6 +68,18 @@ export class MethodHoverResolver {
         if ((position.character >= classStart && position.character <= classEnd) ||
             (position.character >= methodStart && position.character <= methodEnd)) {
             const tokens = this.tokenCache.getTokens(document);
+
+            // For 3-part methods (Class.Interface.Method), the declaration is in the INTERFACE, not the CLASS
+            if (methodImplMatch[3] !== undefined) {
+                const interfaceName = methodImplMatch[2];
+                const ifaceMethodInfo = this.overloadResolver.findInterfaceMethodDeclaration(
+                    interfaceName, methodName, document, tokens, paramCount, line
+                );
+                if (ifaceMethodInfo) {
+                    return this.formatter.formatMethodImplementation(methodName, interfaceName, ifaceMethodInfo);
+                }
+            }
+
             // Pass the full line as implementation signature for type matching
             const declInfo = this.overloadResolver.findMethodDeclaration(className, methodName, document, tokens, paramCount, line);
             if (declInfo) {

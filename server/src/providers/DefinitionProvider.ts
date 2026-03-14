@@ -306,6 +306,20 @@ export class DefinitionProvider {
                     // Count parameters from the implementation signature
                     const paramCount = ClarionPatterns.countParameters(line);
                     logger.info(`Method implementation has ${paramCount} parameters`);
+
+                    // For 3-part methods (Class.Interface.Method), the declaration is in the INTERFACE, not the CLASS
+                    if (parts?.interfaceName) {
+                        const ifaceMethodInfo = this.overloadResolver.findInterfaceMethodDeclaration(
+                            parts.interfaceName, methodName, document, tokens, paramCount, line
+                        );
+                        if (ifaceMethodInfo) {
+                            logger.info(`✅ Found interface method declaration at ${ifaceMethodInfo.file}:${ifaceMethodInfo.line}`);
+                            return Location.create(ifaceMethodInfo.file, {
+                                start: { line: ifaceMethodInfo.line, character: 0 },
+                                end: { line: ifaceMethodInfo.line, character: 0 }
+                            });
+                        }
+                    }
                     
                     const declInfo = this.overloadResolver.findMethodDeclaration(className, methodName, document, tokens, paramCount, line);
                     if (declInfo) {

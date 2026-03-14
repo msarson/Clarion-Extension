@@ -113,7 +113,119 @@ export class MethodOverloadResolver {
         logger.info(`Method not found in current file, searching INCLUDEs`);
         return this.findMethodDeclarationInIncludes(className, methodName, document, paramCount, implementationSignature);
     }
-    
+
+    /**
+     * Finds the declaration of a method within an INTERFACE body.
+     * Used for 3-part method implementations (Class.Interface.Method PROCEDURE).
+     */
+    public findInterfaceMethodDeclaration(
+        interfaceName: string,
+        methodName: string,
+        document: TextDocument,
+        tokens: Token[],
+        paramCount?: number,
+        implementationSignature?: string
+    ): MethodDeclarationInfo | null {
+        logger.info(`Finding interface method declaration: ${interfaceName}.${methodName}`);
+
+        const candidates: MethodDeclarationInfo[] = [];
+        const content = document.getText();
+        const lines = content.split('\n');
+
+        // Search current file tokens for InterfaceMethod under the matching interface
+        for (const token of tokens) {
+            if (token.subType === TokenType.InterfaceMethod &&
+                token.label?.toLowerCase() === methodName.toLowerCase() &&
+                token.parent?.label?.toLowerCase() === interfaceName.toLowerCase()) {
+                const signature = lines[token.line]?.trim() ?? '';
+                const declParamCount = ClarionPatterns.countParameters(signature);
+                candidates.push({ signature, file: document.uri, line: token.line, paramCount: declParamCount });
+                logger.info(`Found interface method candidate at line ${token.line}`);
+            }
+        }
+
+        const bestMatch = this.selectBestOverload(candidates, paramCount, implementationSignature);
+        if (bestMatch) return bestMatch;
+
+        // Search INCLUDE files
+        return this.findInterfaceMethodInIncludes(interfaceName, methodName, document, paramCount, implementationSignature);
+    }
+
+    /**
+     * Searches INCLUDE files for a method declaration within an INTERFACE body.
+     */
+    private findInterfaceMethodInIncludes(
+        interfaceName: string,
+        methodName: string,
+        document: TextDocument,
+        paramCount?: number,
+        implementationSignature?: string
+    ): MethodDeclarationInfo | null {
+        const filePath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
+        const content = document.getText();
+        const docLines = content.split('\n');
+        const candidates: MethodDeclarationInfo[] = [];
+
+        for (let i = 0; i < docLines.length; i++) {
+            const includeMatch = docLines[i].match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
+            if (!includeMatch) continue;
+
+            const includeFileName = includeMatch[1];
+            let resolvedPath: string | null = null;
+
+            const solutionManager = SolutionManager.getInstance();
+            if (solutionManager?.solution) {
+                for (const project of solutionManager.solution.projects) {
+                    const resolved = project.getRedirectionParser().findFile(includeFileName);
+                    if (resolved?.path && fs.existsSync(resolved.path)) {
+                        resolvedPath = resolved.path;
+                        break;
+                    }
+                }
+            }
+
+            if (!resolvedPath) {
+                const currentDir = path.dirname(filePath);
+                const relativePath = path.join(currentDir, includeFileName);
+                if (fs.existsSync(relativePath)) {
+                    resolvedPath = path.resolve(relativePath);
+                }
+            }
+
+            if (resolvedPath && !path.isAbsolute(resolvedPath)) {
+                resolvedPath = path.resolve(path.dirname(filePath), resolvedPath);
+            }
+
+            if (resolvedPath) {
+                logger.info(`Searching INCLUDE for interface method: ${resolvedPath}`);
+                try {
+                    const includeContent = fs.readFileSync(resolvedPath, 'utf8');
+                    const includeLines = includeContent.split('\n');
+
+                    for (let j = 0; j < includeLines.length; j++) {
+                        const ifaceMatch = includeLines[j].match(new RegExp(`^(${interfaceName})\\s+INTERFACE`, 'i'));
+                        if (!ifaceMatch) continue;
+
+                        logger.info(`Found INTERFACE ${interfaceName} at line ${j} in ${resolvedPath}`);
+                        for (let k = j + 1; k < includeLines.length; k++) {
+                            if (/^\s*END\s*$/i.test(includeLines[k]) || /^END\s*$/i.test(includeLines[k])) break;
+                            const methodMatch = includeLines[k].match(new RegExp(`^\\s*(${methodName})\\s+(?:PROCEDURE|FUNCTION)`, 'i'));
+                            if (methodMatch) {
+                                const signature = includeLines[k].trim();
+                                const declParamCount = ClarionPatterns.countParameters(signature);
+                                const fileUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+                                candidates.push({ signature, file: fileUri, line: k, paramCount: declParamCount });
+                                logger.info(`Found interface method in INCLUDE at line ${k}`);
+                            }
+                        }
+                    }
+                } catch { /* skip unreadable files */ }
+            }
+        }
+
+        return this.selectBestOverload(candidates, paramCount, implementationSignature);
+    }
+
     /**
      * Searches for method declaration in INCLUDE files
      */
