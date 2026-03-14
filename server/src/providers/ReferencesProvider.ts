@@ -263,6 +263,54 @@ export class ReferencesProvider {
             }
         }
 
+        // When no solution is loaded (e.g. browsing LibSrc directly), find MODULE files
+        // by scanning the current file's tokens for CLASS ... IMPLEMENTS(ifaceName) MODULE('x.clw')
+        if (!sm?.solution?.projects?.length) {
+            const docTokens = this.getTokensForUri(document.uri);
+            const docContent = document.uri === document.uri ? document.getText() : (this.getFileContent(document.uri) ?? '');
+            const docLines = docContent.split('\n');
+            for (const t of docTokens) {
+                if (t.type === TokenType.Structure && t.subType === TokenType.Class) {
+                    const ln = docLines[t.line] ?? '';
+                    if (/\bIMPLEMENTS\s*\(\s*\w+\s*\)/i.test(ln)) {
+                        const moduleMatch = ln.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i);
+                        if (moduleMatch) {
+                            const resolved = this.resolveModuleFile(moduleMatch[1], document.uri);
+                            if (resolved && !filesToSearch.includes(resolved)) {
+                                filesToSearch.push(resolved);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Pre-build set of class names that implement this interface, per-file (keyed by fileUri)
+        // so MethodDeclaration filtering is fast and accurate.
+        const implementingClassesByFile = new Map<string, Set<string>>();
+        for (const fileUri of filesToSearch) {
+            const ft = this.getTokensForUri(fileUri);
+            if (!ft || ft.length === 0) continue;
+            const fileContent = fileUri === document.uri
+                ? document.getText()
+                : (this.getFileContent(fileUri) ?? '');
+            const fileLines = fileContent.split('\n');
+            const implementors = new Set<string>();
+            for (const t of ft) {
+                if (t.type === TokenType.Structure && t.subType === TokenType.Class && t.label) {
+                    const ln = fileLines[t.line] ?? '';
+                    const implRe = /\bIMPLEMENTS\s*\(\s*(\w+)\s*\)/gi;
+                    let m: RegExpExecArray | null;
+                    while ((m = implRe.exec(ln)) !== null) {
+                        if (m[1].toLowerCase() === ifaceLower) {
+                            implementors.add(t.label.toLowerCase());
+                        }
+                    }
+                }
+            }
+            implementingClassesByFile.set(fileUri, implementors);
+        }
+
         for (const fileUri of filesToSearch) {
             const fileTokens = this.getTokensForUri(fileUri);
             if (!fileTokens || fileTokens.length === 0) continue;
@@ -309,12 +357,19 @@ export class ReferencesProvider {
                     }
                 }
 
-                // MethodDeclaration (VIRTUAL) in a CLASS body — match by label
+                // MethodDeclaration (VIRTUAL) in a CLASS body — only if the enclosing class
+                // implements this interface (prevents false positives from same-named methods
+                // in unrelated classes).
                 if (token.subType === TokenType.MethodDeclaration && labelLower === methodLower) {
-                    const labelTok = fileTokens.find(t2 => t2.line === token.line && t2.value.toLowerCase() === methodLower);
-                    const col = labelTok ? labelTok.start : token.start;
-                    locations.push(Location.create(fileUri, Range.create(token.line, col, token.line, col + methodName.length)));
-                    continue;
+                    const implementors = implementingClassesByFile.get(fileUri) ?? new Set<string>();
+                    const parentClass = (token.parent?.label ?? '').toLowerCase();
+                    if (implementors.has(parentClass)) {
+                        const labelTok = fileTokens.find(t2 => t2.line === token.line && t2.value.toLowerCase() === methodLower);
+                        const col = labelTok ? labelTok.start : token.start;
+                        locations.push(Location.create(fileUri, Range.create(token.line, col, token.line, col + methodName.length)));
+                        continue;
+                    }
+                    continue; // skip — class doesn't implement the interface
                 }
 
                 // Call sites: Function/Variable tokens matching the method name, outside declaration lines
