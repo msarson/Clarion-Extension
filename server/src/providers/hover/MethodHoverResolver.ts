@@ -48,15 +48,21 @@ export class MethodHoverResolver {
         }
 
         const className = methodImplMatch[1];
-        const methodName = methodImplMatch[2];
+        // For 3-part (Class.Interface.Method), group[3] is the method name; group[2] is interface.
+        // For 2-part (Class.Method), group[2] is the method name.
+        const methodName = methodImplMatch[3] !== undefined ? methodImplMatch[3] : methodImplMatch[2];
         
         // Count parameters from the implementation signature
         const paramCount = ClarionPatterns.countParameters(line);
         
-        // Check if cursor is on the class or method name
+        // Check if cursor is on the class name or the method name
         const classStart = line.indexOf(className);
         const classEnd = classStart + className.length;
-        const methodStart = line.indexOf(methodName, classEnd);
+        // For 3-part, method name starts after Class.Interface.; for 2-part after Class.
+        const methodSegmentSearchFrom = methodImplMatch[3] !== undefined
+            ? classEnd + 1 + methodImplMatch[2].length + 1   // skip .InterfaceName.
+            : classEnd + 1;                                    // skip .
+        const methodStart = line.indexOf(methodName, methodSegmentSearchFrom);
         const methodEnd = methodStart + methodName.length;
         
         if ((position.character >= classStart && position.character <= classEnd) ||

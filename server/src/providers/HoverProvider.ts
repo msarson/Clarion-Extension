@@ -116,6 +116,19 @@ export class HoverProvider {
             const implementsHover = await this.buildImplementsHover(word, line, position, document, tokens);
             if (implementsHover) return implementsHover;
 
+            // ✅ Hover on 3-part method line (ClassName.InterfaceName.MethodName PROCEDURE)
+            // When cursor is on the interface-name segment, show the INTERFACE hover
+            const threePartMatch = line.match(/^(\w+)\.(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)/i);
+            if (threePartMatch) {
+                const [, cls, iface, meth] = threePartMatch;
+                const ifaceStart = line.indexOf(iface, cls.length + 1);
+                const ifaceEnd = ifaceStart + iface.length;
+                if (position.character >= ifaceStart && position.character <= ifaceEnd) {
+                    const ifaceToken = await this.findInterfaceToken(iface, document, tokens);
+                    if (ifaceToken) return this.buildInterfaceHover(ifaceToken, iface);
+                }
+            }
+
             // Route through the router for keywords, procedures, methods, symbols, attributes, builtins
             const routedHover = await this.router.route(context);
             if (routedHover) { return routedHover; }
@@ -927,8 +940,9 @@ export class HoverProvider {
         return null;
     }
 
-    /** Find an INTERFACE token by name in the current file or equates */
+    /** Find an INTERFACE token by name: current file → INCLUDE chain → equates */
     private async findInterfaceToken(ifaceName: string, document: TextDocument, tokens: Token[]): Promise<Token | null> {
+        // 1. Current document
         const local = tokens.find(t =>
             t.type === TokenType.Structure &&
             t.subType === TokenType.Interface &&
@@ -936,6 +950,12 @@ export class HoverProvider {
         );
         if (local) return local;
 
+        // 2. Walk INCLUDE files reachable from this document
+        const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const incToken = await this.findInterfaceTokenInIncludes(ifaceName, fromPath, new Set());
+        if (incToken) return incToken;
+
+        // 3. equates.clw
         const sm = SolutionManager.getInstance();
         const equatesTokens = sm?.getEquatesTokens();
         if (equatesTokens) {
@@ -945,6 +965,60 @@ export class HoverProvider {
                 t.label?.toLowerCase() === ifaceName.toLowerCase()
             );
             if (eq) return eq;
+        }
+        return null;
+    }
+
+    /** Walk INCLUDE files from fromPath and search for an INTERFACE token with matching name */
+    private async findInterfaceTokenInIncludes(ifaceName: string, fromPath: string, visited: Set<string>): Promise<Token | null> {
+        if (visited.has(fromPath.toLowerCase())) return null;
+        visited.add(fromPath.toLowerCase());
+
+        let content: string;
+        try { content = fs.readFileSync(fromPath, 'utf8'); } catch { return null; }
+
+        const includePattern = /INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/gi;
+        let match: RegExpExecArray | null;
+
+        while ((match = includePattern.exec(content)) !== null) {
+            const includeFile = match[1];
+            let resolvedPath: string | null = null;
+
+            const sm = SolutionManager.getInstance();
+            if (sm?.solution) {
+                for (const project of sm.solution.projects) {
+                    const resolved = project.getRedirectionParser().findFile(includeFile);
+                    if (resolved?.path && fs.existsSync(resolved.path)) {
+                        resolvedPath = resolved.path;
+                        break;
+                    }
+                }
+            }
+            if (!resolvedPath) {
+                const candidate = path.join(path.dirname(fromPath), includeFile);
+                if (fs.existsSync(candidate)) resolvedPath = candidate;
+            }
+            if (!resolvedPath) continue;
+
+            const uri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+            let incTokens = this.tokenCache.getTokensByUri(uri);
+            if (!incTokens) {
+                try {
+                    const incContent = fs.readFileSync(resolvedPath, 'utf8');
+                    const incDoc = TextDocument.create(uri, 'clarion', 1, incContent);
+                    incTokens = this.tokenCache.getTokens(incDoc);
+                } catch { continue; }
+            }
+
+            const iface = incTokens.find(t =>
+                t.type === TokenType.Structure &&
+                t.subType === TokenType.Interface &&
+                t.label?.toLowerCase() === ifaceName.toLowerCase()
+            );
+            if (iface) return iface;
+
+            const nested = await this.findInterfaceTokenInIncludes(ifaceName, resolvedPath, visited);
+            if (nested) return nested;
         }
         return null;
     }

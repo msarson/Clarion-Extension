@@ -117,6 +117,19 @@ export class ReferencesProvider {
             return this.provideMemberReferences(`SELF.${word}`, document, position, context, classModuleFile, enclosingClass.label);
         }
 
+        // Check if cursor is inside an INTERFACE body — find all implementations + call sites
+        const enclosingInterface = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.subType === TokenType.Interface &&
+            t.line < position.line &&
+            t.finishesAt !== undefined &&
+            t.finishesAt >= position.line
+        );
+        if (enclosingInterface) {
+            logger.info(`🔌 "${word}" is inside INTERFACE body (iface=${enclosingInterface.label ?? '?'}) — routing to interface-method path`);
+            return this.provideInterfaceMethodReferences(word, enclosingInterface.label ?? word, document, context.includeDeclaration);
+        }
+
         // Plain symbol path
         const symbolInfo = await this.symbolFinder.findSymbol(word, document, position);
         if (!symbolInfo) {
@@ -165,6 +178,100 @@ export class ReferencesProvider {
     }
 
     // ─── Member access (SELF.Order, mgr.Order) ───────────────────────────────
+
+    /**
+     * Handle Find All References for a method declared inside an INTERFACE body.
+     * Finds: the declaration, 3-part implementations (Class.IFace.Method), VIRTUAL declarations
+     * in implementing classes, and call sites across all project files.
+     */
+    private async provideInterfaceMethodReferences(
+        methodName: string,
+        ifaceName: string,
+        document: TextDocument,
+        includeDeclaration: boolean
+    ): Promise<Location[] | null> {
+        const methodLower = methodName.toLowerCase();
+        const ifaceLower = ifaceName.toLowerCase();
+        const locations: Location[] = [];
+
+        // Collect all files to search: project files + current file
+        const filesToSearch: string[] = [document.uri];
+        const sm = SolutionManager.getInstance();
+        if (sm?.solution?.projects?.length) {
+            for (const project of sm.solution.projects) {
+                for (const sf of project.sourceFiles) {
+                    const fullPath = path.isAbsolute(sf.relativePath) ? sf.relativePath : path.join(project.path, sf.relativePath);
+                    const uri = `file:///${fullPath.replace(/\\/g, '/')}`;
+                    if (!filesToSearch.includes(uri)) filesToSearch.push(uri);
+                }
+            }
+        }
+
+        for (const fileUri of filesToSearch) {
+            const fileTokens = this.getTokensForUri(fileUri);
+            if (!fileTokens || fileTokens.length === 0) continue;
+
+            // Pre-scan: collect lines that are declaration contexts so we skip them
+            // in the call-site pass (avoids double-counting label + PROCEDURE keyword)
+            const declLines = new Set<number>();
+            for (const t of fileTokens) {
+                const subT = t.subType;
+                if (subT === TokenType.InterfaceMethod || subT === TokenType.MethodDeclaration || subT === TokenType.MethodImplementation) {
+                    const lbl = (t.label ?? '').toLowerCase();
+                    const lastName = lbl.includes('.') ? lbl.split('.').pop()! : lbl;
+                    if (lastName === methodLower) declLines.add(t.line);
+                }
+            }
+
+            for (const token of fileTokens) {
+                if (token.type === TokenType.Comment || token.type === TokenType.String) continue;
+                const valLower = token.value.toLowerCase();
+                const labelLower = (token.label ?? '').toLowerCase();
+
+                // InterfaceMethod declaration: report at the label (Variable) position on same line
+                if (token.subType === TokenType.InterfaceMethod && labelLower === methodLower) {
+                    if (includeDeclaration) {
+                        // Find the preceding Variable/Label token on this line for exact position
+                        const labelTok = fileTokens.find(t2 => t2.line === token.line && t2.value.toLowerCase() === methodLower);
+                        const col = labelTok ? labelTok.start : token.start;
+                        locations.push(Location.create(fileUri, Range.create(token.line, col, token.line, col + methodName.length)));
+                    }
+                    continue;
+                }
+
+                // MethodImplementation: 3-part (Class.IFace.Method) or 2-part matching method name
+                if (token.subType === TokenType.MethodImplementation) {
+                    const parts = labelLower.split('.');
+                    const lastName = parts[parts.length - 1];
+                    const ifacePart = parts.length === 3 ? parts[1] : '';
+                    if (lastName === methodLower && (ifacePart === '' || ifacePart === ifaceLower)) {
+                        // Point at the method-name segment, not the PROCEDURE keyword
+                        const dotPos = (token.label ?? '').lastIndexOf('.');
+                        const methodCol = dotPos >= 0 ? dotPos + 1 : token.start;
+                        locations.push(Location.create(fileUri, Range.create(token.line, methodCol, token.line, methodCol + methodName.length)));
+                        continue;
+                    }
+                }
+
+                // MethodDeclaration (VIRTUAL) in a CLASS body — match by label
+                if (token.subType === TokenType.MethodDeclaration && labelLower === methodLower) {
+                    const labelTok = fileTokens.find(t2 => t2.line === token.line && t2.value.toLowerCase() === methodLower);
+                    const col = labelTok ? labelTok.start : token.start;
+                    locations.push(Location.create(fileUri, Range.create(token.line, col, token.line, col + methodName.length)));
+                    continue;
+                }
+
+                // Call sites: Function/Variable tokens matching the method name, outside declaration lines
+                if ((token.type === TokenType.Variable || token.type === TokenType.Function) &&
+                    valLower === methodLower && !declLines.has(token.line)) {
+                    locations.push(Location.create(fileUri, Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                }
+            }
+        }
+
+        logger.info(`✅ Found ${locations.length} reference(s) to interface method "${methodName}" (iface=${ifaceName})`);
+        return locations.length > 0 ? locations : null;
+    }
 
     /**
      * Handle Find All References for a dotted member access expression.
