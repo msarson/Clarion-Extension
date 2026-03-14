@@ -148,29 +148,38 @@ export class MethodOverloadResolver {
         if (bestMatch) return bestMatch;
 
         // Search INCLUDE files
-        return this.findInterfaceMethodInIncludes(interfaceName, methodName, document, paramCount, implementationSignature);
+        return this.findInterfaceMethodInIncludes(
+            interfaceName, methodName,
+            decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\'),
+            new Set(), paramCount, implementationSignature
+        );
     }
 
     /**
-     * Searches INCLUDE files for a method declaration within an INTERFACE body.
+     * Recursively searches INCLUDE files for a method declaration within an INTERFACE body.
      */
     private findInterfaceMethodInIncludes(
         interfaceName: string,
         methodName: string,
-        document: TextDocument,
+        fromPath: string,
+        visited: Set<string>,
         paramCount?: number,
         implementationSignature?: string
     ): MethodDeclarationInfo | null {
-        const filePath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
-        const content = document.getText();
-        const docLines = content.split('\n');
+        if (visited.has(fromPath.toLowerCase())) return null;
+        visited.add(fromPath.toLowerCase());
+
+        let content: string;
+        try { content = fs.readFileSync(fromPath, 'utf8'); } catch { return null; }
+
+        const lines = content.split('\n');
         const candidates: MethodDeclarationInfo[] = [];
 
-        for (let i = 0; i < docLines.length; i++) {
-            const includeMatch = docLines[i].match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
-            if (!includeMatch) continue;
+        const includePattern = /INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/gi;
+        let m: RegExpExecArray | null;
 
-            const includeFileName = includeMatch[1];
+        while ((m = includePattern.exec(content)) !== null) {
+            const includeFileName = m[1];
             let resolvedPath: string | null = null;
 
             const solutionManager = SolutionManager.getInstance();
@@ -185,7 +194,7 @@ export class MethodOverloadResolver {
             }
 
             if (!resolvedPath) {
-                const currentDir = path.dirname(filePath);
+                const currentDir = path.dirname(fromPath);
                 const relativePath = path.join(currentDir, includeFileName);
                 if (fs.existsSync(relativePath)) {
                     resolvedPath = path.resolve(relativePath);
@@ -193,33 +202,43 @@ export class MethodOverloadResolver {
             }
 
             if (resolvedPath && !path.isAbsolute(resolvedPath)) {
-                resolvedPath = path.resolve(path.dirname(filePath), resolvedPath);
+                resolvedPath = path.resolve(path.dirname(fromPath), resolvedPath);
             }
 
-            if (resolvedPath) {
-                logger.info(`Searching INCLUDE for interface method: ${resolvedPath}`);
-                try {
-                    const includeContent = fs.readFileSync(resolvedPath, 'utf8');
-                    const includeLines = includeContent.split('\n');
+            if (!resolvedPath) continue;
 
-                    for (let j = 0; j < includeLines.length; j++) {
-                        const ifaceMatch = includeLines[j].match(new RegExp(`^(${interfaceName})\\s+INTERFACE`, 'i'));
-                        if (!ifaceMatch) continue;
+            logger.info(`Searching INCLUDE for interface method: ${resolvedPath}`);
+            let includeContent: string;
+            try { includeContent = fs.readFileSync(resolvedPath, 'utf8'); } catch { continue; }
 
-                        logger.info(`Found INTERFACE ${interfaceName} at line ${j} in ${resolvedPath}`);
-                        for (let k = j + 1; k < includeLines.length; k++) {
-                            if (/^\s*END\s*$/i.test(includeLines[k]) || /^END\s*$/i.test(includeLines[k])) break;
-                            const methodMatch = includeLines[k].match(new RegExp(`^\\s*(${methodName})\\s+(?:PROCEDURE|FUNCTION)`, 'i'));
-                            if (methodMatch) {
-                                const signature = includeLines[k].trim();
-                                const declParamCount = ClarionPatterns.countParameters(signature);
-                                const fileUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
-                                candidates.push({ signature, file: fileUri, line: k, paramCount: declParamCount });
-                                logger.info(`Found interface method in INCLUDE at line ${k}`);
-                            }
-                        }
+            const includeLines = includeContent.split('\n');
+            let foundInThis = false;
+
+            for (let j = 0; j < includeLines.length; j++) {
+                const ifaceMatch = includeLines[j].match(new RegExp(`^(${interfaceName})\\s+INTERFACE`, 'i'));
+                if (!ifaceMatch) continue;
+
+                logger.info(`Found INTERFACE ${interfaceName} at line ${j} in ${resolvedPath}`);
+                foundInThis = true;
+                for (let k = j + 1; k < includeLines.length; k++) {
+                    if (/^\s*END\s*$/i.test(includeLines[k]) || /^END\s*$/i.test(includeLines[k])) break;
+                    const methodMatch = includeLines[k].match(new RegExp(`^\\s*(${methodName})\\s+(?:PROCEDURE|FUNCTION)`, 'i'));
+                    if (methodMatch) {
+                        const signature = includeLines[k].trim();
+                        const declParamCount = ClarionPatterns.countParameters(signature);
+                        const fileUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+                        candidates.push({ signature, file: fileUri, line: k, paramCount: declParamCount });
+                        logger.info(`Found interface method in INCLUDE at line ${k}`);
                     }
-                } catch { /* skip unreadable files */ }
+                }
+            }
+
+            // If not found in this file, recurse into its includes
+            if (!foundInThis) {
+                const nested = this.findInterfaceMethodInIncludes(
+                    interfaceName, methodName, resolvedPath, visited, paramCount, implementationSignature
+                );
+                if (nested) return nested;
             }
         }
 
