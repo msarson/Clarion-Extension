@@ -90,6 +90,45 @@ export class ReferencesProvider {
 
         logger.info(`🔍 Finding references for "${word}" at ${position.line}:${position.character}`);
 
+        // Get full line text — used for pattern-based routing before symbol resolution
+        const fullLine = document.getText({
+            start: { line: position.line, character: 0 },
+            end: { line: position.line, character: Number.MAX_VALUE }
+        }).trimEnd();
+
+        // ── Route A: 3-part method implementation (Class.Interface.Method PROCEDURE) ──
+        // Must run before word.includes('.') to intercept the dot-prefixed word.
+        const threePartImplMatch = fullLine.match(/^(\w+)\.(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)/i);
+        if (threePartImplMatch) {
+            const [, clsName, ifacePart, methPart] = threePartImplMatch;
+            const ifaceStart = clsName.length + 1;
+            const ifaceEnd   = ifaceStart + ifacePart.length;
+            const methStart  = ifaceEnd + 1;
+            const methEnd    = methStart + methPart.length;
+
+            if (position.character >= methStart && position.character <= methEnd) {
+                logger.info(`🔌 3-part impl — cursor on method name "${methPart}" (iface=${ifacePart})`);
+                return this.provideInterfaceMethodReferences(methPart, ifacePart, document, context.includeDeclaration);
+            }
+            if (position.character >= ifaceStart && position.character <= ifaceEnd) {
+                logger.info(`🔌 3-part impl — cursor on interface name "${ifacePart}"`);
+                return this.provideImplementsReferences(ifacePart, document);
+            }
+        }
+
+        // ── Route B: cursor on interface name inside IMPLEMENTS(IfaceName) ──
+        const implementsRe = /\bIMPLEMENTS\s*\(\s*(\w+)\s*\)/gi;
+        let implementsM: RegExpExecArray | null;
+        while ((implementsM = implementsRe.exec(fullLine)) !== null) {
+            const ifaceName = implementsM[1];
+            const nameStart = implementsM.index + implementsM[0].indexOf(ifaceName);
+            const nameEnd   = nameStart + ifaceName.length;
+            if (position.character >= nameStart && position.character <= nameEnd) {
+                logger.info(`🔌 IMPLEMENTS(${ifaceName}) — routing to IMPLEMENTS references`);
+                return this.provideImplementsReferences(ifaceName, document);
+            }
+        }
+
         // Route to member-access path when word contains a dot
         if (word.includes('.')) {
             return this.provideMemberReferences(word, document, position, context);
@@ -128,6 +167,23 @@ export class ReferencesProvider {
         if (enclosingInterface) {
             logger.info(`🔌 "${word}" is inside INTERFACE body (iface=${enclosingInterface.label ?? '?'}) — routing to interface-method path`);
             return this.provideInterfaceMethodReferences(word, enclosingInterface.label ?? word, document, context.includeDeclaration);
+        }
+
+        // ── Route C: cursor on interface name IN the declaration line itself ──
+        // e.g. "WindowComponent" in "WindowComponent  INTERFACE,TYPE"
+        // The enclosingInterface check above requires t.line < position.line, so the
+        // declaration line itself falls through here — detect it explicitly.
+        const ifaceDeclToken = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.subType === TokenType.Interface &&
+            t.line === position.line
+        );
+        if (ifaceDeclToken && ifaceDeclToken.label) {
+            const ifaceLabelLower = ifaceDeclToken.label.toLowerCase();
+            if (word.toLowerCase() === ifaceLabelLower) {
+                logger.info(`🔌 "${word}" is INTERFACE declaration name — routing to IMPLEMENTS references`);
+                return this.provideImplementsReferences(ifaceDeclToken.label, document);
+            }
         }
 
         // Plain symbol path
@@ -270,6 +326,77 @@ export class ReferencesProvider {
         }
 
         logger.info(`✅ Found ${locations.length} reference(s) to interface method "${methodName}" (iface=${ifaceName})`);
+        return locations.length > 0 ? locations : null;
+    }
+
+    /**
+     * Find all IMPLEMENTS(IfaceName) references to a given interface across all project files.
+     * Also includes the INTERFACE declaration itself.
+     */
+    private async provideImplementsReferences(
+        ifaceName: string,
+        document: TextDocument
+    ): Promise<Location[] | null> {
+        const ifaceLower = ifaceName.toLowerCase();
+        const locations: Location[] = [];
+
+        // Collect all files to search
+        const filesToSearch: string[] = [document.uri];
+        const sm = SolutionManager.getInstance();
+        if (sm?.solution?.projects?.length) {
+            for (const project of sm.solution.projects) {
+                for (const sf of project.sourceFiles) {
+                    const fullPath = path.isAbsolute(sf.relativePath) ? sf.relativePath : path.join(project.path, sf.relativePath);
+                    const uri = `file:///${fullPath.replace(/\\/g, '/')}`;
+                    if (!filesToSearch.includes(uri)) filesToSearch.push(uri);
+                }
+            }
+        }
+
+        for (const fileUri of filesToSearch) {
+            const fileTokens = this.getTokensForUri(fileUri);
+            if (!fileTokens || fileTokens.length === 0) continue;
+
+            // For the current document use its in-memory text; for other files read from disk
+            let fileContent: string | null = null;
+            const getLines = (): string[] => {
+                if (!fileContent) {
+                    if (fileUri === document.uri) {
+                        fileContent = document.getText();
+                    } else {
+                        try { fileContent = fs.readFileSync(decodeURIComponent(fileUri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\'), 'utf8'); } catch { fileContent = ''; }
+                    }
+                }
+                return fileContent!.split('\n');
+            };
+
+            for (const token of fileTokens) {
+                // INTERFACE declaration itself
+                if (token.type === TokenType.Structure &&
+                    token.subType === TokenType.Interface &&
+                    (token.label ?? '').toLowerCase() === ifaceLower) {
+                    locations.push(Location.create(fileUri, Range.create(token.line, 0, token.line, 0)));
+                    continue;
+                }
+
+                // CLASS token that IMPLEMENTS this interface: check the line text
+                if (token.type === TokenType.Structure &&
+                    token.subType === TokenType.Class) {
+                    const lines = getLines();
+                    const ln = lines[token.line] ?? '';
+                    const implRe = /\bIMPLEMENTS\s*\(\s*(\w+)\s*\)/gi;
+                    let m: RegExpExecArray | null;
+                    while ((m = implRe.exec(ln)) !== null) {
+                        if (m[1].toLowerCase() === ifaceLower) {
+                            const nameStart = m.index + m[0].indexOf(m[1]);
+                            locations.push(Location.create(fileUri, Range.create(token.line, nameStart, token.line, nameStart + m[1].length)));
+                        }
+                    }
+                }
+            }
+        }
+
+        logger.info(`✅ Found ${locations.length} IMPLEMENTS reference(s) for interface "${ifaceName}"`);
         return locations.length > 0 ? locations : null;
     }
 

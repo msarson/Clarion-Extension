@@ -373,3 +373,90 @@ suite('HoverProvider — INTERFACE hover', () => {
         );
     });
 });
+
+// ---------------------------------------------------------------------------
+// Find All References: INTERFACE scenarios
+// ---------------------------------------------------------------------------
+
+suite('ReferencesProvider — INTERFACE references', () => {
+    let provider: import('../providers/ReferencesProvider').ReferencesProvider;
+
+    setup(() => {
+        setServerInitialized(true);
+        TokenCache.getInstance().clearAllTokens();
+        const { ReferencesProvider } = require('../providers/ReferencesProvider');
+        provider = new ReferencesProvider();
+    });
+
+    const code = [
+        'IConn  INTERFACE,TYPE',             // line 0
+        '  CloseSocket  PROCEDURE',           // line 1
+        '  Shutdown     PROCEDURE',           // line 2
+        'END',                                // line 3
+        '',                                   // line 4
+        'CSocketConn  CLASS,IMPLEMENTS(IConn),TYPE,MODULE(\'test.clw\')',  // line 5
+        '  CloseSocket  PROCEDURE,VIRTUAL',   // line 6
+        'END',                                // line 7
+        '',                                   // line 8
+        'MEMBER()',                           // line 9
+        '',                                   // line 10
+        'CSocketConn.IConn.CloseSocket  PROCEDURE',  // line 11
+        'CODE',                               // line 12
+        'END',                                // line 13
+    ].join('\n');
+
+    function makeDoc() {
+        const doc = TextDocument.create('file:///test.clw', 'clarion', 1, code);
+        TokenCache.getInstance().getTokens(doc);
+        return doc;
+    }
+
+    test('Shift+F12 on method inside INTERFACE body finds implementations + declarations', async () => {
+        const doc = makeDoc();
+        // Cursor on "CloseSocket" inside the INTERFACE body (line 1)
+        const line1 = '  CloseSocket  PROCEDURE';
+        const col = line1.indexOf('CloseSocket');
+        const refs = await provider.provideReferences(doc, { line: 1, character: col + 2 }, { includeDeclaration: true });
+        assert.ok(refs && refs.length > 0, 'Expected references for interface method declaration');
+        // Should include line 11 (3-part implementation)
+        const hasImpl = refs!.some(r => r.range.start.line === 11);
+        assert.ok(hasImpl, `Expected reference at line 11 (3-part impl), got lines: ${refs!.map(r => r.range.start.line).join(', ')}`);
+    });
+
+    test('Shift+F12 on method-name in 3-part impl finds interface method declaration', async () => {
+        const doc = makeDoc();
+        // Cursor on "CloseSocket" in "CSocketConn.IConn.CloseSocket  PROCEDURE" (line 11)
+        const implLine = 'CSocketConn.IConn.CloseSocket  PROCEDURE';
+        const methStart = implLine.indexOf('CloseSocket', implLine.indexOf('IConn') + 1);
+        const refs = await provider.provideReferences(doc, { line: 11, character: methStart + 2 }, { includeDeclaration: true });
+        assert.ok(refs && refs.length > 0, 'Expected references from 3-part implementation method name');
+        // Should include line 1 (InterfaceMethod declaration)
+        const hasDecl = refs!.some(r => r.range.start.line === 1);
+        assert.ok(hasDecl, `Expected reference at line 1 (interface method decl), got lines: ${refs!.map(r => r.range.start.line).join(', ')}`);
+    });
+
+    test('Shift+F12 on IMPLEMENTS(IConn) finds interface declaration and implementing classes', async () => {
+        const doc = makeDoc();
+        // Cursor on "IConn" inside IMPLEMENTS(IConn) on line 5
+        const classLine = "CSocketConn  CLASS,IMPLEMENTS(IConn),TYPE,MODULE('test.clw')";
+        const nameStart = classLine.indexOf('IConn', classLine.indexOf('IMPLEMENTS'));
+        const refs = await provider.provideReferences(doc, { line: 5, character: nameStart + 2 }, { includeDeclaration: true });
+        assert.ok(refs && refs.length > 0, 'Expected references for IMPLEMENTS(IConn)');
+        // Should include line 0 (INTERFACE declaration)
+        const hasIfaceDecl = refs!.some(r => r.range.start.line === 0);
+        assert.ok(hasIfaceDecl, `Expected reference at line 0 (INTERFACE decl), got lines: ${refs!.map(r => r.range.start.line).join(', ')}`);
+        // Should include line 5 (IMPLEMENTS)
+        const hasImpl = refs!.some(r => r.range.start.line === 5);
+        assert.ok(hasImpl, `Expected reference at line 5 (IMPLEMENTS), got lines: ${refs!.map(r => r.range.start.line).join(', ')}`);
+    });
+
+    test('Shift+F12 on INTERFACE name in declaration line finds all IMPLEMENTS references', async () => {
+        const doc = makeDoc();
+        // Cursor on "IConn" in "IConn  INTERFACE,TYPE" (line 0)
+        const refs = await provider.provideReferences(doc, { line: 0, character: 2 }, { includeDeclaration: true });
+        assert.ok(refs && refs.length > 0, 'Expected references for INTERFACE declaration name');
+        // Should include line 5 (IMPLEMENTS)
+        const hasImpl = refs!.some(r => r.range.start.line === 5);
+        assert.ok(hasImpl, `Expected reference at line 5 (IMPLEMENTS), got lines: ${refs!.map(r => r.range.start.line).join(', ')}`);
+    });
+});
