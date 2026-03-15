@@ -31,7 +31,8 @@ import {
     ColorPresentationParams,
     ColorPresentation,
     TextDocumentSyncKind,
-    SignatureHelp
+    SignatureHelp,
+    ReferenceParams
 } from 'vscode-languageserver-protocol';
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
@@ -59,6 +60,7 @@ import { ClassConstantsCodeActionProvider } from './providers/ClassConstantsCode
 import { DiagnosticProvider } from './providers/DiagnosticProvider';
 import { SignatureHelpProvider } from './providers/SignatureHelpProvider';
 import { ImplementationProvider } from './providers/ImplementationProvider';
+import { ReferencesProvider } from './providers/ReferencesProvider';
 import { UnreachableCodeProvider } from './providers/UnreachableCodeProvider';
 import { ClarionSolutionInfo } from 'common/types';
 import { URI } from 'vscode-languageserver';
@@ -83,6 +85,7 @@ const definitionProvider = new DefinitionProvider();
 const hoverProvider = new HoverProvider();
 const signatureHelpProvider = new SignatureHelpProvider();
 const implementationProvider = new ImplementationProvider();
+const referencesProvider = new ReferencesProvider();
 
 // ✅ Create Connection and Documents Manager
 const connection = createConnection(ProposedFeatures.all);
@@ -141,6 +144,7 @@ connection.onInitialize((params) => {
                 colorProvider: true,
                 definitionProvider: true,
                 implementationProvider: true,
+                referencesProvider: true,
                 hoverProvider: true,
                 codeActionProvider: true,
                 signatureHelpProvider: {
@@ -388,7 +392,7 @@ connection.onFoldingRanges((params: FoldingRangeParams) => {
         logger.perf('Folding: getTokens', { time_ms: tokenTime.toFixed(2), tokens: tokens.length });
         
         const foldStart = performance.now();
-        const foldingProvider = new ClarionFoldingProvider(tokens);
+        const foldingProvider = new ClarionFoldingProvider(tokens, document);
         const ranges = foldingProvider.computeFoldingRanges();
         const foldTime = performance.now() - foldStart;
         
@@ -829,12 +833,18 @@ connection.onNotification('clarion/updatePaths', async (params: {
             logger.info(`✅ Updated default lookup extensions: ${params.defaultLookupExtensions.join(', ')}`);
         }
 
-        // Log the solution file path
-        if (params.solutionFilePath) {
-            logger.info(`🔍 Received solution file path: ${params.solutionFilePath}`);
-        } else {
-            logger.warn("⚠️ No solution file path provided in updatePaths notification");
-        }
+        // Always-visible startup summary of Clarion folder configuration
+        // Use logger.error so it's visible even when log level is set to "error"
+        logger.error(`\n📦 Clarion Extension — Solution Load\n` +
+            `  Solution : ${params.solutionFilePath || '(none)'}\n` +
+            `  Version  : ${params.clarionVersion || '(unknown)'}\n` +
+            `  Config   : ${params.configuration || '(none)'}\n` +
+            `  Red. File: ${params.redirectionFile || '(none)'}\n` +
+            `  Red. Path: ${(params.redirectionPaths || []).join('; ') || '(none)'}\n` +
+            `  LibSrc   : ${(params.libsrcPaths || []).join('\n           : ') || '(none)'}\n` +
+            `  Proj.Dir : ${(params.projectPaths || []).join('\n           : ') || '(none)'}\n` +
+            `  Macros   : ${Object.keys(params.macros || {}).length} defined`
+        );
 
         // Log memory usage before initialization
         const memoryBefore = process.memoryUsage();
@@ -907,6 +917,14 @@ connection.onNotification('clarion/updatePaths', async (params: {
             globalSolution = await buildClarionSolution();
             const buildEndTime = performance.now();
             logger.info(`✅ Solution built successfully with ${globalSolution.projects.length} projects in ${(buildEndTime - buildStartTime).toFixed(2)}ms`);
+            
+            // Always-visible project summary
+            const projectSummary = globalSolution.projects.map((p, i) =>
+                `  [${i+1}] ${p.name}  (${p.sourceFiles.length} sources)  ${p.path}`
+            ).join('\n');
+            logger.error(`\n✅ Solution ready: ${globalSolution.name}\n` +
+                `  Projects (${globalSolution.projects.length}):\n` +
+                (projectSummary || '  (none)'));
             
             // Log each project in the global solution
             for (let i = 0; i < globalSolution.projects.length; i++) {
@@ -1288,6 +1306,31 @@ connection.onImplementation(async (params) => {
     }
 });
 
+// Handle find all references requests
+connection.onReferences(async (params: ReferenceParams) => {
+    logger.info(`📂 Received references request for: ${params.textDocument.uri} at ${params.position.line}:${params.position.character}`);
+
+    if (!serverInitialized) {
+        logger.info(`⚠️ [DELAY] Server not initialized yet, delaying references request`);
+        return null;
+    }
+
+    const document = documents.get(params.textDocument.uri);
+    if (!document) {
+        logger.info(`⚠️ Document not found: ${params.textDocument.uri}`);
+        return null;
+    }
+
+    try {
+        const references = await referencesProvider.provideReferences(document, params.position, params.context);
+        logger.info(references ? `✅ Found ${references.length} reference(s)` : `⚠️ No references found`);
+        return references;
+    } catch (error) {
+        logger.error(`❌ Error providing references: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+    }
+});
+
 // Handle hover requests
 connection.onHover(async (params) => {
     logger.info(`📂 Received hover request for: ${params.textDocument.uri} at position ${params.position.line}:${params.position.character}`);
@@ -1444,7 +1487,7 @@ connection.onShutdown(() => {
         const timestamp = new Date().toISOString();
         const fullMsg = `[${timestamp}] ${msg}\n`;
         logger.info(msg);
-        console.log(`🛑 ${msg}`);
+        console.error(`🛑 ${msg}`);
         try {
             fs.appendFileSync(shutdownLogPath, fullMsg);
         } catch (e) {
@@ -1467,7 +1510,7 @@ connection.onShutdown(() => {
 connection.onExit(() => {
     const timestamp = new Date().toISOString();
     logger.info("SERVER EXIT: onExit handler called");
-    console.log(`🛑 SERVER EXIT: onExit handler called at ${timestamp}`);
+    console.error(`🛑 SERVER EXIT: onExit handler called at ${timestamp}`);
     const shutdownLogPath = path.join(__dirname, '..', '..', 'shutdown.log');
     try {
         fs.appendFileSync(shutdownLogPath, `[${timestamp}] SERVER EXIT: onExit handler called\n`);
@@ -1478,7 +1521,7 @@ connection.onExit(() => {
 
 // Listen on the connection
 logger.info("🚀 SERVER: Starting to listen on connection");
-console.log("🚀 SERVER: Starting to listen on connection at " + new Date().toISOString());
+console.error("🚀 SERVER: Starting to listen on connection at " + new Date().toISOString());
 connection.listen();
 
 // Add a handler for getting performance metrics

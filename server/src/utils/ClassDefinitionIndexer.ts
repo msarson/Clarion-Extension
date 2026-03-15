@@ -8,7 +8,7 @@ const logger = LoggerManager.getLogger('ClassDefinitionIndexer');
 logger.setLevel('error');
 
 /**
- * Represents a single class definition found in a file
+ * Represents a single class/queue/group definition found in a file
  */
 export interface ClassDefinitionInfo {
     className: string;
@@ -17,6 +17,7 @@ export interface ClassDefinitionInfo {
     isType: boolean;
     parentClass?: string;
     lineContent: string;
+    structureType: 'CLASS' | 'QUEUE' | 'GROUP';
 }
 
 /**
@@ -33,8 +34,18 @@ export interface ClassIndex {
  * Provides fast lookup of class definitions by name
  */
 export class ClassDefinitionIndexer {
+    private static instance: ClassDefinitionIndexer;
     private indexes: Map<string, ClassIndex> = new Map(); // projectPath -> ClassIndex
     private static readonly CLASS_PATTERN = /^(\w+)\s+CLASS\s*([\(,\s]|$)/i;
+    private static readonly QUEUE_PATTERN = /^(\w+)\s+QUEUE\s*([\(,\s]|$)/i;
+    private static readonly GROUP_PATTERN = /^(\w+)\s+GROUP\s*([\(,\s]|$)/i;
+
+    public static getInstance(): ClassDefinitionIndexer {
+        if (!ClassDefinitionIndexer.instance) {
+            ClassDefinitionIndexer.instance = new ClassDefinitionIndexer();
+        }
+        return ClassDefinitionIndexer.instance;
+    }
 
     /**
      * Gets or builds the class index for a project
@@ -117,7 +128,7 @@ export class ClassDefinitionIndexer {
             }
 
             const duration = Date.now() - startTime;
-            logger.info(`Index built in ${duration}ms: ${totalClassesFound} classes found, ${classes.size} unique names`);
+            logger.info(`Index built in ${duration}ms: ${totalClassesFound} structures found, ${classes.size} unique names`);
 
             return {
                 classes,
@@ -240,9 +251,9 @@ export class ClassDefinitionIndexer {
     }
 
     /**
-     * Scans a single file for class definitions
+     * Scans a single file for class, queue, and group type definitions
      * @param filePath The file path to scan
-     * @returns Array of class definitions found in the file
+     * @returns Array of structure definitions found in the file
      */
     private async scanFileForClasses(filePath: string): Promise<ClassDefinitionInfo[]> {
         const definitions: ClassDefinitionInfo[] = [];
@@ -253,33 +264,48 @@ export class ClassDefinitionIndexer {
 
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
-                const match = ClassDefinitionIndexer.CLASS_PATTERN.exec(line);
 
-                if (match) {
-                    const className = match[1];
-                    const remainder = line.substring(match[0].length);
+                let structureType: 'CLASS' | 'QUEUE' | 'GROUP' | null = null;
+                let match: RegExpExecArray | null = null;
 
-                    // Determine if it's a TYPE definition
-                    const isType = /,\s*TYPE/i.test(remainder);
-
-                    // Try to extract parent class from CLASS(ParentClass)
-                    let parentClass: string | undefined;
-                    const parentMatch = /CLASS\s*\(\s*(\w+)\s*\)/i.exec(line);
-                    if (parentMatch) {
-                        parentClass = parentMatch[1];
-                    }
-
-                    definitions.push({
-                        className,
-                        filePath,
-                        lineNumber: i + 1, // 1-based line numbers
-                        isType,
-                        parentClass,
-                        lineContent: line.trim()
-                    });
-
-                    logger.info(`Found class: ${className} in ${path.basename(filePath)}:${i + 1}`);
+                if ((match = ClassDefinitionIndexer.CLASS_PATTERN.exec(line))) {
+                    structureType = 'CLASS';
+                } else if ((match = ClassDefinitionIndexer.QUEUE_PATTERN.exec(line))) {
+                    structureType = 'QUEUE';
+                } else if ((match = ClassDefinitionIndexer.GROUP_PATTERN.exec(line))) {
+                    structureType = 'GROUP';
                 }
+
+                if (!match || !structureType) continue;
+
+                const className = match[1];
+                const remainder = line.substring(match[0].length);
+
+                const isType = /,\s*TYPE/i.test(remainder) || /\bTYPE\b/i.test(remainder);
+
+                let parentClass: string | undefined;
+                if (structureType === 'CLASS') {
+                    const parentMatch = /CLASS\s*\(\s*(\w+)\s*\)/i.exec(line);
+                    if (parentMatch) parentClass = parentMatch[1];
+                } else if (structureType === 'QUEUE') {
+                    const parentMatch = /QUEUE\s*\(\s*(\w+)\s*\)/i.exec(line);
+                    if (parentMatch) parentClass = parentMatch[1];
+                } else if (structureType === 'GROUP') {
+                    const parentMatch = /GROUP\s*\(\s*(\w+)\s*\)/i.exec(line);
+                    if (parentMatch) parentClass = parentMatch[1];
+                }
+
+                definitions.push({
+                    className,
+                    filePath,
+                    lineNumber: i + 1,
+                    isType,
+                    parentClass,
+                    lineContent: line.trim(),
+                    structureType
+                });
+
+                logger.info(`Found ${structureType}: ${className} in ${path.basename(filePath)}:${i + 1}`);
             }
         } catch (error) {
             logger.error(`Error reading file ${filePath}: ${error instanceof Error ? error.message : String(error)}`);

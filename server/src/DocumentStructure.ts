@@ -509,7 +509,15 @@ export class DocumentStructure {
 
     private handleStructureToken(token: Token): void {
         if (!token.subType) {
-            token.subType = TokenType.Structure;
+            // Assign the specific subType that matches the structure keyword so that
+            // consumers can check token.subType === TokenType.Class etc. reliably.
+            switch (token.value.toUpperCase()) {
+                case 'CLASS':     token.subType = TokenType.Class; break;
+                case 'INTERFACE': token.subType = TokenType.Interface; break;
+                case 'QUEUE':     token.subType = TokenType.Structure; break;
+                case 'GROUP':     token.subType = TokenType.Structure; break;
+                default:          token.subType = TokenType.Structure; break;
+            }
         }
 
         // 🛑 Special handling: Skip MODULE structures that are part of CLASS attribute list
@@ -750,6 +758,29 @@ export class DocumentStructure {
             }
         }
 
+        // ✅ Extract IMPLEMENTS() interface names for CLASS tokens
+        if (token.value.toUpperCase() === 'CLASS' && token.subType === TokenType.Class) {
+            const lineTokens2 = this.tokensByLine.get(token.line) || [];
+            const ifaceNames: string[] = [];
+            for (let i = 0; i < lineTokens2.length - 1; i++) {
+                const t = lineTokens2[i];
+                if (t.value.toUpperCase() === 'IMPLEMENTS' && lineTokens2[i + 1]?.value === '(') {
+                    // Collect the name inside the parens
+                    let j = i + 2;
+                    let name = '';
+                    while (j < lineTokens2.length && lineTokens2[j].value !== ')') {
+                        name += lineTokens2[j].value;
+                        j++;
+                    }
+                    if (name) ifaceNames.push(name);
+                }
+            }
+            if (ifaceNames.length > 0) {
+                token.implementedInterfaces = ifaceNames;
+                logger.info(`📋 CLASS '${token.label}' implements: ${ifaceNames.join(', ')}`);
+            }
+        }
+
         // Store the structure's actual indent position for later use when closing with END
         // Use the structure token's actual start position, not maxLabelWidth
         let indentLevel = token.start;
@@ -916,6 +947,7 @@ export class DocumentStructure {
         const isOf = nextValue === 'OF';
         
         // This END/period terminates a structure from the stack
+        // Simply pop the last opened structure - Clarion uses explicit END markers, not indentation
         const lastStructure = this.structureStack.pop();
         if (lastStructure) {
             lastStructure.finishesAt = token.line;
@@ -1001,13 +1033,19 @@ export class DocumentStructure {
         let isMethodImpl = false;
         let fullProcedureName = prevToken?.value ?? "AnonymousProcedure";
         
-        // Check if prevToken is a label, variable, or attribute that might be part of a method name
-        if (prevToken?.type === TokenType.Label || prevToken?.type === TokenType.Variable || prevToken?.type === TokenType.Attribute) {
+        // Check if prevToken is a label, variable, attribute, or structure field that might be part of a method name
+        if (prevToken?.type === TokenType.Label || prevToken?.type === TokenType.Variable ||
+            prevToken?.type === TokenType.Attribute || prevToken?.type === TokenType.StructureField) {
             // Check if the previous token contains dots (entire qualified name in one token)
             if (prevToken.value.includes(".")) {
-                // The previous token itself contains dots (entire name in one token)
-                // This handles: ClassName.MethodName or ClassName.InterfaceName.MethodName
-                fullProcedureName = prevToken.value;
+                // The previous token itself contains dots (e.g., "IConnection.CloseSocket" for 3-part)
+                // Look back for a Label token on the same line to find the class name prefix
+                const prevPrevToken = index >= 2 ? this.tokens[index - 2] : undefined;
+                if (prevPrevToken && prevPrevToken.line === token.line && prevPrevToken.type === TokenType.Label) {
+                    fullProcedureName = prevPrevToken.value + '.' + prevToken.value;
+                } else {
+                    fullProcedureName = prevToken.value;
+                }
                 isMethodImpl = true;
             } else {
                 // Build the full name by looking back at previous tokens on the same line

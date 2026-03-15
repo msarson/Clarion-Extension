@@ -6,6 +6,22 @@ All notable changes to the Clarion Extension are documented here.
 
 ## Recent Versions
 
+### [0.8.7] - 2026-03-15
+**Find All References, INTERFACE Support & Hover Quality**
+
+**Highlights:**
+- 🔍 Find All References (Shift+F12) — full scope-aware coverage: SELF/PARENT members, typed variables, chained chains, MAP/MODULE procedures, structure fields, interfaces, IMPLEMENTS, CLASS type names, overload filtering
+- 🔌 Complete Clarion INTERFACE language support — hover, F12, Ctrl+F12, references for interface methods, IMPLEMENTS(), and 3-part `Class.Interface.Method` implementations
+- 🎨 Hover quality overhaul — clean class type cards, class property / interface method labels, implementation body previews removed, F12/Ctrl+F12 hints suppressed when already at declaration/implementation
+- 🔗 Deep chained navigation — `SELF.Order.RangeList.Init` hover/F12/Ctrl+F12 at any chain depth
+- 🏷️ Typed variable member navigation — hover, F12, Ctrl+F12, and references for `obj.Method()` patterns
+- 📦 25 new built-in function hovers; COMPILE/OMIT folding
+- 🧪 597 tests passing
+
+[**→ Full details**](docs/changelogs/CHANGELOG-0.8.7.md)
+
+---
+
 ### [0.8.6] - 2026-01-12
 **Cross-Project Navigation & Solution View Enhancements**
 

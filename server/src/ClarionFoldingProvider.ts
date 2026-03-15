@@ -1,5 +1,7 @@
 import { FoldingRange, FoldingRangeKind } from "vscode-languageserver-types";
 import { Token, TokenType } from "./ClarionTokenizer.js";
+import { TextDocument } from 'vscode-languageserver-textdocument';
+import { OmitCompileDetector } from './utils/OmitCompileDetector';
 import LoggerManager from './logger';
 
 const logger = LoggerManager.getLogger("FoldingProvider");
@@ -10,10 +12,12 @@ class ClarionFoldingProvider {
     private inferenceUsedCount: number = 0;
     private readonly MAX_FOLDING_RANGES = 10000; // Safety limit
     private processedTokens: Set<Token> = new Set(); // Prevent circular references
+    private document: TextDocument | undefined;
 
-    constructor(tokens: Token[]) {
+    constructor(tokens: Token[], document?: TextDocument) {
         this.tokens = tokens;
         this.foldingRanges = [];
+        this.document = document;
     }
 
     public computeFoldingRanges(): FoldingRange[] {
@@ -30,6 +34,7 @@ class ClarionFoldingProvider {
             // Collect foldable tokens
             if (t.subType === TokenType.Procedure ||
                 t.subType === TokenType.Structure ||
+                t.type === TokenType.Structure ||  // Window, Queue, Group, etc.
                 t.subType === TokenType.Routine ||
                 t.subType === TokenType.Class ||
                 t.subType === TokenType.MapProcedure ||
@@ -79,6 +84,11 @@ class ClarionFoldingProvider {
     
         // ✅ Process REGIONS using pre-filtered comments
         this.foldRegionsOptimized(regionComments);
+    
+        // ✅ Process COMPILE/OMIT directive blocks
+        if (this.document) {
+            this.foldCompileBlocks();
+        }
     
         // Log aggregate inference fallback usage at debug level
         if (this.inferenceUsedCount > 0) {
@@ -132,7 +142,7 @@ class ClarionFoldingProvider {
             return; // Skip single-line with continuation
         }
     
-        // Only fold these subtypes:
+        // Only fold these subtypes or types:
         const foldableSubTypes = [
             TokenType.Procedure,
             TokenType.GlobalProcedure,
@@ -142,7 +152,9 @@ class ClarionFoldingProvider {
             TokenType.Structure
         ];
     
-        if (token.subType === undefined || !foldableSubTypes.includes(token.subType)) {
+        // Allow folding if subType matches OR if type is Structure (for WINDOW, QUEUE, GROUP, etc.)
+        if (token.type !== TokenType.Structure && 
+            (token.subType === undefined || !foldableSubTypes.includes(token.subType))) {
             return;
         }
     
@@ -154,7 +166,7 @@ class ClarionFoldingProvider {
             kind: FoldingRangeKind.Region
         });
     
-        logger.info(`✅ [FoldingProvider] Folded '${token.value}' (${TokenType[token.subType]}) from Line ${token.line} to ${token.finishesAt}`);
+        logger.info(`✅ [FoldingProvider] Folded '${token.value}' (${TokenType[token.subType ?? token.type]}) from Line ${token.line} to ${token.finishesAt}`);
     
         // ✅ Fold CODE block if applicable
         if (
@@ -299,6 +311,38 @@ class ClarionFoldingProvider {
             });
 
             logger.warn(`⚠️ [FoldingProvider] Auto-closed Region at EOF from Line ${lastRegion?.startLine}`);
+        }
+    }
+
+    /** 🔹 Process COMPILE/OMIT directive blocks */
+    private foldCompileBlocks(): void {
+        if (!this.document) {
+            return;
+        }
+
+        const blocks = OmitCompileDetector.findDirectiveBlocks(this.tokens, this.document);
+        
+        for (const block of blocks) {
+            // Only create fold if block has an end line
+            if (block.endLine !== null) {
+                this.foldingRanges.push({
+                    startLine: block.startLine,
+                    endLine: block.endLine,
+                    kind: FoldingRangeKind.Region
+                });
+
+                logger.info(`🔹 [FoldingProvider] ${block.type} block folded from Line ${block.startLine} to ${block.endLine}`);
+            } else {
+                // Block extends to EOF
+                const lastLine = this.tokens[this.tokens.length - 1]?.line ?? block.startLine;
+                this.foldingRanges.push({
+                    startLine: block.startLine,
+                    endLine: lastLine,
+                    kind: FoldingRangeKind.Region
+                });
+
+                logger.warn(`⚠️ [FoldingProvider] Unterminated ${block.type} block folded from Line ${block.startLine} to EOF (Line ${lastLine})`);
+            }
         }
     }
 }

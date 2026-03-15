@@ -48,20 +48,38 @@ export class MethodHoverResolver {
         }
 
         const className = methodImplMatch[1];
-        const methodName = methodImplMatch[2];
+        // For 3-part (Class.Interface.Method), group[3] is the method name; group[2] is interface.
+        // For 2-part (Class.Method), group[2] is the method name.
+        const methodName = methodImplMatch[3] !== undefined ? methodImplMatch[3] : methodImplMatch[2];
         
         // Count parameters from the implementation signature
         const paramCount = ClarionPatterns.countParameters(line);
         
-        // Check if cursor is on the class or method name
+        // Check if cursor is on the class name or the method name
         const classStart = line.indexOf(className);
         const classEnd = classStart + className.length;
-        const methodStart = line.indexOf(methodName, classEnd);
+        // For 3-part, method name starts after Class.Interface.; for 2-part after Class.
+        const methodSegmentSearchFrom = methodImplMatch[3] !== undefined
+            ? classEnd + 1 + methodImplMatch[2].length + 1   // skip .InterfaceName.
+            : classEnd + 1;                                    // skip .
+        const methodStart = line.indexOf(methodName, methodSegmentSearchFrom);
         const methodEnd = methodStart + methodName.length;
         
         if ((position.character >= classStart && position.character <= classEnd) ||
             (position.character >= methodStart && position.character <= methodEnd)) {
             const tokens = this.tokenCache.getTokens(document);
+
+            // For 3-part methods (Class.Interface.Method), the declaration is in the INTERFACE, not the CLASS
+            if (methodImplMatch[3] !== undefined) {
+                const interfaceName = methodImplMatch[2];
+                const ifaceMethodInfo = this.overloadResolver.findInterfaceMethodDeclaration(
+                    interfaceName, methodName, document, tokens, paramCount, line
+                );
+                if (ifaceMethodInfo) {
+                    return this.formatter.formatMethodImplementation(methodName, interfaceName, ifaceMethodInfo, className);
+                }
+            }
+
             // Pass the full line as implementation signature for type matching
             const declInfo = this.overloadResolver.findMethodDeclaration(className, methodName, document, tokens, paramCount, line);
             if (declInfo) {
@@ -108,7 +126,8 @@ export class MethodHoverResolver {
             );
             
             // If we have a label at start of line and PROCEDURE on same line, it's likely a method declaration
-            if (labelToken && procedureToken) {
+            // Guard: exclude implementation lines (MethodImplementation subType means Class.Method PROCEDURE)
+            if (labelToken && procedureToken && procedureToken.subType !== TokenType.MethodImplementation) {
                 logger.info(`Found method declaration pattern: Label="${labelToken.value}" + PROCEDURE on line ${position.line}`);
                 currentToken = labelToken;
             }
@@ -170,18 +189,22 @@ export class MethodHoverResolver {
         );
         
         if (implLocation) {
-            logger.info(`✅ Found implementation at ${implLocation}:${implLocation.split(':')[1]}`);
-            
-            // Get preview of implementation
-            const implInfo = await this.getMethodImplementationPreview(implLocation);
-            if (implInfo) {
-                return {
-                    contents: {
-                        kind: 'markdown',
-                        value: `**Implementation** _(Press Ctrl+F12 to navigate)_ — line ${implInfo.line + 1}\n\n\`\`\`clarion\n${implInfo.preview}\n\`\`\``
-                    }
-                };
-            }
+            logger.info(`✅ Found implementation at ${implLocation}`);
+            const lastColon = implLocation.lastIndexOf(':');
+            const implFile = path.basename(implLocation.substring(0, lastColon));
+            const implLine = parseInt(implLocation.substring(lastColon + 1)) + 1;
+            return {
+                contents: {
+                    kind: 'markdown',
+                    value: [
+                        `**${className}.${currentToken.label}** (Method Declaration)`,
+                        ``,
+                        `**Implemented in** \`${implFile}\` @ line ${implLine}`,
+                        ``,
+                        `*Ctrl+F12 to navigate*`
+                    ].join('\n')
+                }
+            };
         } else {
             logger.info(`❌ No implementation found for ${className}.${currentToken.label}`);
             return {
@@ -231,6 +254,70 @@ export class MethodHoverResolver {
         }
         
         return this.formatter.formatClassMember(fieldName, memberInfo);
+    }
+
+    /**
+     * Resolves hover for a PARENT.MethodName() call — looks up the method starting
+     * from the parent class of the current scope's class.
+     */
+    async resolveParentMethodCall(
+        fieldName: string,
+        document: TextDocument,
+        position: Position,
+        line: string,
+        paramCount?: number
+    ): Promise<Hover | null> {
+        const tokens = this.tokenCache.getTokens(document);
+        const memberInfo = await this.memberResolver.findParentClassMemberInfo(fieldName, document, position.line, tokens, paramCount);
+
+        if (!memberInfo) {
+            logger.info(`❌ findParentClassMemberInfo returned null for ${fieldName} in PARENT context`);
+            return null;
+        }
+
+        const isMethod = memberInfo.type.toUpperCase().includes('PROCEDURE') || memberInfo.type.toUpperCase().includes('FUNCTION');
+
+        if (isMethod) {
+            const implLocation = await this.findMethodImplementationCrossFile(
+                memberInfo.className,
+                fieldName,
+                document,
+                paramCount,
+                null
+            );
+            if (implLocation) {
+                return this.formatter.formatMethodCall(fieldName, memberInfo, implLocation);
+            }
+        }
+
+        return this.formatter.formatClassMember(fieldName, memberInfo);
+    }
+
+    /**
+     * Resolves hover for a chained method call like SELF.Order.RangeList.Init.
+     * chainedInfo already has the resolved className and declaration location.
+     * For PROCEDURE members, also finds the implementation and shows it.
+     */
+    async resolveChainedMethodCall(
+        fieldName: string,
+        chainedInfo: { type: string; className: string; line: number; file: string },
+        document: TextDocument,
+        paramCount?: number
+    ): Promise<Hover | null> {
+        const isMethod = chainedInfo.type.toUpperCase().includes('PROCEDURE') ||
+                         chainedInfo.type.toUpperCase().includes('FUNCTION');
+
+        if (isMethod) {
+            const implLoc = await this.memberResolver.findImplementationCrossFile(
+                chainedInfo.className, fieldName, chainedInfo, document
+            );
+            if (implLoc) {
+                const implLocationStr = `${implLoc.uri}:${implLoc.range.start.line}`;
+                return this.formatter.formatMethodCall(fieldName, chainedInfo, implLocationStr);
+            }
+        }
+
+        return this.formatter.formatClassMember(fieldName, chainedInfo);
     }
 
     /**
@@ -378,6 +465,7 @@ export class MethodHoverResolver {
             const lines = content.split(/\r?\n/);
             
             // Search for method implementation: ClassName.MethodName PROCEDURE
+            const candidates: { lineNum: number; implParamCount: number }[] = [];
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
                 const implMatch = line.match(ClarionPatterns.METHOD_IMPLEMENTATION);
@@ -385,22 +473,38 @@ export class MethodHoverResolver {
                 if (implMatch && 
                     implMatch[1].toUpperCase() === className.toUpperCase() &&
                     implMatch[2].toUpperCase() === methodName.toUpperCase()) {
-                    
-                    // Found a potential match - check parameter count if specified
-                    if (paramCount !== undefined) {
-                        const params = implMatch[3] ? implMatch[3].trim() : '';
-                        const implParamCount = params === '' ? 0 : params.split(',').length;
-                        
-                        if (implParamCount !== paramCount) {
-                            logger.info(`Parameter count mismatch: expected ${paramCount}, found ${implParamCount}`);
-                            continue;
-                        }
-                    }
-                    
-                    logger.info(`✅ Found implementation in ${filePath} at line ${i}`);
-                    return i;
+                    const params = implMatch[3] ? implMatch[3].trim() : '';
+                    const implParamCount = params === '' ? 0 : params.split(',').length;
+                    candidates.push({ lineNum: i, implParamCount });
                 }
             }
+
+            if (candidates.length === 0) return null;
+            if (candidates.length === 1) {
+                logger.info(`✅ Found implementation in ${filePath} at line ${candidates[0].lineNum}`);
+                return candidates[0].lineNum;
+            }
+
+            // Multiple overloads — pick best match
+            if (paramCount !== undefined) {
+                const exact = candidates.find(c => c.implParamCount === paramCount);
+                if (exact) {
+                    logger.info(`✅ Found exact-param implementation in ${filePath} at line ${exact.lineNum}`);
+                    return exact.lineNum;
+                }
+                // Closest match, prefer higher param count on tie
+                const best = candidates.reduce((b, c) => {
+                    const bd = Math.abs(b.implParamCount - paramCount);
+                    const cd = Math.abs(c.implParamCount - paramCount);
+                    if (cd < bd) return c;
+                    if (cd === bd && c.implParamCount > b.implParamCount) return c;
+                    return b;
+                });
+                logger.info(`✅ Found closest-param implementation in ${filePath} at line ${best.lineNum}`);
+                return best.lineNum;
+            }
+            logger.info(`✅ Found implementation in ${filePath} at line ${candidates[0].lineNum}`);
+            return candidates[0].lineNum;
         } catch (error) {
             logger.error(`Error reading file ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
         }

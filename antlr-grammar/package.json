@@ -1,0 +1,25 @@
+{
+  "name": "clarion-antlr-grammar",
+  "version": "0.1.0",
+  "description": "ANTLR4 grammar for Clarion language (exploratory)",
+  "private": true,
+  "scripts": {
+    "generate": "npm run generate:lexer && npm run generate:parser && npm run fix-generated",
+    "generate:lexer": "antlr-ng -Dlanguage=TypeScript --generate-listener --generate-visitor -o generated/ lexer/ClarionLexer.g4",
+    "generate:parser": "antlr-ng -Dlanguage=TypeScript --generate-listener --generate-visitor -o generated/ parser/ClarionParser.g4",
+    "fix-generated": "node -e \"const fs=require('fs'); const f='generated/ClarionLexer.ts'; fs.writeFileSync(f, fs.readFileSync(f,'utf8').replace(/this\\.charPositionInLine/g,'this.column'))\"",
+    "clean": "rimraf generated/ .antlr/ **/*.interp **/*.tokens",
+    "build": "tsc",
+    "test": "npm run build && node out/test-parse.js",
+    "test:file": "npm run build && node out/test-parse.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "antlr-ng": "^1.0.10",
+    "rimraf": "^5.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "antlr4ng": "3.0.15"
+  }
+}

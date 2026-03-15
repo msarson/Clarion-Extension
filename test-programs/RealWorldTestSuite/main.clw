@@ -99,7 +99,7 @@ st StringTheory
 ! GlobalHelper - GLOBAL PROCEDURE
 !═══════════════════════════════════════════════════════════════════════
 ! TEST 5: Hover on 'GlobalHelper' below should show:
-!         **Scope:** 🌍 Global
+!         **Scope:**  Global
 !         **Visibility:** Accessible from all files in the solution
 !
 GlobalHelper PROCEDURE()

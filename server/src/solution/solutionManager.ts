@@ -4,9 +4,10 @@ import { ClarionSolutionServer, ClarionApp } from './clarionSolutionServer';
 import LoggerManager from '../logger';
 import { ClarionProjectServer } from './clarionProjectServer';
 import { Connection } from 'vscode-languageserver';
-import { Token } from '../ClarionTokenizer';
+import { Token, ClarionTokenizer } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { solutionOperationInProgress } from '../server';
+import { serverSettings } from '../serverSettings';
 
 const logger = LoggerManager.getLogger("SolutionManager");
 logger.setLevel("error");
@@ -18,6 +19,10 @@ export class SolutionManager {
     private fileCache: Map<string, string> = new Map();
     private static readonly CACHE_VERSION = 1; // Increment when cache format changes
     
+    // Cache for equates.clw tokens — resolved once via redirection
+    private equatesTokens: Token[] | null = null;
+    private equatesPath: string | null = null;
+
     // Static in-memory cache to store solution data by file path (similar to client-side implementation)
     private static inMemoryCache: Map<string, {
         version: number,
@@ -118,6 +123,8 @@ export class SolutionManager {
             `);
             
             this.solution = await this.parseSolution();
+            this.equatesTokens = null; // reset so equates.clw is re-resolved with new project paths
+            this.equatesPath = null;
             
             // Log memory usage after parsing
             const memoryAfter = process.memoryUsage();
@@ -304,6 +311,54 @@ export class SolutionManager {
         return this.solution.projects.find(project =>
             project.sourceFiles.some(f => f.name.toLowerCase() === baseName)
         );
+    }
+
+    /**
+     * Resolves equates.clw via project redirection and returns its tokenized content.
+     * equates.clw is implicitly in scope for all Clarion programs (global equates/constants).
+     * Result is cached for the lifetime of the solution.
+     */
+    public getEquatesTokens(): Token[] | null {
+        if (this.equatesTokens !== null) return this.equatesTokens;
+
+        // Try project redirection first
+        for (const project of this.solution.projects) {
+            const redParser = project.getRedirectionParser();
+            const result = redParser.findFile('equates.clw');
+            if (result?.path && fs.existsSync(result.path)) {
+                if (this.loadEquatesFrom(result.path)) return this.equatesTokens;
+            }
+        }
+
+        // Fallback: search libsrcPaths (e.g. C:\Clarion\11.1\LibSrc\win)
+        for (const libPath of serverSettings.libsrcPaths) {
+            const candidate = path.join(libPath, 'equates.clw');
+            if (fs.existsSync(candidate)) {
+                if (this.loadEquatesFrom(candidate)) return this.equatesTokens;
+            }
+        }
+
+        logger.info(`equates.clw not found via redirection or libsrcPaths`);
+        return null;
+    }
+
+    private loadEquatesFrom(filePath: string): boolean {
+        try {
+            const content = fs.readFileSync(filePath, 'utf8');
+            this.equatesTokens = new ClarionTokenizer(content).tokenize();
+            this.equatesPath = filePath;
+            logger.info(`✅ equates.clw resolved at ${filePath} (${this.equatesTokens.length} tokens)`);
+            return true;
+        } catch (e) {
+            logger.warn(`Failed to tokenize equates.clw at ${filePath}: ${e}`);
+            return false;
+        }
+    }
+
+    /** Returns the resolved path of equates.clw, or null if not found. */
+    public getEquatesPath(): string | null {
+        this.getEquatesTokens(); // ensure resolved
+        return this.equatesPath;
     }
 
     public async findFileWithExtension(filename: string): Promise<{ path: string, source: string }> {

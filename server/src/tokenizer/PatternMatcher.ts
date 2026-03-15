@@ -50,7 +50,7 @@ export class PatternMatcher {
                 TokenType.ClarionDocument, TokenType.ExecutionMarker,
                 TokenType.ConditionalContinuation, TokenType.Structure, TokenType.WindowElement,
                 TokenType.Type, TokenType.TypeAnnotation, // MUST be before Function to avoid STRING(50) as function
-                TokenType.Function, TokenType.FunctionArgumentParameter, TokenType.PropertyFunction,
+                TokenType.TypeReference, TokenType.Function, TokenType.FunctionArgumentParameter, TokenType.PropertyFunction,
                 TokenType.Property, TokenType.StructurePrefix, TokenType.StructureField, TokenType.Class,
                 TokenType.Attribute, TokenType.Constant,
                 TokenType.ImplicitVariable, TokenType.Variable, TokenType.Unknown
@@ -59,7 +59,7 @@ export class PatternMatcher {
                 TokenType.Keyword, TokenType.Directive, TokenType.ClarionDocument,
                 TokenType.ExecutionMarker, TokenType.ConditionalContinuation, TokenType.Structure,
                 TokenType.Type, TokenType.TypeAnnotation, // MUST be before Function
-                TokenType.Function, TokenType.FunctionArgumentParameter, TokenType.PropertyFunction,
+                TokenType.TypeReference, TokenType.Function, TokenType.FunctionArgumentParameter, TokenType.PropertyFunction,
                 TokenType.Property, TokenType.StructurePrefix, TokenType.StructureField, TokenType.Class,
                 TokenType.Attribute, TokenType.Constant,
                 TokenType.ImplicitVariable, TokenType.Variable, TokenType.Unknown

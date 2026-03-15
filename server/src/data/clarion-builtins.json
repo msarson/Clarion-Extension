@@ -3,6 +3,115 @@
   "description": "Clarion built-in function definitions for signature help and IntelliSense",
   "functions": [
     {
+      "name": "ABS",
+      "signatures": [
+        {
+          "params": [
+            { "name": "expression", "optional": false }
+          ],
+          "returnType": "REAL or DECIMAL",
+          "description": "Returns the absolute value of an expression. The absolute value is always positive (or zero). Useful for calculating differences without regard to sign.",
+          "syntax": "ABS(expression)"
+        }
+      ]
+    },
+    {
+      "name": "ACCEPTED",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "SIGNED",
+          "description": "Returns the field number of the control that triggered an EVENT:Accepted event. Returns 0 for all other events. Field numbers are assigned by compiler in declaration order. Used in CASE statements to process post-edit code for specific controls.",
+          "syntax": "ACCEPTED()"
+        }
+      ]
+    },
+    {
+      "name": "ACOS",
+      "signatures": [
+        {
+          "params": [
+            { "name": "expression", "optional": false }
+          ],
+          "returnType": "REAL",
+          "description": "Returns the inverse cosine (arccosine). The inverse of a cosine is the angle that produces the cosine. Return value is angle in radians. Used for trigonometric calculations. There are 2π radians (360 degrees) in a circle.",
+          "syntax": "ACOS(expression)"
+        }
+      ]
+    },
+    {
+      "name": "ALERT",
+      "signatures": [
+        {
+          "params": [
+            { "name": "first-keycode", "optional": true },
+            { "name": "last-keycode", "optional": true }
+          ],
+          "returnType": "",
+          "description": "Specifies keys that generate field-independent events (EVENT:PreAlertKey and EVENT:AlertKey). Can specify single key or range. ALERT() with no parameters clears all alert keys. Use CYCLE in EVENT:PreAlertKey to allow default action, omit CYCLE to shortstop it.",
+          "syntax": "ALERT([first-keycode] [,last-keycode])"
+        }
+      ]
+    },
+    {
+      "name": "BUFFER",
+      "signatures": [
+        {
+          "params": [
+            { "name": "entity", "optional": false },
+            { "name": "pagesize", "optional": true },
+            { "name": "behind", "optional": true },
+            { "name": "ahead", "optional": true },
+            { "name": "timeout", "optional": true }
+          ],
+          "returnType": "",
+          "description": "Specifies automatic record set buffering for FILE or VIEW. Pagesize sets records per fetch (default 1). Behind saves pages already read. Ahead reads additional pages asynchronously. Timeout sets cache validity in seconds. Dramatically improves browse performance and reduces network traffic in Client/Server environments.",
+          "syntax": "BUFFER(entity [,pagesize] [,behind] [,ahead] [,timeout])"
+        }
+      ]
+    },
+    {
+      "name": "BYTES",
+      "signatures": [
+        {
+          "params": [
+            { "name": "file", "optional": false }
+          ],
+          "returnType": "LONG",
+          "description": "After OPEN: returns file size in bytes. After GET/NEXT/PREVIOUS/ADD/PUT: returns bytes in last record accessed. Useful for variable length records. For SQL tables, returns row count before open, record buffer size after. Files >2GB return negative value; assign to ULONG for correct positive value.",
+          "syntax": "BYTES(file)"
+        }
+      ]
+    },
+    {
+      "name": "CENTER",
+      "signatures": [
+        {
+          "params": [
+            { "name": "string", "optional": false },
+            { "name": "length", "optional": true }
+          ],
+          "returnType": "STRING",
+          "description": "Removes leading and trailing spaces from string, then centers it within specified length by padding with spaces. If length omitted, uses string's declared length. Returns centered string.",
+          "syntax": "CENTER(string [,length])"
+        }
+      ]
+    },
+    {
+      "name": "CHANGE",
+      "signatures": [
+        {
+          "params": [
+            { "name": "control", "optional": false },
+            { "name": "value", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Changes the value displayed in a control. Updates the control's USE variable, clears all pending events, and displays the new value. Use field equate (?FieldName) to specify control.",
+          "syntax": "CHANGE(control, value)"
+        }
+      ]
+    },
+    {
       "name": "CHOOSE",
       "signatures": [
         {
@@ -43,6 +152,19 @@
           "params": ["STRING string"],
           "returnType": "STRING",
           "description": "Removes trailing spaces from a string and returns the trimmed result. Frequently used with concatenation. Not needed for CSTRING or PSTRING types."
+        }
+      ]
+    },
+    {
+      "name": "TAN",
+      "signatures": [
+        {
+          "params": [
+            { "name": "radians", "optional": false }
+          ],
+          "returnType": "REAL",
+          "description": "Returns the trigonometric tangent of an angle measured in radians. The tangent is the ratio of the angle's opposite side divided by its adjacent side. Convert degrees to radians by multiplying by 0.0174532925199 (Deg2Rad).",
+          "syntax": "TAN(radians)"
         }
       ]
     },
@@ -135,6 +257,20 @@
       ]
     },
     {
+      "name": "RANDOM",
+      "signatures": [
+        {
+          "params": [
+            { "name": "low", "optional": false },
+            { "name": "high", "optional": false }
+          ],
+          "returnType": "LONG",
+          "description": "Returns a random integer between low and high values, inclusively. Only integer portion of parameters is used for the range. Useful for simulations, games, and random sampling. Example: RANDOM(1,49) returns random number 1-49 inclusive.",
+          "syntax": "RANDOM(low, high)"
+        }
+      ]
+    },
+    {
       "name": "RECORDS",
       "signatures": [
         {
@@ -165,12 +301,36 @@
       ]
     },
     {
+      "name": "COS",
+      "signatures": [
+        {
+          "params": [
+            { "name": "radians", "optional": false }
+          ],
+          "returnType": "REAL",
+          "description": "Returns the trigonometric cosine of an angle measured in radians. The cosine is the ratio of the angle's adjacent side divided by the hypotenuse. Convert degrees to radians by multiplying by 0.0174532925199 (Deg2Rad).",
+          "syntax": "COS(radians)"
+        }
+      ]
+    },
+    {
       "name": "COPY",
       "signatures": [
         {
           "params": ["STRING source", "STRING destination"],
           "returnType": "",
           "description": "Copies a file from source path to destination path. Overwrites destination if it exists. Check ERRORCODE() to verify success."
+        }
+      ]
+    },
+    {
+      "name": "REJECTCODE",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "SIGNED",
+          "description": "Returns the code number for the reason any EVENT:Rejected was posted. Returns zero if no EVENT:Rejected was posted. Use equates from EQUATES.CLW: REJECT:RangeHigh, REJECT:RangeLow, REJECT:Range, REJECT:Invalid. Used to determine why input was rejected.",
+          "syntax": "REJECTCODE()"
         }
       ]
     },
@@ -231,6 +391,39 @@
           "params": [],
           "returnType": "LONG",
           "description": "Returns the file driver-specific error code as a numeric value. Useful for programmatic error handling and driver-specific error checking."
+        }
+      ]
+    },
+    {
+      "name": "FILEDIALOG",
+      "signatures": [
+        {
+          "params": [
+            { "name": "title", "optional": true },
+            { "name": "file", "optional": false },
+            { "name": "extensions", "optional": true },
+            { "name": "flag", "optional": true }
+          ],
+          "returnType": "STRING",
+          "description": "Displays Windows standard file choice dialog (Open or Save). Returns selected filename in file parameter. Extensions format: 'Description|*.ext|Description2|*.ext2' (pipe-delimited). Flag bitmap: bit 0=0 for Open dialog, bit 0=1 for Save dialog, bit 1=1 saves/restores current directory. Returns file parameter value or empty on cancel.",
+          "syntax": "FILEDIALOG([title], file [,extensions] [,flag])"
+        }
+      ]
+    },
+    {
+      "name": "FILEDIALOGA",
+      "signatures": [
+        {
+          "params": [
+            { "name": "title", "optional": true },
+            { "name": "file", "optional": false },
+            { "name": "extensions", "optional": true },
+            { "name": "flag", "optional": true },
+            { "name": "index", "optional": true }
+          ],
+          "returnType": "STRING",
+          "description": "Extended file dialog with multi-select support. Similar to FILEDIALOG but with index parameter to select default extension by index number. Flag bitmap supports additional options including multiple file selection. Returns selected filename(s) in file parameter. For multiple files, use '|' as delimiter.",
+          "syntax": "FILEDIALOGA([title], file [,extensions] [,flag] [,index])"
         }
       ]
     },
@@ -306,6 +499,20 @@
           "params": ["QUEUE queue", "LONG position"],
           "returnType": "",
           "description": "Retrieves a queue entry at the specified position (1-based) into the queue structure fields."
+        }
+      ]
+    },
+    {
+      "name": "DEFORMAT",
+      "signatures": [
+        {
+          "params": [
+            { "name": "string", "optional": false },
+            { "name": "picture", "optional": true }
+          ],
+          "returnType": "STRING",
+          "description": "Removes formatting characters from a numeric string, returning only the numbers. If picture omitted, uses string's declared picture or returns only valid numeric characters. For date/time pictures, returns Clarion Standard Date/Time. Example: DEFORMAT('$1,234.56') returns '1234.56'.",
+          "syntax": "DEFORMAT(string [,picture])"
         }
       ]
     },
@@ -671,6 +878,19 @@
       ]
     },
     {
+      "name": "SIN",
+      "signatures": [
+        {
+          "params": [
+            { "name": "radians", "optional": false }
+          ],
+          "returnType": "REAL",
+          "description": "Returns the trigonometric sine of an angle measured in radians. The sine is the ratio of the angle's opposite side divided by the hypotenuse. Convert degrees to radians by multiplying by 0.0174532925199 (Deg2Rad).",
+          "syntax": "SIN(radians)"
+        }
+      ]
+    },
+    {
       "name": "SIZE",
       "signatures": [
         {
@@ -721,6 +941,21 @@
           ],
           "returnType": "reference",
           "description": "Allocates heap memory for a new instance of the specified data type. Used on source side of reference assignment (reference &= NEW(datatype)). Memory is automatically initialized to blank/zero and must be explicitly de-allocated with DISPOSE to prevent memory leaks. Parentheses around datatype are optional."
+        }
+      ]
+    },
+    {
+      "name": "DIRECTORY",
+      "signatures": [
+        {
+          "params": [
+            { "name": "queue", "optional": false },
+            { "name": "path", "optional": false },
+            { "name": "attributes", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Gets a file directory listing into specified queue. Queue must have structure starting with name, date, time, size, attrib fields (see EQUATES.CLW for ff_:queue or FILE:queue). Path supports wildcards (* and ?). Attributes specify file types to include. Like DOS DIR command.",
+          "syntax": "DIRECTORY(queue, path, attributes)"
         }
       ]
     },
@@ -780,6 +1015,19 @@
           ],
           "returnType": "",
           "description": "Terminates PROGRAM or PROCEDURE and returns control to caller. Expression required for procedures returning values (may be NULL for reference returns). Automatically closes local APPLICATION/WINDOW/REPORT/VIEW/QUEUE structures. Implicit RETURN occurs at end if not specified. Closes program and files when used in PROGRAM."
+        }
+      ]
+    },
+    {
+      "name": "DUPLICATE",
+      "signatures": [
+        {
+          "params": [
+            { "name": "key", "optional": false }
+          ],
+          "returnType": "LONG",
+          "description": "Checks for duplicate entries in a unique key. Returns 0 if no duplicate, non-zero if duplicate exists. Used after ADD or PUT operations to detect uniqueness violations. Can test specific KEY or entire FILE.",
+          "syntax": "DUPLICATE(key) or DUPLICATE(file)"
         }
       ]
     },
@@ -876,6 +1124,19 @@
       ]
     },
     {
+      "name": "ATAN",
+      "signatures": [
+        {
+          "params": [
+            { "name": "expression", "optional": false }
+          ],
+          "returnType": "REAL",
+          "description": "Returns the inverse tangent (arctangent). The inverse of a tangent is the angle that produces the tangent. Return value is angle in radians. Used for trigonometric calculations. There are 2π radians (360 degrees) in a circle.",
+          "syntax": "ATAN(expression)"
+        }
+      ]
+    },
+    {
       "name": "BAND",
       "signatures": [
         {
@@ -963,6 +1224,19 @@
           "returnType": "",
           "description": "Terminates a data declaration structure (GROUP, CLASS, FILE, RECORD, etc.) or compound executable statement (IF, LOOP, CASE, ACCEPT, etc.). Functionally equivalent to period (.). By convention, END aligns with structure start and is used for multi-line structures. Multiple periods on one line can replace multiple END statements.",
           "syntax": "END"
+        }
+      ]
+    },
+    {
+      "name": "ASIN",
+      "signatures": [
+        {
+          "params": [
+            { "name": "expression", "optional": false }
+          ],
+          "returnType": "REAL",
+          "description": "Returns the inverse sine (arcsine). The inverse of a sine is the angle that produces the sine. Return value is angle in radians. Used for trigonometric calculations. There are 2π radians (360 degrees) in a circle.",
+          "syntax": "ASIN(expression)"
         }
       ]
     },
@@ -1195,6 +1469,19 @@
       ]
     },
     {
+      "name": "NUMERIC",
+      "signatures": [
+        {
+          "params": [
+            { "name": "string", "optional": false }
+          ],
+          "returnType": "UNSIGNED",
+          "description": "Returns 1 (true) if string contains only valid numeric characters (0-9, E, leading minus, decimal point), otherwise returns 0 (false). Accepts REAL format (e.g., '1.23E-4'). Use DEFORMAT to remove formatting before testing. Example: NUMERIC('1234.56') returns 1, NUMERIC('1,234.56') returns 0.",
+          "syntax": "NUMERIC(string)"
+        }
+      ]
+    },
+    {
       "name": "NULL",
       "signatures": [
         {
@@ -1226,6 +1513,17 @@
           "returnType": "LONG",
           "description": "Returns operating system date as standard date. Standard date is number of days since December 28, 1800. Range: January 1, 1801 (standard date 4) to December 31, 2099 (standard date 109,211).",
           "syntax": "TODAY()"
+        }
+      ]
+    },
+    {
+      "name": "DATE",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "LONG",
+          "description": "Four-byte date data type. Stores year (1-9999), month (1-12), and day (1-31) in packed format. Used for date calculations and comparisons. See also TODAY() for current date.",
+          "syntax": "DATE"
         }
       ]
     },
@@ -1367,6 +1665,21 @@
       ]
     },
     {
+      "name": "START",
+      "signatures": [
+        {
+          "params": [
+            { "name": "procedure", "optional": false },
+            { "name": "stack", "optional": true },
+            { "name": "passed value", "optional": true }
+          ],
+          "returnType": "SIGNED",
+          "description": "Begins a new execution thread, calling the procedure and returning the thread number (minimum 2). Procedure may not be overloaded. Can pass up to three STRING or GROUP parameters by value. Stack defaults to 20,000 bytes if omitted. Returns 0 on failure (out of memory or system modal). Code continues immediately after START until ACCEPT is executed.",
+          "syntax": "START(procedure [,stack] [,passed value])"
+        }
+      ]
+    },
+    {
       "name": "STRPOS",
       "signatures": [
         {
@@ -1392,6 +1705,32 @@
           "returnType": "STRING",
           "description": "Returns left-justified string. Removes leading spaces, pads trailing spaces to specified length. If length omitted, uses string length. Use CLIP(LEFT()) to remove both leading and trailing spaces.",
           "syntax": "LEFT(string [,length])"
+        }
+      ]
+    },
+    {
+      "name": "LOG10",
+      "signatures": [
+        {
+          "params": [
+            { "name": "expression", "optional": false }
+          ],
+          "returnType": "REAL",
+          "description": "Returns the base 10 logarithm of an expression. The base 10 logarithm is the power to which 10 must be raised to equal the value. Returns 0 if expression is zero or less (logarithm undefined for values ≤ 0). Example: LOG10(10) returns 1, LOG10(1) returns 0.",
+          "syntax": "LOG10(expression)"
+        }
+      ]
+    },
+    {
+      "name": "LOGE",
+      "signatures": [
+        {
+          "params": [
+            { "name": "expression", "optional": false }
+          ],
+          "returnType": "REAL",
+          "description": "Returns the natural logarithm of an expression. The natural logarithm is the power to which e (2.71828182846) must be raised to equal the value. Returns 0 if expression is less than zero (logarithm undefined for values < 0). Example: LOGE(2.71828) returns 1, LOGE(1) returns 0.",
+          "syntax": "LOGE(expression)"
         }
       ]
     },

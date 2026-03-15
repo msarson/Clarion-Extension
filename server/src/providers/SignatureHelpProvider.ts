@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("SignatureHelpProvider");
-logger.setLevel("error"); // DEBUG: Enable for signature help debugging
+logger.setLevel("error");
 
 /**
  * Provides signature help (parameter hints) for method calls
@@ -611,8 +611,10 @@ export class SignatureHelpProvider {
                 
                 for (const param of params) {
                     const trimmed = param.trim();
+                    // Strip optional-parameter angle brackets: <Key K> → Key K
+                    const stripped = trimmed.replace(/^<(.*)>$/, '$1').trim();
                     // Extract parameter name and type
-                    const paramMatch = trimmed.match(/([*&<]?\s*\w+)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*[=>].*)?$/i);
+                    const paramMatch = stripped.match(/([*&]?\s*\w+)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*[=>].*)?$/i);
                     if (paramMatch) {
                         const type = paramMatch[1].trim();
                         const name = paramMatch[2];
@@ -621,9 +623,9 @@ export class SignatureHelpProvider {
                             documentation: undefined
                         });
                     } else {
-                        // Fallback: use the whole parameter as label
+                        // Fallback: use stripped form (without angle brackets) as label
                         parameters.push({
-                            label: trimmed,
+                            label: stripped || trimmed,
                             documentation: undefined
                         });
                     }

@@ -1,4 +1,4 @@
-import { Hover } from 'vscode-languageserver-protocol';
+import { Hover, MarkupContent } from 'vscode-languageserver-protocol';
 import { HoverContext } from './HoverContextBuilder';
 import { ProcedureHoverResolver } from './ProcedureHoverResolver';
 import { MethodHoverResolver } from './MethodHoverResolver';
@@ -9,6 +9,9 @@ import { ContextualHoverHandler } from './ContextualHoverHandler';
 import { BuiltinFunctionService } from '../../utils/BuiltinFunctionService';
 import { AttributeService } from '../../utils/AttributeService';
 import { HoverFormatter } from './HoverFormatter';
+import { TokenCache } from '../../TokenCache';
+import { Token, TokenType } from '../../ClarionTokenizer';
+import * as path from 'path';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("HoverRouter");
@@ -41,6 +44,10 @@ export class HoverRouter {
         // 1. Handle special keywords (MODULE, TO, ELSE, PROCEDURE)
         const keywordHover = this.handleSpecialKeywords(context);
         if (keywordHover) return keywordHover;
+
+        // 1.5 Handle IMPLEMENTS(InterfaceName) hover
+        const implementsHover = this.handleImplementsHover(line, position, tokens);
+        if (implementsHover) return implementsHover;
 
         // 2. Handle routine references (DO statements) - check early to handle namespace prefixes
         const routineHover = await this.routineResolver.resolveRoutineReference(document, position, line);
@@ -107,6 +114,56 @@ export class HoverRouter {
             return this.contextHandler.handleProcedureKeyword(line, isInMapBlock, isInClassBlock);
         }
 
+        return null;
+    }
+
+    /**
+     * Handle hover over interface name inside IMPLEMENTS(InterfaceName)
+     */
+    private handleImplementsHover(line: string, position: { character: number }, tokens: Token[]): Hover | null {
+        const implementsRe = /\bIMPLEMENTS\s*\(\s*(\w+)\s*\)/gi;
+        let match: RegExpExecArray | null;
+        while ((match = implementsRe.exec(line)) !== null) {
+            const ifaceName = match[1];
+            const nameStart = match.index + match[0].indexOf(ifaceName);
+            const nameEnd = nameStart + ifaceName.length;
+            if (position.character < nameStart || position.character > nameEnd) continue;
+
+            // Search current doc tokens first
+            let declFile: string | null = null;
+            const ifaceToken = tokens.find(t =>
+                t.type === TokenType.Structure &&
+                (t as any).subType === TokenType.Interface &&
+                t.label?.toLowerCase() === ifaceName.toLowerCase()
+            );
+
+            if (!ifaceToken) {
+                // Search all TokenCache entries
+                const cache = TokenCache.getInstance();
+                for (const uri of cache.getAllCachedUris()) {
+                    const cached = cache.getTokensByUri(uri);
+                    if (!cached) continue;
+                    const found = cached.find(t =>
+                        t.type === TokenType.Structure &&
+                        (t as any).subType === TokenType.Interface &&
+                        t.label?.toLowerCase() === ifaceName.toLowerCase()
+                    );
+                    if (found) {
+                        try {
+                            declFile = path.basename(decodeURIComponent(uri.replace(/^file:\/\/\//i, '')));
+                        } catch {
+                            declFile = uri;
+                        }
+                        break;
+                    }
+                }
+            }
+
+            const lines: string[] = [`**INTERFACE** \`${ifaceName}\``];
+            if (declFile) lines.push(`Declared in \`${declFile}\``);
+            const content: MarkupContent = { kind: 'markdown', value: lines.join('\n\n') };
+            return { contents: content };
+        }
         return null;
     }
 

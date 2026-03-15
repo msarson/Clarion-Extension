@@ -26,7 +26,7 @@ class Logger {
         // In perf test mode, allow PERF messages through, skip others
         if (LoggingConfig.PERF_TEST_MODE && !message.includes('🚀') && !message.includes('[PERF]')) return;
         if (this.shouldLog("debug")) {
-            console.log(`[${this.getTimestamp()}] [${this.name}] 🐛 DEBUG:`, message, ...args);
+            console.error(`[${this.getTimestamp()}] [${this.name}] 🐛 DEBUG:`, message, ...args);
         }
     }
 
@@ -34,7 +34,7 @@ class Logger {
         // In perf test mode, allow PERF messages through, skip others
         if (LoggingConfig.PERF_TEST_MODE && !message.includes('🚀') && !message.includes('[PERF]')) return;
         if (this.shouldLog("info")) {
-            console.log(`[${this.getTimestamp()}] [${this.name}] ℹ️ INFO:`, message, ...args);
+            console.error(`[${this.getTimestamp()}] [${this.name}] ℹ️ INFO:`, message, ...args);
         }
     }
 
@@ -42,13 +42,13 @@ class Logger {
         // In perf test mode, allow PERF messages through, skip others
         if (LoggingConfig.PERF_TEST_MODE && !message.includes('🚀') && !message.includes('[PERF]')) return;
         if (this.shouldLog("warn")) {
-            console.log(`[${this.getTimestamp()}] [${this.name}] ⚠️ WARN:`, message, ...args);
+            console.error(`[${this.getTimestamp()}] [${this.name}] ⚠️ WARN:`, message, ...args);
         }
     }
 
     error(message: string, ...args: any[]) {
         if (this.shouldLog("error")) {
-            console.log(`[${this.getTimestamp()}] [${this.name}] ❌ ERROR:`, message, ...args);
+            console.error(`[${this.getTimestamp()}] [${this.name}] ❌ ERROR:`, message, ...args);
         }
     }
 
@@ -65,9 +65,9 @@ class Logger {
             const metricsStr = Object.entries(metrics)
                 .map(([key, value]) => `${key}=${value}`)
                 .join(', ');
-            console.log(`[${timestamp}] [${this.name}] 📊 PERF: ${message} | ${metricsStr}`);
+            console.error(`[${timestamp}] [${this.name}] 📊 PERF: ${message} | ${metricsStr}`);
         } else {
-            console.log(`[${timestamp}] [${this.name}] 📊 PERF: ${message}`);
+            console.error(`[${timestamp}] [${this.name}] 📊 PERF: ${message}`);
         }
     }
 

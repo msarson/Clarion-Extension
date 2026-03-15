@@ -53,37 +53,15 @@ export class RoutineHoverResolver {
                 if (match && match[1].toUpperCase() === routineName.toUpperCase()) {
                     logger.info(`✅ Found routine at line ${i}`);
                     
-                    // Get a preview of the routine, stopping at next ROUTINE/PROCEDURE or max lines
-                    const previewLines: string[] = [];
-                    const maxPreviewLines = 10;
-                    
-                    for (let j = i; j < Math.min(i + maxPreviewLines, lines.length); j++) {
-                        const previewLine = lines[j];
-                        
-                        // Stop if we hit another label at column 0 (next routine/procedure)
-                        // Skip the first line (i) since that's the routine we're showing
-                        if (j > i && previewLine.length > 0 && previewLine[0] !== ' ' && previewLine[0] !== '\t') {
-                            // Check if it's a ROUTINE, PROCEDURE, or FUNCTION declaration
-                            if (/^[A-Za-z_][A-Za-z0-9_:]*\s+(?:ROUTINE|PROCEDURE|FUNCTION)\b/i.test(previewLine)) {
-                                logger.info(`Stopping preview at next routine/procedure at line ${j}`);
-                                break;
-                            }
-                        }
-                        
-                        previewLines.push(previewLine);
-                    }
-                    
                     return {
                         contents: {
                             kind: 'markdown',
                             value: [
-                                `**Routine:** ${routineName}`,
+                                `**Routine:** \`${routineName}\``,
                                 '',
-                                `📍 **Line:** ${i + 1} *(press Ctrl+F12 to go to routine)*`,
+                                `📍 Line ${i + 1}`,
                                 '',
-                                '```clarion',
-                                ...previewLines,
-                                '```'
+                                `*Ctrl+F12 to navigate*`
                             ].join('\n')
                         }
                     };

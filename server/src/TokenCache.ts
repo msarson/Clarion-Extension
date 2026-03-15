@@ -208,6 +208,23 @@ export class TokenCache {
     }
 
     /**
+     * Get all URIs currently held in the cache
+     * Used by ReferencesProvider to avoid disk reads for open documents
+     */
+    public getAllCachedUris(): string[] {
+        return Array.from(this.cache.keys());
+    }
+
+    /**
+     * Get tokens for a URI without a TextDocument (uses cached data only)
+     * Returns null if the URI is not in the cache
+     */
+    public getTokensByUri(uri: string): Token[] | null {
+        const cached = this.cache.get(uri);
+        return cached ? cached.tokens : null;
+    }
+
+    /**
      * Clear tokens for a document
      * @param uri The document URI
      */

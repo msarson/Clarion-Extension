@@ -156,6 +156,8 @@ export class ClarionTokenizer {
                 inCodeSection = true;
             } else if (line.match(/^\s*(DATA|ROUTINE)\b/i)) {
                 inCodeSection = false; // DATA/ROUTINE sections can have structures
+            } else if (line.match(/\b(?:PROCEDURE|FUNCTION)\b/i)) {
+                inCodeSection = false; // PROCEDURE/FUNCTION declarations sections can have structures (before CODE)
             }
 
             while (position < line.length) {
@@ -213,6 +215,7 @@ export class ClarionTokenizer {
                             upperSubstring.startsWith('VIEW') ||
                             upperSubstring.startsWith('SHEET') ||
                             upperSubstring.startsWith('TAB') ||
+                            upperSubstring.startsWith('OPTION') ||
                             upperSubstring.startsWith('MENU') ||
                             upperSubstring.startsWith('MENUBAR') ||
                             upperSubstring.startsWith('TOOLBAR') ||

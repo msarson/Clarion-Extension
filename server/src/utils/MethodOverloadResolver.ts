@@ -113,7 +113,138 @@ export class MethodOverloadResolver {
         logger.info(`Method not found in current file, searching INCLUDEs`);
         return this.findMethodDeclarationInIncludes(className, methodName, document, paramCount, implementationSignature);
     }
-    
+
+    /**
+     * Finds the declaration of a method within an INTERFACE body.
+     * Used for 3-part method implementations (Class.Interface.Method PROCEDURE).
+     */
+    public findInterfaceMethodDeclaration(
+        interfaceName: string,
+        methodName: string,
+        document: TextDocument,
+        tokens: Token[],
+        paramCount?: number,
+        implementationSignature?: string
+    ): MethodDeclarationInfo | null {
+        logger.info(`Finding interface method declaration: ${interfaceName}.${methodName}`);
+
+        const candidates: MethodDeclarationInfo[] = [];
+        const content = document.getText();
+        const lines = content.split('\n');
+
+        // Search current file tokens for InterfaceMethod under the matching interface
+        for (const token of tokens) {
+            if (token.subType === TokenType.InterfaceMethod &&
+                token.label?.toLowerCase() === methodName.toLowerCase() &&
+                token.parent?.label?.toLowerCase() === interfaceName.toLowerCase()) {
+                const signature = lines[token.line]?.trim() ?? '';
+                const declParamCount = ClarionPatterns.countParameters(signature);
+                candidates.push({ signature, file: document.uri, line: token.line, paramCount: declParamCount });
+                logger.info(`Found interface method candidate at line ${token.line}`);
+            }
+        }
+
+        const bestMatch = this.selectBestOverload(candidates, paramCount, implementationSignature);
+        if (bestMatch) return bestMatch;
+
+        // Search INCLUDE files
+        return this.findInterfaceMethodInIncludes(
+            interfaceName, methodName,
+            decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\'),
+            new Set(), paramCount, implementationSignature
+        );
+    }
+
+    /**
+     * Recursively searches INCLUDE files for a method declaration within an INTERFACE body.
+     */
+    private findInterfaceMethodInIncludes(
+        interfaceName: string,
+        methodName: string,
+        fromPath: string,
+        visited: Set<string>,
+        paramCount?: number,
+        implementationSignature?: string
+    ): MethodDeclarationInfo | null {
+        if (visited.has(fromPath.toLowerCase())) return null;
+        visited.add(fromPath.toLowerCase());
+
+        let content: string;
+        try { content = fs.readFileSync(fromPath, 'utf8'); } catch { return null; }
+
+        const lines = content.split('\n');
+        const candidates: MethodDeclarationInfo[] = [];
+
+        const includePattern = /INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/gi;
+        let m: RegExpExecArray | null;
+
+        while ((m = includePattern.exec(content)) !== null) {
+            const includeFileName = m[1];
+            let resolvedPath: string | null = null;
+
+            const solutionManager = SolutionManager.getInstance();
+            if (solutionManager?.solution) {
+                for (const project of solutionManager.solution.projects) {
+                    const resolved = project.getRedirectionParser().findFile(includeFileName);
+                    if (resolved?.path && fs.existsSync(resolved.path)) {
+                        resolvedPath = resolved.path;
+                        break;
+                    }
+                }
+            }
+
+            if (!resolvedPath) {
+                const currentDir = path.dirname(fromPath);
+                const relativePath = path.join(currentDir, includeFileName);
+                if (fs.existsSync(relativePath)) {
+                    resolvedPath = path.resolve(relativePath);
+                }
+            }
+
+            if (resolvedPath && !path.isAbsolute(resolvedPath)) {
+                resolvedPath = path.resolve(path.dirname(fromPath), resolvedPath);
+            }
+
+            if (!resolvedPath) continue;
+
+            logger.info(`Searching INCLUDE for interface method: ${resolvedPath}`);
+            let includeContent: string;
+            try { includeContent = fs.readFileSync(resolvedPath, 'utf8'); } catch { continue; }
+
+            const includeLines = includeContent.split('\n');
+            let foundInThis = false;
+
+            for (let j = 0; j < includeLines.length; j++) {
+                const ifaceMatch = includeLines[j].match(new RegExp(`^(${interfaceName})\\s+INTERFACE`, 'i'));
+                if (!ifaceMatch) continue;
+
+                logger.info(`Found INTERFACE ${interfaceName} at line ${j} in ${resolvedPath}`);
+                foundInThis = true;
+                for (let k = j + 1; k < includeLines.length; k++) {
+                    if (/^\s*END\s*$/i.test(includeLines[k]) || /^END\s*$/i.test(includeLines[k])) break;
+                    const methodMatch = includeLines[k].match(new RegExp(`^\\s*(${methodName})\\s+(?:PROCEDURE|FUNCTION)`, 'i'));
+                    if (methodMatch) {
+                        const signature = includeLines[k].trim();
+                        const declParamCount = ClarionPatterns.countParameters(signature);
+                        const fileUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+                        candidates.push({ signature, file: fileUri, line: k, paramCount: declParamCount });
+                        logger.info(`Found interface method in INCLUDE at line ${k}`);
+                    }
+                }
+            }
+
+            // If not found in this file, recurse into its includes
+            if (!foundInThis) {
+                const nested = this.findInterfaceMethodInIncludes(
+                    interfaceName, methodName, resolvedPath, visited, paramCount, implementationSignature
+                );
+                if (nested) return nested;
+            }
+        }
+
+        return this.selectBestOverload(candidates, paramCount, implementationSignature);
+    }
+
     /**
      * Searches for method declaration in INCLUDE files
      */
@@ -220,22 +351,20 @@ export class MethodOverloadResolver {
         implementationSignature?: string
     ): MethodDeclarationInfo | null {
         if (candidates.length === 0) return null;
-        
-        // If no parameter count provided, return first candidate
+
+        // 1. No parameter count provided → return first candidate
         if (paramCount === undefined) {
             logger.info(`Returning first candidate (no param matching needed)`);
             return candidates[0];
         }
-        
-        // Filter candidates by parameter count first
+
+        // 2. Exact count match
         const exactCountMatches = candidates.filter(c => c.paramCount === paramCount);
-        
-        // If we have implementation signature and multiple matches with same count, try type matching
+
         if (implementationSignature && exactCountMatches.length > 1) {
             logger.info(`Multiple overloads with ${paramCount} parameters, attempting type matching`);
             const implParams = this.extractParameterTypes(implementationSignature);
-            
-            // Try to find exact type match
+
             for (const candidate of exactCountMatches) {
                 const declParams = this.extractParameterTypes(candidate.signature);
                 if (this.parametersMatch(implParams, declParams)) {
@@ -243,28 +372,40 @@ export class MethodOverloadResolver {
                     return candidate;
                 }
             }
-            
+
             logger.info(`No exact type match found, returning first candidate with matching count`);
         }
-        
+
         if (exactCountMatches.length > 0) {
             logger.info(`Found exact match with ${paramCount} parameters`);
             return exactCountMatches[0];
         }
-        
-        // If no exact match, find closest (prefer higher param count for optional params)
+
+        // 3. Compatible match: callArgs within [paramCount - defaultCount, paramCount]
+        const compatibleCandidates = candidates
+            .filter(c => {
+                const defaults = ClarionPatterns.countDefaultParams(c.signature);
+                return paramCount >= (c.paramCount - defaults) && paramCount <= c.paramCount;
+            })
+            .sort((a, b) => (a.paramCount - paramCount) - (b.paramCount - paramCount));
+
+        if (compatibleCandidates.length > 0) {
+            logger.info(`Selected compatible overload with ${compatibleCandidates[0].paramCount} parameters (call had ${paramCount})`);
+            return compatibleCandidates[0];
+        }
+
+        // 4. Fallback: closest absolute distance, prefer higher param count on tie
         const bestMatch = candidates.reduce((best, curr) => {
             const bestDiff = Math.abs(best.paramCount - paramCount);
             const currDiff = Math.abs(curr.paramCount - paramCount);
-            
-            // If same distance, prefer the one with MORE parameters (optional params)
+
             if (currDiff === bestDiff) {
                 return curr.paramCount > best.paramCount ? curr : best;
             }
-            
+
             return currDiff < bestDiff ? curr : best;
         });
-        
+
         logger.info(`Selected overload with ${bestMatch.paramCount} parameters (implementation had ${paramCount})`);
         return bestMatch;
     }
@@ -383,6 +524,35 @@ export class MethodOverloadResolver {
      * Extracts parameter list from PROCEDURE(...) 
      * Handles omittable parameters like <LONG SomeVar> and default values LONG SomeVar=1
      */
+    /**
+     * Given a declaration signature and an array of candidate implementation signatures,
+     * returns the index of the best matching implementation.
+     * Matches first by parameter count, then by parameter types (e.g. STRING vs *STRING).
+     */
+    public findBestMatchingImplementation(declarationSignature: string, candidateSignatures: string[]): number {
+        if (candidateSignatures.length <= 1) return 0;
+
+        const declParamCount = ClarionPatterns.countParameters(declarationSignature);
+
+        const countMatches = candidateSignatures
+            .map((sig, idx) => ({ sig, idx, count: ClarionPatterns.countParameters(sig) }))
+            .filter(c => c.count === declParamCount);
+
+        if (countMatches.length === 0) return 0;
+        if (countMatches.length === 1) return countMatches[0].idx;
+
+        // Multiple candidates with same count — use type-based matching
+        const declTypes = this.extractParameterTypes(declarationSignature);
+        for (const candidate of countMatches) {
+            const implTypes = this.extractParameterTypes(candidate.sig);
+            if (this.parametersMatch(declTypes, implTypes)) {
+                return candidate.idx;
+            }
+        }
+
+        return countMatches[0].idx;
+    }
+
     /**
      * Counts parameters in a procedure declaration
      * @deprecated Use ClarionPatterns.countParameters() instead

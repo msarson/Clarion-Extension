@@ -11,6 +11,10 @@ export interface SolutionReference {
     settingsPath: string;         // e.g., "F:\\MyProject\\.vscode\\settings.json"
     solutionFile: string;         // e.g., "F:\\MyProject\\MySolution.sln"
     lastOpened: Date;
+    // Full configuration — stored so settings survive cross-workspace switches
+    propertiesFile?: string;      // e.g., "C:\\...\\ClarionProperties.xml"
+    version?: string;             // e.g., "Clarion11"
+    configuration?: string;       // e.g., "Release"
 }
 
 const MAX_RECENT_SOLUTIONS = 20;
@@ -27,9 +31,17 @@ export class GlobalSolutionHistory {
     }
 
     /**
-     * Add or update a solution reference in the global history
+     * Add or update a solution reference in the global history.
+     * Pass propertiesFile/version/configuration to persist full settings so they
+     * survive cross-workspace switches and can be restored on re-open.
      */
-    static async addSolution(solutionFile: string, folderPath: string): Promise<void> {
+    static async addSolution(
+        solutionFile: string,
+        folderPath: string,
+        propertiesFile?: string,
+        version?: string,
+        configuration?: string
+    ): Promise<void> {
         if (!this.context) {
             logger.error("GlobalSolutionHistory not initialized");
             return;
@@ -41,7 +53,10 @@ export class GlobalSolutionHistory {
             folderPath,
             settingsPath,
             solutionFile,
-            lastOpened: new Date()
+            lastOpened: new Date(),
+            propertiesFile: propertiesFile || undefined,
+            version: version || undefined,
+            configuration: configuration || undefined
         };
 
         // Get existing references

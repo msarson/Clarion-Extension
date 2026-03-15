@@ -19,6 +19,7 @@ import { ClarionDocumentSymbolProvider, ClarionDocumentSymbol } from '../provide
 import { TokenCache } from '../TokenCache';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { TokenHelper } from '../utils/TokenHelper';
+import { SolutionManager } from '../solution/solutionManager';
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -39,7 +40,7 @@ export interface SymbolInfo {
     /** Scope where symbol was found */
     scope: {
         token: Token;
-        type: 'parameter' | 'local' | 'module' | 'global' | 'routine';
+        type: 'parameter' | 'local' | 'module' | 'global' | 'routine' | 'field';
     };
     
     /** Location information */
@@ -85,6 +86,43 @@ export class SymbolFinderService {
     ) {
         this.symbolProvider = new ClarionDocumentSymbolProvider();
     }
+
+    /**
+     * Extract display type string from the token after a variable label.
+     * Handles QUEUE(TypeName), GROUP(TypeName), CLASS(TypeName) as well as plain types.
+     */
+    private static extractTypeInfo(labelToken: Token, tokens: Token[]): string {
+        const idx = tokens.indexOf(labelToken);
+        if (idx + 1 >= tokens.length) return 'UNKNOWN';
+        const next = tokens[idx + 1];
+        if (next.line !== labelToken.line) return 'UNKNOWN';
+
+        if (next.type === TokenType.Type) return next.value;
+        if (next.type === TokenType.Variable || next.type === TokenType.Label) return next.value;
+        if (next.type === TokenType.ReferenceVariable) {
+            // &TypeName — strip leading '&'
+            return next.value.startsWith('&') ? next.value.substring(1) : next.value;
+        }
+        if (next.type === TokenType.Structure) {
+            // Look for type arg: QUEUE(TypeName) → "QUEUE(TypeName)"
+            const lineTokens = tokens.filter(t => t.line === labelToken.line && t.start > next.start);
+            const typeArg = lineTokens.find(t =>
+                (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+                t.value !== '(' && t.value !== ')'
+            );
+            return typeArg ? `${next.value.toUpperCase()}(${typeArg.value})` : next.value.toUpperCase();
+        }
+        if (next.type === TokenType.TypeReference) {
+            // LIKE(TypeName) → "LIKE(TypeName)"
+            const lineTokens = tokens.filter(t => t.line === labelToken.line && t.start > next.start);
+            const typeArg = lineTokens.find(t =>
+                (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+                t.value !== '(' && t.value !== ')'
+            );
+            return typeArg ? `LIKE(${typeArg.value})` : 'LIKE';
+        }
+        return 'UNKNOWN';
+    }
     
     /**
      * Find a parameter in a procedure signature
@@ -117,8 +155,10 @@ export class SymbolFinderService {
         
         for (const param of params) {
             const trimmedParam = param.trim();
+            // Strip optional-parameter angle brackets: <Key K> → Key K
+            const stripped = trimmedParam.replace(/^<(.*)>$/, '$1').trim();
             // Match: [*&]? TYPE NAME [= default]
-            const paramMatch = trimmedParam.match(/([*&]?\s*\w+)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*=.*)?$/i);
+            const paramMatch = stripped.match(/([*&]?\s*\w+)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*=.*)?$/i);
             
             if (paramMatch) {
                 const type = paramMatch[1].trim();
@@ -148,7 +188,7 @@ export class SymbolFinderService {
                             line: scopeToken.line,
                             character: paramToken.start
                         },
-                        declaration: trimmedParam,
+                        declaration: stripped,
                         originalWord: word,
                         searchWord: word
                     };
@@ -192,7 +232,32 @@ export class SymbolFinderService {
         const varSymbol = this.findVariableInSymbol(procedureSymbol, searchText);
         
         if (!varSymbol) {
-            logger.info(`❌ Variable "${searchText}" not found in procedure ${procedureSymbol.name}`);
+            logger.info(`❌ Variable "${searchText}" not found in symbol tree — falling back to token scan`);
+
+            // Fallback: scan tokens directly for a Label token at the start of a line (column 0)
+            // within the procedure's scope. This catches variables whose symbol names don't match
+            // (e.g. QUEUE/GROUP/FILE structures where the symbol name is "QUEUE" not "QZipF").
+            // Column 0 check ensures we only match declarations, not usage sites.
+            const scopeStart = scopeToken.line;
+            const scopeEnd = scopeToken.finishesAt ?? Number.MAX_SAFE_INTEGER;
+            const wordLower = searchText.toLowerCase();
+            const labelToken = tokens.find(t =>
+                t.line >= scopeStart && t.line <= scopeEnd &&
+                t.start === 0 &&
+                (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+                t.value.toLowerCase() === wordLower
+            );
+            if (labelToken) {
+                logger.info(`✅ Found "${searchText}" via token fallback at line ${labelToken.line}`);
+                return {
+                    token: labelToken,
+                    type: SymbolFinderService.extractTypeInfo(labelToken, tokens),
+                    scope: { token: scopeToken, type: 'local' },
+                    location: { uri: document.uri, line: labelToken.line, character: labelToken.start },
+                    originalWord: originalWord || word,
+                    searchWord: word
+                };
+            }
             return null;
         }
         
@@ -255,10 +320,11 @@ export class SymbolFinderService {
         
         const moduleScopeEndLine = firstProcToken ? firstProcToken.line : Number.MAX_SAFE_INTEGER;
         
-        // Find variable in module scope
+        // Find variable in module scope (exclude structure fields which have a parent token)
         const candidateVars = tokens.filter(t =>
             t.type === TokenType.Label &&
             t.start === 0 &&
+            t.parent === undefined &&
             t.line < moduleScopeEndLine &&
             t.value.toLowerCase() === word.toLowerCase()
         );
@@ -273,25 +339,9 @@ export class SymbolFinderService {
         
         logger.info(`✅ Found module variable: ${moduleVar.value} at line ${moduleVar.line}`);
         
-        // Get type from next token
-        const moduleIndex = tokens.indexOf(moduleVar);
-        let typeInfo = 'UNKNOWN';
-        let declaration: string | undefined;
-        
-        if (moduleIndex + 1 < tokens.length) {
-            const nextToken = tokens[moduleIndex + 1];
-            if (nextToken.line === moduleVar.line) {
-                if (nextToken.type === TokenType.Type) {
-                    typeInfo = nextToken.value;
-                } else if (nextToken.type === TokenType.Structure) {
-                    typeInfo = nextToken.value.toUpperCase(); // CLASS, GROUP, QUEUE
-                }
-                
-                // Try to build full declaration
-                const lineTokens = tokens.filter(t => t.line === moduleVar.line);
-                declaration = lineTokens.map(t => t.value).join(' ');
-            }
-        }
+        const typeInfo = SymbolFinderService.extractTypeInfo(moduleVar, tokens);
+        const lineTokens = tokens.filter(t => t.line === moduleVar.line);
+        const declaration = lineTokens.map(t => t.value).join(' ');
         
         return {
             token: moduleVar,
@@ -311,6 +361,47 @@ export class SymbolFinderService {
         };
     }
     
+    /**
+     * Find a structure field declaration — a col-0 Label whose parent token is a Structure (QUEUE, GROUP, CLASS, FILE).
+     * Used when the cursor is on a field declaration line inside a structure definition.
+     */
+    findStructureField(word: string, tokens: Token[], line: number, document: TextDocument): SymbolInfo | null {
+        const fieldToken = tokens.find(t =>
+            t.type === TokenType.Label &&
+            t.start === 0 &&
+            t.line === line &&
+            t.parent !== undefined &&
+            t.parent.type === TokenType.Structure &&
+            t.value.toLowerCase() === word.toLowerCase()
+        );
+
+        if (!fieldToken) {
+            return null;
+        }
+
+        logger.info(`✅ Found structure field: ${fieldToken.value} at line ${fieldToken.line} (parent: ${fieldToken.parent!.value})`);
+
+        const lineTokens = tokens.filter(t => t.line === fieldToken.line);
+        const declaration = lineTokens.map(t => t.value).join(' ');
+
+        return {
+            token: fieldToken,
+            type: 'field',
+            scope: {
+                token: fieldToken.parent!,
+                type: 'field'
+            },
+            location: {
+                uri: document.uri,
+                line: fieldToken.line,
+                character: fieldToken.start
+            },
+            declaration,
+            originalWord: word,
+            searchWord: word
+        };
+    }
+
     /**
      * Find a global variable definition
      * 
@@ -359,6 +450,7 @@ export class SymbolFinderService {
         const globalVar = tokens.find(t =>
             t.type === TokenType.Label &&
             t.start === 0 &&
+            t.parent === undefined &&
             t.line < globalScopeEndLine &&
             t.value.toLowerCase() === word.toLowerCase()
         );
@@ -366,25 +458,9 @@ export class SymbolFinderService {
         if (globalVar) {
             logger.info(`✅ Found global variable in current file: ${globalVar.value} at line ${globalVar.line} (< ${globalScopeEndLine})`);
             
-            // Get type from next token
-            const varIndex = tokens.indexOf(globalVar);
-            let typeInfo = 'UNKNOWN';
-            let declaration: string | undefined;
-            
-            if (varIndex + 1 < tokens.length) {
-                const nextToken = tokens[varIndex + 1];
-                if (nextToken.line === globalVar.line) {
-                    if (nextToken.type === TokenType.Type) {
-                        typeInfo = nextToken.value;
-                    } else if (nextToken.type === TokenType.Structure) {
-                        typeInfo = nextToken.value.toUpperCase(); // CLASS, GROUP, QUEUE
-                    }
-                    
-                    // Try to build full declaration
-                    const lineTokens = tokens.filter(t => t.line === globalVar.line);
-                    declaration = lineTokens.map(t => t.value).join(' ');
-                }
-            }
+            const typeInfo = SymbolFinderService.extractTypeInfo(globalVar, tokens);
+            const lineTokens = tokens.filter(t => t.line === globalVar.line);
+            const declaration = lineTokens.map(t => t.value).join(' ');
             
             return {
                 token: globalVar,
@@ -413,10 +489,43 @@ export class SymbolFinderService {
         
         if (memberToken && memberToken.referencedFile) {
             logger.info(`Found MEMBER reference to: ${memberToken.referencedFile}`);
-            return await this.findGlobalVariableInParentFile(word, memberToken.referencedFile, document);
+            const parentResult = await this.findGlobalVariableInParentFile(word, memberToken.referencedFile, document);
+            if (parentResult) return parentResult;
+            // Fall through to equates.clw check
         }
         
         logger.info(`❌ Global variable "${word}" not found in current file or parent`);
+
+        // Step 3: Check equates.clw — implicitly in global scope for all Clarion programs
+        const solutionManager = SolutionManager.getInstance();
+        if (solutionManager) {
+            const equatesTokens = solutionManager.getEquatesTokens();
+            const equatesPath = solutionManager.getEquatesPath();
+            if (equatesTokens && equatesTokens.length > 0 && equatesPath) {
+                const equatesVar = equatesTokens.find(t =>
+                    (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+                    t.start === 0 &&
+                    t.value.toLowerCase() === word.toLowerCase()
+                );
+                if (equatesVar) {
+                    logger.info(`✅ Found "${word}" in equates.clw at line ${equatesVar.line}`);
+                    const typeInfo = SymbolFinderService.extractTypeInfo(equatesVar, equatesTokens);
+                    const lineTokens = equatesTokens.filter(t => t.line === equatesVar.line);
+                    const declaration = lineTokens.map(t => t.value).join(' ');
+                    const equatesUri = `file:///${equatesPath.replace(/\\/g, '/')}`;
+                    return {
+                        token: equatesVar,
+                        type: typeInfo,
+                        scope: { token: equatesVar, type: 'global' },
+                        location: { uri: equatesUri, line: equatesVar.line, character: equatesVar.start },
+                        declaration,
+                        originalWord: word,
+                        searchWord: word
+                    };
+                }
+            }
+        }
+
         return null;
     }
     
@@ -476,25 +585,9 @@ export class SymbolFinderService {
             if (globalVar) {
                 logger.info(`✅ Found global variable in MEMBER parent: ${globalVar.value} at line ${globalVar.line}`);
                 
-                // Get type from next token
-                const varIndex = parentTokens.indexOf(globalVar);
-                let typeInfo = 'UNKNOWN';
-                let declaration: string | undefined;
-                
-                if (varIndex + 1 < parentTokens.length) {
-                    const nextToken = parentTokens[varIndex + 1];
-                    if (nextToken.line === globalVar.line) {
-                        if (nextToken.type === TokenType.Type) {
-                            typeInfo = nextToken.value;
-                        } else if (nextToken.type === TokenType.Structure) {
-                            typeInfo = nextToken.value.toUpperCase(); // CLASS, GROUP, QUEUE
-                        }
-                        
-                        // Try to build full declaration
-                        const lineTokens = parentTokens.filter(t => t.line === globalVar.line);
-                        declaration = lineTokens.map(t => t.value).join(' ');
-                    }
-                }
+                const typeInfo = SymbolFinderService.extractTypeInfo(globalVar, parentTokens);
+                const lineTokens = parentTokens.filter(t => t.line === globalVar.line);
+                const declaration = lineTokens.map(t => t.value).join(' ');
                 
                 return {
                     token: globalVar,
@@ -555,6 +648,10 @@ export class SymbolFinderService {
             // Try global variable
             const globalResult = await this.findGlobalVariable(word, tokens, document);
             if (globalResult) return globalResult;
+
+            // Try structure field (col-0 Label with a parent Structure token, e.g. queue/group fields in INC)
+            const fieldResult = this.findStructureField(word, tokens, position.line, document);
+            if (fieldResult) return fieldResult;
             
             return null;
         }

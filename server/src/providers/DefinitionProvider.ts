@@ -8,6 +8,7 @@ import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
@@ -19,6 +20,7 @@ import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { SymbolFinderService } from '../services/SymbolFinderService';
+import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
 logger.setLevel("error"); // Production: Only log errors
@@ -31,6 +33,7 @@ export class DefinitionProvider {
     private tokenCache = TokenCache.getInstance();
     private symbolProvider = new ClarionDocumentSymbolProvider();
     private memberResolver = new ClassMemberResolver();
+    private chainedResolver = new ChainedPropertyResolver();
     private overloadResolver = new MethodOverloadResolver();
     private mapResolver = new MapProcedureResolver();
     private symbolResolver = new SymbolDefinitionResolver();
@@ -79,7 +82,8 @@ export class DefinitionProvider {
             // Check if this is a method call (e.g., "self.SaveFile()" or "obj.Method()")
             const dotBeforeIndex = line.lastIndexOf('.', position.character - 1);
             if (dotBeforeIndex > 0) {
-                const beforeDot = line.substring(0, dotBeforeIndex).trim();
+                const rawBeforeDot = line.substring(0, dotBeforeIndex).trim();
+                const beforeDot = ChainedPropertyResolver.extractChain(rawBeforeDot);
                 const afterDot = line.substring(dotBeforeIndex + 1).trim();
                 const methodMatch = afterDot.match(/^(\w+)/);
                 
@@ -112,6 +116,97 @@ export class DefinitionProvider {
                             );
                         }
                     }
+
+                    if (hasParentheses && (beforeDot.toLowerCase() === 'parent' || beforeDot.toLowerCase().endsWith('parent'))) {
+                        // PARENT.Method() — look up the method starting from the parent class
+                        logger.info(`F12 on PARENT method call: PARENT.${methodName}()`);
+                        const paramCount = this.memberResolver.countParametersInCall(line, methodName);
+                        const memberInfo = await this.memberResolver.findParentClassMemberInfo(methodName, document, position.line, tokens, paramCount);
+                        if (memberInfo) {
+                            logger.info(`✅ Found PARENT method declaration at ${memberInfo.file}:${memberInfo.line}`);
+                            return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
+                        }
+                    }
+
+                    // Chained access: SELF.Order.MainKey or PARENT.Foo.Bar
+                    if (/^\s*(self|parent)\b/i.test(beforeDot) && beforeDot.includes('.')) {
+                        const paramCount = hasParentheses
+                            ? this.memberResolver.countParametersInCall(line, methodName)
+                            : undefined;
+                        const chainedInfo = await this.chainedResolver.resolve(beforeDot, methodName, document, position, paramCount ?? undefined);
+                        if (chainedInfo) {
+                            logger.info(`✅ Chained F12: "${methodName}" resolved at ${chainedInfo.file}:${chainedInfo.line}`);
+                            return Location.create(chainedInfo.file, Range.create(chainedInfo.line, 0, chainedInfo.line, 0));
+                        }
+                    }
+
+                    // SELF.property or PARENT.property (no parentheses) — find the class member declaration
+                    if (!hasParentheses && /^\s*(self|parent)\b/i.test(beforeDot)) {
+                        const isSelf = /\bself$/i.test(beforeDot);
+                        logger.info(`F12 on ${isSelf ? 'SELF' : 'PARENT'} property: ${methodName}`);
+                        const memberInfo = isSelf
+                            ? this.memberResolver.findClassMemberInfo(methodName, document, position.line, tokens, undefined)
+                            : await this.memberResolver.findParentClassMemberInfo(methodName, document, position.line, tokens, undefined);
+                        if (memberInfo) {
+                            logger.info(`✅ Found property declaration at ${memberInfo.file}:${memberInfo.line}`);
+                            return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
+                        }
+                    }
+
+                    // Typed variable member: st.GetValue() where st is declared as "st StringTheory"
+                    if (!/^\s*(self|parent)\b/i.test(beforeDot)) {
+                        const structureNameMatch = beforeDot.match(/(\w+)\s*$/);
+                        if (structureNameMatch) {
+                            const structureName = structureNameMatch[1];
+                            const classType = this.findVariableType(tokens, structureName, position.line);
+                            if (classType) {
+                                logger.info(`Variable "${structureName}" is type "${classType}", looking for member "${methodName}"`);
+                                const paramCount = hasParentheses
+                                    ? this.memberResolver.countParametersInCall(line, methodName) ?? undefined
+                                    : undefined;
+                                const result = await this.findClassMemberInType(tokens, classType, methodName, document, paramCount);
+                                if (result) {
+                                    logger.info(`✅ Found typed variable member "${methodName}" in "${classType}"`);
+                                    return result;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ✅ IMPLEMENTS(InterfaceName) navigation: F12 on interface name → INTERFACE declaration
+            const implementsMatch = line.match(/\bIMPLEMENTS\s*\(\s*(\w+)\s*\)/gi);
+            if (implementsMatch) {
+                for (const match of implementsMatch) {
+                    const nameMatch = match.match(/\bIMPLEMENTS\s*\(\s*(\w+)\s*\)/i);
+                    if (nameMatch) {
+                        const ifaceName = nameMatch[1];
+                        const nameStart = line.indexOf(ifaceName, line.indexOf(match));
+                        const nameEnd = nameStart + ifaceName.length;
+                        if (position.character >= nameStart && position.character <= nameEnd) {
+                            logger.info(`F12 on IMPLEMENTS(${ifaceName}) — looking for INTERFACE declaration`);
+                            const ifaceLocation = await this.findInterfaceDeclaration(ifaceName, document, tokens);
+                            if (ifaceLocation) {
+                                logger.info(`✅ Found INTERFACE '${ifaceName}' declaration`);
+                                return ifaceLocation;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ✅ 3-part method implementation: ClassName.InterfaceName.MethodName PROCEDURE
+            // When cursor is on the InterfaceName segment, navigate to the INTERFACE declaration
+            const threePartMatch = line.match(/^(\w+)\.(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)/i);
+            if (threePartMatch) {
+                const [, clsName, ifacePart, methodPart] = threePartMatch;
+                const ifaceStart = line.indexOf(ifacePart, clsName.length + 1);
+                const ifaceEnd = ifaceStart + ifacePart.length;
+                if (position.character >= ifaceStart && position.character <= ifaceEnd) {
+                    logger.info(`F12 on interface name in 3-part method: ${ifacePart}`);
+                    const ifaceLocation = await this.findInterfaceDeclaration(ifacePart, document, tokens);
+                    if (ifaceLocation) return ifaceLocation;
                 }
             }
 
@@ -190,12 +285,14 @@ export class DefinitionProvider {
             // and navigate to the declaration in the CLASS
             const methodImplMatch = line.match(ClarionPatterns.METHOD_IMPLEMENTATION_STRICT);
             if (methodImplMatch) {
-                const className = methodImplMatch[1];
-                const methodName = methodImplMatch[2];
+                const parts = ClarionPatterns.getMethodImplParts(line);
+                const className = parts?.className ?? methodImplMatch[1];
+                // For 3-part (Class.Interface.Method), use the actual method name
+                const methodName = parts?.methodName ?? methodImplMatch[2];
                 
-                logger.info(`🔍 Detected method implementation line: ${className}.${methodName}`);
+                logger.info(`🔍 Detected method implementation line: ${className}.${parts?.interfaceName ? parts.interfaceName + '.' : ''}${methodName}`);
                 
-                // Check if cursor is on the class or method name
+                // Check if cursor is on the class, interface, or method name segment
                 const classStart = line.indexOf(className);
                 const classEnd = classStart + className.length;
                 const methodStart = line.indexOf(methodName, classEnd);
@@ -210,6 +307,20 @@ export class DefinitionProvider {
                     // Count parameters from the implementation signature
                     const paramCount = ClarionPatterns.countParameters(line);
                     logger.info(`Method implementation has ${paramCount} parameters`);
+
+                    // For 3-part methods (Class.Interface.Method), the declaration is in the INTERFACE, not the CLASS
+                    if (parts?.interfaceName) {
+                        const ifaceMethodInfo = this.overloadResolver.findInterfaceMethodDeclaration(
+                            parts.interfaceName, methodName, document, tokens, paramCount, line
+                        );
+                        if (ifaceMethodInfo) {
+                            logger.info(`✅ Found interface method declaration at ${ifaceMethodInfo.file}:${ifaceMethodInfo.line}`);
+                            return Location.create(ifaceMethodInfo.file, {
+                                start: { line: ifaceMethodInfo.line, character: 0 },
+                                end: { line: ifaceMethodInfo.line, character: 0 }
+                            });
+                        }
+                    }
                     
                     const declInfo = this.overloadResolver.findMethodDeclaration(className, methodName, document, tokens, paramCount, line);
                     if (declInfo) {
@@ -286,7 +397,6 @@ export class DefinitionProvider {
             // Check if this is a structure field reference (either dot notation or prefix notation)
             const structureFieldDefinition = await this.findStructureFieldDefinition(word, document, position);
             if (structureFieldDefinition) {
-                logger.info(`Found structure field definition for ${word} in the current document`);
                 return structureFieldDefinition;
             }
 
@@ -338,7 +448,6 @@ export class DefinitionProvider {
                         return bPriority - aPriority;
                     });
                     
-                    logger.info(`Found ${accessibleLabels.length} accessible labels, returning highest priority (line ${accessibleLabels[0].range.start.line})`);
                     return accessibleLabels[0];
                 }
                 
@@ -350,15 +459,19 @@ export class DefinitionProvider {
             // Do this BEFORE checking MAP procedure implementations to avoid false positives
             const symbolDefinition = await this.findSymbolDefinition(word, document, position);
             if (symbolDefinition) {
-                logger.info(`Found symbol definition for ${word} in the current document`);
                 return symbolDefinition;
             }
 
             // Check if we're inside a MAP block and the word is a procedure declaration
             // Navigate to the PROCEDURE implementation
-            const mapProcImpl = this.mapResolver.findProcedureImplementation(word, tokens, document, position, line);
+            // Guard: skip if cursor is inside a PROCEDURE parameter list (word is a parameter type, not a call)
+            const isInsideProcSignature = /\bPROCEDURE\s*\(/i.test(line) && (() => {
+                const parenOpen = line.indexOf('(', line.search(/\bPROCEDURE\s*\(/i));
+                const parenClose = line.lastIndexOf(')');
+                return parenOpen >= 0 && position.character > parenOpen && position.character <= parenClose;
+            })();
+            const mapProcImpl = !isInsideProcSignature && this.mapResolver.findProcedureImplementation(word, tokens, document, position, line);
             if (mapProcImpl) {
-                logger.info(`Found PROCEDURE implementation for MAP declaration: ${word}`);
                 return mapProcImpl;
             }
 
@@ -367,24 +480,33 @@ export class DefinitionProvider {
             // This check must come AFTER MAP navigation checks so MAP declarations can navigate to implementations
             // VSCode won't show an error for this case
             if (this.isOnDeclaration(line, position, word)) {
-                logger.info(`F12 pressed on declaration - already at definition, returning null (no navigation)`);
                 return null;
             }
 
             // Next, check if this is a reference to a Clarion structure (queue, window, view, etc.)
             const structureDefinition = await this.findStructureDefinition(word, document, position);
             if (structureDefinition) {
-                logger.info(`Found structure definition for ${word} in the current document`);
                 return structureDefinition;
             }
 
-
+            // Check if this word is a type name (QUEUE/GROUP/etc) declared in an INCLUDE file
+            // Handles F12 on type names in LIKE(TypeName), QUEUE(TypeName), etc.
+            const typeDefInIncludes = await this.findTypeInIncludes(word, document);
+            if (typeDefInIncludes) {
+                return typeDefInIncludes;
+            }
 
             // Finally, check if this is a file reference
             // This is the lowest priority - only look for files if no local definitions are found
             if (this.fileResolver.isLikelyFileReference(word, document, position, tokens)) {
-                logger.info(`No local definition found for ${word}, looking for file reference`);
                 return await this.fileResolver.findFileDefinition(word, document.uri);
+            }
+
+            // Last resort: check if word is a CLASS type name via the class definition indexer
+            // This handles parameter types, variable types, etc. (e.g. "EditClass EC" in a PROCEDURE signature)
+            const classLocation = await this.findClassTypeDefinition(word, document);
+            if (classLocation) {
+                return classLocation;
             }
 
             return null;
@@ -1731,12 +1853,14 @@ export class DefinitionProvider {
         
         for (const param of params) {
             const trimmedParam = param.trim();
-            logger.info(`Checking parameter: "${trimmedParam}"`);
+            // Strip optional-parameter angle brackets: <Key K> → Key K
+            const stripped = trimmedParam.replace(/^<(.*)>$/, '$1').trim();
+            logger.info(`Checking parameter: "${stripped}"`);
             
             // Extract parameter name (last word before = or end of parameter)
             // Format: TYPE paramName or TYPE paramName=default or *TYPE paramName or &TYPE paramName
             // Match pattern: optional pointer/reference, whitespace, type, whitespace, paramName, optional =default
-            const paramMatch = trimmedParam.match(/[*&]?\s*\w+\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*=.*)?$/i);
+            const paramMatch = stripped.match(/[*&]?\s*\w+\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*=.*)?$/i);
             if (paramMatch) {
                 const paramName = paramMatch[1];
                 logger.info(`Extracted parameter name: "${paramName}"`);
@@ -1820,15 +1944,30 @@ export class DefinitionProvider {
     /**
      * Finds a class member in a specific class type
      */
-    private async findClassMemberInType(tokens: Token[], className: string, memberName: string, document: TextDocument): Promise<Location | null> {
-        logger.info(`Looking for member ${memberName} in class ${className}`);
+    private async findClassMemberInType(tokens: Token[], className: string, memberName: string, document: TextDocument, paramCount?: number): Promise<Location | null> {
+        logger.info(`Looking for member ${memberName} in class/structure ${className}`);
 
-        // Find the CLASS structure definition
+        // First: search current file tokens for any structure (CLASS, QUEUE, GROUP, FILE) with this label
+        const structureLabelToken = tokens.find(t =>
+            t.type === TokenType.Label &&
+            t.start === 0 &&
+            t.parent === undefined &&
+            t.value.toLowerCase() === className.toLowerCase()
+        );
+
+        if (structureLabelToken) {
+            logger.info(`Found structure definition for ${className} at line ${structureLabelToken.line}`);
+            const result = await this.findFieldInStructure(tokens, structureLabelToken, memberName, document, { line: structureLabelToken.line, character: 0 });
+            if (result) {
+                return Array.isArray(result) ? result[0] : result;
+            }
+        }
+
+        // Second: search CLASS structures (existing logic)
         const classTokens = TokenHelper.findClassStructures(tokens)
             .filter(token => token.line > 0);
 
         for (const classToken of classTokens) {
-            // Find the label token just before this CLASS
             const labelToken = tokens.find(t =>
                 t.type === TokenType.Label &&
                 t.line === classToken.line &&
@@ -1837,25 +1976,244 @@ export class DefinitionProvider {
 
             if (labelToken) {
                 logger.info(`Found class definition for ${className} at line ${labelToken.line}`);
-                
-                // Search for the member within the class structure  
-                // findFieldInStructure returns Definition (Location | Location[]), we need Location
                 const result = await this.findFieldInStructure(tokens, labelToken, memberName, document, { line: labelToken.line, character: 0 });
                 if (result) {
-                    // If it's an array, return the first location
                     return Array.isArray(result) ? result[0] : result;
                 }
             }
         }
 
-        // If not found in current file, search in INCLUDE files
-        logger.info(`Class ${className} not found in current file, searching includes`);
-        return this.findClassMemberInIncludes(className, memberName, document.uri);
+        // Third: not in current file — walk INCLUDE files
+        logger.info(`Structure ${className} not found in current file, searching INCLUDE files`);
+        const filePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const includeResult = await this.findMemberInIncludes(className, memberName, filePath, new Set());
+        if (includeResult) return includeResult;
+
+        // Check equates.clw (implicitly global)
+        const equatesPath = SolutionManager.getInstance()?.getEquatesPath();
+        if (equatesPath) {
+            const equatesResult = await this.findMemberInIncludes(className, memberName, equatesPath, new Set());
+            if (equatesResult) return equatesResult;
+        }
+
+        // Fourth: fall back to ClassMemberResolver (handles CLASS inheritance via class index)
+        logger.info(`Falling back to class index for ${className}.${memberName}`);
+        const memberInfo = await this.memberResolver.findMemberInNamedStructure(memberName, className, document, paramCount);
+        if (memberInfo) {
+            return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
+        }
+        return null;
     }
 
     /**
-     * Finds the type of a variable (for typed variable.member lookups)
+     * Walk INCLUDE files reachable from fromPath and find a structure with label=className,
+     * then look for memberName inside it. Uses TokenCache for already-opened files.
      */
+    private async findMemberInIncludes(
+        className: string,
+        memberName: string,
+        fromPath: string,
+        visited: Set<string>
+    ): Promise<Location | null> {
+        if (visited.has(fromPath.toLowerCase())) return null;
+        visited.add(fromPath.toLowerCase());
+
+        let content: string;
+        try { content = fs.readFileSync(fromPath, 'utf8'); } catch { return null; }
+
+        const includePattern = /INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/gi;
+        let match: RegExpExecArray | null;
+
+        while ((match = includePattern.exec(content)) !== null) {
+            const includeFile = match[1];
+
+            // Resolve via redirection, then relative fallback
+            let resolvedPath: string | null = null;
+            const solutionManager = SolutionManager.getInstance();
+            if (solutionManager?.solution) {
+                for (const project of solutionManager.solution.projects) {
+                    const resolved = project.getRedirectionParser().findFile(includeFile);
+                    if (resolved?.path && fs.existsSync(resolved.path)) {
+                        resolvedPath = resolved.path;
+                        break;
+                    }
+                }
+            }
+            if (!resolvedPath) {
+                const candidate = path.join(path.dirname(fromPath), includeFile);
+                if (fs.existsSync(candidate)) resolvedPath = candidate;
+            }
+            if (!resolvedPath) continue;
+
+            const uri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+            const incTokens = this.tokenCache.getTokensByUri(uri);
+
+            if (incTokens && incTokens.length > 0) {
+                const labelToken = incTokens.find(t =>
+                    t.type === TokenType.Label &&
+                    t.start === 0 &&
+                    t.parent === undefined &&
+                    t.value.toLowerCase() === className.toLowerCase()
+                );
+                if (labelToken) {
+                    logger.info(`Found ${className} in ${resolvedPath} at line ${labelToken.line}`);
+                    const { TextDocument } = await import('vscode-languageserver-textdocument');
+                    const incDoc = TextDocument.create(uri, 'clarion', 1, fs.readFileSync(resolvedPath, 'utf8'));
+                    const result = await this.findFieldInStructure(incTokens, labelToken, memberName, incDoc, { line: labelToken.line, character: 0 });
+                    if (result) return Array.isArray(result) ? result[0] : result;
+                }
+            }
+
+            const nested = await this.findMemberInIncludes(className, memberName, resolvedPath, visited);
+            if (nested) return nested;
+        }
+        return null;
+    }
+
+    /**
+     * Find INTERFACE declaration by name, searching:
+     * 1. Current document tokens
+     * 2. INCLUDE files
+     * 3. equates.clw
+     */
+    private async findInterfaceDeclaration(ifaceName: string, document: TextDocument, tokens: Token[]): Promise<Location | null> {
+        // Search current document
+        const local = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.subType === TokenType.Interface &&
+            t.label?.toLowerCase() === ifaceName.toLowerCase()
+        );
+        if (local) {
+            return Location.create(document.uri, Range.create(local.line, 0, local.line, 0));
+        }
+
+        // Search INCLUDE files
+        const result = await this.findTypeDeclarationInIncludes(ifaceName, decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\'), new Set());
+        if (result) return result;
+
+        // Search equates.clw
+        const sm = SolutionManager.getInstance();
+        const equatesTokens = sm?.getEquatesTokens();
+        const equatesPath = sm?.getEquatesPath();
+        if (equatesTokens && equatesPath) {
+            const eq = equatesTokens.find(t =>
+                t.type === TokenType.Structure &&
+                t.subType === TokenType.Interface &&
+                t.label?.toLowerCase() === ifaceName.toLowerCase()
+            );
+            if (eq) {
+                const uri = `file:///${equatesPath.replace(/\\/g, '/')}`;
+                return Location.create(uri, Range.create(eq.line, 0, eq.line, 0));
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Walk INCLUDE files reachable from the document and find a structure (QUEUE/GROUP/FILE/CLASS)
+     * declaration with label = typeName. Returns a Location pointing to that declaration line.
+     */
+    private async findTypeInIncludes(typeName: string, document: TextDocument): Promise<Location | null> {
+        const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const result = await this.findTypeDeclarationInIncludes(typeName, fromPath, new Set());
+        if (result) return result;
+
+        // Fallback: check equates.clw (implicitly global in all Clarion programs)
+        const solutionManager = SolutionManager.getInstance();
+        if (solutionManager) {
+            const equatesPath = solutionManager.getEquatesPath();
+            if (equatesPath) {
+                return this.findTypeDeclarationInIncludes(typeName, equatesPath, new Set());
+            }
+        }
+        return null;
+    }
+
+    private async findTypeDeclarationInIncludes(
+        typeName: string,
+        fromPath: string,
+        visited: Set<string>
+    ): Promise<Location | null> {
+        if (visited.has(fromPath.toLowerCase())) return null;
+        visited.add(fromPath.toLowerCase());
+
+        let content: string;
+        try { content = fs.readFileSync(fromPath, 'utf8'); } catch { return null; }
+
+        const includePattern = /INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/gi;
+        let match: RegExpExecArray | null;
+
+        while ((match = includePattern.exec(content)) !== null) {
+            const includeFile = match[1];
+            let resolvedPath: string | null = null;
+
+            const solutionManager = SolutionManager.getInstance();
+            if (solutionManager?.solution) {
+                for (const project of solutionManager.solution.projects) {
+                    const resolved = project.getRedirectionParser().findFile(includeFile);
+                    if (resolved?.path && fs.existsSync(resolved.path)) {
+                        resolvedPath = resolved.path;
+                        break;
+                    }
+                }
+            }
+            if (!resolvedPath) {
+                const candidate = path.join(path.dirname(fromPath), includeFile);
+                if (fs.existsSync(candidate)) resolvedPath = candidate;
+            }
+            if (!resolvedPath) continue;
+
+            const uri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+            let incTokens = this.tokenCache.getTokensByUri(uri);
+            if (!incTokens || incTokens.length === 0) {
+                try {
+                    const { TextDocument: TD } = await import('vscode-languageserver-textdocument');
+                    const incContent = fs.readFileSync(resolvedPath, 'utf8');
+                    const incDoc = TD.create(uri, 'clarion', 1, incContent);
+                    incTokens = this.tokenCache.getTokens(incDoc);
+                } catch { incTokens = null; }
+            }
+
+            if (incTokens && incTokens.length > 0) {
+                const labelToken = incTokens.find(t =>
+                    (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+                    t.start === 0 &&
+                    t.value.toLowerCase() === typeName.toLowerCase()
+                );
+                if (labelToken) {
+                    logger.info(`Found type "${typeName}" in ${resolvedPath}:${labelToken.line}`);
+                    return Location.create(uri, Range.create(labelToken.line, 0, labelToken.line, 0));
+                }
+            }
+
+            const nested = await this.findTypeDeclarationInIncludes(typeName, resolvedPath, visited);
+            if (nested) return nested;
+        }
+        return null;
+    }
+
+
+    private async findClassTypeDefinition(word: string, document: TextDocument): Promise<Location | null> {
+        try {
+            const fromPath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
+            const projectPath = path.dirname(fromPath);
+
+            const classIndexer = ClassDefinitionIndexer.getInstance();
+            await classIndexer.getOrBuildIndex(projectPath);
+            const definitions = classIndexer.findClass(word, projectPath);
+            if (!definitions || definitions.length === 0) return null;
+
+            const def = definitions[0];
+            const uri = `file:///${def.filePath.replace(/\\/g, '/')}`;
+            logger.error(`✅ CLASS type F12: "${word}" → ${def.filePath}:${def.lineNumber}`);
+            return Location.create(uri, Range.create(def.lineNumber, 0, def.lineNumber, 0));
+        } catch (e) {
+            logger.error(`findClassTypeDefinition error: ${e}`);
+            return null;
+        }
+    }
+
     private findVariableType(tokens: Token[], variableName: string, currentLine: number): string | null {
         logger.info(`Looking for type of variable ${variableName}`);
 
@@ -1863,7 +2221,8 @@ export class DefinitionProvider {
         const varTokens = tokens.filter(token =>
             (token.type === TokenType.Variable ||
                 token.type === TokenType.ReferenceVariable ||
-                token.type === TokenType.ImplicitVariable) &&
+                token.type === TokenType.ImplicitVariable ||
+                token.type === TokenType.Label) &&
             token.value.toLowerCase() === variableName.toLowerCase() &&
             token.start === 0
         );
@@ -1883,6 +2242,35 @@ export class DefinitionProvider {
         // Find the type token on the same line (should be after the variable name)
         const lineTokens = TokenHelper.findTokens(tokens, { line: varToken.line })
             .filter(t => t.start > varToken.start);
+
+        // Handle QUEUE(TypeName), GROUP(TypeName), CLASS(TypeName) — type is inside parens
+        const structureToken = lineTokens.find(t => t.type === TokenType.Structure);
+        if (structureToken) {
+            const afterStructure = lineTokens.filter(t => t.start > structureToken.start);
+            const typeArg = afterStructure.find(t =>
+                (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+                t.value !== '(' && t.value !== ')'
+            );
+            if (typeArg) {
+                logger.info(`Found structure type arg ${typeArg.value} for variable ${variableName}`);
+                return typeArg.value;
+            }
+        }
+
+        // Handle LIKE(TypeName) — mirrors type of a named variable/type
+        const likeToken = lineTokens.find(t => t.type === TokenType.TypeReference);
+        if (likeToken) {
+            const afterLike = lineTokens.filter(t => t.start > likeToken.start);
+            const typeArg = afterLike.find(t =>
+                (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+                t.value !== '(' && t.value !== ')'
+            );
+            if (typeArg) {
+                logger.info(`Found LIKE type arg ${typeArg.value} for variable ${variableName}`);
+                return typeArg.value;
+            }
+        }
+
         const typeToken = lineTokens.find(t =>
             t.type === TokenType.Type || 
             t.type === TokenType.Label || // Class names appear as labels
@@ -2007,8 +2395,8 @@ export class DefinitionProvider {
             return false;
         }
         
-        // Rule out method implementations (ClassName.MethodName PROCEDURE)
-        const isMethodImplementation = /^\s*\w+\.\w+\s+(PROCEDURE|FUNCTION)/i.test(line);
+        // Rule out method implementations: ClassName.MethodName or ClassName.IFace.MethodName PROCEDURE
+        const isMethodImplementation = /^\s*\w+\.\w+(?:\.\w+)?\s+(PROCEDURE|FUNCTION)/i.test(line);
         if (isMethodImplementation) {
             return false;
         }

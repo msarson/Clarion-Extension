@@ -9,17 +9,20 @@
  */
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { Location, Position } from 'vscode-languageserver-protocol';
+import { Location, Position, Range } from 'vscode-languageserver-protocol';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { MapProcedureResolver } from '../utils/MapProcedureResolver';
 import { CrossFileResolver } from '../utils/CrossFileResolver';
+import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { SolutionManager } from '../solution/solutionManager';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { TokenHelper } from '../utils/TokenHelper';
 import LoggerManager from '../logger';
 import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { CrossFileCache } from './hover/CrossFileCache';
+import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -31,12 +34,18 @@ export class ImplementationProvider {
     private mapResolver: MapProcedureResolver;
     private crossFileResolver: CrossFileResolver;
     private crossFileCache: CrossFileCache;
+    private overloadResolver: MethodOverloadResolver;
+    private memberResolver: ClassMemberResolver;
+    private chainedResolver: ChainedPropertyResolver;
 
     constructor() {
         this.tokenCache = TokenCache.getInstance();
         this.crossFileCache = new CrossFileCache(this.tokenCache);
         this.mapResolver = new MapProcedureResolver(this.crossFileCache);
         this.crossFileResolver = new CrossFileResolver(this.tokenCache);
+        this.overloadResolver = new MethodOverloadResolver();
+        this.memberResolver = new ClassMemberResolver();
+        this.chainedResolver = new ChainedPropertyResolver();
     }
 
     /**
@@ -310,12 +319,99 @@ export class ImplementationProvider {
         position: Position,
         line: string
     ): Promise<Location | null> {
-        // Pattern 1: Method call like SELF.MethodName() or object.MethodName()
-        const methodCallMatch = line.match(/(\w+)\.(\w+)\s*\(/gi);
+        // Pattern 1b: Chained access like SELF.Order.MainKey or PARENT.Foo.Bar
+        // Must be checked BEFORE Pattern 1 because Pattern 1's regex matches the last
+        // X.Y( pair in a chain (e.g. RangeList.Init() from SELF.Order.RangeList.Init())
+        // and returns before reaching this block.
+        {
+            const dotBeforeIndex = line.lastIndexOf('.', position.character - 1);
+            if (dotBeforeIndex > 0) {
+                const rawBeforeDot = line.substring(0, dotBeforeIndex).trim();
+                const beforeDot = ChainedPropertyResolver.extractChain(rawBeforeDot);
+                if (/^\s*(self|parent)\b/i.test(beforeDot) && beforeDot.includes('.')) {
+                    const afterDot = line.substring(dotBeforeIndex + 1).trim();
+                    const methodMatch = afterDot.match(/^(\w+)/);
+                    if (methodMatch) {
+                        const memberName = methodMatch[1];
+                        const tokens = this.tokenCache.getTokens(document);
+                        const hasParens = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
+                        const paramCount = hasParens
+                            ? this.memberResolver.countParametersInCall(line, memberName)
+                            : 0;
+                        const chainedInfo = await this.chainedResolver.resolve(beforeDot, memberName, document, position, paramCount);
+                        if (chainedInfo) {
+                            logger.info(`✅ Chained Ctrl+F12: "${memberName}" → impl lookup at ${chainedInfo.file}:${chainedInfo.line}`);
+                            // For methods, try to find the implementation; for properties just return declaration
+                            if (chainedInfo.type.toUpperCase().startsWith('PROCEDURE')) {
+                                const implLoc = await this.findMethodImplementationCrossFile(
+                                    chainedInfo.className, memberName, document, paramCount, null, line,
+                                    chainedInfo.file
+                                );
+                                if (implLoc) return implLoc;
+                            }
+                            return Location.create(chainedInfo.file, Range.create(chainedInfo.line, 0, chainedInfo.line, 0));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Pattern 1: Method call like SELF.MethodName() or PARENT.MethodName() or object.MethodName()
+        // Also handles no-paren calls: FuzzyMatcher.Init (Clarion allows no-param methods without ())
+        const methodCallMatch = line.match(/(\w+)\.(\w+)\s*\(?/gi);
         if (methodCallMatch) {
             const callInfo = this.extractMethodCall(line, position);
             if (callInfo) {
-                logger.info(`Found method call: ${callInfo.methodName} with ${callInfo.paramCount} params`);
+                logger.info(`Found method call: ${callInfo.objectName}.${callInfo.methodName} with ${callInfo.paramCount} params`);
+
+                // PARENT.Method() — find the parent class and search for its implementation
+                if (callInfo.objectName.toUpperCase() === 'PARENT') {
+                    const tokens = this.tokenCache.getTokens(document);
+                    const parentInfo = await this.memberResolver.getParentClassInfo(document, position.line, tokens);
+                    if (parentInfo) {
+                        logger.info(`PARENT.${callInfo.methodName} → searching for ${parentInfo.parentClassName}.${callInfo.methodName} implementation`);
+                        const impl = await this.findMethodImplementationCrossFile(
+                            parentInfo.parentClassName,
+                            callInfo.methodName,
+                            document,
+                            callInfo.paramCount,
+                            parentInfo.moduleFile ?? null,
+                            line
+                        );
+                        if (impl) return impl;
+                    }
+                    return null;
+                }
+
+                // SELF.Method() — handled above in Pattern 1b or earlier; skip
+                if (callInfo.objectName.toUpperCase() === 'SELF') {
+                    return this.findMethodImplementationInFile(document, callInfo.methodName, callInfo.paramCount);
+                }
+
+                // Typed variable: st.GetValue() where st is declared as "st StringTheory"
+                {
+                    const tokens = this.tokenCache.getTokens(document);
+                    const classType = this.findVariableType(tokens, callInfo.objectName);
+                    if (classType) {
+                        logger.info(`Variable "${callInfo.objectName}" is type "${classType}", finding impl of "${callInfo.methodName}"`);
+                        const memberInfo = await this.memberResolver.findMemberInNamedStructure(
+                            callInfo.methodName, classType, document, callInfo.paramCount
+                        );
+                        if (memberInfo) {
+                            if (memberInfo.type.toUpperCase().includes('PROCEDURE')) {
+                                const impl = await this.memberResolver.findImplementationCrossFile(
+                                    classType, callInfo.methodName, memberInfo, document
+                                );
+                                if (impl) {
+                                    logger.info(`✅ Found typed variable impl "${callInfo.methodName}" in "${classType}"`);
+                                    return impl;
+                                }
+                            }
+                            return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
+                        }
+                    }
+                }
+
                 return this.findMethodImplementationInFile(document, callInfo.methodName, callInfo.paramCount);
             }
         }
@@ -384,7 +480,8 @@ export class ImplementationProvider {
                     tokenAtPosition.label,
                     document,
                     paramCount,
-                    moduleFile
+                    moduleFile,
+                    line
                 );
                 
                 if (implementation) {
@@ -405,7 +502,8 @@ export class ImplementationProvider {
     private extractMethodCall(
         line: string,
         position: Position
-    ): { methodName: string; paramCount: number } | null {
+    ): { objectName: string; methodName: string; paramCount: number } | null {
+        // First try with parens: Object.Method(...) or Object.Method()
         const regex = /(\w+)\.(\w+)\s*\((.*?)\)/gi;
         let match: RegExpExecArray | null;
 
@@ -414,11 +512,24 @@ export class ImplementationProvider {
             const callEnd = match.index + match[0].length;
 
             if (position.character >= callStart && position.character <= callEnd) {
+                const objectName = match[1];
                 const methodName = match[2];
                 const paramList = match[3].trim();
                 const paramCount = paramList === '' ? 0 : paramList.split(',').length;
 
-                return { methodName, paramCount };
+                return { objectName, methodName, paramCount };
+            }
+        }
+
+        // Fallback: no-paren dotted call — Object.Method (Clarion allows calling
+        // no-parameter methods without parentheses)
+        const noParenRegex = /(\w+)\.(\w+)(?!\s*\()/gi;
+        while ((match = noParenRegex.exec(line)) !== null) {
+            const callStart = match.index;
+            const callEnd = match.index + match[0].length;
+
+            if (position.character >= callStart && position.character <= callEnd) {
+                return { objectName: match[1], methodName: match[2], paramCount: 0 };
             }
         }
 
@@ -431,7 +542,9 @@ export class ImplementationProvider {
     private findMethodImplementationInFile(
         document: TextDocument,
         methodName: string,
-        paramCount?: number
+        paramCount?: number,
+        declarationSignature?: string,
+        className?: string
     ): Location | null {
         const text = document.getText();
         const lines = text.split(/\r?\n/);
@@ -453,69 +566,48 @@ export class ImplementationProvider {
             }
         }
 
-        // Search for method implementation: ClassName.MethodName PROCEDURE
-        let bestMatch: { line: number; distance: number } | null = null;
+        // Collect all matching candidates
+        const candidates: { lineNum: number; signature: string }[] = [];
 
         for (let i = 0; i < lines.length; i++) {
-            // Skip MAP blocks
-            const isInMapBlock = mapBlocks.some(block => i >= block.start && i <= block.end);
-            if (isInMapBlock) {
-                continue;
-            }
+            if (mapBlocks.some(block => i >= block.start && i <= block.end)) continue;
 
             const line = lines[i];
             const implMatch = line.match(ClarionPatterns.METHOD_IMPLEMENTATION);
 
             if (implMatch && implMatch[2].toUpperCase() === methodName.toUpperCase()) {
-                // Found a matching method name
-                if (paramCount === undefined) {
-                    // No parameter count specified, return first match
-                    logger.info(`✅ Found method implementation at line ${i}`);
-                    return Location.create(
-                        document.uri,
-                        {
-                            start: { line: i, character: 0 },
-                            end: { line: i, character: implMatch[0].length }
-                        }
-                    );
-                }
-
-                // Count parameters to find best match
-                const params = implMatch[3] ? implMatch[3].trim() : '';
-                const implParamCount = params === '' ? 0 : params.split(',').length;
-                const distance = Math.abs(implParamCount - paramCount);
-
-                if (distance === 0) {
-                    // Exact match
-                    logger.info(`✅ Found exact parameter match at line ${i}`);
-                    return Location.create(
-                        document.uri,
-                        {
-                            start: { line: i, character: 0 },
-                            end: { line: i, character: implMatch[0].length }
-                        }
-                    );
-                }
-
-                if (bestMatch === null || distance < bestMatch.distance) {
-                    bestMatch = { line: i, distance };
-                }
+                // If caller specified a class name, only match that class
+                if (className && implMatch[1].toUpperCase() !== className.toUpperCase()) continue;
+                candidates.push({ lineNum: i, signature: line.trim() });
             }
         }
 
-        // Return best match if found
-        if (bestMatch !== null) {
-            logger.info(`✅ Found closest parameter match at line ${bestMatch.line}`);
-            return Location.create(
-                document.uri,
-                {
-                    start: { line: bestMatch.line, character: 0 },
-                    end: { line: bestMatch.line, character: 0 }
-                }
-            );
+        if (candidates.length === 0) return null;
+
+        let bestIdx = 0;
+        if (candidates.length > 1) {
+            if (declarationSignature) {
+                bestIdx = this.overloadResolver.findBestMatchingImplementation(
+                    declarationSignature,
+                    candidates.map(c => c.signature)
+                );
+            } else if (paramCount !== undefined) {
+                const countMatch = candidates.findIndex(c =>
+                    ClarionPatterns.countParameters(c.signature) === paramCount
+                );
+                if (countMatch !== -1) bestIdx = countMatch;
+            }
         }
 
-        return null;
+        const best = candidates[bestIdx];
+        logger.info(`✅ Found method implementation at line ${best.lineNum}`);
+        return Location.create(
+            document.uri,
+            {
+                start: { line: best.lineNum, character: 0 },
+                end: { line: best.lineNum, character: lines[best.lineNum].length }
+            }
+        );
     }
 
     /**
@@ -568,6 +660,35 @@ export class ImplementationProvider {
     }
 
     /**
+     * Finds the class type of a variable declared at column 0.
+     * Returns null for built-in types; returns the class name for user-defined types.
+     */
+    private findVariableType(tokens: Token[], variableName: string): string | null {
+        const varToken = tokens.find(t =>
+            t.start === 0 &&
+            t.value.toLowerCase() === variableName.toLowerCase()
+        );
+        if (!varToken) return null;
+
+        const idx = tokens.indexOf(varToken);
+        if (idx + 1 >= tokens.length) return null;
+
+        const nextToken = tokens[idx + 1];
+        if (nextToken.line !== varToken.line) return null;
+
+        // Only user-defined class names (not built-in Type/Structure/Keyword tokens)
+        if (nextToken.type === TokenType.Type ||
+            nextToken.type === TokenType.Structure ||
+            nextToken.type === TokenType.Keyword) {
+            return null;
+        }
+        if (nextToken.type === TokenType.Variable || nextToken.type === TokenType.Label) {
+            return nextToken.value;
+        }
+        return null;
+    }
+
+    /**
      * Find method implementation across all files in solution
      */
     private async findMethodImplementationCrossFile(
@@ -575,12 +696,14 @@ export class ImplementationProvider {
         methodName: string,
         currentDocument: TextDocument,
         paramCount?: number,
-        moduleFile?: string | null
+        moduleFile?: string | null,
+        declarationSignature?: string,
+        declarationFile?: string
     ): Promise<Location | null> {
         logger.info(`Searching for ${className}.${methodName} implementation cross-file`);
         
-        // First, search in current file
-        const localImpl = this.findMethodImplementationInFile(currentDocument, methodName, paramCount);
+        // First, search in current file (filtered by className to avoid matching wrong class)
+        const localImpl = this.findMethodImplementationInFile(currentDocument, methodName, paramCount, declarationSignature, className);
         if (localImpl) {
             return localImpl;
         }
@@ -603,7 +726,8 @@ export class ImplementationProvider {
                             resolved.path,
                             className,
                             methodName,
-                            paramCount
+                            paramCount,
+                            declarationSignature
                         );
                         if (implLocation) {
                             return implLocation;
@@ -621,7 +745,8 @@ export class ImplementationProvider {
                         relativeModulePath,
                         className,
                         methodName,
-                        paramCount
+                        paramCount,
+                        declarationSignature
                     );
                     if (implLocation) {
                         return implLocation;
@@ -663,7 +788,8 @@ export class ImplementationProvider {
                     fullPath,
                     className,
                     methodName,
-                    paramCount
+                    paramCount,
+                    declarationSignature
                 );
                 
                 if (implLocation) {
@@ -671,7 +797,49 @@ export class ImplementationProvider {
                 }
             }
         }
-        
+
+        // Fallback: use the redirection parser to find the CLW file that corresponds to
+        // the class declaration file (same base name, .clw extension).
+        // e.g. ABUTIL.INC → look up ABUTIL.CLW via redirection.
+        if (declarationFile) {
+            // declarationFile may be a URI — convert to filesystem path
+            let declFilePath = declarationFile;
+            if (declFilePath.startsWith('file:///')) {
+                declFilePath = decodeURIComponent(declFilePath.replace('file:///', '')).replace(/\//g, '\\');
+            }
+            const declBase = path.basename(declFilePath, path.extname(declFilePath));
+            const implFileName = declBase + '.clw';
+            const currentPath = decodeURIComponent(currentDocument.uri.replace('file:///', '')).replace(/\//g, '\\');
+
+            logger.info(`Searching for ${className}.${methodName} via redirection: ${implFileName}`);
+
+            const sm = SolutionManager.getInstance();
+            if (sm?.solution) {
+                for (const project of sm.solution.projects) {
+                    const redirectionParser = project.getRedirectionParser();
+                    const resolved = redirectionParser.findFile(implFileName, currentPath);
+                    if (resolved?.path && fs.existsSync(resolved.path)) {
+                        logger.info(`Redirection resolved ${implFileName} → ${resolved.path}`);
+                        const implLocation = this.searchFileForMethodImplementation(
+                            resolved.path, className, methodName, paramCount, declarationSignature
+                        );
+                        if (implLocation) return implLocation;
+                    }
+                }
+            }
+
+            // No solution / redirection failed — fall back to same directory as declaration
+            const declDir = path.dirname(declFilePath);
+            const directPath = path.join(declDir, implFileName);
+            if (fs.existsSync(directPath)) {
+                logger.info(`Direct fallback: ${directPath}`);
+                const implLocation = this.searchFileForMethodImplementation(
+                    directPath, className, methodName, paramCount, declarationSignature
+                );
+                if (implLocation) return implLocation;
+            }
+        }
+
         logger.info(`❌ No implementation found for ${className}.${methodName}`);
         return null;
     }
@@ -683,48 +851,75 @@ export class ImplementationProvider {
         fullPath: string,
         className: string,
         methodName: string,
-        paramCount?: number
+        paramCount?: number,
+        declarationSignature?: string
     ): Location | null {
         try {
             const content = fs.readFileSync(fullPath, 'utf8');
             const lines = content.split(/\r?\n/);
-            
-            // Search for method implementation: ClassName.MethodName PROCEDURE
+
+            // Collect all matching candidates
+            const candidates: { lineNum: number; signature: string }[] = [];
+
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
                 const implMatch = line.match(ClarionPatterns.METHOD_IMPLEMENTATION);
-                
-                if (implMatch && 
+
+                if (implMatch &&
                     implMatch[1].toUpperCase() === className.toUpperCase() &&
                     implMatch[2].toUpperCase() === methodName.toUpperCase()) {
-                    
-                    // Found a potential match - check parameter count if specified
-                    if (paramCount !== undefined) {
-                        const params = implMatch[3] ? implMatch[3].trim() : '';
-                        const implParamCount = params === '' ? 0 : params.split(',').length;
-                        
-                        if (implParamCount !== paramCount) {
-                            logger.info(`Parameter count mismatch: expected ${paramCount}, found ${implParamCount}`);
-                            continue;
-                        }
-                    }
-                    
-                    logger.info(`✅ Found implementation in ${fullPath} at line ${i}`);
-                    const fileUri = `file:///${fullPath.replace(/\\/g, '/')}`;
-                    
-                    return Location.create(
-                        fileUri,
-                        {
-                            start: { line: i, character: 0 },
-                            end: { line: i, character: implMatch[0].length }
-                        }
-                    );
+                    candidates.push({ lineNum: i, signature: line.trim() });
                 }
             }
+
+            if (candidates.length === 0) return null;
+
+            let bestIdx = 0;
+            if (candidates.length > 1) {
+                if (declarationSignature) {
+                    bestIdx = this.overloadResolver.findBestMatchingImplementation(
+                        declarationSignature,
+                        candidates.map(c => c.signature)
+                    );
+                } else if (paramCount !== undefined) {
+                    // Exact match first
+                    const exactMatch = candidates.findIndex(c =>
+                        ClarionPatterns.countParameters(c.signature) === paramCount
+                    );
+                    if (exactMatch !== -1) {
+                        bestIdx = exactMatch;
+                    } else {
+                        // No exact match — find closest, preferring higher param count
+                        // (implementations have no default-param markers, so a 3-param
+                        // implementation is the right target for a 2-arg call when the
+                        // declaration has a default on the 3rd param)
+                        bestIdx = candidates.reduce((bestI, c, i) => {
+                            const bestCount = ClarionPatterns.countParameters(candidates[bestI].signature);
+                            const currCount = ClarionPatterns.countParameters(c.signature);
+                            const bestDiff = Math.abs(bestCount - paramCount);
+                            const currDiff = Math.abs(currCount - paramCount);
+                            if (currDiff < bestDiff) return i;
+                            if (currDiff === bestDiff && currCount > bestCount) return i;
+                            return bestI;
+                        }, 0);
+                    }
+                }
+            }
+
+            const best = candidates[bestIdx];
+            logger.info(`✅ Found implementation in ${fullPath} at line ${best.lineNum}`);
+            const fileUri = `file:///${fullPath.replace(/\\/g, '/')}`;
+            return Location.create(
+                fileUri,
+                {
+                    start: { line: best.lineNum, character: 0 },
+                    end: { line: best.lineNum, character: lines[best.lineNum].length }
+                }
+            );
         } catch (error) {
             logger.error(`Error reading file ${fullPath}: ${error instanceof Error ? error.message : String(error)}`);
         }
-        
+
         return null;
     }
 }

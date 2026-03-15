@@ -25,7 +25,7 @@ export class ClassConstantsCodeActionProvider {
     private includeVerifier: IncludeVerifier;
 
     constructor() {
-        this.classIndexer = new ClassDefinitionIndexer();
+        this.classIndexer = ClassDefinitionIndexer.getInstance();
         this.includeVerifier = new IncludeVerifier();
     }
 
