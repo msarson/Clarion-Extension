@@ -126,7 +126,8 @@ export class MethodHoverResolver {
             );
             
             // If we have a label at start of line and PROCEDURE on same line, it's likely a method declaration
-            if (labelToken && procedureToken) {
+            // Guard: exclude implementation lines (MethodImplementation subType means Class.Method PROCEDURE)
+            if (labelToken && procedureToken && procedureToken.subType !== TokenType.MethodImplementation) {
                 logger.info(`Found method declaration pattern: Label="${labelToken.value}" + PROCEDURE on line ${position.line}`);
                 currentToken = labelToken;
             }

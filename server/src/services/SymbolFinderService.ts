@@ -99,6 +99,10 @@ export class SymbolFinderService {
 
         if (next.type === TokenType.Type) return next.value;
         if (next.type === TokenType.Variable || next.type === TokenType.Label) return next.value;
+        if (next.type === TokenType.ReferenceVariable) {
+            // &TypeName — strip leading '&'
+            return next.value.startsWith('&') ? next.value.substring(1) : next.value;
+        }
         if (next.type === TokenType.Structure) {
             // Look for type arg: QUEUE(TypeName) → "QUEUE(TypeName)"
             const lineTokens = tokens.filter(t => t.line === labelToken.line && t.start > next.start);

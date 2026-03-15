@@ -147,7 +147,7 @@ export class HoverProvider {
                 logger.info('No scope found - checking for global variables');
                 
                 // Check for global variable (in current file or MEMBER parent)
-                const globalVarHover = await this.variableResolver.findGlobalVariableHover(word, tokens, document);
+                const globalVarHover = await this.variableResolver.findGlobalVariableHover(word, tokens, document, position.line);
                 if (globalVarHover) return globalVarHover;
                 
                 logger.info('No scope found and no global variable found - cannot provide hover');
@@ -171,11 +171,11 @@ export class HoverProvider {
             if (parameterHover) return parameterHover;
 
             logger.info(`Checking if ${word} (full word) is a local variable...`);
-            let variableHover = await this.variableResolver.findLocalVariableHover(word, tokens, currentScope, document, word);
+            let variableHover = await this.variableResolver.findLocalVariableHover(word, tokens, currentScope, document, word, position.line);
             if (variableHover) return variableHover;
             
             logger.info(`Checking for ${word} (full word) as module-local variable...`);
-            let moduleVarHover = this.variableResolver.findModuleVariableHover(word, tokens, document);
+            let moduleVarHover = this.variableResolver.findModuleVariableHover(word, tokens, document, position.line);
             if (moduleVarHover) return moduleVarHover;
 
             // If not found and word contains colon, try stripping prefix (e.g., LOC:Field -> Field)
@@ -196,13 +196,13 @@ export class HoverProvider {
 
                 // Check if this is a local variable (with prefix stripped)
                 logger.info(`Checking if ${searchWord} is a local variable...`);
-                variableHover = await this.variableResolver.findLocalVariableHover(searchWord, tokens, currentScope, document, word);
+                variableHover = await this.variableResolver.findLocalVariableHover(searchWord, tokens, currentScope, document, word, position.line);
                 if (variableHover) return variableHover;
                 logger.info(`${searchWord} is not a local variable`);
                 
                 // 🔗 Check for module-local variable in current file (with prefix stripped)
                 logger.info(`Checking for module-local variable in current file...`);
-                moduleVarHover = this.variableResolver.findModuleVariableHover(searchWord, tokens, document);
+                moduleVarHover = this.variableResolver.findModuleVariableHover(searchWord, tokens, document, position.line);
                 if (moduleVarHover) return moduleVarHover;
             } else {
                 logger.info(`${word} has no prefix, already searched as-is`);
@@ -255,7 +255,7 @@ export class HoverProvider {
                     }
                     
                     // Not a procedure - check for global variable in parent
-                    const globalVarHover = await this.variableResolver.findGlobalVariableHover(searchWord, parentTokens, parentDoc);
+                    const globalVarHover = await this.variableResolver.findGlobalVariableHover(searchWord, parentTokens, parentDoc, position.line);
                     if (globalVarHover) return globalVarHover;
                 }
             }

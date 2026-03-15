@@ -53,7 +53,7 @@ export class VariableHoverResolver {
     /**
      * Find and format hover for a local variable
      */
-    async findLocalVariableHover(word: string, tokens: Token[], currentScope: Token, document: TextDocument, originalWord?: string): Promise<Hover | null> {
+    async findLocalVariableHover(word: string, tokens: Token[], currentScope: Token, document: TextDocument, originalWord?: string, hoverLine?: number): Promise<Hover | null> {
         const symbolInfo = this.symbolFinder.findLocalVariable(word, tokens, currentScope, document, originalWord);
         
         if (symbolInfo) {
@@ -62,7 +62,7 @@ export class VariableHoverResolver {
                 type: symbolInfo.type,
                 line: symbolInfo.location.line
             };
-            const baseHover = this.formatter.formatVariable(originalWord || word, variableInfo, currentScope, document);
+            const baseHover = this.formatter.formatVariable(originalWord || word, variableInfo, currentScope, document, hoverLine);
             
             // Enhance with class definition info if applicable
             return await this.enhanceHoverWithClassInfo(baseHover, symbolInfo.type, document);
@@ -73,7 +73,7 @@ export class VariableHoverResolver {
     /**
      * Find and format hover for a module-local variable
      */
-    findModuleVariableHover(searchWord: string, tokens: Token[], document: TextDocument): Hover | null {
+    findModuleVariableHover(searchWord: string, tokens: Token[], document: TextDocument, hoverLine?: number): Hover | null {
         logger.info(`Checking for module-local variable in current file: ${searchWord}...`);
         
         const symbolInfo = this.symbolFinder.findModuleVariable(searchWord, tokens, document);
@@ -119,7 +119,9 @@ export class VariableHoverResolver {
         }
         
         markdown.push(``);
-        markdown.push(`F12 → Go to declaration`);
+        if (hoverLine === undefined || hoverLine !== symbolInfo.location.line) {
+            markdown.push(`F12 → Go to declaration`);
+        }
         
         return {
             contents: {
@@ -132,7 +134,7 @@ export class VariableHoverResolver {
     /**
      * Find and format hover for a global variable (in current or parent file)
      */
-    async findGlobalVariableHover(searchWord: string, tokens: Token[], document: TextDocument): Promise<Hover | null> {
+    async findGlobalVariableHover(searchWord: string, tokens: Token[], document: TextDocument, hoverLine?: number): Promise<Hover | null> {
         // First, check for global variable in CURRENT file (PROGRAM)
         const firstCodeToken = tokens.find(t => 
             t.type === TokenType.Keyword && 
@@ -149,7 +151,7 @@ export class VariableHoverResolver {
         
         if (globalVar) {
             logger.info(`✅ Found global variable in current file: ${globalVar.value} at line ${globalVar.line}`);
-            return this.buildGlobalVariableHover(globalVar, tokens, document);
+            return this.buildGlobalVariableHover(globalVar, tokens, document, hoverLine);
         }
         
         // If not found in current file, check for global variable in MEMBER parent file
@@ -190,7 +192,7 @@ export class VariableHoverResolver {
     /**
      * Build hover for a global variable
      */
-    private buildGlobalVariableHover(globalVar: Token, tokens: Token[], document: TextDocument): Hover {
+    private buildGlobalVariableHover(globalVar: Token, tokens: Token[], document: TextDocument, hoverLine?: number): Hover {
         const globalIndex = tokens.indexOf(globalVar);
         let typeInfo = 'UNKNOWN';
         if (globalIndex + 1 < tokens.length) {
@@ -218,10 +220,25 @@ export class VariableHoverResolver {
                     typeInfo = typeArg ? `LIKE(${typeArg.value})` : 'LIKE';
                 } else if (nextToken.type === TokenType.Variable || nextToken.type === TokenType.Label) {
                     typeInfo = nextToken.value; // user-defined class name
+                } else if (nextToken.type === TokenType.ReferenceVariable) {
+                    // &TypeName reference variable — strip leading '&'
+                    typeInfo = nextToken.value.startsWith('&') ? nextToken.value.substring(1) : nextToken.value;
                 } else if (nextToken.type === TokenType.Procedure) {
                     typeInfo = 'PROCEDURE';
                 }
             }
+        }
+
+        // Check if this variable is inside a CLASS structure (class property)
+        const structure = this.tokenCache.getStructure(document);
+        const isClassProperty = structure.isInClassBlock(globalVar.line);
+        let containingClassName: string | undefined;
+        if (isClassProperty) {
+            const classToken = tokens.slice(0, globalIndex).reverse().find(t =>
+                t.type === TokenType.Structure &&
+                (t as any).subType === TokenType.Class
+            );
+            containingClassName = classToken?.label ?? classToken?.value;
         }
         
         const globalPos: Position = { line: globalVar.line, character: 0 };
@@ -234,7 +251,10 @@ export class VariableHoverResolver {
         
         const isProcedure = typeInfo === 'PROCEDURE';
 
-        if (scopeInfo) {
+        if (isClassProperty) {
+            const classLabel = containingClassName ? `Class property of \`${containingClassName}\`` : 'Class property';
+            markdown.push(`🔷 ${classLabel}`);
+        } else if (scopeInfo) {
             const scopeIcon = scopeInfo.type === 'global' ? '🌍' : '📦';
             const scopeLabel = isProcedure
                 ? (scopeInfo.type === 'global' ? 'Global procedure' : 'Module procedure')
@@ -266,7 +286,9 @@ export class VariableHoverResolver {
         }
         
         markdown.push(``);
-        markdown.push(`F12 → Go to declaration`);
+        if (hoverLine === undefined || hoverLine !== globalVar.line) {
+            markdown.push(`F12 → Go to declaration`);
+        }
         
         return {
             contents: {

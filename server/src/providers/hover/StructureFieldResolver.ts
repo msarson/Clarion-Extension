@@ -104,6 +104,18 @@ export class StructureFieldResolver {
             return null;
         }
 
+        // Verify cursor is actually on the word immediately after the dot, not a later occurrence
+        // e.g. "SELF.Q &= Q" — cursor on 2nd Q should NOT match SELF.Q
+        // When word includes qualifier ("SELF.LC"), wordStart must include the SELF part
+        const qualifier = word.includes('.') ? word.substring(0, word.lastIndexOf('.')) : '';
+        const fieldStartInLine = dotBeforeIndex + 1;
+        const wordStartInLine = qualifier ? fieldStartInLine - qualifier.length - 1 : fieldStartInLine;
+        const wordEndInLine = fieldStartInLine + fieldName.length;
+        if (position.character < wordStartInLine || position.character > wordEndInLine) {
+            logger.info(`resolveFieldAccess: Cursor not on field immediately after dot, returning null`);
+            return null;
+        }
+
         // Check if this is a method call (has parentheses)
         const hasParentheses = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
         

@@ -74,7 +74,7 @@ export class ClassMemberResolver {
             const content = document.getText();
             const lines = content.split('\n');
             const scopeLine = lines[currentScope.line];
-            const classMethodMatch = scopeLine.match(/^(\w+)\.(\w+)\s+PROCEDURE/i);
+            const classMethodMatch = scopeLine.match(/^(\w+)\.(?:\w+\.)?(\w+)\s+PROCEDURE/i);
             if (classMethodMatch) {
                 className = classMethodMatch[1];
             }

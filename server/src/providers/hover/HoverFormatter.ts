@@ -64,7 +64,7 @@ export class HoverFormatter {
     /**
      * Constructs hover for a local variable
      */
-    formatVariable(name: string, info: VariableInfo, scope: Token, document?: TextDocument): Hover {
+    formatVariable(name: string, info: VariableInfo, scope: Token, document?: TextDocument, hoverLine?: number): Hover {
         // Check if this is a routine scope
         const isRoutine = scope.subType === TokenType.Routine;
         const variableType = isRoutine ? 'Routine Variable' : 'Local Variable';
@@ -132,7 +132,9 @@ export class HoverFormatter {
             markdown.push(`Declared at line ${info.line + 1}`);
         }
         markdown.push(``);
-        markdown.push(`F12 → Go to declaration`);
+        if (hoverLine === undefined || hoverLine !== info.line) {
+            markdown.push(`F12 → Go to declaration`);
+        }
 
         return {
             contents: {
