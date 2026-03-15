@@ -32,8 +32,6 @@ import { CrossFileCache } from './hover/CrossFileCache';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
 import { IncludeVerifier } from '../utils/IncludeVerifier';
-import { ClassConstantParser } from '../utils/ClassConstantParser';
-import { ProjectConstantsChecker } from '../utils/ProjectConstantsChecker';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -101,7 +99,10 @@ export class HoverProvider {
      * Provides hover information for a position in the document
      */
     public async provideHover(document: TextDocument, position: Position): Promise<Hover | null> {
-        logger.error(`[HOVER] provideHover pos=${position.line}:${position.character} uri=${document.uri}`);
+        return this._provideHoverInternal(document, position);
+    }
+
+    private async _provideHoverInternal(document: TextDocument, position: Position): Promise<Hover | null> {
 
         try {
             // Build hover context
@@ -790,91 +791,18 @@ export class HoverProvider {
                 
                 logger.info(`✅ Found CLASS type: ${def.className} and verified it's included`);
                 
-                const relativePath = path.relative(projectPath, def.filePath);
-                
-                // Parse class file for required constants
-                const constantParser = new ClassConstantParser();
-                const classConstants = await constantParser.parseFile(def.filePath);
-                const thisClassConstants = classConstants.find(c => c.className.toLowerCase() === def.className.toLowerCase());
-                
-                // Build hover text
-                const classInfo = [
-                    `**CLASS Type:** \`${def.className}\``,
+                const typeLabel = def.isType ? 'CLASS, TYPE' : 'CLASS';
+                const parentLine = def.parentClass ? `\n⬆️ Extends: \`${def.parentClass}\`` : '';
+                const hoverMarkdown = [
+                    `**${def.className}** — ${typeLabel}`,
                     ``,
-                    `**Definition:**`,
-                    `- File: \`${fileName}\``,
-                    `- Line: ${def.lineNumber}`,
-                    `- Path: \`${relativePath}\``,
-                    `- Type: ${def.isType ? 'CLASS,TYPE' : 'CLASS'}`,
-                ];
-                
-                if (def.parentClass) {
-                    classInfo.push(`- Parent: \`${def.parentClass}\``);
-                }
-                
-                // Add required constants information
-                if (thisClassConstants && thisClassConstants.constants.length > 0) {
-                    logger.info(`Found ${thisClassConstants.constants.length} constants for ${def.className}`);
-                    
-                    // Check which constants are missing from the project
-                    const constantsChecker = new ProjectConstantsChecker();
-                    const missingConstants = [];
-                    
-                    for (const constant of thisClassConstants.constants) {
-                        const isDefined = await constantsChecker.isConstantDefined(constant.name, projectPath);
-                        logger.info(`Constant ${constant.name} defined: ${isDefined}`);
-                        if (!isDefined) {
-                            missingConstants.push(constant);
-                        }
-                    }
-                    
-                    logger.info(`Missing constants count: ${missingConstants.length}`);
-                    
-                    if (missingConstants.length > 0) {
-                        classInfo.push(``);
-                        classInfo.push(`**⚠️ Missing Constants:**`);
-                        
-                        for (const constant of missingConstants) {
-                            const typeDesc = constant.type === 'Link' ? 'Link mode' : 'DLL mode';
-                            const fileInfo = constant.relatedFile ? ` (${constant.relatedFile})` : '';
-                            classInfo.push(`- \`${constant.name}\` - ${typeDesc}${fileInfo}`);
-                        }
-                        
-                        // Generate suggested definitions for missing constants only
-                        const linkModeDefs = constantParser.generateConstantDefinitions(missingConstants, true);
-                        const dllModeDefs = constantParser.generateConstantDefinitions(missingConstants, false);
-                        
-                        classInfo.push(``);
-                        classInfo.push(`**Suggested Values:**`);
-                        classInfo.push(`- **Link mode:** \`${linkModeDefs}\``);
-                        classInfo.push(`- **DLL mode:** \`${dllModeDefs}\``);
-                        
-                        logger.info(`Listed ${missingConstants.length} missing constants`);
-                    } else {
-                        // All constants are defined
-                        classInfo.push(``);
-                        classInfo.push(`✅ **All required constants are defined in project**`);
-                    }
-                }
-                
-                classInfo.push(``);
-                classInfo.push(`*Part of ${index.classes.size} indexed classes*`);
-                
-                const hoverMarkdown = classInfo.join('\n');
-                logger.info(`Hover markdown length: ${hoverMarkdown.length} chars`);
-                logger.info(`Hover markdown preview: ${hoverMarkdown.substring(0, 200)}...`);
-                logger.info(`Hover markdown end: ...${hoverMarkdown.substring(hoverMarkdown.length - 200)}`);
-                
-                // Log the full markdown to see exactly what's being sent
-                logger.info(`===== FULL HOVER MARKDOWN =====`);
-                logger.info(hoverMarkdown);
-                logger.info(`===== END HOVER MARKDOWN =====`);
+                    `📦 Defined in \`${fileName}\` at line ${def.lineNumber}${parentLine}`,
+                    ``,
+                    `*(F12 to navigate to definition)*`
+                ].join('\n');
                 
                 return {
-                    contents: {
-                        kind: 'markdown',
-                        value: hoverMarkdown
-                    }
+                    contents: { kind: 'markdown', value: hoverMarkdown }
                 };
             }
             
@@ -914,18 +842,14 @@ export class HoverProvider {
         // Check if word appears as the argument of IMPLEMENTS(...)
         const implementsRe = /\bIMPLEMENTS\s*\(\s*(\w+)\s*\)/gi;
         let m: RegExpExecArray | null;
-        logger.error(`[IMPL-HOVER] word="${word}" pos=${position.character} line="${line.trim()}"`);
         while ((m = implementsRe.exec(line)) !== null) {
             const ifaceName = m[1];
-            logger.error(`[IMPL-HOVER] checking ifaceName="${ifaceName}" vs word="${word}"`);
             if (ifaceName.toLowerCase() !== word.toLowerCase()) continue;
             const nameStart = m.index + m[0].indexOf(ifaceName);
             const nameEnd = nameStart + ifaceName.length;
-            logger.error(`[IMPL-HOVER] nameStart=${nameStart} nameEnd=${nameEnd} pos=${position.character}`);
             if (position.character < nameStart || position.character > nameEnd) continue;
 
             const ifaceToken = await this.findInterfaceToken(ifaceName, document, tokens);
-            logger.error(`[IMPL-HOVER] findInterfaceToken result: ${ifaceToken ? 'FOUND label=' + ifaceToken.label : 'NULL'}`);
             if (!ifaceToken) return null;
 
             return this.buildInterfaceHover(ifaceToken, ifaceName);

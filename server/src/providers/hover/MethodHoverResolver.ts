@@ -76,7 +76,7 @@ export class MethodHoverResolver {
                     interfaceName, methodName, document, tokens, paramCount, line
                 );
                 if (ifaceMethodInfo) {
-                    return this.formatter.formatMethodImplementation(methodName, interfaceName, ifaceMethodInfo);
+                    return this.formatter.formatMethodImplementation(methodName, interfaceName, ifaceMethodInfo, className);
                 }
             }
 

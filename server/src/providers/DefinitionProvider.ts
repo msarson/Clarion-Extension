@@ -20,6 +20,7 @@ import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { SymbolFinderService } from '../services/SymbolFinderService';
+import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
 logger.setLevel("error"); // Production: Only log errors
@@ -396,7 +397,6 @@ export class DefinitionProvider {
             // Check if this is a structure field reference (either dot notation or prefix notation)
             const structureFieldDefinition = await this.findStructureFieldDefinition(word, document, position);
             if (structureFieldDefinition) {
-                logger.info(`Found structure field definition for ${word} in the current document`);
                 return structureFieldDefinition;
             }
 
@@ -448,7 +448,6 @@ export class DefinitionProvider {
                         return bPriority - aPriority;
                     });
                     
-                    logger.info(`Found ${accessibleLabels.length} accessible labels, returning highest priority (line ${accessibleLabels[0].range.start.line})`);
                     return accessibleLabels[0];
                 }
                 
@@ -460,15 +459,19 @@ export class DefinitionProvider {
             // Do this BEFORE checking MAP procedure implementations to avoid false positives
             const symbolDefinition = await this.findSymbolDefinition(word, document, position);
             if (symbolDefinition) {
-                logger.info(`Found symbol definition for ${word} in the current document`);
                 return symbolDefinition;
             }
 
             // Check if we're inside a MAP block and the word is a procedure declaration
             // Navigate to the PROCEDURE implementation
-            const mapProcImpl = this.mapResolver.findProcedureImplementation(word, tokens, document, position, line);
+            // Guard: skip if cursor is inside a PROCEDURE parameter list (word is a parameter type, not a call)
+            const isInsideProcSignature = /\bPROCEDURE\s*\(/i.test(line) && (() => {
+                const parenOpen = line.indexOf('(', line.search(/\bPROCEDURE\s*\(/i));
+                const parenClose = line.lastIndexOf(')');
+                return parenOpen >= 0 && position.character > parenOpen && position.character <= parenClose;
+            })();
+            const mapProcImpl = !isInsideProcSignature && this.mapResolver.findProcedureImplementation(word, tokens, document, position, line);
             if (mapProcImpl) {
-                logger.info(`Found PROCEDURE implementation for MAP declaration: ${word}`);
                 return mapProcImpl;
             }
 
@@ -477,14 +480,12 @@ export class DefinitionProvider {
             // This check must come AFTER MAP navigation checks so MAP declarations can navigate to implementations
             // VSCode won't show an error for this case
             if (this.isOnDeclaration(line, position, word)) {
-                logger.info(`F12 pressed on declaration - already at definition, returning null (no navigation)`);
                 return null;
             }
 
             // Next, check if this is a reference to a Clarion structure (queue, window, view, etc.)
             const structureDefinition = await this.findStructureDefinition(word, document, position);
             if (structureDefinition) {
-                logger.info(`Found structure definition for ${word} in the current document`);
                 return structureDefinition;
             }
 
@@ -492,17 +493,20 @@ export class DefinitionProvider {
             // Handles F12 on type names in LIKE(TypeName), QUEUE(TypeName), etc.
             const typeDefInIncludes = await this.findTypeInIncludes(word, document);
             if (typeDefInIncludes) {
-                logger.info(`Found type definition for ${word} in includes`);
                 return typeDefInIncludes;
             }
-
-
 
             // Finally, check if this is a file reference
             // This is the lowest priority - only look for files if no local definitions are found
             if (this.fileResolver.isLikelyFileReference(word, document, position, tokens)) {
-                logger.info(`No local definition found for ${word}, looking for file reference`);
                 return await this.fileResolver.findFileDefinition(word, document.uri);
+            }
+
+            // Last resort: check if word is a CLASS type name via the class definition indexer
+            // This handles parameter types, variable types, etc. (e.g. "EditClass EC" in a PROCEDURE signature)
+            const classLocation = await this.findClassTypeDefinition(word, document);
+            if (classLocation) {
+                return classLocation;
             }
 
             return null;
@@ -2189,6 +2193,26 @@ export class DefinitionProvider {
         return null;
     }
 
+
+    private async findClassTypeDefinition(word: string, document: TextDocument): Promise<Location | null> {
+        try {
+            const fromPath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
+            const projectPath = path.dirname(fromPath);
+
+            const classIndexer = ClassDefinitionIndexer.getInstance();
+            await classIndexer.getOrBuildIndex(projectPath);
+            const definitions = classIndexer.findClass(word, projectPath);
+            if (!definitions || definitions.length === 0) return null;
+
+            const def = definitions[0];
+            const uri = `file:///${def.filePath.replace(/\\/g, '/')}`;
+            logger.error(`✅ CLASS type F12: "${word}" → ${def.filePath}:${def.lineNumber}`);
+            return Location.create(uri, Range.create(def.lineNumber, 0, def.lineNumber, 0));
+        } catch (e) {
+            logger.error(`findClassTypeDefinition error: ${e}`);
+            return null;
+        }
+    }
 
     private findVariableType(tokens: Token[], variableName: string, currentLine: number): string | null {
         logger.info(`Looking for type of variable ${variableName}`);

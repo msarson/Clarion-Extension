@@ -53,7 +53,6 @@ export class HoverContextBuilder {
         // Check if the line is inside an OMIT or COMPILE block
         const isInOmitBlock = OmitCompileDetector.isLineOmitted(position.line, tokens, document);
         if (isInOmitBlock) {
-            logger.error(`[CTX] Line ${position.line} is inside OMIT/COMPILE block - skipping hover`);
             return null;
         }
         
@@ -63,12 +62,10 @@ export class HoverContextBuilder {
         // Get the word at the current position
         const wordRange = TokenHelper.getWordRangeAtPosition(document, position);
         if (!wordRange) {
-            logger.error(`[CTX] No word found at pos ${position.line}:${position.character}`);
             return null;
         }
 
         const word = document.getText(wordRange);
-        logger.error(`[CTX] word="${word}" pos=${position.line}:${position.character}`);
 
         // Get the line to check context
         const line = document.getText({

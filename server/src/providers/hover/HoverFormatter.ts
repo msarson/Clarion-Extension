@@ -275,21 +275,32 @@ export class HoverFormatter {
     /**
      * Constructs hover for method implementation showing declaration
      */
-    formatMethodImplementation(methodName: string, className: string, declInfo: MethodDeclarationInfo): Hover {
+    formatMethodImplementation(methodName: string, className: string, declInfo: MethodDeclarationInfo, ownerClassName?: string): Hover {
         const fileName = declInfo.file.split(/[\/\\]/).pop() || declInfo.file;
         
-        const markdown = [
-            `**Method Implementation:** \`${className}.${methodName}\``,
-            ``,
-            `**Declaration:**`,
-            '```clarion',
-            declInfo.signature,
-            '```',
-            ``,
-            `**Declared in:** \`${fileName}\` at line **${declInfo.line + 1}**`,
-            ``,
-            `*(Press F12 to go to declaration)*`
-        ];
+        // className may be the interface name (3-part) or class name (2-part)
+        const isInterface = !!ownerClassName;
+        const title = ownerClassName
+            ? `**${ownerClassName}.${className}.${methodName}** — Method Implementation`
+            : `**${className}.${methodName}** — Method Implementation`;
+
+        const markdown = [title, ``];
+
+        if (isInterface) {
+            markdown.push(`🔷 Class: \`${ownerClassName}\``);
+            markdown.push(`🔌 Interface: \`${className}\``);
+        } else {
+            markdown.push(`🔷 Class: \`${className}\``);
+        }
+
+        markdown.push(``);
+        markdown.push(`**Declaration:** \`${fileName}\`:${declInfo.line + 1}`);
+        markdown.push(``);
+        markdown.push('```clarion');
+        markdown.push(declInfo.signature);
+        markdown.push('```');
+        markdown.push(``);
+        markdown.push(`*F12 to go to declaration*`);
 
         return {
             contents: {
