@@ -189,18 +189,22 @@ export class MethodHoverResolver {
         );
         
         if (implLocation) {
-            logger.info(`✅ Found implementation at ${implLocation}:${implLocation.split(':')[1]}`);
-            
-            // Get preview of implementation
-            const implInfo = await this.getMethodImplementationPreview(implLocation);
-            if (implInfo) {
-                return {
-                    contents: {
-                        kind: 'markdown',
-                        value: `**Implementation** _(Press Ctrl+F12 to navigate)_ — line ${implInfo.line + 1}\n\n\`\`\`clarion\n${implInfo.preview}\n\`\`\``
-                    }
-                };
-            }
+            logger.info(`✅ Found implementation at ${implLocation}`);
+            const lastColon = implLocation.lastIndexOf(':');
+            const implFile = path.basename(implLocation.substring(0, lastColon));
+            const implLine = parseInt(implLocation.substring(lastColon + 1)) + 1;
+            return {
+                contents: {
+                    kind: 'markdown',
+                    value: [
+                        `**${className}.${currentToken.label}** (Method Declaration)`,
+                        ``,
+                        `**Implemented in** \`${implFile}\` @ line ${implLine}`,
+                        ``,
+                        `*Ctrl+F12 to navigate*`
+                    ].join('\n')
+                }
+            };
         } else {
             logger.info(`❌ No implementation found for ${className}.${currentToken.label}`);
             return {

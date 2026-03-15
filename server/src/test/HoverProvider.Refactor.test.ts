@@ -49,7 +49,7 @@ END`;
                 ? hover.contents 
                 : 'value' in hover.contents ? hover.contents.value : '';
             
-            assert.ok(content.includes('Implementation') || content.includes('PROCEDURE'), 
+            assert.ok(content.includes('Implemented in') || content.includes('PROCEDURE'), 
                 'Should show implementation info');
         });
 

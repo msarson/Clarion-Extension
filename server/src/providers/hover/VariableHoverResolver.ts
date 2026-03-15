@@ -229,9 +229,14 @@ export class VariableHoverResolver {
             }
         }
 
-        // Check if this variable is inside a CLASS structure (class property)
+        // Check if this variable is inside a CLASS or INTERFACE structure
         const structure = this.tokenCache.getStructure(document);
         const isClassProperty = structure.isInClassBlock(globalVar.line);
+        const isInterfaceMethod = !isClassProperty && tokens.some(t =>
+            t.type === TokenType.Procedure &&
+            (t as any).subType === TokenType.InterfaceMethod &&
+            t.line === globalVar.line
+        );
         let containingClassName: string | undefined;
         if (isClassProperty) {
             const classToken = tokens.slice(0, globalIndex).reverse().find(t =>
@@ -239,6 +244,14 @@ export class VariableHoverResolver {
                 (t as any).subType === TokenType.Class
             );
             containingClassName = classToken?.label ?? classToken?.value;
+        }
+        let containingInterfaceName: string | undefined;
+        if (isInterfaceMethod) {
+            const ifaceToken = tokens.slice(0, globalIndex).reverse().find(t =>
+                t.type === TokenType.Structure &&
+                (t as any).subType === TokenType.Interface
+            );
+            containingInterfaceName = ifaceToken?.label ?? ifaceToken?.value;
         }
         
         const globalPos: Position = { line: globalVar.line, character: 0 };
@@ -254,6 +267,9 @@ export class VariableHoverResolver {
         if (isClassProperty) {
             const classLabel = containingClassName ? `Class property of \`${containingClassName}\`` : 'Class property';
             markdown.push(`🔷 ${classLabel}`);
+        } else if (isInterfaceMethod) {
+            const ifaceLabel = containingInterfaceName ? `Interface method of \`${containingInterfaceName}\`` : 'Interface method';
+            markdown.push(`🔌 ${ifaceLabel}`);
         } else if (scopeInfo) {
             const scopeIcon = scopeInfo.type === 'global' ? '🌍' : '📦';
             const scopeLabel = isProcedure
@@ -264,9 +280,9 @@ export class VariableHoverResolver {
         
         const fileName = path.basename(document.uri.replace('file:///', ''));
         const lineNumber = globalVar.line + 1;
-        // Append "Declared in" to the same line as scope label if it exists
+        // Append "Declared in" to the same line as scope/context label if it exists
         const lastLine = markdown[markdown.length - 1];
-        if (lastLine && (lastLine.includes('variable') || lastLine.includes('procedure'))) {
+        if (lastLine && (lastLine.includes('variable') || lastLine.includes('procedure') || lastLine.includes('property') || lastLine.includes('method'))) {
             markdown[markdown.length - 1] = `${lastLine} Declared in ${fileName}:${lineNumber}`;
         } else {
             markdown.push(`Declared in ${fileName}:${lineNumber}`);

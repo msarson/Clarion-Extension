@@ -245,45 +245,18 @@ export class HoverFormatter {
             markdown.push('');
         }
         
-        // Show implementation
+        // Show implementation location (no body preview)
         try {
             const lastColonIndex = implementationLocation.lastIndexOf(':');
             const implFilePath = implementationLocation.substring(0, lastColonIndex).replace('file:///', '');
             const implLine = parseInt(implementationLocation.substring(lastColonIndex + 1));
-            
             const implUri = decodeURIComponent(implFilePath);
-            const implContent = fs.readFileSync(implUri, 'utf-8');
-            const implLines = implContent.split('\n');
-            
             const implFileName = path.basename(implUri);
             const implLineNumber = implLine + 1;
-            
-            // Show up to 10 lines of implementation
-            const maxLines = 10;
-            const endLine = Math.min(implLine + maxLines, implLines.length);
-            const codeLines: string[] = [];
-            
-            for (let i = implLine; i < endLine; i++) {
-                const line = implLines[i];
-                if (!line) continue;
-                
-                const trimmed = line.trim().toUpperCase();
-                codeLines.push(implLines[i]);
-                
-                // Stop at CODE or first END
-                if (trimmed === 'CODE' || trimmed.match(/^END\b/)) {
-                    break;
-                }
-            }
-            
-            if (codeLines.length > 0) {
-                markdown.push(`**Implementation in** \`${implFileName}\` @ line ${implLineNumber}: *(Ctrl+F12 to navigate)*`);
-                markdown.push('```clarion');
-                markdown.push(codeLines.join('\n'));
-                markdown.push('```');
-            }
+            markdown.push(`**Implemented in** \`${implFileName}\` @ line ${implLineNumber}`);
+            markdown.push(``);
+            markdown.push(`*Ctrl+F12 to navigate*`);
         } catch (error) {
-            // Fallback if can't read file
             const lastColonIndex = implementationLocation.lastIndexOf(':');
             const implFilePath = implementationLocation.substring(0, lastColonIndex);
             const implLine = parseInt(implementationLocation.substring(lastColonIndex + 1)) + 1;
@@ -476,88 +449,22 @@ export class HoverFormatter {
         logger.info(`formatProcedure: About to check implementation, procImpl=${!!procImpl}, isAtImplementation=${isAtImplementation}`);
         if (procImpl && !isAtImplementation) {
             try {
-                // Check if implementation is in current document or if we need to read from disk
-                const isSameDocument = procImpl.uri === currentDocument.uri;
-                let implContent: string;
                 let implUri: string;
-                
-                if (isSameDocument) {
-                    // Use current document content
-                    implContent = currentDocument.getText();
-                    implUri = currentDocument.uri;
-                    logger.info(`formatProcedure: Using current document content`);
-                } else if (procImpl.uri.startsWith('test://')) {
-                    // Cannot read test:// URIs from filesystem - skip implementation preview
-                    logger.info(`formatProcedure: Skipping test:// URI implementation preview`);
-                    throw new Error('Cannot read test:// URI from filesystem');
+                if (procImpl.uri.startsWith('test://')) {
+                    implUri = procImpl.uri;
                 } else {
-                    // Read from filesystem
                     implUri = decodeURIComponent(procImpl.uri.replace('file:///', ''));
-                    logger.info(`formatProcedure: Reading implementation from ${implUri}`);
-                    implContent = fs.readFileSync(implUri, 'utf-8');
                 }
-                
-                const implLines = implContent.split('\n');
-                const startLine = procImpl.range.start.line;
-                
-                logger.info(`formatProcedure: Implementation starts at line ${startLine}`);
-                
-                // Extract filename from URI (handle both file:// and test:// URIs)
-                const fileName = implUri.includes('://') 
+                const fileName = implUri.includes('://')
                     ? implUri.split('/').pop() || 'unknown'
                     : path.basename(implUri);
-                const lineNumber = startLine + 1;
-                
-                const maxLines = 15;
-                const endLine = Math.min(startLine + maxLines, implLines.length);
-                const codeLines: string[] = [];
-                
-                let foundCode = false;
-                let linesAfterCode = 0;
-                const maxLinesAfterCode = 3;
-                
-                for (let i = startLine; i < endLine; i++) {
-                    const line = implLines[i];
-                    if (!line) continue;
-                    
-                    const trimmed = line.trim().toUpperCase();
-                    
-                    // Stop if we hit another procedure/routine
-                    if (i > startLine && trimmed.match(/^\w+\s+(PROCEDURE|ROUTINE|FUNCTION)/)) {
-                        break;
-                    }
-                    
-                    codeLines.push(line);
-                    
-                    // Track CODE section
-                    if (trimmed === 'CODE') {
-                        foundCode = true;
-                    } else if (foundCode) {
-                        linesAfterCode++;
-                        // Show a few lines after CODE, then stop with ellipsis
-                        if (linesAfterCode >= maxLinesAfterCode) {
-                            codeLines.push('  ! ...');
-                            break;
-                        }
-                    }
-                    
-                    // Stop at RETURN
-                    if (trimmed.startsWith('RETURN')) {
-                        break;
-                    }
-                }
-                
-                if (codeLines.length > 0) {
-                    logger.info(`formatProcedure: Adding implementation preview with ${codeLines.length} lines`);
-                    parts.push(`\n**Implemented in** \`${fileName}\` @ line ${lineNumber}:\n\`\`\`clarion\n${codeLines.join('\n')}\n\`\`\``);
-                } else {
-                    logger.info(`formatProcedure: No code lines captured for preview`);
-                }
+                const lineNumber = procImpl.range.start.line + 1;
+                parts.push(`**Implemented in** \`${fileName}\` @ line ${lineNumber}`);
             } catch (error) {
                 logger.error(`Error reading PROCEDURE implementation: ${error}`);
             }
         } else {
-            logger.info(`formatProcedure: Skipping implementation preview (procImpl=${!!procImpl}, isAtImplementation=${isAtImplementation})`);
+            logger.info(`formatProcedure: Skipping implementation (procImpl=${!!procImpl}, isAtImplementation=${isAtImplementation})`);
         }
         
         // Add context-aware navigation hint

@@ -534,7 +534,6 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             assert.ok(hasGlobalScope, 'Should show global scope icon/text');
             assert.ok(hasImplementedIn, 'Should show "Implemented in" with file and line');
             assert.ok(hasCtrlF12Text, 'Should mention Ctrl+F12 to navigate to implementation');
-            assert.ok(showsImplementationCode, 'Should show implementation code preview');
             
             console.log(`   ✅ PASS: GlobalHelper MAP hover shows implementation correctly`);
         });
