@@ -32,7 +32,8 @@ import {
     ColorPresentation,
     TextDocumentSyncKind,
     SignatureHelp,
-    ReferenceParams
+    ReferenceParams,
+    RenameParams
 } from 'vscode-languageserver-protocol';
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
@@ -61,6 +62,7 @@ import { DiagnosticProvider } from './providers/DiagnosticProvider';
 import { SignatureHelpProvider } from './providers/SignatureHelpProvider';
 import { ImplementationProvider } from './providers/ImplementationProvider';
 import { ReferencesProvider } from './providers/ReferencesProvider';
+import { RenameProvider } from './providers/RenameProvider';
 import { UnreachableCodeProvider } from './providers/UnreachableCodeProvider';
 import { ClarionSolutionInfo } from 'common/types';
 import { URI } from 'vscode-languageserver';
@@ -86,6 +88,7 @@ const hoverProvider = new HoverProvider();
 const signatureHelpProvider = new SignatureHelpProvider();
 const implementationProvider = new ImplementationProvider();
 const referencesProvider = new ReferencesProvider();
+const renameProvider = new RenameProvider();
 
 // ✅ Create Connection and Documents Manager
 const connection = createConnection(ProposedFeatures.all);
@@ -145,6 +148,7 @@ connection.onInitialize((params) => {
                 definitionProvider: true,
                 implementationProvider: true,
                 referencesProvider: true,
+                renameProvider: { prepareProvider: true },
                 hoverProvider: true,
                 codeActionProvider: true,
                 signatureHelpProvider: {
@@ -1331,7 +1335,35 @@ connection.onReferences(async (params: ReferenceParams) => {
     }
 });
 
-// Handle hover requests
+// Handle prepareRename (validation before rename input box appears)
+connection.onPrepareRename(async (params) => {
+    if (!serverInitialized) return null;
+
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return null;
+
+    try {
+        return await renameProvider.prepareRename(document, params.position);
+    } catch (error: any) {
+        // Re-throw ResponseErrors so VS Code shows the message inline
+        throw error;
+    }
+});
+
+// Handle rename requests
+connection.onRenameRequest(async (params: RenameParams) => {
+    if (!serverInitialized) return null;
+
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return null;
+
+    try {
+        return await renameProvider.provideRename(document, params.position, params.newName);
+    } catch (error) {
+        logger.error(`❌ Error providing rename: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+    }
+});
 connection.onHover(async (params) => {
     logger.info(`📂 Received hover request for: ${params.textDocument.uri} at position ${params.position.line}:${params.position.character}`);
     
