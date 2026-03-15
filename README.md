@@ -48,12 +48,16 @@ Open any Clarion solution - just open the folder.
 - **[Learn more about Solution Management →](docs/features/solution-management.md)**
 
 ### 🧭 **Smart Code Navigation**
-Jump to definitions, find implementations - works in same file immediately, cross-file with solution.
+Jump to definitions, find implementations, and explore references — works in same file immediately, cross-file with solution.
 - Press **F12** to go to definition (same file: no solution needed!)
 - Press **Ctrl+F12** to go to implementation
-- Hover for documentation and previews — including declaration + implementation preview
-- **Chained navigation**: `SELF.Order.RangeList.Init` — hover, F12 and Ctrl+F12 all resolve through CLASS, QUEUE, and GROUP type chains
+- Press **Shift+F12** for **Find All References** — scope-aware across all project files
+- Hover for documentation — declaration location, class/interface context, type info
+- **Chained navigation**: `SELF.Order.RangeList.Init` — hover, F12, Ctrl+F12, and references resolve through CLASS, QUEUE, and GROUP type chains
 - **SELF/PARENT properties**: F12 on `SELF.List` navigates to the class member declaration
+- **Typed variable members**: F12/Ctrl+F12/hover on `obj.Method()` where `obj` is any typed variable
+- **INTERFACE support**: hover, F12, Ctrl+F12, and references for interface methods, IMPLEMENTS(), and 3-part `Class.Interface.Method` implementations
+- **CLASS type names**: F12 and Find All References work on type names in parameter and variable declarations
 - Cross-file navigation requires solution
 - **[Learn more about Navigation →](docs/features/navigation.md)**
 
@@ -121,10 +125,22 @@ Productivity features to write code faster.
 
 ## 🆕 What's New
 
-### Latest: v0.8.7 (In Development)
+### Latest: v0.8.7 (2026-03-15)
 
-**Coming Soon:**
-- New features and improvements in progress
+#### 🔍 Find All References (Shift+F12)
+Full scope-aware Find All References — SELF/PARENT members, typed variables, chained chains, MAP/MODULE procedures, structure fields, INTERFACE methods, IMPLEMENTS(), CLASS type names, and overload filtering.
+
+#### 🔌 Clarion INTERFACE Support
+Complete language support for interfaces — hover, F12, Ctrl+F12, and Find All References for interface methods, IMPLEMENTS() declarations, and 3-part `Class.Interface.Method` implementations.
+
+#### 🎨 Hover Quality Overhaul
+- Clean class type cards (`ClassName — CLASS, TYPE · 📦 Defined in File at line N`)
+- `🔷 Class property of ClassName` and `🔌 Interface method of InterfaceName` labels
+- F12/Ctrl+F12 hints suppressed when already at declaration/implementation
+- Implementation body previews removed (location only, matching TypeScript/C# style)
+
+#### 🔗 Deep Chained Navigation
+Hover, F12, Ctrl+F12, and references for any depth of `SELF.A.B.C` chains including CLASS, QUEUE, and GROUP intermediate types.
 
 **[See full changelog →](CHANGELOG.md)**
 
