@@ -833,12 +833,18 @@ connection.onNotification('clarion/updatePaths', async (params: {
             logger.info(`✅ Updated default lookup extensions: ${params.defaultLookupExtensions.join(', ')}`);
         }
 
-        // Log the solution file path
-        if (params.solutionFilePath) {
-            logger.info(`🔍 Received solution file path: ${params.solutionFilePath}`);
-        } else {
-            logger.warn("⚠️ No solution file path provided in updatePaths notification");
-        }
+        // Always-visible startup summary of Clarion folder configuration
+        // Use logger.error so it's visible even when log level is set to "error"
+        logger.error(`\n📦 Clarion Extension — Solution Load\n` +
+            `  Solution : ${params.solutionFilePath || '(none)'}\n` +
+            `  Version  : ${params.clarionVersion || '(unknown)'}\n` +
+            `  Config   : ${params.configuration || '(none)'}\n` +
+            `  Red. File: ${params.redirectionFile || '(none)'}\n` +
+            `  Red. Path: ${(params.redirectionPaths || []).join('; ') || '(none)'}\n` +
+            `  LibSrc   : ${(params.libsrcPaths || []).join('\n           : ') || '(none)'}\n` +
+            `  Proj.Dir : ${(params.projectPaths || []).join('\n           : ') || '(none)'}\n` +
+            `  Macros   : ${Object.keys(params.macros || {}).length} defined`
+        );
 
         // Log memory usage before initialization
         const memoryBefore = process.memoryUsage();
@@ -911,6 +917,14 @@ connection.onNotification('clarion/updatePaths', async (params: {
             globalSolution = await buildClarionSolution();
             const buildEndTime = performance.now();
             logger.info(`✅ Solution built successfully with ${globalSolution.projects.length} projects in ${(buildEndTime - buildStartTime).toFixed(2)}ms`);
+            
+            // Always-visible project summary
+            const projectSummary = globalSolution.projects.map((p, i) =>
+                `  [${i+1}] ${p.name}  (${p.sourceFiles.length} sources)  ${p.path}`
+            ).join('\n');
+            logger.error(`\n✅ Solution ready: ${globalSolution.name}\n` +
+                `  Projects (${globalSolution.projects.length}):\n` +
+                (projectSummary || '  (none)'));
             
             // Log each project in the global solution
             for (let i = 0; i < globalSolution.projects.length; i++) {

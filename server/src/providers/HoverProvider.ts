@@ -101,7 +101,7 @@ export class HoverProvider {
      * Provides hover information for a position in the document
      */
     public async provideHover(document: TextDocument, position: Position): Promise<Hover | null> {
-        logger.info(`Providing hover for position ${position.line}:${position.character} in ${document.uri}`);
+        logger.error(`[HOVER] provideHover pos=${position.line}:${position.character} uri=${document.uri}`);
 
         try {
             // Build hover context
@@ -914,14 +914,18 @@ export class HoverProvider {
         // Check if word appears as the argument of IMPLEMENTS(...)
         const implementsRe = /\bIMPLEMENTS\s*\(\s*(\w+)\s*\)/gi;
         let m: RegExpExecArray | null;
+        logger.error(`[IMPL-HOVER] word="${word}" pos=${position.character} line="${line.trim()}"`);
         while ((m = implementsRe.exec(line)) !== null) {
             const ifaceName = m[1];
+            logger.error(`[IMPL-HOVER] checking ifaceName="${ifaceName}" vs word="${word}"`);
             if (ifaceName.toLowerCase() !== word.toLowerCase()) continue;
             const nameStart = m.index + m[0].indexOf(ifaceName);
             const nameEnd = nameStart + ifaceName.length;
+            logger.error(`[IMPL-HOVER] nameStart=${nameStart} nameEnd=${nameEnd} pos=${position.character}`);
             if (position.character < nameStart || position.character > nameEnd) continue;
 
             const ifaceToken = await this.findInterfaceToken(ifaceName, document, tokens);
+            logger.error(`[IMPL-HOVER] findInterfaceToken result: ${ifaceToken ? 'FOUND label=' + ifaceToken.label : 'NULL'}`);
             if (!ifaceToken) return null;
 
             return this.buildInterfaceHover(ifaceToken, ifaceName);

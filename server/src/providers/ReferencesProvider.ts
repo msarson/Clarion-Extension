@@ -12,6 +12,7 @@ import { TokenHelper } from '../utils/TokenHelper';
 import { ChainedPropertyResolver, ChainedMemberInfo } from '../utils/ChainedPropertyResolver';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
+import { serverSettings } from '../serverSettings';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
@@ -88,7 +89,7 @@ export class ReferencesProvider {
             }
         }
 
-        logger.info(`🔍 Finding references for "${word}" at ${position.line}:${position.character}`);
+        logger.error(`🔍 [FAR] Finding references for "${word}" at ${position.line}:${position.character} in ${path.basename(decodeURIComponent(document.uri))}`);
 
         // Get full line text — used for pattern-based routing before symbol resolution
         const fullLine = document.getText({
@@ -107,11 +108,11 @@ export class ReferencesProvider {
             const methEnd    = methStart + methPart.length;
 
             if (position.character >= methStart && position.character <= methEnd) {
-                logger.info(`🔌 3-part impl — cursor on method name "${methPart}" (iface=${ifacePart})`);
+                logger.error(`🔌 [FAR] Route A — 3-part impl, cursor on method "${methPart}" (iface=${ifacePart})`);
                 return this.provideInterfaceMethodReferences(methPart, ifacePart, document, context.includeDeclaration);
             }
             if (position.character >= ifaceStart && position.character <= ifaceEnd) {
-                logger.info(`🔌 3-part impl — cursor on interface name "${ifacePart}"`);
+                logger.error(`🔌 [FAR] Route A — 3-part impl, cursor on interface name "${ifacePart}"`);
                 return this.provideImplementsReferences(ifacePart, document);
             }
         }
@@ -124,7 +125,7 @@ export class ReferencesProvider {
             const nameStart = implementsM.index + implementsM[0].indexOf(ifaceName);
             const nameEnd   = nameStart + ifaceName.length;
             if (position.character >= nameStart && position.character <= nameEnd) {
-                logger.info(`🔌 IMPLEMENTS(${ifaceName}) — routing to IMPLEMENTS references`);
+                logger.error(`🔌 [FAR] Route B — IMPLEMENTS(${ifaceName}), routing to IMPLEMENTS references`);
                 return this.provideImplementsReferences(ifaceName, document);
             }
         }
@@ -152,7 +153,7 @@ export class ReferencesProvider {
             });
             const moduleMatch = classLine.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i);
             const classModuleFile = moduleMatch?.[1];
-            logger.info(`🏛️ "${word}" is inside CLASS body (class=${enclosingClass.label ?? '?'}, module=${classModuleFile ?? 'none'}) — routing to member-access path`);
+            logger.error(`🏛️ [FAR] Route: CLASS body (class=${enclosingClass.label ?? '?'}, module=${classModuleFile ?? 'none'}) → member-access path`);
             return this.provideMemberReferences(`SELF.${word}`, document, position, context, classModuleFile, enclosingClass.label);
         }
 
@@ -165,7 +166,7 @@ export class ReferencesProvider {
             t.finishesAt >= position.line
         );
         if (enclosingInterface) {
-            logger.info(`🔌 "${word}" is inside INTERFACE body (iface=${enclosingInterface.label ?? '?'}) — routing to interface-method path`);
+            logger.error(`🔌 [FAR] Route: INTERFACE body (iface=${enclosingInterface.label ?? '?'}) → interface-method path`);
             return this.provideInterfaceMethodReferences(word, enclosingInterface.label ?? word, document, context.includeDeclaration);
         }
 
@@ -181,7 +182,7 @@ export class ReferencesProvider {
         if (ifaceDeclToken && ifaceDeclToken.label) {
             const ifaceLabelLower = ifaceDeclToken.label.toLowerCase();
             if (word.toLowerCase() === ifaceLabelLower) {
-                logger.info(`🔌 "${word}" is INTERFACE declaration name — routing to IMPLEMENTS references`);
+                logger.error(`🔌 [FAR] Route C — INTERFACE declaration name "${word}" → IMPLEMENTS references`);
                 return this.provideImplementsReferences(ifaceDeclToken.label, document);
             }
         }
@@ -193,10 +194,10 @@ export class ReferencesProvider {
             return this.findProcedureReferences(word, document, tokens, context.includeDeclaration);
         }
 
-        logger.info(`✅ Symbol "${word}" found — scope: ${symbolInfo.scope.type}, declared at ${symbolInfo.location.uri}:${symbolInfo.location.line}`);
-
         const searchWord = symbolInfo.token.value;
         const filesToSearch = this.getFilesToSearch(symbolInfo, document);
+
+        logger.error(`[FAR] Plain symbol "${searchWord}" — scope: ${symbolInfo.scope.type}, declared at ${path.basename(decodeURIComponent(symbolInfo.location.uri))}:${symbolInfo.location.line}`);
 
         // When the declaration is in a MEMBER file, also walk MAP INCLUDE files to find
         // the MODULE declaration (e.g. startproc.inc) and add it to the search list.
@@ -212,7 +213,8 @@ export class ReferencesProvider {
             }
         }
 
-        logger.info(`📁 Searching ${filesToSearch.length} file(s) for "${searchWord}"`);
+        logger.error(`[FAR] Searching ${filesToSearch.length} file(s) for "${searchWord}":\n` +
+            filesToSearch.map(f => `  ${path.basename(decodeURIComponent(f))}`).join('\n'));
 
         // For structure field scope, collect all PRE prefixes that map to this field
         const fieldPrefixes = symbolInfo.scope.type === 'field'
@@ -229,7 +231,7 @@ export class ReferencesProvider {
             locations.push(...fileLocations);
         }
 
-        logger.info(`✅ Found ${locations.length} reference(s) to "${searchWord}"`);
+        logger.error(`[FAR] ✅ ${locations.length} reference(s) found for "${searchWord}"`);
         return locations.length > 0 ? locations : null;
     }
 
@@ -285,6 +287,52 @@ export class ReferencesProvider {
             }
         }
 
+        // Scan LibSrc INC files for:
+        //   (a) classes that IMPLEMENTS(ifaceName) with a MODULE declaration → add those CLW files
+        //   (b) the INC that DECLARES the interface itself (ifaceName INTERFACE) → add that INC
+        // This covers both: starting from the interface declaration AND starting from an implementation.
+        const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const dirsToScan = new Set<string>([path.dirname(currentFilePath).toLowerCase()]);
+        for (const lp of (serverSettings.libsrcPaths ?? [])) {
+            if (lp) dirsToScan.add(lp.toLowerCase());
+        }
+        const implementsRe = new RegExp(`\\bIMPLEMENTS\\s*\\(\\s*${ifaceName}\\s*\\)`, 'i');
+        const ifaceDeclRe  = new RegExp(`^[ \\t]*${ifaceName}[ \\t]+INTERFACE\\b`, 'im');
+        for (const dir of dirsToScan) {
+            let dirEntries: string[];
+            try { dirEntries = fs.readdirSync(dir); } catch { continue; }
+            for (const fname of dirEntries) {
+                if (!fname.toLowerCase().endsWith('.inc')) continue;
+                const incPath = path.join(dir, fname);
+                const incUri = `file:///${incPath.replace(/\\/g, '/')}`;
+                let incContent: string;
+                try { incContent = fs.readFileSync(incPath, 'utf8'); } catch { continue; }
+
+                // (a) IMPLEMENTS — add the MODULE CLW file
+                if (implementsRe.test(incContent)) {
+                    const moduleRe = /MODULE\s*\(\s*['"](.+?)['"]\s*\)/gi;
+                    let m: RegExpExecArray | null;
+                    while ((m = moduleRe.exec(incContent)) !== null) {
+                        const resolved = this.resolveModuleFile(m[1], incUri);
+                        if (resolved && !filesToSearch.includes(resolved)) {
+                            filesToSearch.push(resolved);
+                            logger.error(`[FAR] Found implementor via LibSrc scan: ${path.basename(decodeURIComponent(resolved))} (from ${fname})`);
+                        }
+                    }
+                }
+
+                // (b) INTERFACE declaration — add the INC itself so the InterfaceMethod token is found
+                if (!filesToSearch.includes(incUri) && ifaceDeclRe.test(incContent)) {
+                    filesToSearch.push(incUri);
+                    logger.error(`[FAR] Found interface declaration in: ${fname}`);
+                }
+            }
+        }
+
+        logger.error(`[FAR] Interface method "${methodName}" (${ifaceName}) — searching ${filesToSearch.length} file(s)` +
+            (sm?.solution?.projects?.length ? ` [solution: ${sm.solution.projects.length} project(s)]` : ' [no solution — using current file + MODULE fallback]') + ':\n' +
+            filesToSearch.map(f => `  ${path.basename(decodeURIComponent(f))}`).join('\n'));
+
         // Pre-build set of class names that implement this interface, per-file (keyed by fileUri)
         // so MethodDeclaration filtering is fast and accurate.
         const implementingClassesByFile = new Map<string, Set<string>>();
@@ -315,21 +363,8 @@ export class ReferencesProvider {
             const fileTokens = this.getTokensForUri(fileUri);
             if (!fileTokens || fileTokens.length === 0) continue;
 
-            // Pre-scan: collect lines that are declaration contexts so we skip them
-            // in the call-site pass (avoids double-counting label + PROCEDURE keyword)
-            const declLines = new Set<number>();
-            for (const t of fileTokens) {
-                const subT = t.subType;
-                if (subT === TokenType.InterfaceMethod || subT === TokenType.MethodDeclaration || subT === TokenType.MethodImplementation) {
-                    const lbl = (t.label ?? '').toLowerCase();
-                    const lastName = lbl.includes('.') ? lbl.split('.').pop()! : lbl;
-                    if (lastName === methodLower) declLines.add(t.line);
-                }
-            }
-
             for (const token of fileTokens) {
                 if (token.type === TokenType.Comment || token.type === TokenType.String) continue;
-                const valLower = token.value.toLowerCase();
                 const labelLower = (token.label ?? '').toLowerCase();
 
                 // InterfaceMethod declaration: report at the label (Variable) position on same line
@@ -343,12 +378,10 @@ export class ReferencesProvider {
                     continue;
                 }
 
-                // MethodImplementation: 3-part (Class.IFace.Method) or 2-part matching method name
+                // MethodImplementation: only 3-part (Class.IFace.Method) where IFace matches exactly
                 if (token.subType === TokenType.MethodImplementation) {
                     const parts = labelLower.split('.');
-                    const lastName = parts[parts.length - 1];
-                    const ifacePart = parts.length === 3 ? parts[1] : '';
-                    if (lastName === methodLower && (ifacePart === '' || ifacePart === ifaceLower)) {
+                    if (parts.length === 3 && parts[1] === ifaceLower && parts[2] === methodLower) {
                         // Point at the method-name segment, not the PROCEDURE keyword
                         const dotPos = (token.label ?? '').lastIndexOf('.');
                         const methodCol = dotPos >= 0 ? dotPos + 1 : token.start;
@@ -367,20 +400,12 @@ export class ReferencesProvider {
                         const labelTok = fileTokens.find(t2 => t2.line === token.line && t2.value.toLowerCase() === methodLower);
                         const col = labelTok ? labelTok.start : token.start;
                         locations.push(Location.create(fileUri, Range.create(token.line, col, token.line, col + methodName.length)));
-                        continue;
                     }
-                    continue; // skip — class doesn't implement the interface
-                }
-
-                // Call sites: Function/Variable tokens matching the method name, outside declaration lines
-                if ((token.type === TokenType.Variable || token.type === TokenType.Function) &&
-                    valLower === methodLower && !declLines.has(token.line)) {
-                    locations.push(Location.create(fileUri, Range.create(token.line, token.start, token.line, token.start + token.value.length)));
                 }
             }
         }
 
-        logger.info(`✅ Found ${locations.length} reference(s) to interface method "${methodName}" (iface=${ifaceName})`);
+        logger.error(`✅ [FAR] Interface method "${methodName}" — ${locations.length} reference(s) found`);
         return locations.length > 0 ? locations : null;
     }
 
@@ -407,6 +432,10 @@ export class ReferencesProvider {
                 }
             }
         }
+
+        logger.error(`[FAR] IMPLEMENTS("${ifaceName}") — searching ${filesToSearch.length} file(s)` +
+            (sm?.solution?.projects?.length ? ` [solution: ${sm.solution.projects.length} project(s)]` : ' [no solution]') + ':\n' +
+            filesToSearch.map(f => `  ${path.basename(decodeURIComponent(f))}`).join('\n'));
 
         for (const fileUri of filesToSearch) {
             const fileTokens = this.getTokensForUri(fileUri);
@@ -451,7 +480,7 @@ export class ReferencesProvider {
             }
         }
 
-        logger.info(`✅ Found ${locations.length} IMPLEMENTS reference(s) for interface "${ifaceName}"`);
+        logger.error(`✅ [FAR] IMPLEMENTS "${ifaceName}" — ${locations.length} reference(s) found`);
         return locations.length > 0 ? locations : null;
     }
 
@@ -1240,16 +1269,18 @@ export class ReferencesProvider {
         const scopeType = symbolInfo.scope.type;
 
         if (scopeType === 'local' || scopeType === 'parameter' || scopeType === 'routine') {
+            logger.error(`[FAR] Scope="${scopeType}" → searching only current file`);
             return [currentDocument.uri];
         }
 
         if (scopeType === 'module') {
             const isMember = this.isMemberFile(symbolInfo.location.uri);
             const isProcDecl = this.isProcedureDeclaration(symbolInfo.location.uri, symbolInfo.location.line);
-            logger.info(`🔎 module scope: isMemberFile=${isMember}, isProcedureDeclaration=${isProcDecl} (line=${symbolInfo.location.line})`);
+            logger.error(`[FAR] Scope="module": isMemberFile=${isMember}, isProcedureDeclaration=${isProcDecl}`);
             if (isMember || isProcDecl) {
                 // Fall through to global search below
             } else {
+                logger.error(`[FAR] Scope="module" → searching only declaring file: ${path.basename(decodeURIComponent(symbolInfo.location.uri))}`);
                 return [symbolInfo.location.uri];
             }
         }
@@ -1279,8 +1310,11 @@ export class ReferencesProvider {
                     }
                 }
             }
+            logger.error(`[FAR] Scope="${scopeType}" → global, solution has ${solutionManager.solution.projects.length} project(s), ${allFiles.length} file(s) to search`);
             return allFiles;
         }
+
+        logger.error(`[FAR] Scope="${scopeType}" → global but NO solution loaded, searching ${[...alwaysInclude].length} file(s)`);
 
         return [...alwaysInclude];
     }
@@ -1365,6 +1399,11 @@ export class ReferencesProvider {
                         !(fileUri === declarationUri && token.line === declarationLine)) {
                         continue;
                     }
+                } else if (token.type === TokenType.ReferenceVariable &&
+                           token.value.toLowerCase() === '&' + searchWordLower) {
+                    // &TypeName reference-variable declaration: e.g. "Behavior &StandardBehavior,PRIVATE"
+                    matchStart = token.start + 1; // skip the leading '&'
+                    matchLength = searchWord.length;
                 } else if (scopeType === 'field' && (token.type === TokenType.StructureField || token.type === TokenType.Class)) {
                     // Field reference via dot-notation: "QZipF.version" when searching for "version"
                     const dotIndex = token.value.lastIndexOf('.');

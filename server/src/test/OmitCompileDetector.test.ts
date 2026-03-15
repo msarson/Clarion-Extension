@@ -45,68 +45,62 @@ suite('OmitCompileDetector', () => {
             assert.strictEqual(OmitCompileDetector.isLineOmittedWithBlocks(4, blocks), false, 'line 4 should NOT be omitted');
         });
 
-        test('COMPILE block closed by *** line (no tokens on terminator line)', () => {
+        test('conditional COMPILE (with condition arg) is ignored — lines treated as NOT omitted', () => {
+            // COMPILE('***', TraceFiles) — condition cannot be evaluated at analysis time,
+            // so we ignore it and treat all lines as navigable
             const code = [
-                '  COMPILE(\'***\',TraceFiles)', // line 0 - COMPILE start
-                'Trace    FILE,DRIVER(\'ASCII\')', // line 1 - inside COMPILE block
-                '  ***',                           // line 2 - terminator (no tokens)
-                'NormalCode    EQUATE(1)',          // line 3 - should NOT be omitted
+                '  COMPILE(\'***\',TraceFiles)', // line 0 - conditional COMPILE, ignored
+                'Trace    FILE,DRIVER(\'ASCII\')', // line 1 - NOT omitted
+                '  ***',                           // line 2
+                'NormalCode    EQUATE(1)',          // line 3 - NOT omitted
             ].join('\n');
 
             const doc = makeDoc(code);
             const tokens = tokenize(code);
             const blocks = OmitCompileDetector.findDirectiveBlocks(tokens, doc);
 
-            assert.strictEqual(blocks.length, 1);
-            assert.strictEqual(blocks[0].type, 'COMPILE');
-            assert.ok(blocks[0].endLine !== null, 'Block should be closed');
-
-            assert.strictEqual(OmitCompileDetector.isLineOmittedWithBlocks(1, blocks), true, 'line 1 inside COMPILE block');
-            assert.strictEqual(OmitCompileDetector.isLineOmittedWithBlocks(3, blocks), false, 'line 3 after block NOT omitted');
+            assert.strictEqual(blocks.length, 0, 'conditional COMPILE should be ignored');
+            assert.strictEqual(OmitCompileDetector.isLineOmittedWithBlocks(1, blocks), false, 'line 1 NOT omitted');
+            assert.strictEqual(OmitCompileDetector.isLineOmittedWithBlocks(3, blocks), false, 'line 3 NOT omitted');
         });
 
-        test('sequential COMPILE and OMIT blocks both close correctly', () => {
-            // Mirrors the pattern in ABFILE.CLW lines 128-139
+        test('conditional COMPILE and OMIT blocks are both ignored', () => {
+            // Mirrors the pattern in ABFILE.CLW lines 128-139 — both have condition args
             const code = [
-                '  COMPILE(\'***\',TraceFiles)', // line 0 - COMPILE start
-                'Trace    FILE,DRIVER(\'ASCII\')', // line 1 - inside COMPILE block
-                '  ***',                           // line 2 - closes COMPILE block (no tokens)
-                '  OMIT(\'***\',TraceFiles)',       // line 3 - OMIT start
-                'HiddenCode    EQUATE(0)',          // line 4 - inside OMIT block
-                '  ***',                            // line 5 - closes OMIT block (no tokens)
-                'NormalCode    EQUATE(1)',           // line 6 - should NOT be omitted
+                '  COMPILE(\'***\',TraceFiles)', // line 0 - conditional, ignored
+                'Trace    FILE,DRIVER(\'ASCII\')', // line 1 - NOT omitted
+                '  ***',                           // line 2
+                '  OMIT(\'***\',TraceFiles)',       // line 3 - conditional, ignored
+                'HiddenCode    EQUATE(0)',          // line 4 - NOT omitted
+                '  ***',                            // line 5
+                'NormalCode    EQUATE(1)',           // line 6 - NOT omitted
             ].join('\n');
 
             const doc = makeDoc(code);
             const tokens = tokenize(code);
             const blocks = OmitCompileDetector.findDirectiveBlocks(tokens, doc);
 
-            assert.strictEqual(blocks.length, 2, 'should find exactly 2 blocks');
-
-            // line 1 inside COMPILE block
-            assert.strictEqual(OmitCompileDetector.isLineOmittedWithBlocks(1, blocks), true, 'line 1 inside COMPILE');
-            // line 4 inside OMIT block
-            assert.strictEqual(OmitCompileDetector.isLineOmittedWithBlocks(4, blocks), true, 'line 4 inside OMIT');
-            // line 6 after both blocks
+            assert.strictEqual(blocks.length, 0, 'both conditional blocks should be ignored');
+            assert.strictEqual(OmitCompileDetector.isLineOmittedWithBlocks(1, blocks), false, 'line 1 NOT omitted');
+            assert.strictEqual(OmitCompileDetector.isLineOmittedWithBlocks(4, blocks), false, 'line 4 NOT omitted');
             assert.strictEqual(OmitCompileDetector.isLineOmittedWithBlocks(6, blocks), false, 'line 6 NOT omitted');
         });
 
-        test('line after OMIT block with comment terminator is NOT omitted', () => {
-            // Mirrors the COMPILE('=== DO LINK') pattern where terminator appears in a comment line
+        test('conditional COMPILE with comment terminator is ignored', () => {
+            // Mirrors the COMPILE('=== DO LINK', LinkFlag) pattern — condition arg present
             const code = [
-                '  COMPILE(\'=== DO LINK\',LinkFlag)', // line 0
-                '  PRAGMA(\'link(foo.LIB)\')',          // line 1 - inside COMPILE
-                '! === DO LINK',                         // line 2 - terminator in comment
-                'NormalCode    EQUATE(1)',                // line 3
+                '  COMPILE(\'=== DO LINK\',LinkFlag)', // line 0 - conditional, ignored
+                '  PRAGMA(\'link(foo.LIB)\')',          // line 1 - NOT omitted
+                '! === DO LINK',                         // line 2
+                'NormalCode    EQUATE(1)',                // line 3 - NOT omitted
             ].join('\n');
 
             const doc = makeDoc(code);
             const tokens = tokenize(code);
             const blocks = OmitCompileDetector.findDirectiveBlocks(tokens, doc);
 
-            assert.strictEqual(blocks.length, 1);
-            assert.ok(blocks[0].endLine !== null, 'Block should be closed');
-            assert.strictEqual(OmitCompileDetector.isLineOmittedWithBlocks(1, blocks), true, 'line 1 inside COMPILE');
+            assert.strictEqual(blocks.length, 0, 'conditional COMPILE should be ignored');
+            assert.strictEqual(OmitCompileDetector.isLineOmittedWithBlocks(1, blocks), false, 'line 1 NOT omitted');
             assert.strictEqual(OmitCompileDetector.isLineOmittedWithBlocks(3, blocks), false, 'line 3 NOT omitted');
         });
 
@@ -209,6 +203,31 @@ suite('OmitCompileDetector', () => {
             assert.strictEqual(blocks.length, 1);
             assert.strictEqual(blocks[0].endLine, null, 'genuinely unclosed block should have endLine null');
             assert.strictEqual(OmitCompileDetector.isLineOmittedWithBlocks(2, blocks), true, 'line 2 after unclosed block IS omitted');
+        });
+
+        test('conditional OMIT with two args (include guard pattern) is ignored', () => {
+            // e.g. OMIT('_EndOfInclude_', _BrowsePresent_) — condition cannot be evaluated,
+            // treat the block as NOT omitted so hover/goto/FAR still work in the file
+            const code = [
+                '    OMIT(\'_EndOfInclude_\',_BrowsePresent_)',  // line 0 - conditional OMIT
+                '_BrowsePresent_ EQUATE(1)',                       // line 1 - should NOT be omitted
+                '',                                                 // line 2
+                'BrowseQueue INTERFACE',                            // line 3 - should NOT be omitted
+                'Kill PROCEDURE',                                   // line 4
+                '    END',                                          // line 5
+                '_EndOfInclude_',                                   // line 6 - terminator
+                'AfterGuard EQUATE(2)',                             // line 7 - should NOT be omitted
+            ].join('\n');
+
+            const doc = makeDoc(code);
+            const tokens = tokenize(code);
+            const blocks = OmitCompileDetector.findDirectiveBlocks(tokens, doc);
+
+            // Conditional OMIT should produce no blocks
+            assert.strictEqual(blocks.length, 0, 'conditional OMIT should be ignored');
+            assert.strictEqual(OmitCompileDetector.isLineOmittedWithBlocks(1, blocks), false, 'line 1 NOT omitted');
+            assert.strictEqual(OmitCompileDetector.isLineOmittedWithBlocks(3, blocks), false, 'line 3 NOT omitted');
+            assert.strictEqual(OmitCompileDetector.isLineOmittedWithBlocks(7, blocks), false, 'line 7 NOT omitted');
         });
     });
 });

@@ -553,7 +553,41 @@ logger.perf('Operation name', {
 
 ### Testing Patterns
 
-#### Server Tests (TDD style)
+#### TDD Workflow (Required)
+**Always write a failing test before writing or changing any code.** Verify the test fails for the right reason, then implement, then confirm it passes.
+
+1. Write a test that exercises the expected behaviour
+2. Run it — confirm it fails (not just errors)
+3. Implement the minimum code to make it pass
+4. Re-run — confirm it passes
+5. Refactor if needed, keeping tests green
+
+#### Disposable Exploratory Tests (Preferred over static analysis)
+**Before analysing code by reading files, run a disposable Node.js snippet to observe actual runtime behaviour.** This is faster and avoids wrong assumptions.
+
+Use `node -e "..."` against the compiled output in `./out/`:
+\\\ash
+# Quick tokenizer probe — no test file needed
+node -e "
+const { ClarionTokenizer } = require('./out/server/src/ClarionTokenizer');
+const { TokenType } = require('./out/server/src/tokenizer/TokenTypes');
+
+const t = new ClarionTokenizer('Behavior  &StandardBehavior,PRIVATE');
+t.tokenize().forEach(tok =>
+  console.log(tok.type, tok.subType, JSON.stringify(tok.value), 'col', tok.start)
+);
+"
+\\\
+
+Use these probes to answer questions like:
+- "What tokens does this line produce?"
+- "What value/type does this token have at runtime?"
+- "Does this regex match this input?"
+- "Which code path runs for input X?"
+
+Only fall back to reading source files when the probe output alone isn't enough to understand context (e.g., to trace where a value is consumed downstream).
+
+#### Server Tests (Mocha TDD)
 \\\	ypescript
 import * as assert from 'assert';
 import { ClarionTokenizer, TokenType } from '../ClarionTokenizer';
@@ -569,6 +603,11 @@ suite('Feature Name', () => {
     assert.ok(procToken, 'Should find PROCEDURE token');
   });
 });
+\\\
+
+Run a single test file during development:
+\\\ash
+npm run compile:dev && npx mocha out/server/src/test/MyFeature.test.js --timeout 30000
 \\\
 
 #### Client Tests

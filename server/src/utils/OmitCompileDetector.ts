@@ -82,6 +82,16 @@ export class OmitCompileDetector {
             for (let j = i + 1; j < Math.min(i + 5, tokens.length); j++) {
                 if (tokens[j].type === TokenType.String) {
                     terminatorString = tokens[j].value.replace(/^'(.*)'$/, '$1');
+                    // If there is a condition argument after the terminator string (comma + identifier),
+                    // we cannot evaluate macros at analysis time, so treat conditional OMIT/COMPILE
+                    // as not-omitted for navigation purposes (hover, F12, FAR).
+                    for (let k = j + 1; k < Math.min(j + 4, tokens.length); k++) {
+                        if (tokens[k].type === TokenType.Delimiter) continue; // skip comma/parens
+                        if (tokens[k].line !== token.line) break;
+                        // Any non-delimiter token on the same line = condition argument present
+                        terminatorString = null;
+                        break;
+                    }
                     break;
                 }
             }
