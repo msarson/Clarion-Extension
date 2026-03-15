@@ -52,15 +52,6 @@ export class RenameProvider {
             throw new ResponseError(ErrorCodes.InvalidRequest, libsrcReason);
         }
 
-        // Reject if there is no loaded solution (can't safely rename cross-file without it)
-        const solutionManager = SolutionManager.getInstance();
-        if (!solutionManager?.solution || solutionManager.solution.projects.length === 0) {
-            throw new ResponseError(
-                ErrorCodes.InvalidRequest,
-                'Cannot rename: no solution loaded. Open a Clarion solution first.'
-            );
-        }
-
         const wordRange = TokenHelper.getWordRangeAtPosition(document, position);
         if (!wordRange) {
             throw new ResponseError(ErrorCodes.InvalidRequest, 'No symbol at cursor position.');
