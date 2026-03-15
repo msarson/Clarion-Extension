@@ -144,17 +144,6 @@ export class RenameProvider {
             }
         }
 
-        // Also check project paths — file must be inside at least one project directory
-        // Only enforce this guard when a solution is loaded (projectPaths populated)
-        if (serverSettings.projectPaths.length > 0) {
-            const inProject = serverSettings.projectPaths.some(p =>
-                normalised.startsWith(p.toLowerCase())
-            );
-            if (!inProject) {
-                return `Cannot rename: '${path.basename(filePath)}' is not part of the current solution's source files.`;
-            }
-        }
-
         return null;
     }
 }
