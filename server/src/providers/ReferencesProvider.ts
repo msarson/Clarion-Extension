@@ -13,6 +13,7 @@ import { ChainedPropertyResolver, ChainedMemberInfo } from '../utils/ChainedProp
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { serverSettings } from '../serverSettings';
+import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
@@ -186,6 +187,11 @@ export class ReferencesProvider {
                 return this.provideImplementsReferences(ifaceDeclToken.label, document);
             }
         }
+
+        // ── Route D: CLASS TYPE name — always global, never scope-limited ──
+        // Must run before findSymbol to prevent parameter/local scope limiting.
+        const classTypeRef = await this.findClassTypeReferences(word, document, context.includeDeclaration);
+        if (classTypeRef !== null) return classTypeRef;
 
         // Plain symbol path
         const symbolInfo = await this.symbolFinder.findSymbol(word, document, position);
@@ -1632,6 +1638,28 @@ export class ReferencesProvider {
      * 2. Same check across all cached project source files
      * 3. Same check after walking MAP INCLUDE files from the current CLW
      */
+    private async findClassTypeReferences(
+        word: string,
+        document: TextDocument,
+        includeDeclaration: boolean
+    ): Promise<Location[] | null> {
+        // Check if the word is a known CLASS type via the class definition indexer
+        const fromPath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
+        const projectPath = path.dirname(fromPath);
+        try {
+            const classIndexer = ClassDefinitionIndexer.getInstance();
+            await classIndexer.getOrBuildIndex(projectPath);
+            const definitions = classIndexer.findClass(word, projectPath);
+            if (!definitions || definitions.length === 0) return null;
+        } catch {
+            return null;
+        }
+
+        // It IS a class type — do a global search using the procedure-reference machinery
+        const tokens = this.tokenCache.getTokensByUri(document.uri) ?? this.tokenCache.getTokens(document);
+        return this.findProcedureReferences(word, document, tokens, includeDeclaration);
+    }
+
     private async findProcedureReferences(
         word: string,
         document: TextDocument,
