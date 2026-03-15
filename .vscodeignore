@@ -40,6 +40,19 @@ clarion-extensions-*.vsix
 
 # AI prompts and development context
 prompt/**
+ai/**
+dev/**
+
+# ANTLR grammar source (not needed at runtime - only compiled output matters)
+antlr-grammar/**
+
+# Large documentation/reference folders not needed at runtime
+ClarionDocs/**
+
+# Development test files
+test-compile-folding.clw
+test-declaration-debug.js
+test-declaration-patterns.js
 
 # Git and GitHub
 .git/**
