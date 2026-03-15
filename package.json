@@ -2,7 +2,7 @@
     "name": "clarion-extensions",
     "displayName": "Clarion Extensions",
     "description": "Extension for Clarion Language",
-    "version": "0.8.7",
+    "version": "0.8.8",
     "publisher": "msarson",
     "repository": {
         "type": "git",
@@ -113,14 +113,30 @@
             {
                 "language": "clarion",
                 "scopes": {
-                    "keywordControl": ["keyword.control.clarion"],
-                    "keywordStructure": ["storage.type.structure.clarion"],
-                    "keywordStructure.endStructure": ["storage.type.structure.clarion"],
-                    "keywordOop": ["keyword.oop.clarion"],
-                    "keywordOop.endOop": ["keyword.oop.clarion"],
-                    "keywordWindow": ["storage.type.control.clarion"],
-                    "keywordWindow.endWindow": ["storage.type.control.clarion"],
-                    "keywordControl.endControl": ["keyword.control.clarion"]
+                    "keywordControl": [
+                        "keyword.control.clarion"
+                    ],
+                    "keywordStructure": [
+                        "storage.type.structure.clarion"
+                    ],
+                    "keywordStructure.endStructure": [
+                        "storage.type.structure.clarion"
+                    ],
+                    "keywordOop": [
+                        "keyword.oop.clarion"
+                    ],
+                    "keywordOop.endOop": [
+                        "keyword.oop.clarion"
+                    ],
+                    "keywordWindow": [
+                        "storage.type.control.clarion"
+                    ],
+                    "keywordWindow.endWindow": [
+                        "storage.type.control.clarion"
+                    ],
+                    "keywordControl.endControl": [
+                        "keyword.control.clarion"
+                    ]
                 }
             }
         ],
