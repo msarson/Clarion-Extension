@@ -1063,6 +1063,56 @@ MyProcedure  PROCEDURE()
             assert.strictEqual(returnDiagnostics.length, 1, 'Should flag MAP procedure missing RETURN');
             assert.ok(returnDiagnostics[0].message.includes('MyProcedure'), 'Should mention procedure name');
         });
+
+        test('Should NOT flag overloaded MAP procedure without return type (issue #44)', () => {
+            // FileSignature(STRING, StringTheory) has no return type
+            // FileSignature(STRING) has STRING return type
+            // Only the second overload's implementation should be checked for RETURN
+            const code = `  PROGRAM
+                    MAP
+FileSignature PROCEDURE(STRING pFilename,STRING pSt)
+FileSignature PROCEDURE(STRING pFilename),STRING
+                    END
+
+FileSignature  PROCEDURE(STRING pFilename,STRING pSt)
+    CODE
+    RETURN
+
+FileSignature  PROCEDURE(STRING pFilename)
+x STRING(255)
+    CODE
+    RETURN x`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            const returnDiagnostics = diagnostics.filter(d => d.message.includes('RETURN'));
+            assert.strictEqual(returnDiagnostics.length, 0, 'Should NOT flag the non-returning overload for missing RETURN value');
+        });
+
+        test('Should still flag the overload WITH return type if it has no RETURN value (issue #44)', () => {
+            const code = `  PROGRAM
+                    MAP
+FileSignature PROCEDURE(STRING pFilename,STRING pSt)
+FileSignature PROCEDURE(STRING pFilename),STRING
+                    END
+
+FileSignature  PROCEDURE(STRING pFilename,STRING pSt)
+    CODE
+    RETURN
+
+FileSignature  PROCEDURE(STRING pFilename)
+x STRING(255)
+    CODE
+    RETURN`;
+
+            const document = createDocument(code);
+            const diagnostics = DiagnosticProvider.validateDocument(document);
+
+            const returnDiagnostics = diagnostics.filter(d => d.message.includes('RETURN'));
+            assert.strictEqual(returnDiagnostics.length, 1, 'Should flag the overload with STRING return but empty RETURN');
+            assert.ok(returnDiagnostics[0].message.includes('FileSignature'), 'Diagnostic should mention FileSignature');
+        });
     });
 
     suite('IF-ELSE with Multiple Statements', () => {

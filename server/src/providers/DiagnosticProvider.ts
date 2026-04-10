@@ -2,6 +2,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
 import { ClarionTokenizer, Token, TokenType } from '../ClarionTokenizer';
 import { extractReturnType } from '../utils/AttributeKeywords';
+import { ProcedureSignatureUtils } from '../utils/ProcedureSignatureUtils';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("DiagnosticProvider");
@@ -977,12 +978,14 @@ export class DiagnosticProvider {
      */
     public static validateReturnStatements(tokens: Token[], document: TextDocument): Diagnostic[] {
         const diagnostics: Diagnostic[] = [];
+        const docLines = document.getText().split('\n');
         
         // Step 1: Find all procedure/method declarations with return types
         const declarationsWithReturnTypes: Array<{
             name: string;           // Method name or full ClassName.MethodName
             returnType: string;     // Return type (LONG, STRING, etc.)
-            line: number;          // Declaration line
+            line: number;           // Declaration line
+            signature: string;      // Full declaration line text (for overload matching)
         }> = [];
         
         // Find declarations in CLASS blocks and MAP blocks
@@ -1027,7 +1030,8 @@ export class DiagnosticProvider {
                                             declarationsWithReturnTypes.push({
                                                 name: procNameToken.value,  // Just procedure name, no class prefix
                                                 returnType: returnType,
-                                                line: procNameToken.line
+                                                line: procNameToken.line,
+                                                signature: docLines[tokens[j].line] || ''
                                             });
                                         }
                                     }
@@ -1086,7 +1090,8 @@ export class DiagnosticProvider {
                                              declarationsWithReturnTypes.push({
                                                 name: className + '.' + methodNameToken.value,
                                                 returnType: returnType,
-                                                line: methodNameToken.line
+                                                line: methodNameToken.line,
+                                                signature: docLines[tokens[j].line] || ''
                                             });
                                         }
                                     }
@@ -1143,9 +1148,7 @@ export class DiagnosticProvider {
                             fullName = tokens[i - 3].value + '.' + fullName;
                         } else if (i > 1 && tokens[i - 2].type === TokenType.Label) {
                             // Check source for dot
-                            const content = document.getText();
-                            const lines = content.split('\n');
-                            const line = lines[token.line];
+                            const line = docLines[token.line];
                             const className = tokens[i - 2].value;
                             const methodName = tokens[i - 1].value;
                             if (line.includes(className + '.' + methodName)) {
@@ -1157,6 +1160,14 @@ export class DiagnosticProvider {
                     // Check if this matches our declaration
                     // Clarion is case-insensitive, so compare lowercase
                     if (fullName.toLowerCase() === decl.name.toLowerCase()) {
+                        // For overloaded procedures, verify this implementation matches the declaration's
+                        // parameter signature — if not, it's a different overload, skip it
+                        const implLine = docLines[token.line] || '';
+                        const declParams = ProcedureSignatureUtils.extractParameterTypes(decl.signature);
+                        const implParams = ProcedureSignatureUtils.extractParameterTypes(implLine);
+                        if (!ProcedureSignatureUtils.parametersMatch(declParams, implParams)) {
+                            continue; // Different overload — keep searching
+                        }
                         // Find CODE and validate RETURN statements
                         let codeLineStart = -1;
                         

@@ -6,6 +6,13 @@ All notable changes to the Clarion Extension are documented here.
 
 ## Recent Versions
 
+### [0.8.8] - 2026-04-10
+**Bug Fixes**
+
+- 🐛 Fixed false-positive diagnostic "Procedure returns X but all RETURN statements are empty" for overloaded procedures — the validator now matches implementations by parameter signature, not just name, so a non-returning overload is no longer incorrectly flagged because another overload of the same name has a return type ([#44](https://github.com/msarson/Clarion-Extension/issues/44))
+
+---
+
 ### [0.8.7] - 2026-03-15
 **Find All References, INTERFACE Support & Hover Quality**
 
