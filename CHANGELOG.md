@@ -13,6 +13,11 @@ All notable changes to the Clarion Extension are documented here.
 - 🐛 **Find All References on a local CLASS label** now returns correct positions and complete results:
   - Previously, FAR on a CLASS declaration label (e.g. `ThisWindow` in `ThisWindow CLASS(WindowManager)`) returned the CLASS *keyword* column for every CLASS declaration in the procedure instead of actual `ThisWindow` references — caused by `varName` extraction using `split(' ')[0]` on `"CLASS (ThisWindow)"`, yielding `"CLASS"` rather than the label
   - Method implementation headers (`ThisWindow.Init PROCEDURE`, `ThisWindow.Kill PROCEDURE`, etc.) are now included — the token scan is expanded to the full file when a CLASS label is detected, since implementations live outside the declaring procedure's scope
+- 🐛 **Go to Implementation (Ctrl+F12) and hover for `SELF.Method()`** now correctly find implementations inherited from an external base class:
+  - Previously, `SELF.Method()` on a method declared in an external `.inc` file (e.g. `KanbanWrapper.inc`) and implemented in the corresponding `.clw` file only found the declaration — the implementation search was limited to the current file
+  - `ImplementationProvider` now resolves the member declaration first to obtain the declaration file, then uses the existing `.inc` → `.clw` redirection fallback to locate the implementation
+  - `MethodHoverResolver` now derives the `.clw` filename from `memberInfo.file` and passes it to the redirection-aware cross-file search (fixes both `SELF.Method()` and `PARENT.Method()` hover)
+  - Hover now also shows the implementation signature as a code snippet alongside the file/line reference
 
 ---
 
