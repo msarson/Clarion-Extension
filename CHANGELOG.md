@@ -10,6 +10,9 @@ All notable changes to the Clarion Extension are documented here.
 **Bug Fixes**
 
 - 🐛 Fixed false-positive diagnostic "Procedure returns X but all RETURN statements are empty" for overloaded procedures — the validator now matches implementations by parameter signature, not just name, so a non-returning overload is no longer incorrectly flagged because another overload of the same name has a return type ([#44](https://github.com/msarson/Clarion-Extension/issues/44))
+- 🐛 **Find All References on a local CLASS label** now returns correct positions and complete results:
+  - Previously, FAR on a CLASS declaration label (e.g. `ThisWindow` in `ThisWindow CLASS(WindowManager)`) returned the CLASS *keyword* column for every CLASS declaration in the procedure instead of actual `ThisWindow` references — caused by `varName` extraction using `split(' ')[0]` on `"CLASS (ThisWindow)"`, yielding `"CLASS"` rather than the label
+  - Method implementation headers (`ThisWindow.Init PROCEDURE`, `ThisWindow.Kill PROCEDURE`, etc.) are now included — the token scan is expanded to the full file when a CLASS label is detected, since implementations live outside the declaring procedure's scope
 
 ---
 
