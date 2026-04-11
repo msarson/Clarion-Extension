@@ -245,7 +245,7 @@ export class HoverFormatter {
             markdown.push('');
         }
         
-        // Show implementation location (no body preview)
+        // Show implementation location with signature snippet
         try {
             const lastColonIndex = implementationLocation.lastIndexOf(':');
             const implFilePath = implementationLocation.substring(0, lastColonIndex).replace('file:///', '');
@@ -253,7 +253,19 @@ export class HoverFormatter {
             const implUri = decodeURIComponent(implFilePath);
             const implFileName = path.basename(implUri);
             const implLineNumber = implLine + 1;
-            markdown.push(`**Implemented in** \`${implFileName}\` @ line ${implLineNumber}`);
+            markdown.push(`**Implemented in** \`${implFileName}\` @ line ${implLineNumber}: *(Ctrl+F12 to navigate)*`);
+            try {
+                const implContent = fs.readFileSync(implUri, 'utf-8');
+                const implLines = implContent.split('\n');
+                const implSignature = implLines[implLine]?.trim();
+                if (implSignature) {
+                    markdown.push('```clarion');
+                    markdown.push(implSignature);
+                    markdown.push('```');
+                }
+            } catch {
+                // File not readable — skip snippet
+            }
             markdown.push(``);
             markdown.push(`*Ctrl+F12 to navigate*`);
         } catch (error) {

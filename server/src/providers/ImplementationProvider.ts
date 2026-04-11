@@ -383,8 +383,24 @@ export class ImplementationProvider {
                     return null;
                 }
 
-                // SELF.Method() — handled above in Pattern 1b or earlier; skip
+                // SELF.Method() — resolve via class member lookup then cross-file search
                 if (callInfo.objectName.toUpperCase() === 'SELF') {
+                    const selfTokens = this.tokenCache.getTokens(document);
+                    const memberInfo = this.memberResolver.findClassMemberInfo(
+                        callInfo.methodName, document, position.line, selfTokens, callInfo.paramCount
+                    );
+                    if (memberInfo && memberInfo.type.toUpperCase().includes('PROCEDURE')) {
+                        const impl = await this.findMethodImplementationCrossFile(
+                            memberInfo.className,
+                            callInfo.methodName,
+                            document,
+                            callInfo.paramCount,
+                            null,
+                            line,
+                            memberInfo.file
+                        );
+                        if (impl) return impl;
+                    }
                     return this.findMethodImplementationInFile(document, callInfo.methodName, callInfo.paramCount);
                 }
 

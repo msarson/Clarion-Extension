@@ -240,12 +240,16 @@ export class MethodHoverResolver {
         const isMethod = memberInfo.type.toUpperCase().includes('PROCEDURE') || memberInfo.type.toUpperCase().includes('FUNCTION');
         
         if (isMethod) {
+            const declFilePath = decodeURIComponent(memberInfo.file.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+            const declExt = path.extname(declFilePath).toLowerCase();
+            const implModuleFile = declExt !== '.clw' ? path.basename(declFilePath, declExt) + '.clw' : null;
+
             const implLocation = await this.findMethodImplementationCrossFile(
                 memberInfo.className,
                 fieldName,
                 document,
                 paramCount,
-                null
+                implModuleFile
             );
             
             if (implLocation) {
@@ -257,7 +261,7 @@ export class MethodHoverResolver {
     }
 
     /**
-     * Resolves hover for a PARENT.MethodName() call — looks up the method starting
+     * Resolves hover for a PARENT.MethodName() call— looks up the method starting
      * from the parent class of the current scope's class.
      */
     async resolveParentMethodCall(
@@ -278,12 +282,16 @@ export class MethodHoverResolver {
         const isMethod = memberInfo.type.toUpperCase().includes('PROCEDURE') || memberInfo.type.toUpperCase().includes('FUNCTION');
 
         if (isMethod) {
+            const declFilePath = decodeURIComponent(memberInfo.file.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+            const declExt = path.extname(declFilePath).toLowerCase();
+            const implModuleFile = declExt !== '.clw' ? path.basename(declFilePath, declExt) + '.clw' : null;
+
             const implLocation = await this.findMethodImplementationCrossFile(
                 memberInfo.className,
                 fieldName,
                 document,
                 paramCount,
-                null
+                implModuleFile
             );
             if (implLocation) {
                 return this.formatter.formatMethodCall(fieldName, memberInfo, implLocation);
