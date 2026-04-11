@@ -263,9 +263,13 @@ export class SymbolFinderService {
         
         logger.info(`✅ Found variable: ${varSymbol.name} of type ${varSymbol._clarionType || varSymbol.detail}`);
         
-        // Extract the variable name (without type info that may be in the name)
-        // ClarionDocumentSymbolProvider may include type in the name like "Counter LONG"
-        const varName = varSymbol._clarionVarName || varSymbol.name.split(' ')[0];
+        // Extract the variable name (without type info that may be in the name).
+        // ClarionDocumentSymbolProvider may encode CLASS/GROUP/QUEUE declarations as
+        // "CLASS (LabelName)" — in that case the label lives inside the parens, not
+        // before the first space.  Fall back to split(' ')[0] for plain "VarName TYPE".
+        const structureNameMatch = varSymbol.name.match(/^(?:GROUP|QUEUE|CLASS)\s*\(([^)]+)\)/i);
+        const varName = varSymbol._clarionVarName
+            || (structureNameMatch ? structureNameMatch[1] : varSymbol.name.split(' ')[0]);
         
         // Find the actual token for this variable
         const variableToken = tokens.find(t =>

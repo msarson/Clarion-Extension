@@ -428,3 +428,66 @@ suite('ReferencesProvider – LIKE typed variable', () => {
         assert.ok(refLines.includes(6), 'Should find usage on line 6');
     });
 });
+
+// ---------------------------------------------------------------------------
+// ReferencesProvider — local CLASS declaration label
+// ---------------------------------------------------------------------------
+
+suite('ReferencesProvider – local CLASS label references', () => {
+    let provider: ReferencesProvider;
+
+    setup(() => {
+        setServerInitialized(true);
+        TokenCache.getInstance().clearAllTokens();
+        provider = new ReferencesProvider();
+    });
+
+    /**
+     * When cursor is on the label of a local CLASS declaration (e.g. "ThisWindow"
+     * in "ThisWindow  CLASS(BaseClass)"), FAR must find:
+     *   - the label declaration itself (col 0)
+     *   - method implementation headers  (ThisWindow.Init PROCEDURE …)
+     *   - call/usage sites               (result = ThisWindow.Run())
+     * It must NOT return the CLASS keyword position (col N > 0).
+     */
+    test('Cursor on local CLASS label finds method implementations and usages, not CLASS keyword', async () => {
+        const code = [
+            "  MEMBER('Main')",                       // line 0
+            'Main PROCEDURE',                          // line 1
+            'ThisWindow      CLASS(BaseClass)',         // line 2 — declaration  col 0
+            'Init              PROCEDURE',              // line 3
+            'Run               PROCEDURE,VIRTUAL',      // line 4
+            'END',                                      // line 5
+            'CODE',                                     // line 6
+            '  result = ThisWindow.Run()',               // line 7 — usage
+            'END',                                      // line 8
+            '',                                         // line 9
+            'ThisWindow.Init PROCEDURE',               // line 10 — implementation
+            'CODE',                                     // line 11
+            '  RETURN',                                 // line 12
+            '',                                         // line 13
+            'ThisWindow.Run PROCEDURE',                // line 14 — implementation
+            'CODE',                                     // line 15
+            '  RETURN',                                 // line 16
+        ].join('\n');
+
+        const doc = createDocument(code);
+        seedCache(doc);
+
+        // Cursor on "ThisWindow" at line 2, col 2 (inside the label)
+        const refs = await provider.provideReferences(doc, { line: 2, character: 2 }, { includeDeclaration: true });
+
+        assert.ok(refs !== null, 'Should return results, not null');
+        assert.ok(refs!.length >= 1, `Expected at least 1 reference, got ${refs!.length}`);
+
+        // All declaration/usage positions must be at col 0, NOT the CLASS keyword column
+        const wrongColRefs = refs!.filter(r => r.range.start.character > 0 && r.range.start.line === 2);
+        assert.strictEqual(wrongColRefs.length, 0,
+            `References on declaration line should be at col 0, not CLASS keyword position. Got: ${JSON.stringify(wrongColRefs)}`);
+
+        const refLines = refs!.map(r => r.range.start.line);
+        assert.ok(refLines.includes(2), 'Should include the declaration line (col 0, not CLASS keyword col)');
+        // line 7 is ThisWindow.Run() inside Main scope — should be found
+        assert.ok(refLines.includes(7), `Should find usage on line 7. Lines found: ${refLines}`);
+    });
+});
