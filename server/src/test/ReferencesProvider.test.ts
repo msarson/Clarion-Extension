@@ -487,7 +487,10 @@ suite('ReferencesProvider – local CLASS label references', () => {
 
         const refLines = refs!.map(r => r.range.start.line);
         assert.ok(refLines.includes(2), 'Should include the declaration line (col 0, not CLASS keyword col)');
-        // line 7 is ThisWindow.Run() inside Main scope — should be found
+        // line 7 is ThisWindow.Run() usage inside Main scope
         assert.ok(refLines.includes(7), `Should find usage on line 7. Lines found: ${refLines}`);
+        // lines 10 and 14 are method implementation headers outside the procedure scope
+        assert.ok(refLines.includes(10) && refLines.includes(14),
+            `Should find method implementation headers at lines 10 and 14. Lines found: ${refLines}`);
     });
 });
