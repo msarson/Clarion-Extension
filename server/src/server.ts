@@ -32,7 +32,9 @@ import {
     ColorPresentation,
     TextDocumentSyncKind,
     SignatureHelp,
-    ReferenceParams
+    ReferenceParams,
+    RenameParams,
+    PrepareRenameParams
 } from 'vscode-languageserver-protocol';
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
@@ -61,6 +63,7 @@ import { DiagnosticProvider } from './providers/DiagnosticProvider';
 import { SignatureHelpProvider } from './providers/SignatureHelpProvider';
 import { ImplementationProvider } from './providers/ImplementationProvider';
 import { ReferencesProvider } from './providers/ReferencesProvider';
+import { RenameProvider } from './providers/RenameProvider';
 import { UnreachableCodeProvider } from './providers/UnreachableCodeProvider';
 import { ClarionSolutionInfo } from 'common/types';
 import { URI } from 'vscode-languageserver';
@@ -86,6 +89,7 @@ const hoverProvider = new HoverProvider();
 const signatureHelpProvider = new SignatureHelpProvider();
 const implementationProvider = new ImplementationProvider();
 const referencesProvider = new ReferencesProvider();
+const renameProvider = new RenameProvider(referencesProvider);
 
 // ✅ Create Connection and Documents Manager
 const connection = createConnection(ProposedFeatures.all);
@@ -145,6 +149,9 @@ connection.onInitialize((params) => {
                 definitionProvider: true,
                 implementationProvider: true,
                 referencesProvider: true,
+                renameProvider: {
+                    prepareProvider: true
+                },
                 hoverProvider: true,
                 codeActionProvider: true,
                 signatureHelpProvider: {
@@ -1327,6 +1334,48 @@ connection.onReferences(async (params: ReferenceParams) => {
         return references;
     } catch (error) {
         logger.error(`❌ Error providing references: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+    }
+});
+
+// Handle rename requests
+connection.onRenameRequest(async (params: RenameParams) => {
+    logger.info(`📂 Received rename request for: ${params.textDocument.uri} at ${params.position.line}:${params.position.character} → "${params.newName}"`);
+
+    if (!serverInitialized) {
+        logger.info(`⚠️ [DELAY] Server not initialized yet, delaying rename request`);
+        return null;
+    }
+
+    const document = documents.get(params.textDocument.uri);
+    if (!document) {
+        logger.info(`⚠️ Document not found: ${params.textDocument.uri}`);
+        return null;
+    }
+
+    try {
+        const edit = await renameProvider.provideRenameEdits(document, params.position, params.newName);
+        logger.info(edit ? `✅ Rename produced edits` : `⚠️ Rename returned null`);
+        return edit;
+    } catch (error) {
+        logger.error(`❌ Error providing rename: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+    }
+});
+
+// Handle prepare rename requests
+connection.onPrepareRename(async (params: PrepareRenameParams) => {
+    logger.info(`📂 Received prepareRename for: ${params.textDocument.uri} at ${params.position.line}:${params.position.character}`);
+
+    if (!serverInitialized) return null;
+
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return null;
+
+    try {
+        return await renameProvider.prepareRename(document, params.position);
+    } catch (error) {
+        logger.error(`❌ Error in prepareRename: ${error instanceof Error ? error.message : String(error)}`);
         return null;
     }
 });
