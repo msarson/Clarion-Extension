@@ -6,9 +6,13 @@ All notable changes to the Clarion Extension are documented here.
 
 ## Recent Versions
 
-### [0.8.8] - 2026-04-10
+### [0.8.8] - 2026-04-12
 **Bug Fixes**
 
+- 🐛 **Hover and Go to Definition for local class instances inside `MethodImplementation` scopes** now correctly resolves variables declared in the parent `GlobalProcedure`'s data section:
+  - In Clarion, local classes declared in a `PROCEDURE`'s data section (e.g. `Kanban CLASS(KanbanWrapperClass)`) have their method implementations (`Kanban.Init PROCEDURE`, `Kanban.RegisterEvents PROCEDURE`, etc.) tokenized as flat, independent `MethodImplementation` scopes with no parent link — yet at runtime they share the parent procedure's local variable stack
+  - **Hover** (`SymbolFinderService.findLocalVariable`): when a variable isn't found in the method's own scope, the resolver now also searches all `GlobalProcedure` data sections in the file
+  - **Go to Definition** (`DefinitionProvider`): the same fallback was added — after the method's own DATA section search turns up nothing, all `GlobalProcedure` data sections are searched before giving up
 - 🐛 Fixed false-positive diagnostic "Procedure returns X but all RETURN statements are empty" for overloaded procedures — the validator now matches implementations by parameter signature, not just name, so a non-returning overload is no longer incorrectly flagged because another overload of the same name has a return type ([#44](https://github.com/msarson/Clarion-Extension/issues/44))
 - 🐛 **Find All References on a local CLASS label** now returns correct positions and complete results:
   - Previously, FAR on a CLASS declaration label (e.g. `ThisWindow` in `ThisWindow CLASS(WindowManager)`) returned the CLASS *keyword* column for every CLASS declaration in the procedure instead of actual `ThisWindow` references — caused by `varName` extraction using `split(' ')[0]` on `"CLASS (ThisWindow)"`, yielding `"CLASS"` rather than the label

@@ -1087,6 +1087,34 @@ export class DefinitionProvider {
                     // If we get here, all data variables failed validation
                     logger.info(`All ${dataVariables.length} data variables failed prefix validation`);
                 }
+
+                // If still not found and we're in a MethodImplementation, also search GlobalProcedure
+                // data sections — local class method implementations share their parent procedure's locals.
+                if (currentScope.subType === TokenType.MethodImplementation) {
+                    const globalProcs = tokens.filter(t =>
+                        t.type === TokenType.Procedure &&
+                        t.subType === TokenType.GlobalProcedure
+                    );
+                    for (const gp of globalProcs) {
+                        const gpCodeMarker = gp.executionMarker;
+                        const gpDataEnd = gpCodeMarker ? gpCodeMarker.line : (gp.finishesAt ?? tokens[tokens.length - 1].line);
+                        const gpVars = tokens.filter(t =>
+                            (t.type === TokenType.Variable || t.type === TokenType.Label) &&
+                            t.start === 0 &&
+                            t.line > gp.line &&
+                            t.line < gpDataEnd &&
+                            t.value.toLowerCase() === searchWord.toLowerCase()
+                        );
+                        if (gpVars.length > 0) {
+                            const tok = gpVars[0];
+                            logger.info(`✅ Found "${searchWord}" in GlobalProcedure data section at line ${tok.line}`);
+                            return Location.create(document.uri, {
+                                start: { line: tok.line, character: tok.start },
+                                end: { line: tok.line, character: tok.start + tok.value.length }
+                            });
+                        }
+                    }
+                }
             } else if (currentScope.subType === TokenType.Routine && currentScope.hasLocalData) {
                 // For routines with DATA sections, search only the DATA section
                 logger.info(`Searching routine DATA section`);

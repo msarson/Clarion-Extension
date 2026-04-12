@@ -5,6 +5,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import * as path from 'path';
 import * as fs from 'fs';
 import LoggerManager from '../../logger';
+import { DocCommentReader, DocComment } from '../../utils/DocCommentReader';
 
 const logger = LoggerManager.getLogger("HoverFormatter");
 logger.setLevel("error");
@@ -218,14 +219,18 @@ export class HoverFormatter {
             `**Class:** ${declarationInfo.className}`,
             ``
         ];
-        
+
+        let docComment: DocComment | null = null;
+
         // Show declaration from CLASS
         try {
             const declUri = decodeURIComponent(declarationInfo.file.replace('file:///', ''));
             const declContent = fs.readFileSync(declUri, 'utf-8');
             const declLines = declContent.split('\n');
             const declLine = declLines[declarationInfo.line];
-            
+
+            docComment = DocCommentReader.read(declLines, declarationInfo.line);
+
             if (declLine) {
                 const trimmedDeclLine = declLine.trim();
                 const declFileName = path.basename(declUri);
@@ -235,7 +240,7 @@ export class HoverFormatter {
                 markdown.push(trimmedDeclLine);
                 markdown.push('```');
                 markdown.push('');
-                markdown.push('---'); // Horizontal separator line
+                markdown.push('---');
                 markdown.push('');
             }
         } catch (error) {
@@ -244,7 +249,7 @@ export class HoverFormatter {
             markdown.push(`**Declaration:** \`${declFileName}\` @ line **${declarationInfo.line + 1}**`);
             markdown.push('');
         }
-        
+
         // Show implementation location with signature snippet
         try {
             const lastColonIndex = implementationLocation.lastIndexOf(':');
@@ -254,17 +259,22 @@ export class HoverFormatter {
             const implFileName = path.basename(implUri);
             const implLineNumber = implLine + 1;
             markdown.push(`**Implemented in** \`${implFileName}\` @ line ${implLineNumber}: *(Ctrl+F12 to navigate)*`);
-            try {
-                const implContent = fs.readFileSync(implUri, 'utf-8');
-                const implLines = implContent.split('\n');
-                const implSignature = implLines[implLine]?.trim();
-                if (implSignature) {
-                    markdown.push('```clarion');
-                    markdown.push(implSignature);
-                    markdown.push('```');
+            if (!implUri.startsWith('test://')) {
+                try {
+                    const implContent = fs.readFileSync(implUri, 'utf-8');
+                    const implLines = implContent.split('\n');
+                    const implSignature = implLines[implLine]?.trim();
+                    if (implSignature) {
+                        markdown.push('```clarion');
+                        markdown.push(implSignature);
+                        markdown.push('```');
+                    }
+                    // Definition wins: impl !!! comment overrides declaration comment
+                    const implDoc = DocCommentReader.read(implLines, implLine);
+                    if (implDoc) docComment = implDoc;
+                } catch {
+                    // File not readable — skip snippet and impl doc
                 }
-            } catch {
-                // File not readable — skip snippet
             }
             markdown.push(``);
             markdown.push(`*Ctrl+F12 to navigate*`);
@@ -275,7 +285,17 @@ export class HoverFormatter {
             const implFile = implFilePath.split(/[\/\\]/).pop() || implFilePath;
             markdown.push(`**Implementation:** \`${implFile}\` @ line **${implLine}**`);
         }
-        
+
+        if (docComment) {
+            const docMarkdown = DocCommentReader.toMarkdown(docComment);
+            if (docMarkdown) {
+                markdown.push('');
+                markdown.push('---');
+                markdown.push('');
+                markdown.push(docMarkdown);
+            }
+        }
+
         return {
             contents: {
                 kind: 'markdown',
@@ -287,9 +307,15 @@ export class HoverFormatter {
     /**
      * Constructs hover for method implementation showing declaration
      */
-    formatMethodImplementation(methodName: string, className: string, declInfo: MethodDeclarationInfo, ownerClassName?: string): Hover {
+    formatMethodImplementation(
+        methodName: string,
+        className: string,
+        declInfo: MethodDeclarationInfo,
+        ownerClassName?: string,
+        implLocation?: { lines: string[], line: number }
+    ): Hover {
         const fileName = declInfo.file.split(/[\/\\]/).pop() || declInfo.file;
-        
+
         // className may be the interface name (3-part) or class name (2-part)
         const isInterface = !!ownerClassName;
         const title = ownerClassName
@@ -314,12 +340,92 @@ export class HoverFormatter {
         markdown.push(``);
         markdown.push(`*F12 to go to declaration*`);
 
+        // Doc comment: try declaration file, then let implementation override (definition wins)
+        let docComment: DocComment | null = null;
+        try {
+            const declUri = decodeURIComponent(declInfo.file.replace('file:///', ''));
+            const declContent = fs.readFileSync(declUri, 'utf-8');
+            docComment = DocCommentReader.read(declContent.split('\n'), declInfo.line);
+        } catch {
+            // Declaration file not readable
+        }
+        if (implLocation) {
+            const implDoc = DocCommentReader.read(implLocation.lines, implLocation.line);
+            if (implDoc) docComment = implDoc; // definition wins
+        }
+
+        if (docComment) {
+            const docMarkdown = DocCommentReader.toMarkdown(docComment);
+            if (docMarkdown) {
+                markdown.push('');
+                markdown.push('---');
+                markdown.push('');
+                markdown.push(docMarkdown);
+            }
+        }
+
         return {
             contents: {
                 kind: 'markdown',
                 value: markdown.join('\n')
             }
         };
+    }
+
+    /**
+     * Extracts doc comment for a procedure from its MAP declaration and/or implementation.
+     * Implementation !!! comment takes precedence over declaration (definition wins).
+     */
+    private extractProcedureDocComment(
+        procName: string,
+        mapDecl: Location | null,
+        procImpl: Location | null,
+        currentDocument: TextDocument
+    ): DocComment | null {
+        let docComment: DocComment | null = null;
+
+        // Try MAP declaration first
+        if (mapDecl) {
+            try {
+                let mapContent: string;
+                if (mapDecl.uri === currentDocument.uri) {
+                    mapContent = currentDocument.getText();
+                } else if (!mapDecl.uri.startsWith('test://')) {
+                    const mapUri = decodeURIComponent(mapDecl.uri.replace('file:///', ''));
+                    mapContent = fs.readFileSync(mapUri, 'utf-8');
+                } else {
+                    mapContent = '';
+                }
+                if (mapContent) {
+                    docComment = DocCommentReader.read(mapContent.split('\n'), mapDecl.range.start.line);
+                }
+            } catch {
+                // Silently skip
+            }
+        }
+
+        // Try implementation — overrides MAP declaration if found (definition wins)
+        if (procImpl) {
+            try {
+                let implContent: string;
+                if (procImpl.uri === currentDocument.uri) {
+                    implContent = currentDocument.getText();
+                } else if (!procImpl.uri.startsWith('test://')) {
+                    const implUri = decodeURIComponent(procImpl.uri.replace('file:///', ''));
+                    implContent = fs.readFileSync(implUri, 'utf-8');
+                } else {
+                    implContent = '';
+                }
+                if (implContent) {
+                    const implDoc = DocCommentReader.read(implContent.split('\n'), procImpl.range.start.line);
+                    if (implDoc) docComment = implDoc;
+                }
+            } catch {
+                // Silently skip
+            }
+        }
+
+        return docComment;
     }
 
     /**
@@ -427,7 +533,18 @@ export class HoverFormatter {
         }
         
         parts.push(header);
-        
+
+        // Extract doc comment: try impl first (definition wins), fall back to MAP declaration
+        const procDocComment = this.extractProcedureDocComment(
+            procName, mapDecl, procImpl, currentDocument
+        );
+        if (procDocComment) {
+            const docMarkdown = DocCommentReader.toMarkdown(procDocComment);
+            if (docMarkdown) {
+                parts.push(docMarkdown + '\n');
+            }
+        }
+
         // Show MAP declaration - but NOT if we're hovering at the MAP declaration itself
         logger.info(`formatProcedure: About to check MAP declaration, mapDecl=${!!mapDecl}, isAtMapDeclaration=${isAtMapDeclaration}`);
         if (mapDecl && !isAtMapDeclaration) {
