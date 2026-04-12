@@ -1,7 +1,7 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
 import { ClarionTokenizer, Token, TokenType } from '../ClarionTokenizer';
-import { extractReturnType } from '../utils/AttributeKeywords';
+import { extractReturnType, hasProcAttribute } from '../utils/AttributeKeywords';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("DiagnosticProvider");
@@ -983,6 +983,7 @@ export class DiagnosticProvider {
             name: string;           // Method name or full ClassName.MethodName
             returnType: string;     // Return type (LONG, STRING, etc.)
             line: number;          // Declaration line
+            hasProc: boolean;      // True if PROC attribute present (return value discardable, RETURN optional)
         }> = [];
         
         // Find declarations in CLASS blocks and MAP blocks
@@ -1027,7 +1028,8 @@ export class DiagnosticProvider {
                                             declarationsWithReturnTypes.push({
                                                 name: procNameToken.value,  // Just procedure name, no class prefix
                                                 returnType: returnType,
-                                                line: procNameToken.line
+                                                line: procNameToken.line,
+                                                hasProc: hasProcAttribute(tokens, k + 1, true)
                                             });
                                         }
                                     }
@@ -1038,7 +1040,7 @@ export class DiagnosticProvider {
                     }
                 }
             }
-            
+
             // Look for CLASS declarations
             if (token.type === TokenType.Structure && token.value.toUpperCase() === 'CLASS') {
                 // Find class name
@@ -1086,7 +1088,8 @@ export class DiagnosticProvider {
                                              declarationsWithReturnTypes.push({
                                                 name: className + '.' + methodNameToken.value,
                                                 returnType: returnType,
-                                                line: methodNameToken.line
+                                                line: methodNameToken.line,
+                                                hasProc: hasProcAttribute(tokens, k + 1, true)
                                             });
                                         }
                                     }
@@ -1217,29 +1220,33 @@ export class DiagnosticProvider {
                             }
                         }
                         
-                        // Validate
-                        const implToken = i > 0 ? tokens[i - 1] : token;
-                        
-                        if (returnStatements.length === 0) {
-                            diagnostics.push({
-                                severity: DiagnosticSeverity.Error,
-                                range: {
-                                    start: { line: implToken.line, character: implToken.start },
-                                    end: { line: implToken.line, character: implToken.start + implToken.value.length }
-                                },
-                                message: `Procedure '${decl.name}' returns ${decl.returnType} but has no RETURN statement`,
-                                source: 'clarion'
-                            });
-                        } else if (returnStatements.every(r => !r.hasValue)) {
-                            diagnostics.push({
-                                severity: DiagnosticSeverity.Error,
-                                range: {
-                                    start: { line: implToken.line, character: implToken.start },
-                                    end: { line: implToken.line, character: implToken.start + implToken.value.length }
-                                },
-                                message: `Procedure '${decl.name}' returns ${decl.returnType} but all RETURN statements are empty`,
-                                source: 'clarion'
-                            });
+                        // Validate — skip if PROC attribute is present, since PROC means
+                        // the return value is discardable and an explicit RETURN is optional
+                        // (the procedure returns the default value for the return type).
+                        if (!decl.hasProc) {
+                            const implToken = i > 0 ? tokens[i - 1] : token;
+
+                            if (returnStatements.length === 0) {
+                                diagnostics.push({
+                                    severity: DiagnosticSeverity.Error,
+                                    range: {
+                                        start: { line: implToken.line, character: implToken.start },
+                                        end: { line: implToken.line, character: implToken.start + implToken.value.length }
+                                    },
+                                    message: `Procedure '${decl.name}' returns ${decl.returnType} but has no RETURN statement`,
+                                    source: 'clarion'
+                                });
+                            } else if (returnStatements.every(r => !r.hasValue)) {
+                                diagnostics.push({
+                                    severity: DiagnosticSeverity.Error,
+                                    range: {
+                                        start: { line: implToken.line, character: implToken.start },
+                                        end: { line: implToken.line, character: implToken.start + implToken.value.length }
+                                    },
+                                    message: `Procedure '${decl.name}' returns ${decl.returnType} but all RETURN statements are empty`,
+                                    source: 'clarion'
+                                });
+                            }
                         }
                         
                         break; // Found implementation, move to next declaration

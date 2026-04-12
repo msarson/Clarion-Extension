@@ -123,4 +123,24 @@ export function extractReturnType(tokens: any[], startIndex: number, sameLine: b
  *   TestProc2 PROCEDURE(),NAME('TestProc2'),PROC,LONG
  *   TestProc3 PROCEDURE(),LONG,NAME('TestProc3')
  * Use extractReturnType() to identify return types among the attributes.
+ *
+ * PROC Attribute:
+ * When PROC is present, the return value can be discarded and an explicit RETURN
+ * statement is optional — the procedure returns the default value for the type.
+ * Use hasProcAttribute() to check before flagging missing RETURN statements.
  */
+
+/**
+ * Check if the PROC attribute is present in the attribute list after a procedure declaration.
+ * PROC means the return value is discardable and an explicit RETURN is optional.
+ */
+export function hasProcAttribute(tokens: any[], startIndex: number, sameLine: boolean = true): boolean {
+    const startLine = tokens[startIndex]?.line;
+
+    for (let i = startIndex; i < tokens.length; i++) {
+        const token = tokens[i];
+        if (sameLine && token.line !== startLine) break;
+        if (token.value && token.value.toUpperCase() === 'PROC') return true;
+    }
+    return false;
+}
