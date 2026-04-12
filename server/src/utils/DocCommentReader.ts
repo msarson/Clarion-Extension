@@ -112,12 +112,12 @@ export class DocCommentReader {
         const result: DocComment = { params: [] };
 
         try {
-            const summaryMatch = xml.match(/<summary>([\s\S]*?)<\/summary>/);
+            const summaryMatch = xml.match(/<summary>([\s\S]*?)<\/summary>/i);
             if (summaryMatch) {
                 result.summary = summaryMatch[1].trim();
             }
 
-            const paramRegex = /<param\s+name="([^"]+)">([\s\S]*?)<\/param>/g;
+            const paramRegex = /<param\s+name="([^"]+)">([\s\S]*?)<\/param>/gi;
             let paramMatch: RegExpExecArray | null;
             while ((paramMatch = paramRegex.exec(xml)) !== null) {
                 result.params.push({
@@ -126,17 +126,31 @@ export class DocCommentReader {
                 });
             }
 
-            const returnsMatch = xml.match(/<returns>([\s\S]*?)<\/returns>/);
+            const returnsMatch = xml.match(/<returns>([\s\S]*?)<\/returns>/i);
             if (returnsMatch) {
                 result.returns = returnsMatch[1].trim();
             }
 
-            const remarksMatch = xml.match(/<remarks>([\s\S]*?)<\/remarks>/);
+            const remarksMatch = xml.match(/<remarks>([\s\S]*?)<\/remarks>/i);
             if (remarksMatch) {
                 result.remarks = remarksMatch[1].trim();
             }
+
+            // Fallback: if no structured content was found, strip all XML tags and use
+            // the remaining text as a plain summary — mirrors Clarion IDE's <docroot> approach
+            // where plain text nodes and malformed/unclosed tags all fall back gracefully.
+            if (!result.summary && result.params.length === 0 && !result.returns && !result.remarks) {
+                const stripped = xml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+                if (stripped) {
+                    result.summary = stripped;
+                }
+            }
         } catch {
-            // Return whatever was parsed so far on error
+            // Last resort: strip tags and return raw text
+            const stripped = xml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+            if (stripped) {
+                result.summary = stripped;
+            }
         }
 
         return result;

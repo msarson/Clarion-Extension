@@ -66,16 +66,15 @@ export class HoverFormatter {
      * Constructs hover for a local variable
      */
     formatVariable(name: string, info: VariableInfo, scope: Token, document?: TextDocument, hoverLine?: number): Hover {
-        // Check if this is a routine scope
-        const isRoutine = scope.subType === TokenType.Routine;
-        const variableType = isRoutine ? 'Routine Variable' : 'Local Variable';
-        
         const displayName = name;
         
         const markdown = [
             `**${displayName}** — \`${info.type}\``,
             ``
         ];
+
+        // Derive a contextual noun from the type (CLASS, GROUP, QUEUE, FILE, etc.)
+        const typeNoun = this.getTypeNoun(info.type);
         
         // Determine scope for new format
         if (document) {
@@ -93,13 +92,13 @@ export class HoverFormatter {
                 
                 let scopeLabel = '';
                 if (detailedScope.type === 'routine') {
-                    scopeLabel = `${scopeIcon} Local routine variable`;
+                    scopeLabel = `${scopeIcon} Local routine ${typeNoun}`;
                 } else if (detailedScope.type === 'procedure') {
-                    scopeLabel = isMethod ? `${scopeIcon} Local method variable` : `${scopeIcon} Local procedure variable`;
+                    scopeLabel = isMethod ? `${scopeIcon} Local method ${typeNoun}` : `${scopeIcon} Local procedure ${typeNoun}`;
                 } else if (detailedScope.type === 'module') {
-                    scopeLabel = `${scopeIcon} Module variable`;
+                    scopeLabel = `${scopeIcon} Module ${typeNoun}`;
                 } else {
-                    scopeLabel = `${scopeIcon} Global variable`;
+                    scopeLabel = `${scopeIcon} Global ${typeNoun}`;
                 }
                 
                 markdown.push(scopeLabel);
@@ -128,6 +127,13 @@ export class HoverFormatter {
                     markdown.push(sourceLine);
                     markdown.push('```');
                 }
+            }
+
+            // Append doc comment if present
+            const docComment = DocCommentReader.read(lines, info.line);
+            if (docComment) {
+                markdown.push(``);
+                markdown.push(DocCommentReader.toMarkdown(docComment));
             }
         } else {
             markdown.push(`Declared at line ${info.line + 1}`);
@@ -784,5 +790,21 @@ export class HoverFormatter {
                 value: content.trim()
             }
         };
+    }
+
+    /** Returns a display noun for the declaration type (e.g. CLASS → "class", GROUP → "group"). */
+    private getTypeNoun(type: string): string {
+        const upper = type.trimStart().toUpperCase();
+        if (upper.startsWith('CLASS'))     return 'class';
+        if (upper.startsWith('GROUP'))     return 'group';
+        if (upper.startsWith('QUEUE'))     return 'queue';
+        if (upper.startsWith('FILE'))      return 'file';
+        if (upper.startsWith('VIEW'))      return 'view';
+        if (upper.startsWith('REPORT'))    return 'report';
+        if (upper.startsWith('WINDOW'))    return 'window';
+        if (upper.startsWith('MENU'))      return 'menu';
+        if (upper.startsWith('TOOLBAR'))   return 'toolbar';
+        if (upper.startsWith('INTERFACE')) return 'interface';
+        return 'variable';
     }
 }
