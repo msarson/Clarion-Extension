@@ -7,6 +7,15 @@ All notable changes to the Clarion Extension are documented here.
 ## Recent Versions
 
 ### [0.8.8] - 2026-04-12
+**New Features**
+
+- ✨ **Rename Symbol (F2)** — rename any user-defined symbol across the entire workspace in one step:
+  - Delegates to the References provider for scope-aware coverage — local/module/global variables, procedures, class members via `SELF`/`PARENT` chains
+  - `prepareRename` validates the position before the rename dialog opens and rejects Clarion keywords and built-in types
+  - Library/read-only files are protected — symbols declared in `.inc` files outside the project cannot be renamed
+- ✨ **Document Highlight** — pressing on a symbol highlights all occurrences in the current file
+- ✨ **Workspace Symbol Search** (`Ctrl+T`) — search for any procedure, class, or label across all files in the solution
+
 **Bug Fixes**
 
 - 🐛 **Hover and Go to Definition for local class instances inside `MethodImplementation` scopes** now correctly resolves variables declared in the parent `GlobalProcedure`'s data section:
