@@ -94,4 +94,7 @@ jobs:
         run: |
           git checkout master
           git checkout -b version-${{ inputs.next_version }}
+          npm version ${{ inputs.next_version }} --no-git-tag-version
+          git add package.json package-lock.json
+          git commit -m "chore: Bump version to ${{ inputs.next_version }}"
           git push origin version-${{ inputs.next_version }}
