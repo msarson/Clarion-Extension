@@ -232,8 +232,18 @@ export class ReferencesProvider {
         }
 
         const locations: Location[] = [];
+        // CLASS labels declared inside a procedure have method implementations outside the
+        // procedure scope (e.g. ThisWindow.Init PROCEDURE).  Detect this case and expand
+        // the token search to the full file while still only searching the current file.
+        const isClassLabelDecl = symbolInfo.scope.type === 'local' &&
+            symbolInfo.token.type === TokenType.Label &&
+            tokens.some(t =>
+                t.line === symbolInfo.token.line &&
+                t.type === TokenType.Structure &&
+                t.subType === TokenType.Class
+            );
         for (const fileUri of filesToSearch) {
-            const fileLocations = this.findReferencesInFile(fileUri, searchWord, symbolInfo, context.includeDeclaration, fieldPrefixes);
+            const fileLocations = this.findReferencesInFile(fileUri, searchWord, symbolInfo, context.includeDeclaration, fieldPrefixes, isClassLabelDecl);
             locations.push(...fileLocations);
         }
 
@@ -1367,7 +1377,8 @@ export class ReferencesProvider {
         searchWord: string,
         symbolInfo: SymbolInfo,
         includeDeclaration: boolean,
-        fieldPrefixes?: Set<string>
+        fieldPrefixes?: Set<string>,
+        ignoreLineScope?: boolean
     ): Location[] {
         const locations: Location[] = [];
         const searchWordLower = searchWord.toLowerCase();
@@ -1380,7 +1391,7 @@ export class ReferencesProvider {
             let startLine = 0;
             let endLine = Number.MAX_SAFE_INTEGER;
 
-            if (scopeType === 'local' || scopeType === 'parameter' || scopeType === 'routine') {
+            if (!ignoreLineScope && (scopeType === 'local' || scopeType === 'parameter' || scopeType === 'routine')) {
                 const scopeToken = symbolInfo.scope.token;
                 startLine = scopeToken.line;
                 endLine = scopeToken.finishesAt ?? Number.MAX_SAFE_INTEGER;

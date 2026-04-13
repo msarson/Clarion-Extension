@@ -221,22 +221,20 @@ export class SymbolFinderService {
         // Find the procedure/method symbol containing this scope
         const procedureSymbol = this.findProcedureContainingLine(symbols, scopeToken.line);
         if (!procedureSymbol) {
-            logger.info(`❌ No procedure symbol found for scope at line ${scopeToken.line}`);
-            return null;
+            logger.info(`❌ No procedure symbol found for scope at line ${scopeToken.line} — falling back to token scan`);
         }
         
-        logger.info(`Found procedure symbol: ${procedureSymbol.name}`);
-        
-        // Search for the variable in the symbol tree
+        // Search for the variable in the symbol tree (if we have a procedure symbol)
         const searchText = originalWord || word;
-        const varSymbol = this.findVariableInSymbol(procedureSymbol, searchText);
+        const varSymbol = procedureSymbol ? this.findVariableInSymbol(procedureSymbol, searchText) : null;
         
         if (!varSymbol) {
             logger.info(`❌ Variable "${searchText}" not found in symbol tree — falling back to token scan`);
 
             // Fallback: scan tokens directly for a Label token at the start of a line (column 0)
             // within the procedure's scope. This catches variables whose symbol names don't match
-            // (e.g. QUEUE/GROUP/FILE structures where the symbol name is "QUEUE" not "QZipF").
+            // (e.g. QUEUE/GROUP/FILE structures where the symbol name is "QUEUE" not "QZipF"),
+            // and also when the symbol provider returns no symbols (e.g. local CLASS declarations).
             // Column 0 check ensures we only match declarations, not usage sites.
             const scopeStart = scopeToken.line;
             const scopeEnd = scopeToken.finishesAt ?? Number.MAX_SAFE_INTEGER;
@@ -258,14 +256,51 @@ export class SymbolFinderService {
                     searchWord: word
                 };
             }
+
+            // If the current scope is a method implementation, the class was declared inside
+            // a GlobalProcedure whose locals are shared with the method. Search all GlobalProcedure
+            // data sections (before their CODE line) for the variable.
+            if (scopeToken.subType === TokenType.MethodImplementation) {
+                logger.info(`Scope is MethodImplementation — searching GlobalProcedure scopes for "${searchText}"`);
+                const globalProcs = tokens.filter(t =>
+                    t.type === TokenType.Procedure &&
+                    t.subType === TokenType.GlobalProcedure
+                );
+                for (const gp of globalProcs) {
+                    const gpStart = gp.line;
+                    const gpEnd = gp.finishesAt ?? Number.MAX_SAFE_INTEGER;
+                    const found = tokens.find(t =>
+                        t.line >= gpStart && t.line <= gpEnd &&
+                        t.start === 0 &&
+                        (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+                        t.value.toLowerCase() === wordLower
+                    );
+                    if (found) {
+                        logger.info(`✅ Found "${searchText}" in GlobalProcedure scope at line ${found.line}`);
+                        return {
+                            token: found,
+                            type: SymbolFinderService.extractTypeInfo(found, tokens),
+                            scope: { token: gp, type: 'local' },
+                            location: { uri: document.uri, line: found.line, character: found.start },
+                            originalWord: originalWord || word,
+                            searchWord: word
+                        };
+                    }
+                }
+            }
+
             return null;
         }
         
         logger.info(`✅ Found variable: ${varSymbol.name} of type ${varSymbol._clarionType || varSymbol.detail}`);
         
-        // Extract the variable name (without type info that may be in the name)
-        // ClarionDocumentSymbolProvider may include type in the name like "Counter LONG"
-        const varName = varSymbol._clarionVarName || varSymbol.name.split(' ')[0];
+        // Extract the variable name (without type info that may be in the name).
+        // ClarionDocumentSymbolProvider may encode CLASS/GROUP/QUEUE declarations as
+        // "CLASS (LabelName)" — in that case the label lives inside the parens, not
+        // before the first space.  Fall back to split(' ')[0] for plain "VarName TYPE".
+        const structureNameMatch = varSymbol.name.match(/^(?:GROUP|QUEUE|CLASS)\s*\(([^)]+)\)/i);
+        const varName = varSymbol._clarionVarName
+            || (structureNameMatch ? structureNameMatch[1] : varSymbol.name.split(' ')[0]);
         
         // Find the actual token for this variable
         const variableToken = tokens.find(t =>
@@ -306,16 +341,14 @@ export class SymbolFinderService {
     ): SymbolInfo | null {
         logger.info(`Finding module variable: "${word}"`);
         
-        // Find the first PROCEDURE implementation (not MAP declaration)
-        // Only check Procedure, GlobalProcedure, and MethodImplementation
-        // MapProcedure tokens are declarations inside MAP blocks, not implementations
+        // Find the first PROCEDURE implementation (not MAP/CLASS declaration).
+        // The PROCEDURE keyword carries the subType (GlobalProcedure/MethodImplementation),
+        // but the label before it is at start=0 — so we match by subType on the keyword itself,
+        // without requiring start===0 (which is only true for the label, not the keyword).
         const firstProcToken = tokens.find(t =>
-            (t.subType === TokenType.Procedure ||
-             t.subType === TokenType.GlobalProcedure ||
+            (t.subType === TokenType.GlobalProcedure ||
              t.subType === TokenType.MethodImplementation) &&
-            // Verify it's actually a PROCEDURE keyword or a label token for the procedure
-            (t.value.toUpperCase() === 'PROCEDURE' || t.type === TokenType.Label) &&
-            t.start === 0
+            t.value.toUpperCase() === 'PROCEDURE'
         );
         
         const moduleScopeEndLine = firstProcToken ? firstProcToken.line : Number.MAX_SAFE_INTEGER;

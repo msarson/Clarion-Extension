@@ -708,7 +708,7 @@ The following would typically be checked:
 8. **Code Snippets** - 50+ templates for common patterns
 9. **Productivity Tools** - Paste as string, method wizards, class creation
 
-**Latest Version:** v0.8.7 (development)
+**Latest Version:** v0.8.8 (development)
 
 **Recent Highlights:**
 - v0.8.6: 50-70% faster Ctrl+F12 with CrossFileCache, namespace prefix support, dependency-aware builds
@@ -841,6 +841,36 @@ pm run watch\
 4. Update documentation
 5. Add example/reference if user-facing
 6. Test integration end-to-end
+
+---
+
+## 8. GITHUB ISSUE & RELEASE WORKFLOW
+
+### Fixing a Reported Issue
+1. Reproduce by reading the issue on GitHub
+2. Search for related existing patterns (e.g. overload handling) before implementing fresh logic
+3. Fix the code, add tests (TDD — write failing test first)
+4. Update `CHANGELOG.md` — add a `[x.y.z]` entry at the top of **Recent Versions**
+5. Commit with message referencing the issue: `fix: description\n\nFixes #NN`
+6. Push to the active development branch (`version-x.y.z`)
+
+### After Committing a Fix
+1. **Post a comment on the issue** explaining what was fixed and which version will contain it
+2. **Create a milestone** named `vX.Y.Z` if it doesn't exist: `gh api repos/msarson/Clarion-Extension/milestones --method POST -f title="vX.Y.Z"`
+3. **Attach the issue to the milestone and close it**: `gh api repos/msarson/Clarion-Extension/issues/NN --method PATCH -F milestone=<number> -f state="closed"`
+
+This pattern lets reporters see the issue is resolved (closed) and which version ships the fix (milestone), without any ambiguity about whether the fix is live yet.
+
+### When Publishing a Release
+- Close the milestone on GitHub to mark it as shipped
+- The Marketplace publish is done via `npm run package` then uploading the `.vsix`
+
+### Overload Resolution Pattern
+Clarion supports procedure overloading (same name, different parameter signatures). Several providers handle this:
+- **`ProcedureSignatureUtils`** (`server/src/utils/ProcedureSignatureUtils.ts`) — shared utility with `extractParameterTypes()` and `parametersMatch()`. Always use this when comparing signatures, never roll your own.
+- **`MapProcedureResolver`**, **`CrossFileResolver`**, **`MethodOverloadResolver`** — all use `ProcedureSignatureUtils` for overload-aware navigation
+- **`DiagnosticProvider.validateReturnStatements`** — uses signature matching to avoid false diagnostics on the wrong overload
+- When adding any new feature that looks up procedures by name, check for overloads using `ProcedureSignatureUtils`
 
 ---
 

@@ -40,6 +40,20 @@
       ]
     },
     {
+      "name": "AGE",
+      "signatures": [
+        {
+          "params": [
+            { "name": "birthDate", "optional": false },
+            { "name": "baseDate", "optional": true }
+          ],
+          "returnType": "STRING",
+          "description": "Returns elapsed time between two standard Clarion dates as a formatted string. Format: 1–60 days = 'nn DAYS'; 61 days–24 months = 'nn MOS'; 2+ years = 'nnn YRS'. If baseDate is omitted, the current operating system date is used.",
+          "syntax": "AGE(birthDate [,baseDate])"
+        }
+      ]
+    },
+    {
       "name": "ALERT",
       "signatures": [
         {
@@ -50,6 +64,28 @@
           "returnType": "",
           "description": "Specifies keys that generate field-independent events (EVENT:PreAlertKey and EVENT:AlertKey). Can specify single key or range. ALERT() with no parameters clears all alert keys. Use CYCLE in EVENT:PreAlertKey to allow default action, omit CYCLE to shortstop it.",
           "syntax": "ALERT([first-keycode] [,last-keycode])"
+        }
+      ]
+    },
+    {
+      "name": "BIND",
+      "signatures": [
+        {
+          "params": [
+            { "name": "name", "optional": false },
+            { "name": "label", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Declares a variable or procedure as available for use in dynamic expression strings (EVALUATE or VIEW FILTER). The name string is the identifier used in the expression — it may match the variable label or be any string. Applies to variables, FILE/GROUP/QUEUE fields, and procedures returning STRING, REAL, or LONG.",
+          "syntax": "BIND(name, label)"
+        },
+        {
+          "params": [
+            { "name": "groupLabel", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Binds all fields within a GROUP, RECORD, or QUEUE structure declared with the BINDABLE attribute. Each field's NAME attribute (or its label if no NAME is set) becomes the identifier used in dynamic expressions.",
+          "syntax": "BIND(groupLabel)"
         }
       ]
     },
@@ -448,7 +484,36 @@
         {
           "params": ["QUEUE queue", "LONG position"],
           "returnType": "",
-          "description": "Inserts a new entry into a queue at the specified position (1-based). Existing entries shift down."
+          "description": "Inserts a new entry into a queue at the specified position (1-based). Existing entries shift down. If pointer is zero or greater than the number of entries, the entry is added at the end."
+        },
+        {
+          "params": ["QUEUE queue", "PARAMS KEY[] key"],
+          "returnType": "",
+          "description": "Inserts a new entry into a sorted queue maintaining sort order by the specified key field(s). Up to 16 key parameters separated by commas; leading +/- for ascending/descending. Entry is inserted after all other entries with matching key values."
+        },
+        {
+          "params": ["QUEUE queue", "STRING name"],
+          "returnType": "",
+          "description": "Inserts a new entry into a sorted queue by field NAME attributes. The name string contains NAME attributes separated by commas with optional leading +/- for sort direction. Case sensitive. Entry is inserted after all other entries with matching field values."
+        },
+        {
+          "params": ["QUEUE queue", "*? functionLabel"],
+          "returnType": "",
+          "description": "Inserts a new entry into a queue at the position determined by a comparison function. The function takes two *GROUP parameters (passed by address) and returns SIGNED: negative = first < second, zero = equal (entry not added), positive = first > second."
+        }
+      ]
+    },
+    {
+      "name": "APPEND",
+      "signatures": [
+        {
+          "params": [
+            { "name": "fileLabel", "optional": false },
+            { "name": "length", "optional": true }
+          ],
+          "returnType": "",
+          "description": "Writes a new record to a FILE without updating any KEYs. After all APPENDs are done, rebuild keys with BUILD. Significantly faster than ADD for bulk operations — e.g., 5000 records via APPEND + BUILD is much faster than 5000 ADD calls. Length defaults to the full RECORD length if omitted or out of range.",
+          "syntax": "APPEND(fileLabel [,length])"
         }
       ]
     },
@@ -473,7 +538,22 @@
         {
           "params": ["QUEUE queue"],
           "returnType": "",
-          "description": "Updates the current queue entry (last one accessed by GET) with data from the queue structure."
+          "description": "Updates the current queue entry (last one accessed by GET or ADD) with data from the queue structure."
+        },
+        {
+          "params": ["QUEUE queue", "PARAMS KEY[] key"],
+          "returnType": "",
+          "description": "Updates a sorted queue entry after GET or ADD, maintaining sort order by the specified key field(s). Entry is re-inserted after all other entries with matching key values. Up to 16 key parameters with optional +/- for direction."
+        },
+        {
+          "params": ["QUEUE queue", "STRING name"],
+          "returnType": "",
+          "description": "Updates a sorted queue entry after GET or ADD, maintaining sort order by field NAME attributes. The name string contains NAME attributes separated by commas with optional +/- for direction. Case sensitive."
+        },
+        {
+          "params": ["QUEUE queue", "*? functionLabel"],
+          "returnType": "",
+          "description": "Updates a queue entry at the position determined by a comparison function after a successful GET or ADD. Function returns SIGNED: zero = equal (no write), negative = first < second, positive = first > second."
         },
         {
           "params": ["VIEW view"],
@@ -498,7 +578,32 @@
         {
           "params": ["QUEUE queue", "LONG position"],
           "returnType": "",
-          "description": "Retrieves a queue entry at the specified position (1-based) into the queue structure fields."
+          "description": "Retrieves a queue entry at the specified position (1-based) into the queue structure fields. If pointer is zero, clears the current record pointer."
+        },
+        {
+          "params": ["FILE file", "POINTER_T filePointer", "<UNSIGNED length>"],
+          "returnType": "",
+          "description": "Reads a record from file by relative file pointer position. If filePointer is zero, clears the current record pointer without retrieving a record. Optional length limits bytes read (1 to RECORD length; defaults to full RECORD). Pointer semantics are file-driver dependent."
+        },
+        {
+          "params": ["KEY key", "POINTER_T keyPointer"],
+          "returnType": "",
+          "description": "Reads a record from file using a key pointer position. Pointer semantics are file-driver dependent. Posts 'Record Not Found' if the pointer value is out of range."
+        },
+        {
+          "params": ["QUEUE queue", "PARAMS KEY[] key"],
+          "returnType": "",
+          "description": "Searches for the first queue entry matching the value in the specified key field(s). Up to 16 key parameters; leading +/- for sort direction. If the queue is not sorted on those fields, the key specifies an alternate sort order (cached for efficient subsequent SORT on the same fields)."
+        },
+        {
+          "params": ["QUEUE queue", "STRING name"],
+          "returnType": "",
+          "description": "Searches for a queue entry matching the value in the named field(s). The name string contains field NAME attributes separated by commas with optional +/- for direction. Case sensitive. If not already sorted on those fields, specifies an alternate sort order."
+        },
+        {
+          "params": ["QUEUE queue", "*? functionLabel"],
+          "returnType": "",
+          "description": "Reads from a positional value returned by a comparison function. The function takes two *GROUP parameters (passed by address) and returns SIGNED. Posts 'Entry Not Found' if no match."
         }
       ]
     },
@@ -1002,7 +1107,25 @@
             { "name": "[+|-]key", "optional": false }
           ],
           "returnType": "",
-          "description": "Reorders entries in a QUEUE by specified key fields. Supports up to 16 keys separated by commas. Leading +/- indicates ascending/descending order. Keys must include PRE prefix if QUEUE has one. Can use NAME attributes as string or comparison function. Entries with identical keys maintain relative position."
+          "description": "Reorders entries in a QUEUE by specified key fields. Supports up to 16 keys separated by commas. Leading +/- indicates ascending/descending order. Keys must include PRE prefix if QUEUE has one. Entries with identical keys maintain relative position."
+        },
+        {
+          "params": [
+            { "name": "QUEUE queue", "optional": false },
+            { "name": "STRING name", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Reorders a QUEUE by field NAME attributes. The name string contains NAME attributes separated by commas with optional leading +/- for ascending/descending order. Case sensitive. Entries with identical values maintain relative position.",
+          "syntax": "SORT(queue, name)"
+        },
+        {
+          "params": [
+            { "name": "QUEUE queue", "optional": false },
+            { "name": "*? functionLabel", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Reorders a QUEUE using a custom comparison function. The function takes two *GROUP parameters (passed by address) and returns SIGNED: negative = first < second, zero = equal, positive = first > second. RAW, C, and PASCAL attributes are not permitted in the prototype declaration.",
+          "syntax": "SORT(queue, functionLabel)"
         }
       ]
     },
@@ -1731,6 +1854,21 @@
           "returnType": "REAL",
           "description": "Returns the natural logarithm of an expression. The natural logarithm is the power to which e (2.71828182846) must be raised to equal the value. Returns 0 if expression is less than zero (logarithm undefined for values < 0). Example: LOGE(2.71828) returns 1, LOGE(1) returns 0.",
           "syntax": "LOGE(expression)"
+        }
+      ]
+    },
+    {
+      "name": "LOGOUT",
+      "signatures": [
+        {
+          "params": [
+            { "name": "timeout", "optional": false },
+            { "name": "fileLabel1", "optional": false },
+            { "name": "fileLabel2, ...", "optional": true }
+          ],
+          "returnType": "",
+          "description": "Initiates transaction processing for one or more files. All files must share the same file driver and must already be open. Up to 100 files may be specified. The timeout parameter specifies how many seconds to attempt to begin the transaction before aborting with an error. Alternatively, set PROP:Logout on each file and call LOGOUT with no file parameters.",
+          "syntax": "LOGOUT(timeout, fileLabel1 [,fileLabel2, ...])"
         }
       ]
     },

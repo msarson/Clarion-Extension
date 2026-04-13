@@ -5,6 +5,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import * as path from 'path';
 import * as fs from 'fs';
 import LoggerManager from '../../logger';
+import { DocCommentReader, DocComment } from '../../utils/DocCommentReader';
 
 const logger = LoggerManager.getLogger("HoverFormatter");
 logger.setLevel("error");
@@ -65,16 +66,15 @@ export class HoverFormatter {
      * Constructs hover for a local variable
      */
     formatVariable(name: string, info: VariableInfo, scope: Token, document?: TextDocument, hoverLine?: number): Hover {
-        // Check if this is a routine scope
-        const isRoutine = scope.subType === TokenType.Routine;
-        const variableType = isRoutine ? 'Routine Variable' : 'Local Variable';
-        
         const displayName = name;
         
         const markdown = [
             `**${displayName}** — \`${info.type}\``,
             ``
         ];
+
+        // Derive a contextual noun from the type (CLASS, GROUP, QUEUE, FILE, etc.)
+        const typeNoun = this.getTypeNoun(info.type);
         
         // Determine scope for new format
         if (document) {
@@ -92,13 +92,13 @@ export class HoverFormatter {
                 
                 let scopeLabel = '';
                 if (detailedScope.type === 'routine') {
-                    scopeLabel = `${scopeIcon} Local routine variable`;
+                    scopeLabel = `${scopeIcon} Local routine ${typeNoun}`;
                 } else if (detailedScope.type === 'procedure') {
-                    scopeLabel = isMethod ? `${scopeIcon} Local method variable` : `${scopeIcon} Local procedure variable`;
+                    scopeLabel = isMethod ? `${scopeIcon} Local method ${typeNoun}` : `${scopeIcon} Local procedure ${typeNoun}`;
                 } else if (detailedScope.type === 'module') {
-                    scopeLabel = `${scopeIcon} Module variable`;
+                    scopeLabel = `${scopeIcon} Module ${typeNoun}`;
                 } else {
-                    scopeLabel = `${scopeIcon} Global variable`;
+                    scopeLabel = `${scopeIcon} Global ${typeNoun}`;
                 }
                 
                 markdown.push(scopeLabel);
@@ -127,6 +127,13 @@ export class HoverFormatter {
                     markdown.push(sourceLine);
                     markdown.push('```');
                 }
+            }
+
+            // Append doc comment if present
+            const docComment = DocCommentReader.read(lines, info.line);
+            if (docComment) {
+                markdown.push(``);
+                markdown.push(DocCommentReader.toMarkdown(docComment));
             }
         } else {
             markdown.push(`Declared at line ${info.line + 1}`);
@@ -218,14 +225,18 @@ export class HoverFormatter {
             `**Class:** ${declarationInfo.className}`,
             ``
         ];
-        
+
+        let docComment: DocComment | null = null;
+
         // Show declaration from CLASS
         try {
             const declUri = decodeURIComponent(declarationInfo.file.replace('file:///', ''));
             const declContent = fs.readFileSync(declUri, 'utf-8');
             const declLines = declContent.split('\n');
             const declLine = declLines[declarationInfo.line];
-            
+
+            docComment = DocCommentReader.read(declLines, declarationInfo.line);
+
             if (declLine) {
                 const trimmedDeclLine = declLine.trim();
                 const declFileName = path.basename(declUri);
@@ -235,7 +246,7 @@ export class HoverFormatter {
                 markdown.push(trimmedDeclLine);
                 markdown.push('```');
                 markdown.push('');
-                markdown.push('---'); // Horizontal separator line
+                markdown.push('---');
                 markdown.push('');
             }
         } catch (error) {
@@ -244,8 +255,8 @@ export class HoverFormatter {
             markdown.push(`**Declaration:** \`${declFileName}\` @ line **${declarationInfo.line + 1}**`);
             markdown.push('');
         }
-        
-        // Show implementation location (no body preview)
+
+        // Show implementation location with signature snippet
         try {
             const lastColonIndex = implementationLocation.lastIndexOf(':');
             const implFilePath = implementationLocation.substring(0, lastColonIndex).replace('file:///', '');
@@ -253,7 +264,24 @@ export class HoverFormatter {
             const implUri = decodeURIComponent(implFilePath);
             const implFileName = path.basename(implUri);
             const implLineNumber = implLine + 1;
-            markdown.push(`**Implemented in** \`${implFileName}\` @ line ${implLineNumber}`);
+            markdown.push(`**Implemented in** \`${implFileName}\` @ line ${implLineNumber}: *(Ctrl+F12 to navigate)*`);
+            if (!implUri.startsWith('test://')) {
+                try {
+                    const implContent = fs.readFileSync(implUri, 'utf-8');
+                    const implLines = implContent.split('\n');
+                    const implSignature = implLines[implLine]?.trim();
+                    if (implSignature) {
+                        markdown.push('```clarion');
+                        markdown.push(implSignature);
+                        markdown.push('```');
+                    }
+                    // Definition wins: impl !!! comment overrides declaration comment
+                    const implDoc = DocCommentReader.read(implLines, implLine);
+                    if (implDoc) docComment = implDoc;
+                } catch {
+                    // File not readable — skip snippet and impl doc
+                }
+            }
             markdown.push(``);
             markdown.push(`*Ctrl+F12 to navigate*`);
         } catch (error) {
@@ -263,7 +291,17 @@ export class HoverFormatter {
             const implFile = implFilePath.split(/[\/\\]/).pop() || implFilePath;
             markdown.push(`**Implementation:** \`${implFile}\` @ line **${implLine}**`);
         }
-        
+
+        if (docComment) {
+            const docMarkdown = DocCommentReader.toMarkdown(docComment);
+            if (docMarkdown) {
+                markdown.push('');
+                markdown.push('---');
+                markdown.push('');
+                markdown.push(docMarkdown);
+            }
+        }
+
         return {
             contents: {
                 kind: 'markdown',
@@ -275,9 +313,15 @@ export class HoverFormatter {
     /**
      * Constructs hover for method implementation showing declaration
      */
-    formatMethodImplementation(methodName: string, className: string, declInfo: MethodDeclarationInfo, ownerClassName?: string): Hover {
+    formatMethodImplementation(
+        methodName: string,
+        className: string,
+        declInfo: MethodDeclarationInfo,
+        ownerClassName?: string,
+        implLocation?: { lines: string[], line: number }
+    ): Hover {
         const fileName = declInfo.file.split(/[\/\\]/).pop() || declInfo.file;
-        
+
         // className may be the interface name (3-part) or class name (2-part)
         const isInterface = !!ownerClassName;
         const title = ownerClassName
@@ -302,12 +346,92 @@ export class HoverFormatter {
         markdown.push(``);
         markdown.push(`*F12 to go to declaration*`);
 
+        // Doc comment: try declaration file, then let implementation override (definition wins)
+        let docComment: DocComment | null = null;
+        try {
+            const declUri = decodeURIComponent(declInfo.file.replace('file:///', ''));
+            const declContent = fs.readFileSync(declUri, 'utf-8');
+            docComment = DocCommentReader.read(declContent.split('\n'), declInfo.line);
+        } catch {
+            // Declaration file not readable
+        }
+        if (implLocation) {
+            const implDoc = DocCommentReader.read(implLocation.lines, implLocation.line);
+            if (implDoc) docComment = implDoc; // definition wins
+        }
+
+        if (docComment) {
+            const docMarkdown = DocCommentReader.toMarkdown(docComment);
+            if (docMarkdown) {
+                markdown.push('');
+                markdown.push('---');
+                markdown.push('');
+                markdown.push(docMarkdown);
+            }
+        }
+
         return {
             contents: {
                 kind: 'markdown',
                 value: markdown.join('\n')
             }
         };
+    }
+
+    /**
+     * Extracts doc comment for a procedure from its MAP declaration and/or implementation.
+     * Implementation !!! comment takes precedence over declaration (definition wins).
+     */
+    private extractProcedureDocComment(
+        procName: string,
+        mapDecl: Location | null,
+        procImpl: Location | null,
+        currentDocument: TextDocument
+    ): DocComment | null {
+        let docComment: DocComment | null = null;
+
+        // Try MAP declaration first
+        if (mapDecl) {
+            try {
+                let mapContent: string;
+                if (mapDecl.uri === currentDocument.uri) {
+                    mapContent = currentDocument.getText();
+                } else if (!mapDecl.uri.startsWith('test://')) {
+                    const mapUri = decodeURIComponent(mapDecl.uri.replace('file:///', ''));
+                    mapContent = fs.readFileSync(mapUri, 'utf-8');
+                } else {
+                    mapContent = '';
+                }
+                if (mapContent) {
+                    docComment = DocCommentReader.read(mapContent.split('\n'), mapDecl.range.start.line);
+                }
+            } catch {
+                // Silently skip
+            }
+        }
+
+        // Try implementation — overrides MAP declaration if found (definition wins)
+        if (procImpl) {
+            try {
+                let implContent: string;
+                if (procImpl.uri === currentDocument.uri) {
+                    implContent = currentDocument.getText();
+                } else if (!procImpl.uri.startsWith('test://')) {
+                    const implUri = decodeURIComponent(procImpl.uri.replace('file:///', ''));
+                    implContent = fs.readFileSync(implUri, 'utf-8');
+                } else {
+                    implContent = '';
+                }
+                if (implContent) {
+                    const implDoc = DocCommentReader.read(implContent.split('\n'), procImpl.range.start.line);
+                    if (implDoc) docComment = implDoc;
+                }
+            } catch {
+                // Silently skip
+            }
+        }
+
+        return docComment;
     }
 
     /**
@@ -415,7 +539,18 @@ export class HoverFormatter {
         }
         
         parts.push(header);
-        
+
+        // Extract doc comment: try impl first (definition wins), fall back to MAP declaration
+        const procDocComment = this.extractProcedureDocComment(
+            procName, mapDecl, procImpl, currentDocument
+        );
+        if (procDocComment) {
+            const docMarkdown = DocCommentReader.toMarkdown(procDocComment);
+            if (docMarkdown) {
+                parts.push(docMarkdown + '\n');
+            }
+        }
+
         // Show MAP declaration - but NOT if we're hovering at the MAP declaration itself
         logger.info(`formatProcedure: About to check MAP declaration, mapDecl=${!!mapDecl}, isAtMapDeclaration=${isAtMapDeclaration}`);
         if (mapDecl && !isAtMapDeclaration) {
@@ -655,5 +790,21 @@ export class HoverFormatter {
                 value: content.trim()
             }
         };
+    }
+
+    /** Returns a display noun for the declaration type (e.g. CLASS → "class", GROUP → "group"). */
+    private getTypeNoun(type: string): string {
+        const upper = type.trimStart().toUpperCase();
+        if (upper.startsWith('CLASS'))     return 'class';
+        if (upper.startsWith('GROUP'))     return 'group';
+        if (upper.startsWith('QUEUE'))     return 'queue';
+        if (upper.startsWith('FILE'))      return 'file';
+        if (upper.startsWith('VIEW'))      return 'view';
+        if (upper.startsWith('REPORT'))    return 'report';
+        if (upper.startsWith('WINDOW'))    return 'window';
+        if (upper.startsWith('MENU'))      return 'menu';
+        if (upper.startsWith('TOOLBAR'))   return 'toolbar';
+        if (upper.startsWith('INTERFACE')) return 'interface';
+        return 'variable';
     }
 }

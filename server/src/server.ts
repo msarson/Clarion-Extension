@@ -32,7 +32,8 @@ import {
     ColorPresentation,
     TextDocumentSyncKind,
     SignatureHelp,
-    ReferenceParams
+    ReferenceParams,
+    RenameParams
 } from 'vscode-languageserver-protocol';
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
@@ -61,6 +62,9 @@ import { DiagnosticProvider } from './providers/DiagnosticProvider';
 import { SignatureHelpProvider } from './providers/SignatureHelpProvider';
 import { ImplementationProvider } from './providers/ImplementationProvider';
 import { ReferencesProvider } from './providers/ReferencesProvider';
+import { RenameProvider } from './providers/RenameProvider';
+import { DocumentHighlightProvider } from './providers/DocumentHighlightProvider';
+import { WorkspaceSymbolProvider } from './providers/WorkspaceSymbolProvider';
 import { UnreachableCodeProvider } from './providers/UnreachableCodeProvider';
 import { ClarionSolutionInfo } from 'common/types';
 import { URI } from 'vscode-languageserver';
@@ -86,6 +90,9 @@ const hoverProvider = new HoverProvider();
 const signatureHelpProvider = new SignatureHelpProvider();
 const implementationProvider = new ImplementationProvider();
 const referencesProvider = new ReferencesProvider();
+const renameProvider = new RenameProvider();
+const documentHighlightProvider = new DocumentHighlightProvider();
+const workspaceSymbolProvider = new WorkspaceSymbolProvider();
 
 // ✅ Create Connection and Documents Manager
 const connection = createConnection(ProposedFeatures.all);
@@ -145,6 +152,9 @@ connection.onInitialize((params) => {
                 definitionProvider: true,
                 implementationProvider: true,
                 referencesProvider: true,
+                renameProvider: { prepareProvider: true },
+                documentHighlightProvider: true,
+                workspaceSymbolProvider: true,
                 hoverProvider: true,
                 codeActionProvider: true,
                 signatureHelpProvider: {
@@ -1331,7 +1341,63 @@ connection.onReferences(async (params: ReferenceParams) => {
     }
 });
 
-// Handle hover requests
+// Handle prepareRename (validation before rename input box appears)
+connection.onPrepareRename(async (params) => {
+    if (!serverInitialized) return null;
+
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return null;
+
+    try {
+        return await renameProvider.prepareRename(document, params.position);
+    } catch (error: any) {
+        // Re-throw ResponseErrors so VS Code shows the message inline
+        throw error;
+    }
+});
+
+// Handle rename requests
+connection.onRenameRequest(async (params: RenameParams) => {
+    if (!serverInitialized) return null;
+
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return null;
+
+    try {
+        return await renameProvider.provideRename(document, params.position, params.newName);
+    } catch (error) {
+        logger.error(`❌ Error providing rename: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+    }
+});
+
+// Handle document highlight requests
+connection.onDocumentHighlight(async (params) => {
+    if (!serverInitialized) return null;
+
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return null;
+
+    try {
+        return await documentHighlightProvider.provideDocumentHighlights(document, params.position);
+    } catch (error) {
+        logger.error(`❌ Error providing document highlights: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+    }
+});
+
+// Handle workspace symbol search
+connection.onWorkspaceSymbol(async (params) => {
+    if (!serverInitialized) return [];
+
+    try {
+        return await workspaceSymbolProvider.provideWorkspaceSymbols(params.query);
+    } catch (error) {
+        logger.error(`❌ Error providing workspace symbols: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
+    }
+});
+
 connection.onHover(async (params) => {
     logger.info(`📂 Received hover request for: ${params.textDocument.uri} at position ${params.position.line}:${params.position.character}`);
     

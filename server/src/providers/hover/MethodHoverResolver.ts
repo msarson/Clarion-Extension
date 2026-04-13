@@ -76,14 +76,16 @@ export class MethodHoverResolver {
                     interfaceName, methodName, document, tokens, paramCount, line
                 );
                 if (ifaceMethodInfo) {
-                    return this.formatter.formatMethodImplementation(methodName, interfaceName, ifaceMethodInfo, className);
+                    const implLines = document.getText().split('\n');
+                    return this.formatter.formatMethodImplementation(methodName, interfaceName, ifaceMethodInfo, className, { lines: implLines, line: position.line });
                 }
             }
 
             // Pass the full line as implementation signature for type matching
             const declInfo = this.overloadResolver.findMethodDeclaration(className, methodName, document, tokens, paramCount, line);
             if (declInfo) {
-                return this.formatter.formatMethodImplementation(methodName, className, declInfo);
+                const implLines = document.getText().split('\n');
+                return this.formatter.formatMethodImplementation(methodName, className, declInfo, undefined, { lines: implLines, line: position.line });
             }
         }
 
@@ -240,12 +242,16 @@ export class MethodHoverResolver {
         const isMethod = memberInfo.type.toUpperCase().includes('PROCEDURE') || memberInfo.type.toUpperCase().includes('FUNCTION');
         
         if (isMethod) {
+            const declFilePath = decodeURIComponent(memberInfo.file.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+            const declExt = path.extname(declFilePath).toLowerCase();
+            const implModuleFile = declExt !== '.clw' ? path.basename(declFilePath, declExt) + '.clw' : null;
+
             const implLocation = await this.findMethodImplementationCrossFile(
                 memberInfo.className,
                 fieldName,
                 document,
                 paramCount,
-                null
+                implModuleFile
             );
             
             if (implLocation) {
@@ -257,7 +263,7 @@ export class MethodHoverResolver {
     }
 
     /**
-     * Resolves hover for a PARENT.MethodName() call — looks up the method starting
+     * Resolves hover for a PARENT.MethodName() call— looks up the method starting
      * from the parent class of the current scope's class.
      */
     async resolveParentMethodCall(
@@ -278,12 +284,16 @@ export class MethodHoverResolver {
         const isMethod = memberInfo.type.toUpperCase().includes('PROCEDURE') || memberInfo.type.toUpperCase().includes('FUNCTION');
 
         if (isMethod) {
+            const declFilePath = decodeURIComponent(memberInfo.file.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+            const declExt = path.extname(declFilePath).toLowerCase();
+            const implModuleFile = declExt !== '.clw' ? path.basename(declFilePath, declExt) + '.clw' : null;
+
             const implLocation = await this.findMethodImplementationCrossFile(
                 memberInfo.className,
                 fieldName,
                 document,
                 paramCount,
-                null
+                implModuleFile
             );
             if (implLocation) {
                 return this.formatter.formatMethodCall(fieldName, memberInfo, implLocation);
