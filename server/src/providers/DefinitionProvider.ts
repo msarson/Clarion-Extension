@@ -21,6 +21,7 @@ import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { SymbolFinderService } from '../services/SymbolFinderService';
 import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
+import { MemberLocatorService } from '../services/MemberLocatorService';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
 logger.setLevel("error"); // Production: Only log errors
@@ -39,6 +40,7 @@ export class DefinitionProvider {
     private symbolResolver = new SymbolDefinitionResolver();
     private fileResolver = new FileDefinitionResolver();
     private crossFileResolver = new CrossFileResolver(this.tokenCache);
+    private memberLocator = new MemberLocatorService();
     private scopeAnalyzer: ScopeAnalyzer;
     private symbolFinder: SymbolFinderService;
 
@@ -2011,90 +2013,24 @@ export class DefinitionProvider {
             }
         }
 
-        // Third: not in current file — walk INCLUDE files
-        logger.info(`Structure ${className} not found in current file, searching INCLUDE files`);
-        const filePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-        const includeResult = await this.findMemberInIncludes(className, memberName, filePath, new Set());
-        if (includeResult) return includeResult;
-
-        // Check equates.clw (implicitly global)
-        const equatesPath = SolutionManager.getInstance()?.getEquatesPath();
-        if (equatesPath) {
-            const equatesResult = await this.findMemberInIncludes(className, memberName, equatesPath, new Set());
-            if (equatesResult) return equatesResult;
-        }
-
-        // Fourth: fall back to ClassMemberResolver (handles CLASS inheritance via class index)
-        logger.info(`Falling back to class index for ${className}.${memberName}`);
-        const memberInfo = await this.memberResolver.findMemberInNamedStructure(memberName, className, document, paramCount);
+        // Third: cross-file lookup via MemberLocatorService (INCLUDE chain + class index + parent chain)
+        logger.info(`Structure ${className} not found in current file, delegating to MemberLocatorService`);
+        const memberInfo = await this.memberLocator.findMemberInClass(className, memberName, document, paramCount);
         if (memberInfo) {
             return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
         }
-        return null;
-    }
 
-    /**
-     * Walk INCLUDE files reachable from fromPath and find a structure with label=className,
-     * then look for memberName inside it. Uses TokenCache for already-opened files.
-     */
-    private async findMemberInIncludes(
-        className: string,
-        memberName: string,
-        fromPath: string,
-        visited: Set<string>
-    ): Promise<Location | null> {
-        if (visited.has(fromPath.toLowerCase())) return null;
-        visited.add(fromPath.toLowerCase());
-
-        let content: string;
-        try { content = fs.readFileSync(fromPath, 'utf8'); } catch { return null; }
-
-        const includePattern = /INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/gi;
-        let match: RegExpExecArray | null;
-
-        while ((match = includePattern.exec(content)) !== null) {
-            const includeFile = match[1];
-
-            // Resolve via redirection, then relative fallback
-            let resolvedPath: string | null = null;
-            const solutionManager = SolutionManager.getInstance();
-            if (solutionManager?.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const resolved = project.getRedirectionParser().findFile(includeFile);
-                    if (resolved?.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        break;
-                    }
-                }
+        // Fallback: equates.clw (implicitly global — not always in INCLUDE chain)
+        const equatesPath = SolutionManager.getInstance()?.getEquatesPath();
+        if (equatesPath && fs.existsSync(equatesPath)) {
+            const equatesUri = `file:///${equatesPath.replace(/\\/g, '/')}`;
+            const equatesDoc = TextDocument.create(equatesUri, 'clarion', 1, fs.readFileSync(equatesPath, 'utf8'));
+            const equatesInfo = await this.memberLocator.findMemberInClass(className, memberName, equatesDoc, paramCount);
+            if (equatesInfo) {
+                return Location.create(equatesInfo.file, Range.create(equatesInfo.line, 0, equatesInfo.line, 0));
             }
-            if (!resolvedPath) {
-                const candidate = path.join(path.dirname(fromPath), includeFile);
-                if (fs.existsSync(candidate)) resolvedPath = candidate;
-            }
-            if (!resolvedPath) continue;
-
-            const uri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
-            const incTokens = this.tokenCache.getTokensByUri(uri);
-
-            if (incTokens && incTokens.length > 0) {
-                const labelToken = incTokens.find(t =>
-                    t.type === TokenType.Label &&
-                    t.start === 0 &&
-                    t.parent === undefined &&
-                    t.value.toLowerCase() === className.toLowerCase()
-                );
-                if (labelToken) {
-                    logger.info(`Found ${className} in ${resolvedPath} at line ${labelToken.line}`);
-                    const { TextDocument } = await import('vscode-languageserver-textdocument');
-                    const incDoc = TextDocument.create(uri, 'clarion', 1, fs.readFileSync(resolvedPath, 'utf8'));
-                    const result = await this.findFieldInStructure(incTokens, labelToken, memberName, incDoc, { line: labelToken.line, character: 0 });
-                    if (result) return Array.isArray(result) ? result[0] : result;
-                }
-            }
-
-            const nested = await this.findMemberInIncludes(className, memberName, resolvedPath, visited);
-            if (nested) return nested;
         }
+
         return null;
     }
 
@@ -2308,112 +2244,6 @@ export class DefinitionProvider {
         if (typeToken) {
             logger.info(`Found type ${typeToken.value} for variable ${variableName}`);
             return typeToken.value;
-        }
-
-        return null;
-    }
-
-    /**
-     * Searches for a class member in INCLUDE files
-     */
-    private findClassMemberInIncludes(className: string, memberName: string, documentUri: string): Location | null {
-        logger.info(`Searching for ${className}.${memberName} in INCLUDE files`);
-
-        // Decode the URI properly
-        const filePath = decodeURIComponent(documentUri.replace('file:///', '')).replace(/\//g, '\\');
-        logger.info(`Reading file: ${filePath}`);
-        
-        const content = fs.readFileSync(filePath, 'utf8');
-        const lines = content.split('\n');
-        
-        // Find INCLUDE statements by searching the text
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const includeMatch = line.match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
-            if (!includeMatch) continue;
-            
-            const includeFileName = includeMatch[1];
-            logger.info(`Found INCLUDE statement: ${includeFileName}`);
-            
-            // Try to resolve the include file using solution-wide redirection
-            let resolvedPath: string | null = null;
-            
-            const solutionManager = SolutionManager.getInstance();
-            if (solutionManager && solutionManager.solution) {
-                // Try each project's redirection parser
-                for (const project of solutionManager.solution.projects) {
-                    const redirectionParser = project.getRedirectionParser();
-                    const resolved = redirectionParser.findFile(includeFileName);
-                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        logger.info(`Resolved via project ${project.name} redirection: ${resolvedPath}`);
-                        break;
-                    }
-                }
-            }
-            
-            // Fallback: try relative to current file if no solution/project available
-            if (!resolvedPath) {
-                const currentDir = path.dirname(filePath);
-                const relativePath = path.join(currentDir, includeFileName);
-                if (fs.existsSync(relativePath)) {
-                    resolvedPath = relativePath;
-                    logger.info(`Resolved via relative path (no solution): ${resolvedPath}`);
-                }
-            }
-            
-            // If we found the file, search it for the class
-            if (resolvedPath && fs.existsSync(resolvedPath)) {
-                logger.info(`Searching in include file: ${resolvedPath}`);
-                
-                const includeContent = fs.readFileSync(resolvedPath, 'utf8');
-                const includeLines = includeContent.split('\n');
-
-                // Search for the class definition
-                for (let j = 0; j < includeLines.length; j++) {
-                    const includeLine = includeLines[j];
-                    const classMatch = includeLine.match(new RegExp(`^${className}\\s+CLASS`, 'i'));
-                    if (classMatch) {
-                        logger.info(`Found class ${className} at line ${j} in ${resolvedPath}`);
-                        
-                        // Search for the member within the class, tracking nested structure depth
-                        let nestDepth = 0;
-                        for (let k = j + 1; k < includeLines.length; k++) {
-                            const memberLine = includeLines[k];
-                            const stripped = memberLine.replace(/!.*$/, '').trim();
-
-                            if (/^(GROUP|QUEUE|RECORD)\b/i.test(stripped) ||
-                                /^\w+\s+(GROUP|QUEUE|RECORD)\b/i.test(stripped)) {
-                                nestDepth++;
-                            } else if (/^END\s*$/i.test(stripped)) {
-                                if (nestDepth > 0) { nestDepth--; continue; }
-                                logger.info('Reached END of class');
-                                break;
-                            }
-
-                            if (nestDepth > 0) continue;
-
-                            // Check for member definition (member name at start of line or after whitespace)
-                            const memberMatch = memberLine.match(new RegExp(`^\\s*${memberName}\\s+`, 'i'));
-                            if (memberMatch) {
-                                logger.info(`Found member ${memberName} at line ${k}`);
-                                const fileUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
-                                const memberIndex = memberLine.indexOf(memberName);
-                                return Location.create(fileUri, {
-                                    start: { line: k, character: memberIndex },
-                                    end: { line: k, character: memberIndex + memberName.length }
-                                });
-                            }
-                        }
-                        
-                        // Class found but member not found
-                        logger.info(`Class ${className} found but member ${memberName} not found`);
-                        break;
-                    }
-                }
-            } else {
-                logger.warn(`Could not resolve INCLUDE file: ${includeFileName}`);
-            }
         }
 
         return null;
