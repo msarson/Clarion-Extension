@@ -263,6 +263,11 @@ export class HoverProvider {
             
             logger.info(`❌ ${searchWord} is not a local variable or global in MEMBER parent`);
             
+            // Check INCLUDE files of the current file and equates.clw (covers both PROGRAM files
+            // and MEMBER files that have their own INCLUDE chain)
+            const includesHover = await this.variableResolver.findInIncludesAndEquates(searchWord, tokens, document);
+            if (includesHover) return includesHover;
+
             // 🔍 Last resort: Check if this word is a CLASS type reference
             // This handles when user hovers directly on a type name (e.g., hovering on "StringTheory" in "st StringTheory")
             logger.info(`Checking if ${word} is a CLASS type...`);

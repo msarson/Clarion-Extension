@@ -184,6 +184,21 @@ export class VariableHoverResolver {
     }
 
     /**
+     * Search the INCLUDE chain of a file and equates.clw for a label.
+     * Used by HoverProvider after all scope-based checks fail (parameter/local/module/global).
+     */
+    public async findInIncludesAndEquates(searchWord: string, tokens: Token[], document: TextDocument): Promise<Hover | null> {
+        const currentFilePath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
+        const currentDir = path.dirname(currentFilePath);
+        const incResult = await this.searchIncludesForLabel(searchWord, tokens, currentDir, new Set());
+        if (incResult) {
+            logger.info(`✅ Found "${searchWord}" in INCLUDE file: ${path.basename(incResult.doc.uri)}`);
+            return this.buildGlobalVariableHover(incResult.token, incResult.tokens, incResult.doc);
+        }
+        return await this.searchEquatesFile(searchWord);
+    }
+
+    /**
      * Find local variable information using the document symbol tree (public for use by other resolvers)
      */
     public findLocalVariableInfo(word: string, tokens: Token[], currentScope: Token, document: TextDocument, originalWord?: string): { type: string; line: number } | null {
