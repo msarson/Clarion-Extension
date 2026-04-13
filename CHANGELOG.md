@@ -24,6 +24,12 @@ All notable changes to the Clarion Extension are documented here.
   - `DefinitionProvider.findMemberInIncludes` (tokenized walk) deleted — replaced by service
   - `ImplementationProvider.findVariableTypeCrossFile` deleted — replaced by service
   - `ImplementationProvider.findVariableType` deleted — replaced by service
+  - `VariableHoverResolver.findVariableTokenCrossFile`, `findGlobalVariableInParentFile`, `searchIncludesForLabel`, `resolveFilePath` deleted — hover now fully delegates cross-file variable lookup to `MemberLocatorService`, completing the unification between hover and GoTo code paths
+
+**Bug Fixes (regression — v0.9.0)**
+
+- 🐛 **F12 broken for variables declared in a MEMBER parent's INCLUDE chain** — `DefinitionProvider`'s MEMBER parent fallback only read the parent CLW directly and never walked its INCLUDE chain; added `findVariableInParentChain()` to `MemberLocatorService` and replaced the ~60-line manual fallback with a 5-line delegation
+- 🐛 **F12 broken for dot-access where the object variable is declared cross-file** — both dot-access entry points in `DefinitionProvider` called `findVariableType()` (current-file only) for step 1 (type resolution); they now first try `memberLocator.resolveVariableType()` (cross-file) and fall back to `findVariableType()` only for non-class types, matching hover's behaviour
 
 ---
 
