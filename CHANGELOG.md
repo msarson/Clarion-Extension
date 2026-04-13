@@ -17,6 +17,14 @@ All notable changes to the Clarion Extension are documented here.
 - 🐛 **Go to Implementation (Ctrl+F12) for typed variables declared in parent/include files** — `ImplementationProvider` only searched the current file for the variable type; a new `findVariableTypeCrossFile()` method now mirrors hover's cross-file lookup (current file → MEMBER parent via `crossFileCache`) so `UD.ShowProcedureInfo` etc. resolve correctly
 - 🐛 **`ClassMemberResolver.searchFileForMember` nested-`END` fix** — the shared member-scan utility (used by both hover fallback and GoTo) now tracks `nestDepth` so nested structure blocks (`GROUP`/`QUEUE`/`RECORD` inside a `CLASS`) do not prematurely terminate the scan
 
+**Refactoring**
+
+- ♻️ **`MemberLocatorService` — unified dot-access resolution** — extracted a single service (`server/src/services/MemberLocatorService.ts`) that owns the entire typed-variable dot-access lookup pipeline (variable type resolution → INCLUDE chain walk → class index lookup → parent class chain). Hover, F12, and Ctrl+F12 all now delegate to this service, eliminating three independent implementations that previously diverged and caused repeated provider-specific bugs (see issue #50)
+  - `DefinitionProvider.findClassMemberInIncludes` (raw-text fallback) deleted — replaced by service
+  - `DefinitionProvider.findMemberInIncludes` (tokenized walk) deleted — replaced by service
+  - `ImplementationProvider.findVariableTypeCrossFile` deleted — replaced by service
+  - `ImplementationProvider.findVariableType` deleted — replaced by service
+
 ---
 
 ### [0.8.9] - 2026-04-13
