@@ -14,7 +14,82 @@ import LoggerManager from '../logger';
 const logger = LoggerManager.getLogger("ClassMemberResolver");
 logger.setLevel("error");
 
-export type MemberInfo = { type: string; className: string; line: number; file: string };
+export type MemberInfo = { type: string; className: string; line: number; file: string; signature?: string };
+
+/**
+ * Scans the body of a named CLASS/QUEUE/GROUP in a file for a specific member.
+ * Handles nested GROUP/QUEUE/RECORD blocks (nestDepth tracking) so their END
+ * keywords do not prematurely terminate the scan of the parent structure.
+ *
+ * This is the canonical implementation shared by ClassMemberResolver and
+ * MemberLocatorService — keep both in sync if the algorithm changes.
+ *
+ * @param filePath   Absolute path to the file to scan
+ * @param className  Name of the structure to find (e.g. "UltimateDebug")
+ * @param memberName Name of the member to find inside the structure
+ * @param paramCount Optional call-site parameter count for overload selection
+ * @param structureType  Structure keyword to match — CLASS | QUEUE | GROUP (default CLASS)
+ * @param countParamsInDecl  Callback that counts parameters in a declaration line
+ * @param selectBestOverload Callback that picks the best candidate by paramCount
+ * @returns MemberInfo with the file URI, or null if not found
+ */
+export function scanClassBodyForMember(
+    filePath: string,
+    className: string,
+    memberName: string,
+    paramCount: number | undefined,
+    structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS',
+    countParamsInDecl: (line: string) => number,
+    selectBestOverload: (candidates: { type: string; line: number; paramCount: number; signature?: string }[], paramCount: number | undefined) => { type: string; line: number; paramCount: number; signature?: string } | null
+): MemberInfo | null {
+    try {
+        const content = fs.readFileSync(filePath, 'utf8');
+        const lines = content.split('\n');
+        const headerPattern = new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP)`, 'i');
+
+        for (let j = 0; j < lines.length; j++) {
+            if (!headerPattern.test(lines[j])) continue;
+
+            const candidates: { type: string; line: number; paramCount: number; signature?: string }[] = [];
+            let nestDepth = 0;
+
+            for (let k = j + 1; k < lines.length; k++) {
+                const memberLine = lines[k];
+                const stripped = memberLine.replace(/!.*$/, '').trim();
+
+                if (/^(GROUP|QUEUE|RECORD)\b/i.test(stripped) ||
+                    /^\w+\s+(GROUP|QUEUE|RECORD)\b/i.test(stripped)) {
+                    nestDepth++;
+                } else if (/^END\s*$/i.test(stripped)) {
+                    if (nestDepth > 0) { nestDepth--; continue; }
+                    break;
+                }
+
+                if (nestDepth > 0) continue;
+
+                const memberMatch = memberLine.match(new RegExp(`^\\s*(${memberName})\\s+`, 'i'));
+                if (memberMatch) {
+                    const afterMember = memberLine.substring(memberMatch[0].length).trim();
+                    const type = (afterMember.split(/\s*!/).shift() || afterMember).trim() || 'Unknown';
+                    let declParamCount = 0;
+                    if (type.toUpperCase().startsWith('PROCEDURE')) {
+                        declParamCount = countParamsInDecl(memberLine);
+                    }
+                    candidates.push({ type, line: k, paramCount: declParamCount, signature: memberLine.trim() });
+                }
+            }
+
+            const bestMatch = selectBestOverload(candidates, paramCount);
+            if (bestMatch) {
+                const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
+                return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri, signature: bestMatch.signature };
+            }
+        }
+    } catch (error) {
+        // Caller handles logging
+    }
+    return null;
+}
 
 /**
  * Shared utility for resolving class members (methods, properties)
@@ -637,7 +712,7 @@ export class ClassMemberResolver {
 
     /**
      * Reads a file and searches for a member inside a specific class/queue/group body.
-     * Returns the member info or null if not found.
+     * Delegates to the shared scanClassBodyForMember helper.
      */
     private searchFileForMember(
         filePath: string,
@@ -646,57 +721,15 @@ export class ClassMemberResolver {
         paramCount: number | undefined,
         structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS'
     ): MemberInfo | null {
-        try {
-            const content = fs.readFileSync(filePath, 'utf8');
-            const lines = content.split('\n');
-            // Match CLASS, QUEUE, or GROUP header for this structure name
-            const headerPattern = new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP)`, 'i');
-
-            for (let j = 0; j < lines.length; j++) {
-                if (!headerPattern.test(lines[j])) continue;
-
-                logger.info(`Found structure ${className} in ${path.basename(filePath)} at line ${j}`);
-                const candidates: { type: string; line: number; paramCount: number; signature?: string }[] = [];
-
-                // Track nesting depth so nested GROUP/QUEUE/RECORD with their own END
-                // don't prematurely terminate the scan of the parent CLASS body.
-                let nestDepth = 0;
-                for (let k = j + 1; k < lines.length; k++) {
-                    const memberLine = lines[k];
-                    const stripped = memberLine.replace(/!.*$/, '').trim(); // strip comments
-
-                    if (/^(GROUP|QUEUE|RECORD)\b/i.test(stripped) ||
-                        /^\w+\s+(GROUP|QUEUE|RECORD)\b/i.test(stripped)) {
-                        nestDepth++;
-                    } else if (/^END\s*$/i.test(stripped)) {
-                        if (nestDepth > 0) { nestDepth--; continue; }
-                        break; // closing END of the CLASS/QUEUE/GROUP we entered
-                    }
-
-                    if (nestDepth > 0) continue; // inside a nested structure, skip
-
-                    const memberMatch = memberLine.match(new RegExp(`^\\s*(${memberName})\\s+`, 'i'));
-                    if (memberMatch) {
-                        const afterMember = memberLine.substring(memberMatch[0].length).trim();
-                        const type = (afterMember.split(/\s*!/).shift() || afterMember).trim() || 'Unknown';
-                        let declParamCount = 0;
-                        if (type.toUpperCase().startsWith('PROCEDURE')) {
-                            declParamCount = this.countParametersInDeclaration(memberLine);
-                        }
-                        candidates.push({ type, line: k, paramCount: declParamCount, signature: memberLine });
-                    }
-                }
-
-                const bestMatch = this.selectBestOverload(candidates, paramCount);
-                if (bestMatch) {
-                    const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
-                    return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri };
-                }
-            }
-        } catch (error) {
-            logger.error(`Error reading ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+        const result = scanClassBodyForMember(
+            filePath, className, memberName, paramCount, structureType,
+            (line) => this.countParametersInDeclaration(line),
+            (candidates, pc) => this.selectBestOverload(candidates, pc)
+        );
+        if (!result) {
+            logger.info(`searchFileForMember: "${memberName}" not found in "${className}" in ${path.basename(filePath)}`);
         }
-        return null;
+        return result;
     }
 
     /**
