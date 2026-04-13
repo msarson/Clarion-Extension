@@ -2376,16 +2376,23 @@ export class DefinitionProvider {
                     if (classMatch) {
                         logger.info(`Found class ${className} at line ${j} in ${resolvedPath}`);
                         
-                        // Search for the member within the class
+                        // Search for the member within the class, tracking nested structure depth
+                        let nestDepth = 0;
                         for (let k = j + 1; k < includeLines.length; k++) {
                             const memberLine = includeLines[k];
-                            
-                            // Check for END (end of class)
-                            if (memberLine.match(/^\s*END\s*$/i) || memberLine.match(/^END\s*$/i)) {
+                            const stripped = memberLine.replace(/!.*$/, '').trim();
+
+                            if (/^(GROUP|QUEUE|RECORD)\b/i.test(stripped) ||
+                                /^\w+\s+(GROUP|QUEUE|RECORD)\b/i.test(stripped)) {
+                                nestDepth++;
+                            } else if (/^END\s*$/i.test(stripped)) {
+                                if (nestDepth > 0) { nestDepth--; continue; }
                                 logger.info('Reached END of class');
                                 break;
                             }
-                            
+
+                            if (nestDepth > 0) continue;
+
                             // Check for member definition (member name at start of line or after whitespace)
                             const memberMatch = memberLine.match(new RegExp(`^\\s*${memberName}\\s+`, 'i'));
                             if (memberMatch) {

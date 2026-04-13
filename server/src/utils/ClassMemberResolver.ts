@@ -658,9 +658,22 @@ export class ClassMemberResolver {
                 logger.info(`Found structure ${className} in ${path.basename(filePath)} at line ${j}`);
                 const candidates: { type: string; line: number; paramCount: number; signature?: string }[] = [];
 
+                // Track nesting depth so nested GROUP/QUEUE/RECORD with their own END
+                // don't prematurely terminate the scan of the parent CLASS body.
+                let nestDepth = 0;
                 for (let k = j + 1; k < lines.length; k++) {
                     const memberLine = lines[k];
-                    if (/^\s*END\s*$/i.test(memberLine) || /^END\s*$/i.test(memberLine)) break;
+                    const stripped = memberLine.replace(/!.*$/, '').trim(); // strip comments
+
+                    if (/^(GROUP|QUEUE|RECORD)\b/i.test(stripped) ||
+                        /^\w+\s+(GROUP|QUEUE|RECORD)\b/i.test(stripped)) {
+                        nestDepth++;
+                    } else if (/^END\s*$/i.test(stripped)) {
+                        if (nestDepth > 0) { nestDepth--; continue; }
+                        break; // closing END of the CLASS/QUEUE/GROUP we entered
+                    }
+
+                    if (nestDepth > 0) continue; // inside a nested structure, skip
 
                     const memberMatch = memberLine.match(new RegExp(`^\\s*(${memberName})\\s+`, 'i'));
                     if (memberMatch) {
