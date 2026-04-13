@@ -121,6 +121,11 @@ export class SymbolFinderService {
             );
             return typeArg ? `LIKE(${typeArg.value})` : 'LIKE';
         }
+        if (next.type === TokenType.Procedure || next.type === TokenType.Keyword) {
+            // PROCEDURE, ROUTINE, FUNCTION — return the keyword as the type
+            const upper = next.value.toUpperCase();
+            if (upper === 'PROCEDURE' || upper === 'ROUTINE' || upper === 'FUNCTION') return upper;
+        }
         return 'UNKNOWN';
     }
     

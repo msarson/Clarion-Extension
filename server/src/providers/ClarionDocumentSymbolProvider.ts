@@ -642,6 +642,9 @@ export class ClarionDocumentSymbolProvider {
                     routineSymbol._finishesAt = token.finishesAt;
                 }
 
+                routineSymbol._clarionVarName = routineName;
+                routineSymbol._clarionType = 'ROUTINE';
+
                 // Mark special routines
                 if (isSpecialRoutine) {
                     routineSymbol._isSpecialRoutine = true;
