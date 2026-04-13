@@ -184,6 +184,65 @@ export class VariableHoverResolver {
     }
 
     /**
+     * Find a label token by name across the current file, its MEMBER parent file, and INCLUDE chains.
+     * Returns the token plus the file tokens/document it was found in.
+     * Used by StructureFieldResolver to resolve typed variable access like UD.ShowProcedureInfo()
+     * where UD is declared in a parent or included file.
+     */
+    public async findVariableTokenCrossFile(
+        varName: string,
+        tokens: Token[],
+        document: TextDocument
+    ): Promise<{ token: Token; tokens: Token[]; doc: TextDocument } | null> {
+        // 1. Current file (column 0 label)
+        const localToken = tokens.find(t =>
+            t.start === 0 && t.value.toLowerCase() === varName.toLowerCase()
+        );
+        if (localToken) return { token: localToken, tokens, doc: document };
+
+        const currentFilePath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
+        const currentDir = path.dirname(currentFilePath);
+
+        // 2. MEMBER parent file (and its INCLUDE chain)
+        const memberToken = tokens.find(t =>
+            t.value?.toUpperCase() === 'MEMBER' && t.line < 5 && t.referencedFile
+        );
+        if (memberToken?.referencedFile) {
+            const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir);
+            if (parentPath) {
+                let parentDoc: TextDocument | null = null;
+                let parentTokens: Token[] | null = null;
+                if (this.crossFileCache) {
+                    const cached = await this.crossFileCache.getOrLoadDocument(parentPath);
+                    if (cached) { parentDoc = cached.document; parentTokens = cached.tokens; }
+                } else if (fs.existsSync(parentPath)) {
+                    try {
+                        const content = await fs.promises.readFile(parentPath, 'utf-8');
+                        parentDoc = TextDocument.create(`file:///${parentPath.replace(/\\/g, '/')}`, 'clarion', 1, content);
+                        parentTokens = this.getTokens(parentDoc);
+                    } catch { /* fall through */ }
+                }
+                if (parentDoc && parentTokens) {
+                    const parentVar = parentTokens.find(t =>
+                        t.start === 0 && t.value.toLowerCase() === varName.toLowerCase()
+                    );
+                    if (parentVar) return { token: parentVar, tokens: parentTokens, doc: parentDoc };
+
+                    const parentDir = path.dirname(parentPath);
+                    const incResult = await this.searchIncludesForLabel(varName, parentTokens, parentDir, new Set([parentPath.toLowerCase()]));
+                    if (incResult) return incResult;
+                }
+            }
+        }
+
+        // 3. Current file's INCLUDE chain (for PROGRAM files or MEMBER files with own INCLUDEs)
+        const incResult = await this.searchIncludesForLabel(varName, tokens, currentDir, new Set());
+        if (incResult) return incResult;
+
+        return null;
+    }
+
+    /**
      * Search the INCLUDE chain of a file and equates.clw for a label.
      * Used by HoverProvider after all scope-based checks fail (parameter/local/module/global).
      */

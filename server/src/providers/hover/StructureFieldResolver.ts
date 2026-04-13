@@ -210,13 +210,13 @@ export class StructureFieldResolver {
      * Uses SymbolFinderService.extractTypeInfo as the single source of truth for type extraction.
      */
     private async resolveVariableClassType(varName: string, tokens: Token[], document: TextDocument): Promise<{ typeName: string; isClass: boolean } | null> {
-        const varToken = tokens.find(t =>
-            t.start === 0 &&
-            t.value.toLowerCase() === varName.toLowerCase()
-        );
-        if (!varToken) return null;
+        // Search current file first, then MEMBER parent and INCLUDE chain
+        const found = await this.variableResolver.findVariableTokenCrossFile(varName, tokens, document);
+        if (!found) return null;
+        const varToken = found.token;
+        const varTokens = found.tokens;
 
-        const typeStr = SymbolFinderService.extractTypeInfo(varToken, tokens);
+        const typeStr = SymbolFinderService.extractTypeInfo(varToken, varTokens);
         if (!typeStr || typeStr === 'UNKNOWN') return null;
 
         // CLASS(TypeName), QUEUE(TypeName), GROUP(TypeName), FILE(TypeName)
