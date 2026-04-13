@@ -1832,6 +1832,17 @@
       ]
     },
     {
+      "name": "KEYCODE",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "UNSIGNED",
+          "description": "Returns the keycode of the last key pressed at the time the event occurred, or the last keycode value set by SETKEYCODE. Typically used inside an ACCEPT loop in a CASE statement to process specific keystrokes. Key constant names (UpKey, DownKey, etc.) are defined in KEYCODES.CLW.",
+          "syntax": "KEYCODE()"
+        }
+      ]
+    },
+    {
       "name": "LOG10",
       "signatures": [
         {
