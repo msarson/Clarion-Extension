@@ -65,8 +65,7 @@ export class MethodHoverResolver {
         const methodStart = line.indexOf(methodName, methodSegmentSearchFrom);
         const methodEnd = methodStart + methodName.length;
         
-        if ((position.character >= classStart && position.character <= classEnd) ||
-            (position.character >= methodStart && position.character <= methodEnd)) {
+        if (position.character >= methodStart && position.character <= methodEnd) {
             const tokens = this.tokenCache.getTokens(document);
 
             // For 3-part methods (Class.Interface.Method), the declaration is in the INTERFACE, not the CLASS
