@@ -11,6 +11,7 @@ import { ClassMemberResolver } from '../../utils/ClassMemberResolver';
 import { SolutionManager } from '../../solution/solutionManager';
 import * as fs from 'fs';
 import * as path from 'path';
+import { SymbolFinderService } from '../../services/SymbolFinderService';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("StructureFieldResolver");
@@ -206,6 +207,7 @@ export class StructureFieldResolver {
     /**
      * Resolves the type of a variable. Returns { typeName, isClass } where isClass distinguishes
      * CLASS (method/property access) from QUEUE/GROUP/FILE (field access).
+     * Uses SymbolFinderService.extractTypeInfo as the single source of truth for type extraction.
      */
     private async resolveVariableClassType(varName: string, tokens: Token[], document: TextDocument): Promise<{ typeName: string; isClass: boolean } | null> {
         const varToken = tokens.find(t =>
@@ -214,43 +216,27 @@ export class StructureFieldResolver {
         );
         if (!varToken) return null;
 
-        const idx = tokens.indexOf(varToken);
-        if (idx + 1 >= tokens.length) return null;
+        const typeStr = SymbolFinderService.extractTypeInfo(varToken, tokens);
+        if (!typeStr || typeStr === 'UNKNOWN') return null;
 
-        const nextToken = tokens[idx + 1];
-        if (nextToken.line !== varToken.line) return null;
-
-        // Handle QUEUE(TypeName), GROUP(TypeName), CLASS(TypeName) — type is inside parens
-        if (nextToken.type === TokenType.Structure) {
-            const keyword = nextToken.value.toUpperCase();
-            const isClass = keyword === 'CLASS';
-            const lineTokens = tokens.filter(t => t.line === varToken.line && t.start > nextToken.start);
-            const typeArg = lineTokens.find(t =>
-                (t.type === TokenType.Label || t.type === TokenType.Variable) &&
-                t.value !== '(' && t.value !== ')'
-            );
-            if (typeArg) return { typeName: typeArg.value, isClass };
-            return null;
+        // CLASS(TypeName), QUEUE(TypeName), GROUP(TypeName), FILE(TypeName)
+        const structMatch = typeStr.match(/^(CLASS|QUEUE|GROUP|FILE)\((\w+)\)$/i);
+        if (structMatch) {
+            return { typeName: structMatch[2], isClass: structMatch[1].toUpperCase() === 'CLASS' };
         }
 
-        // Handle LIKE(TypeName) — mirrors the type of a named variable or type
-        if (nextToken.type === TokenType.TypeReference) {
-            const lineTokens = tokens.filter(t => t.line === varToken.line && t.start > nextToken.start);
-            const typeArg = lineTokens.find(t =>
-                (t.type === TokenType.Label || t.type === TokenType.Variable) &&
-                t.value !== '(' && t.value !== ')'
-            );
-            if (typeArg) return { typeName: typeArg.value, isClass: false };
-            return null;
+        // LIKE(TypeName)
+        const likeMatch = typeStr.match(/^LIKE\((\w+)\)$/i);
+        if (likeMatch) {
+            return { typeName: likeMatch[1], isClass: false };
         }
 
-        if (nextToken.type === TokenType.Type || nextToken.type === TokenType.Keyword) {
-            return null;
-        }
-        if (nextToken.type === TokenType.Variable || nextToken.type === TokenType.Label) {
-            return { typeName: nextToken.value, isClass: true }; // bare type name — assume CLASS
-        }
-        return null;
+        // Bare structure keyword with no type arg — can't resolve members
+        const bareStructures = new Set(['CLASS', 'QUEUE', 'GROUP', 'FILE', 'RECORD', 'WINDOW', 'VIEW', 'REPORT', 'LIKE', 'PROCEDURE']);
+        if (bareStructures.has(typeStr.toUpperCase())) return null;
+
+        // Plain user-defined type name used directly as a variable type
+        return { typeName: typeStr, isClass: true };
     }
 
     /**

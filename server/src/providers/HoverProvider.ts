@@ -362,16 +362,6 @@ export class HoverProvider {
                 // Extract type from _clarionType if available, otherwise parse from detail
                 let type = (varSymbol as any)._clarionType || varSymbol.detail || 'Unknown';
                 
-                // Special handling for GROUP/QUEUE/FILE structures (kind = 23)
-                if (varSymbol.kind === 23 && type === 'Unknown') {
-                    // Extract structure type from name pattern like "GROUP (MyGroup)"
-                    const structTypeMatch = varSymbol.name.match(/^(\w+)\s*\(/);
-                    if (structTypeMatch) {
-                        type = structTypeMatch[1]; // e.g., "GROUP", "QUEUE", "FILE"
-                        logger.info(`Extracted structure type from name: ${type}`);
-                    }
-                }
-                
                 return {
                     type: type,
                     line: varSymbol.range.start.line

@@ -91,7 +91,7 @@ export class SymbolFinderService {
      * Extract display type string from the token after a variable label.
      * Handles QUEUE(TypeName), GROUP(TypeName), CLASS(TypeName) as well as plain types.
      */
-    private static extractTypeInfo(labelToken: Token, tokens: Token[]): string {
+    public static extractTypeInfo(labelToken: Token, tokens: Token[]): string {
         const idx = tokens.indexOf(labelToken);
         if (idx + 1 >= tokens.length) return 'UNKNOWN';
         const next = tokens[idx + 1];

@@ -193,41 +193,7 @@ export class VariableHoverResolver {
      * Build hover for a global variable
      */
     private buildGlobalVariableHover(globalVar: Token, tokens: Token[], document: TextDocument, hoverLine?: number): Hover {
-        const globalIndex = tokens.indexOf(globalVar);
-        let typeInfo = 'UNKNOWN';
-        if (globalIndex + 1 < tokens.length) {
-            const nextToken = tokens[globalIndex + 1];
-            if (nextToken.line === globalVar.line) {
-                if (nextToken.type === TokenType.Type) {
-                    typeInfo = nextToken.value;
-                } else if (nextToken.type === TokenType.Structure) {
-                    // Handle QUEUE(TypeName), GROUP(TypeName), etc.
-                    const lineTokens = tokens.filter(t => t.line === globalVar.line && t.start > nextToken.start);
-                    const typeArg = lineTokens.find(t =>
-                        (t.type === TokenType.Label || t.type === TokenType.Variable) &&
-                        t.value !== '(' && t.value !== ')'
-                    );
-                    typeInfo = typeArg
-                        ? `${nextToken.value.toUpperCase()}(${typeArg.value})`
-                        : nextToken.value.toUpperCase();
-                } else if (nextToken.type === TokenType.TypeReference) {
-                    // Handle LIKE(TypeName)
-                    const lineTokens = tokens.filter(t => t.line === globalVar.line && t.start > nextToken.start);
-                    const typeArg = lineTokens.find(t =>
-                        (t.type === TokenType.Label || t.type === TokenType.Variable) &&
-                        t.value !== '(' && t.value !== ')'
-                    );
-                    typeInfo = typeArg ? `LIKE(${typeArg.value})` : 'LIKE';
-                } else if (nextToken.type === TokenType.Variable || nextToken.type === TokenType.Label) {
-                    typeInfo = nextToken.value; // user-defined class name
-                } else if (nextToken.type === TokenType.ReferenceVariable) {
-                    // &TypeName reference variable — strip leading '&'
-                    typeInfo = nextToken.value.startsWith('&') ? nextToken.value.substring(1) : nextToken.value;
-                } else if (nextToken.type === TokenType.Procedure) {
-                    typeInfo = 'PROCEDURE';
-                }
-            }
-        }
+        const typeInfo = SymbolFinderService.extractTypeInfo(globalVar, tokens);
 
         // Check if this variable is inside a CLASS or INTERFACE structure
         const structure = this.tokenCache.getStructure(document);
@@ -239,7 +205,7 @@ export class VariableHoverResolver {
         );
         let containingClassName: string | undefined;
         if (isClassProperty) {
-            const classToken = tokens.slice(0, globalIndex).reverse().find(t =>
+            const classToken = tokens.slice(0, tokens.indexOf(globalVar)).reverse().find(t =>
                 t.type === TokenType.Structure &&
                 (t as any).subType === TokenType.Class
             );
@@ -247,7 +213,7 @@ export class VariableHoverResolver {
         }
         let containingInterfaceName: string | undefined;
         if (isInterfaceMethod) {
-            const ifaceToken = tokens.slice(0, globalIndex).reverse().find(t =>
+            const ifaceToken = tokens.slice(0, tokens.indexOf(globalVar)).reverse().find(t =>
                 t.type === TokenType.Structure &&
                 (t as any).subType === TokenType.Interface
             );
