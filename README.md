@@ -52,6 +52,9 @@ Jump to definitions, find implementations, and explore references — works in s
 - Press **F12** to go to definition (same file: no solution needed!)
 - Press **Ctrl+F12** to go to implementation
 - Press **Shift+F12** for **Find All References** — scope-aware across all project files
+- Press **F2** to **Rename Symbol** — renames across the entire workspace in one step
+- **Document Highlight** — pressing on a symbol highlights all occurrences in the current file
+- **Workspace Symbol Search** (`Ctrl+T`) — search for any procedure, class, or label across all solution files
 - Hover for documentation — declaration location, class/interface context, type info
 - **Chained navigation**: `SELF.Order.RangeList.Init` — hover, F12, Ctrl+F12, and references resolve through CLASS, QUEUE, and GROUP type chains
 - **SELF/PARENT properties**: F12 on `SELF.List` navigates to the class member declaration
@@ -125,7 +128,40 @@ Productivity features to write code faster.
 
 ## 🆕 What's New
 
-### Latest: v0.8.7 (2026-03-15)
+### Latest: v0.8.9 (2026-04-13) — Security Patch
+
+- Updated dev dependencies to resolve Dependabot security alerts (`serialize-javascript` RCE/DoS, `diff` DoS)
+- Replaced deprecated `vscode-test` with `@vscode/test-electron`
+
+No functional changes — safe to upgrade immediately.
+
+**[See full changelog →](CHANGELOG.md)**
+
+---
+
+### Recent: v0.8.8 (2026-04-12)
+
+#### ✏️ Rename Symbol (F2)
+Rename any user-defined symbol across the entire workspace in one step — scope-aware, protects library/read-only `.inc` files, and validates the position before the dialog opens.
+
+#### 🔆 Document Highlight
+Pressing on a symbol highlights all its occurrences in the current file.
+
+#### 🔍 Workspace Symbol Search (Ctrl+T)
+Search for any procedure, class, or label across all files in the solution.
+
+#### 🐛 Bug Fixes
+- Hover and Go to Definition for local class instances inside `MethodImplementation` scopes now correctly resolves variables from the parent procedure's data section
+- `!!!` doc comments now appear in hover for local variables, classes, groups, and other procedure-level declarations
+- Fixed false-positive "Procedure returns X but all RETURN statements are empty" diagnostic for overloaded procedures ([#44](https://github.com/msarson/Clarion-Extension/issues/44))
+- Find All References on a local CLASS label now returns correct positions and includes method implementation headers
+- Go to Implementation and hover for `SELF.Method()` now correctly finds implementations inherited from an external base class
+
+**[See full changelog →](CHANGELOG.md)**
+
+---
+
+### Recent: v0.8.7 (2026-03-15)
 
 #### 🔍 Find All References (Shift+F12)
 Full scope-aware Find All References — SELF/PARENT members, typed variables, chained chains, MAP/MODULE procedures, structure fields, INTERFACE methods, IMPLEMENTS(), CLASS type names, and overload filtering.
@@ -165,34 +201,6 @@ Hover, F12, Ctrl+F12, and references for any depth of `SELF.A.B.C` chains includ
 - **Batch UpperPark commands** - Import/Export/Show All Differences
 - **New context menu commands** - Build Project, Generate + Build, Copy Path, Open in Clarion IDE
 - **Generate All/Build All** - Build multiple applications in dependency order
-
-#### 🐛 Navigation & Hover Fixes
-- FUNCTION declarations now work with Ctrl+F12 (cross-project)
-- Procedures without parameters show correct hover info
-- Methods named like keywords (e.g., MESSAGE) show method info instead of keyword help
-
-**[See full changelog →](CHANGELOG.md)**
-
-### Recent: v0.8.5 (2026-01-09)
-
-#### 🔧 Folding Provider Fix
-Fixed critical issues with code folding for window definitions:
-- APPLICATION structures now fold correctly
-- Nested MENU structures fold properly at any indentation level
-- Removed arbitrary 50-column limit for structure recognition
-
-**Impact:** Complex window/application definitions with nested menus now have proper code folding support.
-
-### Recent: v0.8.4 (2026-01-09)
-
-#### 🎨 Template Language Support
-Dedicated syntax highlighting for `.tpl` and `.tpw` files with 100+ template keywords.
-
-#### ⚡ Performance Boost
-50-60% faster token processing with optimized caching and parent relationship indexing.
-
-#### 🎯 Scope-Aware Navigation
-F12 now correctly prioritizes local variables over globals with the same name.
 
 **[See full changelog →](CHANGELOG.md)**
 
