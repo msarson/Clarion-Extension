@@ -95,10 +95,3 @@ jobs:
           git checkout master
           git checkout -b version-${{ inputs.next_version }}
           git push origin version-${{ inputs.next_version }}
-
-      - name: Set next version branch as default
-        run: |
-          gh api --method PATCH /repos/msarson/Clarion-Extension \
-            -f default_branch=version-${{ inputs.next_version }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
