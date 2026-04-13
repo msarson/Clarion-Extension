@@ -1090,6 +1090,29 @@ export class ClarionDocumentSymbolProvider {
             []
         );
         
+        // Populate _clarionVarName and _clarionType for labeled structures so hover/type
+        // resolution has the same data as variable symbols without re-parsing tokens.
+        if (labelName) {
+            structureSymbol._clarionVarName = labelName;
+            // CLASS, QUEUE and GROUP may carry an optional base/type arg: CLASS(Base)
+            if (upperValue === "CLASS" || upperValue === "QUEUE" || upperValue === "GROUP") {
+                const sameLineAfter = (tokensByLine.get(line) ?? []).filter(t => t.start > token.start);
+                let inParen = false;
+                let typeArg: string | undefined;
+                for (const t of sameLineAfter) {
+                    if (t.value === "(") { inParen = true; continue; }
+                    if (t.value === ")") break;
+                    if (inParen && (t.type === TokenType.Label || t.type === TokenType.Variable || t.type === TokenType.Type)) {
+                        typeArg = t.value;
+                        break;
+                    }
+                }
+                structureSymbol._clarionType = typeArg ? `${upperValue}(${typeArg})` : upperValue;
+            } else {
+                structureSymbol._clarionType = upperValue;
+            }
+        }
+
         // Store metadata for structures that might have prefixes and labels
         if (upperValue === "FILE" || upperValue === "GROUP" || upperValue === "QUEUE") {
             const preResult = this.extractAttribute(tokens, index + 1, "PRE", line, token);

@@ -75,7 +75,6 @@ suite('Local CLASS declaration hover type', () => {
         const symbols = provider.provideDocumentSymbols(tokens, 'test://TestKanban001.clw');
 
         const flat = allSymbols(symbols);
-        // CLASS declarations appear as "CLASS (LabelName)" in the symbol tree
         const thisWindow = flat.find(s =>
             s.name === 'ThisWindow' ||
             (s as any)._clarionVarName === 'ThisWindow' ||
@@ -83,7 +82,12 @@ suite('Local CLASS declaration hover type', () => {
         );
 
         assert.ok(thisWindow, `Should find ThisWindow symbol (got names: ${flat.map(s => s.name).join(', ')})`);
-        console.log(`\nThisWindow symbol: kind=${thisWindow.kind}, name="${thisWindow.name}", _clarionType="${(thisWindow as any)._clarionType}", detail="${thisWindow.detail}"`);
+        console.log(`\nThisWindow symbol: kind=${thisWindow.kind}, name="${thisWindow.name}", _clarionType="${(thisWindow as any)._clarionType}", _clarionVarName="${(thisWindow as any)._clarionVarName}"`);
+
+        const clarionType = (thisWindow as any)._clarionType;
+        const varName = (thisWindow as any)._clarionVarName;
+        assert.strictEqual(varName, 'ThisWindow', `_clarionVarName should be 'ThisWindow'`);
+        assert.strictEqual(clarionType, 'CLASS(WindowManager)', `_clarionType should be 'CLASS(WindowManager)' (got: '${clarionType}')`);
     });
 
     test('SymbolFinderService.findLocalVariable returns correct type for CLASS(WindowManager)', () => {
