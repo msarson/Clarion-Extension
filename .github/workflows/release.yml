@@ -40,11 +40,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests
-        run: npm run test:server
-
       - name: Compile release build
         run: npm run compile:release
+
+      - name: Run tests
+        run: npm run test:server
 
       - name: Install vsce
         run: npm install -g @vscode/vsce
