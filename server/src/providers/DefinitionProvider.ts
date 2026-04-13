@@ -1398,103 +1398,12 @@ export class DefinitionProvider {
             }
         }
     
-        // 🔗 MEMBER file parent search fallback
-        logger.info(`🔍 Checking for MEMBER parent file for global variable lookup`);
-        const memberToken = tokens.find(t => 
-            t.value && t.value.toUpperCase() === 'MEMBER' && 
-            t.line < 5 && 
-            t.referencedFile
-        );
-        
-        if (memberToken && memberToken.referencedFile) {
-            logger.info(`Found MEMBER reference to: ${memberToken.referencedFile}`);
-            
-            // Resolve the full path - same logic as FileDefinitionResolver
-            const currentFilePath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
-            const currentDir = path.dirname(currentFilePath);
-            let parentFilePath: string | null = null;
-            
-            // Try solution-wide redirection first
-            const SolutionManager = require('../solution/solutionManager').SolutionManager;
-            const solutionManager = SolutionManager.getInstance();
-            
-            if (solutionManager && solutionManager.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const redirectionParser = project.getRedirectionParser();
-                    const resolved = redirectionParser.findFile(memberToken.referencedFile);
-                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
-                        parentFilePath = resolved.path;
-                        break;
-                    }
-                }
-            }
-            
-            // Fallback to relative path
-            if (!parentFilePath) {
-                const relativePath = path.join(currentDir, memberToken.referencedFile);
-                if (fs.existsSync(relativePath)) {
-                    parentFilePath = relativePath;
-                }
-            }
-            
-            logger.info(`Resolved MEMBER file path: ${parentFilePath}`);
-            
-            // Read the parent file
-            if (parentFilePath && fs.existsSync(parentFilePath)) {
-                try {
-                    const parentContents = await fs.promises.readFile(parentFilePath, 'utf-8');
-                    // Construct proper file URI for Windows paths
-                    const normalizedPath = parentFilePath.replace(/\\/g, '/');
-                    const parentUri = normalizedPath.startsWith('/') ? `file://${normalizedPath}` : `file:///${normalizedPath}`;
-                    logger.info(`Constructed parent URI: ${parentUri}`);
-                    const parentDoc = TextDocument.create(
-                        parentUri,
-                        'clarion',
-                        1,
-                        parentContents
-                    );
-                    const parentTokens = this.tokenCache.getTokens(parentDoc);
-                    
-                    // Find first CODE token to establish boundary for global scope
-                    const firstCodeToken = parentTokens.find(t => 
-                        t.type === TokenType.Keyword && 
-                        t.value.toUpperCase() === 'CODE'
-                    );
-                    const globalScopeEndLine = firstCodeToken ? firstCodeToken.line : Number.MAX_SAFE_INTEGER;
-                    
-                    // Search for global variable (Label at column 0, before first CODE)
-                    const globalVar = parentTokens.find(t =>
-                        t.type === TokenType.Label &&
-                        t.start === 0 &&
-                        t.line < globalScopeEndLine &&
-                        t.value.toLowerCase() === searchWord.toLowerCase()
-                    );
-                    
-                    if (globalVar) {
-                        logger.info(`✅ Found global variable in MEMBER parent: ${globalVar.value} at line ${globalVar.line}`);
-                        
-                        // Check scope accessibility before returning
-                        const canAccess = this.scopeAnalyzer.canAccess(
-                            position,
-                            { line: globalVar.line, character: globalVar.start },
-                            document,      // reference document (current MEMBER file)
-                            parentDoc      // declaration document (parent PROGRAM file)
-                        );
-                        
-                        if (canAccess) {
-                            logger.info(`✅ SCOPE-CHECK: Can access global variable from MEMBER file`);
-                            return Location.create(parentDoc.uri, {
-                                start: { line: globalVar.line, character: globalVar.start },
-                                end: { line: globalVar.line, character: globalVar.start + globalVar.value.length }
-                            });
-                        } else {
-                            logger.info(`❌ SCOPE-CHECK: Cannot access this variable cross-file (scope boundaries violated)`);
-                        }
-                    }
-                } catch (err) {
-                    logger.error(`Error reading MEMBER parent file: ${err}`);
-                }
-            }
+        // 🔗 MEMBER file parent search fallback (including parent's INCLUDE chain)
+        logger.info(`🔍 Checking for MEMBER parent file (+ includes) for global variable lookup`);
+        const varLocation = await this.memberLocator.findVariableInParentChain(searchWord, document);
+        if (varLocation) {
+            logger.info(`✅ Found variable "${searchWord}" via MemberLocatorService: ${varLocation.uri} line ${varLocation.range.start.line}`);
+            return varLocation;
         }
     
         // 🎯 Try FILE structure fallback

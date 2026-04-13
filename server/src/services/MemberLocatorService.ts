@@ -9,6 +9,7 @@
  * See GitHub issue #50 for the refactor rationale.
  */
 
+import { Location } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
@@ -29,6 +30,75 @@ export class MemberLocatorService {
     private tokenCache = TokenCache.getInstance();
 
     constructor(private crossFileCache?: CrossFileCache) {}
+
+    /**
+     * Finds the declaration location of a variable.
+     * Search order: current file → MEMBER parent (+ its INCLUDE chain) → current INCLUDE chain.
+     * Returns a Location or null.
+     */
+    async findVariableLocation(
+        varName: string,
+        document: TextDocument
+    ): Promise<Location | null> {
+        const tokens = this.tokenCache.getTokens(document);
+        const result = await this.findVariableTokenCrossFile(varName, tokens, document);
+        if (!result) return null;
+        return Location.create(result.doc.uri, {
+            start: { line: result.token.line, character: result.token.start },
+            end: { line: result.token.line, character: result.token.start + result.token.value.length }
+        });
+    }
+
+    /**
+     * Searches the MEMBER parent file (+ its INCLUDE chain) for a variable declaration.
+     * Does NOT search the current file — use this when local scope checks have already run.
+     */
+    async findVariableInParentChain(
+        varName: string,
+        document: TextDocument
+    ): Promise<Location | null> {
+        const tokens = this.tokenCache.getTokens(document);
+        const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const currentDir = path.dirname(currentFilePath);
+
+        const memberToken = tokens.find(t => t.value?.toUpperCase() === 'MEMBER' && t.line < 5 && t.referencedFile);
+        if (memberToken?.referencedFile) {
+            const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir);
+            if (parentPath) {
+                const parentData = await this.loadDocument(parentPath);
+                if (parentData) {
+                    const parentVar = parentData.tokens.find(t =>
+                        t.start === 0 && t.value.toLowerCase() === varName.toLowerCase()
+                    );
+                    if (parentVar) {
+                        return Location.create(parentData.doc.uri, {
+                            start: { line: parentVar.line, character: parentVar.start },
+                            end: { line: parentVar.line, character: parentVar.start + parentVar.value.length }
+                        });
+                    }
+                    const incResult = await this.searchIncludesForToken(
+                        varName, parentData.tokens, path.dirname(parentPath), new Set([parentPath.toLowerCase()])
+                    );
+                    if (incResult) {
+                        return Location.create(incResult.doc.uri, {
+                            start: { line: incResult.token.line, character: incResult.token.start },
+                            end: { line: incResult.token.line, character: incResult.token.start + incResult.token.value.length }
+                        });
+                    }
+                }
+            }
+        }
+
+        // Also search current file's own include chain
+        const incResult = await this.searchIncludesForToken(varName, tokens, currentDir, new Set());
+        if (incResult) {
+            return Location.create(incResult.doc.uri, {
+                start: { line: incResult.token.line, character: incResult.token.start },
+                end: { line: incResult.token.line, character: incResult.token.start + incResult.token.value.length }
+            });
+        }
+        return null;
+    }
 
     /**
      * Resolves the type of a named variable.
