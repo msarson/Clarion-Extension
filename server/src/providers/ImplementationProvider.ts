@@ -23,6 +23,7 @@ import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { CrossFileCache } from './hover/CrossFileCache';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
+import { SymbolFinderService } from '../services/SymbolFinderService';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -686,22 +687,18 @@ export class ImplementationProvider {
         );
         if (!varToken) return null;
 
-        const idx = tokens.indexOf(varToken);
-        if (idx + 1 >= tokens.length) return null;
+        const typeStr = SymbolFinderService.extractTypeInfo(varToken, tokens);
+        if (!typeStr || typeStr === 'UNKNOWN') return null;
 
-        const nextToken = tokens[idx + 1];
-        if (nextToken.line !== varToken.line) return null;
+        // CLASS(TypeName) → return TypeName so cross-file search can find the class
+        const structMatch = typeStr.match(/^(?:CLASS|QUEUE|GROUP)\((\w+)\)$/i);
+        if (structMatch) return structMatch[1];
 
-        // Only user-defined class names (not built-in Type/Structure/Keyword tokens)
-        if (nextToken.type === TokenType.Type ||
-            nextToken.type === TokenType.Structure ||
-            nextToken.type === TokenType.Keyword) {
-            return null;
-        }
-        if (nextToken.type === TokenType.Variable || nextToken.type === TokenType.Label) {
-            return nextToken.value;
-        }
-        return null;
+        // Plain built-in type or bare structure keyword — not useful for class lookup
+        const bareBuiltins = new Set(['CLASS', 'QUEUE', 'GROUP', 'FILE', 'RECORD', 'WINDOW', 'PROCEDURE', 'BYTE', 'SHORT', 'LONG', 'STRING', 'REAL', 'DECIMAL', 'DATE', 'TIME']);
+        if (bareBuiltins.has(typeStr.toUpperCase())) return null;
+
+        return typeStr; // user-defined class name used directly
     }
 
     /**
