@@ -166,6 +166,19 @@ export class VariableHoverResolver {
             return await this.findGlobalVariableInParentFile(searchWord, memberToken.referencedFile, document);
         }
         
+        // Check INCLUDE files reachable from the current file (for PROGRAM files with no MEMBER)
+        const currentFilePath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
+        const currentDir = path.dirname(currentFilePath);
+        const incResult = await this.searchIncludesForLabel(searchWord, tokens, currentDir, new Set());
+        if (incResult) {
+            logger.info(`✅ Found "${searchWord}" in INCLUDE file: ${path.basename(incResult.doc.uri)}`);
+            return this.buildGlobalVariableHover(incResult.token, incResult.tokens, incResult.doc);
+        }
+
+        // Final fallback: equates.clw (implicitly global in all Clarion programs)
+        const equatesResult = await this.searchEquatesFile(searchWord);
+        if (equatesResult) return equatesResult;
+
         logger.info('No scope found and no global variable found - cannot provide hover');
         return null;
     }
@@ -281,72 +294,170 @@ export class VariableHoverResolver {
     }
 
     /**
-     * Find global variable in parent file
+     * Find global variable in parent file (and its INCLUDE chain)
      */
     private async findGlobalVariableInParentFile(searchWord: string, parentFile: string, currentDocument: TextDocument): Promise<Hover | null> {
-        const currentFilePath = decodeURIComponent(currentDocument.uri.replace('file:///', ''));
+        const currentFilePath = decodeURIComponent(currentDocument.uri.replace('file:///', '')).replace(/\//g, '\\');
         const currentFileDir = path.dirname(currentFilePath);
-        const resolvedPath = path.resolve(currentFileDir, parentFile);
-        
+        const resolvedPath = this.resolveFilePath(parentFile, currentFileDir);
+        if (!resolvedPath) return null;
+
+        let parentDoc: TextDocument | null = null;
+        let parentTokens: Token[] | null = null;
+
         if (this.crossFileCache) {
             const cached = await this.crossFileCache.getOrLoadDocument(resolvedPath);
             if (cached) {
-                const { document: parentDoc, tokens: parentTokens } = cached;
-                
-                const firstCodeToken = parentTokens.find(t => 
-                    t.type === TokenType.Keyword && 
-                    t.value.toUpperCase() === 'CODE'
-                );
-                const globalScopeEndLine = firstCodeToken ? firstCodeToken.line : Number.MAX_SAFE_INTEGER;
-                
-                const globalVar = parentTokens.find(t =>
-                    t.type === TokenType.Label &&
-                    t.start === 0 &&
-                    t.line < globalScopeEndLine &&
-                    t.value.toLowerCase() === searchWord.toLowerCase()
-                );
-                
-                if (globalVar) {
-                    logger.info(`✅ Found global variable in MEMBER parent: ${globalVar.value} at line ${globalVar.line}`);
-                    return this.buildGlobalVariableHover(globalVar, parentTokens, parentDoc);
-                }
+                parentDoc = cached.document;
+                parentTokens = cached.tokens;
             }
-        } else {
-            // Fallback to direct file reading if cache not available
-            if (fs.existsSync(resolvedPath)) {
-                try {
-                    const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
-                    const parentDoc = TextDocument.create(
-                        `file:///${resolvedPath.replace(/\\/g, '/')}`,
-                        'clarion',
-                        1,
-                        parentContents
-                    );
-                    const parentTokens = this.getTokens(parentDoc);
-                    
-                    const firstCodeToken = parentTokens.find(t => 
-                        t.type === TokenType.Keyword && 
-                        t.value.toUpperCase() === 'CODE'
-                    );
-                    const globalScopeEndLine = firstCodeToken ? firstCodeToken.line : Number.MAX_SAFE_INTEGER;
-                    
-                    const globalVar = parentTokens.find(t =>
-                        t.type === TokenType.Label &&
-                        t.start === 0 &&
-                        t.line < globalScopeEndLine &&
-                        t.value.toLowerCase() === searchWord.toLowerCase()
-                    );
-                    
-                    if (globalVar) {
-                        logger.info(`✅ Found global variable in MEMBER parent: ${globalVar.value} at line ${globalVar.line}`);
-                        return this.buildGlobalVariableHover(globalVar, parentTokens, parentDoc);
-                    }
-                } catch (err) {
-                    logger.error(`Error reading MEMBER parent file: ${err}`);
+        } else if (fs.existsSync(resolvedPath)) {
+            try {
+                const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
+                parentDoc = TextDocument.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, 'clarion', 1, parentContents);
+                parentTokens = this.getTokens(parentDoc);
+            } catch (err) {
+                logger.error(`Error reading MEMBER parent file: ${err}`);
+            }
+        }
+
+        if (parentDoc && parentTokens) {
+            const firstCodeToken = parentTokens.find(t =>
+                t.type === TokenType.Keyword && t.value.toUpperCase() === 'CODE'
+            );
+            const globalScopeEndLine = firstCodeToken ? firstCodeToken.line : Number.MAX_SAFE_INTEGER;
+
+            const globalVar = parentTokens.find(t =>
+                t.type === TokenType.Label &&
+                t.start === 0 &&
+                t.line < globalScopeEndLine &&
+                t.value.toLowerCase() === searchWord.toLowerCase()
+            );
+            if (globalVar) {
+                logger.info(`✅ Found global variable in MEMBER parent: ${globalVar.value} at line ${globalVar.line}`);
+                return this.buildGlobalVariableHover(globalVar, parentTokens, parentDoc);
+            }
+
+            // Search INCLUDE files reachable from the parent file
+            const parentDir = path.dirname(resolvedPath);
+            const visited = new Set<string>([resolvedPath.toLowerCase()]);
+            const incResult = await this.searchIncludesForLabel(searchWord, parentTokens, parentDir, visited);
+            if (incResult) {
+                logger.info(`✅ Found "${searchWord}" in INCLUDE of parent: ${path.basename(incResult.doc.uri)}`);
+                return this.buildGlobalVariableHover(incResult.token, incResult.tokens, incResult.doc);
+            }
+        }
+
+        // Final fallback: equates.clw (implicitly global in all Clarion programs)
+        return await this.searchEquatesFile(searchWord);
+    }
+
+    /**
+     * Resolve a filename to a full path using the redirection parser, then relative path as fallback.
+     */
+    private resolveFilePath(filename: string, fromDir: string): string | null {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { SolutionManager } = require('../../solution/solutionManager');
+        const sm = SolutionManager.getInstance();
+        if (sm?.solution) {
+            for (const project of sm.solution.projects) {
+                const resolved = project.getRedirectionParser().findFile(filename);
+                if (resolved?.path && fs.existsSync(resolved.path)) {
+                    return resolved.path;
                 }
             }
         }
-        
+        const relative = path.join(fromDir, filename);
+        return fs.existsSync(relative) ? relative : null;
+    }
+
+    /**
+     * Search INCLUDE files reachable from a given set of tokens for a label.
+     * Uses redirection parser to resolve each INCLUDE path. Recurses one level deep per call.
+     */
+    private async searchIncludesForLabel(
+        searchWord: string,
+        tokens: Token[],
+        fromDir: string,
+        visited: Set<string>
+    ): Promise<{ token: Token; doc: TextDocument; tokens: Token[] } | null> {
+        const includeTokens = tokens.filter(t =>
+            t.value && t.value.toUpperCase() === 'INCLUDE' && t.referencedFile
+        );
+        for (const includeToken of includeTokens) {
+            const resolvedPath = this.resolveFilePath(includeToken.referencedFile!, fromDir);
+            if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
+            visited.add(resolvedPath.toLowerCase());
+
+            let doc: TextDocument | null = null;
+            let incTokens: Token[] | null = null;
+
+            if (this.crossFileCache) {
+                const cached = await this.crossFileCache.getOrLoadDocument(resolvedPath);
+                if (cached) { doc = cached.document; incTokens = cached.tokens; }
+            } else if (fs.existsSync(resolvedPath)) {
+                try {
+                    const content = await fs.promises.readFile(resolvedPath, 'utf-8');
+                    const uri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+                    doc = TextDocument.create(uri, 'clarion', 1, content);
+                    incTokens = this.getTokens(doc);
+                } catch { continue; }
+            }
+
+            if (!doc || !incTokens) continue;
+
+            const labelToken = incTokens.find(t =>
+                t.type === TokenType.Label &&
+                t.start === 0 &&
+                t.value.toLowerCase() === searchWord.toLowerCase()
+            );
+            if (labelToken) return { token: labelToken, doc, tokens: incTokens };
+
+            // Recurse into nested includes
+            const nested = await this.searchIncludesForLabel(searchWord, incTokens, path.dirname(resolvedPath), visited);
+            if (nested) return nested;
+        }
+        return null;
+    }
+
+    /**
+     * Search equates.clw (implicitly global in all Clarion programs via MAP/END) for a label.
+     */
+    private async searchEquatesFile(searchWord: string): Promise<Hover | null> {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { SolutionManager } = require('../../solution/solutionManager');
+        const sm = SolutionManager.getInstance();
+        const equatesPath = sm?.getEquatesPath();
+        if (!equatesPath || !fs.existsSync(equatesPath)) return null;
+
+        try {
+            const content = fs.readFileSync(equatesPath, 'utf-8');
+            const uri = `file:///${equatesPath.replace(/\\/g, '/')}`;
+            let doc: TextDocument;
+            let equatesTokens: Token[];
+
+            if (this.crossFileCache) {
+                const cached = await this.crossFileCache.getOrLoadDocument(equatesPath);
+                if (!cached) return null;
+                doc = cached.document;
+                equatesTokens = cached.tokens;
+            } else {
+                doc = TextDocument.create(uri, 'clarion', 1, content);
+                equatesTokens = this.getTokens(doc);
+            }
+
+            const eqToken = equatesTokens.find(t =>
+                t.type === TokenType.Label &&
+                t.start === 0 &&
+                t.value.toLowerCase() === searchWord.toLowerCase()
+            );
+            if (eqToken) {
+                logger.info(`✅ Found "${searchWord}" in equates.clw`);
+                return this.buildGlobalVariableHover(eqToken, equatesTokens, doc);
+            }
+        } catch (err) {
+            logger.error(`Error searching equates.clw: ${err}`);
+        }
         return null;
     }
 
