@@ -160,7 +160,8 @@ export class DefinitionProvider {
                         const structureNameMatch = beforeDot.match(/(\w+)\s*$/);
                         if (structureNameMatch) {
                             const structureName = structureNameMatch[1];
-                            const classType = this.findVariableType(tokens, structureName, position.line);
+                            const typeInfo = await this.memberLocator.resolveVariableType(structureName, tokens, document);
+                            const classType = typeInfo?.isClass ? typeInfo.typeName : this.findVariableType(tokens, structureName, position.line);
                             if (classType) {
                                 logger.info(`Variable "${structureName}" is type "${classType}", looking for member "${methodName}"`);
                                 const paramCount = hasParentheses
@@ -576,7 +577,8 @@ export class DefinitionProvider {
                     }
 
                     // Try to find as a typed variable (e.g., otherValue.value where otherValue is StringTheory)
-                    const classType = this.findVariableType(tokens, structureName, position.line);
+                    const typeInfo = await this.memberLocator.resolveVariableType(structureName, tokens, document);
+                    const classType = typeInfo?.isClass ? typeInfo.typeName : this.findVariableType(tokens, structureName, position.line);
                     if (classType) {
                         logger.info(`Variable ${structureName} is of type ${classType}, looking for member ${fieldName}`);
                         const result = await this.findClassMemberInType(tokens, classType, fieldName, document);
