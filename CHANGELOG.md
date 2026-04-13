@@ -6,10 +6,13 @@ All notable changes to the Clarion Extension are documented here.
 
 ## Recent Versions
 
-### [0.8.9] - Unreleased
-**Bug Fixes**
+### [0.8.9] - 2026-04-13
+**Security**
 
-- (in progress)
+- Updated dev dependencies to resolve Dependabot security alerts:
+  - `serialize-javascript` — RCE via `RegExp.flags` and CPU exhaustion DoS (via mocha transitive dependency)
+  - `diff` — Denial of Service in `parsePatch`/`applyPatch` (via mocha transitive dependency)
+  - Replaced deprecated `vscode-test` with `@vscode/test-electron` in client (fixes `@tootallnate/once` vulnerability)
 
 ---
 
