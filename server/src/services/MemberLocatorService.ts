@@ -50,13 +50,14 @@ export class MemberLocatorService {
     }
 
     /**
-     * Searches the MEMBER parent file (+ its INCLUDE chain) for a variable declaration.
-     * Does NOT search the current file — use this when local scope checks have already run.
+     * Searches the MEMBER parent file (+ its INCLUDE chain) and current INCLUDE chain for a variable.
+     * Does NOT search the current file — use after local scope checks have already run.
+     * Returns the raw token result for callers that need to build their own output (e.g. hover).
      */
-    async findVariableInParentChain(
+    async findVariableTokenInParentChain(
         varName: string,
         document: TextDocument
-    ): Promise<Location | null> {
+    ): Promise<{ token: Token; tokens: Token[]; doc: TextDocument } | null> {
         const tokens = this.tokenCache.getTokens(document);
         const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         const currentDir = path.dirname(currentFilePath);
@@ -70,34 +71,32 @@ export class MemberLocatorService {
                     const parentVar = parentData.tokens.find(t =>
                         t.start === 0 && t.value.toLowerCase() === varName.toLowerCase()
                     );
-                    if (parentVar) {
-                        return Location.create(parentData.doc.uri, {
-                            start: { line: parentVar.line, character: parentVar.start },
-                            end: { line: parentVar.line, character: parentVar.start + parentVar.value.length }
-                        });
-                    }
+                    if (parentVar) return { token: parentVar, tokens: parentData.tokens, doc: parentData.doc };
                     const incResult = await this.searchIncludesForToken(
                         varName, parentData.tokens, path.dirname(parentPath), new Set([parentPath.toLowerCase()])
                     );
-                    if (incResult) {
-                        return Location.create(incResult.doc.uri, {
-                            start: { line: incResult.token.line, character: incResult.token.start },
-                            end: { line: incResult.token.line, character: incResult.token.start + incResult.token.value.length }
-                        });
-                    }
+                    if (incResult) return incResult;
                 }
             }
         }
 
-        // Also search current file's own include chain
-        const incResult = await this.searchIncludesForToken(varName, tokens, currentDir, new Set());
-        if (incResult) {
-            return Location.create(incResult.doc.uri, {
-                start: { line: incResult.token.line, character: incResult.token.start },
-                end: { line: incResult.token.line, character: incResult.token.start + incResult.token.value.length }
-            });
-        }
-        return null;
+        return this.searchIncludesForToken(varName, tokens, currentDir, new Set());
+    }
+
+    /**
+     * Searches the MEMBER parent file (+ its INCLUDE chain) for a variable declaration.
+     * Does NOT search the current file — use this when local scope checks have already run.
+     */
+    async findVariableInParentChain(
+        varName: string,
+        document: TextDocument
+    ): Promise<Location | null> {
+        const result = await this.findVariableTokenInParentChain(varName, document);
+        if (!result) return null;
+        return Location.create(result.doc.uri, {
+            start: { line: result.token.line, character: result.token.start },
+            end: { line: result.token.line, character: result.token.start + result.token.value.length }
+        });
     }
 
     /**
