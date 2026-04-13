@@ -7,11 +7,10 @@ import { HoverFormatter } from './HoverFormatter';
 import { MethodHoverResolver } from './MethodHoverResolver';
 import { VariableHoverResolver } from './VariableHoverResolver';
 import { ChainedPropertyResolver } from '../../utils/ChainedPropertyResolver';
-import { ClassMemberResolver } from '../../utils/ClassMemberResolver';
+import { MemberLocatorService } from '../../services/MemberLocatorService';
 import { SolutionManager } from '../../solution/solutionManager';
 import * as fs from 'fs';
 import * as path from 'path';
-import { SymbolFinderService } from '../../services/SymbolFinderService';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("StructureFieldResolver");
@@ -23,7 +22,7 @@ logger.setLevel("error");
 export class StructureFieldResolver {
     private tokenCache = TokenCache.getInstance();
     private chainedResolver = new ChainedPropertyResolver();
-    private memberResolver = new ClassMemberResolver();
+    private memberLocator = new MemberLocatorService();
     
     constructor(
         private formatter: HoverFormatter,
@@ -178,7 +177,7 @@ export class StructureFieldResolver {
 
                 // Try typed class variable: find what class type structureName is,
                 // then look up the member in that class (e.g., st.GetValue() where st StringTheory)
-                const varTypeInfo = await this.resolveVariableClassType(structureName, tokens, document);
+                const varTypeInfo = await this.memberLocator.resolveVariableType(structureName, tokens, document);
                 if (varTypeInfo) {
                     const { typeName: varType, isClass } = varTypeInfo;
                     logger.info(`✅ Variable "${structureName}" has type "${varType}" (isClass=${isClass}), looking up member "${fieldName}"`);
@@ -188,7 +187,7 @@ export class StructureFieldResolver {
                     }
                     if (isClass) {
                         // CLASS member resolver (methods, properties)
-                        const memberInfo = await this.memberResolver.findMemberInNamedStructure(fieldName, varType, document, paramCount);
+                        const memberInfo = await this.memberLocator.findMemberInClass(varType, fieldName, document, paramCount);
                         if (memberInfo) {
                             logger.info(`✅ Found member "${fieldName}" in "${varType}"`);
                             return await this.methodResolver.resolveChainedMethodCall(fieldName, memberInfo, document, paramCount);
@@ -203,42 +202,6 @@ export class StructureFieldResolver {
         
         return null;
     }
-
-    /**
-     * Resolves the type of a variable. Returns { typeName, isClass } where isClass distinguishes
-     * CLASS (method/property access) from QUEUE/GROUP/FILE (field access).
-     * Uses SymbolFinderService.extractTypeInfo as the single source of truth for type extraction.
-     */
-    private async resolveVariableClassType(varName: string, tokens: Token[], document: TextDocument): Promise<{ typeName: string; isClass: boolean } | null> {
-        // Search current file first, then MEMBER parent and INCLUDE chain
-        const found = await this.variableResolver.findVariableTokenCrossFile(varName, tokens, document);
-        if (!found) return null;
-        const varToken = found.token;
-        const varTokens = found.tokens;
-
-        const typeStr = SymbolFinderService.extractTypeInfo(varToken, varTokens);
-        if (!typeStr || typeStr === 'UNKNOWN') return null;
-
-        // CLASS(TypeName), QUEUE(TypeName), GROUP(TypeName), FILE(TypeName)
-        const structMatch = typeStr.match(/^(CLASS|QUEUE|GROUP|FILE)\((\w+)\)$/i);
-        if (structMatch) {
-            return { typeName: structMatch[2], isClass: structMatch[1].toUpperCase() === 'CLASS' };
-        }
-
-        // LIKE(TypeName)
-        const likeMatch = typeStr.match(/^LIKE\((\w+)\)$/i);
-        if (likeMatch) {
-            return { typeName: likeMatch[1], isClass: false };
-        }
-
-        // Bare structure keyword with no type arg — can't resolve members
-        const bareStructures = new Set(['CLASS', 'QUEUE', 'GROUP', 'FILE', 'RECORD', 'WINDOW', 'VIEW', 'REPORT', 'LIKE', 'PROCEDURE']);
-        if (bareStructures.has(typeStr.toUpperCase())) return null;
-
-        // Plain user-defined type name used directly as a variable type
-        return { typeName: typeStr, isClass: true };
-    }
-
     /**
      * Find a field inside a QUEUE/GROUP/FILE type definition (potentially in INCLUDE files)
      * and return hover info showing the field declaration.
