@@ -315,7 +315,8 @@ export class SymbolFinderService {
         
         return {
             token: variableToken,
-            type: varSymbol._clarionType || varSymbol.detail || 'UNKNOWN',
+            type: varSymbol._clarionType || varSymbol.detail
+                || SymbolFinderService.extractTypeInfo(variableToken, tokens),
             scope: {
                 token: scopeToken,
                 type: 'local'
