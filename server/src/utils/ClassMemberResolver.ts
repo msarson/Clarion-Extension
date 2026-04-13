@@ -91,6 +91,38 @@ export function scanClassBodyForMember(
     return null;
 }
 
+export type OverloadCandidate = { type: string; line: number; paramCount: number; signature?: string };
+
+/**
+ * Picks the best overload candidate given the call-site parameter count.
+ * Exported so MemberLocatorService can share the same selection logic.
+ */
+export function selectBestMemberOverload(
+    candidates: OverloadCandidate[],
+    paramCount: number | undefined
+): OverloadCandidate | null {
+    if (candidates.length === 0) return null;
+    if (paramCount === undefined) return candidates[0];
+
+    const exact = candidates.find(c => c.paramCount === paramCount);
+    if (exact) return exact;
+
+    const compatible = candidates
+        .filter(c => {
+            const defaults = ClarionPatterns.countDefaultParams(c.signature ?? '');
+            return paramCount >= (c.paramCount - defaults) && paramCount <= c.paramCount;
+        })
+        .sort((a, b) => (a.paramCount - paramCount) - (b.paramCount - paramCount));
+    if (compatible.length > 0) return compatible[0];
+
+    return candidates.reduce((best, curr) => {
+        const bd = Math.abs(best.paramCount - paramCount);
+        const cd = Math.abs(curr.paramCount - paramCount);
+        if (cd === bd) return curr.paramCount > best.paramCount ? curr : best;
+        return cd < bd ? curr : best;
+    });
+}
+
 /**
  * Shared utility for resolving class members (methods, properties)
  * Used by both HoverProvider and DefinitionProvider
@@ -385,49 +417,10 @@ export class ClassMemberResolver {
     }
 
     private selectBestOverload(
-        candidates: { type: string; line: number; paramCount: number; signature?: string }[],
+        candidates: OverloadCandidate[],
         paramCount?: number
-    ): { type: string; line: number; paramCount: number; signature?: string } | null {
-        if (candidates.length === 0) return null;
-
-        // 1. No callArgs → first candidate
-        if (paramCount === undefined) {
-            logger.info(`Returning first candidate (no param matching needed)`);
-            return candidates[0];
-        }
-
-        // 2. Exact match
-        const exact = candidates.find(c => c.paramCount === paramCount);
-        if (exact) {
-            logger.info(`Selected overload with ${exact.paramCount} parameters (exact match)`);
-            return exact;
-        }
-
-        // 3. Compatible match: callArgs within [paramCount - defaultCount, paramCount]
-        const compatible = candidates
-            .filter(c => {
-                const defaults = ClarionPatterns.countDefaultParams(c.signature ?? '');
-                return paramCount >= (c.paramCount - defaults) && paramCount <= c.paramCount;
-            })
-            .sort((a, b) => (a.paramCount - paramCount) - (b.paramCount - paramCount));
-
-        if (compatible.length > 0) {
-            logger.info(`Selected compatible overload with ${compatible[0].paramCount} parameters (call had ${paramCount})`);
-            return compatible[0];
-        }
-
-        // 4. Fallback: closest absolute distance, prefer higher count on tie
-        const bestMatch = candidates.reduce((best, curr) => {
-            const bestDiff = Math.abs(best.paramCount - paramCount);
-            const currDiff = Math.abs(curr.paramCount - paramCount);
-            if (currDiff === bestDiff) {
-                return curr.paramCount > best.paramCount ? curr : best;
-            }
-            return currDiff < bestDiff ? curr : best;
-        });
-
-        logger.info(`Selected overload with ${bestMatch.paramCount} parameters (call had ${paramCount})`);
-        return bestMatch;
+    ): OverloadCandidate | null {
+        return selectBestMemberOverload(candidates, paramCount);
     }
 
     /**
