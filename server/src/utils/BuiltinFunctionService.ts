@@ -9,9 +9,8 @@
  * Functions are loaded once at startup and cached in memory for fast lookup.
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
 import { SignatureInformation, ParameterInformation } from 'vscode-languageserver-protocol';
+import * as builtinsData from '../data/clarion-builtins.json';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("BuiltinFunctionService");
@@ -90,11 +89,7 @@ export class BuiltinFunctionService {
         }
 
         try {
-            const dataPath = path.join(__dirname, '../data/clarion-builtins.json');
-            logger.info(`Loading built-in functions from: ${dataPath}`);
-            
-            const data = fs.readFileSync(dataPath, 'utf8');
-            const definitions: BuiltinDefinitions = JSON.parse(data);
+            const definitions: BuiltinDefinitions = builtinsData as unknown as BuiltinDefinitions;
             
             for (const func of definitions.functions) {
                 // Store with uppercase key for case-insensitive lookup
