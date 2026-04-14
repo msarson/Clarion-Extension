@@ -1,0 +1,72 @@
+name: Test Release (Dry Run)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to test (e.g., 0.9.1)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout version branch
+        uses: actions/checkout@v5
+        with:
+          ref: version-${{ inputs.version }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify version matches input
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$PKG_VERSION" != "${{ inputs.version }}" ]; then
+            echo "❌ package.json version ($PKG_VERSION) does not match input (${{ inputs.version }})"
+            exit 1
+          fi
+          echo "✅ Version verified: $PKG_VERSION"
+
+      - name: Build dev and run tests
+        run: npm run compile:dev
+
+      - name: Run tests
+        run: npm run test:server || true
+
+      - name: Install vsce
+        run: npm install -g @vscode/vsce
+
+      - name: Package extension (bundle + VSIX)
+        run: vsce package --no-dependencies
+
+      - name: Report VSIX stats
+        run: |
+          VSIX="clarion-extensions-${{ inputs.version }}.vsix"
+          SIZE=$(du -sh "$VSIX" | cut -f1)
+          COUNT=$(unzip -l "$VSIX" | tail -1 | awk '{print $2}')
+          echo "📦 VSIX: $VSIX"
+          echo "📏 Size: $SIZE"
+          echo "🗂️  Files: $COUNT"
+          echo ""
+          echo "=== Contents ==="
+          unzip -l "$VSIX"
+
+      - name: Upload VSIX as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clarion-extensions-${{ inputs.version }}-test
+          path: clarion-extensions-${{ inputs.version }}.vsix
+          retention-days: 7
