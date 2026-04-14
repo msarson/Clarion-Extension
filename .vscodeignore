@@ -66,32 +66,10 @@ test-declaration-patterns.js
 *.code-workspace
 Clarion-Extension.code-workspace
 
-# Node modules binaries and dev files - exclude but keep actual modules
-**/node_modules/.bin/**
-**/node_modules/.package-lock.json
-**/node_modules/**/test/**
-**/node_modules/**/tests/**
-**/node_modules/**/example/**
-**/node_modules/**/examples/**
-**/node_modules/**/docs/**
-**/node_modules/**/*.md
-**/node_modules/**/*.txt
-**/node_modules/**/*.yml
-**/node_modules/**/*.yaml
-**/node_modules/**/*.ts
-**/node_modules/**/*.map
-**/node_modules/**/LICENSE*
-**/node_modules/**/CHANGELOG*
-**/node_modules/**/.github/**
-**/node_modules/**/README*
-
-# Exclude large unnecessary dependencies and build artifacts from node_modules
-**/node_modules/**/*.d.ts
-**/node_modules/**/*.tsbuildinfo
-
-# Exclude source maps and debugging files from dependencies
-**/node_modules/**/*.js.map
-**/node_modules/**/src/**/*.ts
+# Node modules are not needed — extension bundles all dependencies via esbuild
+node_modules/**
+client/node_modules/**
+server/node_modules/**
 
 # Log files
 *.log
@@ -102,14 +80,11 @@ discourse-announcement.md
 release-announcement-*.md
 
 # Required files (explicitly NOT ignored):
-# - out/** (compiled extension code)
+# - out/** (compiled/bundled extension code — client and server bundles)
 # - syntaxes/** (language grammar)
 # - snippets/** (code snippets)
 # - images/** (extension icons)
 # - package.json (extension manifest)
-# - package-lock.json (dependency locking)
 # - README.md (marketplace description) - root only
 # - CHANGELOG.md (version history) - root only
 # - LICENSE (required) - root only
-# - client/package.json and server/package.json (manifests)
-# - node_modules runtime dependencies (vscode-languageclient, etc.)

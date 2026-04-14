@@ -1,5 +1,4 @@
-import * as fs from 'fs';
-import * as path from 'path';
+import * as dataTypesData from '../data/clarion-datatypes.json';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("DataTypeService");
@@ -45,9 +44,7 @@ export class DataTypeService {
 
     private loadDataTypes(): void {
         try {
-            const dataPath = path.join(__dirname, '..', 'data', 'clarion-datatypes.json');
-            const rawData = fs.readFileSync(dataPath, 'utf8');
-            const data: DataTypesData = JSON.parse(rawData);
+            const data: DataTypesData = dataTypesData as unknown as DataTypesData;
 
             for (const dataType of data.dataTypes) {
                 this.dataTypes.set(dataType.name.toUpperCase(), dataType);

@@ -1,5 +1,4 @@
-import * as path from 'path';
-import * as fs from 'fs';
+import * as controlsData from '../data/clarion-controls.json';
 
 export interface ControlDefinition {
     name: string;
@@ -31,9 +30,7 @@ export class ControlService {
 
     private loadControls(): void {
         try {
-            const dataPath = path.join(__dirname, '..', 'data', 'clarion-controls.json');
-            const data = fs.readFileSync(dataPath, 'utf8');
-            const controlData: ControlData = JSON.parse(data);
+            const controlData: ControlData = controlsData as unknown as ControlData;
 
             // Load window controls
             for (const control of controlData.windowControls) {

@@ -1,5 +1,4 @@
-import * as path from 'path';
-import * as fs from 'fs';
+import * as attributesData from '../data/clarion-attributes.json';
 
 export interface ParameterDefinition {
     name: string;
@@ -42,9 +41,7 @@ export class AttributeService {
 
     private loadAttributes(): void {
         try {
-            const dataPath = path.join(__dirname, '..', 'data', 'clarion-attributes.json');
-            const data = fs.readFileSync(dataPath, 'utf8');
-            const attributeData: AttributeData = JSON.parse(data);
+            const attributeData: AttributeData = attributesData as unknown as AttributeData;
 
             // Load attributes into map (case-insensitive keys)
             for (const attr of attributeData.attributes) {
