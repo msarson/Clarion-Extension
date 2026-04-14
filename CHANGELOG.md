@@ -18,6 +18,9 @@ All notable changes to the Clarion Extension are documented here.
   - Full inheritance walk — child members shadow parent members by name
   - `PRIVATE` members visible only within the same class; `PROTECTED` visible in subclasses; `PUBLIC` visible everywhere
   - Chained expressions (`SELF.Order.`) resolve intermediate segment types
+  - Each overloaded method appears as a distinct entry (e.g. `AddItem(STRING pText)` and `AddItem(LONG pId, STRING pText)`) with return type shown in the detail column
+
+- ✨ **Signature help for class methods** ([#54](https://github.com/msarson/Clarion-Extension/issues/54)) — typing `(` after selecting a method from dot-completion (or typing `SELF.Method(` manually) now shows parameter hints; inherits the full inheritance chain so methods from parent classes are found correctly
 
 **Bug Fixes**
 

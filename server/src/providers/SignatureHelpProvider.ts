@@ -262,10 +262,15 @@ export class SignatureHelpProvider {
 
         logger.info(`Resolved class name: ${className}`);
 
-        // Find all overloads of this method in the class
-        const declarations = await this.findAllMethodDeclarations(className, methodName, document, tokens);
-        
-        return declarations.map(decl => this.createSignatureInformation(methodName, decl.signature, decl.paramCount));
+        // Use MemberLocatorService — handles inheritance, current-file classes, and INC files
+        const allMembers = await this.memberLocator.enumerateMembersInClass(className, document, className);
+        const matchingMembers = allMembers.filter(m => m.name.toLowerCase() === methodName.toLowerCase());
+
+        logger.info(`Found ${matchingMembers.length} overload(s) for ${className}.${methodName}`);
+
+        return matchingMembers.map(m =>
+            this.createSignatureInformation(methodName, m.signature, this.overloadResolver.countParametersInDeclaration(m.signature))
+        );
     }
 
     /**
