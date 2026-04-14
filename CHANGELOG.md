@@ -8,6 +8,17 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [0.9.0] - Unreleased
 
+**New Features**
+
+- ✨ **Dot-triggered member completion for CLASS instances and `SELF`** ([#54](https://github.com/msarson/Clarion-Extension/issues/54)) — typing `SELF.` or `MyVar.` now opens a dropdown of all methods and properties on the resolved class:
+  - `SELF.` resolves to the enclosing class via `ChainedPropertyResolver`
+  - `PARENT.` resolves to the base class
+  - `MyVar.` resolves the variable's declared type then enumerates members
+  - `ClassName.` enumerates the class directly
+  - Full inheritance walk — child members shadow parent members by name
+  - `PRIVATE` members visible only within the same class; `PROTECTED` visible in subclasses; `PUBLIC` visible everywhere
+  - Chained expressions (`SELF.Order.`) resolve intermediate segment types
+
 **Bug Fixes**
 
 - 🐛 **Hover for equates/labels in `INCLUDE` files and `EQUATES.CLW`** — symbols defined in files pulled in via `INCLUDE` statements at the global level (e.g. `KEYCODES.CLW`, `EQUATES.CLW`) now resolve correctly on hover; previously the lookup stopped at the current file
@@ -28,7 +39,7 @@ All notable changes to the Clarion Extension are documented here.
 
 **Bug Fixes (regression — v0.9.0)**
 
-- 🐛 **Find All References returns only 1 result for MAP procedure calls** — `SymbolFinderService.findLocalVariable` was intercepting MAP procedure symbols via the document symbol tree and returning them with type `'()'` (the signature string) rather than `'PROCEDURE'`; `ReferencesProvider` then set `isLocalProcDecl=false` and bounded the search to the enclosing procedure's `finishesAt` range (which excluded the call site and implementation). Fixed by: (1) adding an `_isMapProcedure` / `_isMethodDeclaration` guard in the symbol-tree return path of `findLocalVariable` so these symbols are deferred to `findProcedureDeclaration` (which always returns `type='PROCEDURE'`); (2) skipping MAP/global procedure declarations in both the main token fallback scan and the `MethodImplementation` local-variable fallback scan; (3) adding `findProcedureDeclaration()` to `SymbolFinderService` that determines the correct scope from context — local MAP (inside a `GlobalProcedure` or `MethodImplementation`) → `scope='local'`; module MAP (in a MEMBER file before any procedure) → `scope='module'`; global MAP (in a PROGRAM file before any procedure) → `scope='global'`. FAR now returns all occurrences whether invoked from the MAP declaration line, a call site, or the implementation
+- 🐛 **Find All References returns only 1 result for MAP procedure calls**
 - 🐛 **Find All References for module-scoped symbols incorrectly expanded to all project files** — symbols declared at module level in a MEMBER file (before the first PROCEDURE, per Clarion scope rules) have module scope and are only visible within that MEMBER module. `ReferencesProvider.getFilesToSearch` was falling through to global (all-project) search for any module-scoped symbol in a MEMBER file; it now correctly returns only the declaring file for MEMBER-file module-scoped symbols
 - 🐛 **Hover / F12 for procedure-local variables when cursor is inside a ROUTINE** — variables declared in a procedure's local data section (between `PROCEDURE` and `CODE`) are accessible from all `ROUTINE` blocks within that procedure per Clarion scope rules, but `SymbolFinderService.findLocalVariable` only searched within the ROUTINE's own range and never checked the parent procedure's data section. The fix: (1) after the ROUTINE's own search fails, the parent procedure is located via `TokenHelper.getParentScopeOfRoutine` and its data section (before the CODE marker) is scanned for the variable; (2) when the symbol-tree path finds the variable in the parent procedure's data, the returned scope token is now the parent procedure (not the ROUTINE) so FAR searches the entire procedure range instead of just the ROUTINE
 - 🐛 **F12 broken for variables declared in a MEMBER parent's INCLUDE chain**— `DefinitionProvider`'s MEMBER parent fallback only read the parent CLW directly and never walked its INCLUDE chain; added `findVariableInParentChain()` to `MemberLocatorService` and replaced the ~60-line manual fallback with a 5-line delegation
