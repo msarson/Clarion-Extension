@@ -198,7 +198,7 @@ suite('CompletionProvider — dot-triggered member completion', function () {
             const params = makeParams(selfLine, '  SELF.');
             const items = await provider.onCompletion(params, doc);
             const names = items.map(i => (i.label as string).toUpperCase());
-            assert.ok(names.includes('OWNMETHOD'), `Expected OwnMethod in completions: [${names.join(', ')}]`);
+            assert.ok(names.some(n => n.startsWith('OWNMETHOD')), `Expected OwnMethod in completions: [${names.join(', ')}]`);
         });
 
         test('direct class name completion returns its members', async function () {
@@ -211,8 +211,8 @@ suite('CompletionProvider — dot-triggered member completion', function () {
             const params = makeParams(triggerLine, '  StandaloneClass.');
             const items = await provider.onCompletion(params, doc);
             const names = items.map(i => (i.label as string).toUpperCase());
-            assert.ok(names.includes('ALPHA'), `Expected Alpha in [${names.join(', ')}]`);
-            assert.ok(names.includes('BETA'), `Expected Beta in [${names.join(', ')}]`);
+            assert.ok(names.some(n => n.startsWith('ALPHA')), `Expected Alpha in [${names.join(', ')}]`);
+            assert.ok(names.some(n => n.startsWith('BETA')), `Expected Beta in [${names.join(', ')}]`);
         });
 
         test('inherited items show fromClass label', async function () {

@@ -222,6 +222,21 @@ export class CompletionProvider {
         return false;
     }
 
+    /**
+     * Deduplicates members by name (case-insensitive), keeping the first occurrence.
+     * Overloads are collapsed to a single entry; signature help shows all overloads
+     * once the user types '(' after selecting.
+     */
+    private deduplicateByName(members: MemberEnumItem[]): MemberEnumItem[] {
+        const seen = new Set<string>();
+        return members.filter(m => {
+            const key = m.name.toUpperCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    }
+
     // -------------------------------------------------------------------------
     // CompletionItem mapping
     // -------------------------------------------------------------------------
@@ -231,17 +246,61 @@ export class CompletionProvider {
             ? CompletionItemKind.Method
             : CompletionItemKind.Field;
 
+        const { paramDetail, returnDescription } = this.parseTypeForLabel(member.type, member.kind);
+
+        // For methods, embed params in the label so overloads are distinct entries
+        const label = member.kind === 'method' && paramDetail
+            ? `${member.name}${paramDetail}`
+            : member.name;
+
+        // Show return type (or property type) in the detail column
+        const detail = returnDescription || undefined;
+
+        // Build documentation: full declaration + inherited-from note
+        let docs = `\`${member.signature}\``;
+        if (member.fromClass !== _forClass) {
+            docs += `\n\nInherited from \`${member.fromClass}\``;
+        }
+
         const item: CompletionItem = {
-            label: member.name,
+            label,
             kind,
-            detail: member.type,
-            documentation: member.fromClass !== _forClass
-                ? `Inherited from ${member.fromClass}`
-                : undefined,
+            detail,
+            documentation: docs,
             insertText: member.name,
             insertTextFormat: InsertTextFormat.PlainText
         };
 
         return item;
+    }
+
+    /**
+     * Parses a Clarion type string into the parts used by CompletionItemLabelDetails.
+     *
+     * Examples:
+     *   "PROCEDURE(LONG pVal),LONG"  → detail="(LONG pVal)",  description="LONG"
+     *   "PROCEDURE()"                → detail="()",            description=""
+     *   "PROCEDURE"                  → detail="()",            description=""
+     *   "LONG"                       → detail="",              description="LONG"
+     *   "STRING(20)"                 → detail="",              description="STRING(20)"
+     */
+    private parseTypeForLabel(
+        typeStr: string,
+        kind: 'method' | 'property'
+    ): { paramDetail: string; returnDescription: string } {
+        if (kind === 'property') {
+            return { paramDetail: '', returnDescription: typeStr };
+        }
+
+        // Method — extract params from PROCEDURE(...)
+        const procMatch = typeStr.match(/^PROCEDURE\s*(\([^)]*\))?(?:\s*,\s*(.+))?$/i);
+        if (procMatch) {
+            const params = procMatch[1] ?? '()';
+            const ret = (procMatch[2] ?? '').trim();
+            return { paramDetail: params, returnDescription: ret };
+        }
+
+        // Fallback: treat the whole thing as a return type
+        return { paramDetail: '', returnDescription: typeStr };
     }
 }
