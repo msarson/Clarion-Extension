@@ -65,7 +65,7 @@ jobs:
           unzip -l "$VSIX"
 
       - name: Upload VSIX as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: clarion-extensions-${{ inputs.version }}-test
           path: clarion-extensions-${{ inputs.version }}.vsix
