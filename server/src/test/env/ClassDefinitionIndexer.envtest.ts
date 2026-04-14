@@ -1,9 +1,9 @@
 import * as assert from 'assert';
 import * as path from 'path';
 import * as fs from 'fs';
-import { SolutionManager } from '../solution/solutionManager';
-import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
-import { serverSettings } from '../serverSettings';
+import { SolutionManager } from '../../solution/solutionManager';
+import { ClassDefinitionIndexer } from '../../utils/ClassDefinitionIndexer';
+import { serverSettings } from '../../serverSettings';
 
 /**
  * Test suite for ClassDefinitionIndexer

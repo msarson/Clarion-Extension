@@ -733,4 +733,50 @@ StandardBehavior.IListControl.Choice PROCEDURE()
                 `Choice should have detail "Method Implementation", but got "${choice.detail}"`);
         });
     });
+
+    suite('Unlabeled GROUP Nesting', () => {
+        test('should handle multiple unlabeled GROUPs in the same method', () => {
+            const source = `  PROGRAM
+
+Test Procedure()
+            group,pre(g1_)
+field1        long
+field2        long
+            end
+            group,pre(g2_)
+field3        long
+field4        long
+            end
+  CODE
+`;
+
+            const tokenizer = new ClarionTokenizer(source);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionDocumentSymbolProvider();
+            const symbols = provider.provideDocumentSymbols(tokens, 'test://multiple-groups.clw');
+
+            const testProc = symbols.find(s => s.name.includes('Test'));
+            assert.ok(testProc, 'Should find Test procedure');
+
+            const group1 = testProc!.children!.find(c => c.name.includes('PRE(g1_)'));
+            const group2 = testProc!.children!.find(c => c.name.includes('PRE(g2_)'));
+
+            assert.ok(group1, 'Should find first GROUP');
+            assert.ok(group2, 'Should find second GROUP');
+
+            assert.strictEqual(group1!.children!.length, 2, 'First GROUP should have 2 children');
+            assert.strictEqual(group2!.children!.length, 2, 'Second GROUP should have 2 children');
+
+            const group1ChildNames = group1!.children!.map(c => c.name);
+            const group2ChildNames = group2!.children!.map(c => c.name);
+
+            assert.ok(group1ChildNames.some(n => n.includes('field1')), 'field1 should be in first GROUP');
+            assert.ok(group1ChildNames.some(n => n.includes('field2')), 'field2 should be in first GROUP');
+            assert.ok(group2ChildNames.some(n => n.includes('field3')), 'field3 should be in second GROUP');
+            assert.ok(group2ChildNames.some(n => n.includes('field4')), 'field4 should be in second GROUP');
+
+            assert.ok(!group1ChildNames.some(n => n.includes('field3')), 'field3 should NOT be in first GROUP');
+            assert.ok(!group2ChildNames.some(n => n.includes('field1')), 'field1 should NOT be in second GROUP');
+        });
+    });
 });

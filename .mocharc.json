@@ -3,5 +3,8 @@
   "timeout": 30000,
   "spec": [
     "out/server/src/test/**/*.test.js"
+  ],
+  "ignore": [
+    "out/server/src/test/env/**/*.test.js"
   ]
 }

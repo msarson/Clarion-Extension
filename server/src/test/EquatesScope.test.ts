@@ -8,6 +8,8 @@
  */
 
 import * as assert from 'assert';
+import * as path from 'path';
+import * as fs from 'fs';
 import { ClarionTokenizer, TokenType } from '../ClarionTokenizer';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { SymbolFinderService } from '../services/SymbolFinderService';
@@ -16,6 +18,8 @@ import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { SolutionManager } from '../solution/solutionManager';
 import { setServerInitialized } from '../serverState';
 import { Token } from '../ClarionTokenizer';
+
+const TEST_SLN = path.resolve(__dirname, '..', '..', '..', '..', 'test-programs', 'RealWorldTestSuite', 'RealWorldTestSuite.sln');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -196,6 +200,13 @@ suite('EquatesScope - findGlobalVariable reaches equates', () => {
     let service: SymbolFinderService;
     let tokenCache: TokenCache;
     let equatesTokens: Token[];
+
+    suiteSetup(async function () {
+        // Ensure SolutionManager singleton is initialized so the equates patch below applies
+        if (fs.existsSync(TEST_SLN) && !SolutionManager.getInstance()) {
+            await SolutionManager.create(TEST_SLN);
+        }
+    });
 
     setup(() => {
         setServerInitialized(true);
