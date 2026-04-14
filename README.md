@@ -138,7 +138,16 @@ Productivity features to write code faster.
 
 ## 🆕 What's New
 
-### Latest: v0.9.0 (2026-04-14) — IntelliSense & Completion
+### Latest: v0.9.1 (2026-04-14) — Faster Install
+
+#### 🚀 Dramatically Smaller Extension
+VSIX size drops from **19 MB → 0.6 MB** (10,849 bundled node_modules files eliminated). The extension now bundles all dependencies into two optimised files via esbuild — installs are much faster from the Marketplace and no functionality changes.
+
+**[See full changelog →](CHANGELOG.md)**
+
+---
+
+### Recent: v0.9.0 (2026-04-14) — IntelliSense & Completion
 
 #### 🤖 Dot-Triggered Member Completion
 Type `SELF.` or `MyVar.` for a context-aware dropdown of all available methods and properties. Supports full inheritance chains, access control (`PRIVATE`/`PROTECTED`/`PUBLIC`), and shows each overload as a distinct entry with parameter signatures inline.
@@ -150,14 +159,6 @@ Typing `(` after a class method now shows parameter hints for the full inheritan
 - Signature help missing for `SELF.Method(` when class defined in same `.clw` file
 - Missing `END` now flagged as a diagnostic for `WINDOW`, `SHEET`, `TAB`, `OLE`, `MENU`, `MENUBAR`, `TOOLBAR`, `REPORT`, `APPLICATION`, and `OPTION`
 - Multiple cross-file F12, Ctrl+F12, hover, and Find All References fixes
-
-**[See full changelog →](CHANGELOG.md)**
-
----
-
-### Recent: v0.8.9 (2026-04-13) — Security Patch
-
-- Updated dev dependencies to resolve Dependabot security alerts (`serialize-javascript` RCE/DoS, `diff` DoS)
 - Replaced deprecated `vscode-test` with `@vscode/test-electron`
 
 No functional changes — safe to upgrade immediately.
