@@ -74,7 +74,7 @@ export class CompletionProvider {
             }
 
             logger.info(`CompletionProvider: returning ${members.length} completion items for "${className}"`);
-            return this.deduplicateByName(members).map(m => this.toCompletionItem(m, className));
+            return members.map(m => this.toCompletionItem(m, className));
         } catch (err) {
             logger.error(`CompletionProvider error: ${err instanceof Error ? err.message : String(err)}`);
             return [];
@@ -222,21 +222,6 @@ export class CompletionProvider {
         return false;
     }
 
-    /**
-     * Deduplicates members by name (case-insensitive), keeping the first occurrence.
-     * Overloads are collapsed to a single entry; signature help shows all overloads
-     * once the user types '(' after selecting.
-     */
-    private deduplicateByName(members: MemberEnumItem[]): MemberEnumItem[] {
-        const seen = new Set<string>();
-        return members.filter(m => {
-            const key = m.name.toUpperCase();
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-        });
-    }
-
     // -------------------------------------------------------------------------
     // CompletionItem mapping
     // -------------------------------------------------------------------------
@@ -246,58 +231,17 @@ export class CompletionProvider {
             ? CompletionItemKind.Method
             : CompletionItemKind.Field;
 
-        const { paramDetail, returnDescription } = this.parseTypeForLabel(member.type, member.kind);
-
-        // Format detail as "(params) : ReturnType" for methods, or just the type for properties
-        const detail = paramDetail
-            ? `${paramDetail}${returnDescription ? ' : ' + returnDescription : ''}`
-            : returnDescription;
-
-        // Build documentation: full declaration + inherited-from note
-        let docs = `\`${member.signature}\``;
-        if (member.fromClass !== _forClass) {
-            docs += `\n\nInherited from \`${member.fromClass}\``;
-        }
-
         const item: CompletionItem = {
             label: member.name,
             kind,
-            detail,
-            documentation: docs,
+            detail: member.type,
+            documentation: member.fromClass !== _forClass
+                ? `Inherited from ${member.fromClass}`
+                : undefined,
             insertText: member.name,
             insertTextFormat: InsertTextFormat.PlainText
         };
 
         return item;
-    }
-
-    /**
-     * Parses a Clarion type string into the parts used by CompletionItemLabelDetails.
-     *
-     * Examples:
-     *   "PROCEDURE(LONG pVal),LONG"  → detail="(LONG pVal)",  description="LONG"
-     *   "PROCEDURE()"                → detail="()",            description=""
-     *   "PROCEDURE"                  → detail="()",            description=""
-     *   "LONG"                       → detail="",              description="LONG"
-     *   "STRING(20)"                 → detail="",              description="STRING(20)"
-     */
-    private parseTypeForLabel(
-        typeStr: string,
-        kind: 'method' | 'property'
-    ): { paramDetail: string; returnDescription: string } {
-        if (kind === 'property') {
-            return { paramDetail: '', returnDescription: typeStr };
-        }
-
-        // Method — extract params from PROCEDURE(...)
-        const procMatch = typeStr.match(/^PROCEDURE\s*(\([^)]*\))?(?:\s*,\s*(.+))?$/i);
-        if (procMatch) {
-            const params = procMatch[1] ?? '()';
-            const ret = (procMatch[2] ?? '').trim();
-            return { paramDetail: params, returnDescription: ret };
-        }
-
-        // Fallback: treat the whole thing as a return type
-        return { paramDetail: '', returnDescription: typeStr };
     }
 }
