@@ -49,8 +49,9 @@ jobs:
           fi
           echo "✅ Version verified: $PKG_VERSION"
 
-      - name: Compile release build
-        run: npm run compile:release
+      - name: Build dev and run tests
+        run: npm run compile:dev
+        # Build dev output for test runner (tests run against tsc output, not the bundle)
 
       - name: Run tests
         run: npm run test:server || true
