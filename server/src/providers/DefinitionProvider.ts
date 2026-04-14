@@ -1801,7 +1801,7 @@ export class DefinitionProvider {
             // Extract parameter name (last word before = or end of parameter)
             // Format: TYPE paramName or TYPE paramName=default or *TYPE paramName or &TYPE paramName
             // Match pattern: optional pointer/reference, whitespace, type, whitespace, paramName, optional =default
-            const paramMatch = stripped.match(/[*&]?\s*\w+\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*=.*)?$/i);
+            const paramMatch = stripped.match(/[*&]?\s*\w+\s+([A-Za-z_][A-Za-z0-9_:]*[A-Za-z0-9_])(?:\s*=.*)?$/i);
             if (paramMatch) {
                 const paramName = paramMatch[1];
                 logger.info(`Extracted parameter name: "${paramName}"`);
