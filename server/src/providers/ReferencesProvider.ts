@@ -1290,12 +1290,21 @@ export class ReferencesProvider {
         }
 
         if (scopeType === 'module') {
+            // Module-level MAP procedures (type='PROCEDURE') are only available within the current
+            // MEMBER module — do not expand to project-wide search.
+            if (symbolInfo.type === 'PROCEDURE') {
+                logger.error(`[FAR] Scope="module" (MAP procedure) → searching only declaring file`);
+                return [symbolInfo.location.uri];
+            }
             const isMember = this.isMemberFile(symbolInfo.location.uri);
             const isProcDecl = this.isProcedureDeclaration(symbolInfo.location.uri, symbolInfo.location.line);
             logger.error(`[FAR] Scope="module": isMemberFile=${isMember}, isProcedureDeclaration=${isProcDecl}`);
-            if (isMember || isProcDecl) {
-                // Fall through to global search below
+            if (!isMember && isProcDecl) {
+                // Non-MEMBER file procedure declaration at module level (PROGRAM file MAP entry) —
+                // fall through to global search so all call sites are found.
             } else {
+                // MEMBER-file module symbols are visible only within that MEMBER module.
+                // PROGRAM-file module-level data (non-procedure) also stays local.
                 logger.error(`[FAR] Scope="module" → searching only declaring file: ${path.basename(decodeURIComponent(symbolInfo.location.uri))}`);
                 return [symbolInfo.location.uri];
             }
@@ -1392,9 +1401,15 @@ export class ReferencesProvider {
             let endLine = Number.MAX_SAFE_INTEGER;
 
             if (!ignoreLineScope && (scopeType === 'local' || scopeType === 'parameter' || scopeType === 'routine')) {
-                const scopeToken = symbolInfo.scope.token;
-                startLine = scopeToken.line;
-                endLine = scopeToken.finishesAt ?? Number.MAX_SAFE_INTEGER;
+                // Local MAP procedures (type='PROCEDURE') are callable from method implementations
+                // of locally-defined classes, which live outside the parent procedure's line range.
+                // Skip the line-range restriction so those call sites are found.
+                const isLocalProcDecl = scopeType === 'local' && symbolInfo.type === 'PROCEDURE';
+                if (!isLocalProcDecl) {
+                    const scopeToken = symbolInfo.scope.token;
+                    startLine = scopeToken.line;
+                    endLine = scopeToken.finishesAt ?? Number.MAX_SAFE_INTEGER;
+                }
             }
 
             const declarationLine = symbolInfo.location.line;
