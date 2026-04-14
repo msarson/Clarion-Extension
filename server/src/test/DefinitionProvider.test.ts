@@ -265,8 +265,13 @@ ProcessData ROUTINE
     // and existing integration tests provide coverage.
     // ========================================================================
 
-    suite.skip('🔒 Behavior Lock: Local Variable Navigation', () => {
+    suite('🔒 Behavior Lock: Local Variable Navigation', () => {
         const definitionProvider = new DefinitionProvider();
+        const tokenCache = TokenCache.getInstance();
+
+        teardown(() => {
+            tokenCache.clearTokens('test://test.clw');
+        });
 
         test('Should navigate to local variable declaration', async () => {
             const code = `
@@ -319,8 +324,13 @@ MyProc PROCEDURE(LONG pId, STRING pName)
         });
     });
 
-    suite.skip('🔒 Behavior Lock: Structure Navigation', () => {
+    suite('🔒 Behavior Lock: Structure Navigation', () => {
         const definitionProvider = new DefinitionProvider();
+        const tokenCache = TokenCache.getInstance();
+
+        teardown(() => {
+            tokenCache.clearTokens('test://test.clw');
+        });
 
         test('Should navigate to QUEUE definition', async () => {
             const code = `
@@ -380,8 +390,13 @@ Field2 LONG
         });
     });
 
-    suite.skip('🔒 Behavior Lock: Class Method Navigation', () => {
+    suite('🔒 Behavior Lock: Class Method Navigation', () => {
         const definitionProvider = new DefinitionProvider();
+        const tokenCache = TokenCache.getInstance();
+
+        teardown(() => {
+            tokenCache.clearTokens('test://test.clw');
+        });
 
         test('Should navigate from method implementation to CLASS declaration (same file)', async () => {
             const code = `
@@ -446,8 +461,13 @@ MyClass.Process PROCEDURE(STRING pName)
         });
     });
 
-    suite.skip('🔒 Behavior Lock: Routine Navigation', () => {
+    suite('🔒 Behavior Lock: Routine Navigation', () => {
         const definitionProvider = new DefinitionProvider();
+        const tokenCache = TokenCache.getInstance();
+
+        teardown(() => {
+            tokenCache.clearTokens('test://test.clw');
+        });
 
         test('Should navigate to ROUTINE declaration', async () => {
             const code = `
@@ -801,7 +821,7 @@ LocalHelper PROCEDURE(STRING text)
         });
     });
 
-    suite.skip('🔒 Behavior Lock: Cross-File Navigation (Already Working)', () => {
+    suite('🔒 Behavior Lock: Cross-File Navigation (Already Working)', () => {
         const definitionProvider = new DefinitionProvider();
 
         test('Should handle INCLUDE file references', async () => {

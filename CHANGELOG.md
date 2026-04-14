@@ -8,6 +8,14 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [0.9.2] - Unreleased
 
+**Bug Fixes**
+
+- 🐛 **Hover: show both declaration and implementation for inherited class methods** — `SELF.Method()` hover on methods inherited from a parent class defined in an `.inc` file (e.g. `WindowManager.SetAlerts` from `ABWINDOW.INC`) was only showing the declaration. The fix reads the `MODULE('...')` attribute from the class definition to locate the correct `.clw` implementation file via redirection, rather than guessing from the `.inc` filename. Local classes (declared in `.clw`) are unaffected.
+
+**Tests**
+
+- 🔧 **Fix test state pollution in `DefinitionProvider.test.ts`** — added `TokenCache.clearTokens` teardown to all `🔒 Behavior Lock` suites; the `LOC:Field` prefixed variable test was failing only due to cached state from a prior test
+
 ---
 
 ### [0.9.1] - 2026-04-14
