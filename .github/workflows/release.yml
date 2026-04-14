@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout version branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: version-${{ inputs.version }}
           fetch-depth: 0
@@ -32,7 +32,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: 'npm'
@@ -49,8 +49,9 @@ jobs:
           fi
           echo "✅ Version verified: $PKG_VERSION"
 
-      - name: Compile release build
-        run: npm run compile:release
+      - name: Build dev and run tests
+        run: npm run compile:dev
+        # Build dev output for test runner (tests run against tsc output, not the bundle)
 
       - name: Run tests
         run: npm run test:server || true
