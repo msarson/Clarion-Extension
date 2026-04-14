@@ -133,8 +133,8 @@ export class ChainedPropertyResolver {
         return result ?? null;
     }
 
-    /** Extracts the class name the current scope belongs to (for SELF resolution). */
-    private resolveCurrentClassName(document: TextDocument, position: Position, tokens: Token[]): string | null {
+    /** Extracts the class name the current scope belongs to (for SELF resolution). Public for CompletionProvider. */
+    public resolveCurrentClassName(document: TextDocument, position: Position, tokens: Token[]): string | null {
         const structure = this.tokenCache.getStructure(document);
         let currentScope = TokenHelper.getInnermostScopeAtLine(structure, position.line);
         if (!currentScope) return null;

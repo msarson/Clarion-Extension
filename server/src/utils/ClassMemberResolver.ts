@@ -14,7 +14,211 @@ import LoggerManager from '../logger';
 const logger = LoggerManager.getLogger("ClassMemberResolver");
 logger.setLevel("error");
 
-export type MemberInfo = { type: string; className: string; line: number; file: string };
+export type MemberInfo = { type: string; className: string; line: number; file: string; signature?: string };
+
+/** Access level for a class member. */
+export type MemberAccess = 'public' | 'protected' | 'private';
+
+/** A single class member returned by the enumeration API. */
+export interface MemberEnumItem {
+    name: string;
+    kind: 'method' | 'property';
+    signature: string;       // full declaration line (trimmed)
+    type: string;            // return type (methods) or data type (properties)
+    access: MemberAccess;
+    fromClass: string;       // class that declared this member (for inherited items)
+    line: number;            // 0-based line in the file
+    file: string;            // absolute file path
+}
+
+/**
+ * Detects the access modifier in a Clarion member declaration line.
+ * Looks for PRIVATE or PROTECTED in the comma-separated attribute list.
+ */
+export function detectMemberAccess(line: string): MemberAccess {
+    const stripped = line.replace(/!.*$/, '');
+    if (/\bPRIVATE\b/i.test(stripped)) return 'private';
+    if (/\bPROTECTED\b/i.test(stripped)) return 'protected';
+    return 'public';
+}
+
+/**
+ * Scans the body of a named CLASS/QUEUE/GROUP in a file and returns ALL members.
+ * Handles nested GROUP/QUEUE/RECORD blocks so their END keywords do not
+ * prematurely terminate the scan.
+ *
+ * @param filePath      Absolute path to the file to scan
+ * @param className     Name of the structure to find (e.g. "ThisWindow")
+ * @param structureType Structure keyword to match — CLASS | QUEUE | GROUP (default CLASS)
+ * @returns Array of MemberEnumItem, or empty array if class not found
+ */
+export function scanClassBodyForAllMembers(
+    filePath: string,
+    className: string,
+    structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS'
+): MemberEnumItem[] {
+    const results: MemberEnumItem[] = [];
+    try {
+        const content = fs.readFileSync(filePath, 'utf8');
+        const lines = content.split(/\r?\n/);
+        const headerPattern = new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP)`, 'i');
+
+        for (let j = 0; j < lines.length; j++) {
+            if (!headerPattern.test(lines[j])) continue;
+
+            let nestDepth = 0;
+
+            for (let k = j + 1; k < lines.length; k++) {
+                const raw = lines[k];
+                const stripped = raw.replace(/!.*$/, '').trim();
+
+                if (/^(GROUP|QUEUE|RECORD)\b/i.test(stripped) ||
+                    /^\w+\s+(GROUP|QUEUE|RECORD)\b/i.test(stripped)) {
+                    nestDepth++;
+                    continue;
+                }
+                if (/^END\s*$/i.test(stripped)) {
+                    if (nestDepth > 0) { nestDepth--; continue; }
+                    break;
+                }
+                if (nestDepth > 0) continue;
+                if (!stripped || /^(INCLUDE|MODULE|SECTION)\b/i.test(stripped)) continue;
+
+                // A member line: Label <whitespace> Type...
+                const memberMatch = raw.match(/^(\w+)\s+(.+?)(\s*!.*)?$/);
+                if (!memberMatch) continue;
+
+                const name = memberMatch[1];
+                const typeStr = (memberMatch[2] || '').replace(/!.*$/, '').trim();
+                const access = detectMemberAccess(raw);
+                const kind: 'method' | 'property' = /^PROCEDURE\b/i.test(typeStr) ? 'method' : 'property';
+
+                results.push({
+                    name,
+                    kind,
+                    signature: raw.trim(),
+                    type: typeStr,
+                    access,
+                    fromClass: className,
+                    line: k,
+                    file: filePath
+                });
+            }
+            // Only scan the first matching class definition
+            break;
+        }
+    } catch {
+        // Caller handles logging
+    }
+    return results;
+}
+
+/**
+ * Scans the body of a named CLASS/QUEUE/GROUP in a file for a specific member.
+ * Handles nested GROUP/QUEUE/RECORD blocks (nestDepth tracking) so their END
+ * keywords do not prematurely terminate the scan of the parent structure.
+ *
+ * This is the canonical implementation shared by ClassMemberResolver and
+ * MemberLocatorService — keep both in sync if the algorithm changes.
+ *
+ * @param filePath   Absolute path to the file to scan
+ * @param className  Name of the structure to find (e.g. "UltimateDebug")
+ * @param memberName Name of the member to find inside the structure
+ * @param paramCount Optional call-site parameter count for overload selection
+ * @param structureType  Structure keyword to match — CLASS | QUEUE | GROUP (default CLASS)
+ * @param countParamsInDecl  Callback that counts parameters in a declaration line
+ * @param selectBestOverload Callback that picks the best candidate by paramCount
+ * @returns MemberInfo with the file URI, or null if not found
+ */
+export function scanClassBodyForMember(
+    filePath: string,
+    className: string,
+    memberName: string,
+    paramCount: number | undefined,
+    structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS',
+    countParamsInDecl: (line: string) => number,
+    selectBestOverload: (candidates: { type: string; line: number; paramCount: number; signature?: string }[], paramCount: number | undefined) => { type: string; line: number; paramCount: number; signature?: string } | null
+): MemberInfo | null {
+    try {
+        const content = fs.readFileSync(filePath, 'utf8');
+        const lines = content.split(/\r?\n/);
+        const headerPattern = new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP)`, 'i');
+
+        for (let j = 0; j < lines.length; j++) {
+            if (!headerPattern.test(lines[j])) continue;
+
+            const candidates: { type: string; line: number; paramCount: number; signature?: string }[] = [];
+            let nestDepth = 0;
+
+            for (let k = j + 1; k < lines.length; k++) {
+                const memberLine = lines[k];
+                const stripped = memberLine.replace(/!.*$/, '').trim();
+
+                if (/^(GROUP|QUEUE|RECORD)\b/i.test(stripped) ||
+                    /^\w+\s+(GROUP|QUEUE|RECORD)\b/i.test(stripped)) {
+                    nestDepth++;
+                } else if (/^END\s*$/i.test(stripped)) {
+                    if (nestDepth > 0) { nestDepth--; continue; }
+                    break;
+                }
+
+                if (nestDepth > 0) continue;
+
+                const memberMatch = memberLine.match(new RegExp(`^\\s*(${memberName})\\s+`, 'i'));
+                if (memberMatch) {
+                    const afterMember = memberLine.substring(memberMatch[0].length).trim();
+                    const type = (afterMember.split(/\s*!/).shift() || afterMember).trim() || 'Unknown';
+                    let declParamCount = 0;
+                    if (type.toUpperCase().startsWith('PROCEDURE')) {
+                        declParamCount = countParamsInDecl(memberLine);
+                    }
+                    candidates.push({ type, line: k, paramCount: declParamCount, signature: memberLine.trim() });
+                }
+            }
+
+            const bestMatch = selectBestOverload(candidates, paramCount);
+            if (bestMatch) {
+                const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
+                return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri, signature: bestMatch.signature };
+            }
+        }
+    } catch (error) {
+        // Caller handles logging
+    }
+    return null;
+}
+
+export type OverloadCandidate = { type: string; line: number; paramCount: number; signature?: string };
+
+/**
+ * Picks the best overload candidate given the call-site parameter count.
+ * Exported so MemberLocatorService can share the same selection logic.
+ */
+export function selectBestMemberOverload(
+    candidates: OverloadCandidate[],
+    paramCount: number | undefined
+): OverloadCandidate | null {
+    if (candidates.length === 0) return null;
+    if (paramCount === undefined) return candidates[0];
+
+    const exact = candidates.find(c => c.paramCount === paramCount);
+    if (exact) return exact;
+
+    const compatible = candidates
+        .filter(c => {
+            const defaults = ClarionPatterns.countDefaultParams(c.signature ?? '');
+            return paramCount >= (c.paramCount - defaults) && paramCount <= c.paramCount;
+        })
+        .sort((a, b) => (a.paramCount - paramCount) - (b.paramCount - paramCount));
+    if (compatible.length > 0) return compatible[0];
+
+    return candidates.reduce((best, curr) => {
+        const bd = Math.abs(best.paramCount - paramCount);
+        const cd = Math.abs(curr.paramCount - paramCount);
+        if (cd === bd) return curr.paramCount > best.paramCount ? curr : best;
+        return cd < bd ? curr : best;
+    });
+}
 
 /**
  * Shared utility for resolving class members (methods, properties)
@@ -310,49 +514,10 @@ export class ClassMemberResolver {
     }
 
     private selectBestOverload(
-        candidates: { type: string; line: number; paramCount: number; signature?: string }[],
+        candidates: OverloadCandidate[],
         paramCount?: number
-    ): { type: string; line: number; paramCount: number; signature?: string } | null {
-        if (candidates.length === 0) return null;
-
-        // 1. No callArgs → first candidate
-        if (paramCount === undefined) {
-            logger.info(`Returning first candidate (no param matching needed)`);
-            return candidates[0];
-        }
-
-        // 2. Exact match
-        const exact = candidates.find(c => c.paramCount === paramCount);
-        if (exact) {
-            logger.info(`Selected overload with ${exact.paramCount} parameters (exact match)`);
-            return exact;
-        }
-
-        // 3. Compatible match: callArgs within [paramCount - defaultCount, paramCount]
-        const compatible = candidates
-            .filter(c => {
-                const defaults = ClarionPatterns.countDefaultParams(c.signature ?? '');
-                return paramCount >= (c.paramCount - defaults) && paramCount <= c.paramCount;
-            })
-            .sort((a, b) => (a.paramCount - paramCount) - (b.paramCount - paramCount));
-
-        if (compatible.length > 0) {
-            logger.info(`Selected compatible overload with ${compatible[0].paramCount} parameters (call had ${paramCount})`);
-            return compatible[0];
-        }
-
-        // 4. Fallback: closest absolute distance, prefer higher count on tie
-        const bestMatch = candidates.reduce((best, curr) => {
-            const bestDiff = Math.abs(best.paramCount - paramCount);
-            const currDiff = Math.abs(curr.paramCount - paramCount);
-            if (currDiff === bestDiff) {
-                return curr.paramCount > best.paramCount ? curr : best;
-            }
-            return currDiff < bestDiff ? curr : best;
-        });
-
-        logger.info(`Selected overload with ${bestMatch.paramCount} parameters (call had ${paramCount})`);
-        return bestMatch;
+    ): OverloadCandidate | null {
+        return selectBestMemberOverload(candidates, paramCount);
     }
 
     /**
@@ -637,7 +802,7 @@ export class ClassMemberResolver {
 
     /**
      * Reads a file and searches for a member inside a specific class/queue/group body.
-     * Returns the member info or null if not found.
+     * Delegates to the shared scanClassBodyForMember helper.
      */
     private searchFileForMember(
         filePath: string,
@@ -646,44 +811,15 @@ export class ClassMemberResolver {
         paramCount: number | undefined,
         structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS'
     ): MemberInfo | null {
-        try {
-            const content = fs.readFileSync(filePath, 'utf8');
-            const lines = content.split('\n');
-            // Match CLASS, QUEUE, or GROUP header for this structure name
-            const headerPattern = new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP)`, 'i');
-
-            for (let j = 0; j < lines.length; j++) {
-                if (!headerPattern.test(lines[j])) continue;
-
-                logger.info(`Found structure ${className} in ${path.basename(filePath)} at line ${j}`);
-                const candidates: { type: string; line: number; paramCount: number; signature?: string }[] = [];
-
-                for (let k = j + 1; k < lines.length; k++) {
-                    const memberLine = lines[k];
-                    if (/^\s*END\s*$/i.test(memberLine) || /^END\s*$/i.test(memberLine)) break;
-
-                    const memberMatch = memberLine.match(new RegExp(`^\\s*(${memberName})\\s+`, 'i'));
-                    if (memberMatch) {
-                        const afterMember = memberLine.substring(memberMatch[0].length).trim();
-                        const type = (afterMember.split(/\s*!/).shift() || afterMember).trim() || 'Unknown';
-                        let declParamCount = 0;
-                        if (type.toUpperCase().startsWith('PROCEDURE')) {
-                            declParamCount = this.countParametersInDeclaration(memberLine);
-                        }
-                        candidates.push({ type, line: k, paramCount: declParamCount, signature: memberLine });
-                    }
-                }
-
-                const bestMatch = this.selectBestOverload(candidates, paramCount);
-                if (bestMatch) {
-                    const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
-                    return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri };
-                }
-            }
-        } catch (error) {
-            logger.error(`Error reading ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+        const result = scanClassBodyForMember(
+            filePath, className, memberName, paramCount, structureType,
+            (line) => this.countParametersInDeclaration(line),
+            (candidates, pc) => this.selectBestOverload(candidates, pc)
+        );
+        if (!result) {
+            logger.info(`searchFileForMember: "${memberName}" not found in "${className}" in ${path.basename(filePath)}`);
         }
-        return null;
+        return result;
     }
 
     /**

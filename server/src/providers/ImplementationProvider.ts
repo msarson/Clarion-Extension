@@ -23,6 +23,7 @@ import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { CrossFileCache } from './hover/CrossFileCache';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
+import { MemberLocatorService } from '../services/MemberLocatorService';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -37,6 +38,7 @@ export class ImplementationProvider {
     private overloadResolver: MethodOverloadResolver;
     private memberResolver: ClassMemberResolver;
     private chainedResolver: ChainedPropertyResolver;
+    private memberLocator: MemberLocatorService;
 
     constructor() {
         this.tokenCache = TokenCache.getInstance();
@@ -46,6 +48,7 @@ export class ImplementationProvider {
         this.overloadResolver = new MethodOverloadResolver();
         this.memberResolver = new ClassMemberResolver();
         this.chainedResolver = new ChainedPropertyResolver();
+        this.memberLocator = new MemberLocatorService(this.crossFileCache);
     }
 
     /**
@@ -406,25 +409,20 @@ export class ImplementationProvider {
 
                 // Typed variable: st.GetValue() where st is declared as "st StringTheory"
                 {
-                    const tokens = this.tokenCache.getTokens(document);
-                    const classType = this.findVariableType(tokens, callInfo.objectName);
-                    if (classType) {
-                        logger.info(`Variable "${callInfo.objectName}" is type "${classType}", finding impl of "${callInfo.methodName}"`);
-                        const memberInfo = await this.memberResolver.findMemberInNamedStructure(
-                            callInfo.methodName, classType, document, callInfo.paramCount
-                        );
-                        if (memberInfo) {
-                            if (memberInfo.type.toUpperCase().includes('PROCEDURE')) {
-                                const impl = await this.memberResolver.findImplementationCrossFile(
-                                    classType, callInfo.methodName, memberInfo, document
-                                );
-                                if (impl) {
-                                    logger.info(`✅ Found typed variable impl "${callInfo.methodName}" in "${classType}"`);
-                                    return impl;
-                                }
+                    const memberInfo = await this.memberLocator.resolveDotAccess(
+                        callInfo.objectName, callInfo.methodName, document, callInfo.paramCount
+                    );
+                    if (memberInfo) {
+                        if (memberInfo.type.toUpperCase().includes('PROCEDURE')) {
+                            const impl = await this.memberResolver.findImplementationCrossFile(
+                                memberInfo.className, callInfo.methodName, memberInfo, document
+                            );
+                            if (impl) {
+                                logger.info(`✅ Found typed variable impl "${callInfo.methodName}" in "${memberInfo.className}"`);
+                                return impl;
                             }
-                            return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
                         }
+                        return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
                     }
                 }
 
@@ -673,35 +671,6 @@ export class ImplementationProvider {
         if (paramList === '') return 0;
         
         return paramList.split(',').length;
-    }
-
-    /**
-     * Finds the class type of a variable declared at column 0.
-     * Returns null for built-in types; returns the class name for user-defined types.
-     */
-    private findVariableType(tokens: Token[], variableName: string): string | null {
-        const varToken = tokens.find(t =>
-            t.start === 0 &&
-            t.value.toLowerCase() === variableName.toLowerCase()
-        );
-        if (!varToken) return null;
-
-        const idx = tokens.indexOf(varToken);
-        if (idx + 1 >= tokens.length) return null;
-
-        const nextToken = tokens[idx + 1];
-        if (nextToken.line !== varToken.line) return null;
-
-        // Only user-defined class names (not built-in Type/Structure/Keyword tokens)
-        if (nextToken.type === TokenType.Type ||
-            nextToken.type === TokenType.Structure ||
-            nextToken.type === TokenType.Keyword) {
-            return null;
-        }
-        if (nextToken.type === TokenType.Variable || nextToken.type === TokenType.Label) {
-            return nextToken.value;
-        }
-        return null;
     }
 
     /**

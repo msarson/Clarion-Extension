@@ -293,7 +293,9 @@ export class DiagnosticProvider {
         const requiresTermination = [
             'IF', 'LOOP', 'CASE', 'EXECUTE', 'BEGIN',
             'GROUP', 'QUEUE', 'RECORD', 'FILE',
-            'CLASS', 'INTERFACE', 'MAP', 'MODULE'
+            'CLASS', 'INTERFACE', 'MAP', 'MODULE',
+            'WINDOW', 'REPORT', 'APPLICATION',
+            'SHEET', 'TAB', 'OLE', 'OPTION', 'MENU', 'MENUBAR', 'TOOLBAR'
         ];
         
         return requiresTermination.includes(structureType);

@@ -7,7 +7,7 @@ import { HoverFormatter } from './HoverFormatter';
 import { MethodHoverResolver } from './MethodHoverResolver';
 import { VariableHoverResolver } from './VariableHoverResolver';
 import { ChainedPropertyResolver } from '../../utils/ChainedPropertyResolver';
-import { ClassMemberResolver } from '../../utils/ClassMemberResolver';
+import { MemberLocatorService } from '../../services/MemberLocatorService';
 import { SolutionManager } from '../../solution/solutionManager';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -22,7 +22,7 @@ logger.setLevel("error");
 export class StructureFieldResolver {
     private tokenCache = TokenCache.getInstance();
     private chainedResolver = new ChainedPropertyResolver();
-    private memberResolver = new ClassMemberResolver();
+    private memberLocator = new MemberLocatorService();
     
     constructor(
         private formatter: HoverFormatter,
@@ -177,7 +177,7 @@ export class StructureFieldResolver {
 
                 // Try typed class variable: find what class type structureName is,
                 // then look up the member in that class (e.g., st.GetValue() where st StringTheory)
-                const varTypeInfo = await this.resolveVariableClassType(structureName, tokens, document);
+                const varTypeInfo = await this.memberLocator.resolveVariableType(structureName, tokens, document);
                 if (varTypeInfo) {
                     const { typeName: varType, isClass } = varTypeInfo;
                     logger.info(`✅ Variable "${structureName}" has type "${varType}" (isClass=${isClass}), looking up member "${fieldName}"`);
@@ -187,7 +187,7 @@ export class StructureFieldResolver {
                     }
                     if (isClass) {
                         // CLASS member resolver (methods, properties)
-                        const memberInfo = await this.memberResolver.findMemberInNamedStructure(fieldName, varType, document, paramCount);
+                        const memberInfo = await this.memberLocator.findMemberInClass(varType, fieldName, document, paramCount);
                         if (memberInfo) {
                             logger.info(`✅ Found member "${fieldName}" in "${varType}"`);
                             return await this.methodResolver.resolveChainedMethodCall(fieldName, memberInfo, document, paramCount);
@@ -202,57 +202,6 @@ export class StructureFieldResolver {
         
         return null;
     }
-
-    /**
-     * Resolves the type of a variable. Returns { typeName, isClass } where isClass distinguishes
-     * CLASS (method/property access) from QUEUE/GROUP/FILE (field access).
-     */
-    private async resolveVariableClassType(varName: string, tokens: Token[], document: TextDocument): Promise<{ typeName: string; isClass: boolean } | null> {
-        const varToken = tokens.find(t =>
-            t.start === 0 &&
-            t.value.toLowerCase() === varName.toLowerCase()
-        );
-        if (!varToken) return null;
-
-        const idx = tokens.indexOf(varToken);
-        if (idx + 1 >= tokens.length) return null;
-
-        const nextToken = tokens[idx + 1];
-        if (nextToken.line !== varToken.line) return null;
-
-        // Handle QUEUE(TypeName), GROUP(TypeName), CLASS(TypeName) — type is inside parens
-        if (nextToken.type === TokenType.Structure) {
-            const keyword = nextToken.value.toUpperCase();
-            const isClass = keyword === 'CLASS';
-            const lineTokens = tokens.filter(t => t.line === varToken.line && t.start > nextToken.start);
-            const typeArg = lineTokens.find(t =>
-                (t.type === TokenType.Label || t.type === TokenType.Variable) &&
-                t.value !== '(' && t.value !== ')'
-            );
-            if (typeArg) return { typeName: typeArg.value, isClass };
-            return null;
-        }
-
-        // Handle LIKE(TypeName) — mirrors the type of a named variable or type
-        if (nextToken.type === TokenType.TypeReference) {
-            const lineTokens = tokens.filter(t => t.line === varToken.line && t.start > nextToken.start);
-            const typeArg = lineTokens.find(t =>
-                (t.type === TokenType.Label || t.type === TokenType.Variable) &&
-                t.value !== '(' && t.value !== ')'
-            );
-            if (typeArg) return { typeName: typeArg.value, isClass: false };
-            return null;
-        }
-
-        if (nextToken.type === TokenType.Type || nextToken.type === TokenType.Keyword) {
-            return null;
-        }
-        if (nextToken.type === TokenType.Variable || nextToken.type === TokenType.Label) {
-            return { typeName: nextToken.value, isClass: true }; // bare type name — assume CLASS
-        }
-        return null;
-    }
-
     /**
      * Find a field inside a QUEUE/GROUP/FILE type definition (potentially in INCLUDE files)
      * and return hover info showing the field declaration.

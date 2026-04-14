@@ -29,9 +29,19 @@ Full language support for Clarion code, basic support for templates.
 ### 💡 **Signature Help & Documentation**
 Get instant parameter hints and documentation - works immediately, no solution needed!
 - 148 built-in functions with parameter hints
-- Method overload support
+- Method overload support — all overloads shown with full signatures
 - Hover documentation for all symbols
+- Signature help for class methods including inherited members
 - **[Learn more about Signature Help →](docs/features/signature-help.md)**
+
+### 🤖 **IntelliSense — Dot-Triggered Member Completion**
+Type `SELF.` or `MyVar.` for instant context-aware member suggestions.
+- Resolves `SELF.`, `PARENT.`, `MyVar.`, or `ClassName.` to the correct class
+- Full inheritance walk — shows methods and properties from parent classes
+- Access control aware — `PRIVATE` / `PROTECTED` / `PUBLIC` scoping enforced
+- Each overload shown as a distinct entry with parameter signatures
+- Chained expressions (`SELF.Order.`) resolve intermediate types
+- **[Learn more about Navigation →](docs/features/navigation.md)**
 
 ### ✏️ **Code Snippets**
 Write code faster with 50+ smart snippets - works immediately!
@@ -52,6 +62,9 @@ Jump to definitions, find implementations, and explore references — works in s
 - Press **F12** to go to definition (same file: no solution needed!)
 - Press **Ctrl+F12** to go to implementation
 - Press **Shift+F12** for **Find All References** — scope-aware across all project files
+- Press **F2** to **Rename Symbol** — renames across the entire workspace in one step
+- **Document Highlight** — pressing on a symbol highlights all occurrences in the current file
+- **Workspace Symbol Search** (`Ctrl+T`) — search for any procedure, class, or label across all solution files
 - Hover for documentation — declaration location, class/interface context, type info
 - **Chained navigation**: `SELF.Order.RangeList.Init` — hover, F12, Ctrl+F12, and references resolve through CLASS, QUEUE, and GROUP type chains
 - **SELF/PARENT properties**: F12 on `SELF.List` navigates to the class member declaration
@@ -70,7 +83,7 @@ Generate applications directly from VS Code.
 
 ### 🎯 **Real-time Diagnostics**
 Catch errors as you type.
-- Unterminated structures
+- Unterminated structures — including window sub-structures (`WINDOW`, `SHEET`, `TAB`, `OLE`, `MENU`, etc.)
 - Missing RETURN statements
 - FILE validation (DRIVER, RECORD)
 - **[Learn more about Diagnostics →](docs/features/diagnostics.md)**
@@ -125,22 +138,44 @@ Productivity features to write code faster.
 
 ## 🆕 What's New
 
-### Latest: v0.8.7 (2026-03-15)
+### Latest: v0.9.0 (2026-04-14) — IntelliSense & Completion
 
-#### 🔍 Find All References (Shift+F12)
-Full scope-aware Find All References — SELF/PARENT members, typed variables, chained chains, MAP/MODULE procedures, structure fields, INTERFACE methods, IMPLEMENTS(), CLASS type names, and overload filtering.
+#### 🤖 Dot-Triggered Member Completion
+Type `SELF.` or `MyVar.` for a context-aware dropdown of all available methods and properties. Supports full inheritance chains, access control (`PRIVATE`/`PROTECTED`/`PUBLIC`), and shows each overload as a distinct entry with parameter signatures inline.
 
-#### 🔌 Clarion INTERFACE Support
-Complete language support for interfaces — hover, F12, Ctrl+F12, and Find All References for interface methods, IMPLEMENTS() declarations, and 3-part `Class.Interface.Method` implementations.
+#### 💡 Signature Help for Class Methods
+Typing `(` after a class method now shows parameter hints for the full inheritance chain — works for `SELF.Method(`, `MyVar.Method(`, and `ClassName.Method(`.
 
-#### 🎨 Hover Quality Overhaul
-- Clean class type cards (`ClassName — CLASS, TYPE · 📦 Defined in File at line N`)
-- `🔷 Class property of ClassName` and `🔌 Interface method of InterfaceName` labels
-- F12/Ctrl+F12 hints suppressed when already at declaration/implementation
-- Implementation body previews removed (location only, matching TypeScript/C# style)
+#### 🐛 Bug Fixes
+- Signature help missing for `SELF.Method(` when class defined in same `.clw` file
+- Missing `END` now flagged as a diagnostic for `WINDOW`, `SHEET`, `TAB`, `OLE`, `MENU`, `MENUBAR`, `TOOLBAR`, `REPORT`, `APPLICATION`, and `OPTION`
+- Multiple cross-file F12, Ctrl+F12, hover, and Find All References fixes
 
-#### 🔗 Deep Chained Navigation
-Hover, F12, Ctrl+F12, and references for any depth of `SELF.A.B.C` chains including CLASS, QUEUE, and GROUP intermediate types.
+**[See full changelog →](CHANGELOG.md)**
+
+---
+
+### Recent: v0.8.9 (2026-04-13) — Security Patch
+
+- Updated dev dependencies to resolve Dependabot security alerts (`serialize-javascript` RCE/DoS, `diff` DoS)
+- Replaced deprecated `vscode-test` with `@vscode/test-electron`
+
+No functional changes — safe to upgrade immediately.
+
+**[See full changelog →](CHANGELOG.md)**
+
+---
+
+### Recent: v0.8.8 (2026-04-12)
+
+#### ✏️ Rename Symbol (F2)
+Rename any user-defined symbol across the entire workspace in one step — scope-aware, protects library/read-only `.inc` files, and validates the position before the dialog opens.
+
+#### 🔆 Document Highlight
+Pressing on a symbol highlights all its occurrences in the current file.
+
+#### 🔍 Workspace Symbol Search (Ctrl+T)
+Search for any procedure, class, or label across all files in the solution.
 
 **[See full changelog →](CHANGELOG.md)**
 
@@ -165,34 +200,6 @@ Hover, F12, Ctrl+F12, and references for any depth of `SELF.A.B.C` chains includ
 - **Batch UpperPark commands** - Import/Export/Show All Differences
 - **New context menu commands** - Build Project, Generate + Build, Copy Path, Open in Clarion IDE
 - **Generate All/Build All** - Build multiple applications in dependency order
-
-#### 🐛 Navigation & Hover Fixes
-- FUNCTION declarations now work with Ctrl+F12 (cross-project)
-- Procedures without parameters show correct hover info
-- Methods named like keywords (e.g., MESSAGE) show method info instead of keyword help
-
-**[See full changelog →](CHANGELOG.md)**
-
-### Recent: v0.8.5 (2026-01-09)
-
-#### 🔧 Folding Provider Fix
-Fixed critical issues with code folding for window definitions:
-- APPLICATION structures now fold correctly
-- Nested MENU structures fold properly at any indentation level
-- Removed arbitrary 50-column limit for structure recognition
-
-**Impact:** Complex window/application definitions with nested menus now have proper code folding support.
-
-### Recent: v0.8.4 (2026-01-09)
-
-#### 🎨 Template Language Support
-Dedicated syntax highlighting for `.tpl` and `.tpw` files with 100+ template keywords.
-
-#### ⚡ Performance Boost
-50-60% faster token processing with optimized caching and parent relationship indexing.
-
-#### 🎯 Scope-Aware Navigation
-F12 now correctly prioritizes local variables over globals with the same name.
 
 **[See full changelog →](CHANGELOG.md)**
 

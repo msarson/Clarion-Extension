@@ -263,6 +263,11 @@ export class HoverProvider {
             
             logger.info(`❌ ${searchWord} is not a local variable or global in MEMBER parent`);
             
+            // Check INCLUDE files of the current file and equates.clw (covers both PROGRAM files
+            // and MEMBER files that have their own INCLUDE chain)
+            const includesHover = await this.variableResolver.findInIncludesAndEquates(searchWord, tokens, document);
+            if (includesHover) return includesHover;
+
             // 🔍 Last resort: Check if this word is a CLASS type reference
             // This handles when user hovers directly on a type name (e.g., hovering on "StringTheory" in "st StringTheory")
             logger.info(`Checking if ${word} is a CLASS type...`);
@@ -361,16 +366,6 @@ export class HoverProvider {
                 
                 // Extract type from _clarionType if available, otherwise parse from detail
                 let type = (varSymbol as any)._clarionType || varSymbol.detail || 'Unknown';
-                
-                // Special handling for GROUP/QUEUE/FILE structures (kind = 23)
-                if (varSymbol.kind === 23 && type === 'Unknown') {
-                    // Extract structure type from name pattern like "GROUP (MyGroup)"
-                    const structTypeMatch = varSymbol.name.match(/^(\w+)\s*\(/);
-                    if (structTypeMatch) {
-                        type = structTypeMatch[1]; // e.g., "GROUP", "QUEUE", "FILE"
-                        logger.info(`Extracted structure type from name: ${type}`);
-                    }
-                }
                 
                 return {
                     type: type,

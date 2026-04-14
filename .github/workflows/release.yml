@@ -40,6 +40,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify version matches input
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$PKG_VERSION" != "${{ inputs.version }}" ]; then
+            echo "❌ package.json version ($PKG_VERSION) does not match release input (${{ inputs.version }})"
+            exit 1
+          fi
+          echo "✅ Version verified: $PKG_VERSION"
+
       - name: Compile release build
         run: npm run compile:release
 
@@ -95,6 +104,13 @@ jobs:
           git checkout master
           git checkout -b version-${{ inputs.next_version }}
           npm version ${{ inputs.next_version }} --no-git-tag-version
-          git add package.json package-lock.json
-          git commit -m "chore: Bump version to ${{ inputs.next_version }}"
+          node -e "
+            const fs = require('fs');
+            const content = fs.readFileSync('CHANGELOG.md', 'utf8');
+            const stub = '### [${{ inputs.next_version }}] - Unreleased\n\n---\n\n';
+            const updated = content.replace('## Recent Versions\n\n', '## Recent Versions\n\n' + stub);
+            fs.writeFileSync('CHANGELOG.md', updated);
+          "
+          git add package.json package-lock.json CHANGELOG.md
+          git commit -m "chore: Bump version to ${{ inputs.next_version }} and add changelog stub"
           git push origin version-${{ inputs.next_version }}

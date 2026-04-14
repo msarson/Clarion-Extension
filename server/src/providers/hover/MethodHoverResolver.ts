@@ -9,6 +9,7 @@ import { ClarionPatterns } from '../../utils/ClarionPatterns';
 import { SolutionManager } from '../../solution/solutionManager';
 import { TokenHelper } from '../../utils/TokenHelper';
 import LoggerManager from '../../logger';
+import { SymbolFinderService } from '../../services/SymbolFinderService';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -65,8 +66,36 @@ export class MethodHoverResolver {
         const methodStart = line.indexOf(methodName, methodSegmentSearchFrom);
         const methodEnd = methodStart + methodName.length;
         
-        if ((position.character >= classStart && position.character <= classEnd) ||
-            (position.character >= methodStart && position.character <= methodEnd)) {
+        if (position.character >= classStart && position.character <= classEnd) {
+            // Cursor is on the class prefix — show the class declaration, not the method
+            const tokens = this.tokenCache.getTokens(document);
+            const classToken = tokens.find(t =>
+                t.start === 0 &&
+                t.value.toLowerCase() === className.toLowerCase()
+            );
+            if (classToken) {
+                const typeStr = SymbolFinderService.extractTypeInfo(classToken, tokens);
+                const fileName = path.basename(document.uri.replace(/file:\/\/\//i, '').replace(/\//g, '\\'));
+                const lineNumber = classToken.line + 1;
+                const lineTokens = tokens.filter(t => t.line === classToken.line);
+                const declaration = lineTokens.map(t => t.value).join(' ');
+                const markdown = [
+                    `**${className}** — \`${typeStr}\``,
+                    ``,
+                    `🔷 Class declaration  Declared in ${fileName}:${lineNumber}`,
+                    ``,
+                    '```clarion',
+                    declaration,
+                    '```',
+                    ``,
+                    `F12 → Go to declaration`
+                ];
+                return { contents: { kind: 'markdown', value: markdown.join('\n') } };
+            }
+            return null;
+        }
+
+        if (position.character >= methodStart && position.character <= methodEnd) {
             const tokens = this.tokenCache.getTokens(document);
 
             // For 3-part methods (Class.Interface.Method), the declaration is in the INTERFACE, not the CLASS

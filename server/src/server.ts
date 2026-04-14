@@ -66,6 +66,7 @@ import { RenameProvider } from './providers/RenameProvider';
 import { DocumentHighlightProvider } from './providers/DocumentHighlightProvider';
 import { WorkspaceSymbolProvider } from './providers/WorkspaceSymbolProvider';
 import { UnreachableCodeProvider } from './providers/UnreachableCodeProvider';
+import { CompletionProvider } from './providers/CompletionProvider';
 import { ClarionSolutionInfo } from 'common/types';
 import { URI } from 'vscode-languageserver';
 import { setServerInitialized, serverInitialized } from './serverState';
@@ -93,6 +94,7 @@ const referencesProvider = new ReferencesProvider();
 const renameProvider = new RenameProvider();
 const documentHighlightProvider = new DocumentHighlightProvider();
 const workspaceSymbolProvider = new WorkspaceSymbolProvider();
+const completionProvider = new CompletionProvider();
 
 // ✅ Create Connection and Documents Manager
 const connection = createConnection(ProposedFeatures.all);
@@ -160,6 +162,10 @@ connection.onInitialize((params) => {
                 signatureHelpProvider: {
                     triggerCharacters: ['(', ','],
                     retriggerCharacters: [')']
+                },
+                completionProvider: {
+                    triggerCharacters: ['.'],
+                    resolveProvider: false
                 },
                 semanticTokensProvider: {
                     legend: clarionSemanticTokensProvider.getLegend(),
@@ -1491,6 +1497,18 @@ connection.onSignatureHelp(async (params) => {
         console.error(`❌ [SIG-HELP] Error providing signature help: ${error instanceof Error ? error.message : String(error)}`);
         console.error(`❌ [SIG-HELP] Stack: ${error instanceof Error ? error.stack : 'No stack'}`);
         return undefined;
+    }
+});
+
+// ✅ Handle Completion Request (dot-triggered member completion)
+connection.onCompletion(async (params) => {
+    try {
+        const document = documents.get(params.textDocument.uri);
+        if (!document || !serverInitialized) return [];
+        return await completionProvider.onCompletion(params, document);
+    } catch (error) {
+        logger.error(`❌ [COMPLETION] Error: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
     }
 });
 

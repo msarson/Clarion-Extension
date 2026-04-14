@@ -91,7 +91,7 @@ export class SymbolFinderService {
      * Extract display type string from the token after a variable label.
      * Handles QUEUE(TypeName), GROUP(TypeName), CLASS(TypeName) as well as plain types.
      */
-    private static extractTypeInfo(labelToken: Token, tokens: Token[]): string {
+    public static extractTypeInfo(labelToken: Token, tokens: Token[]): string {
         const idx = tokens.indexOf(labelToken);
         if (idx + 1 >= tokens.length) return 'UNKNOWN';
         const next = tokens[idx + 1];
@@ -120,6 +120,11 @@ export class SymbolFinderService {
                 t.value !== '(' && t.value !== ')'
             );
             return typeArg ? `LIKE(${typeArg.value})` : 'LIKE';
+        }
+        if (next.type === TokenType.Procedure || next.type === TokenType.Keyword) {
+            // PROCEDURE, ROUTINE, FUNCTION — return the keyword as the type
+            const upper = next.value.toUpperCase();
+            if (upper === 'PROCEDURE' || upper === 'ROUTINE' || upper === 'FUNCTION') return upper;
         }
         return 'UNKNOWN';
     }
@@ -246,15 +251,66 @@ export class SymbolFinderService {
                 t.value.toLowerCase() === wordLower
             );
             if (labelToken) {
-                logger.info(`✅ Found "${searchText}" via token fallback at line ${labelToken.line}`);
-                return {
-                    token: labelToken,
-                    type: SymbolFinderService.extractTypeInfo(labelToken, tokens),
-                    scope: { token: scopeToken, type: 'local' },
-                    location: { uri: document.uri, line: labelToken.line, character: labelToken.start },
-                    originalWord: originalWord || word,
-                    searchWord: word
-                };
+                // Skip MAP/global procedure declarations — these are handled by
+                // findProcedureDeclaration (step 5) with the correct scope and type.
+                const isProcDecl = tokens.some(t =>
+                    t.line === labelToken.line &&
+                    t.type === TokenType.Procedure &&
+                    (t.subType === TokenType.MapProcedure ||
+                     t.subType === TokenType.GlobalProcedure ||
+                     t.subType === TokenType.MethodDeclaration)
+                );
+                if (!isProcDecl) {
+                    logger.info(`✅ Found "${searchText}" via token fallback at line ${labelToken.line}`);
+                    return {
+                        token: labelToken,
+                        type: SymbolFinderService.extractTypeInfo(labelToken, tokens),
+                        scope: { token: scopeToken, type: 'local' },
+                        location: { uri: document.uri, line: labelToken.line, character: labelToken.start },
+                        originalWord: originalWord || word,
+                        searchWord: word
+                    };
+                }
+            }
+
+            // If the current scope is a ROUTINE, also search the parent procedure's data section.
+            // Per Clarion rules, a ROUTINE can access all variables declared in its containing
+            // procedure's local data section (the area between PROCEDURE and CODE).
+            if (scopeToken.subType === TokenType.Routine) {
+                const parentProc = TokenHelper.getParentScopeOfRoutine(tokens, scopeToken);
+                if (parentProc) {
+                    // Search up to the parent procedure's CODE marker (data section only),
+                    // or up to just before this ROUTINE if no explicit CODE marker exists.
+                    const dataEnd = parentProc.executionMarker
+                        ? parentProc.executionMarker.line - 1
+                        : scopeToken.line - 1;
+                    const found = tokens.find(t =>
+                        t.line > parentProc.line && t.line <= dataEnd &&
+                        t.start === 0 &&
+                        (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+                        t.value.toLowerCase() === wordLower
+                    );
+                    if (found) {
+                        const isProcDecl = tokens.some(t =>
+                            t.line === found.line &&
+                            t.type === TokenType.Procedure &&
+                            (t.subType === TokenType.MapProcedure ||
+                             t.subType === TokenType.GlobalProcedure ||
+                             t.subType === TokenType.MethodDeclaration)
+                        );
+                        if (!isProcDecl) {
+                            logger.info(`✅ Found "${searchText}" in parent procedure data section at line ${found.line}`);
+                            return {
+                                token: found,
+                                type: SymbolFinderService.extractTypeInfo(found, tokens),
+                                scope: { token: parentProc, type: 'local' },
+                                location: { uri: document.uri, line: found.line, character: found.start },
+                                originalWord: originalWord || word,
+                                searchWord: word
+                            };
+                        }
+                    }
+                }
             }
 
             // If the current scope is a method implementation, the class was declared inside
@@ -276,6 +332,16 @@ export class SymbolFinderService {
                         t.value.toLowerCase() === wordLower
                     );
                     if (found) {
+                        // Skip MAP/global procedure declarations — they are not local variables
+                        const isProcDecl = tokens.some(t =>
+                            t.line === found.line &&
+                            t.type === TokenType.Procedure &&
+                            (t.subType === TokenType.MapProcedure ||
+                             t.subType === TokenType.GlobalProcedure ||
+                             t.subType === TokenType.MethodDeclaration)
+                        );
+                        if (isProcDecl) continue;
+
                         logger.info(`✅ Found "${searchText}" in GlobalProcedure scope at line ${found.line}`);
                         return {
                             token: found,
@@ -292,6 +358,15 @@ export class SymbolFinderService {
             return null;
         }
         
+        // Skip MAP procedure and method declarations — these are handled by findProcedureDeclaration
+        // (step 5) with the correct scope/type. Without this guard the symbol tree would return
+        // them with type='()' (the signature detail) instead of 'PROCEDURE', causing isLocalProcDecl
+        // to be false and FAR to restrict its search to the outer procedure's narrow finishesAt range.
+        if (varSymbol._isMapProcedure || varSymbol._isMethodDeclaration) {
+            logger.info(`⏭️ "${searchText}" is a MAP/method declaration — deferring to findProcedureDeclaration`);
+            return null;
+        }
+
         logger.info(`✅ Found variable: ${varSymbol.name} of type ${varSymbol._clarionType || varSymbol.detail}`);
         
         // Extract the variable name (without type info that may be in the name).
@@ -313,11 +388,24 @@ export class SymbolFinderService {
             return null;
         }
         
+        // If the current scope is a ROUTINE but the found variable is in the parent
+        // procedure's data section (before the ROUTINE), use the parent procedure as
+        // the effective scope so FAR searches the entire procedure range, not just
+        // the ROUTINE's range.
+        let effectiveScopeToken = scopeToken;
+        if (scopeToken.subType === TokenType.Routine && varSymbol.range.start.line < scopeToken.line) {
+            const parentProc = TokenHelper.getParentScopeOfRoutine(tokens, scopeToken);
+            if (parentProc) {
+                effectiveScopeToken = parentProc;
+            }
+        }
+
         return {
             token: variableToken,
-            type: varSymbol._clarionType || varSymbol.detail || 'UNKNOWN',
+            type: varSymbol._clarionType || varSymbol.detail
+                || SymbolFinderService.extractTypeInfo(variableToken, tokens),
             scope: {
-                token: scopeToken,
+                token: effectiveScopeToken,
                 type: 'local'
             },
             location: {
@@ -758,10 +846,83 @@ export class SymbolFinderService {
             }
         }
         
+        // 5. Try as procedure declaration (MAP or global PROCEDURE)
+        result = this.findProcedureDeclaration(word, tokens, document);
+        if (result) {
+            logger.info(`✅ Found as procedure declaration: ${word}`);
+            return result;
+        }
+
         logger.info(`❌ Symbol "${word}" not found`);
         return null;
     }
-    
+
+    /**
+     * Find a MAP or global procedure declaration by name.
+     * 
+     * Determines scope based on where the MAP declaration lives:
+     * - Inside a GlobalProcedure or MethodImplementation → local MAP → scope='local'
+     *   (callable only within that procedure and methods of locally-defined classes;
+     *    FAR searches the current file with no line-range restriction)
+     * - At module level in a MEMBER file → module MAP → scope='module'
+     *   (available only within this MEMBER module; FAR searches current file only)
+     * - At module level in a PROGRAM file → global MAP → scope='global'
+     *   (available throughout the program; FAR searches all project files)
+     */
+    findProcedureDeclaration(word: string, tokens: Token[], document: TextDocument): SymbolInfo | null {
+        const wordLower = word.toLowerCase();
+        const procToken = tokens.find(t =>
+            t.type === TokenType.Procedure &&
+            (t.subType === TokenType.MapProcedure || t.subType === TokenType.GlobalProcedure) &&
+            t.label?.toLowerCase() === wordLower
+        );
+        if (!procToken) return null;
+
+        const labelToken = tokens.find(t =>
+            t.line === procToken.line &&
+            t.start === 0 &&
+            t.type === TokenType.Label &&
+            t.value.toLowerCase() === wordLower
+        );
+        if (!labelToken) return null;
+
+        // Find the innermost containing procedure scope (MethodImplementation or GlobalProcedure)
+        const containingScope = tokens
+            .filter(t =>
+                t.type === TokenType.Procedure &&
+                (t.subType === TokenType.GlobalProcedure || t.subType === TokenType.MethodImplementation) &&
+                t.line < procToken.line &&
+                (t.finishesAt === undefined || t.finishesAt >= procToken.line)
+            )
+            .sort((a, b) => b.line - a.line)[0]; // innermost = latest start before declaration
+
+        let scopeType: SymbolInfo['scope']['type'];
+        let scopeToken: Token;
+        if (containingScope) {
+            // MAP is inside a procedure → local MAP
+            scopeType = 'local';
+            scopeToken = containingScope;
+        } else {
+            // MAP is at module level — global if PROGRAM file, module if MEMBER file
+            const isMember = tokens.some(t =>
+                t.type === TokenType.ClarionDocument &&
+                t.value.toUpperCase() === 'MEMBER'
+            );
+            scopeType = isMember ? 'module' : 'global';
+            scopeToken = labelToken;
+        }
+
+        logger.info(`✅ Found procedure declaration "${word}" at line ${labelToken.line} scope=${scopeType}`);
+        return {
+            token: labelToken,
+            type: 'PROCEDURE',
+            scope: { token: scopeToken, type: scopeType },
+            location: { uri: document.uri, line: labelToken.line, character: labelToken.start },
+            originalWord: word,
+            searchWord: word
+        };
+    }
+
     /**
      * Check if a token is inside a procedure
      */
