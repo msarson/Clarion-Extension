@@ -29,9 +29,19 @@ Full language support for Clarion code, basic support for templates.
 ### 💡 **Signature Help & Documentation**
 Get instant parameter hints and documentation - works immediately, no solution needed!
 - 148 built-in functions with parameter hints
-- Method overload support
+- Method overload support — all overloads shown with full signatures
 - Hover documentation for all symbols
+- Signature help for class methods including inherited members
 - **[Learn more about Signature Help →](docs/features/signature-help.md)**
+
+### 🤖 **IntelliSense — Dot-Triggered Member Completion**
+Type `SELF.` or `MyVar.` for instant context-aware member suggestions.
+- Resolves `SELF.`, `PARENT.`, `MyVar.`, or `ClassName.` to the correct class
+- Full inheritance walk — shows methods and properties from parent classes
+- Access control aware — `PRIVATE` / `PROTECTED` / `PUBLIC` scoping enforced
+- Each overload shown as a distinct entry with parameter signatures
+- Chained expressions (`SELF.Order.`) resolve intermediate types
+- **[Learn more about Navigation →](docs/features/navigation.md)**
 
 ### ✏️ **Code Snippets**
 Write code faster with 50+ smart snippets - works immediately!
@@ -73,7 +83,7 @@ Generate applications directly from VS Code.
 
 ### 🎯 **Real-time Diagnostics**
 Catch errors as you type.
-- Unterminated structures
+- Unterminated structures — including window sub-structures (`WINDOW`, `SHEET`, `TAB`, `OLE`, `MENU`, etc.)
 - Missing RETURN statements
 - FILE validation (DRIVER, RECORD)
 - **[Learn more about Diagnostics →](docs/features/diagnostics.md)**
@@ -128,7 +138,24 @@ Productivity features to write code faster.
 
 ## 🆕 What's New
 
-### Latest: v0.8.9 (2026-04-13) — Security Patch
+### Latest: v0.9.0 (2026-04-14) — IntelliSense & Completion
+
+#### 🤖 Dot-Triggered Member Completion
+Type `SELF.` or `MyVar.` for a context-aware dropdown of all available methods and properties. Supports full inheritance chains, access control (`PRIVATE`/`PROTECTED`/`PUBLIC`), and shows each overload as a distinct entry with parameter signatures inline.
+
+#### 💡 Signature Help for Class Methods
+Typing `(` after a class method now shows parameter hints for the full inheritance chain — works for `SELF.Method(`, `MyVar.Method(`, and `ClassName.Method(`.
+
+#### 🐛 Bug Fixes
+- Signature help missing for `SELF.Method(` when class defined in same `.clw` file
+- Missing `END` now flagged as a diagnostic for `WINDOW`, `SHEET`, `TAB`, `OLE`, `MENU`, `MENUBAR`, `TOOLBAR`, `REPORT`, `APPLICATION`, and `OPTION`
+- Multiple cross-file F12, Ctrl+F12, hover, and Find All References fixes
+
+**[See full changelog →](CHANGELOG.md)**
+
+---
+
+### Recent: v0.8.9 (2026-04-13) — Security Patch
 
 - Updated dev dependencies to resolve Dependabot security alerts (`serialize-javascript` RCE/DoS, `diff` DoS)
 - Replaced deprecated `vscode-test` with `@vscode/test-electron`
@@ -149,34 +176,6 @@ Pressing on a symbol highlights all its occurrences in the current file.
 
 #### 🔍 Workspace Symbol Search (Ctrl+T)
 Search for any procedure, class, or label across all files in the solution.
-
-#### 🐛 Bug Fixes
-- Hover and Go to Definition for local class instances inside `MethodImplementation` scopes now correctly resolves variables from the parent procedure's data section
-- `!!!` doc comments now appear in hover for local variables, classes, groups, and other procedure-level declarations
-- Fixed false-positive "Procedure returns X but all RETURN statements are empty" diagnostic for overloaded procedures ([#44](https://github.com/msarson/Clarion-Extension/issues/44))
-- Find All References on a local CLASS label now returns correct positions and includes method implementation headers
-- Go to Implementation and hover for `SELF.Method()` now correctly finds implementations inherited from an external base class
-
-**[See full changelog →](CHANGELOG.md)**
-
----
-
-### Recent: v0.8.7 (2026-03-15)
-
-#### 🔍 Find All References (Shift+F12)
-Full scope-aware Find All References — SELF/PARENT members, typed variables, chained chains, MAP/MODULE procedures, structure fields, INTERFACE methods, IMPLEMENTS(), CLASS type names, and overload filtering.
-
-#### 🔌 Clarion INTERFACE Support
-Complete language support for interfaces — hover, F12, Ctrl+F12, and Find All References for interface methods, IMPLEMENTS() declarations, and 3-part `Class.Interface.Method` implementations.
-
-#### 🎨 Hover Quality Overhaul
-- Clean class type cards (`ClassName — CLASS, TYPE · 📦 Defined in File at line N`)
-- `🔷 Class property of ClassName` and `🔌 Interface method of InterfaceName` labels
-- F12/Ctrl+F12 hints suppressed when already at declaration/implementation
-- Implementation body previews removed (location only, matching TypeScript/C# style)
-
-#### 🔗 Deep Chained Navigation
-Hover, F12, Ctrl+F12, and references for any depth of `SELF.A.B.C` chains including CLASS, QUEUE, and GROUP intermediate types.
 
 **[See full changelog →](CHANGELOG.md)**
 
