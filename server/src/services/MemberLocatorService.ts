@@ -15,7 +15,7 @@ import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
 import { CrossFileCache } from '../providers/hover/CrossFileCache';
-import { MemberInfo, OverloadCandidate, scanClassBodyForMember, selectBestMemberOverload } from '../utils/ClassMemberResolver';
+import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload } from '../utils/ClassMemberResolver';
 import { SymbolFinderService } from './SymbolFinderService';
 import { SolutionManager } from '../solution/solutionManager';
 import * as fs from 'fs';
@@ -164,6 +164,31 @@ export class MemberLocatorService {
         if (!typeInfo) return null;
         logger.info(`resolveDotAccess: "${objectName}" → type "${typeInfo.typeName}", looking for "${memberName}"`);
         return this.findMemberInClass(typeInfo.typeName, memberName, document, paramCount);
+    }
+
+    /**
+     * Enumerates ALL members of a class (methods + properties), walking up the
+     * inheritance chain.  Child members shadow parent members with the same name.
+     *
+     * Search order for the class definition:
+     *   1. Current document
+     *   2. INCLUDE chain reachable from the document
+     *   3. ClassDefinitionIndexer (libsrc / accessory paths)
+     *
+     * @param className      The class to enumerate (e.g. "ThisWindow")
+     * @param document       The document requesting completion
+     * @param callerClass    Optional: the class the caller belongs to (for access filtering).
+     *                       Omit to show only public members (external call site).
+     * @returns Flat, deduped, access-filtered list of MemberEnumItem
+     */
+    async enumerateMembersInClass(
+        className: string,
+        document: TextDocument,
+        callerClass?: string
+    ): Promise<MemberEnumItem[]> {
+        return this.collectInheritedMembers(
+            className, document, callerClass, new Set()
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -379,5 +404,168 @@ export class MemberLocatorService {
         for (const project of sm.solution.projects) {
             await this.classIndexer.getOrBuildIndex(project.path);
         }
+    }
+
+    /**
+     * Recursively collects members of className and all ancestor classes.
+     * Returns a child-first deduped list: if a child and parent both define
+     * a member with the same (case-insensitive) name, the child's version wins.
+     */
+    private async collectInheritedMembers(
+        className: string,
+        document: TextDocument,
+        callerClass: string | undefined,
+        visited: Set<string>
+    ): Promise<MemberEnumItem[]> {
+        const key = className.toLowerCase();
+        if (visited.has(key)) return [];
+        visited.add(key);
+
+        // 1. Find raw members of this class
+        const ownMembers = await this.findAllMembersInClass(className, document);
+
+        // 2. Determine access filter relative to the caller
+        const accessAllowed = this.accessFilter(className, callerClass);
+        const filtered = ownMembers.filter(m => accessAllowed.has(m.access));
+
+        // 3. Determine the parent class (if any)
+        let parentClassName: string | undefined;
+
+        // Try include chain first, then indexer
+        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const classInfo = await this.findClassInfoInDoc(className, document);
+        if (classInfo?.parentClass) {
+            parentClassName = classInfo.parentClass;
+        } else {
+            await this.ensureIndexBuilt();
+            const indexed = this.classIndexer.findClass(className);
+            if (indexed && indexed.length > 0) {
+                parentClassName = (indexed.find(d => !d.isType) || indexed[0]).parentClass;
+            }
+        }
+
+        if (!parentClassName) return filtered;
+
+        // 4. Recurse into the parent
+        const parentMembers = await this.collectInheritedMembers(
+            parentClassName, document, callerClass, visited
+        );
+
+        // 5. Merge child-first: child members shadow parent members by name
+        const childNames = new Set(filtered.map(m => m.name.toLowerCase()));
+        const uniqueParent = parentMembers.filter(m => !childNames.has(m.name.toLowerCase()));
+
+        return [...filtered, ...uniqueParent];
+    }
+
+    /**
+     * Locates the raw (unfiltered) MemberEnumItem[] for a single class in:
+     *   1. Current document
+     *   2. INCLUDE chain reachable from the document
+     *   3. ClassDefinitionIndexer
+     */
+    private async findAllMembersInClass(
+        className: string,
+        document: TextDocument
+    ): Promise<MemberEnumItem[]> {
+        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const tokens = this.tokenCache.getTokens(document);
+
+        // 1. Current document
+        const members = scanClassBodyForAllMembers(docPath, className);
+        if (members.length > 0) return members;
+
+        // 2. INCLUDE chain
+        const fromInclude = await this.findAllMembersInIncludeChain(
+            className, tokens, path.dirname(docPath), new Set([docPath.toLowerCase()])
+        );
+        if (fromInclude.length > 0) return fromInclude;
+
+        // 3. ClassDefinitionIndexer
+        await this.ensureIndexBuilt();
+        const infos = this.classIndexer.findClass(className);
+        if (infos && infos.length > 0) {
+            const info = infos.find(d => !d.isType) || infos[0];
+            return scanClassBodyForAllMembers(info.filePath, className, info.structureType);
+        }
+
+        return [];
+    }
+
+    /** Walks the INCLUDE chain searching for className and enumerating its members. */
+    private async findAllMembersInIncludeChain(
+        className: string,
+        tokens: Token[],
+        fromDir: string,
+        visited: Set<string>
+    ): Promise<MemberEnumItem[]> {
+        const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
+        for (const inc of includeTokens) {
+            const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
+            if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
+            visited.add(resolvedPath.toLowerCase());
+
+            const members = scanClassBodyForAllMembers(resolvedPath, className);
+            if (members.length > 0) return members;
+
+            const data = await this.loadDocument(resolvedPath);
+            if (data) {
+                const nested = await this.findAllMembersInIncludeChain(
+                    className, data.tokens, path.dirname(resolvedPath), visited
+                );
+                if (nested.length > 0) return nested;
+            }
+        }
+        return [];
+    }
+
+    /**
+     * Finds the ClassDefinitionInfo for a class by scanning the current document
+     * and its include chain (before falling back to the indexer).
+     * Returns the info only if found and has a parentClass field worth following.
+     */
+    private async findClassInfoInDoc(
+        className: string,
+        document: TextDocument
+    ): Promise<{ parentClass?: string } | null> {
+        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        // Quick scan: look for "ClassName  CLASS(ParentName)" in the document text
+        const lines = document.getText().split('\n');
+        const pattern = new RegExp(`^${className}\\s+CLASS\\s*\\((\\w+)\\)`, 'i');
+        for (const line of lines) {
+            const m = line.match(pattern);
+            if (m) return { parentClass: m[1] };
+        }
+        return null;
+    }
+
+    /**
+     * Returns the set of access levels visible to callerClass when accessing className.
+     * - same class    → public + protected + private
+     * - subclass      → public + protected
+     * - external      → public only
+     */
+    private accessFilter(className: string, callerClass: string | undefined): Set<'public' | 'protected' | 'private'> {
+        if (!callerClass) return new Set(['public']);
+        if (callerClass.toLowerCase() === className.toLowerCase()) {
+            return new Set(['public', 'protected', 'private']);
+        }
+        // Check if callerClass is a subclass of className via the indexer
+        const callerInfos = this.classIndexer.findClass(callerClass);
+        if (callerInfos) {
+            let current = (callerInfos.find(d => !d.isType) || callerInfos[0])?.parentClass;
+            const seen = new Set<string>();
+            while (current && !seen.has(current.toLowerCase())) {
+                seen.add(current.toLowerCase());
+                if (current.toLowerCase() === className.toLowerCase()) {
+                    return new Set(['public', 'protected']);
+                }
+                const parentInfos = this.classIndexer.findClass(current);
+                current = parentInfos
+                    ? (parentInfos.find(d => !d.isType) || parentInfos[0])?.parentClass
+                    : undefined;
+            }
+        }
+        return new Set(['public']);
     }
 }

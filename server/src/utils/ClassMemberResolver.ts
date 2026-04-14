@@ -16,6 +16,103 @@ logger.setLevel("error");
 
 export type MemberInfo = { type: string; className: string; line: number; file: string; signature?: string };
 
+/** Access level for a class member. */
+export type MemberAccess = 'public' | 'protected' | 'private';
+
+/** A single class member returned by the enumeration API. */
+export interface MemberEnumItem {
+    name: string;
+    kind: 'method' | 'property';
+    signature: string;       // full declaration line (trimmed)
+    type: string;            // return type (methods) or data type (properties)
+    access: MemberAccess;
+    fromClass: string;       // class that declared this member (for inherited items)
+    line: number;            // 0-based line in the file
+    file: string;            // absolute file path
+}
+
+/**
+ * Detects the access modifier in a Clarion member declaration line.
+ * Looks for PRIVATE or PROTECTED in the comma-separated attribute list.
+ */
+export function detectMemberAccess(line: string): MemberAccess {
+    const stripped = line.replace(/!.*$/, '');
+    if (/\bPRIVATE\b/i.test(stripped)) return 'private';
+    if (/\bPROTECTED\b/i.test(stripped)) return 'protected';
+    return 'public';
+}
+
+/**
+ * Scans the body of a named CLASS/QUEUE/GROUP in a file and returns ALL members.
+ * Handles nested GROUP/QUEUE/RECORD blocks so their END keywords do not
+ * prematurely terminate the scan.
+ *
+ * @param filePath      Absolute path to the file to scan
+ * @param className     Name of the structure to find (e.g. "ThisWindow")
+ * @param structureType Structure keyword to match — CLASS | QUEUE | GROUP (default CLASS)
+ * @returns Array of MemberEnumItem, or empty array if class not found
+ */
+export function scanClassBodyForAllMembers(
+    filePath: string,
+    className: string,
+    structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS'
+): MemberEnumItem[] {
+    const results: MemberEnumItem[] = [];
+    try {
+        const content = fs.readFileSync(filePath, 'utf8');
+        const lines = content.split(/\r?\n/);
+        const headerPattern = new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP)`, 'i');
+
+        for (let j = 0; j < lines.length; j++) {
+            if (!headerPattern.test(lines[j])) continue;
+
+            let nestDepth = 0;
+
+            for (let k = j + 1; k < lines.length; k++) {
+                const raw = lines[k];
+                const stripped = raw.replace(/!.*$/, '').trim();
+
+                if (/^(GROUP|QUEUE|RECORD)\b/i.test(stripped) ||
+                    /^\w+\s+(GROUP|QUEUE|RECORD)\b/i.test(stripped)) {
+                    nestDepth++;
+                    continue;
+                }
+                if (/^END\s*$/i.test(stripped)) {
+                    if (nestDepth > 0) { nestDepth--; continue; }
+                    break;
+                }
+                if (nestDepth > 0) continue;
+                if (!stripped || /^(INCLUDE|MODULE|SECTION)\b/i.test(stripped)) continue;
+
+                // A member line: Label <whitespace> Type...
+                const memberMatch = raw.match(/^(\w+)\s+(.+?)(\s*!.*)?$/);
+                if (!memberMatch) continue;
+
+                const name = memberMatch[1];
+                const typeStr = (memberMatch[2] || '').replace(/!.*$/, '').trim();
+                const access = detectMemberAccess(raw);
+                const kind: 'method' | 'property' = /^PROCEDURE\b/i.test(typeStr) ? 'method' : 'property';
+
+                results.push({
+                    name,
+                    kind,
+                    signature: raw.trim(),
+                    type: typeStr,
+                    access,
+                    fromClass: className,
+                    line: k,
+                    file: filePath
+                });
+            }
+            // Only scan the first matching class definition
+            break;
+        }
+    } catch {
+        // Caller handles logging
+    }
+    return results;
+}
+
 /**
  * Scans the body of a named CLASS/QUEUE/GROUP in a file for a specific member.
  * Handles nested GROUP/QUEUE/RECORD blocks (nestDepth tracking) so their END
@@ -44,7 +141,7 @@ export function scanClassBodyForMember(
 ): MemberInfo | null {
     try {
         const content = fs.readFileSync(filePath, 'utf8');
-        const lines = content.split('\n');
+        const lines = content.split(/\r?\n/);
         const headerPattern = new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP)`, 'i');
 
         for (let j = 0; j < lines.length; j++) {
