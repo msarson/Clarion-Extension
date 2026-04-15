@@ -846,9 +846,11 @@ export class ImplementationProvider {
         if (cachedTokens && cachedTokens.length > 0) {
             const matchesLabel = (lbl: string): boolean => {
                 const parts = lbl.split('.');
-                return parts.length >= 2 &&
+                // Require exactly 2 parts (ClassName.MethodName) to avoid false positives
+                // with 3-part interface implementations (ClassName.InterfaceName.MethodName)
+                return parts.length === 2 &&
                     parts[0].toUpperCase() === className.toUpperCase() &&
-                    parts[parts.length - 1].toUpperCase() === methodName.toUpperCase();
+                    parts[1].toUpperCase() === methodName.toUpperCase();
             };
             const tokenCandidates = cachedTokens.filter(t =>
                 t.type === TokenType.Procedure &&
