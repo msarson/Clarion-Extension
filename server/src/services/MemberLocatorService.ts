@@ -125,7 +125,7 @@ export class MemberLocatorService {
         paramCount?: number
     ): Promise<MemberInfo | null> {
         const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-        const tokens = this.tokenCache.getTokens(document);
+        const tokens = this.tokenCache.getTokensByUri(document.uri) ?? this.tokenCache.getTokens(document);
 
         // 1. Walk INCLUDE chain reachable from this document
         const fromInclude = await this.findInIncludeChain(

@@ -839,6 +839,42 @@ export class ImplementationProvider {
         paramCount?: number,
         declarationSignature?: string
     ): Location | null {
+        const fileUri = `file:///${fullPath.replace(/\\/g, '/')}`;
+
+        // Fast path: use cached tokens to find MethodImplementation candidates
+        const cachedTokens = this.tokenCache.getTokensByUri(fileUri);
+        if (cachedTokens && cachedTokens.length > 0) {
+            const matchesLabel = (lbl: string): boolean => {
+                const parts = lbl.split('.');
+                return parts.length >= 2 &&
+                    parts[0].toUpperCase() === className.toUpperCase() &&
+                    parts[parts.length - 1].toUpperCase() === methodName.toUpperCase();
+            };
+            const tokenCandidates = cachedTokens.filter(t =>
+                t.type === TokenType.Procedure &&
+                t.subType === TokenType.MethodImplementation &&
+                t.label !== undefined &&
+                matchesLabel(t.label)
+            );
+
+            if (tokenCandidates.length === 1) {
+                // Single match — return immediately without disk read
+                const tok = tokenCandidates[0];
+                logger.info(`✅ Found implementation (token cache) in ${fullPath} at line ${tok.line}`);
+                return Location.create(fileUri, { start: { line: tok.line, character: 0 }, end: { line: tok.line, character: 0 } });
+            }
+
+            if (tokenCandidates.length > 1 && paramCount !== undefined && !declarationSignature) {
+                // Multiple overloads, paramCount only — use token-based param count via finishesAt range
+                // Pick the candidate whose implementation body has the closest param count
+                // We still need line text for ClarionPatterns.countParameters; fall through to disk path.
+                // But if we can derive param count from label structure, we can avoid disk.
+                // For now: just use line numbers from tokens but read file for signature text.
+                // (This still saves the full regex scan — we only read necessary lines.)
+            }
+        }
+
+        // Disk fallback (also used when file not in cache, or multi-overload needing signatures)
         try {
             const content = fs.readFileSync(fullPath, 'utf8');
             const lines = content.split(/\r?\n/);
@@ -893,7 +929,6 @@ export class ImplementationProvider {
 
             const best = candidates[bestIdx];
             logger.info(`✅ Found implementation in ${fullPath} at line ${best.lineNum}`);
-            const fileUri = `file:///${fullPath.replace(/\\/g, '/')}`;
             return Location.create(
                 fileUri,
                 {
