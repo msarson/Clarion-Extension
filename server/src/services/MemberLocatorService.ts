@@ -572,7 +572,6 @@ export class MemberLocatorService {
         let parentClassName: string | undefined;
 
         // Try include chain first, then indexer
-        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         const classInfo = await this.findClassInfoInDoc(className, document);
         if (classInfo?.parentClass) {
             parentClassName = classInfo.parentClass;
@@ -679,7 +678,6 @@ export class MemberLocatorService {
         className: string,
         document: TextDocument
     ): Promise<{ parentClass?: string } | null> {
-        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         // Quick scan: look for "ClassName  CLASS(ParentName)" in the document text
         const lines = document.getText().split('\n');
         const pattern = new RegExp(`^${className}\\s+CLASS\\s*\\((\\w+)\\)`, 'i');

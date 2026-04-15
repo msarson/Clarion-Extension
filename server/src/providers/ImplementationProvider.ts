@@ -336,7 +336,6 @@ export class ImplementationProvider {
                     const methodMatch = afterDot.match(/^(\w+)/);
                     if (methodMatch) {
                         const memberName = methodMatch[1];
-                        const tokens = this.tokenCache.getTokens(document);
                         const hasParens = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
                         const paramCount = hasParens
                             ? this.memberResolver.countParametersInCall(line, memberName)

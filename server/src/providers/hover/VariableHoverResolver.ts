@@ -1,9 +1,7 @@
 import { Hover, Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../../ClarionTokenizer';
-import { TokenHelper } from '../../utils/TokenHelper';
 import { TokenCache } from '../../TokenCache';
-import { ClarionDocumentSymbolProvider } from '../ClarionDocumentSymbolProvider';
 import { HoverFormatter, VariableInfo } from './HoverFormatter';
 import { ScopeAnalyzer } from '../../utils/ScopeAnalyzer';
 import { ClassDefinitionIndexer } from '../../utils/ClassDefinitionIndexer';
