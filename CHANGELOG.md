@@ -85,44 +85,29 @@ All notable changes to the Clarion Extension are documented here.
 ---
 
 ### [0.8.9] - 2026-04-13
-**Security**
+**Security Patch**
 
-- Updated dev dependencies to resolve Dependabot security alerts:
-  - `serialize-javascript` — RCE via `RegExp.flags` and CPU exhaustion DoS (via mocha transitive dependency)
-  - `diff` — Denial of Service in `parsePatch`/`applyPatch` (via mocha transitive dependency)
-  - Replaced deprecated `vscode-test` with `@vscode/test-electron` in client (fixes `@tootallnate/once` vulnerability)
+**Highlights:**
+- 🔒 Resolved Dependabot alerts: `serialize-javascript` RCE, `diff` DoS
+- 🔧 Replaced deprecated `vscode-test` with `@vscode/test-electron`
+
+[**→ Full details**](docs/changelogs/CHANGELOG-0.8.9.md)
 
 ---
 
 ### [0.8.8] - 2026-04-12
-**New Features**
+**Rename Symbol, Document Highlight & Workspace Search**
 
-- ✨ **Rename Symbol (F2)** — rename any user-defined symbol across the entire workspace in one step:
-  - Delegates to the References provider for scope-aware coverage — local/module/global variables, procedures, class members via `SELF`/`PARENT` chains
-  - `prepareRename` validates the position before the rename dialog opens and rejects Clarion keywords and built-in types
-  - Library/read-only files are protected — symbols declared in `.inc` files outside the project cannot be renamed
-- ✨ **Document Highlight** — pressing on a symbol highlights all occurrences in the current file
-- ✨ **Workspace Symbol Search** (`Ctrl+T`) — search for any procedure, class, or label across all files in the solution
+**Highlights:**
+- ✏️ Rename Symbol (F2) — scope-aware rename across entire workspace
+- 🔦 Document Highlight — all occurrences highlighted on cursor
+- 🔎 Workspace Symbol Search (Ctrl+T) — find any procedure/class/label across solution
+- 🐛 Hover/F12 for local class instances inside `MethodImplementation` scopes
+- 🐛 `!!!` doc comments now shown in hover for local variables and classes
+- 🐛 FAR on CLASS labels now returns correct positions and method implementations
+- 🐛 `SELF.Method()` / `PARENT.Method()` Go to Implementation and hover cross-file fix
 
-**Bug Fixes**
-
-- 🐛 **Hover and Go to Definition for local class instances inside `MethodImplementation` scopes** now correctly resolves variables declared in the parent `GlobalProcedure`'s data section:
-  - In Clarion, local classes declared in a `PROCEDURE`'s data section (e.g. `Kanban CLASS(KanbanWrapperClass)`) have their method implementations (`Kanban.Init PROCEDURE`, `Kanban.RegisterEvents PROCEDURE`, etc.) tokenized as flat, independent `MethodImplementation` scopes with no parent link — yet at runtime they share the parent procedure's local variable stack
-  - **Hover** (`SymbolFinderService.findLocalVariable`): when a variable isn't found in the method's own scope, the resolver now also searches all `GlobalProcedure` data sections in the file
-  - **Go to Definition** (`DefinitionProvider`): the same fallback was added — after the method's own DATA section search turns up nothing, all `GlobalProcedure` data sections are searched before giving up
-- 🐛 **`!!!` doc comments now appear in hover for local variables, classes, groups, and other procedure-level declarations:**
-  - `formatVariable` in `HoverFormatter` was not calling `DocCommentReader` at all — doc comments above local declarations were silently ignored
-  - `DocCommentReader.parseXml` now handles unclosed `<summary>` tags and plain `!!!` text with no XML tags — mirrors Clarion IDE's forgiving `<docroot>` wrapping behaviour where plain text nodes and malformed tags all fall back gracefully to showing the raw comment text
-  - The scope label in the hover card now uses a contextual noun derived from the declaration type: `CLASS(...)` → "class", `GROUP` → "group", `QUEUE` → "queue", etc., instead of always saying "variable"
-- 🐛 Fixed false-positive diagnostic "Procedure returns X but all RETURN statements are empty" for overloaded procedures — the validator now matches implementations by parameter signature, not just name, so a non-returning overload is no longer incorrectly flagged because another overload of the same name has a return type ([#44](https://github.com/msarson/Clarion-Extension/issues/44))
-- 🐛 **Find All References on a local CLASS label** now returns correct positions and complete results:
-  - Previously, FAR on a CLASS declaration label (e.g. `ThisWindow` in `ThisWindow CLASS(WindowManager)`) returned the CLASS *keyword* column for every CLASS declaration in the procedure instead of actual `ThisWindow` references — caused by `varName` extraction using `split(' ')[0]` on `"CLASS (ThisWindow)"`, yielding `"CLASS"` rather than the label
-  - Method implementation headers (`ThisWindow.Init PROCEDURE`, `ThisWindow.Kill PROCEDURE`, etc.) are now included — the token scan is expanded to the full file when a CLASS label is detected, since implementations live outside the declaring procedure's scope
-- 🐛 **Go to Implementation (Ctrl+F12) and hover for `SELF.Method()`** now correctly find implementations inherited from an external base class:
-  - Previously, `SELF.Method()` on a method declared in an external `.inc` file (e.g. `KanbanWrapper.inc`) and implemented in the corresponding `.clw` file only found the declaration — the implementation search was limited to the current file
-  - `ImplementationProvider` now resolves the member declaration first to obtain the declaration file, then uses the existing `.inc` → `.clw` redirection fallback to locate the implementation
-  - `MethodHoverResolver` now derives the `.clw` filename from `memberInfo.file` and passes it to the redirection-aware cross-file search (fixes both `SELF.Method()` and `PARENT.Method()` hover)
-  - Hover now also shows the implementation signature as a code snippet alongside the file/line reference
+[**→ Full details**](docs/changelogs/CHANGELOG-0.8.8.md)
 
 ---
 
