@@ -220,17 +220,17 @@ export class VariableHoverResolver {
         );
         let containingClassName: string | undefined;
         if (isClassProperty) {
-            const classToken = tokens.slice(0, tokens.indexOf(globalVar)).reverse().find(t =>
-                t.type === TokenType.Structure &&
-                (t as any).subType === TokenType.Class
+            // 🚀 PERF: use structure index (O(classes)) instead of full token scan + slice + reverse
+            const classToken = structure.getClasses().find(t =>
+                t.line < globalVar.line && (t.finishesAt === undefined || t.finishesAt >= globalVar.line)
             );
             containingClassName = classToken?.label ?? classToken?.value;
         }
         let containingInterfaceName: string | undefined;
         if (isInterfaceMethod) {
-            const ifaceToken = tokens.slice(0, tokens.indexOf(globalVar)).reverse().find(t =>
-                t.type === TokenType.Structure &&
-                (t as any).subType === TokenType.Interface
+            // 🚀 PERF: use structure index (O(interfaces)) instead of full token scan + slice + reverse
+            const ifaceToken = structure.getInterfaces().find(t =>
+                t.line < globalVar.line && (t.finishesAt === undefined || t.finishesAt >= globalVar.line)
             );
             containingInterfaceName = ifaceToken?.label ?? ifaceToken?.value;
         }

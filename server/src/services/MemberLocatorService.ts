@@ -15,7 +15,7 @@ import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
 import { CrossFileCache } from '../providers/hover/CrossFileCache';
-import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload } from '../utils/ClassMemberResolver';
+import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, detectMemberAccess } from '../utils/ClassMemberResolver';
 import { SymbolFinderService } from './SymbolFinderService';
 import { SolutionManager } from '../solution/solutionManager';
 import * as fs from 'fs';
@@ -139,7 +139,7 @@ export class MemberLocatorService {
         const infos = this.classIndexer.findClass(className);
         if (infos && infos.length > 0) {
             const info = infos.find(d => !d.isType) || infos[0];
-            const result = this.scanBodyForMember(info.filePath, className, memberName, paramCount, info.structureType);
+            const result = await this.scanBodyForMember(info.filePath, className, memberName, paramCount, info.structureType);
             if (result) return result;
             if (info.structureType === 'CLASS' && info.parentClass) {
                 return this.walkParentChain(info.parentClass, memberName, paramCount, new Set([className.toLowerCase()]));
@@ -275,12 +275,19 @@ export class MemberLocatorService {
             if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
             visited.add(resolvedPath.toLowerCase());
 
-            const result = this.scanBodyForMember(resolvedPath, className, memberName, paramCount);
-            if (result) return result;
-
-            // Recurse into nested INCLUDEs within this file
+            // 🚀 Load once — use tokens for member lookup, then recurse into nested INCLUDEs
             const data = await this.loadDocument(resolvedPath);
             if (data) {
+                const result = this.findMemberFromTokens(data.tokens, data.doc, resolvedPath, className, memberName, paramCount);
+                if (result) return result;
+                // Fallback to disk scan for edge cases
+                const diskResult = scanClassBodyForMember(
+                    resolvedPath, className, memberName, paramCount, 'CLASS',
+                    (line) => this.countParamsInDecl(line),
+                    (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc)
+                );
+                if (diskResult) return diskResult;
+
                 const nested = await this.findInIncludeChain(
                     className, memberName, data.tokens, path.dirname(resolvedPath), paramCount, visited
                 );
@@ -291,12 +298,12 @@ export class MemberLocatorService {
     }
 
     /** Walks the CLASS(Parent) inheritance chain via the class index. */
-    private walkParentChain(
+    private async walkParentChain(
         className: string,
         memberName: string,
         paramCount: number | undefined,
         visited: Set<string>
-    ): MemberInfo | null {
+    ): Promise<MemberInfo | null> {
         if (visited.has(className.toLowerCase())) return null;
         visited.add(className.toLowerCase());
 
@@ -304,7 +311,7 @@ export class MemberLocatorService {
         if (!classInfos || classInfos.length === 0) return null;
 
         const classInfo = classInfos.find(d => !d.isType) || classInfos[0];
-        const result = this.scanBodyForMember(classInfo.filePath, className, memberName, paramCount, classInfo.structureType);
+        const result = await this.scanBodyForMember(classInfo.filePath, className, memberName, paramCount, classInfo.structureType);
         if (result) return result;
 
         if (classInfo.parentClass) {
@@ -313,14 +320,20 @@ export class MemberLocatorService {
         return null;
     }
 
-    /** Thin wrapper around scanClassBodyForMember using the shared overload selector. */
-    private scanBodyForMember(
+    /** Thin wrapper: tries token-based member lookup first, falls back to disk scan. */
+    private async scanBodyForMember(
         filePath: string,
         className: string,
         memberName: string,
         paramCount: number | undefined,
         structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS'
-    ): MemberInfo | null {
+    ): Promise<MemberInfo | null> {
+        const data = await this.loadDocument(filePath);
+        if (data) {
+            const result = this.findMemberFromTokens(data.tokens, data.doc, filePath, className, memberName, paramCount, structureType);
+            if (result) return result;
+        }
+        // Fallback to disk-based scan (handles any edge cases not covered by token approach)
         return scanClassBodyForMember(
             filePath, className, memberName, paramCount, structureType,
             (line) => this.countParamsInDecl(line),
@@ -340,6 +353,129 @@ export class MemberLocatorService {
             else if (char === ',' && depth === 0) count++;
         }
         return count + 1;
+    }
+
+    /**
+     * Token-based replacement for scanClassBodyForAllMembers.
+     * Uses the DocumentStructure token tree: finds the CLASS/QUEUE/GROUP token by label,
+     * collects Label tokens in its line range, and skips members inside nested structures.
+     * Falls back to empty array (caller then tries the disk-based scan).
+     */
+    private extractMembersFromTokens(
+        tokens: Token[],
+        doc: TextDocument,
+        className: string,
+        filePath: string,
+        structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS'
+    ): MemberEnumItem[] {
+        const classToken = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.value.toUpperCase() === structureType &&
+            t.label?.toLowerCase() === className.toLowerCase() &&
+            t.finishesAt !== undefined
+        );
+        if (!classToken || classToken.finishesAt === undefined) return [];
+        const classEnd = classToken.finishesAt;
+
+        // Ranges of nested GROUP/QUEUE/RECORD structures inside this class — skip their contents
+        const nestedRanges = tokens
+            .filter(t =>
+                t.type === TokenType.Structure &&
+                ['GROUP', 'QUEUE', 'RECORD'].includes(t.value.toUpperCase()) &&
+                t.finishesAt !== undefined &&
+                t.line > classToken.line &&
+                t.line < classEnd
+            )
+            .map(t => ({ start: t.line, end: t.finishesAt! }));
+
+        const isInsideNested = (line: number): boolean =>
+            nestedRanges.some(r => line > r.start && line < r.end);
+
+        const docLines = doc.getText().split(/\r?\n/);
+        const results: MemberEnumItem[] = [];
+
+        for (const token of tokens) {
+            if (token.line <= classToken.line || token.line >= classEnd) continue;
+            if (token.type !== TokenType.Label) continue;
+            if (token.start !== 0) continue;
+            if (isInsideNested(token.line)) continue;
+
+            const raw = docLines[token.line] ?? '';
+            const memberMatch = raw.match(/^(\w+)\s+(.+?)(\s*!.*)?$/);
+            if (!memberMatch) continue;
+
+            const name = memberMatch[1];
+            const typeStr = (memberMatch[2] || '').replace(/!.*$/, '').trim();
+            const access = detectMemberAccess(raw);
+            const kind: 'method' | 'property' = /^PROCEDURE\b/i.test(typeStr) ? 'method' : 'property';
+
+            results.push({ name, kind, signature: raw.trim(), type: typeStr, access, fromClass: className, line: token.line, file: filePath });
+        }
+        return results;
+    }
+
+    /**
+     * Token-based replacement for scanClassBodyForMember.
+     * Finds a specific member by name inside a CLASS/QUEUE/GROUP, supporting overloads.
+     * Falls back to null (caller then tries disk-based scan).
+     */
+    private findMemberFromTokens(
+        tokens: Token[],
+        doc: TextDocument,
+        filePath: string,
+        className: string,
+        memberName: string,
+        paramCount: number | undefined,
+        structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS'
+    ): MemberInfo | null {
+        const classToken = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.value.toUpperCase() === structureType &&
+            t.label?.toLowerCase() === className.toLowerCase() &&
+            t.finishesAt !== undefined
+        );
+        if (!classToken || classToken.finishesAt === undefined) return null;
+        const classEnd = classToken.finishesAt;
+
+        const nestedRanges = tokens
+            .filter(t =>
+                t.type === TokenType.Structure &&
+                ['GROUP', 'QUEUE', 'RECORD'].includes(t.value.toUpperCase()) &&
+                t.finishesAt !== undefined &&
+                t.line > classToken.line &&
+                t.line < classEnd
+            )
+            .map(t => ({ start: t.line, end: t.finishesAt! }));
+
+        const isInsideNested = (line: number): boolean =>
+            nestedRanges.some(r => line > r.start && line < r.end);
+
+        const docLines = doc.getText().split(/\r?\n/);
+        const candidates: OverloadCandidate[] = [];
+
+        for (const token of tokens) {
+            if (token.line <= classToken.line || token.line >= classEnd) continue;
+            if (token.type !== TokenType.Label) continue;
+            if (token.start !== 0) continue;
+            if (token.value.toLowerCase() !== memberName.toLowerCase()) continue;
+            if (isInsideNested(token.line)) continue;
+
+            const memberLine = docLines[token.line] ?? '';
+            const afterMember = memberLine.substring(token.value.length).trimStart();
+            const type = (afterMember.split(/\s*!/).shift() || afterMember).trim() || 'Unknown';
+            let declParamCount = 0;
+            if (type.toUpperCase().startsWith('PROCEDURE')) {
+                declParamCount = this.countParamsInDecl(memberLine);
+            }
+            candidates.push({ type, line: token.line, paramCount: declParamCount, signature: memberLine.trim() });
+        }
+
+        const bestMatch = selectBestMemberOverload(candidates, paramCount);
+        if (bestMatch) {
+            const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
+            return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri, signature: bestMatch.signature };
+        }
+        return null;
     }
 
     /**
@@ -390,8 +526,12 @@ export class MemberLocatorService {
         if (!fs.existsSync(filePath)) return null;
         try {
             const content = await fs.promises.readFile(filePath, 'utf-8');
-            const doc = TextDocument.create(`file:///${filePath.replace(/\\/g, '/')}`, 'clarion', 1, content);
-            const tokens = this.tokenCache.getTokens(doc);
+            const uri = `file:///${filePath.replace(/\\/g, '/')}`;
+            const doc = TextDocument.create(uri, 'clarion', 1, content);
+            // 🚀 Prefer tokens already in the cache (e.g. file open in editor) to avoid
+            // overwriting the cache entry with disk content (version=1) which may be stale.
+            const cachedTokens = this.tokenCache.getTokensByUri(uri);
+            const tokens = cachedTokens ?? this.tokenCache.getTokens(doc);
             return { doc, tokens };
         } catch {
             return null;
@@ -460,7 +600,7 @@ export class MemberLocatorService {
 
     /**
      * Locates the raw (unfiltered) MemberEnumItem[] for a single class in:
-     *   1. Current document
+     *   1. Current document (token-based, then disk fallback)
      *   2. INCLUDE chain reachable from the document
      *   3. ClassDefinitionIndexer
      */
@@ -471,9 +611,11 @@ export class MemberLocatorService {
         const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         const tokens = this.tokenCache.getTokens(document);
 
-        // 1. Current document
-        const members = scanClassBodyForAllMembers(docPath, className);
-        if (members.length > 0) return members;
+        // 1. Current document — token-based first, disk fallback
+        const tokenMembers = this.extractMembersFromTokens(tokens, document, className, docPath);
+        if (tokenMembers.length > 0) return tokenMembers;
+        const diskMembers = scanClassBodyForAllMembers(docPath, className);
+        if (diskMembers.length > 0) return diskMembers;
 
         // 2. INCLUDE chain
         const fromInclude = await this.findAllMembersInIncludeChain(
@@ -486,6 +628,11 @@ export class MemberLocatorService {
         const infos = this.classIndexer.findClass(className);
         if (infos && infos.length > 0) {
             const info = infos.find(d => !d.isType) || infos[0];
+            const indexedData = await this.loadDocument(info.filePath);
+            if (indexedData) {
+                const indexedMembers = this.extractMembersFromTokens(indexedData.tokens, indexedData.doc, className, info.filePath, info.structureType);
+                if (indexedMembers.length > 0) return indexedMembers;
+            }
             return scanClassBodyForAllMembers(info.filePath, className, info.structureType);
         }
 
@@ -505,11 +652,15 @@ export class MemberLocatorService {
             if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
             visited.add(resolvedPath.toLowerCase());
 
-            const members = scanClassBodyForAllMembers(resolvedPath, className);
-            if (members.length > 0) return members;
-
+            // 🚀 Load once — use tokens for member extraction, then recurse into nested INCLUDEs
             const data = await this.loadDocument(resolvedPath);
             if (data) {
+                const members = this.extractMembersFromTokens(data.tokens, data.doc, className, resolvedPath);
+                if (members.length > 0) return members;
+                // Fallback to disk scan if token-based found nothing (e.g. file not yet tokenized)
+                const diskMembers = scanClassBodyForAllMembers(resolvedPath, className);
+                if (diskMembers.length > 0) return diskMembers;
+
                 const nested = await this.findAllMembersInIncludeChain(
                     className, data.tokens, path.dirname(resolvedPath), visited
                 );

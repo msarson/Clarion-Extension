@@ -1361,6 +1361,15 @@ export class DocumentStructure {
     }
 
     /**
+     * Gets all INTERFACE structure blocks in the document
+     * @returns Array of INTERFACE tokens (empty if none found)
+     */
+    public getInterfaces(): Token[] {
+        const ifaceTokens = this.structuresByType.get('INTERFACE');
+        return ifaceTokens ? [...ifaceTokens] : [];
+    }
+
+    /**
      * Finds all MAP procedure declarations with matching name
      * Searches inside MAP blocks for procedure declarations (including overloads)
      * @param procName Procedure name to search for (case-insensitive)

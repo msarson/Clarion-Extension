@@ -92,10 +92,11 @@ export class SymbolFinderService {
      * Handles QUEUE(TypeName), GROUP(TypeName), CLASS(TypeName) as well as plain types.
      */
     public static extractTypeInfo(labelToken: Token, tokens: Token[]): string {
-        const idx = tokens.indexOf(labelToken);
-        if (idx + 1 >= tokens.length) return 'UNKNOWN';
-        const next = tokens[idx + 1];
-        if (next.line !== labelToken.line) return 'UNKNOWN';
+        // 🚀 PERF: build line tokens once — avoids O(n) indexOf + multiple O(n) filter passes
+        const lineTokens = tokens.filter(t => t.line === labelToken.line);
+        const idx = lineTokens.indexOf(labelToken);
+        if (idx + 1 >= lineTokens.length) return 'UNKNOWN';
+        const next = lineTokens[idx + 1];
 
         if (next.type === TokenType.Type) return next.value;
         if (next.type === TokenType.Variable || next.type === TokenType.Label) return next.value;
@@ -105,8 +106,8 @@ export class SymbolFinderService {
         }
         if (next.type === TokenType.Structure) {
             // Look for type arg: QUEUE(TypeName) → "QUEUE(TypeName)"
-            const lineTokens = tokens.filter(t => t.line === labelToken.line && t.start > next.start);
-            const typeArg = lineTokens.find(t =>
+            const afterNext = lineTokens.filter(t => t.start > next.start);
+            const typeArg = afterNext.find(t =>
                 (t.type === TokenType.Label || t.type === TokenType.Variable) &&
                 t.value !== '(' && t.value !== ')'
             );
@@ -114,8 +115,8 @@ export class SymbolFinderService {
         }
         if (next.type === TokenType.TypeReference) {
             // LIKE(TypeName) → "LIKE(TypeName)"
-            const lineTokens = tokens.filter(t => t.line === labelToken.line && t.start > next.start);
-            const typeArg = lineTokens.find(t =>
+            const afterNext = lineTokens.filter(t => t.start > next.start);
+            const typeArg = afterNext.find(t =>
                 (t.type === TokenType.Label || t.type === TokenType.Variable) &&
                 t.value !== '(' && t.value !== ')'
             );
