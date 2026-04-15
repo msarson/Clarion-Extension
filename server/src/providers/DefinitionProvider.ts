@@ -1935,7 +1935,12 @@ export class DefinitionProvider {
         const equatesPath = SolutionManager.getInstance()?.getEquatesPath();
         if (equatesPath && fs.existsSync(equatesPath)) {
             const equatesUri = `file:///${equatesPath.replace(/\\/g, '/')}`;
-            const equatesDoc = TextDocument.create(equatesUri, 'clarion', 1, fs.readFileSync(equatesPath, 'utf8'));
+            // Skip disk read if equates.clw is already cached — findMemberInClass uses
+            // getTokensByUri first so the empty content will never be tokenized
+            const equatesDoc = TextDocument.create(
+                equatesUri, 'clarion', 1,
+                this.tokenCache.getTokensByUri(equatesUri) ? '' : fs.readFileSync(equatesPath, 'utf8')
+            );
             const equatesInfo = await this.memberLocator.findMemberInClass(className, memberName, equatesDoc, paramCount);
             if (equatesInfo) {
                 return Location.create(equatesInfo.file, Range.create(equatesInfo.line, 0, equatesInfo.line, 0));
