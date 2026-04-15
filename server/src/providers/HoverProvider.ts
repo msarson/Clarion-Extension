@@ -294,45 +294,6 @@ export class HoverProvider {
     }
 
     /**
-     * Finds parameter information
-     */
-    private findParameterInfo(word: string, document: TextDocument, currentScope: Token): { type: string; line: number } | null {
-        const content = document.getText();
-        const lines = content.split('\n');
-        const procedureLine = lines[currentScope.line];
-
-        if (!procedureLine) {
-            return null;
-        }
-
-        // Match PROCEDURE(...) or FUNCTION(...) pattern
-        const match = procedureLine.match(ClarionPatterns.PROCEDURE_WITH_PARAMS);
-        if (!match || !match[1]) {
-            return null;
-        }
-
-        const paramString = match[1];
-        const params = paramString.split(',');
-
-        for (const param of params) {
-            const trimmedParam = param.trim();
-            // Strip optional-parameter angle brackets: <Key K> → Key K
-            const stripped = trimmedParam.replace(/^<(.*)>$/, '$1').trim();
-            // Extract parameter: TYPE paramName or TYPE paramName=default
-            const paramMatch = stripped.match(/([*&]?\s*\w+)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*=.*)?$/i);
-            if (paramMatch) {
-                const type = paramMatch[1].trim();
-                const paramName = paramMatch[2];
-                if (paramName.toLowerCase() === word.toLowerCase()) {
-                    return { type, line: currentScope.line };
-                }
-            }
-        }
-
-        return null;
-    }
-
-    /**
      * Finds local variable information using the document symbol tree
      * This is more reliable than token-based search as it uses the outline provider's hierarchy
      */

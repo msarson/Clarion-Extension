@@ -164,13 +164,20 @@ export class SymbolFinderService {
             // Strip optional-parameter angle brackets: <Key K> → Key K
             const stripped = trimmedParam.replace(/^<(.*)>$/, '$1').trim();
             // Match: [*&]? TYPE NAME [= default]
-            const paramMatch = stripped.match(/([*&]?\s*\w+)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*=.*)?$/i);
+            // NAME may be a prefixed identifier: PREFIX:Name (e.g. LOC:test)
+            const paramMatch = stripped.match(/([*&]?\s*\w+)\s+([A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)?)(?:\s*=.*)?$/i);
             
             if (paramMatch) {
                 const type = paramMatch[1].trim();
                 const paramName = paramMatch[2];
                 
-                if (paramName.toLowerCase() === word.toLowerCase()) {
+                // Match exact name (LOC:test === LOC:test) or bare suffix (test matches LOC:test)
+                const paramLower = paramName.toLowerCase();
+                const wordLower = word.toLowerCase();
+                const isMatch = paramLower === wordLower ||
+                    paramLower.endsWith(':' + wordLower);
+                
+                if (isMatch) {
                     logger.info(`✅ Found parameter: ${paramName} of type ${type}`);
                     
                     // Create a synthetic token for the parameter
