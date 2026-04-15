@@ -159,7 +159,7 @@ GlobalProcedure
   ├── Structure (GROUP/QUEUE/RECORD in data section → children of procedure)
   │     └── Label (field declarations → children of structure)
   ├── Structure (CLASS in data section)
-  │     └── MethodDeclaration tokens (children of CLASS)
+  │     └── MethodDeclaration tokens (children of CLASS)  ← only METHODS, not properties
   └── Routine
         └── (local data, nested structures)
 
@@ -173,6 +173,9 @@ MAP
 INTERFACE
   └── InterfaceMethod declarations
 ```
+
+> **CLASS children caveat:** `classToken.children` contains only `MethodDeclaration` Procedure tokens. Plain CLASS properties (Label + type declarations) are **not** added to `children`. To enumerate properties, use a line-range scan with `classToken.finishesAt` (see *Find all members of a CLASS* in Common Lookup Patterns).
+
 
 ### Traversal patterns
 
@@ -226,6 +229,18 @@ const parent: Token | undefined = structure.getParent(token);
 // O(1): Walk up to nearest scope-defining ancestor (procedure/routine/MODULE)
 const scope: Token | undefined = structure.getParentScope(token);
 ```
+
+### Public collection accessors
+
+```typescript
+// All CLASS structure tokens in the document (O(1) — backed by structuresByType)
+structure.getClasses(): Token[]
+
+// All INTERFACE structure tokens in the document (O(1))
+structure.getInterfaces(): Token[]
+```
+
+Use these instead of scanning the full token array when you need to find the CLASS/INTERFACE a variable belongs to — it reduces an O(n²) scan to O(classes).
 
 ### Private indexes (accessible from within DocumentStructure methods)
 
@@ -368,6 +383,57 @@ function getRoutineAtLine(tokens: Token[], line: number): Token | undefined {
 const resolvedPath = directiveToken.referencedFile;
 ```
 
+### Find the CLASS/INTERFACE that contains a given token (by line)
+
+```typescript
+// Use structure.getClasses() — O(classes) instead of O(n²) full-array scan
+const structure = TokenCache.getInstance().getStructure(document);
+const containingClass = structure.getClasses().find(t =>
+    t.line < myToken.line &&
+    (t.finishesAt === undefined || t.finishesAt >= myToken.line)
+);
+// Same for interfaces:
+const containingInterface = structure.getInterfaces().find(t =>
+    t.line < myToken.line &&
+    (t.finishesAt === undefined || t.finishesAt >= myToken.line)
+);
+```
+
+### Find all members (properties + methods) of a CLASS by line range
+
+`classToken.children` only has method declarations — use line-range filtering for properties:
+
+```typescript
+const classToken = structure.getClasses().find(t =>
+    t.label?.toUpperCase() === 'MYCLASS'
+);
+if (classToken && classToken.finishesAt !== undefined) {
+    const classEnd = classToken.finishesAt;
+
+    // Ranges of nested structures to skip (GROUP/QUEUE/RECORD inside the class)
+    const nestedRanges = tokens
+        .filter(t =>
+            t.type === TokenType.Structure &&
+            ['GROUP', 'QUEUE', 'RECORD'].includes(t.value.toUpperCase()) &&
+            t.finishesAt !== undefined &&
+            t.line > classToken.line && t.line < classEnd
+        )
+        .map(t => ({ start: t.line, end: t.finishesAt! }));
+
+    const isNested = (line: number) =>
+        nestedRanges.some(r => line > r.start && line < r.end);
+
+    // All Label tokens at col 0 inside the class, not inside nested structures
+    const members = tokens.filter(t =>
+        t.type === TokenType.Label &&
+        t.start === 0 &&
+        t.line > classToken.line &&
+        t.line < classEnd &&
+        !isNested(t.line)
+    );
+}
+```
+
 ---
 
 ## Anti-Patterns — Don't Do These
@@ -457,6 +523,37 @@ const prevToken = tokens[idx - 1];
 const lineTokens = structure.getTokensByLine(targetToken.line) ?? [];
 const idx = lineTokens.indexOf(targetToken);
 const prevToken = lineTokens[idx - 1];
+```
+
+### ❌ Scanning all tokens to find which CLASS contains a token
+
+```typescript
+// WRONG: O(n²) — iterates backward through ALL tokens for every variable
+const containingClass = tokens.slice(0, tokens.indexOf(varToken)).reverse()
+    .find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'CLASS');
+```
+
+```typescript
+// CORRECT: getClasses() is O(classes), not O(n)
+const containingClass = structure.getClasses().find(t =>
+    t.line < varToken.line &&
+    (t.finishesAt === undefined || t.finishesAt >= varToken.line)
+);
+```
+
+### ❌ Creating a TextDocument with version=1 and calling `getTokens()` when the file may be open
+
+```typescript
+// WRONG: if the file is open in the editor (version > 1), this overwrites
+// the live cache entry with stale disk tokens
+const doc = TextDocument.create(uri, 'clarion', 1, fs.readFileSync(filePath, 'utf8'));
+const tokens = TokenCache.getInstance().getTokens(doc);
+```
+
+```typescript
+// CORRECT: check the cache first; only tokenize if not already cached
+const cache = TokenCache.getInstance();
+const tokens = cache.getTokensByUri(uri) ?? cache.getTokens(doc);
 ```
 
 ---
