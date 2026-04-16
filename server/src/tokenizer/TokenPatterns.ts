@@ -66,7 +66,7 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.ExecutionMarker]: /\b(?:CODE|DATA)\b/i,
     [TokenType.Type]: /\b(?:BYTE|SHORT|USHORT|LONG|ULONG|REAL|SREAL|DECIMAL|PDECIMAL|STRING|CSTRING|PSTRING|DATE|TIME|ASTRING|ANY|BSTRING|MEMO|SIGNED|UNSIGNED)(?=\(|\s|,|$)/i,
     [TokenType.TypeAnnotation]: /:\s*(?:byte|short|ushort|long|ulong|real|sreal|decimal|pdecimal|string|cstring|pstring|date|time)\b/i,
-    [TokenType.Directive]: /\b(?:COMPILE|OMIT|EMBED|SECTION|ENDSECTION)\b/i,
+    [TokenType.Directive]: /\b(?:COMPILE|OMIT|EMBED|SECTION|ENDSECTION|INCLUDE)\b/i,
     // ✅ Structure is handled specially in PatternMatcher - see STRUCTURE_PATTERNS
     // DO NOT combine patterns here as it breaks negative lookbehinds!
     [TokenType.WindowElement]: /\b(?:BUTTON|ENTRY|TEXT|LIST|COMBO|CHECK|RADIO|IMAGE|LINE|BOX|ELLIPSE|PANEL|PROGRESS|REGION|PROMPT|SPIN|ITEM)\b|STRING\s*\(@[^)]*\)/i,
@@ -76,7 +76,7 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Number]: /\b[0-9]+(\.[0-9]+)?\b/i,
     [TokenType.Operator]: /[\+\-\*\/\=\>\<\&\|\~]/,
     [TokenType.Delimiter]: /[\(\)\[\]\{\}\,\:\;]/,
-    [TokenType.Label]: /^(?!(?:COMPILE|OMIT|EMBED|SECTION|ENDSECTION|MODULE|MAP|CLASS|FILE|GROUP|QUEUE|VIEW|WINDOW|REPORT|INTERFACE|RECORD|PROGRAM|MEMBER|END)(?![:\w]))[A-Za-z_][A-Za-z0-9_:]*/i,  // Starts at column 0, can include colons. Excludes bare keywords but NOT colon-qualified names like FILE:Queue
+    [TokenType.Label]: /^(?!(?:COMPILE|OMIT|EMBED|SECTION|ENDSECTION|INCLUDE|MODULE|MAP|CLASS|FILE|GROUP|QUEUE|VIEW|WINDOW|REPORT|INTERFACE|RECORD|PROGRAM|MEMBER|END)(?![:\w]))[A-Za-z_][A-Za-z0-9_:]*/i,  // Starts at column 0, can include colons. Excludes bare keywords but NOT colon-qualified names like FILE:Queue
     [TokenType.Variable]: /\b(?!(?:IF|LOOP|CASE|ACCEPT|EXECUTE|BEGIN|FILE|QUEUE|GROUP|RECORD|CLASS|WINDOW|REPORT|MODULE|MAP|VIEW|INTERFACE|END)\b)[A-Za-z_][A-Za-z0-9_]*\b/i,  // Exclude structure keywords to allow them to match Structure type first
     [TokenType.ImplicitVariable]: /\b[A-Za-z_][A-Za-z0-9_]*[$#"]/i,  // ✅ Variables ending with implicit type suffixes
     [TokenType.Function]: /\b[A-Za-z_][A-Za-z0-9_]*(?=\()/i,
