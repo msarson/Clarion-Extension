@@ -775,7 +775,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             }
 
             if (symbols === undefined) {
-                logger.warn(`⚠️ executeDocumentSymbolProvider timed out after ${this._symbolRequestTimeoutMs}ms — showing cached symbols, retrying in 5s`);
+                logger.error(`❌ executeDocumentSymbolProvider timed out after ${this._symbolRequestTimeoutMs}ms for ${this.activeEditor?.document.fileName} — showing cached symbols (${this._lastKnownSymbols.length}), retrying in 5s`);
                 // Schedule a single retry so the view recovers once the server catches up
                 if (this._retryTimeout) clearTimeout(this._retryTimeout);
                 this._retryTimeout = setTimeout(() => {
