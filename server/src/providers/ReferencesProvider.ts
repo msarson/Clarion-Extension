@@ -14,6 +14,7 @@ import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { serverSettings } from '../serverSettings';
 import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
+import { isAttributeKeyword } from '../utils/AttributeKeywords';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
@@ -57,6 +58,12 @@ export class ReferencesProvider {
 
         let word = document.getText(wordRange);
         if (!word || word.length === 0) return null;
+
+        // Attribute keywords (ONCE, PRIVATE, VIRTUAL, DERIVED, etc.) are not symbols
+        if (isAttributeKeyword(word)) {
+            logger.info(`⏭️ [FAR] Skipping attribute keyword "${word}" — not a referenceable symbol`);
+            return null;
+        }
 
         // When cursor lands on any segment of a chained expression (e.g. "Order" in
         // SELF.Order.MainKey, or "Thumb" in SELF.Sort.Thumb), getWordRangeAtPosition
