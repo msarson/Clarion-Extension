@@ -61,7 +61,9 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     // Symbol request guard — prevents concurrent executeDocumentSymbolProvider calls
     // and abandons stale responses when a newer request has been issued.
     private _symbolRequestGeneration: number = 0;
-    private _symbolRequestTimeoutMs: number = 10000; // Abandon request after 10s
+    private _symbolRequestTimeoutMs: number = 10000; // Wait 10s before falling back to cached
+    private _lastKnownSymbols: DocumentSymbol[] = [];   // Shown while server is busy
+    private _retryTimeout: NodeJS.Timeout | null = null; // Scheduled retry after timeout
 
     // Centralized element tracking registry
     private registry = new SymbolElementRegistry();
@@ -80,6 +82,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             const perfStart = performance.now();
             
             this.activeEditor = editor;
+            this._lastKnownSymbols = []; // Stale symbols from previous file are invalid
+            if (this._retryTimeout) { clearTimeout(this._retryTimeout); this._retryTimeout = null; }
             
             // Clear any active filter when changing documents
             if (this._filterText !== '') {
@@ -767,12 +771,18 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
 
             // Discard response if a newer request has been issued since this one started
             if (myGeneration !== this._symbolRequestGeneration) {
-                return [];
+                return this._lastKnownSymbols;
             }
 
             if (symbols === undefined) {
-                logger.warn(`⚠️ executeDocumentSymbolProvider timed out after ${this._symbolRequestTimeoutMs}ms`);
-                return [];
+                logger.warn(`⚠️ executeDocumentSymbolProvider timed out after ${this._symbolRequestTimeoutMs}ms — showing cached symbols, retrying in 5s`);
+                // Schedule a single retry so the view recovers once the server catches up
+                if (this._retryTimeout) clearTimeout(this._retryTimeout);
+                this._retryTimeout = setTimeout(() => {
+                    this._retryTimeout = null;
+                    this._onDidChangeTreeData.fire();
+                }, 5000);
+                return this._lastKnownSymbols;
             }
 
             const symbolsTime = performance.now() - symbolsStart;
@@ -817,10 +827,11 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 }
             }
 
+            this._lastKnownSymbols = regroupedSymbols;
             return regroupedSymbols;
         } catch (error) {
             logger.error(`Error getting document symbols: ${error}`);
-            return [];
+            return this._lastKnownSymbols;
         }
     }
     
