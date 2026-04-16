@@ -57,7 +57,14 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     // Document change debouncing
     private documentChangeDebounceTimeout: NodeJS.Timeout | null = null;
     private documentChangeDebounceDelay: number = 500; // 500ms debounce for document changes
-    
+
+    // Symbol request guard — prevents concurrent executeDocumentSymbolProvider calls
+    // and abandons stale responses when a newer request has been issued.
+    private _symbolRequestGeneration: number = 0;
+    private _symbolRequestTimeoutMs: number = 10000; // Wait 10s before falling back to cached
+    private _lastKnownSymbols: DocumentSymbol[] = [];   // Shown while server is busy
+    private _retryTimeout: NodeJS.Timeout | null = null; // Scheduled retry after timeout
+
     // Centralized element tracking registry
     private registry = new SymbolElementRegistry();
     
@@ -75,6 +82,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             const perfStart = performance.now();
             
             this.activeEditor = editor;
+            this._lastKnownSymbols = []; // Stale symbols from previous file are invalid
+            if (this._retryTimeout) { clearTimeout(this._retryTimeout); this._retryTimeout = null; }
             
             // Clear any active filter when changing documents
             if (this._filterText !== '') {
@@ -89,10 +98,16 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             perfLogger.info(`📊 PERF: Structure view updated for editor change: ${perfTime.toFixed(2)}ms`);
         }));
 
-        // Listen for document changes
+        // Listen for document changes (debounced — large files would otherwise flood the tree)
         this.disposables.push(workspace.onDidChangeTextDocument(event => {
             if (this.activeEditor && event.document === this.activeEditor.document) {
-                this._onDidChangeTreeData.fire();
+                if (this.documentChangeDebounceTimeout) {
+                    clearTimeout(this.documentChangeDebounceTimeout);
+                }
+                this.documentChangeDebounceTimeout = setTimeout(() => {
+                    this.documentChangeDebounceTimeout = null;
+                    this._onDidChangeTreeData.fire();
+                }, this.documentChangeDebounceDelay);
             }
         }));
         
@@ -738,13 +753,38 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
 
         try {
             const symbolsStart = performance.now();
-            
-            // For normal-sized documents, proceed with symbol request
-            const symbols = await commands.executeCommand<DocumentSymbol[]>(
-                'vscode.executeDocumentSymbolProvider',
-                this.activeEditor.document.uri
+
+            // Bump generation so any in-flight request from a previous call can be discarded
+            const myGeneration = ++this._symbolRequestGeneration;
+
+            // Race the symbol request against a timeout to avoid infinite spinner
+            const timeoutPromise = new Promise<undefined>(resolve =>
+                setTimeout(() => resolve(undefined), this._symbolRequestTimeoutMs)
             );
-            
+            const symbols = await Promise.race([
+                commands.executeCommand<DocumentSymbol[]>(
+                    'vscode.executeDocumentSymbolProvider',
+                    this.activeEditor.document.uri
+                ),
+                timeoutPromise
+            ]);
+
+            // Discard response if a newer request has been issued since this one started
+            if (myGeneration !== this._symbolRequestGeneration) {
+                return this._lastKnownSymbols;
+            }
+
+            if (symbols === undefined) {
+                logger.error(`❌ executeDocumentSymbolProvider timed out after ${this._symbolRequestTimeoutMs}ms for ${this.activeEditor?.document.fileName} — showing cached symbols (${this._lastKnownSymbols.length}), retrying in 5s`);
+                // Schedule a single retry so the view recovers once the server catches up
+                if (this._retryTimeout) clearTimeout(this._retryTimeout);
+                this._retryTimeout = setTimeout(() => {
+                    this._retryTimeout = null;
+                    this._onDidChangeTreeData.fire();
+                }, 5000);
+                return this._lastKnownSymbols;
+            }
+
             const symbolsTime = performance.now() - symbolsStart;
             perfLogger.info(`📊 PERF: executeDocumentSymbolProvider: ${symbolsTime.toFixed(2)}ms, returned ${symbols?.length || 0} symbols`);
             
@@ -787,10 +827,11 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
                 }
             }
 
+            this._lastKnownSymbols = regroupedSymbols;
             return regroupedSymbols;
         } catch (error) {
             logger.error(`Error getting document symbols: ${error}`);
-            return [];
+            return this._lastKnownSymbols;
         }
     }
     
