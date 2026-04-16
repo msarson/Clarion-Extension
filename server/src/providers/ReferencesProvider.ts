@@ -653,7 +653,18 @@ export class ReferencesProvider {
             }
         }
 
-        const filesToSearch = this.getMemberSearchFiles(document, declarationFile, effectiveModuleFile);
+        // When a CLASS is declared in the current document with no MODULE attribute,
+        // all implementations are in the same file — searching the entire solution
+        // would scan thousands of files and hang indefinitely on large solutions.
+        const isLocalClass = !effectiveModuleFile && !!className &&
+            this.isClassDeclaredInDocument(className, document);
+        if (isLocalClass) {
+            logger.error(`📌 [FAR] "${className}" is a local class — restricting search to current file`);
+        }
+
+        const filesToSearch = isLocalClass
+            ? [document.uri]
+            : this.getMemberSearchFiles(document, declarationFile, effectiveModuleFile);
 
         logger.info(`🔍 Searching ${filesToSearch.length} file(s) for ${className ?? '?'}.${memberName}`);
 
@@ -984,6 +995,22 @@ export class ReferencesProvider {
             logger.info(`🧬 Class family for "${declaringClass}": [${Array.from(family).join(', ')}]`);
         }
         return family;
+    }
+
+    /**
+     * Returns true when the named CLASS is declared inside the current document's
+     * token tree (i.e. it is a "local" class, not imported from an INC file).
+     * Used to avoid scanning the entire solution for classes that can only be
+     * referenced within the declaring file.
+     */
+    private isClassDeclaredInDocument(className: string, document: TextDocument): boolean {
+        const tokens = this.tokenCache.getTokens(document);
+        const nameLower = className.toLowerCase();
+        return tokens.some(t =>
+            t.type === TokenType.Structure &&
+            t.subType === TokenType.Class &&
+            (t.label ?? '').toLowerCase() === nameLower
+        );
     }
 
     /**

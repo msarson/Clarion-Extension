@@ -1389,7 +1389,10 @@ connection.onReferences(async (params: ReferenceParams) => {
     }
 
     try {
-        const references = await referencesProvider.provideReferences(document, params.position, params.context);
+        const references = await Promise.race([
+            referencesProvider.provideReferences(document, params.position, params.context),
+            new Promise<null>(resolve => setTimeout(() => resolve(null), 15000))
+        ]);
         logger.info(references ? `✅ Found ${references.length} reference(s)` : `⚠️ No references found`);
         return references;
     } catch (error) {
