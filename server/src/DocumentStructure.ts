@@ -1,6 +1,7 @@
 import { Token, TokenType } from "./ClarionTokenizer";
 import LoggerManager from "./logger";
 import { ProcedureUtils } from './utils/ProcedureUtils';
+import { isAttributeKeyword } from './utils/AttributeKeywords';
 
 const logger = LoggerManager.getLogger("DocumentStructure");
 logger.setLevel("error");// Production: Only log errors
@@ -845,7 +846,8 @@ export class DocumentStructure {
                      this.tokens[i + 1].value === "(" &&
                      !token.value.toLowerCase().startsWith("module") &&
                      !token.value.toLowerCase().startsWith("map") &&
-                     !token.value.startsWith("!")) {
+                     !token.value.startsWith("!") &&
+                     !isAttributeKeyword(token.value)) {
                 // This looks like a shorthand procedure declaration with separate tokens
                 token.subType = TokenType.MapProcedure;
                 token.parent = mapToken;
