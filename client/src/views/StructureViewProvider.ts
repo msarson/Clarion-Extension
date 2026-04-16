@@ -57,7 +57,12 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     // Document change debouncing
     private documentChangeDebounceTimeout: NodeJS.Timeout | null = null;
     private documentChangeDebounceDelay: number = 500; // 500ms debounce for document changes
-    
+
+    // Symbol request guard — prevents concurrent executeDocumentSymbolProvider calls
+    // and abandons stale responses when a newer request has been issued.
+    private _symbolRequestGeneration: number = 0;
+    private _symbolRequestTimeoutMs: number = 10000; // Abandon request after 10s
+
     // Centralized element tracking registry
     private registry = new SymbolElementRegistry();
     
@@ -89,10 +94,16 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             perfLogger.info(`📊 PERF: Structure view updated for editor change: ${perfTime.toFixed(2)}ms`);
         }));
 
-        // Listen for document changes
+        // Listen for document changes (debounced — large files would otherwise flood the tree)
         this.disposables.push(workspace.onDidChangeTextDocument(event => {
             if (this.activeEditor && event.document === this.activeEditor.document) {
-                this._onDidChangeTreeData.fire();
+                if (this.documentChangeDebounceTimeout) {
+                    clearTimeout(this.documentChangeDebounceTimeout);
+                }
+                this.documentChangeDebounceTimeout = setTimeout(() => {
+                    this.documentChangeDebounceTimeout = null;
+                    this._onDidChangeTreeData.fire();
+                }, this.documentChangeDebounceDelay);
             }
         }));
         
@@ -736,15 +747,34 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             return element.children ?? [];
         }
 
+        // Bump generation so any in-flight request from a previous call can be discarded
+        const myGeneration = ++this._symbolRequestGeneration;
+
         try {
             const symbolsStart = performance.now();
-            
-            // For normal-sized documents, proceed with symbol request
-            const symbols = await commands.executeCommand<DocumentSymbol[]>(
-                'vscode.executeDocumentSymbolProvider',
-                this.activeEditor.document.uri
+
+            // Race the symbol request against a timeout to avoid infinite spinner
+            const timeoutPromise = new Promise<undefined>(resolve =>
+                setTimeout(() => resolve(undefined), this._symbolRequestTimeoutMs)
             );
-            
+            const symbols = await Promise.race([
+                commands.executeCommand<DocumentSymbol[]>(
+                    'vscode.executeDocumentSymbolProvider',
+                    this.activeEditor.document.uri
+                ),
+                timeoutPromise
+            ]);
+
+            // Discard response if a newer request has been issued since this one started
+            if (myGeneration !== this._symbolRequestGeneration) {
+                return [];
+            }
+
+            if (symbols === undefined) {
+                logger.warn(`⚠️ executeDocumentSymbolProvider timed out after ${this._symbolRequestTimeoutMs}ms`);
+                return [];
+            }
+
             const symbolsTime = performance.now() - symbolsStart;
             perfLogger.info(`📊 PERF: executeDocumentSymbolProvider: ${symbolsTime.toFixed(2)}ms, returned ${symbols?.length || 0} symbols`);
             
