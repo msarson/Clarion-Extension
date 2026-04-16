@@ -578,7 +578,10 @@ documents.onDidChangeContent(event => {
                 
                 // Token cache already cleared if structure-affecting (above)
                 // Otherwise incremental tokenization will handle it efficiently
+                const tokensStart = performance.now();
                 const tokens = getTokens(document);
+                const tokensMs = (performance.now() - tokensStart).toFixed(1);
+                logger.error(`⏱️ [SERVER] getTokens: ${tokensMs}ms, ${tokens.length} tokens for ${path.basename(decodeURIComponent(uri))}`);
                 logger.info(`🔍 Successfully refreshed tokens after edit: ${uri}, got ${tokens.length} tokens`);
                 
                 // Validate document using fresh tokens
@@ -971,6 +974,24 @@ connection.onNotification('clarion/updatePaths', async (params: {
             for (const doc of documents.all()) {
                 validateTextDocument(doc, 'solutionReady');
             }
+
+            // Pre-build CLASS definition index for all project paths in the background.
+            // Without this, the first hover on a CLASS base type triggers a full scan of all
+            // .inc files (potentially thousands), causing a 4-5s freeze on the hover spinner.
+            setImmediate(async () => {
+                const { ClassDefinitionIndexer } = await import('./utils/ClassDefinitionIndexer');
+                const classIndexer = ClassDefinitionIndexer.getInstance();
+                const projectPaths = [...new Set(
+                    globalSolution!.projects.map(p => p.path).filter(Boolean)
+                )];
+                logger.error(`⏱️ [INDEX] Pre-building class index for ${projectPaths.length} project(s) in background`);
+                await Promise.all(projectPaths.map(p =>
+                    classIndexer.getOrBuildIndex(p).catch(err =>
+                        logger.error(`❌ [INDEX] Background build failed for ${p}: ${err}`)
+                    )
+                ));
+                logger.error(`⏱️ [INDEX] Background class index pre-build complete`);
+            });
             
             // Log each project in the global solution
             for (let i = 0; i < globalSolution.projects.length; i++) {

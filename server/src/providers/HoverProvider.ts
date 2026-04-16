@@ -731,9 +731,16 @@ export class HoverProvider {
         try {
             const classIndexer = ClassDefinitionIndexer.getInstance();
             
-            // Get project path from document URI
+            // Resolve project path — prefer SolutionManager's project path for consistent cache keying
             const docPath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
-            const projectPath = path.dirname(docPath);
+            let projectPath = path.dirname(docPath);
+            const solutionMgr = SolutionManager.getInstance();
+            if (solutionMgr) {
+                const project = solutionMgr.findProjectForFile(docPath);
+                if (project?.path) {
+                    projectPath = project.path;
+                }
+            }
             
             logger.info(`Looking up CLASS type: ${word} in project: ${projectPath}`);
             
