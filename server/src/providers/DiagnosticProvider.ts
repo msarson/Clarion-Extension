@@ -1028,14 +1028,19 @@ export class DiagnosticProvider {
                                     // Look for return type in attributes after closing paren
                                     // IMPORTANT: Only look on the SAME line as the PROCEDURE declaration
                                     if (k + 1 < tokens.length && tokens[k + 1].line === tokens[j].line) {
-                                        const returnType = extractReturnType(tokens, k + 1, true);
-                                        if (returnType) {
-                                            declarationsWithReturnTypes.push({
-                                                name: procNameToken.value,  // Just procedure name, no class prefix
-                                                returnType: returnType,
-                                                line: procNameToken.line,
-                                                signature: docLines[tokens[j].line] || ''
-                                            });
+                                        const lineTokens = tokens.filter(t => t.line === tokens[j].line);
+                                        const hasProc = lineTokens.some(t => t.value.toUpperCase() === 'PROC');
+                                        const hasDerived = lineTokens.some(t => t.value.toUpperCase() === 'DERIVED');
+                                        if (!hasProc && !hasDerived) {
+                                            const returnType = extractReturnType(tokens, k + 1, true);
+                                            if (returnType) {
+                                                declarationsWithReturnTypes.push({
+                                                    name: procNameToken.value,  // Just procedure name, no class prefix
+                                                    returnType: returnType,
+                                                    line: procNameToken.line,
+                                                    signature: docLines[tokens[j].line] || ''
+                                                });
+                                            }
                                         }
                                     }
                                     break;
@@ -1057,12 +1062,18 @@ export class DiagnosticProvider {
                 
                 const className = classNameToken.value;
                 
-                // Find END of CLASS
-                let classEndLine = -1;
-                for (let j = i + 1; j < tokens.length; j++) {
-                    if (tokens[j].value.toUpperCase() === 'END' && tokens[j].start === 0) {
-                        classEndLine = tokens[j].line;
-                        break;
+                // Use finishesAt from DocumentStructure (reliable); fall back to scanning
+                // for END at column 0 only if finishesAt is absent. The manual scan is
+                // unreliable when the CLASS END is indented (start !== 0), causing the
+                // inner loop to bleed past the class body into the rest of the file and
+                // falsely attribute later declarations to this class name.
+                let classEndLine: number = token.finishesAt ?? -1;
+                if (classEndLine === -1) {
+                    for (let j = i + 1; j < tokens.length; j++) {
+                        if (tokens[j].value.toUpperCase() === 'END' && tokens[j].start === 0) {
+                            classEndLine = tokens[j].line;
+                            break;
+                        }
                     }
                 }
                 
@@ -1088,14 +1099,21 @@ export class DiagnosticProvider {
                                     // Look for return type in attributes after closing paren
                                     // IMPORTANT: Only look on the SAME line as the PROCEDURE declaration
                                     if (k + 1 < tokens.length && tokens[k + 1].line === tokens[j].line) {
-                                        const returnType = extractReturnType(tokens, k + 1, true);
-                                        if (returnType) {
-                                             declarationsWithReturnTypes.push({
-                                                name: className + '.' + methodNameToken.value,
-                                                returnType: returnType,
-                                                line: methodNameToken.line,
-                                                signature: docLines[tokens[j].line] || ''
-                                            });
+                                        // Skip if PROC attribute present (callers don't have to capture, so
+                                        // empty RETURN is intentional) or DERIVED (override may drop return type)
+                                        const lineTokens = tokens.filter(t => t.line === tokens[j].line);
+                                        const hasProc = lineTokens.some(t => t.value.toUpperCase() === 'PROC');
+                                        const hasDerived = lineTokens.some(t => t.value.toUpperCase() === 'DERIVED');
+                                        if (!hasProc && !hasDerived) {
+                                            const returnType = extractReturnType(tokens, k + 1, true);
+                                            if (returnType) {
+                                                declarationsWithReturnTypes.push({
+                                                    name: className + '.' + methodNameToken.value,
+                                                    returnType: returnType,
+                                                    line: methodNameToken.line,
+                                                    signature: docLines[tokens[j].line] || ''
+                                                });
+                                            }
                                         }
                                     }
                                     break;
