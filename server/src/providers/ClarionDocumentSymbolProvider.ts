@@ -414,54 +414,49 @@ export class ClarionDocumentSymbolProvider {
                 
                 // Special handling for MAP and MODULE structures
                 if (value.toUpperCase() === "MAP" || value.toUpperCase() === "MODULE") {
-                    // Look ahead for procedure declarations inside this structure
-                    let j = i + 1;
-                    let endFound = false;
-                    let lastProcedureLine = -1; // Track the line of the last identified procedure
-                    
-                    while (j < tokens.length && !endFound) {
+                    // Use finishesAt (set by DocumentStructure) as a hard line boundary,
+                    // plus a nesting depth counter to correctly handle nested structures.
+                    // This replaces the previous O(n²) tokens.slice().some() check.
+                    const mapEndLine = token.finishesAt;
+                    let nestingDepth = 0;
+                    let lastProcedureLine = -1;
+
+                    for (let j = i + 1; j < tokens.length; j++) {
                         const nextToken = tokens[j];
-                        
-                        // Stop if we hit an END statement for this structure
-                        if (nextToken.type === TokenType.EndStatement &&
-                            nextToken.line > line &&
-                            !tokens.slice(i+1, j).some(t => t.type === TokenType.Structure)) {
-                            endFound = true;
-                            break;
+
+                        // Hard boundary: stop if we're past this MAP/MODULE's end line
+                        if (mapEndLine !== undefined && nextToken.line > mapEndLine) break;
+
+                        if (nextToken.type === TokenType.Structure) {
+                            nestingDepth++;
+                            continue;
                         }
-                        
-                        // If we find a procedure declaration with PROCEDURE or FUNCTION keyword, mark it
+                        if (nextToken.type === TokenType.EndStatement) {
+                            if (nestingDepth === 0) break; // closes this MAP/MODULE
+                            nestingDepth--;
+                            continue;
+                        }
+
+                        // Only mark procedures at the top level of this MAP/MODULE
+                        if (nestingDepth > 0) continue;
+
                         if (nextToken.type === TokenType.Keyword &&
                             ProcedureUtils.isProcedureKeyword(nextToken.value)) {
-                            // Mark this as a MAP/MODULE procedure
                             nextToken.subType = TokenType.MapProcedure;
                             lastProcedureLine = nextToken.line;
-                            logger.debug(`Marked procedure at line ${nextToken.line} as MAP/MODULE procedure`);
-                        }
-                        // Special case for MAP: Look for procedure declarations without PROCEDURE keyword
-                        // Format: ProcedureName(parameters),returnType
-                        // Can be Label token (column 0), Function token (no space), or Variable token (indented with space)
-                        // BUT exclude attribute keywords: dll, name, raw, pascal, proc, etc.
-                        // CRITICAL FIX: Only mark as procedure if it's on a NEW line (not the same line as last procedure)
-                        // This prevents attribute keywords on the same line from being treated as procedures
-                        else if ((nextToken.type === TokenType.Label || 
-                                 nextToken.type === TokenType.Function ||
-                                 nextToken.type === TokenType.Variable) &&
-                                nextToken.line !== lastProcedureLine && // NEW: Must be on different line
-                                j + 1 < tokens.length &&
-                                tokens[j + 1].value === "(" &&
-                                nextToken.value.toUpperCase() !== "MODULE" &&
-                                nextToken.value.toUpperCase() !== "MAP" &&
-                                !this.isAttributeKeyword(nextToken.value)) {
-                            // This looks like a procedure declaration in shorthand MAP syntax
+                        } else if ((nextToken.type === TokenType.Label ||
+                                    nextToken.type === TokenType.Function ||
+                                    nextToken.type === TokenType.Variable) &&
+                                   nextToken.line !== lastProcedureLine &&
+                                   j + 1 < tokens.length &&
+                                   tokens[j + 1].value === "(" &&
+                                   nextToken.value.toUpperCase() !== "MODULE" &&
+                                   nextToken.value.toUpperCase() !== "MAP" &&
+                                   !this.isAttributeKeyword(nextToken.value)) {
                             nextToken.subType = TokenType.MapProcedure;
-                            // CRITICAL: Set token.label to just the procedure name (nextToken.value is already just the name)
                             nextToken.label = nextToken.value;
-                            lastProcedureLine = nextToken.line; // Track this line as having a procedure
-                            logger.debug(`Marked shorthand procedure ${nextToken.value} at line ${nextToken.line} as MAP/MODULE procedure`);
+                            lastProcedureLine = nextToken.line;
                         }
-                        
-                        j++;
                     }
                 }
                 
