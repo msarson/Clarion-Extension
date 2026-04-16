@@ -96,7 +96,7 @@ export class ClassDefinitionIndexer {
                 }
             }
             
-            logger.info(`Found ${searchPaths.length} total search paths (redirection + libsrc)`);
+            logger.error(`⏱️ [INDEX] Starting scan of ${searchPaths.length} search paths for ${projectPath}`);
 
             // Scan all .inc files in these paths
             const allFiles: string[] = [];
@@ -109,14 +109,13 @@ export class ClassDefinitionIndexer {
                 }
             }
 
-            logger.info(`Scanning ${allFiles.length} .inc files for class definitions`);
+            logger.error(`⏱️ [INDEX] Scanning ${allFiles.length} .inc files in parallel`);
 
-            // Scan files for class definitions
+            // Scan all files in parallel for a major speedup over sequential awaits
+            const allResults = await Promise.all(allFiles.map(f => this.scanFileForClasses(f)));
             let totalClassesFound = 0;
-            for (const filePath of allFiles) {
-                const definitions = await this.scanFileForClasses(filePath);
+            for (const definitions of allResults) {
                 totalClassesFound += definitions.length;
-
                 for (const def of definitions) {
                     // Store by lowercase key for case-insensitive lookup
                     const key = def.className.toLowerCase();
@@ -128,7 +127,7 @@ export class ClassDefinitionIndexer {
             }
 
             const duration = Date.now() - startTime;
-            logger.info(`Index built in ${duration}ms: ${totalClassesFound} structures found, ${classes.size} unique names`);
+            logger.error(`⏱️ [INDEX] Built in ${duration}ms: ${totalClassesFound} structures, ${classes.size} unique names`);
 
             return {
                 classes,

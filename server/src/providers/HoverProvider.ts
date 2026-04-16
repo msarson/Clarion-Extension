@@ -713,6 +713,21 @@ export class HoverProvider {
      * @returns Hover with class definition info, or null if not a class
      */
     private async checkClassTypeHover(word: string, document: TextDocument): Promise<Hover | null> {
+        let timeoutId: NodeJS.Timeout | undefined;
+        const timeout = new Promise<null>(resolve => {
+            timeoutId = setTimeout(() => {
+                logger.error(`⏱️ [HOVER] checkClassTypeHover timed out for "${word}" — class index build too slow`);
+                resolve(null);
+            }, 10000);
+        });
+        try {
+            return await Promise.race([this._checkClassTypeHoverInternal(word, document), timeout]);
+        } finally {
+            if (timeoutId !== undefined) clearTimeout(timeoutId);
+        }
+    }
+
+    private async _checkClassTypeHoverInternal(word: string, document: TextDocument): Promise<Hover | null> {
         try {
             const classIndexer = ClassDefinitionIndexer.getInstance();
             
