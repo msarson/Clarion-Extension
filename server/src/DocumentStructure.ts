@@ -1,7 +1,6 @@
 import { Token, TokenType } from "./ClarionTokenizer";
 import LoggerManager from "./logger";
 import { ProcedureUtils } from './utils/ProcedureUtils';
-import { isAttributeKeyword } from './utils/AttributeKeywords';
 
 const logger = LoggerManager.getLogger("DocumentStructure");
 logger.setLevel("error");// Production: Only log errors
@@ -314,7 +313,7 @@ export class DocumentStructure {
                         break;
                 }
             } else if (token.type === TokenType.Structure) {
-                this.handleStructureToken(token, i);
+                this.handleStructureToken(token);
             } else if (token.type === TokenType.EndStatement) {
                 this.handleEndStatementForStructure(token);
             } else if (token.type === TokenType.Label && token.start === 0) {
@@ -508,7 +507,7 @@ export class DocumentStructure {
         }
     }
 
-    private handleStructureToken(token: Token, globalIndex: number): void {
+    private handleStructureToken(token: Token): void {
         if (!token.subType) {
             // Assign the specific subType that matches the structure keyword so that
             // consumers can check token.subType === TokenType.Class etc. reliably.
@@ -751,7 +750,7 @@ export class DocumentStructure {
                 // Special handling for MAP structure: look for shorthand procedure declarations
                 if (token.value.toUpperCase() === "MAP") {
                     logger.info(`🗺️ Found MAP structure at line ${token.line}, calling processShorthandProcedures()`);
-                    this.processShorthandProcedures(token, globalIndex);
+                    this.processShorthandProcedures(token);
                 }
             } else {
                 logger.info('Skipping inline attribute');
@@ -797,7 +796,8 @@ export class DocumentStructure {
      * 1. Single token: "Dos2DriverPipe(Long pOpCode, long pClaFCB, long pVarList)"
      * 2. Separate tokens: "SaveRecord" followed by "(" token
      */
-    private processShorthandProcedures(mapToken: Token, mapIndex: number): void {
+    private processShorthandProcedures(mapToken: Token): void {
+        const mapIndex = this.tokens.indexOf(mapToken);
         if (mapIndex === -1) return;
         
         logger.info(`🔍 Processing shorthand procedures in MAP at line ${mapToken.line}`);
@@ -845,8 +845,7 @@ export class DocumentStructure {
                      this.tokens[i + 1].value === "(" &&
                      !token.value.toLowerCase().startsWith("module") &&
                      !token.value.toLowerCase().startsWith("map") &&
-                     !token.value.startsWith("!") &&
-                     !isAttributeKeyword(token.value)) {
+                     !token.value.startsWith("!")) {
                 // This looks like a shorthand procedure declaration with separate tokens
                 token.subType = TokenType.MapProcedure;
                 token.parent = mapToken;

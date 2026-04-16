@@ -484,8 +484,8 @@ export class ScopeAnalyzer {
         for (let i = 0; i < mapTokens.length; i++) {
             const token = mapTokens[i];
             
-            // Look for INCLUDE keyword
-            if (token.type === TokenType.Function && token.value.toUpperCase() === 'INCLUDE') {
+            // Look for INCLUDE keyword (may be TokenType.Directive or TokenType.Function)
+            if (token.value.toUpperCase() === 'INCLUDE') {
                 // Next tokens should be: ( 'filename' )
                 if (i + 2 < mapTokens.length) {
                     const parenToken = mapTokens[i + 1];

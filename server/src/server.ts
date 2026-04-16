@@ -653,7 +653,7 @@ connection.onDocumentFormatting((params: DocumentFormattingParams): TextEdit[] =
 
 
 // Cache for document symbols to avoid recomputing during rapid typing
-const symbolCache = new Map<string, { version: number; symbols: DocumentSymbol[] }>();
+const symbolCache = new Map<string, DocumentSymbol[]>();
 const foldingCache = new Map<string, FoldingRange[]>();
 
 connection.onDocumentSymbol((params: DocumentSymbolParams) => {
@@ -681,16 +681,15 @@ connection.onDocumentSymbol((params: DocumentSymbolParams) => {
 
         logger.info(`📂 [DEBUG] Computing document symbols for: ${uri}, language: ${document.languageId}`);
         
-        // Return cached symbols if document version matches (avoids redundant rebuild)
-        const cached = symbolCache.get(uri);
-        if (cached && cached.version === document.version) {
-            logger.perf('Symbols: cache hit', { uri, version: document.version });
-            return cached.symbols;
-        }
-        
         const tokenStart = performance.now();
         const tokens = getTokens(document);  // ✅ No need for async
         const tokenTime = performance.now() - tokenStart;
+        
+        // If tokenization took > 50ms, return cached symbols to avoid blocking the UI
+        if (tokenTime > 50 && symbolCache.has(uri)) {
+            logger.info(`⚡ [PERF] Returning cached symbols (tokenization took ${tokenTime.toFixed(0)}ms)`);
+            return symbolCache.get(uri)!;
+        }
         
         logger.info(`🔍 [DEBUG] Got ${tokens.length} tokens for document symbols`);
         logger.perf('Symbols: getTokens', { time_ms: tokenTime.toFixed(2), tokens: tokens.length });
@@ -699,8 +698,8 @@ connection.onDocumentSymbol((params: DocumentSymbolParams) => {
         const symbols = clarionDocumentSymbolProvider.provideDocumentSymbols(tokens, uri, document);
         const symbolTime = performance.now() - symbolStart;
         
-        // Cache the symbols keyed by version for quick retrieval on repeated requests
-        symbolCache.set(uri, { version: document.version, symbols });
+        // Cache the symbols for quick retrieval during typing
+        symbolCache.set(uri, symbols);
         
         logger.info(`🧩 [DEBUG] Returned ${symbols.length} document symbols for ${uri}`);
 
