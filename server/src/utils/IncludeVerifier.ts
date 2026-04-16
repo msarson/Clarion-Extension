@@ -1,6 +1,7 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
+import { SolutionManager } from '../solution/solutionManager';
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -239,13 +240,28 @@ export class IncludeVerifier {
 
             logger.info(`Found MEMBER: ${memberToken.referencedFile}`);
 
-            // Resolve path relative to current document
-            const currentFilePath = document.uri.replace('file:///', '').replace(/\//g, '\\');
+            // Resolve path: try redirection parser first, then local directory fallback
+            const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
             const currentFileDir = path.dirname(currentFilePath);
-            const resolvedPath = path.resolve(currentFileDir, memberToken.referencedFile);
+            let resolvedPath: string | null = null;
 
-            if (!fs.existsSync(resolvedPath)) {
-                logger.warn(`MEMBER file not found: ${resolvedPath}`);
+            const solutionManager = SolutionManager.getInstance();
+            if (solutionManager?.solution) {
+                for (const project of solutionManager.solution.projects) {
+                    const resolved = project.getRedirectionParser().findFile(memberToken.referencedFile);
+                    if (resolved?.path && fs.existsSync(resolved.path)) {
+                        resolvedPath = resolved.path;
+                        break;
+                    }
+                }
+            }
+            if (!resolvedPath) {
+                const candidate = path.resolve(currentFileDir, memberToken.referencedFile);
+                if (fs.existsSync(candidate)) resolvedPath = candidate;
+            }
+
+            if (!resolvedPath) {
+                logger.warn(`MEMBER file not found: ${memberToken.referencedFile}`);
                 return null;
             }
 

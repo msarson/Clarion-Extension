@@ -1999,6 +1999,37 @@ export class DefinitionProvider {
         const result = await this.findTypeDeclarationInIncludes(typeName, fromPath, new Set());
         if (result) return result;
 
+        // If this is a MEMBER module, also scan the parent program file's includes.
+        // Types like base classes (e.g. Class(ce_MetroWizardForm)) may only be included
+        // in the parent PROGRAM file, not in the MEMBER module.
+        const tokens = this.tokenCache.getTokensByUri(document.uri);
+        const memberToken = tokens?.find(t =>
+            t.line < 10 &&
+            t.value?.toUpperCase() === 'MEMBER' &&
+            t.referencedFile
+        );
+        if (memberToken?.referencedFile) {
+            const solutionManager = SolutionManager.getInstance();
+            let parentPath: string | null = null;
+            if (solutionManager?.solution) {
+                for (const project of solutionManager.solution.projects) {
+                    const resolved = project.getRedirectionParser().findFile(memberToken.referencedFile);
+                    if (resolved?.path && fs.existsSync(resolved.path)) {
+                        parentPath = resolved.path;
+                        break;
+                    }
+                }
+            }
+            if (!parentPath) {
+                const candidate = path.join(path.dirname(fromPath), memberToken.referencedFile);
+                if (fs.existsSync(candidate)) parentPath = candidate;
+            }
+            if (parentPath) {
+                const parentResult = await this.findTypeDeclarationInIncludes(typeName, parentPath, new Set());
+                if (parentResult) return parentResult;
+            }
+        }
+
         // Fallback: check equates.clw (implicitly global in all Clarion programs)
         const solutionManager = SolutionManager.getInstance();
         if (solutionManager) {
