@@ -13,7 +13,7 @@ import { ChainedPropertyResolver, ChainedMemberInfo } from '../utils/ChainedProp
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { serverSettings } from '../serverSettings';
-import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
+import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { isAttributeKeyword } from '../utils/AttributeKeywords';
 import LoggerManager from '../logger';
 
@@ -1742,10 +1742,10 @@ export class ReferencesProvider {
         const fromPath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
         const projectPath = path.dirname(fromPath);
         try {
-            const classIndexer = ClassDefinitionIndexer.getInstance();
-            await classIndexer.getOrBuildIndex(projectPath);
-            const definitions = classIndexer.findClass(word, projectPath);
-            if (!definitions || definitions.length === 0) return null;
+            const sdi = StructureDeclarationIndexer.getInstance();
+            await sdi.getOrBuildIndex(projectPath);
+            const definitions = sdi.find(word, projectPath);
+            if (definitions.length === 0) return null;
         } catch {
             return null;
         }

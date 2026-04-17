@@ -4,7 +4,7 @@ import { Token, TokenType } from '../../ClarionTokenizer';
 import { TokenCache } from '../../TokenCache';
 import { HoverFormatter, VariableInfo } from './HoverFormatter';
 import { ScopeAnalyzer } from '../../utils/ScopeAnalyzer';
-import { ClassDefinitionIndexer } from '../../utils/ClassDefinitionIndexer';
+import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationIndexer';
 import { CrossFileCache } from './CrossFileCache';
 import { SymbolFinderService } from '../../services/SymbolFinderService';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
@@ -19,7 +19,7 @@ logger.setLevel("error");
  * Resolves hover information for variables (parameters, local, module, global)
  */
 export class VariableHoverResolver {
-    private classIndexer: ClassDefinitionIndexer;
+    private sdi: StructureDeclarationIndexer;
     private symbolFinder: SymbolFinderService;
     private memberLocator: MemberLocatorService;
     
@@ -29,7 +29,7 @@ export class VariableHoverResolver {
         private tokenCache: TokenCache,
         private crossFileCache?: CrossFileCache
     ) {
-        this.classIndexer = ClassDefinitionIndexer.getInstance();
+        this.sdi = StructureDeclarationIndexer.getInstance();
         this.symbolFinder = new SymbolFinderService(tokenCache, scopeAnalyzer);
         this.memberLocator = new MemberLocatorService(crossFileCache);
     }
@@ -360,15 +360,15 @@ export class VariableHoverResolver {
             const projectPath = path.dirname(docPath);
             
             // Try to get or build index for this project
-            const index = await this.classIndexer.getOrBuildIndex(projectPath);
+            const index = await this.sdi.getOrBuildIndex(projectPath);
             
             // Look up the class
-            const definitions = this.classIndexer.findClass(cleanTypeName, projectPath);
+            const definitions = this.sdi.find(cleanTypeName, projectPath);
             
-            if (definitions && definitions.length > 0) {
+            if (definitions.length > 0) {
                 const def = definitions[0]; // Use first definition
                 
-                logger.info(`Found class definition: ${def.className} in ${def.filePath}:${def.lineNumber}`);
+                logger.info(`Found class definition: ${def.name} in ${def.filePath}:${def.line + 1}`);
                 
                 // Extract just the filename from the full path
                 const fileName = path.basename(def.filePath);
@@ -378,16 +378,16 @@ export class VariableHoverResolver {
                     ``,
                     `---`,
                     `**Class Definition:**`,
-                    `- File: \`${fileName}\` (line ${def.lineNumber})`,
+                    `- File: \`${fileName}\` (line ${def.line + 1})`,
                     `- Type: ${def.isType ? 'CLASS,TYPE' : 'CLASS'}`,
                 ];
                 
-                if (def.parentClass) {
-                    classInfo.push(`- Parent: \`${def.parentClass}\``);
+                if (def.parentName) {
+                    classInfo.push(`- Parent: \`${def.parentName}\``);
                 }
                 
                 // Add indexer stats
-                classInfo.push(``,  `*Indexed ${index.classes.size} classes in project*`);
+                classInfo.push(``,  `*Indexed ${index.byName.size} structures in project*`);
                 
                 // Append to existing hover content
                 let existingContent = '';

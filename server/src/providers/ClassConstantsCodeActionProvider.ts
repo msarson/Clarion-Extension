@@ -7,7 +7,7 @@ import {
     CodeActionKind,
     Command
 } from 'vscode-languageserver/node';
-import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
+import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { ClassConstantParser } from '../utils/ClassConstantParser';
 import { ProjectConstantsChecker } from '../utils/ProjectConstantsChecker';
 import { IncludeVerifier } from '../utils/IncludeVerifier';
@@ -21,11 +21,11 @@ logger.setLevel('error');
  * Provides Code Actions (lightbulb) for adding missing class constants
  */
 export class ClassConstantsCodeActionProvider {
-    private classIndexer: ClassDefinitionIndexer;
+    private sdi: StructureDeclarationIndexer;
     private includeVerifier: IncludeVerifier;
 
     constructor() {
-        this.classIndexer = ClassDefinitionIndexer.getInstance();
+        this.sdi = StructureDeclarationIndexer.getInstance();
         this.includeVerifier = new IncludeVerifier();
     }
 
@@ -72,14 +72,14 @@ export class ClassConstantsCodeActionProvider {
             logger.info(`Project path: ${projectPath}`);
             
             // Build or get index for this project
-            const index = await this.classIndexer.getOrBuildIndex(projectPath);
-            logger.info(`Index has ${index.classes.size} classes`);
+            const index = await this.sdi.getOrBuildIndex(projectPath);
+            logger.info(`Index has ${index.byName.size} entries`);
             
             // Look up the class
-            const definitions = this.classIndexer.findClass(word, projectPath);
-            logger.info(`Found ${definitions?.length || 0} definitions for ${word}`);
+            const definitions = this.sdi.find(word, projectPath);
+            logger.info(`Found ${definitions.length} definitions for ${word}`);
             
-            if (!definitions || definitions.length === 0) {
+            if (definitions.length === 0) {
                 return actions;
             }
 
@@ -103,7 +103,7 @@ export class ClassConstantsCodeActionProvider {
             // Parse class constants
             const constantParser = new ClassConstantParser();
             const classConstants = await constantParser.parseFile(def.filePath);
-            const thisClassConstants = classConstants.find(c => c.className.toLowerCase() === def.className.toLowerCase());
+            const thisClassConstants = classConstants.find(c => c.className.toLowerCase() === def.name.toLowerCase());
 
             if (!thisClassConstants || thisClassConstants.constants.length === 0) {
                 return actions;
@@ -133,7 +133,7 @@ export class ClassConstantsCodeActionProvider {
                     'Add Constants',
                     'clarion.addClassConstants',
                     {
-                        className: def.className,
+                        className: def.name,
                         projectPath: projectPath,
                         constants: missingConstants.map(c => ({
                             name: c.name,
@@ -153,7 +153,7 @@ export class ClassConstantsCodeActionProvider {
                     'Add Constants',
                     'clarion.addClassConstants',
                     {
-                        className: def.className,
+                        className: def.name,
                         projectPath: projectPath,
                         constants: missingConstants.map(c => ({
                             name: c.name,
@@ -186,10 +186,10 @@ export class ClassConstantsCodeActionProvider {
             const projectPath = path.dirname(decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\'));
             
             // Build or get index for this project
-            await this.classIndexer.getOrBuildIndex(projectPath);
+            await this.sdi.getOrBuildIndex(projectPath);
             
             // Find all classes in this include file
-            const allClasses = this.classIndexer.findClassesByFile(includeFile, projectPath);
+            const allClasses = this.sdi.findInFile(includeFile, projectPath);
             
             if (allClasses.length === 0) {
                 logger.info(`No classes found in ${includeFile}`);
@@ -207,7 +207,7 @@ export class ClassConstantsCodeActionProvider {
             
             for (const classDef of allClasses) {
                 const classConstants = await constantParser.parseFile(classDef.filePath);
-                const thisClassConstants = classConstants.find(c => c.className.toLowerCase() === classDef.className.toLowerCase());
+                const thisClassConstants = classConstants.find(c => c.className.toLowerCase() === classDef.name.toLowerCase());
                 
                 if (thisClassConstants && thisClassConstants.constants.length > 0) {
                     for (const constant of thisClassConstants.constants) {
@@ -330,9 +330,9 @@ export class ClassConstantsCodeActionProvider {
             }
             
             // Check if there are also missing constants for this class
-            await this.classIndexer.getOrBuildIndex(projectPath);
-            const classDefArray = this.classIndexer.findClass(className, projectPath);
-            const classDef = classDefArray && classDefArray.length > 0 ? classDefArray[0] : null;
+            await this.sdi.getOrBuildIndex(projectPath);
+            const classDefArray = this.sdi.find(className, projectPath);
+            const classDef = classDefArray.length > 0 ? classDefArray[0] : null;
             
             if (classDef) {
                 const constantParser = new ClassConstantParser();

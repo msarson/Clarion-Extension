@@ -10,7 +10,7 @@ import { SolutionManager } from '../../solution/solutionManager';
 import { TokenHelper } from '../../utils/TokenHelper';
 import LoggerManager from '../../logger';
 import { SymbolFinderService } from '../../services/SymbolFinderService';
-import { ClassDefinitionIndexer } from '../../utils/ClassDefinitionIndexer';
+import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationIndexer';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -398,9 +398,9 @@ export class MethodHoverResolver {
      */
     private resolveModuleFile(className: string, declarationFileUri: string): string | null {
         // 1. Look up the class in the indexer for a MODULE attribute
-        const indexer = ClassDefinitionIndexer.getInstance();
-        const classInfos = indexer.findClass(className);
-        if (classInfos && classInfos.length > 0) {
+        const sdi = StructureDeclarationIndexer.getInstance();
+        const classInfos = sdi.find(className);
+        if (classInfos.length > 0) {
             const classInfo = classInfos.find(d => !d.isType) || classInfos[0];
             const moduleMatch = classInfo.lineContent.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i);
             if (moduleMatch) {

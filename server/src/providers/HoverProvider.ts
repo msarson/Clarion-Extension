@@ -30,7 +30,7 @@ import { HoverRouter } from './hover/HoverRouter';
 import { StructureFieldResolver } from './hover/StructureFieldResolver';
 import { CrossFileCache } from './hover/CrossFileCache';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
-import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
+import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { IncludeVerifier } from '../utils/IncludeVerifier';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -729,7 +729,7 @@ export class HoverProvider {
 
     private async _checkClassTypeHoverInternal(word: string, document: TextDocument): Promise<Hover | null> {
         try {
-            const classIndexer = ClassDefinitionIndexer.getInstance();
+            const sdi = StructureDeclarationIndexer.getInstance();
             
             // Resolve project path — prefer SolutionManager's project path for consistent cache keying
             const docPath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
@@ -744,16 +744,15 @@ export class HoverProvider {
             
             logger.info(`Looking up CLASS type: ${word} in project: ${projectPath}`);
             
-            // Try to get or build index for this project
-            const index = await classIndexer.getOrBuildIndex(projectPath);
+            await sdi.getOrBuildIndex(projectPath);
             
             // Look up the class
-            const definitions = classIndexer.findClass(word, projectPath);
+            const definitions = sdi.find(word, projectPath);
             
-            if (definitions && definitions.length > 0) {
+            if (definitions.length > 0) {
                 const def = definitions[0]; // Use first definition
                 
-                logger.info(`Found CLASS definition: ${def.className} in ${def.filePath}:${def.lineNumber}`);
+                logger.info(`Found CLASS definition: ${def.name} in ${def.filePath}:${def.line + 1}`);
                 
                 // Extract just the filename from the full path
                 const fileName = path.basename(def.filePath);
@@ -767,14 +766,14 @@ export class HoverProvider {
                     return null;
                 }
                 
-                logger.info(`✅ Found CLASS type: ${def.className} and verified it's included`);
+                logger.info(`✅ Found CLASS type: ${def.name} and verified it's included`);
                 
                 const typeLabel = def.isType ? 'CLASS, TYPE' : 'CLASS';
-                const parentLine = def.parentClass ? `\n⬆️ Extends: \`${def.parentClass}\`` : '';
+                const parentLine = def.parentName ? `\n⬆️ Extends: \`${def.parentName}\`` : '';
                 const hoverMarkdown = [
-                    `**${def.className}** — ${typeLabel}`,
+                    `**${def.name}** — ${typeLabel}`,
                     ``,
-                    `📦 Defined in \`${fileName}\` at line ${def.lineNumber}${parentLine}`,
+                    `📦 Defined in \`${fileName}\` at line ${def.line + 1}${parentLine}`,
                     ``,
                     `*(F12 to navigate to definition)*`
                 ].join('\n');

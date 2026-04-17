@@ -13,7 +13,7 @@ import { Location } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
-import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
+import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { CrossFileCache } from '../providers/hover/CrossFileCache';
 import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, detectMemberAccess } from '../utils/ClassMemberResolver';
 import { SymbolFinderService } from './SymbolFinderService';
@@ -26,7 +26,7 @@ const logger = LoggerManager.getLogger("MemberLocatorService");
 logger.setLevel("error");
 
 export class MemberLocatorService {
-    private classIndexer = ClassDefinitionIndexer.getInstance();
+    private sdi = StructureDeclarationIndexer.getInstance();
     private tokenCache = TokenCache.getInstance();
 
     constructor(private crossFileCache?: CrossFileCache) {}
@@ -134,15 +134,15 @@ export class MemberLocatorService {
         );
         if (fromInclude) return fromInclude;
 
-        // 2. ClassDefinitionIndexer (covers libsrc / accessory paths) + parent chain
+        // 2. StructureDeclarationIndexer (covers libsrc / accessory paths) + parent chain
         await this.ensureIndexBuilt();
-        const infos = this.classIndexer.findClass(className);
-        if (infos && infos.length > 0) {
+        const infos = this.sdi.find(className);
+        if (infos.length > 0) {
             const info = infos.find(d => !d.isType) || infos[0];
-            const result = await this.scanBodyForMember(info.filePath, className, memberName, paramCount, info.structureType);
+            const result = await this.scanBodyForMember(info.filePath, className, memberName, paramCount, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
             if (result) return result;
-            if (info.structureType === 'CLASS' && info.parentClass) {
-                return this.walkParentChain(info.parentClass, memberName, paramCount, new Set([className.toLowerCase()]));
+            if (info.structureType === 'CLASS' && info.parentName) {
+                return this.walkParentChain(info.parentName, memberName, paramCount, new Set([className.toLowerCase()]));
             }
         }
 
@@ -307,15 +307,15 @@ export class MemberLocatorService {
         if (visited.has(className.toLowerCase())) return null;
         visited.add(className.toLowerCase());
 
-        const classInfos = this.classIndexer.findClass(className);
-        if (!classInfos || classInfos.length === 0) return null;
+        const classInfos = this.sdi.find(className);
+        if (classInfos.length === 0) return null;
 
         const classInfo = classInfos.find(d => !d.isType) || classInfos[0];
-        const result = await this.scanBodyForMember(classInfo.filePath, className, memberName, paramCount, classInfo.structureType);
+        const result = await this.scanBodyForMember(classInfo.filePath, className, memberName, paramCount, classInfo.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
         if (result) return result;
 
-        if (classInfo.parentClass) {
-            return this.walkParentChain(classInfo.parentClass, memberName, paramCount, visited);
+        if (classInfo.parentName) {
+            return this.walkParentChain(classInfo.parentName, memberName, paramCount, visited);
         }
         return null;
     }
@@ -542,7 +542,7 @@ export class MemberLocatorService {
         const sm = SolutionManager.getInstance();
         if (!sm?.solution) return;
         for (const project of sm.solution.projects) {
-            await this.classIndexer.getOrBuildIndex(project.path);
+            await this.sdi.getOrBuildIndex(project.path);
         }
     }
 
@@ -577,9 +577,9 @@ export class MemberLocatorService {
             parentClassName = classInfo.parentClass;
         } else {
             await this.ensureIndexBuilt();
-            const indexed = this.classIndexer.findClass(className);
-            if (indexed && indexed.length > 0) {
-                parentClassName = (indexed.find(d => !d.isType) || indexed[0]).parentClass;
+            const indexed = this.sdi.find(className);
+            if (indexed.length > 0) {
+                parentClassName = (indexed.find(d => !d.isType) || indexed[0]).parentName;
             }
         }
 
@@ -622,17 +622,17 @@ export class MemberLocatorService {
         );
         if (fromInclude.length > 0) return fromInclude;
 
-        // 3. ClassDefinitionIndexer
+        // 3. StructureDeclarationIndexer
         await this.ensureIndexBuilt();
-        const infos = this.classIndexer.findClass(className);
-        if (infos && infos.length > 0) {
+        const infos = this.sdi.find(className);
+        if (infos.length > 0) {
             const info = infos.find(d => !d.isType) || infos[0];
             const indexedData = await this.loadDocument(info.filePath);
             if (indexedData) {
-                const indexedMembers = this.extractMembersFromTokens(indexedData.tokens, indexedData.doc, className, info.filePath, info.structureType);
+                const indexedMembers = this.extractMembersFromTokens(indexedData.tokens, indexedData.doc, className, info.filePath, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
                 if (indexedMembers.length > 0) return indexedMembers;
             }
-            return scanClassBodyForAllMembers(info.filePath, className, info.structureType);
+            return scanClassBodyForAllMembers(info.filePath, className, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
         }
 
         return [];
@@ -700,18 +700,18 @@ export class MemberLocatorService {
             return new Set(['public', 'protected', 'private']);
         }
         // Check if callerClass is a subclass of className via the indexer
-        const callerInfos = this.classIndexer.findClass(callerClass);
-        if (callerInfos) {
-            let current = (callerInfos.find(d => !d.isType) || callerInfos[0])?.parentClass;
+        const callerInfos = this.sdi.find(callerClass);
+        if (callerInfos.length > 0) {
+            let current = (callerInfos.find(d => !d.isType) || callerInfos[0])?.parentName;
             const seen = new Set<string>();
             while (current && !seen.has(current.toLowerCase())) {
                 seen.add(current.toLowerCase());
                 if (current.toLowerCase() === className.toLowerCase()) {
                     return new Set(['public', 'protected']);
                 }
-                const parentInfos = this.classIndexer.findClass(current);
-                current = parentInfos
-                    ? (parentInfos.find(d => !d.isType) || parentInfos[0])?.parentClass
+                const parentInfos = this.sdi.find(current);
+                current = parentInfos.length > 0
+                    ? (parentInfos.find(d => !d.isType) || parentInfos[0])?.parentName
                     : undefined;
             }
         }
