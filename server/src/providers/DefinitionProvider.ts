@@ -2112,8 +2112,8 @@ export class DefinitionProvider {
 
     private async findClassTypeDefinition(word: string, document: TextDocument): Promise<Location | null> {
         try {
-            const fromPath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
-            const projectPath = path.dirname(fromPath);
+            const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+            const projectPath = SolutionManager.getInstance()?.getProjectPathForFile(fromPath) ?? path.dirname(fromPath);
 
             const sdi = StructureDeclarationIndexer.getInstance();
             await sdi.getOrBuildIndex(projectPath);

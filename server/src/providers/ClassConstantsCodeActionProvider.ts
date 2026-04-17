@@ -8,6 +8,7 @@ import {
     Command
 } from 'vscode-languageserver/node';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
+import { SolutionManager } from '../solution/solutionManager';
 import { ClassConstantParser } from '../utils/ClassConstantParser';
 import { ProjectConstantsChecker } from '../utils/ProjectConstantsChecker';
 import { IncludeVerifier } from '../utils/IncludeVerifier';
@@ -67,7 +68,8 @@ export class ClassConstantsCodeActionProvider {
             logger.info(`Checking for code actions on word: ${word}`);
 
             // Check if this is a class type with missing constants
-            const projectPath = path.dirname(decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\'));
+            const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+            const projectPath = SolutionManager.getInstance()?.getProjectPathForFile(fromPath) ?? path.dirname(fromPath);
             
             logger.info(`Project path: ${projectPath}`);
             
@@ -183,7 +185,8 @@ export class ClassConstantsCodeActionProvider {
         const actions: CodeAction[] = [];
         
         try {
-            const projectPath = path.dirname(decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\'));
+            const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+            const projectPath = SolutionManager.getInstance()?.getProjectPathForFile(fromPath) ?? path.dirname(fromPath);
             
             // Build or get index for this project
             await this.sdi.getOrBuildIndex(projectPath);

@@ -8,6 +8,7 @@ import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationInd
 import { CrossFileCache } from './CrossFileCache';
 import { SymbolFinderService } from '../../services/SymbolFinderService';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
+import { SolutionManager } from '../../solution/solutionManager';
 import LoggerManager from '../../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -297,8 +298,6 @@ export class VariableHoverResolver {
      * Search equates.clw (implicitly global in all Clarion programs via MAP/END) for a label.
      */
     private async searchEquatesFile(searchWord: string): Promise<Hover | null> {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { SolutionManager } = require('../../solution/solutionManager');
         const sm = SolutionManager.getInstance();
         const equatesPath = sm?.getEquatesPath();
         if (!equatesPath || !fs.existsSync(equatesPath)) return null;
@@ -356,8 +355,8 @@ export class VariableHoverResolver {
             logger.info(`Looking up class definition for type: ${cleanTypeName}`);
             
             // Get project path from document URI
-            const docPath = document.uri.replace('file:///', '').replace(/\//g, '\\');
-            const projectPath = path.dirname(docPath);
+            const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+            const projectPath = SolutionManager.getInstance()?.getProjectPathForFile(docPath) ?? path.dirname(docPath);
             
             // Try to get or build index for this project
             const index = await this.sdi.getOrBuildIndex(projectPath);

@@ -1739,8 +1739,8 @@ export class ReferencesProvider {
         includeDeclaration: boolean
     ): Promise<Location[] | null> {
         // Check if the word is a known CLASS type via the class definition indexer
-        const fromPath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
-        const projectPath = path.dirname(fromPath);
+        const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+        const projectPath = SolutionManager.getInstance()?.getProjectPathForFile(fromPath) ?? path.dirname(fromPath);
         try {
             const sdi = StructureDeclarationIndexer.getInstance();
             await sdi.getOrBuildIndex(projectPath);
