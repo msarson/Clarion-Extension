@@ -5,7 +5,7 @@ import LoggerManager from '../logger';
 import { serverSettings } from '../serverSettings';
 
 const logger = LoggerManager.getLogger('StructureDeclarationIndexer');
-logger.setLevel('error');
+logger.setLevel('warn');
 
 /**
  * All declaration types that the indexer recognises.
@@ -204,6 +204,8 @@ export function scanSourceForDeclarations(
 export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
     private static instance: StructureDeclarationIndexer;
     private indexes: Map<string, StructureIndex> = new Map();
+    /** In-flight build promises — prevents duplicate parallel builds for the same project */
+    private pendingBuilds: Map<string, Promise<StructureIndex>> = new Map();
 
     private constructor() {}
 
@@ -219,9 +221,20 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
         if (this.indexes.has(key)) {
             return this.indexes.get(key)!;
         }
-        const index = await this.buildIndex(projectPath);
-        this.indexes.set(key, index);
-        return index;
+        // Coalesce concurrent callers onto the same in-flight build
+        if (this.pendingBuilds.has(key)) {
+            return this.pendingBuilds.get(key)!;
+        }
+        const buildPromise = this.buildIndex(projectPath).then(index => {
+            this.indexes.set(key, index);
+            this.pendingBuilds.delete(key);
+            return index;
+        }).catch(err => {
+            this.pendingBuilds.delete(key);
+            throw err;
+        });
+        this.pendingBuilds.set(key, buildPromise);
+        return buildPromise;
     }
 
     async buildIndex(projectPath: string): Promise<StructureIndex> {
@@ -241,7 +254,7 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
                 }
             }
 
-            logger.error(`⏱️ [SDI] Starting scan of ${searchPaths.length} search paths for ${projectPath}`);
+            logger.warn(`⏱️ [SDI] Starting scan of ${searchPaths.length} search paths for ${projectPath}`);
 
             const allFiles: string[] = [];
             for (const dir of searchPaths) {
@@ -253,7 +266,7 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
                 }
             }
 
-            logger.error(`⏱️ [SDI] Scanning ${allFiles.length} files in parallel`);
+            logger.warn(`⏱️ [SDI] Scanning ${allFiles.length} files in parallel`);
 
             const allResults = await Promise.all(allFiles.map(f => this.scanFile(f)));
             let total = 0;
@@ -267,7 +280,7 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
             }
 
             const duration = Date.now() - startTime;
-            logger.error(`⏱️ [SDI] Built in ${duration}ms: ${total} declarations, ${byName.size} unique names`);
+            logger.warn(`⏱️ [SDI] Built in ${duration}ms: ${total} declarations, ${byName.size} unique names`);
 
         } catch (err) {
             logger.error(`Error building index: ${err instanceof Error ? err.message : String(err)}`);
