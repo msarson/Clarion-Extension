@@ -72,7 +72,7 @@ suite('ClassDefinitionIndexer Tests', () => {
         test('Should build index from redirection paths', async function() {
             this.timeout(10000);
             
-            const indexer = new ClassDefinitionIndexer();
+            const indexer = ClassDefinitionIndexer.getInstance();
             const projectPath = solutionManager!.solution.projects[0].path;
             console.log(`   📂 Project path: ${projectPath}`);
             
@@ -87,7 +87,7 @@ suite('ClassDefinitionIndexer Tests', () => {
         test('Should find StringTheory class in index', async function() {
             this.timeout(10000);
             
-            const indexer = new ClassDefinitionIndexer();
+            const indexer = ClassDefinitionIndexer.getInstance();
             const projectPath = solutionManager!.solution.projects[0].path;
             const index = await indexer.buildIndex(projectPath);
             
@@ -102,7 +102,7 @@ suite('ClassDefinitionIndexer Tests', () => {
         test('Should complete index build in reasonable time (<5 seconds)', async function() {
             this.timeout(10000);
             
-            const indexer = new ClassDefinitionIndexer();
+            const indexer = ClassDefinitionIndexer.getInstance();
             const projectPath = solutionManager!.solution.projects[0].path;
             
             const startTime = Date.now();
