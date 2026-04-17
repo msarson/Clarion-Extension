@@ -491,6 +491,100 @@ export class SymbolFinderService {
     }
     
     /**
+     * Find a structure field or sub-structure accessed via PRE:Field notation.
+     * e.g. "IBSDataSets:Record" → prefix="IBSDataSets", fieldName="Record"
+     * Finds the structure with structurePrefix="IBSDataSets" and returns scope='field'
+     * so FAR only matches IBSDataSets:Record tokens (not bare "Record").
+     */
+    private async findPrefixedField(word: string, tokens: Token[], document: TextDocument): Promise<SymbolInfo | null> {
+        const colonIndex = word.indexOf(':');
+        if (colonIndex <= 0) return null;
+
+        const prefixUpper = word.substring(0, colonIndex).toUpperCase();
+        const fieldName = word.substring(colonIndex + 1); // preserve original case
+
+        // Search current file
+        const result = this.findPrefixedFieldInTokens(prefixUpper, fieldName, tokens, document.uri);
+        if (result) return result;
+
+        // If MEMBER file, search the parent PROGRAM file
+        const memberToken = tokens.find(t =>
+            t.value && t.value.toUpperCase() === 'MEMBER' &&
+            t.line < 5 &&
+            t.referencedFile
+        );
+        if (memberToken?.referencedFile) {
+            try {
+                const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '').replace(/\//g, '\\'));
+                const resolvedPath = path.resolve(path.dirname(currentFilePath), memberToken.referencedFile);
+                if (fs.existsSync(resolvedPath)) {
+                    const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
+                    const parentDoc = TextDocument.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, 'clarion', 1, parentContents);
+                    const parentTokens = this.tokenCache.getTokens(parentDoc);
+                    const parentResult = this.findPrefixedFieldInTokens(prefixUpper, fieldName, parentTokens, parentDoc.uri);
+                    if (parentResult) return parentResult;
+                }
+            } catch (err) {
+                logger.error(`Error reading MEMBER parent file for prefixed field: ${err}`);
+            }
+        }
+
+        return null;
+    }
+
+    private findPrefixedFieldInTokens(prefixUpper: string, fieldName: string, tokens: Token[], uri: string): SymbolInfo | null {
+        const fieldNameUpper = fieldName.toUpperCase();
+
+        // Find structure with matching structurePrefix (e.g. FILE,PRE(IBSDataSets))
+        const structureToken = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.structurePrefix?.toUpperCase() === prefixUpper
+        );
+        if (!structureToken) return null;
+
+        // Find child token within the structure's range
+        const childToken = tokens.find(t => {
+            if (t.line <= structureToken.line) return false;
+            if (structureToken.finishesAt !== undefined && t.line > structureToken.finishesAt) return false;
+            // Label at col 0 with matching value (e.g. a field named "Record")
+            if (t.type === TokenType.Label && t.start === 0 && t.value.toUpperCase() === fieldNameUpper) return true;
+            // Sub-structure with matching label (e.g. "Record  RECORD" → label="Record")
+            if (t.type === TokenType.Structure && t.label?.toUpperCase() === fieldNameUpper) return true;
+            return false;
+        });
+
+        // Determine the field name value to use as searchWord — preserves original casing
+        const resolvedName = childToken
+            ? (childToken.type === TokenType.Structure ? (childToken.label ?? fieldName) : childToken.value)
+            : fieldName;
+        const targetToken = childToken ?? structureToken;
+
+        // Synthetic token so token.value = fieldName (FAR uses token.value as searchWord)
+        const syntheticToken: Token = {
+            type: TokenType.Label,
+            value: resolvedName,
+            line: targetToken.line,
+            start: targetToken.start,
+            maxLabelLength: 0
+        };
+
+        logger.info(`✅ Found PRE:Field "${prefixUpper}:${fieldName}" — structure "${structureToken.label ?? structureToken.value}" at line ${targetToken.line} in ${uri}`);
+
+        return {
+            token: syntheticToken,
+            type: 'field',
+            scope: {
+                token: structureToken, // structurePrefix used by collectFieldPrefixes
+                type: 'field'
+            },
+            location: { uri, line: targetToken.line, character: targetToken.start },
+            declaration: `${structureToken.label ?? structureToken.value} PRE(${prefixUpper})`,
+            originalWord: `${prefixUpper}:${fieldName}`,
+            searchWord: resolvedName
+        };
+    }
+
+    /**
      * Find a structure field declaration — a col-0 Label whose parent token is a Structure (QUEUE, GROUP, CLASS, FILE).
      * Used when the cursor is on a field declaration line inside a structure definition.
      */
@@ -816,6 +910,18 @@ export class SymbolFinderService {
             return result;
         }
         
+        // If not found and word has colon, first try to resolve as PRE:Field notation.
+        // e.g. "IBSDataSets:Record" → find structure with structurePrefix="IBSDataSets",
+        // return scope='field' so FAR only matches IBSDataSets:Record tokens (not bare "Record").
+        const colonIdx = word.indexOf(':');
+        if (colonIdx > 0) {
+            const prefixedResult = await this.findPrefixedField(word, tokens, document);
+            if (prefixedResult) {
+                logger.info(`✅ Found as prefixed field (PRE:Field): ${word}`);
+                return prefixedResult;
+            }
+        }
+
         // If not found and word has colon, try with stripped prefix
         const colonIndex = word.lastIndexOf(':');
         if (colonIndex > 0) {

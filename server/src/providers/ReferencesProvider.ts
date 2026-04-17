@@ -1394,6 +1394,28 @@ export class ReferencesProvider {
 
         if (solutionManager?.solution?.projects?.length) {
             const allFiles: string[] = [...alwaysInclude];
+
+            // Scope search to the project that declares the symbol.
+            // Global symbols are visible only within their own program unit (project) —
+            // searching all 40 projects for a symbol declared in project X is wrong.
+            const declPath = decodeURIComponent(symbolInfo.location.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+            const declProject = solutionManager.findProjectForFile(path.basename(declPath));
+
+            if (declProject) {
+                for (const sourceFile of declProject.sourceFiles) {
+                    const fullPath = path.isAbsolute(sourceFile.relativePath) ? sourceFile.relativePath : path.join(declProject.path, sourceFile.relativePath);
+                    const uri = `file:///${fullPath.replace(/\\/g, '/')}`;
+                    const basename = path.basename(fullPath).toLowerCase();
+                    if (!alwaysInclude.has(uri) && !alwaysIncludeNames.has(basename)) {
+                        allFiles.push(uri);
+                    }
+                }
+                logger.error(`[FAR] Scope="${scopeType}" → project "${declProject.name}", ${allFiles.length} file(s) to search`);
+                return allFiles;
+            }
+
+            // Fallback: declaration not in any known project source list (e.g. INCLUDE-only symbol).
+            // Search all project files so cross-project INCLUDE references are found.
             for (const project of solutionManager.solution.projects) {
                 for (const sourceFile of project.sourceFiles) {
                     const fullPath = path.isAbsolute(sourceFile.relativePath) ? sourceFile.relativePath : path.join(project.path, sourceFile.relativePath);
@@ -1404,7 +1426,7 @@ export class ReferencesProvider {
                     }
                 }
             }
-            logger.error(`[FAR] Scope="${scopeType}" → global, solution has ${solutionManager.solution.projects.length} project(s), ${allFiles.length} file(s) to search`);
+            logger.error(`[FAR] Scope="${scopeType}" → global (no declaring project found), solution has ${solutionManager.solution.projects.length} project(s), ${allFiles.length} file(s) to search`);
             return allFiles;
         }
 
