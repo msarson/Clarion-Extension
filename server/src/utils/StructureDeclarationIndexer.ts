@@ -216,8 +216,16 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
         return StructureDeclarationIndexer.instance;
     }
 
+    /** Normalise a project path that may arrive URI-encoded (e.g. c%3A → c:) or as a file:// URI */
+    private normalizeKey(projectPath: string): string {
+        let p = projectPath;
+        try { p = decodeURIComponent(p); } catch { /* leave as-is if malformed */ }
+        p = p.replace(/^file:\/\/\/?/i, '');
+        return path.normalize(p);
+    }
+
     async getOrBuildIndex(projectPath: string): Promise<StructureIndex> {
-        const key = path.normalize(projectPath);
+        const key = this.normalizeKey(projectPath);
         if (this.indexes.has(key)) {
             return this.indexes.get(key)!;
         }
@@ -225,7 +233,7 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
         if (this.pendingBuilds.has(key)) {
             return this.pendingBuilds.get(key)!;
         }
-        const buildPromise = this.buildIndex(projectPath).then(index => {
+        const buildPromise = this.buildIndex(key).then(index => {
             this.indexes.set(key, index);
             this.pendingBuilds.delete(key);
             return index;
@@ -293,7 +301,7 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
     find(name: string, projectPath?: string): StructureDeclarationInfo[] {
         const key = name.toLowerCase();
         if (projectPath) {
-            return this.indexes.get(path.normalize(projectPath))?.byName.get(key) ?? [];
+            return this.indexes.get(this.normalizeKey(projectPath))?.byName.get(key) ?? [];
         }
         for (const idx of this.indexes.values()) {
             const hit = idx.byName.get(key);
@@ -318,7 +326,7 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
         };
 
         if (projectPath) {
-            const idx = this.indexes.get(path.normalize(projectPath));
+            const idx = this.indexes.get(this.normalizeKey(projectPath));
             if (idx) search(idx);
         } else {
             for (const idx of this.indexes.values()) search(idx);
@@ -332,7 +340,7 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
     }
 
     clearProjectCache(projectPath: string): void {
-        this.indexes.delete(path.normalize(projectPath));
+        this.indexes.delete(this.normalizeKey(projectPath));
     }
 
     private async scanFile(filePath: string): Promise<StructureDeclarationInfo[]> {
