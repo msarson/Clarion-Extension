@@ -227,6 +227,19 @@ export class TokenHelper {
     // ========================================================================
 
     /**
+     * Returns true if the given character position on a line falls inside a Clarion
+     * comment (`!`) or after a line-continuation marker (`|`), meaning navigation
+     * and hover should be suppressed at that position.
+     */
+    public static isPositionInComment(tokens: Token[], line: number, character: number): boolean {
+        return tokens.some(t =>
+            t.line === line &&
+            (t.type === TokenType.Comment || t.type === TokenType.LineContinuation) &&
+            t.start <= character
+        );
+    }
+
+    /**
      * Case-insensitive string comparison (optimized to avoid unnecessary allocations)
      * 🚀 PERFORMANCE: Only allocates uppercase strings once, not in tight loops
      * @param a First string

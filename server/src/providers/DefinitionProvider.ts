@@ -60,6 +60,14 @@ export class DefinitionProvider {
         logger.info(`Providing definition for position ${position.line}:${position.character} in ${document.uri}`);
 
         try {
+            // Get tokens once for reuse throughout the method
+            const tokens = this.tokenCache.getTokens(document);
+
+            // Don't navigate on words inside comments or after line-continuation markers
+            if (TokenHelper.isPositionInComment(tokens, position.line, position.character)) {
+                return null;
+            }
+
             // Get the word at the current position
             const wordRange = TokenHelper.getWordRangeAtPosition(document, position);
             if (!wordRange) {
@@ -69,9 +77,6 @@ export class DefinitionProvider {
 
             const word = document.getText(wordRange);
             logger.info(`Found word: "${word}" at position`);
-            
-            // Get tokens once for reuse throughout the method
-            const tokens = this.tokenCache.getTokens(document);
             
             // Get the line to check context
             const line = document.getText({

@@ -61,6 +61,12 @@ export class ImplementationProvider {
         logger.info(`Implementation requested at ${position.line}:${position.character} in ${document.uri}`);
 
         const tokens = this.tokenCache.getTokens(document);
+
+        // Don't navigate on words inside comments or after line-continuation markers
+        if (TokenHelper.isPositionInComment(tokens, position.line, position.character)) {
+            return null;
+        }
+
         const documentStructure = this.tokenCache.getStructure(document);
         
         const line = document.getText({

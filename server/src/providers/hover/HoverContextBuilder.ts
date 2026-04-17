@@ -75,6 +75,12 @@ export class HoverContextBuilder {
 
         // Get tokens on current line
         const currentLineTokens = tokens.filter(t => t.line === position.line);
+
+        // If the cursor is inside a comment or after a line-continuation marker (|),
+        // return null — hovers should never fire on comment text.
+        if (TokenHelper.isPositionInComment(tokens, position.line, position.character)) {
+            return null;
+        }
         
         // Check if there's a Label token before the current word (indicates data declaration)
         const hasLabelBefore = currentLineTokens.some(t => 

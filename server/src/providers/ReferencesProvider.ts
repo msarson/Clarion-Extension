@@ -59,6 +59,12 @@ export class ReferencesProvider {
         let word = document.getText(wordRange);
         if (!word || word.length === 0) return null;
 
+        // Don't search references for words inside comments or after line-continuation markers
+        const tokens = this.tokenCache.getTokens(document);
+        if (TokenHelper.isPositionInComment(tokens, position.line, position.character)) {
+            return null;
+        }
+
         // Attribute keywords (ONCE, PRIVATE, VIRTUAL, DERIVED, etc.) are not symbols
         if (isAttributeKeyword(word)) {
             logger.info(`⏭️ [FAR] Skipping attribute keyword "${word}" — not a referenceable symbol`);
@@ -146,7 +152,7 @@ export class ReferencesProvider {
         // Check if the cursor is inside a CLASS body BEFORE trying plain symbol search.
         // findSymbol may resolve the word as a different same-named module variable declared
         // before the CLASS, so we must detect CLASS context first.
-        const tokens = this.tokenCache.getTokens(document);
+        // (tokens already retrieved above for the comment guard)
         const enclosingClass = tokens.find(t =>
             t.type === TokenType.Structure &&
             t.subType === TokenType.Class &&
@@ -163,6 +169,35 @@ export class ReferencesProvider {
             const classModuleFile = moduleMatch?.[1];
             logger.error(`🏛️ [FAR] Route: CLASS body (class=${enclosingClass.label ?? '?'}, module=${classModuleFile ?? 'none'}) → member-access path`);
             return this.provideMemberReferences(`SELF.${word}`, document, position, context, classModuleFile, enclosingClass.label);
+        }
+
+        // Check if cursor is on a MethodImplementation line for a locally-declared class.
+        // e.g. "MetroForm.TakeAccepted PROCEDURE()" where MetroForm has no MODULE attribute.
+        // findSymbol would resolve TakeAccepted to the base-class INC, causing a full-solution
+        // scan — intercept here and redirect to the local-class member path instead.
+        const methodImplToken = tokens.find(t =>
+            t.subType === TokenType.MethodImplementation &&
+            t.label !== undefined &&
+            t.line === position.line
+        );
+        if (methodImplToken?.label) {
+            const dotIdx = methodImplToken.label.indexOf('.');
+            const implClassName = dotIdx > 0 ? methodImplToken.label.substring(0, dotIdx) : null;
+            if (implClassName && this.isClassDeclaredInDocument(implClassName, document)) {
+                const classToken = tokens.find(t =>
+                    t.type === TokenType.Structure &&
+                    t.subType === TokenType.Class &&
+                    (t.label ?? '').toLowerCase() === implClassName.toLowerCase()
+                );
+                const classLine = classToken ? document.getText({
+                    start: { line: classToken.line, character: 0 },
+                    end: { line: classToken.line, character: 999 }
+                }) : '';
+                if (!/MODULE\s*\(\s*['"]/i.test(classLine)) {
+                    logger.error(`🏛️ [FAR] Route: MethodImpl of local class "${implClassName}" → restricting to current file`);
+                    return this.provideMemberReferences(`SELF.${word}`, document, position, context, undefined, implClassName);
+                }
+            }
         }
 
         // Check if cursor is inside an INTERFACE body — find all implementations + call sites
