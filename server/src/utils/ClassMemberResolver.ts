@@ -4,7 +4,7 @@ import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
 import { TokenHelper } from './TokenHelper';
-import { ClassDefinitionIndexer } from './ClassDefinitionIndexer';
+import { StructureDeclarationIndexer } from './StructureDeclarationIndexer';
 import { ClarionPatterns } from './ClarionPatterns';
 import { MethodOverloadResolver } from './MethodOverloadResolver';
 import * as path from 'path';
@@ -226,7 +226,7 @@ export function selectBestMemberOverload(
  */
 export class ClassMemberResolver {
     private tokenCache = TokenCache.getInstance();
-    private classIndexer = ClassDefinitionIndexer.getInstance();
+    private sdi = StructureDeclarationIndexer.getInstance();
     private overloadResolver = new MethodOverloadResolver();
 
     /**
@@ -688,8 +688,8 @@ export class ClassMemberResolver {
 
         // Resolve the parent class MODULE file from the classIndexer
         let moduleFile: string | undefined;
-        const parentInfos = this.classIndexer.findClass(parentClassName);
-        if (parentInfos && parentInfos.length > 0) {
+        const parentInfos = this.sdi.find(parentClassName);
+        if (parentInfos.length > 0) {
             const parentInfo = parentInfos.find(d => !d.isType) || parentInfos[0];
             const moduleMatch = parentInfo.lineContent.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i);
             if (moduleMatch) moduleFile = moduleMatch[1];
@@ -706,7 +706,7 @@ export class ClassMemberResolver {
         const solutionManager = SolutionManager.getInstance();
         if (!solutionManager?.solution) return;
         for (const project of solutionManager.solution.projects) {
-            await this.classIndexer.getOrBuildIndex(project.path);
+            await this.sdi.getOrBuildIndex(project.path);
         }
     }
 
@@ -749,11 +749,11 @@ export class ClassMemberResolver {
             }
         }
 
-        // Also try the ClassDefinitionIndexer (covers libsrc paths)
-        const classInfos = this.classIndexer.findClass(className);
-        if (classInfos && classInfos.length > 0) {
+        // Also try the StructureDeclarationIndexer (covers libsrc paths)
+        const classInfos = this.sdi.find(className);
+        if (classInfos.length > 0) {
             const def = classInfos.find(d => !d.isType) || classInfos[0];
-            return def.parentClass || null;
+            return def.parentName || null;
         }
 
         return null;
@@ -780,8 +780,8 @@ export class ClassMemberResolver {
 
         logger.info(`Searching parent class ${className} for member ${memberName}`);
 
-        const classInfos = this.classIndexer.findClass(className);
-        if (!classInfos || classInfos.length === 0) {
+        const classInfos = this.sdi.find(className);
+        if (classInfos.length === 0) {
             logger.info(`Parent class ${className} not found in index`);
             return null;
         }
@@ -789,12 +789,12 @@ export class ClassMemberResolver {
         // Prefer a non-TYPE definition (TYPE classes are templates, not instances)
         const classInfo = classInfos.find(d => !d.isType) || classInfos[0];
 
-        const result = this.searchFileForMember(classInfo.filePath, className, memberName, paramCount, classInfo.structureType);
+        const result = this.searchFileForMember(classInfo.filePath, className, memberName, paramCount, classInfo.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
         if (result) return result;
 
         // Recurse into grandparent if present
-        if (classInfo.parentClass) {
-            return this.findMemberInParentChain(classInfo.parentClass, memberName, paramCount, visited);
+        if (classInfo.parentName) {
+            return this.findMemberInParentChain(classInfo.parentName, memberName, paramCount, visited);
         }
 
         return null;
@@ -875,14 +875,14 @@ export class ClassMemberResolver {
 
         await this.ensureIndexBuilt(document);
 
-        const infos = this.classIndexer.findClass(structureName);
-        if (infos && infos.length > 0) {
+        const infos = this.sdi.find(structureName);
+        if (infos.length > 0) {
             const info = infos.find(d => !d.isType) || infos[0];
-            const result = this.searchFileForMember(info.filePath, structureName, memberName, paramCount, info.structureType);
+            const result = this.searchFileForMember(info.filePath, structureName, memberName, paramCount, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
             if (result) return result;
             // Walk parent chain for CLASS types
-            if (info.structureType === 'CLASS' && info.parentClass) {
-                return this.findMemberInParentChain(info.parentClass, memberName, paramCount, new Set([structureName.toLowerCase()]));
+            if (info.structureType === 'CLASS' && info.parentName) {
+                return this.findMemberInParentChain(info.parentName, memberName, paramCount, new Set([structureName.toLowerCase()]));
             }
         }
         return null;

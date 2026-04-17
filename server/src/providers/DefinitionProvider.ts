@@ -20,7 +20,7 @@ import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { SymbolFinderService } from '../services/SymbolFinderService';
-import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
+import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
@@ -2115,15 +2115,15 @@ export class DefinitionProvider {
             const fromPath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
             const projectPath = path.dirname(fromPath);
 
-            const classIndexer = ClassDefinitionIndexer.getInstance();
-            await classIndexer.getOrBuildIndex(projectPath);
-            const definitions = classIndexer.findClass(word, projectPath);
-            if (!definitions || definitions.length === 0) return null;
+            const sdi = StructureDeclarationIndexer.getInstance();
+            await sdi.getOrBuildIndex(projectPath);
+            const definitions = sdi.find(word, projectPath);
+            if (definitions.length === 0) return null;
 
             const def = definitions[0];
             const uri = `file:///${def.filePath.replace(/\\/g, '/')}`;
-            logger.error(`✅ CLASS type F12: "${word}" → ${def.filePath}:${def.lineNumber}`);
-            return Location.create(uri, Range.create(def.lineNumber, 0, def.lineNumber, 0));
+            logger.error(`✅ CLASS type F12: "${word}" → ${def.filePath}:${def.line + 1}`);
+            return Location.create(uri, Range.create(def.line, 0, def.line, 0));
         } catch (e) {
             logger.error(`findClassTypeDefinition error: ${e}`);
             return null;
