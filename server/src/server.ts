@@ -975,22 +975,22 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 validateTextDocument(doc, 'solutionReady');
             }
 
-            // Pre-build CLASS definition index for all project paths in the background.
-            // Without this, the first hover on a CLASS base type triggers a full scan of all
-            // .inc files (potentially thousands), causing a 4-5s freeze on the hover spinner.
+            // Pre-build structure declaration index for all project paths in the background.
+            // Without this, the first hover on a CLASS/INTERFACE/EQUATE etc. triggers a full scan
+            // of all .inc files (potentially thousands), causing a 4-5s freeze.
             setImmediate(async () => {
-                const { ClassDefinitionIndexer } = await import('./utils/ClassDefinitionIndexer');
-                const classIndexer = ClassDefinitionIndexer.getInstance();
+                const { StructureDeclarationIndexer } = await import('./utils/StructureDeclarationIndexer');
+                const indexer = StructureDeclarationIndexer.getInstance();
                 const projectPaths = [...new Set(
                     globalSolution!.projects.map(p => p.path).filter(Boolean)
                 )];
-                logger.error(`⏱️ [INDEX] Pre-building class index for ${projectPaths.length} project(s) in background`);
+                logger.error(`⏱️ [INDEX] Pre-building structure index for ${projectPaths.length} project(s) in background`);
                 await Promise.all(projectPaths.map(p =>
-                    classIndexer.getOrBuildIndex(p).catch(err =>
+                    indexer.getOrBuildIndex(p).catch(err =>
                         logger.error(`❌ [INDEX] Background build failed for ${p}: ${err}`)
                     )
                 ));
-                logger.error(`⏱️ [INDEX] Background class index pre-build complete`);
+                logger.error(`⏱️ [INDEX] Background structure index pre-build complete`);
             });
             
             // Log each project in the global solution
