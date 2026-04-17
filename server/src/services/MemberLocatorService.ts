@@ -280,11 +280,14 @@ export class MemberLocatorService {
             if (data) {
                 const result = this.findMemberFromTokens(data.tokens, data.doc, resolvedPath, className, memberName, paramCount);
                 if (result) return result;
-                // Fallback to disk scan for edge cases
+                // Fallback to disk scan for edge cases — prefer live editor text if file is open
+                const diskUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+                const liveContent = this.tokenCache.getDocumentText(diskUri) ?? undefined;
                 const diskResult = scanClassBodyForMember(
                     resolvedPath, className, memberName, paramCount, 'CLASS',
                     (line) => this.countParamsInDecl(line),
-                    (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc)
+                    (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
+                    liveContent
                 );
                 if (diskResult) return diskResult;
 
@@ -333,11 +336,14 @@ export class MemberLocatorService {
             const result = this.findMemberFromTokens(data.tokens, data.doc, filePath, className, memberName, paramCount, structureType);
             if (result) return result;
         }
-        // Fallback to disk-based scan (handles any edge cases not covered by token approach)
+        // Fallback to disk-based scan — prefer live editor text if file is open
+        const uri = `file:///${filePath.replace(/\\/g, '/')}`;
+        const liveContent = this.tokenCache.getDocumentText(uri) ?? undefined;
         return scanClassBodyForMember(
             filePath, className, memberName, paramCount, structureType,
             (line) => this.countParamsInDecl(line),
-            (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc)
+            (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
+            liveContent
         );
     }
 

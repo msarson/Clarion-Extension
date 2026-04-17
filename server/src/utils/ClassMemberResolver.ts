@@ -55,11 +55,12 @@ export function detectMemberAccess(line: string): MemberAccess {
 export function scanClassBodyForAllMembers(
     filePath: string,
     className: string,
-    structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS'
+    structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS',
+    contentOverride?: string
 ): MemberEnumItem[] {
     const results: MemberEnumItem[] = [];
     try {
-        const content = fs.readFileSync(filePath, 'utf8');
+        const content = contentOverride ?? fs.readFileSync(filePath, 'utf8');
         const lines = content.split(/\r?\n/);
         const headerPattern = new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP)`, 'i');
 
@@ -137,10 +138,11 @@ export function scanClassBodyForMember(
     paramCount: number | undefined,
     structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS',
     countParamsInDecl: (line: string) => number,
-    selectBestOverload: (candidates: { type: string; line: number; paramCount: number; signature?: string }[], paramCount: number | undefined) => { type: string; line: number; paramCount: number; signature?: string } | null
+    selectBestOverload: (candidates: { type: string; line: number; paramCount: number; signature?: string }[], paramCount: number | undefined) => { type: string; line: number; paramCount: number; signature?: string } | null,
+    contentOverride?: string
 ): MemberInfo | null {
     try {
-        const content = fs.readFileSync(filePath, 'utf8');
+        const content = contentOverride ?? fs.readFileSync(filePath, 'utf8');
         const lines = content.split(/\r?\n/);
         const headerPattern = new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP)`, 'i');
 
@@ -811,10 +813,13 @@ export class ClassMemberResolver {
         paramCount: number | undefined,
         structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS'
     ): MemberInfo | null {
+        const uri = `file:///${filePath.replace(/\\/g, '/')}`;
+        const liveContent = this.tokenCache.getDocumentText(uri) ?? undefined;
         const result = scanClassBodyForMember(
             filePath, className, memberName, paramCount, structureType,
             (line) => this.countParametersInDeclaration(line),
-            (candidates, pc) => this.selectBestOverload(candidates, pc)
+            (candidates, pc) => this.selectBestOverload(candidates, pc),
+            liveContent
         );
         if (!result) {
             logger.info(`searchFileForMember: "${memberName}" not found in "${className}" in ${path.basename(filePath)}`);

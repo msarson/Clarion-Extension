@@ -752,7 +752,7 @@ export class HoverProvider {
             if (definitions.length > 0) {
                 const def = definitions[0]; // Use first definition
                 
-                logger.info(`Found CLASS definition: ${def.name} in ${def.filePath}:${def.line + 1}`);
+                logger.info(`Found ${def.structureType} definition: ${def.name} in ${def.filePath}:${def.line + 1}`);
                 
                 // Extract just the filename from the full path
                 const fileName = path.basename(def.filePath);
@@ -766,9 +766,11 @@ export class HoverProvider {
                     return null;
                 }
                 
-                logger.info(`✅ Found CLASS type: ${def.name} and verified it's included`);
+                logger.info(`✅ Found ${def.structureType} type: ${def.name} and verified it's included`);
                 
-                const typeLabel = def.isType ? 'CLASS, TYPE' : 'CLASS';
+                const typeLabel = def.structureType === 'INTERFACE'
+                    ? 'INTERFACE'
+                    : def.isType ? `${def.structureType}, TYPE` : def.structureType;
                 const parentLine = def.parentName ? `\n⬆️ Extends: \`${def.parentName}\`` : '';
                 const hoverMarkdown = [
                     `**${def.name}** — ${typeLabel}`,
@@ -783,7 +785,7 @@ export class HoverProvider {
                 };
             }
             
-            logger.info(`No CLASS definition found for: ${word}`);
+            logger.info(`No type definition found for: ${word}`);
         } catch (error) {
             logger.error(`Error checking class type hover: ${error instanceof Error ? error.message : String(error)}`);
         }
@@ -845,7 +847,7 @@ export class HoverProvider {
         return null;
     }
 
-    /** Find an INTERFACE token by name: current file → INCLUDE chain → equates */
+    /** Find an INTERFACE token by name: current file → INCLUDE chain → index → equates */
     private async findInterfaceToken(ifaceName: string, document: TextDocument, tokens: Token[]): Promise<Token | null> {
         // 1. Current document
         const local = tokens.find(t =>
@@ -860,8 +862,35 @@ export class HoverProvider {
         const incToken = await this.findInterfaceTokenInIncludes(ifaceName, fromPath, new Set());
         if (incToken) return incToken;
 
-        // 3. equates.clw
+        // 3. StructureDeclarationIndexer — covers libsrc/.inc files not in the INCLUDE chain
+        const sdi = StructureDeclarationIndexer.getInstance();
+        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         const sm = SolutionManager.getInstance();
+        const project = sm?.findProjectForFile(docPath);
+        if (project?.path) {
+            await sdi.getOrBuildIndex(project.path);
+            const infos = sdi.find(ifaceName, project.path);
+            const ifaceInfo = infos.find(d => d.structureType === 'INTERFACE');
+            if (ifaceInfo) {
+                const uri = `file:///${ifaceInfo.filePath.replace(/\\/g, '/')}`;
+                let incTokens = this.tokenCache.getTokensByUri(uri);
+                if (!incTokens) {
+                    try {
+                        const incContent = fs.readFileSync(ifaceInfo.filePath, 'utf8');
+                        const incDoc = TextDocument.create(uri, 'clarion', 1, incContent);
+                        incTokens = this.tokenCache.getTokens(incDoc);
+                    } catch { /* fall through */ }
+                }
+                const iface = incTokens?.find(t =>
+                    t.type === TokenType.Structure &&
+                    t.subType === TokenType.Interface &&
+                    t.label?.toLowerCase() === ifaceName.toLowerCase()
+                );
+                if (iface) return iface;
+            }
+        }
+
+        // 4. equates.clw
         const equatesTokens = sm?.getEquatesTokens();
         if (equatesTokens) {
             const eq = equatesTokens.find(t =>

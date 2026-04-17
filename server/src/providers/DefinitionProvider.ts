@@ -2122,7 +2122,7 @@ export class DefinitionProvider {
 
             const def = definitions[0];
             const uri = `file:///${def.filePath.replace(/\\/g, '/')}`;
-            logger.error(`✅ CLASS type F12: "${word}" → ${def.filePath}:${def.line + 1}`);
+            logger.error(`✅ ${def.structureType} type F12: "${word}" → ${def.filePath}:${def.line + 1}`);
             return Location.create(uri, Range.create(def.line, 0, def.line, 0));
         } catch (e) {
             logger.error(`findClassTypeDefinition error: ${e}`);
