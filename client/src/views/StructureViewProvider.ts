@@ -54,9 +54,11 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     private _filteredNodesCache: Map<string, DocumentSymbol[]> = new Map();
     private _debounceDelay: number = 300; // 300ms debounce delay
     
-    // Document change debouncing
+    // Document change debouncing with maxWait to prevent starvation on rapid undo
     private documentChangeDebounceTimeout: NodeJS.Timeout | null = null;
-    private documentChangeDebounceDelay: number = 500; // 500ms debounce for document changes
+    private documentChangeMaxWaitTimeout: NodeJS.Timeout | null = null;
+    private documentChangeDebounceDelay: number = 500;  // ms idle before firing
+    private documentChangeMaxWaitDelay: number = 1500;  // ms max before forcing a fire
 
     // Symbol request guard — prevents concurrent executeDocumentSymbolProvider calls
     // and abandons stale responses when a newer request has been issued.
@@ -84,6 +86,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             this.activeEditor = editor;
             this._lastKnownSymbols = []; // Stale symbols from previous file are invalid
             if (this._retryTimeout) { clearTimeout(this._retryTimeout); this._retryTimeout = null; }
+            if (this.documentChangeDebounceTimeout) { clearTimeout(this.documentChangeDebounceTimeout); this.documentChangeDebounceTimeout = null; }
+            if (this.documentChangeMaxWaitTimeout) { clearTimeout(this.documentChangeMaxWaitTimeout); this.documentChangeMaxWaitTimeout = null; }
             
             // Clear any active filter when changing documents
             if (this._filterText !== '') {
@@ -98,16 +102,33 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             perfLogger.info(`📊 PERF: Structure view updated for editor change: ${perfTime.toFixed(2)}ms`);
         }));
 
-        // Listen for document changes (debounced — large files would otherwise flood the tree)
+        // Listen for document changes (debounced with maxWait — prevents starvation on rapid undo)
         this.disposables.push(workspace.onDidChangeTextDocument(event => {
             if (this.activeEditor && event.document === this.activeEditor.document) {
+                // Rolling debounce: reset on every change, fires after 500ms idle
                 if (this.documentChangeDebounceTimeout) {
                     clearTimeout(this.documentChangeDebounceTimeout);
                 }
                 this.documentChangeDebounceTimeout = setTimeout(() => {
                     this.documentChangeDebounceTimeout = null;
+                    if (this.documentChangeMaxWaitTimeout) {
+                        clearTimeout(this.documentChangeMaxWaitTimeout);
+                        this.documentChangeMaxWaitTimeout = null;
+                    }
                     this._onDidChangeTreeData.fire();
                 }, this.documentChangeDebounceDelay);
+
+                // MaxWait: if changes keep coming in, still fire after 1500ms
+                if (!this.documentChangeMaxWaitTimeout) {
+                    this.documentChangeMaxWaitTimeout = setTimeout(() => {
+                        this.documentChangeMaxWaitTimeout = null;
+                        if (this.documentChangeDebounceTimeout) {
+                            clearTimeout(this.documentChangeDebounceTimeout);
+                            this.documentChangeDebounceTimeout = null;
+                        }
+                        this._onDidChangeTreeData.fire();
+                    }, this.documentChangeMaxWaitDelay);
+                }
             }
         }));
         
