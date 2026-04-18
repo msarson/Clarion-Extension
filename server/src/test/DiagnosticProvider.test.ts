@@ -1325,4 +1325,320 @@ Field2  STRING(20)
             assert.strictEqual(nestedQueueErrors.length, 2, 'Should flag both nested QUEUEs');
         });
     });
+
+    // ── Discard-return-value warnings for plain MAP procedure calls (Issue #51) ─────────────
+
+    suite('validateDiscardedReturnValuesForPlainCalls', () => {
+
+        function discardDiags(code: string) {
+            const doc = createDocument(code);
+            // Match only plain (non-dot-access) call diagnostics: "Return value of 'ProcName'"
+            // where ProcName has no dot (dot-access is handled by validateDiscardedReturnValues).
+            return DiagnosticProvider.validateDocument(doc).filter(d =>
+                /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
+            );
+        }
+
+        test('bare call to returning MAP procedure warns', () => {
+            const code = `
+  MAP
+GetStatus   PROCEDURE(),LONG
+  END
+
+MainProc    PROCEDURE()
+  CODE
+  GetStatus()
+`;
+            const diags = discardDiags(code);
+            assert.strictEqual(diags.length, 1, 'should warn once');
+            assert.ok(diags[0].message.includes("'GetStatus'"), 'message names the procedure');
+        });
+
+        test('no-paren bare call warns', () => {
+            const code = `
+  MAP
+GetStatus   PROCEDURE(),LONG
+  END
+
+MainProc    PROCEDURE()
+  CODE
+  GetStatus
+`;
+            const diags = discardDiags(code);
+            assert.strictEqual(diags.length, 1, 'should warn for no-paren call');
+        });
+
+        test('assignment suppresses warning', () => {
+            const code = `
+  MAP
+GetStatus   PROCEDURE(),LONG
+  END
+
+MainProc    PROCEDURE()
+result      LONG
+  CODE
+  result = GetStatus()
+`;
+            const diags = discardDiags(code);
+            assert.strictEqual(diags.length, 0, 'assignment captures the return value');
+        });
+
+        test('PROC attribute on declaration suppresses warning', () => {
+            const code = `
+  MAP
+GetStatus   PROCEDURE(),PROC,LONG
+  END
+
+MainProc    PROCEDURE()
+  CODE
+  GetStatus()
+`;
+            const diags = discardDiags(code);
+            assert.strictEqual(diags.length, 0, 'PROC attribute suppresses warning');
+        });
+
+        test('procedure with no return type does not warn', () => {
+            const code = `
+  MAP
+DoSomething PROCEDURE()
+  END
+
+MainProc    PROCEDURE()
+  CODE
+  DoSomething()
+`;
+            const diags = discardDiags(code);
+            assert.strictEqual(diags.length, 0, 'void procedure should not warn');
+        });
+
+        test('any overload with PROC suppresses warning for that name', () => {
+            const code = `
+  MAP
+GetStatus   PROCEDURE(LONG),LONG
+GetStatus   PROCEDURE(),PROC,LONG
+  END
+
+MainProc    PROCEDURE()
+  CODE
+  GetStatus()
+`;
+            const diags = discardDiags(code);
+            assert.strictEqual(diags.length, 0, 'PROC overload suppresses all overloads of that name');
+        });
+
+        test('dot-access call is not flagged (handled by validateDiscardedReturnValues)', () => {
+            const code = `
+  MAP
+GetStatus   PROCEDURE(),LONG
+  END
+
+MainProc    PROCEDURE()
+  CODE
+  Self.GetStatus()
+`;
+            // dot-access calls are filtered out by the dot-prefix check
+            const diags = discardDiags(code);
+            assert.strictEqual(diags.length, 0, 'dot-access should not be flagged by plain-call validator');
+        });
+
+        test('MODULE-inside-MAP procedure warns', () => {
+            const code = `
+  MAP
+    MODULE('helper.clw')
+GetHelper   PROCEDURE(),LONG
+    END
+  END
+
+MainProc    PROCEDURE()
+  CODE
+  GetHelper()
+`;
+            const diags = discardDiags(code);
+            assert.strictEqual(diags.length, 1, 'MODULE declaration should be included');
+        });
+
+        test('multiple returning procedures - warns for each bare call', () => {
+            const code = `
+  MAP
+FuncA   PROCEDURE(),LONG
+FuncB   PROCEDURE(),STRING
+  END
+
+MainProc    PROCEDURE()
+  CODE
+  FuncA()
+  FuncB()
+`;
+            const diags = discardDiags(code);
+            assert.strictEqual(diags.length, 2, 'should warn for both bare calls');
+        });
+
+        test('call only in first procedure, not second', () => {
+            const code = `
+  MAP
+GetStatus   PROCEDURE(),LONG
+  END
+
+ProcA       PROCEDURE()
+  CODE
+  GetStatus()
+
+ProcB       PROCEDURE()
+  CODE
+  x = 1
+`;
+            const diags = discardDiags(code);
+            assert.strictEqual(diags.length, 1, 'should warn only in ProcA');
+        });
+
+        test('comparison expression using return value does not warn', () => {
+            const code = `
+  MAP
+GetStatus   PROCEDURE(),LONG
+  END
+
+MainProc    PROCEDURE()
+  CODE
+  IF GetStatus() = 1
+  END
+`;
+            const diags = discardDiags(code);
+            assert.strictEqual(diags.length, 0, 'used in IF condition — return value is consumed');
+        });
+    });
+
+    suite('validateCrossFilePlainCalls (async cross-file)', () => {
+        // These tests pre-populate TokenCache with a "program file" that declares a
+        // global MAP procedure, then validate a "member file" that calls it.
+        // validateDiscardedReturnValues (async) performs the cross-file scan.
+
+        const { TokenCache } = require('../TokenCache');
+        const { MemberLocatorService } = require('../services/MemberLocatorService');
+
+        function createDoc(uri: string, code: string): TextDocument {
+            return TextDocument.create(uri, 'clarion', 1, code);
+        }
+
+        function populateCache(doc: TextDocument): void {
+            TokenCache.getInstance().getTokens(doc);
+        }
+
+        teardown(() => {
+            TokenCache.getInstance().clearAllTokens();
+        });
+
+        test('cross-file: bare call to global MAP procedure warns', async () => {
+            const programCode = `
+  PROGRAM
+  MAP
+TestProc  PROCEDURE(),LONG
+  END
+  CODE
+`;
+            const memberCode = `
+  MEMBER('prog.clw')
+CallerProc  PROCEDURE()
+  CODE
+  TestProc()
+`;
+            const progDoc = createDoc('file:///prog.clw', programCode);
+            const memberDoc = createDoc('file:///member.clw', memberCode);
+            populateCache(progDoc);
+
+            const tokens = TokenCache.getInstance().getTokens(memberDoc);
+            const locator = new MemberLocatorService();
+            const diags = await DiagnosticProvider.validateDiscardedReturnValues(tokens, memberDoc, locator);
+
+            const plain = diags.filter((d: { message: string }) =>
+                /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
+            );
+            assert.strictEqual(plain.length, 1, 'should warn for bare TestProc() call');
+            assert.ok(plain[0].message.includes("'TestProc'"));
+        });
+
+        test('cross-file: assignment suppresses warning', async () => {
+            const programCode = `
+  PROGRAM
+  MAP
+TestProc  PROCEDURE(),LONG
+  END
+  CODE
+`;
+            const memberCode = `
+  MEMBER('prog.clw')
+CallerProc  PROCEDURE()
+Result  LONG
+  CODE
+  Result = TestProc()
+`;
+            const progDoc = createDoc('file:///prog.clw', programCode);
+            const memberDoc = createDoc('file:///member.clw', memberCode);
+            populateCache(progDoc);
+
+            const tokens = TokenCache.getInstance().getTokens(memberDoc);
+            const locator = new MemberLocatorService();
+            const diags = await DiagnosticProvider.validateDiscardedReturnValues(tokens, memberDoc, locator);
+
+            const plain = diags.filter((d: { message: string }) =>
+                /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
+            );
+            assert.strictEqual(plain.length, 0, 'assignment captures return value — no warning');
+        });
+
+        test('cross-file: PROC attribute on declaration suppresses warning', async () => {
+            const programCode = `
+  PROGRAM
+  MAP
+TestProc  PROCEDURE(),LONG,PROC
+  END
+  CODE
+`;
+            const memberCode = `
+  MEMBER('prog.clw')
+CallerProc  PROCEDURE()
+  CODE
+  TestProc()
+`;
+            const progDoc = createDoc('file:///prog.clw', programCode);
+            const memberDoc = createDoc('file:///member.clw', memberCode);
+            populateCache(progDoc);
+
+            const tokens = TokenCache.getInstance().getTokens(memberDoc);
+            const locator = new MemberLocatorService();
+            const diags = await DiagnosticProvider.validateDiscardedReturnValues(tokens, memberDoc, locator);
+
+            const plain = diags.filter((d: { message: string }) =>
+                /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
+            );
+            assert.strictEqual(plain.length, 0, 'PROC attribute — no warning');
+        });
+
+        test('cross-file: no return type — no warning', async () => {
+            const programCode = `
+  PROGRAM
+  MAP
+VoidProc  PROCEDURE()
+  END
+  CODE
+`;
+            const memberCode = `
+  MEMBER('prog.clw')
+CallerProc  PROCEDURE()
+  CODE
+  VoidProc()
+`;
+            const progDoc = createDoc('file:///prog.clw', programCode);
+            const memberDoc = createDoc('file:///member.clw', memberCode);
+            populateCache(progDoc);
+
+            const tokens = TokenCache.getInstance().getTokens(memberDoc);
+            const locator = new MemberLocatorService();
+            const diags = await DiagnosticProvider.validateDiscardedReturnValues(tokens, memberDoc, locator);
+
+            const plain = diags.filter((d: { message: string }) =>
+                /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
+            );
+            assert.strictEqual(plain.length, 0, 'void procedure — no warning');
+        });
+    });
 });
