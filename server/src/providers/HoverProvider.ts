@@ -281,7 +281,12 @@ export class HoverProvider {
                     }
                     
                     // Not a procedure - check for global variable in parent's own scope only
+                    // Try full word first (e.g., Access:IBSDataSets), then prefix-stripped fallback
                     // (shallowOnly=true: skips recursive include chain — handled by findInIncludesAndEquates below)
+                    if (word !== searchWord) {
+                        const fullWordHover = await this.variableResolver.findGlobalVariableHover(word, parentTokens, parentDoc, position.line, true);
+                        if (fullWordHover) return fullWordHover;
+                    }
                     const globalVarHover = await this.variableResolver.findGlobalVariableHover(searchWord, parentTokens, parentDoc, position.line, true);
                     if (globalVarHover) return globalVarHover;
                 }
