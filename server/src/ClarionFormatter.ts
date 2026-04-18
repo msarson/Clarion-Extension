@@ -14,12 +14,9 @@ class ClarionFormatter {
     private text: string;
     private lines: string[];
     private indentSize: number = 4;
-    private labelLines: Set<number> = new Set();
-    private structureIndentMap: Map<number, number> = new Map();
     private executionRanges: { startsAt: number; finishesAt: number }[] = [];
-    private statementIndentation: Map<number, number> = new Map();
-    private insideExecutionCode: boolean = false;
     private localDataSections: Map<number, { startLine: number; endLine: number; maxLabelLength: number }> = new Map();
+    private tokensByLine: Map<number, Token[]> = new Map();
 
     constructor(tokens: Token[], text: string, options?: { indentSize?: number, formattingOptions?: FormattingOptions }) {
         this.tokens = tokens;
@@ -33,16 +30,24 @@ class ClarionFormatter {
             logger.info(`Using editor tab size: ${this.indentSize}`);
         }
 
-        // Check if input text contains tabs
         if (text.includes('\t')) {
             logger.warn('⚠️ Input text contains tabs. This may cause alignment issues if token.start values are tab-aware.');
         }
 
+        this.buildTokensByLine();
         this.identifyExecutionRanges();
-        this.identifyLabelLines();
-        this.detectMisplacedLabels(); // 🚀 NEW FUNCTION HERE
-        this.identifyLocalDataSections(); // 🚀 NEW: Detect local data sections
-        // this.calculateIndentation();
+        this.identifyLocalDataSections();
+    }
+
+    private buildTokensByLine(): void {
+        for (const token of this.tokens) {
+            let list = this.tokensByLine.get(token.line);
+            if (!list) {
+                list = [];
+                this.tokensByLine.set(token.line, list);
+            }
+            list.push(token);
+        }
     }
 
     /**
@@ -58,177 +63,40 @@ class ClarionFormatter {
     private identifyExecutionRanges(): void {
         this.executionRanges = [];
         for (const token of this.tokens) {
-            if (token.subType === TokenType.Procedure || token.subType === TokenType.Routine) {
-                let executionStart = token.executionMarker ? token.executionMarker.line + 1 : token.line + 1;
+            if (token.type === TokenType.Procedure || token.subType === TokenType.Routine) {
+                const executionStart = token.executionMarker ? token.executionMarker.line + 1 : token.line + 1;
                 this.executionRanges.push({
                     startsAt: executionStart,
                     finishesAt: token.finishesAt ?? this.tokens[this.tokens.length - 1]?.line ?? 0
                 });
-                logger.warn(`📌 Execution Range for ${token.subType === TokenType.Procedure ? 'PROCEDURE' : 'ROUTINE'} '${token.value}': ${executionStart} to ${token.finishesAt ?? this.tokens[this.tokens.length - 1]?.line ?? 0}`);
             }
         }
     }
-    private identifyLabelLines(): void {
-        const executionCodeSections: Set<number> = new Set();
-        const possibleLabels: Set<number> = new Set();
-        const processedLines: Set<number> = new Set(); // ✅ Ensure we process only the first token per line
-
-        // ✅ Step 1: Identify execution sections FIRST
-        for (const range of this.executionRanges) {
-            for (let line = range.startsAt; line <= range.finishesAt; line++) {
-                executionCodeSections.add(line);
-            }
-        }
-
-        // ✅ Step 2: Identify possible labels, but only outside execution sections
-        for (const token of this.tokens) {
-            if (processedLines.has(token.line)) continue; // 🚀 Skip if line already processed
-
-            // ✅ Skip tokens inside execution range
-            if (executionCodeSections.has(token.line)) {
-                logger.info(`⏭️ Skipping '${token.value}' at line ${token.line}, inside execution.`);
-                continue;
-            }
-
-            // ✅ Only process the first token per line
-            if (token.type === TokenType.Label || token.type === TokenType.Variable || token.subType === TokenType.Routine || token.type === TokenType.Class) {
-                possibleLabels.add(token.line);
-                this.labelLines.add(token.line);
-                logger.info(`📌 Possible label detected: '${token.value}' at line ${token.line}`);
-            }
-
-            // 🚀 Stop processing further tokens on this line
-            processedLines.add(token.line);
-        }
-
-
-        // ✅ Step 3: Confirm only valid labels
-        // for (const token of this.tokens) {
-        //     if (possibleLabels.has(token.line)) {
-        //         if (executionCodeSections.has(token.line) && token.subType !== TokenType.Routine) {
-        //             this.labelLines.delete(token.line);
-        //             logger.info(`🔄 Overriding '${token.value}' at line ${token.line} (inside execution) as a statement`);
-        //         } else {
-        //             this.labelLines.add(token.line);
-        //             logger.info(`✅ Confirmed label at line ${token.line}: ${token.value}`);
-        //         }
-        //     }
-        // }
-    }
-
-
-    private detectMisplacedLabels(): void {
-        logger.info("🔍 Detecting misplaced labels...");
-
-        for (const token of this.tokens) {
-            // ✅ Only check for misplaced labels
-            if (token.type === TokenType.Label && token.start > 0) {
-                logger.warn(`🚨 Misplaced label detected: '${token.value}' at Line ${token.line}, Column ${token.start}`);
-
-                // ✅ Add the line to be adjusted
-                this.labelLines.delete(token.line); // ❌ Remove as label
-                this.statementIndentation.set(token.line, this.indentSize); // ✅ Treat it as a statement instead
-            }
-        }
-    }
-
     private identifyLocalDataSections(): void {
-        logger.info("🔍 Identifying local data sections...");
-
         for (const token of this.tokens) {
-            if (token.subType === TokenType.Procedure || token.subType === TokenType.Routine) {
+            if (token.type === TokenType.Procedure || token.subType === TokenType.Routine) {
                 if (token.executionMarker) {
                     const startLine = token.line + 1;
                     const endLine = token.executionMarker.line - 1;
-                    
-                    if (endLine >= startLine) {
-                        // Find longest label in this section
-                        let maxLabelLength = 0;
-                        const tokensInSection = this.tokens.filter(t => 
-                            t.line >= startLine && t.line <= endLine && 
-                            (t.type === TokenType.Label || t.type === TokenType.Variable)
-                        );
 
-                        for (const t of tokensInSection) {
-                            if (t.start === 0 || (t.type === TokenType.Label && t.parent?.line === token.line)) {
-                                maxLabelLength = Math.max(maxLabelLength, t.value.length);
+                    if (endLine >= startLine) {
+                        let maxLabelLength = 0;
+                        for (let ln = startLine; ln <= endLine; ln++) {
+                            const lineTokens = this.tokensByLine.get(ln);
+                            if (!lineTokens) continue;
+                            const first = lineTokens[0];
+                            if (first && (first.type === TokenType.Label || first.type === TokenType.Variable) && first.start === 0) {
+                                maxLabelLength = Math.max(maxLabelLength, first.value.length);
                             }
                         }
 
                         if (maxLabelLength > 0) {
                             this.localDataSections.set(token.line, { startLine, endLine, maxLabelLength });
-                            logger.info(`📋 Local data section for '${token.value}': lines ${startLine}-${endLine}, max label length: ${maxLabelLength}`);
                         }
                     }
                 }
             }
         }
-    }
-
-
-    private calculateIndentation(): void {
-        const indentStack: { startColumn: number; indentLevel: number }[] = [];
-        let structureIndentation: number = 0;
-
-        logger.info("🔍 Starting indentation calculation...");
-
-        for (const token of this.tokens) {
-            logger.info(`🔎 Processing Token: '${token.value}' at Line ${token.line}, Column ${token.start}`);
-
-            // ✅ Handle STRUCTURE (e.g., VIEW, WINDOW, SHEET)
-            if (token.type === TokenType.Structure) {
-                // Find label (if any) on the same line
-                let labelToken = this.tokens.find(t => t.line === token.line && t.type === TokenType.Label);
-                // ✅ Find where the label ends
-                let labelEndColumn = labelToken ? labelToken.start + labelToken.value.length : 0;
-
-                // ✅ Log label detection details
-                if (labelToken) {
-                    logger.info(`🔍 Label Detection: ${labelToken ? `'${labelToken.value}'` : 'No Label'} at Line ${token.line}, Starts at ${labelToken.start} Ends at Column ${labelEndColumn}`);
-                }
-
-                // ✅ Find the next tab stop AFTER the label (ensuring tabSize spacing)
-                let structureColumn = labelEndColumn > 0
-                    ? Math.ceil((labelEndColumn + 1) / this.indentSize) * this.indentSize  // ✅ Ensure 1 space before aligning
-                    : token.start;
-
-
-                // ✅ Log structure alignment
-                logger.info(`📏 Structure '${token.value}' at Line ${token.line} starts at Column ${structureColumn}`);
-
-                // ✅ Child elements align at **next full tab stop after the structure**
-                structureIndentation = Math.ceil((structureColumn + this.indentSize) / this.indentSize) * this.indentSize;
-
-                // ✅ Log indentation details
-                logger.info(`🔹 Child elements of '${token.value}' will align at Column ${structureIndentation}`);
-
-
-                // ✅ Store indentation for children
-                this.structureIndentMap.set(token.line, structureColumn);
-                indentStack.push({ startColumn: structureColumn, indentLevel: structureIndentation });
-
-                logger.info(`📏 Structure '${token.value}' at Line ${token.line} starts at Column ${structureColumn}, children will align at Column ${structureIndentation}`);
-            }
-
-            // ✅ Handle END statement (aligns with structure)
-            else if (token.type === TokenType.EndStatement) {
-                let lastStructure = indentStack.pop();
-                if (lastStructure) {
-                    structureIndentation = lastStructure.startColumn;
-                    this.structureIndentMap.set(token.line, structureIndentation);
-                    logger.info(`✅ END at Line ${token.line} aligns with its structure at Column ${structureIndentation}`);
-                }
-            }
-
-            // ✅ Handle nested elements inside a structure
-            else {
-                let indentLevel = indentStack.length > 0 ? indentStack[indentStack.length - 1].indentLevel : 0;
-                this.structureIndentMap.set(token.line, indentLevel);
-                logger.info(`🔹 Statement '${token.value}' at Line ${token.line} indented at Column ${indentLevel}`);
-            }
-        }
-
-        logger.info("✅ Indentation calculation completed!");
     }
     private isStructure(token: Token): token is StructureToken {
         return token.type === TokenType.Structure;
@@ -277,11 +145,8 @@ class ClarionFormatter {
                 }
             }
             
-            // For logging purposes, also track the left-trimmed version to maintain token positions
-            const leftTrimmedLine = originalLine.trimLeft();
-
             // ✅ Get tokens for this line
-            const tokensOnLine = this.tokens.filter(t => t.line === index);
+            const tokensOnLine = this.tokensByLine.get(index) ?? [];
             if (tokensOnLine.length === 0) {
                 formattedLines.push(" ".repeat(finalIndent) + trimmedLine);
                 continue;
@@ -384,7 +249,9 @@ class ClarionFormatter {
             else if (firstToken.type === TokenType.Structure) {
               if (firstToken.finishesAt !== undefined && firstToken.finishesAt === index) {
                 logger.info(`⏩ Skipping inline structure '${firstToken.value}' on Line ${index}`);
-                formattedLines.push(padToCol0(this.indentSize) + originalLine.trim()); // minimal indent
+                // Bug 2 fix: use current stack indent level, not hardcoded minimum
+                const currentIndent = indentStack.length ? indentStack[indentStack.length - 1].indentLevel : this.indentSize;
+                formattedLines.push(padToCol0(currentIndent) + originalLine.trim());
                 continue;
               }
 
@@ -427,40 +294,10 @@ class ClarionFormatter {
         }
 
         logger.info("📐 Structure-based formatting complete.");
-        return formattedLines.join("\r\n");
+        // Bug 3 fix: detect input EOL and use it for output
+        const eol = this.text.includes('\r\n') ? '\r\n' : '\n';
+        return formattedLines.join(eol);
     }
-
-
-
-
-
-
-
-
-    /** ✅ Gets the root structure that a given token belongs to */
-    private getRootStructure(token: Token): Token | null {
-        let current = token;
-        while (current.parent) {
-            current = current.parent;
-        }
-        return current;
-    }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     public formatDocument(): string {
         return this.format();
