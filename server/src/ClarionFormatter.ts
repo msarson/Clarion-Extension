@@ -177,36 +177,58 @@ class ClarionFormatter {
             if (firstToken.type === TokenType.Label) {
               logger.info(`📌 Keeping label '${firstToken.value}' at column 0 on Line ${index}`);
 
-              // 0-based label positions
-              const labelStart0 = firstToken.start;                              // 0-based
-              const labelEnd0   = labelStart0 + firstToken.value.length;         // 0-based
+              // Find the first token that is not a Label or Variable — this is the actual
+              // type/keyword/procedure token. This handles method implementations like
+              // "ThisWindow.Init PROCEDURE()" where the tokenizer emits a separate token
+              // for "Init" between the Label and the PROCEDURE keyword.
+              const contentToken = tokensOnLine.slice(1).find(t =>
+                t.type !== TokenType.Label && t.type !== TokenType.Variable
+              ) ?? secondToken;
+
+              // Full label text from the original line (preserves dot notation etc.)
+              const labelText = contentToken
+                ? originalLine.substring(firstToken.start, contentToken.start).trimEnd()
+                : firstToken.value;
+              const labelStart0 = firstToken.start;
+              const labelEnd0   = labelStart0 + labelText.length;
 
               const parentCol0  = indentStack.length
-                ? indentStack[indentStack.length - 1].indentLevel                // 0-based
-                : this.indentSize;                                               // minimum 0-based indent
+                ? indentStack[indentStack.length - 1].indentLevel
+                : this.indentSize;
 
-              if (secondToken?.type === TokenType.Structure) {
+              if (contentToken?.type === TokenType.Structure) {
                 // Require a full indent gap after label, then snap to grid
-                const minAfterLabel0   = labelEnd0 + this.indentSize;            // e.g., 24 + 4 = 28
-                const nextGridAfterLbl = snap0(minAfterLabel0);                  // e.g., -> 28
+                const minAfterLabel0   = labelEnd0 + this.indentSize;
+                const nextGridAfterLbl = snap0(minAfterLabel0);
 
-                // If maxLabelLength policy is present, snap that too (+indentSize if desired)
-                const maxLabelTarget0 = (secondToken as any).maxLabelLength
-                  ? snap0((secondToken as any).maxLabelLength + this.indentSize)
+                const maxLabelTarget0 = (contentToken as any).maxLabelLength
+                  ? snap0((contentToken as any).maxLabelLength + this.indentSize)
                   : nextGridAfterLbl;
 
-                const structureCol0 = Math.max(nextGridAfterLbl, maxLabelTarget0, parentCol0); // 0-based
+                const structureCol0 = Math.max(nextGridAfterLbl, maxLabelTarget0, parentCol0);
 
-                // Push EXACT opener column (0-based); children will use +indentSize, END will pop to this
                 indentStack.push({ startColumn: structureCol0, indentLevel: structureCol0 + this.indentSize });
                 logger.info(`labelEnd0 = ${labelEnd0} - structureCol0 = ${structureCol0}`);
-                const spacesToAdd = Math.max(0, structureCol0 - labelEnd0);      // 0-based delta from label end
-                logger.info(`➡️ Aligning structure '${secondToken.value}' after label '${firstToken.value}' at Column ${structureCol0} on Line ${index}`);
+                const spacesToAdd = Math.max(0, structureCol0 - labelEnd0);
+                logger.info(`➡️ Aligning structure '${contentToken.value}' after label '${labelText}' at Column ${structureCol0} on Line ${index}`);
                 const formattedLine =
-                  firstToken.value +
+                  labelText +
                   " ".repeat(spacesToAdd) +
-                  originalLine.substring(secondToken.start); // token.start is 0-based index into original
+                  originalLine.substring(contentToken.start);
                 logger.info(`Formatted Line ${index}: "${formattedLine}"`);
+                formattedLines.push(formattedLine);
+                continue;
+              }
+
+              if (contentToken && contentToken !== secondToken) {
+                // There were intermediate tokens (e.g. "Init" in "ThisWindow.Init PROCEDURE()").
+                // Output the full label text + aligned content token.
+                const stmtCol0    = Math.max(snap0(labelEnd0 + this.indentSize), parentCol0);
+                const spacesToAdd = Math.max(0, stmtCol0 - labelEnd0);
+                const formattedLine =
+                  labelText +
+                  " ".repeat(spacesToAdd) +
+                  originalLine.substring(contentToken.start);
                 formattedLines.push(formattedLine);
                 continue;
               }
@@ -215,9 +237,9 @@ class ClarionFormatter {
                 // Non-structure after label: align to the same grid column policy
                 const stmtCol0    = Math.max(snap0(labelEnd0 + this.indentSize), parentCol0);
                 const spacesToAdd = Math.max(0, stmtCol0 - labelEnd0);
-                logger.info(`➡️ Aligning statement '${secondToken.value}' after label '${firstToken.value}' at Column ${stmtCol0} on Line ${index}`);
+                logger.info(`➡️ Aligning statement '${secondToken.value}' after label '${labelText}' at Column ${stmtCol0} on Line ${index}`);
                 const formattedLine =
-                  firstToken.value +
+                  labelText +
                   " ".repeat(spacesToAdd) +
                   originalLine.substring(secondToken.start);
 

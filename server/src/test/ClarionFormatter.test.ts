@@ -624,4 +624,29 @@ suite('ClarionFormatter – Bug 1 side-effect: procedure header line unchanged b
             'procedure header: label at col 0, PROCEDURE at col 12',
         );
     });
+
+    test('method implementation preserves dot-notation in label (e.g. ThisWindow.Init PROCEDURE)', () => {
+        // The tokenizer emits Label("ThisWindow") + Variable("Init") + Procedure("PROCEDURE").
+        // The formatter must reconstruct "ThisWindow.Init" from the original line text,
+        // not just use firstToken.value which would drop the ".Init" part.
+        //
+        // "ThisWindow.Init" (15 chars): stmtCol0 = max(snap0(15+4)=20, 4) = 20
+        const code = [
+            'ThisWindow.Init  PROCEDURE()',
+            '  CODE',
+            '  RETURN',
+        ].join('\r\n');
+
+        const result = fmt(code);
+        const lines = splitLines(result);
+
+        assert.ok(
+            lines[0].startsWith('ThisWindow.Init'),
+            'dot-notation label must be preserved: got ' + JSON.stringify(lines[0]),
+        );
+        assert.ok(
+            lines[0].includes('PROCEDURE'),
+            'PROCEDURE keyword must appear on the same line',
+        );
+    });
 });
