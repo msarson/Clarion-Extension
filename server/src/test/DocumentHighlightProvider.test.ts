@@ -51,7 +51,7 @@ suite('DocumentHighlightProvider', () => {
     test('declaration is marked as Write kind', async () => {
         const code = [
             'MyProc PROCEDURE',
-            '  MyVar  LONG',
+            'MyVar  LONG',
             'CODE',
             '  MyVar = 5',
             '  MyVar += 1',
@@ -69,7 +69,7 @@ suite('DocumentHighlightProvider', () => {
     test('usages are marked as Read kind', async () => {
         const code = [
             'MyProc PROCEDURE',
-            '  MyVar  LONG',
+            'MyVar  LONG',
             'CODE',
             '  MyVar = 5',
             '  MyVar += 1',
@@ -107,7 +107,7 @@ suite('DocumentHighlightProvider', () => {
     test('all highlight ranges cover only the symbol name', async () => {
         const code = [
             'MyProc PROCEDURE',
-            '  MyVar  LONG',
+            'MyVar  LONG',
             'CODE',
             '  MyVar = 5',
         ].join('\n');
