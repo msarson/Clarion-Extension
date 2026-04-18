@@ -154,6 +154,16 @@ export class StructureFieldResolver {
             if (chainedInfo) {
                 return this.methodResolver.resolveChainedMethodCall(fieldName, chainedInfo, document, paramCount);
             }
+        } else if (beforeDot.includes('.')) {
+            // Multi-segment variable chain: variable.property.method (e.g., thisStartup.Settings.PutGlobalSetting)
+            let paramCount: number | undefined;
+            if (hasParentheses) {
+                paramCount = countParametersInCall(line, fieldName) ?? undefined;
+            }
+            const chainedInfo = await this.chainedResolver.resolve(beforeDot, fieldName, document, position, paramCount);
+            if (chainedInfo) {
+                return this.methodResolver.resolveChainedMethodCall(fieldName, chainedInfo, document, paramCount);
+            }
         } else {
             // variable.member - structure field access (e.g., MyGroup.MyVar)
             // or typed class variable access (e.g., st.GetValue() where st is StringTheory)

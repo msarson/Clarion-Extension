@@ -13,7 +13,7 @@ import { Location } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
-import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
+import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { CrossFileCache } from '../providers/hover/CrossFileCache';
 import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, detectMemberAccess } from '../utils/ClassMemberResolver';
 import { SymbolFinderService } from './SymbolFinderService';
@@ -26,7 +26,7 @@ const logger = LoggerManager.getLogger("MemberLocatorService");
 logger.setLevel("error");
 
 export class MemberLocatorService {
-    private classIndexer = ClassDefinitionIndexer.getInstance();
+    private sdi = StructureDeclarationIndexer.getInstance();
     private tokenCache = TokenCache.getInstance();
 
     constructor(private crossFileCache?: CrossFileCache) {}
@@ -69,7 +69,7 @@ export class MemberLocatorService {
                 const parentData = await this.loadDocument(parentPath);
                 if (parentData) {
                     const parentVar = parentData.tokens.find(t =>
-                        t.start === 0 && t.value.toLowerCase() === varName.toLowerCase()
+                        t.start === 0 && this.tokenMatchesName(t, varName.toLowerCase())
                     );
                     if (parentVar) return { token: parentVar, tokens: parentData.tokens, doc: parentData.doc };
                     const incResult = await this.searchIncludesForToken(
@@ -134,15 +134,15 @@ export class MemberLocatorService {
         );
         if (fromInclude) return fromInclude;
 
-        // 2. ClassDefinitionIndexer (covers libsrc / accessory paths) + parent chain
+        // 2. StructureDeclarationIndexer (covers libsrc / accessory paths) + parent chain
         await this.ensureIndexBuilt();
-        const infos = this.classIndexer.findClass(className);
-        if (infos && infos.length > 0) {
+        const infos = this.sdi.find(className);
+        if (infos.length > 0) {
             const info = infos.find(d => !d.isType) || infos[0];
-            const result = await this.scanBodyForMember(info.filePath, className, memberName, paramCount, info.structureType);
+            const result = await this.scanBodyForMember(info.filePath, className, memberName, paramCount, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
             if (result) return result;
-            if (info.structureType === 'CLASS' && info.parentClass) {
-                return this.walkParentChain(info.parentClass, memberName, paramCount, new Set([className.toLowerCase()]));
+            if (info.structureType === 'CLASS' && info.parentName) {
+                return this.walkParentChain(info.parentName, memberName, paramCount, new Set([className.toLowerCase()]));
             }
         }
 
@@ -201,8 +201,8 @@ export class MemberLocatorService {
         tokens: Token[],
         document: TextDocument
     ): Promise<{ token: Token; tokens: Token[]; doc: TextDocument } | null> {
-        // 1. Current file (column 0 label)
-        const local = tokens.find(t => t.start === 0 && t.value.toLowerCase() === varName.toLowerCase());
+        // 1. Current file (column 0 label or structure)
+        const local = tokens.find(t => t.start === 0 && this.tokenMatchesName(t, varName.toLowerCase()));
         if (local) return { token: local, tokens, doc: document };
 
         const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
@@ -216,7 +216,7 @@ export class MemberLocatorService {
                 const parentData = await this.loadDocument(parentPath);
                 if (parentData) {
                     const parentVar = parentData.tokens.find(t =>
-                        t.start === 0 && t.value.toLowerCase() === varName.toLowerCase()
+                        t.start === 0 && this.tokenMatchesName(t, varName.toLowerCase())
                     );
                     if (parentVar) return { token: parentVar, tokens: parentData.tokens, doc: parentData.doc };
                     const incResult = await this.searchIncludesForToken(
@@ -248,9 +248,8 @@ export class MemberLocatorService {
             if (!data) continue;
 
             const found = data.tokens.find(t =>
-                t.type === TokenType.Label &&
                 t.start === 0 &&
-                t.value.toLowerCase() === varName.toLowerCase()
+                this.tokenMatchesName(t, varName.toLowerCase())
             );
             if (found) return { token: found, tokens: data.tokens, doc: data.doc };
 
@@ -258,6 +257,94 @@ export class MemberLocatorService {
             if (nested) return nested;
         }
         return null;
+    }
+
+    /**
+     * Searches the current file, MEMBER parent, and INCLUDE chain for a structure field
+     * identified by PRE prefix and field name (e.g. "SetG:SettingsGroup" → prefix="SetG", field="SettingsGroup").
+     * Structure fields have token.structurePrefix === prefix and are not at column 0.
+     */
+    async findPrefixFieldTokenInChain(
+        prefix: string,
+        fieldName: string,
+        document: TextDocument
+    ): Promise<{ token: Token; tokens: Token[]; doc: TextDocument } | null> {
+        const tokens = this.tokenCache.getTokens(document);
+        const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const currentDir = path.dirname(currentFilePath);
+
+        // 1. Current file
+        const found = this.findPrefixFieldInTokens(prefix, fieldName, tokens);
+        if (found) return { token: found, tokens, doc: document };
+
+        // 2. MEMBER parent + its include chain
+        const memberToken = tokens.find(t => t.value?.toUpperCase() === 'MEMBER' && t.line < 5 && t.referencedFile);
+        if (memberToken?.referencedFile) {
+            const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir);
+            if (parentPath) {
+                const parentData = await this.loadDocument(parentPath);
+                if (parentData) {
+                    const parentFound = this.findPrefixFieldInTokens(prefix, fieldName, parentData.tokens);
+                    if (parentFound) return { token: parentFound, tokens: parentData.tokens, doc: parentData.doc };
+                    const incResult = await this.searchIncludesForPrefixField(
+                        prefix, fieldName, parentData.tokens, path.dirname(parentPath), new Set([parentPath.toLowerCase()])
+                    );
+                    if (incResult) return incResult;
+                }
+            }
+        }
+
+        // 3. Current file include chain
+        return this.searchIncludesForPrefixField(prefix, fieldName, tokens, currentDir, new Set());
+    }
+
+    private findPrefixFieldInTokens(prefix: string, fieldName: string, tokens: Token[]): Token | undefined {
+        const prefixUpper = prefix.toUpperCase();
+        const fieldUpper = fieldName.toUpperCase();
+        return tokens.find(t =>
+            t.structurePrefix?.toUpperCase() === prefixUpper &&
+            // Label tokens: t.value is the name; Structure tokens (nested GROUP etc): t.label is the name
+            (t.value.toUpperCase() === fieldUpper || t.label?.toUpperCase() === fieldUpper)
+        );
+    }
+
+    private async searchIncludesForPrefixField(
+        prefix: string,
+        fieldName: string,
+        tokens: Token[],
+        fromDir: string,
+        visited: Set<string>
+    ): Promise<{ token: Token; tokens: Token[]; doc: TextDocument } | null> {
+        const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
+        for (const inc of includeTokens) {
+            const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
+            if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
+            visited.add(resolvedPath.toLowerCase());
+
+            const data = await this.loadDocument(resolvedPath);
+            if (!data) continue;
+
+            const found = this.findPrefixFieldInTokens(prefix, fieldName, data.tokens);
+            if (found) return { token: found, tokens: data.tokens, doc: data.doc };
+
+            const nested = await this.searchIncludesForPrefixField(prefix, fieldName, data.tokens, path.dirname(resolvedPath), visited);
+            if (nested) return nested;
+        }
+        return null;
+    }
+
+
+    /**
+     * Returns true if a token's declared name matches varName.
+     * - Label tokens: the name is token.value
+     * - Structure/Procedure tokens: the name is token.label (e.g. "SetG:SettingsGroup GROUP" → label="SetG:SettingsGroup")
+     */
+    private tokenMatchesName(t: Token, nameLower: string): boolean {
+        if (t.type === TokenType.Label) return t.value.toLowerCase() === nameLower;
+        if (t.type === TokenType.Structure || t.type === TokenType.Procedure) {
+            return t.label?.toLowerCase() === nameLower;
+        }
+        return false;
     }
 
     /** Walks the INCLUDE chain of a document searching for className.memberName. */
@@ -280,11 +367,14 @@ export class MemberLocatorService {
             if (data) {
                 const result = this.findMemberFromTokens(data.tokens, data.doc, resolvedPath, className, memberName, paramCount);
                 if (result) return result;
-                // Fallback to disk scan for edge cases
+                // Fallback to disk scan for edge cases — prefer live editor text if file is open
+                const diskUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+                const liveContent = this.tokenCache.getDocumentText(diskUri) ?? undefined;
                 const diskResult = scanClassBodyForMember(
                     resolvedPath, className, memberName, paramCount, 'CLASS',
                     (line) => this.countParamsInDecl(line),
-                    (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc)
+                    (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
+                    liveContent
                 );
                 if (diskResult) return diskResult;
 
@@ -307,15 +397,15 @@ export class MemberLocatorService {
         if (visited.has(className.toLowerCase())) return null;
         visited.add(className.toLowerCase());
 
-        const classInfos = this.classIndexer.findClass(className);
-        if (!classInfos || classInfos.length === 0) return null;
+        const classInfos = this.sdi.find(className);
+        if (classInfos.length === 0) return null;
 
         const classInfo = classInfos.find(d => !d.isType) || classInfos[0];
-        const result = await this.scanBodyForMember(classInfo.filePath, className, memberName, paramCount, classInfo.structureType);
+        const result = await this.scanBodyForMember(classInfo.filePath, className, memberName, paramCount, classInfo.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
         if (result) return result;
 
-        if (classInfo.parentClass) {
-            return this.walkParentChain(classInfo.parentClass, memberName, paramCount, visited);
+        if (classInfo.parentName) {
+            return this.walkParentChain(classInfo.parentName, memberName, paramCount, visited);
         }
         return null;
     }
@@ -333,11 +423,14 @@ export class MemberLocatorService {
             const result = this.findMemberFromTokens(data.tokens, data.doc, filePath, className, memberName, paramCount, structureType);
             if (result) return result;
         }
-        // Fallback to disk-based scan (handles any edge cases not covered by token approach)
+        // Fallback to disk-based scan — prefer live editor text if file is open
+        const uri = `file:///${filePath.replace(/\\/g, '/')}`;
+        const liveContent = this.tokenCache.getDocumentText(uri) ?? undefined;
         return scanClassBodyForMember(
             filePath, className, memberName, paramCount, structureType,
             (line) => this.countParamsInDecl(line),
-            (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc)
+            (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
+            liveContent
         );
     }
 
@@ -542,7 +635,7 @@ export class MemberLocatorService {
         const sm = SolutionManager.getInstance();
         if (!sm?.solution) return;
         for (const project of sm.solution.projects) {
-            await this.classIndexer.getOrBuildIndex(project.path);
+            await this.sdi.getOrBuildIndex(project.path);
         }
     }
 
@@ -577,9 +670,9 @@ export class MemberLocatorService {
             parentClassName = classInfo.parentClass;
         } else {
             await this.ensureIndexBuilt();
-            const indexed = this.classIndexer.findClass(className);
-            if (indexed && indexed.length > 0) {
-                parentClassName = (indexed.find(d => !d.isType) || indexed[0]).parentClass;
+            const indexed = this.sdi.find(className);
+            if (indexed.length > 0) {
+                parentClassName = (indexed.find(d => !d.isType) || indexed[0]).parentName;
             }
         }
 
@@ -622,17 +715,17 @@ export class MemberLocatorService {
         );
         if (fromInclude.length > 0) return fromInclude;
 
-        // 3. ClassDefinitionIndexer
+        // 3. StructureDeclarationIndexer
         await this.ensureIndexBuilt();
-        const infos = this.classIndexer.findClass(className);
-        if (infos && infos.length > 0) {
+        const infos = this.sdi.find(className);
+        if (infos.length > 0) {
             const info = infos.find(d => !d.isType) || infos[0];
             const indexedData = await this.loadDocument(info.filePath);
             if (indexedData) {
-                const indexedMembers = this.extractMembersFromTokens(indexedData.tokens, indexedData.doc, className, info.filePath, info.structureType);
+                const indexedMembers = this.extractMembersFromTokens(indexedData.tokens, indexedData.doc, className, info.filePath, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
                 if (indexedMembers.length > 0) return indexedMembers;
             }
-            return scanClassBodyForAllMembers(info.filePath, className, info.structureType);
+            return scanClassBodyForAllMembers(info.filePath, className, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
         }
 
         return [];
@@ -700,18 +793,18 @@ export class MemberLocatorService {
             return new Set(['public', 'protected', 'private']);
         }
         // Check if callerClass is a subclass of className via the indexer
-        const callerInfos = this.classIndexer.findClass(callerClass);
-        if (callerInfos) {
-            let current = (callerInfos.find(d => !d.isType) || callerInfos[0])?.parentClass;
+        const callerInfos = this.sdi.find(callerClass);
+        if (callerInfos.length > 0) {
+            let current = (callerInfos.find(d => !d.isType) || callerInfos[0])?.parentName;
             const seen = new Set<string>();
             while (current && !seen.has(current.toLowerCase())) {
                 seen.add(current.toLowerCase());
                 if (current.toLowerCase() === className.toLowerCase()) {
                     return new Set(['public', 'protected']);
                 }
-                const parentInfos = this.classIndexer.findClass(current);
-                current = parentInfos
-                    ? (parentInfos.find(d => !d.isType) || parentInfos[0])?.parentClass
+                const parentInfos = this.sdi.find(current);
+                current = parentInfos.length > 0
+                    ? (parentInfos.find(d => !d.isType) || parentInfos[0])?.parentName
                     : undefined;
             }
         }

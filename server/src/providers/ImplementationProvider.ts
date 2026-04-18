@@ -67,6 +67,11 @@ export class ImplementationProvider {
             return null;
         }
 
+        // Don't navigate on words inside string literals
+        if (TokenHelper.isPositionInString(tokens, position.line, position.character)) {
+            return null;
+        }
+
         const documentStructure = this.tokenCache.getStructure(document);
         
         const line = document.getText({
@@ -350,6 +355,31 @@ export class ImplementationProvider {
                         if (chainedInfo) {
                             logger.info(`✅ Chained Ctrl+F12: "${memberName}" → impl lookup at ${chainedInfo.file}:${chainedInfo.line}`);
                             // For methods, try to find the implementation; for properties just return declaration
+                            if (chainedInfo.type.toUpperCase().startsWith('PROCEDURE')) {
+                                const implLoc = await this.findMethodImplementationCrossFile(
+                                    chainedInfo.className, memberName, document, paramCount, null, line,
+                                    chainedInfo.file
+                                );
+                                if (implLoc) return implLoc;
+                            }
+                            return Location.create(chainedInfo.file, Range.create(chainedInfo.line, 0, chainedInfo.line, 0));
+                        }
+                    }
+                }
+
+                // Multi-segment variable chain: variable.property.method (e.g., thisStartup.Settings.PutGlobalSetting)
+                if (!/^\s*(self|parent)\b/i.test(beforeDot) && beforeDot.includes('.')) {
+                    const afterDot = line.substring(dotBeforeIndex + 1).trim();
+                    const methodMatch = afterDot.match(/^(\w+)/);
+                    if (methodMatch) {
+                        const memberName = methodMatch[1];
+                        const hasParens = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
+                        const paramCount = hasParens
+                            ? this.memberResolver.countParametersInCall(line, memberName)
+                            : 0;
+                        const chainedInfo = await this.chainedResolver.resolve(beforeDot, memberName, document, position, paramCount);
+                        if (chainedInfo) {
+                            logger.info(`✅ Chained Ctrl+F12 (var chain): "${memberName}" → impl lookup at ${chainedInfo.file}:${chainedInfo.line}`);
                             if (chainedInfo.type.toUpperCase().startsWith('PROCEDURE')) {
                                 const implLoc = await this.findMethodImplementationCrossFile(
                                     chainedInfo.className, memberName, document, paramCount, null, line,

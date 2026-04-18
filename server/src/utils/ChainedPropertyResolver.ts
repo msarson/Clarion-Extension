@@ -4,6 +4,7 @@ import { Token } from '../ClarionTokenizer';
 import { ClassMemberResolver } from './ClassMemberResolver';
 import { TokenCache } from '../TokenCache';
 import { TokenHelper } from './TokenHelper';
+import { MemberLocatorService } from '../services/MemberLocatorService';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ChainedPropertyResolver");
@@ -70,14 +71,22 @@ export class ChainedPropertyResolver {
         if (segments.length < 2) return null;
 
         const root = segments[0].toUpperCase();
-        if (root !== 'SELF' && root !== 'PARENT') return null;
 
-        // Step 1: resolve the initial class from SELF/PARENT scope
+        // Step 1: resolve the initial class from the root segment
         let currentClassName: string | null;
         if (root === 'SELF') {
             currentClassName = this.resolveCurrentClassName(document, position, tokens);
-        } else {
+        } else if (root === 'PARENT') {
             currentClassName = await this.resolveParentClassName(document, position, tokens);
+        } else {
+            // Non-SELF/PARENT root: resolve the variable's declared type
+            const memberLocator = new MemberLocatorService();
+            const typeInfo = await memberLocator.resolveVariableType(segments[0], tokens, document);
+            if (!typeInfo || !typeInfo.isClass) {
+                logger.info(`ChainedPropertyResolver: root "${segments[0]}" not found as class variable`);
+                return null;
+            }
+            currentClassName = typeInfo.typeName;
         }
 
         if (!currentClassName) {

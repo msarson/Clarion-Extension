@@ -81,6 +81,11 @@ export class HoverContextBuilder {
         if (TokenHelper.isPositionInComment(tokens, position.line, position.character)) {
             return null;
         }
+
+        // If the cursor is inside a string literal, return null — no hover for string contents.
+        if (TokenHelper.isPositionInString(tokens, position.line, position.character)) {
+            return null;
+        }
         
         // Check if there's a Label token before the current word (indicates data declaration)
         const hasLabelBefore = currentLineTokens.some(t => 

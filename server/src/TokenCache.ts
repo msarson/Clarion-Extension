@@ -65,6 +65,15 @@ export class TokenCache {
     }
 
     /**
+     * Returns the live document text for a cached URI, or null if not cached.
+     * Use this to read the editor's in-memory content for open files instead of
+     * falling back to readFileSync (which would return stale disk content).
+     */
+    public getDocumentText(uri: string): string | null {
+        return this.cache.get(uri)?.documentText ?? null;
+    }
+
+    /**
      * Get tokens for a document, using cached tokens if available
      * Implements incremental line-based re-tokenization for performance
      * @param document The text document
