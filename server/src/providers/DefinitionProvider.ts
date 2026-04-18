@@ -1422,8 +1422,9 @@ export class DefinitionProvider {
             logger.info(`🔁 No scoped match found; skipping to global lookup`);
         }
     
-        // 🌍 Global fallback
-        const globalSymbol = await this.symbolFinder.findGlobalVariable(searchWord, tokens, document);
+        // 🌍 Global fallback — use the original word (not colon-stripped) so that labels like
+        // Access:IBSDataSets are found correctly instead of matching an unrelated IBSDataSets FILE.
+        const globalSymbol = await this.symbolFinder.findGlobalVariable(word, tokens, document);
         if (globalSymbol) {
             // Convert SymbolInfo to Location
             const globalLocation = Location.create(globalSymbol.location.uri, {

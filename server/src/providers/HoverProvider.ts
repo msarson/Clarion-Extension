@@ -204,37 +204,7 @@ export class HoverProvider {
             let moduleVarHover = this.variableResolver.findModuleVariableHover(word, tokens, document, position.line);
             if (moduleVarHover) return moduleVarHover;
 
-            // If not found and word contains colon, try stripping prefix (e.g., LOC:Field -> Field)
-            const colonIndex = word.lastIndexOf(':');
-            let searchWord = word;
-            let prefixPart = '';
-            
-            if (colonIndex > 0) {
-                prefixPart = word.substring(0, colonIndex);
-                searchWord = word.substring(colonIndex + 1);
-                logger.info(`Full word not found. Trying with prefix stripped: prefix="${prefixPart}", field="${searchWord}"`);
-                
-                // Check if this is a parameter (with prefix stripped)
-                logger.info(`Checking if ${searchWord} is a parameter...`);
-                parameterHover = this.variableResolver.findParameterHover(searchWord, document, currentScope);
-                if (parameterHover) return parameterHover;
-                logger.info(`${searchWord} is not a parameter`);
-
-                // Check if this is a local variable (with prefix stripped)
-                logger.info(`Checking if ${searchWord} is a local variable...`);
-                variableHover = await this.variableResolver.findLocalVariableHover(searchWord, tokens, currentScope, document, word, position.line);
-                if (variableHover) return variableHover;
-                logger.info(`${searchWord} is not a local variable`);
-                
-                // 🔗 Check for module-local variable in current file (with prefix stripped)
-                logger.info(`Checking for module-local variable in current file...`);
-                moduleVarHover = this.variableResolver.findModuleVariableHover(searchWord, tokens, document, position.line);
-                if (moduleVarHover) return moduleVarHover;
-            } else {
-                logger.info(`${word} has no prefix, already searched as-is`);
-            }
-            
-            logger.info(`${searchWord} is not a module-local variable - checking MEMBER parent file`);
+            logger.info(`${word} not found locally - checking MEMBER parent file`);
             
             // 🔗 Check if MEMBER file exists
             const mapTokens = this.tokenCache.getTokens(document);
@@ -247,8 +217,6 @@ export class HoverProvider {
             if (memberToken && memberToken.referencedFile) {
                 logger.info(`Found MEMBER reference to: ${memberToken.referencedFile}`);
                 
-                // Resolve the referenced file path relative to the current document
-                // Decode URI first to get proper file path
                 const currentFilePath = decodeURIComponent(document.uri.replace('file:///', ''));
                 const currentFileDir = path.dirname(currentFilePath);
                 const resolvedPath = path.resolve(currentFileDir, memberToken.referencedFile);
@@ -260,39 +228,32 @@ export class HoverProvider {
                     logger.info(`Loaded parent file, found ${parentTokens.length} tokens`);
                     
                     // First check if this is a procedure in the MAP (before treating as variable)
-                    // Look for MAP declaration of the procedure
-                    const parentStructure = this.tokenCache.getStructure(parentDoc);
-                    const mapDecl = this.mapResolver.findMapDeclaration(searchWord, parentTokens, parentDoc, line);
+                    const mapDecl = this.mapResolver.findMapDeclaration(word, parentTokens, parentDoc, line);
                     
                     if (mapDecl) {
-                        logger.info(`✅ Found MAP declaration for ${searchWord} in parent - treating as procedure call`);
+                        logger.info(`✅ Found MAP declaration for ${word} in parent - treating as procedure call`);
                         
-                        // Find implementation
                         const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
                         const procImpl = await this.mapResolver.findProcedureImplementation(
-                            searchWord,
+                            word,
                             parentTokens,
                             parentDoc,
                             mapPosition,
                             line
                         );
                         
-                        return this.formatter.formatProcedure(searchWord, mapDecl, procImpl, document, position);
+                        return this.formatter.formatProcedure(word, mapDecl, procImpl, document, position);
                     }
                     
-                    // Not a procedure - check for global variable in parent's own scope only
-                    // Try full word first (e.g., Access:IBSDataSets), then prefix-stripped fallback
-                    // (shallowOnly=true: skips recursive include chain — handled by findInIncludesAndEquates below)
-                    if (word !== searchWord) {
-                        const fullWordHover = await this.variableResolver.findGlobalVariableHover(word, parentTokens, parentDoc, position.line, true);
-                        if (fullWordHover) return fullWordHover;
-                    }
-                    const globalVarHover = await this.variableResolver.findGlobalVariableHover(searchWord, parentTokens, parentDoc, position.line, true);
+                    // Not a procedure — check for global variable in parent's own scope only.
+                    // Use full word (e.g., Access:IBSDataSets) — colon is part of the label name.
+                    // shallowOnly=true: skips recursive include chain, handled by findInIncludesAndEquates below.
+                    const globalVarHover = await this.variableResolver.findGlobalVariableHover(word, parentTokens, parentDoc, position.line, true);
                     if (globalVarHover) return globalVarHover;
                 }
             }
             
-            logger.info(`❌ ${searchWord} is not a local variable or global in MEMBER parent`);
+            logger.info(`❌ ${word} not found in MEMBER parent`);
             
             // Check INCLUDE files of the current file and equates.clw
             const includesHover = await this.variableResolver.findInIncludesAndEquates(word, tokens, document);
