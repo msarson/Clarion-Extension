@@ -211,9 +211,13 @@ class ClarionFormatter {
                 const minAfterLabel0   = labelEnd0 + this.indentSize;
                 const nextGridAfterLbl = snap0(minAfterLabel0);
 
-                const maxLabelTarget0 = (contentToken as any).maxLabelLength
-                  ? snap0((contentToken as any).maxLabelLength + this.indentSize)
-                  : nextGridAfterLbl;
+                // In a local data section, align the structure keyword (CLASS/GROUP/etc.)
+                // to the same column as all other type keywords in the section.
+                const maxLabelTarget0 = inLocalDataSection
+                  ? snap0(localDataMaxLabel + 1)
+                  : ((contentToken as any).maxLabelLength
+                      ? snap0((contentToken as any).maxLabelLength + this.indentSize)
+                      : nextGridAfterLbl);
 
                 const structureCol0 = Math.max(nextGridAfterLbl, maxLabelTarget0, parentCol0);
 

@@ -791,3 +791,47 @@ suite('ClarionFormatter – Bug 5: CLASS method PROCEDURE column alignment', () 
         );
     });
 });
+
+// =============================================================================
+// Bug 6 – CLASS keyword in local data section doesn't align with type keywords
+// =============================================================================
+//
+// Root cause: the Label+Structure path computes structureCol0 = snap0(labelLen + indentSize)
+// per-label, while the flat-variable path uses snap0(localDataMaxLabel + 1) for ALL labels.
+// When a CLASS/GROUP/QUEUE appears inside a procedure's local data section the CLASS keyword
+// lands at a different column than LIKE/LONG/etc. on surrounding lines.
+//
+// Fix: when inLocalDataSection, use snap0(localDataMaxLabel + 1) as the structureCol0 target
+// in the Label+Structure path, matching the flat-variable alignment formula.
+// =============================================================================
+suite('ClarionFormatter – Bug 6: CLASS keyword aligns with type column in local data section', () => {
+    const classWithLike = [
+        'Main  PROCEDURE()',
+        'cardMeta  LIKE(KanbanCardMeta)',
+        'UD  CLASS(UltimateDebug)',
+        '  END',
+        '  CODE',
+        '  RETURN',
+    ].join('\n');
+
+    test('[RED] CLASS keyword must align with LIKE keyword on adjacent local data variable', () => {
+        const tokens = new ClarionTokenizer(classWithLike).tokenize();
+        const result = new ClarionFormatter(tokens, classWithLike, { indentSize: 4 }).format();
+        const lines = splitLines(result);
+
+        const likeLine  = lines.find(l => /^cardMeta\b/.test(l));
+        const classLine = lines.find(l => /^UD\b/.test(l));
+
+        assert.ok(likeLine,  'cardMeta line must appear');
+        assert.ok(classLine, 'UD CLASS line must appear');
+
+        const likeCol  = likeLine!.indexOf('LIKE');
+        const classCol = classLine!.indexOf('CLASS');
+
+        assert.strictEqual(
+            classCol,
+            likeCol,
+            `CLASS at col ${classCol} but LIKE at col ${likeCol} — they must be equal`,
+        );
+    });
+});
