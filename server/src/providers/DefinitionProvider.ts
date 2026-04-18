@@ -175,6 +175,18 @@ export class DefinitionProvider {
 
                     // Typed variable member: st.GetValue() where st is declared as "st StringTheory"
                     if (!/^\s*(self|parent)\b/i.test(beforeDot)) {
+                        // Multi-segment variable chain: variable.property.method
+                        if (beforeDot.includes('.')) {
+                            const paramCount = hasParentheses
+                                ? this.memberResolver.countParametersInCall(line, methodName) ?? undefined
+                                : undefined;
+                            const chainedInfo = await this.chainedResolver.resolve(beforeDot, methodName, document, position, paramCount);
+                            if (chainedInfo) {
+                                logger.info(`✅ Chained F12 (var chain): "${methodName}" resolved at ${chainedInfo.file}:${chainedInfo.line}`);
+                                return Location.create(chainedInfo.file, Range.create(chainedInfo.line, 0, chainedInfo.line, 0));
+                            }
+                        }
+
                         const structureNameMatch = beforeDot.match(/(\w+)\s*$/);
                         if (structureNameMatch) {
                             const structureName = structureNameMatch[1];
