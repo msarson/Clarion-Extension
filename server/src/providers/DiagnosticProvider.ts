@@ -4,6 +4,7 @@ import { ClarionTokenizer, Token, TokenType } from '../ClarionTokenizer';
 import { extractReturnType } from '../utils/AttributeKeywords';
 import { ProcedureSignatureUtils } from '../utils/ProcedureSignatureUtils';
 import { MemberLocatorService } from '../services/MemberLocatorService';
+import { TokenCache } from '../TokenCache';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("DiagnosticProvider");
@@ -1783,6 +1784,135 @@ export class DiagnosticProvider {
                     end: { line: lineIdx, character: colStart + stripped.length }
                 },
                 message: `Return value of '${objectName}.${methodName}' is discarded. Capture the return value or add the PROC attribute to the declaration to suppress this warning.`,
+                source: 'clarion'
+            });
+        }
+
+        // Cross-file plain call check: warn for MAP procs declared in OTHER cached files
+        // (e.g. PROGRAM file's global MAP, called from a MEMBER file).
+        const crossFileDiags = this.validateCrossFilePlainCalls(tokens, document, docLines, codeRanges);
+        diagnostics.push(...crossFileDiags);
+
+        return diagnostics;
+    }
+
+    /**
+     * Scans all OTHER cached files for MapProcedure declarations and warns when
+     * the current document calls one with its return value discarded.
+     *
+     * This is the cross-file counterpart to validateDiscardedReturnValuesForPlainCalls
+     * (which handles MAP procs declared in the SAME file).  A typical case is a MEMBER
+     * file calling a procedure that is declared in the PROGRAM file's global MAP.
+     */
+    private static validateCrossFilePlainCalls(
+        currentTokens: Token[],
+        document: TextDocument,
+        docLines: string[],
+        codeRanges: { start: number; end: number }[]
+    ): Diagnostic[] {
+        const cache = TokenCache.getInstance();
+        const currentUri = document.uri;
+
+        // Names already handled by the sync path (declared in this file's MAP)
+        const localMapNames = new Set<string>();
+        for (const t of currentTokens) {
+            if (t.subType === TokenType.MapProcedure) {
+                const name = (t.label ?? t.value.split('(')[0].trim()).toUpperCase();
+                if (name) localMapNames.add(name);
+            }
+        }
+
+        // Collect warnable procs from all OTHER cached files
+        const warnableProcs = new Map<string, string>(); // nameUpper → returnType
+        const excluded = new Set<string>();
+
+        for (const uri of cache.getAllCachedUris()) {
+            if (uri === currentUri) continue;
+            const otherTokens = cache.getTokensByUri(uri);
+            if (!otherTokens) continue;
+
+            for (let i = 0; i < otherTokens.length; i++) {
+                const t = otherTokens[i];
+                if (t.subType !== TokenType.MapProcedure) continue;
+
+                const name = (t.label ?? t.value.split('(')[0].trim()).toUpperCase();
+                if (!name || excluded.has(name) || localMapNames.has(name)) continue;
+
+                const lineTokens = otherTokens.filter(tok => tok.line === t.line);
+                if (lineTokens.some(tok => ['PROC', 'DERIVED'].includes(tok.value.toUpperCase()))) {
+                    excluded.add(name);
+                    warnableProcs.delete(name);
+                    continue;
+                }
+
+                let startIdx = i;
+                if (t.type === TokenType.Procedure) {
+                    let depth = 0;
+                    for (let k = i; k < otherTokens.length && otherTokens[k].line === t.line; k++) {
+                        if (otherTokens[k].value === '(') depth++;
+                        else if (otherTokens[k].value === ')') {
+                            depth--;
+                            if (depth === 0) { startIdx = k + 1; break; }
+                        }
+                    }
+                }
+
+                const returnType = extractReturnType(otherTokens, startIdx, true);
+                if (!returnType) {
+                    excluded.add(name);
+                    warnableProcs.delete(name);
+                    continue;
+                }
+                if (!excluded.has(name)) {
+                    warnableProcs.set(name, returnType);
+                }
+            }
+        }
+
+        if (warnableProcs.size === 0) return [];
+
+        const diagnostics: Diagnostic[] = [];
+        const ASSIGN_RE = /^[A-Za-z_][A-Za-z0-9_:]*\s*[+\-*/&|]?=/;
+
+        for (let lineIdx = 0; lineIdx < docLines.length; lineIdx++) {
+            if (!codeRanges.some(r => lineIdx >= r.start && lineIdx <= r.end)) continue;
+
+            const rawLine = docLines[lineIdx];
+            const stripped = rawLine.replace(/!.*$/, '').trim();
+            if (!stripped) continue;
+
+            if (ASSIGN_RE.test(stripped)) continue;
+            if (/^[A-Za-z_][A-Za-z0-9_]*\./.test(stripped)) continue;
+
+            const identMatch = stripped.match(/^([A-Za-z_][A-Za-z0-9_]*)/);
+            if (!identMatch) continue;
+
+            const callName = identMatch[1];
+            if (!warnableProcs.has(callName.toUpperCase())) continue;
+
+            const afterIdent = stripped.substring(callName.length).trimStart();
+            if (afterIdent !== '') {
+                if (!afterIdent.startsWith('(')) continue;
+                let depth = 0, closeIdx = -1;
+                for (let ci = 0; ci < afterIdent.length; ci++) {
+                    if (afterIdent[ci] === '(') depth++;
+                    else if (afterIdent[ci] === ')') {
+                        depth--;
+                        if (depth === 0) { closeIdx = ci; break; }
+                    }
+                }
+                if (closeIdx === -1) continue;
+                if (afterIdent.substring(closeIdx + 1).trim()) continue;
+            }
+
+            const colStart = rawLine.search(/\S/);
+            diagnostics.push({
+                severity: DiagnosticSeverity.Warning,
+                range: {
+                    start: { line: lineIdx, character: colStart >= 0 ? colStart : 0 },
+                    end:   { line: lineIdx, character: colStart + stripped.length }
+                },
+                message: `Return value of '${callName}' is discarded. Capture the return value or add the PROC attribute to the declaration to suppress this warning.`,
                 source: 'clarion'
             });
         }

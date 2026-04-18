@@ -1506,4 +1506,139 @@ MainProc    PROCEDURE()
             assert.strictEqual(diags.length, 0, 'used in IF condition — return value is consumed');
         });
     });
+
+    suite('validateCrossFilePlainCalls (async cross-file)', () => {
+        // These tests pre-populate TokenCache with a "program file" that declares a
+        // global MAP procedure, then validate a "member file" that calls it.
+        // validateDiscardedReturnValues (async) performs the cross-file scan.
+
+        const { TokenCache } = require('../TokenCache');
+        const { MemberLocatorService } = require('../services/MemberLocatorService');
+
+        function createDoc(uri: string, code: string): TextDocument {
+            return TextDocument.create(uri, 'clarion', 1, code);
+        }
+
+        function populateCache(doc: TextDocument): void {
+            TokenCache.getInstance().getTokens(doc);
+        }
+
+        teardown(() => {
+            TokenCache.getInstance().clearAllTokens();
+        });
+
+        test('cross-file: bare call to global MAP procedure warns', async () => {
+            const programCode = `
+  PROGRAM
+  MAP
+TestProc  PROCEDURE(),LONG
+  END
+  CODE
+`;
+            const memberCode = `
+  MEMBER('prog.clw')
+CallerProc  PROCEDURE()
+  CODE
+  TestProc()
+`;
+            const progDoc = createDoc('file:///prog.clw', programCode);
+            const memberDoc = createDoc('file:///member.clw', memberCode);
+            populateCache(progDoc);
+
+            const tokens = TokenCache.getInstance().getTokens(memberDoc);
+            const locator = new MemberLocatorService();
+            const diags = await DiagnosticProvider.validateDiscardedReturnValues(tokens, memberDoc, locator);
+
+            const plain = diags.filter((d: { message: string }) =>
+                /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
+            );
+            assert.strictEqual(plain.length, 1, 'should warn for bare TestProc() call');
+            assert.ok(plain[0].message.includes("'TestProc'"));
+        });
+
+        test('cross-file: assignment suppresses warning', async () => {
+            const programCode = `
+  PROGRAM
+  MAP
+TestProc  PROCEDURE(),LONG
+  END
+  CODE
+`;
+            const memberCode = `
+  MEMBER('prog.clw')
+CallerProc  PROCEDURE()
+Result  LONG
+  CODE
+  Result = TestProc()
+`;
+            const progDoc = createDoc('file:///prog.clw', programCode);
+            const memberDoc = createDoc('file:///member.clw', memberCode);
+            populateCache(progDoc);
+
+            const tokens = TokenCache.getInstance().getTokens(memberDoc);
+            const locator = new MemberLocatorService();
+            const diags = await DiagnosticProvider.validateDiscardedReturnValues(tokens, memberDoc, locator);
+
+            const plain = diags.filter((d: { message: string }) =>
+                /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
+            );
+            assert.strictEqual(plain.length, 0, 'assignment captures return value — no warning');
+        });
+
+        test('cross-file: PROC attribute on declaration suppresses warning', async () => {
+            const programCode = `
+  PROGRAM
+  MAP
+TestProc  PROCEDURE(),LONG,PROC
+  END
+  CODE
+`;
+            const memberCode = `
+  MEMBER('prog.clw')
+CallerProc  PROCEDURE()
+  CODE
+  TestProc()
+`;
+            const progDoc = createDoc('file:///prog.clw', programCode);
+            const memberDoc = createDoc('file:///member.clw', memberCode);
+            populateCache(progDoc);
+
+            const tokens = TokenCache.getInstance().getTokens(memberDoc);
+            const locator = new MemberLocatorService();
+            const diags = await DiagnosticProvider.validateDiscardedReturnValues(tokens, memberDoc, locator);
+
+            const plain = diags.filter((d: { message: string }) =>
+                /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
+            );
+            assert.strictEqual(plain.length, 0, 'PROC attribute — no warning');
+        });
+
+        test('cross-file: no return type — no warning', async () => {
+            const programCode = `
+  PROGRAM
+  MAP
+VoidProc  PROCEDURE()
+  END
+  CODE
+`;
+            const memberCode = `
+  MEMBER('prog.clw')
+CallerProc  PROCEDURE()
+  CODE
+  VoidProc()
+`;
+            const progDoc = createDoc('file:///prog.clw', programCode);
+            const memberDoc = createDoc('file:///member.clw', memberCode);
+            populateCache(progDoc);
+
+            const tokens = TokenCache.getInstance().getTokens(memberDoc);
+            const locator = new MemberLocatorService();
+            const diags = await DiagnosticProvider.validateDiscardedReturnValues(tokens, memberDoc, locator);
+
+            const plain = diags.filter((d: { message: string }) =>
+                /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
+            );
+            assert.strictEqual(plain.length, 0, 'void procedure — no warning');
+        });
+    });
 });
