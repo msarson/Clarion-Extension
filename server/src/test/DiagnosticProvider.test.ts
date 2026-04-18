@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import { ClarionTokenizer } from '../ClarionTokenizer';
 import { DiagnosticProvider } from '../providers/DiagnosticProvider';
+import { validateCycleBreakOutsideLoop } from '../providers/diagnostics/ControlFlowDiagnostics';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
 /**
@@ -1639,6 +1640,134 @@ CallerProc  PROCEDURE()
                 /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
             );
             assert.strictEqual(plain.length, 0, 'void procedure — no warning');
+        });
+    });
+
+    // ─── CYCLE / BREAK outside LOOP or ACCEPT (issue #64) ───────────────────
+
+    suite('validateCycleBreakOutsideLoop', () => {
+
+        function cycleBreakDiags(code: string) {
+            const doc = createDocument(code);
+            const tokens = new ClarionTokenizer(code).tokenize();
+            return validateCycleBreakOutsideLoop(tokens, doc);
+        }
+
+        test('BREAK inside LOOP — no warning', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+  LOOP
+    IF SomeCondition
+      BREAK
+    END
+  END
+`;
+            assert.strictEqual(cycleBreakDiags(code).length, 0);
+        });
+
+        test('CYCLE inside LOOP — no warning', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+  LOOP
+    IF SomeCondition
+      CYCLE
+    END
+  END
+`;
+            assert.strictEqual(cycleBreakDiags(code).length, 0);
+        });
+
+        test('BREAK inside ACCEPT — no warning', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+  OPEN(Window)
+  ACCEPT
+    IF ACCEPTED() = ?Ok
+      BREAK
+    END
+  END
+`;
+            assert.strictEqual(cycleBreakDiags(code).length, 0);
+        });
+
+        test('CYCLE inside ACCEPT — no warning', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+  OPEN(Window)
+  ACCEPT
+    CASE EVENT()
+    OF EVENT:Move
+      CYCLE
+    END
+  END
+`;
+            assert.strictEqual(cycleBreakDiags(code).length, 0);
+        });
+
+        test('BREAK outside any loop — warns', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+  BREAK
+`;
+            const diags = cycleBreakDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes('BREAK'));
+        });
+
+        test('CYCLE outside any loop — warns', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+  CYCLE
+`;
+            const diags = cycleBreakDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes('CYCLE'));
+        });
+
+        test('nested LOOP/ACCEPT — inner BREAK valid', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+  LOOP
+    ACCEPT
+      IF x
+        BREAK
+      END
+    END
+  END
+`;
+            assert.strictEqual(cycleBreakDiags(code).length, 0);
+        });
+
+        test('BREAK after LOOP ends — warns', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+  LOOP
+    x = 1
+  END
+  BREAK
+`;
+            const diags = cycleBreakDiags(code);
+            assert.strictEqual(diags.length, 1);
+        });
+
+        test('validateDocument includes CYCLE/BREAK diagnostic', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+  CYCLE
+`;
+            const doc = createDocument(code);
+            const diags = DiagnosticProvider.validateDocument(doc);
+            const cfDiags = diags.filter(d => d.message.includes('CYCLE') || d.message.includes('BREAK'));
+            assert.ok(cfDiags.length >= 1, 'validateDocument should include CYCLE/BREAK diagnostics');
         });
     });
 });
