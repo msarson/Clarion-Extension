@@ -113,7 +113,7 @@ class ClarionFormatter {
         // Render helper: produce spaces so the next char is at 0-based column col0
         const padToCol0 = (col0: number) => " ".repeat(Math.max(0, col0));
 
-        let indentStack: { startColumn: number; indentLevel: number }[] = [];
+        let indentStack: { startColumn: number; indentLevel: number; childMaxLabel: number }[] = [];
         let finalIndent = this.indentSize; // 🔹 Minimum indent size
 
         const formattedLines: string[] = [];
@@ -200,6 +200,12 @@ class ClarionFormatter {
                 ? indentStack[indentStack.length - 1].indentLevel
                 : this.indentSize;
 
+              // If we're inside a structure (e.g. CLASS body), use its childMaxLabel for
+              // consistent column alignment across all method/field declarations.
+              const enclosingMaxLabel = indentStack.length
+                ? indentStack[indentStack.length - 1].childMaxLabel
+                : 0;
+
               if (contentToken?.type === TokenType.Structure) {
                 // Require a full indent gap after label, then snap to grid
                 const minAfterLabel0   = labelEnd0 + this.indentSize;
@@ -211,7 +217,14 @@ class ClarionFormatter {
 
                 const structureCol0 = Math.max(nextGridAfterLbl, maxLabelTarget0, parentCol0);
 
-                indentStack.push({ startColumn: structureCol0, indentLevel: structureCol0 + this.indentSize });
+                // Compute the max label length across the structure's children so that
+                // all member declarations (e.g. CLASS methods) align their keywords.
+                const structToken = contentToken as Token;
+                const childMaxLabel = structToken.children
+                  ? Math.max(0, ...structToken.children.map(c => (c.label || c.value).length))
+                  : 0;
+
+                indentStack.push({ startColumn: structureCol0, indentLevel: structureCol0 + this.indentSize, childMaxLabel });
                 logger.info(`labelEnd0 = ${labelEnd0} - structureCol0 = ${structureCol0}`);
                 const spacesToAdd = Math.max(0, structureCol0 - labelEnd0);
                 logger.info(`➡️ Aligning structure '${contentToken.value}' after label '${labelText}' at Column ${structureCol0} on Line ${index}`);
@@ -227,7 +240,9 @@ class ClarionFormatter {
               if (contentToken && contentToken !== secondToken) {
                 // There were intermediate tokens (e.g. "Init" in "ThisWindow.Init PROCEDURE()").
                 // Output the full label text + aligned content token.
-                const stmtCol0    = Math.max(snap0(labelEnd0 + this.indentSize), parentCol0);
+                const stmtCol0    = enclosingMaxLabel
+                  ? Math.max(snap0(enclosingMaxLabel + 1), parentCol0)
+                  : Math.max(snap0(labelEnd0 + this.indentSize), parentCol0);
                 const spacesToAdd = Math.max(0, stmtCol0 - labelEnd0);
                 const formattedLine =
                   labelText +
@@ -238,8 +253,11 @@ class ClarionFormatter {
               }
 
               if (secondToken && !this.isStructure(secondToken)) {
-                // Non-structure after label: align to the same grid column policy
-                const stmtCol0    = Math.max(snap0(labelEnd0 + this.indentSize), parentCol0);
+                // Non-structure after label: align to a shared column within the enclosing
+                // structure (using its maxLabelLength), or per-label snap if at top level.
+                const stmtCol0    = enclosingMaxLabel
+                  ? Math.max(snap0(enclosingMaxLabel + 1), parentCol0)
+                  : Math.max(snap0(labelEnd0 + this.indentSize), parentCol0);
                 const spacesToAdd = Math.max(0, stmtCol0 - labelEnd0);
                 logger.info(`➡️ Aligning statement '${secondToken.value}' after label '${labelText}' at Column ${stmtCol0} on Line ${index}`);
                 const formattedLine =
@@ -269,7 +287,7 @@ class ClarionFormatter {
                 }
 
                 // ✅ Restore the indentation for following lines
-                indentStack.push({ startColumn: lineIndent, indentLevel: lineIndent + this.indentSize });
+                indentStack.push({ startColumn: lineIndent, indentLevel: lineIndent + this.indentSize, childMaxLabel: 0 });
             }
 
             else if (firstToken.type === TokenType.Structure) {
@@ -292,7 +310,10 @@ class ClarionFormatter {
 
               const structureCol0 = Math.max(parentCol0, targetCol0);
 
-              indentStack.push({ startColumn: structureCol0, indentLevel: structureCol0 + this.indentSize });
+              const childMaxLabel2 = firstToken.children
+                ? Math.max(0, ...firstToken.children.map(c => (c.label || c.value).length))
+                : 0;
+              indentStack.push({ startColumn: structureCol0, indentLevel: structureCol0 + this.indentSize, childMaxLabel: childMaxLabel2 });
               lineIndent = structureCol0; // 0-based
             }
 

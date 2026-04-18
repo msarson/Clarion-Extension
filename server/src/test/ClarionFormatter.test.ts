@@ -743,3 +743,51 @@ suite('ClarionFormatter – Bug 4: CLASS in local data section END alignment', (
         );
     });
 });
+
+// =============================================================================
+// Bug 5 – CLASS method declarations don't align PROCEDURE to a shared column
+// =============================================================================
+//
+// Root cause: the Label path computes stmtCol0 = snap0(labelText.length + indentSize)
+// per label, so short labels (e.g. "Init" = 4 chars) produce a smaller column than
+// long labels (e.g. "OnContextMenuSelected" = 21 chars).  Within a CLASS body all
+// PROCEDURE keywords must land on the same column, determined by the CLASS token's
+// maxLabelLength (the longest method label in the class).
+//
+// Fix: carry the structure token in the indent stack entry; when computing stmtCol0
+// for a label inside a structure, use snap0(maxLabelLength + 1) instead of
+// snap0(labelLen + indentSize).
+// =============================================================================
+suite('ClarionFormatter – Bug 5: CLASS method PROCEDURE column alignment', () => {
+    // CLASS with two methods of very different label lengths
+    const multiMethodClass = [
+        'Main  PROCEDURE()',
+        'Kanban    CLASS(KanbanWrapperClass)',
+        'Init      PROCEDURE(LONG pCtrl),VIRTUAL',
+        'OnContextMenuSelected PROCEDURE(STRING pCardId),VIRTUAL',
+        '  END',
+        '  CODE',
+        '  RETURN',
+    ].join('\n');
+
+    test('[RED] all PROCEDURE keywords within a CLASS body must align to the same column', () => {
+        const tokens = new ClarionTokenizer(multiMethodClass).tokenize();
+        const result = new ClarionFormatter(tokens, multiMethodClass, { indentSize: 4 }).format();
+        const lines = splitLines(result);
+
+        const initLine  = lines.find(l => /^\s*Init\b/.test(l));
+        const longLine  = lines.find(l => /^\s*OnContextMenuSelected\b/.test(l));
+
+        assert.ok(initLine, 'Init method line must appear in output');
+        assert.ok(longLine, 'OnContextMenuSelected method line must appear in output');
+
+        const initProcCol = initLine!.indexOf('PROCEDURE');
+        const longProcCol = longLine!.indexOf('PROCEDURE');
+
+        assert.strictEqual(
+            initProcCol,
+            longProcCol,
+            `Init PROCEDURE at col ${initProcCol} but OnContextMenuSelected PROCEDURE at col ${longProcCol} — they must be equal`,
+        );
+    });
+});
