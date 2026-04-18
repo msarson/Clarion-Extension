@@ -650,3 +650,96 @@ suite('ClarionFormatter – Bug 1 side-effect: procedure header line unchanged b
         );
     });
 });
+
+// =============================================================================
+// Bug 4 – CLASS in procedure local data section: END at wrong column,
+//          method declarations not indented from CLASS keyword
+// =============================================================================
+//
+// Root cause:
+//   When a PROCEDURE contains a CLASS declaration in its local data section,
+//   the formatter's local-data-section path fires for "ThisWindow CLASS(...)".
+//   That path formats the line as a flat variable (label + spaces + rest) and
+//   does NOT push the CLASS token to the indent stack.
+//
+//   Consequence 1: The END that closes the CLASS pops from an empty stack,
+//   so lineIndent falls back to finalIndent (= indentSize), producing "    END"
+//   instead of indenting to match the CLASS keyword column.
+//
+//   Consequence 2: Method declarations inside the CLASS body ("Init PROCEDURE()")
+//   also go through the local-data-section path, aligning their PROCEDURE keyword
+//   to the same column as the CLASS keyword rather than CLASS_col + indentSize.
+//
+// Fix: Skip the local-data-section path when either:
+//   (a) the line contains a Structure token (CLASS/WINDOW/GROUP etc.) — these
+//       must push to the indent stack; or
+//   (b) the indent stack is non-empty (we are inside a structure already) —
+//       items inside a CLASS body must use the stack-based indent context.
+//
+// =============================================================================
+
+suite('ClarionFormatter – Bug 4: CLASS in local data section END alignment', () => {
+
+    // Minimal test code: procedure with a CLASS in its local data section.
+    //   Main    PROCEDURE()
+    //   Obj     CLASS
+    //   Init      PROCEDURE()
+    //     END
+    //     CODE
+    //     RETURN
+    //
+    // With indentSize=4:
+    //   - "Obj" (3 chars) + CLASS: structureCol0 = max(snap0(3+4)=8, 4) = 8
+    //     Push {startColumn:8, indentLevel:12}
+    //   - "Init" (4 chars) + PROCEDURE: stmtCol0 = max(snap0(4+4)=8, 12) = 12
+    //   - END: pop → lineIndent=8
+
+    const classInLocalData = [
+        'Main  PROCEDURE()',
+        'Obj  CLASS',
+        'Init   PROCEDURE()',
+        '  END',
+        '  CODE',
+        '  RETURN',
+    ].join('\n');
+
+    test('[RED] END of CLASS in local data section must align with CLASS keyword column', () => {
+        const result = fmt(classInLocalData);
+        const lines = splitLines(result);
+
+        // Find the CLASS line and the END line
+        const classLine = lines.find(l => /\bCLASS\b/.test(l) && !l.includes('CLASS('));
+        const endLine   = lines.find(l => l.trimStart() === 'END');
+
+        assert.ok(classLine, 'CLASS line must appear in output');
+        assert.ok(endLine,   'END line must appear in output');
+
+        const classCol = classLine!.indexOf('CLASS');
+        const endCol   = endLine!.search(/\S/); // first non-space = E of END
+
+        assert.strictEqual(
+            endCol,
+            classCol,
+            `END must align with CLASS keyword (CLASS at col ${classCol}, END at col ${endCol})`,
+        );
+    });
+
+    test('[RED] method declaration PROCEDURE must be indented from CLASS, not at same column', () => {
+        const result = fmt(classInLocalData);
+        const lines = splitLines(result);
+
+        const classLine = lines.find(l => /\bCLASS\b/.test(l) && !l.includes('CLASS('));
+        const initLine  = lines.find(l => l.trimStart().startsWith('Init'));
+
+        assert.ok(classLine, 'CLASS line must appear in output');
+        assert.ok(initLine,  'Init method line must appear in output');
+
+        const classCol     = classLine!.indexOf('CLASS');
+        const procedureCol = initLine!.indexOf('PROCEDURE');
+
+        assert.ok(
+            procedureCol > classCol,
+            `PROCEDURE col (${procedureCol}) must be > CLASS col (${classCol}) — method must be indented inside CLASS`,
+        );
+    });
+});

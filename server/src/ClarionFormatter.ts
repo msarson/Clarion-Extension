@@ -159,7 +159,11 @@ class ClarionFormatter {
             let lineIndent = finalIndent;
             
             // ✅ Handle local data section alignment
-            if (inLocalDataSection && (firstToken.type === TokenType.Label || firstToken.type === TokenType.Variable)) {
+            // Skip if: (a) line declares a structure (CLASS/WINDOW/GROUP etc.) — must push to indent stack,
+            //          (b) indent stack non-empty — we're inside a structure (e.g. CLASS body), so use
+            //              stack-based context rather than the outer procedure's column alignment.
+            const hasStructureToken = tokensOnLine.slice(1).some(t => t.type === TokenType.Structure);
+            if (inLocalDataSection && !hasStructureToken && indentStack.length === 0 && (firstToken.type === TokenType.Label || firstToken.type === TokenType.Variable)) {
                 logger.info(`📋 Formatting local data variable '${firstToken.value}' at line ${index}`);
                 
                 const labelEnd0 = firstToken.value.length;
