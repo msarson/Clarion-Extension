@@ -138,7 +138,21 @@ Productivity features to write code faster.
 
 ## 🆕 What's New
 
-### Latest: v0.9.1 (2026-04-14) — Faster Install
+### Latest: v0.9.2 (2026-04-18) — Navigation & Bug Fixes
+
+#### 🔗 Multi-Level Chain Navigation
+`variable.property.method` chains now resolve all the way through. Hover, F12, and Ctrl+F12 on `thisStartup.Settings.PutGlobalSetting(...)` correctly walk from `thisStartup` → its class → `.Settings` property type → the method on that type.
+
+#### 🐛 Key Bug Fixes
+- `PREFIX:Name` reference variables (e.g. `Access:IBSDataSets &DirectFM`) now resolve correctly — hover and F12 no longer find an unrelated `IBSDataSets FILE` declaration
+- Hover, F12, and Ctrl+F12 are suppressed inside string literals — no more false results on `'ContainsSpaces'`
+- Colon-stripping fallback removed from hover and F12 — was causing wrong matches for labelled variables
+
+**[See full changelog →](CHANGELOG.md)**
+
+---
+
+### Recent: v0.9.1 (2026-04-14) — Faster Install
 
 #### 🚀 Dramatically Smaller Extension
 VSIX size drops from **19 MB → 0.6 MB** (10,849 bundled node_modules files eliminated). The extension now bundles all dependencies into two optimised files via esbuild — installs are much faster from the Marketplace and no functionality changes.
