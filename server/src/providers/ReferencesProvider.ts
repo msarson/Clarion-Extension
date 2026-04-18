@@ -13,7 +13,8 @@ import { ChainedPropertyResolver, ChainedMemberInfo } from '../utils/ChainedProp
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { serverSettings } from '../serverSettings';
-import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
+import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
+import { isAttributeKeyword } from '../utils/AttributeKeywords';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
@@ -57,6 +58,18 @@ export class ReferencesProvider {
 
         let word = document.getText(wordRange);
         if (!word || word.length === 0) return null;
+
+        // Don't search references for words inside comments or after line-continuation markers
+        const tokens = this.tokenCache.getTokens(document);
+        if (TokenHelper.isPositionInComment(tokens, position.line, position.character)) {
+            return null;
+        }
+
+        // Attribute keywords (ONCE, PRIVATE, VIRTUAL, DERIVED, etc.) are not symbols
+        if (isAttributeKeyword(word)) {
+            logger.info(`⏭️ [FAR] Skipping attribute keyword "${word}" — not a referenceable symbol`);
+            return null;
+        }
 
         // When cursor lands on any segment of a chained expression (e.g. "Order" in
         // SELF.Order.MainKey, or "Thumb" in SELF.Sort.Thumb), getWordRangeAtPosition
@@ -139,7 +152,7 @@ export class ReferencesProvider {
         // Check if the cursor is inside a CLASS body BEFORE trying plain symbol search.
         // findSymbol may resolve the word as a different same-named module variable declared
         // before the CLASS, so we must detect CLASS context first.
-        const tokens = this.tokenCache.getTokens(document);
+        // (tokens already retrieved above for the comment guard)
         const enclosingClass = tokens.find(t =>
             t.type === TokenType.Structure &&
             t.subType === TokenType.Class &&
@@ -156,6 +169,35 @@ export class ReferencesProvider {
             const classModuleFile = moduleMatch?.[1];
             logger.error(`🏛️ [FAR] Route: CLASS body (class=${enclosingClass.label ?? '?'}, module=${classModuleFile ?? 'none'}) → member-access path`);
             return this.provideMemberReferences(`SELF.${word}`, document, position, context, classModuleFile, enclosingClass.label);
+        }
+
+        // Check if cursor is on a MethodImplementation line for a locally-declared class.
+        // e.g. "MetroForm.TakeAccepted PROCEDURE()" where MetroForm has no MODULE attribute.
+        // findSymbol would resolve TakeAccepted to the base-class INC, causing a full-solution
+        // scan — intercept here and redirect to the local-class member path instead.
+        const methodImplToken = tokens.find(t =>
+            t.subType === TokenType.MethodImplementation &&
+            t.label !== undefined &&
+            t.line === position.line
+        );
+        if (methodImplToken?.label) {
+            const dotIdx = methodImplToken.label.indexOf('.');
+            const implClassName = dotIdx > 0 ? methodImplToken.label.substring(0, dotIdx) : null;
+            if (implClassName && this.isClassDeclaredInDocument(implClassName, document)) {
+                const classToken = tokens.find(t =>
+                    t.type === TokenType.Structure &&
+                    t.subType === TokenType.Class &&
+                    (t.label ?? '').toLowerCase() === implClassName.toLowerCase()
+                );
+                const classLine = classToken ? document.getText({
+                    start: { line: classToken.line, character: 0 },
+                    end: { line: classToken.line, character: 999 }
+                }) : '';
+                if (!/MODULE\s*\(\s*['"]/i.test(classLine)) {
+                    logger.error(`🏛️ [FAR] Route: MethodImpl of local class "${implClassName}" → restricting to current file`);
+                    return this.provideMemberReferences(`SELF.${word}`, document, position, context, undefined, implClassName);
+                }
+            }
         }
 
         // Check if cursor is inside an INTERFACE body — find all implementations + call sites
@@ -646,7 +688,18 @@ export class ReferencesProvider {
             }
         }
 
-        const filesToSearch = this.getMemberSearchFiles(document, declarationFile, effectiveModuleFile);
+        // When a CLASS is declared in the current document with no MODULE attribute,
+        // all implementations are in the same file — searching the entire solution
+        // would scan thousands of files and hang indefinitely on large solutions.
+        const isLocalClass = !effectiveModuleFile && !!className &&
+            this.isClassDeclaredInDocument(className, document);
+        if (isLocalClass) {
+            logger.error(`📌 [FAR] "${className}" is a local class — restricting search to current file`);
+        }
+
+        const filesToSearch = isLocalClass
+            ? [document.uri]
+            : this.getMemberSearchFiles(document, declarationFile, effectiveModuleFile);
 
         logger.info(`🔍 Searching ${filesToSearch.length} file(s) for ${className ?? '?'}.${memberName}`);
 
@@ -977,6 +1030,22 @@ export class ReferencesProvider {
             logger.info(`🧬 Class family for "${declaringClass}": [${Array.from(family).join(', ')}]`);
         }
         return family;
+    }
+
+    /**
+     * Returns true when the named CLASS is declared inside the current document's
+     * token tree (i.e. it is a "local" class, not imported from an INC file).
+     * Used to avoid scanning the entire solution for classes that can only be
+     * referenced within the declaring file.
+     */
+    private isClassDeclaredInDocument(className: string, document: TextDocument): boolean {
+        const tokens = this.tokenCache.getTokens(document);
+        const nameLower = className.toLowerCase();
+        return tokens.some(t =>
+            t.type === TokenType.Structure &&
+            t.subType === TokenType.Class &&
+            (t.label ?? '').toLowerCase() === nameLower
+        );
     }
 
     /**
@@ -1325,6 +1394,28 @@ export class ReferencesProvider {
 
         if (solutionManager?.solution?.projects?.length) {
             const allFiles: string[] = [...alwaysInclude];
+
+            // Scope search to the project that declares the symbol.
+            // Global symbols are visible only within their own program unit (project) —
+            // searching all 40 projects for a symbol declared in project X is wrong.
+            const declPath = decodeURIComponent(symbolInfo.location.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+            const declProject = solutionManager.findProjectForFile(path.basename(declPath));
+
+            if (declProject) {
+                for (const sourceFile of declProject.sourceFiles) {
+                    const fullPath = path.isAbsolute(sourceFile.relativePath) ? sourceFile.relativePath : path.join(declProject.path, sourceFile.relativePath);
+                    const uri = `file:///${fullPath.replace(/\\/g, '/')}`;
+                    const basename = path.basename(fullPath).toLowerCase();
+                    if (!alwaysInclude.has(uri) && !alwaysIncludeNames.has(basename)) {
+                        allFiles.push(uri);
+                    }
+                }
+                logger.error(`[FAR] Scope="${scopeType}" → project "${declProject.name}", ${allFiles.length} file(s) to search`);
+                return allFiles;
+            }
+
+            // Fallback: declaration not in any known project source list (e.g. INCLUDE-only symbol).
+            // Search all project files so cross-project INCLUDE references are found.
             for (const project of solutionManager.solution.projects) {
                 for (const sourceFile of project.sourceFiles) {
                     const fullPath = path.isAbsolute(sourceFile.relativePath) ? sourceFile.relativePath : path.join(project.path, sourceFile.relativePath);
@@ -1335,7 +1426,7 @@ export class ReferencesProvider {
                     }
                 }
             }
-            logger.error(`[FAR] Scope="${scopeType}" → global, solution has ${solutionManager.solution.projects.length} project(s), ${allFiles.length} file(s) to search`);
+            logger.error(`[FAR] Scope="${scopeType}" → global (no declaring project found), solution has ${solutionManager.solution.projects.length} project(s), ${allFiles.length} file(s) to search`);
             return allFiles;
         }
 
@@ -1670,13 +1761,13 @@ export class ReferencesProvider {
         includeDeclaration: boolean
     ): Promise<Location[] | null> {
         // Check if the word is a known CLASS type via the class definition indexer
-        const fromPath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
-        const projectPath = path.dirname(fromPath);
+        const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+        const projectPath = SolutionManager.getInstance()?.getProjectPathForFile(fromPath) ?? path.dirname(fromPath);
         try {
-            const classIndexer = ClassDefinitionIndexer.getInstance();
-            await classIndexer.getOrBuildIndex(projectPath);
-            const definitions = classIndexer.findClass(word, projectPath);
-            if (!definitions || definitions.length === 0) return null;
+            const sdi = StructureDeclarationIndexer.getInstance();
+            await sdi.getOrBuildIndex(projectPath);
+            const definitions = sdi.find(word, projectPath);
+            if (definitions.length === 0) return null;
         } catch {
             return null;
         }

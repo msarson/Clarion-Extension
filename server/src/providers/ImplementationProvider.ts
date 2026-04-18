@@ -61,6 +61,17 @@ export class ImplementationProvider {
         logger.info(`Implementation requested at ${position.line}:${position.character} in ${document.uri}`);
 
         const tokens = this.tokenCache.getTokens(document);
+
+        // Don't navigate on words inside comments or after line-continuation markers
+        if (TokenHelper.isPositionInComment(tokens, position.line, position.character)) {
+            return null;
+        }
+
+        // Don't navigate on words inside string literals
+        if (TokenHelper.isPositionInString(tokens, position.line, position.character)) {
+            return null;
+        }
+
         const documentStructure = this.tokenCache.getStructure(document);
         
         const line = document.getText({
@@ -336,7 +347,6 @@ export class ImplementationProvider {
                     const methodMatch = afterDot.match(/^(\w+)/);
                     if (methodMatch) {
                         const memberName = methodMatch[1];
-                        const tokens = this.tokenCache.getTokens(document);
                         const hasParens = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
                         const paramCount = hasParens
                             ? this.memberResolver.countParametersInCall(line, memberName)
@@ -345,6 +355,31 @@ export class ImplementationProvider {
                         if (chainedInfo) {
                             logger.info(`✅ Chained Ctrl+F12: "${memberName}" → impl lookup at ${chainedInfo.file}:${chainedInfo.line}`);
                             // For methods, try to find the implementation; for properties just return declaration
+                            if (chainedInfo.type.toUpperCase().startsWith('PROCEDURE')) {
+                                const implLoc = await this.findMethodImplementationCrossFile(
+                                    chainedInfo.className, memberName, document, paramCount, null, line,
+                                    chainedInfo.file
+                                );
+                                if (implLoc) return implLoc;
+                            }
+                            return Location.create(chainedInfo.file, Range.create(chainedInfo.line, 0, chainedInfo.line, 0));
+                        }
+                    }
+                }
+
+                // Multi-segment variable chain: variable.property.method (e.g., thisStartup.Settings.PutGlobalSetting)
+                if (!/^\s*(self|parent)\b/i.test(beforeDot) && beforeDot.includes('.')) {
+                    const afterDot = line.substring(dotBeforeIndex + 1).trim();
+                    const methodMatch = afterDot.match(/^(\w+)/);
+                    if (methodMatch) {
+                        const memberName = methodMatch[1];
+                        const hasParens = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
+                        const paramCount = hasParens
+                            ? this.memberResolver.countParametersInCall(line, memberName)
+                            : 0;
+                        const chainedInfo = await this.chainedResolver.resolve(beforeDot, memberName, document, position, paramCount);
+                        if (chainedInfo) {
+                            logger.info(`✅ Chained Ctrl+F12 (var chain): "${memberName}" → impl lookup at ${chainedInfo.file}:${chainedInfo.line}`);
                             if (chainedInfo.type.toUpperCase().startsWith('PROCEDURE')) {
                                 const implLoc = await this.findMethodImplementationCrossFile(
                                     chainedInfo.className, memberName, document, paramCount, null, line,
@@ -839,6 +874,44 @@ export class ImplementationProvider {
         paramCount?: number,
         declarationSignature?: string
     ): Location | null {
+        const fileUri = `file:///${fullPath.replace(/\\/g, '/')}`;
+
+        // Fast path: use cached tokens to find MethodImplementation candidates
+        const cachedTokens = this.tokenCache.getTokensByUri(fileUri);
+        if (cachedTokens && cachedTokens.length > 0) {
+            const matchesLabel = (lbl: string): boolean => {
+                const parts = lbl.split('.');
+                // Require exactly 2 parts (ClassName.MethodName) to avoid false positives
+                // with 3-part interface implementations (ClassName.InterfaceName.MethodName)
+                return parts.length === 2 &&
+                    parts[0].toUpperCase() === className.toUpperCase() &&
+                    parts[1].toUpperCase() === methodName.toUpperCase();
+            };
+            const tokenCandidates = cachedTokens.filter(t =>
+                t.type === TokenType.Procedure &&
+                t.subType === TokenType.MethodImplementation &&
+                t.label !== undefined &&
+                matchesLabel(t.label)
+            );
+
+            if (tokenCandidates.length === 1) {
+                // Single match — return immediately without disk read
+                const tok = tokenCandidates[0];
+                logger.info(`✅ Found implementation (token cache) in ${fullPath} at line ${tok.line}`);
+                return Location.create(fileUri, { start: { line: tok.line, character: 0 }, end: { line: tok.line, character: 0 } });
+            }
+
+            if (tokenCandidates.length > 1 && paramCount !== undefined && !declarationSignature) {
+                // Multiple overloads, paramCount only — use token-based param count via finishesAt range
+                // Pick the candidate whose implementation body has the closest param count
+                // We still need line text for ClarionPatterns.countParameters; fall through to disk path.
+                // But if we can derive param count from label structure, we can avoid disk.
+                // For now: just use line numbers from tokens but read file for signature text.
+                // (This still saves the full regex scan — we only read necessary lines.)
+            }
+        }
+
+        // Disk fallback (also used when file not in cache, or multi-overload needing signatures)
         try {
             const content = fs.readFileSync(fullPath, 'utf8');
             const lines = content.split(/\r?\n/);
@@ -893,7 +966,6 @@ export class ImplementationProvider {
 
             const best = candidates[bestIdx];
             logger.info(`✅ Found implementation in ${fullPath} at line ${best.lineNum}`);
-            const fileUri = `file:///${fullPath.replace(/\\/g, '/')}`;
             return Location.create(
                 fileUri,
                 {

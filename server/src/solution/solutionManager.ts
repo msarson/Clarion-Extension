@@ -314,6 +314,17 @@ export class SolutionManager {
     }
 
     /**
+     * Returns the project path that should be used as the SDI cache key for a given file.
+     * Prefers the project's own path (from the .sln/.cwproj) so files in redirection
+     * output directories (e.g. genfiles\src) resolve to the same key used at startup.
+     * Falls back to the file's directory if no project is found.
+     */
+    public getProjectPathForFile(filePath: string): string {
+        const project = this.findProjectForFile(filePath);
+        return project?.path || path.dirname(filePath);
+    }
+
+    /**
      * Resolves equates.clw via project redirection and returns its tokenized content.
      * equates.clw is implicitly in scope for all Clarion programs (global equates/constants).
      * Result is cached for the lifetime of the solution.

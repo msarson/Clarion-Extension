@@ -30,8 +30,9 @@ import { HoverRouter } from './hover/HoverRouter';
 import { StructureFieldResolver } from './hover/StructureFieldResolver';
 import { CrossFileCache } from './hover/CrossFileCache';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
-import { ClassDefinitionIndexer } from '../utils/ClassDefinitionIndexer';
+import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { IncludeVerifier } from '../utils/IncludeVerifier';
+import { SymbolFinderService } from '../services/SymbolFinderService';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -64,6 +65,7 @@ export class HoverProvider {
     private router: HoverRouter;
     private structureFieldResolver: StructureFieldResolver;
     private includeVerifier: IncludeVerifier;
+    private symbolFinder: SymbolFinderService;
 
     constructor() {
         const solutionManager = SolutionManager.getInstance();
@@ -93,6 +95,7 @@ export class HoverProvider {
             this.formatter
         );
         this.includeVerifier = new IncludeVerifier();
+        this.symbolFinder = new SymbolFinderService(this.tokenCache, this.scopeAnalyzer);
     }
 
     /**
@@ -112,6 +115,19 @@ export class HoverProvider {
             }
             
             const { word, wordRange, line, tokens, currentScope } = context;
+
+            // ⚡ FAST PATH: if the cursor is on a type argument — CLASS(Type), QUEUE(Type),
+            // GROUP(Type), INTERFACE(Type), or LIKE(Type) — skip all slow symbol resolution
+            // and go straight to the SDI-based type lookup.
+            {
+                const typeArgRegex = /\b(?:CLASS|INTERFACE|QUEUE|GROUP|LIKE)\s*\(\s*([A-Za-z_]\w*)\b/gi;
+                let typeArgMatch: RegExpExecArray | null;
+                while ((typeArgMatch = typeArgRegex.exec(line)) !== null) {
+                    if (typeArgMatch[1].toLowerCase() === word.toLowerCase()) {
+                        return this.checkClassTypeHover(word, document, true);
+                    }
+                }
+            }
 
             // ✅ Hover on IMPLEMENTS(InterfaceName): show interface method signatures
             const implementsHover = await this.buildImplementsHover(word, line, position, document, tokens);
@@ -145,16 +161,12 @@ export class HoverProvider {
             // currentScope already destructured above from context
 
             if (!currentScope) {
-                logger.info('No scope found - checking for global variables');
-                
                 // Check for global variable (in current file or MEMBER parent)
                 const globalVarHover = await this.variableResolver.findGlobalVariableHover(word, tokens, document, position.line);
                 if (globalVarHover) return globalVarHover;
                 
                 logger.info('No scope found and no global variable found - cannot provide hover');
                 
-                // 🔍 Last resort: Check if this word is a CLASS type reference
-                logger.info(`Checking if ${word} is a CLASS type...`);
                 const classTypeHover = await this.checkClassTypeHover(word, document);
                 if (classTypeHover) return classTypeHover;
 
@@ -171,6 +183,19 @@ export class HoverProvider {
             let parameterHover = this.variableResolver.findParameterHover(word, document, currentScope);
             if (parameterHover) return parameterHover;
 
+            // If the current scope is a MethodImplementation (e.g. ThisWindow.Init inside Main),
+            // also check the outer GlobalProcedure(s) for parameters — Clarion scoping allows
+            // local class methods to access the enclosing procedure's parameters.
+            if (currentScope.subType === TokenType.MethodImplementation) {
+                const outerProcs = tokens.filter(t =>
+                    t.type === TokenType.Procedure && t.subType === TokenType.GlobalProcedure
+                );
+                for (const gp of outerProcs) {
+                    const outerParamHover = this.variableResolver.findParameterHover(word, document, gp);
+                    if (outerParamHover) return outerParamHover;
+                }
+            }
+
             logger.info(`Checking if ${word} (full word) is a local variable...`);
             let variableHover = await this.variableResolver.findLocalVariableHover(word, tokens, currentScope, document, word, position.line);
             if (variableHover) return variableHover;
@@ -179,37 +204,7 @@ export class HoverProvider {
             let moduleVarHover = this.variableResolver.findModuleVariableHover(word, tokens, document, position.line);
             if (moduleVarHover) return moduleVarHover;
 
-            // If not found and word contains colon, try stripping prefix (e.g., LOC:Field -> Field)
-            const colonIndex = word.lastIndexOf(':');
-            let searchWord = word;
-            let prefixPart = '';
-            
-            if (colonIndex > 0) {
-                prefixPart = word.substring(0, colonIndex);
-                searchWord = word.substring(colonIndex + 1);
-                logger.info(`Full word not found. Trying with prefix stripped: prefix="${prefixPart}", field="${searchWord}"`);
-                
-                // Check if this is a parameter (with prefix stripped)
-                logger.info(`Checking if ${searchWord} is a parameter...`);
-                parameterHover = this.variableResolver.findParameterHover(searchWord, document, currentScope);
-                if (parameterHover) return parameterHover;
-                logger.info(`${searchWord} is not a parameter`);
-
-                // Check if this is a local variable (with prefix stripped)
-                logger.info(`Checking if ${searchWord} is a local variable...`);
-                variableHover = await this.variableResolver.findLocalVariableHover(searchWord, tokens, currentScope, document, word, position.line);
-                if (variableHover) return variableHover;
-                logger.info(`${searchWord} is not a local variable`);
-                
-                // 🔗 Check for module-local variable in current file (with prefix stripped)
-                logger.info(`Checking for module-local variable in current file...`);
-                moduleVarHover = this.variableResolver.findModuleVariableHover(searchWord, tokens, document, position.line);
-                if (moduleVarHover) return moduleVarHover;
-            } else {
-                logger.info(`${word} has no prefix, already searched as-is`);
-            }
-            
-            logger.info(`${searchWord} is not a module-local variable - checking MEMBER parent file`);
+            logger.info(`${word} not found locally - checking MEMBER parent file`);
             
             // 🔗 Check if MEMBER file exists
             const mapTokens = this.tokenCache.getTokens(document);
@@ -222,8 +217,6 @@ export class HoverProvider {
             if (memberToken && memberToken.referencedFile) {
                 logger.info(`Found MEMBER reference to: ${memberToken.referencedFile}`);
                 
-                // Resolve the referenced file path relative to the current document
-                // Decode URI first to get proper file path
                 const currentFilePath = decodeURIComponent(document.uri.replace('file:///', ''));
                 const currentFileDir = path.dirname(currentFilePath);
                 const resolvedPath = path.resolve(currentFileDir, memberToken.referencedFile);
@@ -235,42 +228,39 @@ export class HoverProvider {
                     logger.info(`Loaded parent file, found ${parentTokens.length} tokens`);
                     
                     // First check if this is a procedure in the MAP (before treating as variable)
-                    // Look for MAP declaration of the procedure
-                    const parentStructure = this.tokenCache.getStructure(parentDoc);
-                    const mapDecl = this.mapResolver.findMapDeclaration(searchWord, parentTokens, parentDoc, line);
+                    const mapDecl = this.mapResolver.findMapDeclaration(word, parentTokens, parentDoc, line);
                     
                     if (mapDecl) {
-                        logger.info(`✅ Found MAP declaration for ${searchWord} in parent - treating as procedure call`);
+                        logger.info(`✅ Found MAP declaration for ${word} in parent - treating as procedure call`);
                         
-                        // Find implementation
                         const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
                         const procImpl = await this.mapResolver.findProcedureImplementation(
-                            searchWord,
+                            word,
                             parentTokens,
                             parentDoc,
                             mapPosition,
                             line
                         );
                         
-                        return this.formatter.formatProcedure(searchWord, mapDecl, procImpl, document, position);
+                        return this.formatter.formatProcedure(word, mapDecl, procImpl, document, position);
                     }
                     
-                    // Not a procedure - check for global variable in parent
-                    const globalVarHover = await this.variableResolver.findGlobalVariableHover(searchWord, parentTokens, parentDoc, position.line);
+                    // Not a procedure — check for global variable in parent's own scope only.
+                    // Use full word (e.g., Access:IBSDataSets) — colon is part of the label name.
+                    // shallowOnly=true: skips recursive include chain, handled by findInIncludesAndEquates below.
+                    const globalVarHover = await this.variableResolver.findGlobalVariableHover(word, parentTokens, parentDoc, position.line, true);
                     if (globalVarHover) return globalVarHover;
                 }
             }
             
-            logger.info(`❌ ${searchWord} is not a local variable or global in MEMBER parent`);
+            logger.info(`❌ ${word} not found in MEMBER parent`);
             
-            // Check INCLUDE files of the current file and equates.clw (covers both PROGRAM files
-            // and MEMBER files that have their own INCLUDE chain)
-            const includesHover = await this.variableResolver.findInIncludesAndEquates(searchWord, tokens, document);
+            // Check INCLUDE files of the current file and equates.clw
+            const includesHover = await this.variableResolver.findInIncludesAndEquates(word, tokens, document);
             if (includesHover) return includesHover;
 
             // 🔍 Last resort: Check if this word is a CLASS type reference
-            // This handles when user hovers directly on a type name (e.g., hovering on "StringTheory" in "st StringTheory")
-            logger.info(`Checking if ${word} is a CLASS type...`);
+            logger.debug(`Falling through to checkClassTypeHover for "${word}"`);
             const classTypeHover = await this.checkClassTypeHover(word, document);
             if (classTypeHover) {
                 logger.info(`✅ HOVER-RETURN: Found CLASS type hover for ${word}`);
@@ -291,45 +281,6 @@ export class HoverProvider {
             logger.error(`Error providing hover: ${error instanceof Error ? error.message : String(error)}`);
             return null;
         }
-    }
-
-    /**
-     * Finds parameter information
-     */
-    private findParameterInfo(word: string, document: TextDocument, currentScope: Token): { type: string; line: number } | null {
-        const content = document.getText();
-        const lines = content.split('\n');
-        const procedureLine = lines[currentScope.line];
-
-        if (!procedureLine) {
-            return null;
-        }
-
-        // Match PROCEDURE(...) or FUNCTION(...) pattern
-        const match = procedureLine.match(ClarionPatterns.PROCEDURE_WITH_PARAMS);
-        if (!match || !match[1]) {
-            return null;
-        }
-
-        const paramString = match[1];
-        const params = paramString.split(',');
-
-        for (const param of params) {
-            const trimmedParam = param.trim();
-            // Strip optional-parameter angle brackets: <Key K> → Key K
-            const stripped = trimmedParam.replace(/^<(.*)>$/, '$1').trim();
-            // Extract parameter: TYPE paramName or TYPE paramName=default
-            const paramMatch = stripped.match(/([*&]?\s*\w+)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*=.*)?$/i);
-            if (paramMatch) {
-                const type = paramMatch[1].trim();
-                const paramName = paramMatch[2];
-                if (paramName.toLowerCase() === word.toLowerCase()) {
-                    return { type, line: currentScope.line };
-                }
-            }
-        }
-
-        return null;
     }
 
     /**
@@ -751,61 +702,59 @@ export class HoverProvider {
      * @param document The document
      * @returns Hover with class definition info, or null if not a class
      */
-    private async checkClassTypeHover(word: string, document: TextDocument): Promise<Hover | null> {
+    private async checkClassTypeHover(word: string, document: TextDocument, skipIncludeCheck = false): Promise<Hover | null> {
+        let timeoutId: NodeJS.Timeout | undefined;
+        const timeout = new Promise<null>(resolve => {
+            timeoutId = setTimeout(() => {
+                logger.error(`⏱️ [HOVER] checkClassTypeHover timed out for "${word}" — class index build too slow`);
+                resolve(null);
+            }, 10000);
+        });
         try {
-            const classIndexer = ClassDefinitionIndexer.getInstance();
-            
-            // Get project path from document URI
-            const docPath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
-            const projectPath = path.dirname(docPath);
-            
-            logger.info(`Looking up CLASS type: ${word} in project: ${projectPath}`);
-            
-            // Try to get or build index for this project
-            const index = await classIndexer.getOrBuildIndex(projectPath);
-            
-            // Look up the class
-            const definitions = classIndexer.findClass(word, projectPath);
-            
-            if (definitions && definitions.length > 0) {
-                const def = definitions[0]; // Use first definition
-                
-                logger.info(`Found CLASS definition: ${def.className} in ${def.filePath}:${def.lineNumber}`);
-                
-                // Extract just the filename from the full path
-                const fileName = path.basename(def.filePath);
-                
-                // ✅ NEW: Verify the class file is included in current scope
-                logger.info(`Verifying if ${fileName} is included...`);
+            return await Promise.race([this._checkClassTypeHoverInternal(word, document, skipIncludeCheck), timeout]);
+        } finally {
+            if (timeoutId !== undefined) clearTimeout(timeoutId);
+        }
+    }
+
+    private async _checkClassTypeHoverInternal(word: string, document: TextDocument, skipIncludeCheck = false): Promise<Hover | null> {
+        try {
+            const info = await this.symbolFinder.findIndexedTypeDeclaration(word, document);
+            if (!info) {
+                return null;
+            }
+
+            const fileName = path.basename(info.filePath);
+
+            // Hover-only guard: verify the type's file is included in current scope.
+            // Skipped for fast-path calls where the word appears as a type argument (CLASS(word),
+            // QUEUE(word), etc.) — the usage itself proves the type is accessible in this file.
+            if (!skipIncludeCheck) {
                 const isIncluded = await this.includeVerifier.isClassIncluded(fileName, document);
-                
                 if (!isIncluded) {
-                    logger.info(`❌ ${fileName} is not included in current scope - skipping hover`);
                     return null;
                 }
-                
-                logger.info(`✅ Found CLASS type: ${def.className} and verified it's included`);
-                
-                const typeLabel = def.isType ? 'CLASS, TYPE' : 'CLASS';
-                const parentLine = def.parentClass ? `\n⬆️ Extends: \`${def.parentClass}\`` : '';
-                const hoverMarkdown = [
-                    `**${def.className}** — ${typeLabel}`,
-                    ``,
-                    `📦 Defined in \`${fileName}\` at line ${def.lineNumber}${parentLine}`,
-                    ``,
-                    `*(F12 to navigate to definition)*`
-                ].join('\n');
-                
-                return {
-                    contents: { kind: 'markdown', value: hoverMarkdown }
-                };
             }
-            
-            logger.info(`No CLASS definition found for: ${word}`);
+
+            const typeLabel = info.structureType === 'INTERFACE'
+                ? 'INTERFACE'
+                : info.isType ? `${info.structureType}, TYPE` : info.structureType;
+            const parentLine = info.parentName ? `\n⬆️ Extends: \`${info.parentName}\`` : '';
+            const hoverMarkdown = [
+                `**${info.name}** — ${typeLabel}`,
+                ``,
+                `📦 Defined in \`${fileName}\` at line ${info.line + 1}${parentLine}`,
+                ``,
+                `*(F12 to navigate to definition)*`
+            ].join('\n');
+
+            return {
+                contents: { kind: 'markdown', value: hoverMarkdown }
+            };
         } catch (error) {
             logger.error(`Error checking class type hover: ${error instanceof Error ? error.message : String(error)}`);
         }
-        
+
         return null;
     }
 
@@ -863,7 +812,7 @@ export class HoverProvider {
         return null;
     }
 
-    /** Find an INTERFACE token by name: current file → INCLUDE chain → equates */
+    /** Find an INTERFACE token by name: current file → INCLUDE chain → index → equates */
     private async findInterfaceToken(ifaceName: string, document: TextDocument, tokens: Token[]): Promise<Token | null> {
         // 1. Current document
         const local = tokens.find(t =>
@@ -878,8 +827,35 @@ export class HoverProvider {
         const incToken = await this.findInterfaceTokenInIncludes(ifaceName, fromPath, new Set());
         if (incToken) return incToken;
 
-        // 3. equates.clw
+        // 3. StructureDeclarationIndexer — covers libsrc/.inc files not in the INCLUDE chain
+        const sdi = StructureDeclarationIndexer.getInstance();
+        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         const sm = SolutionManager.getInstance();
+        const project = sm?.findProjectForFile(docPath);
+        if (project?.path) {
+            await sdi.getOrBuildIndex(project.path);
+            const infos = sdi.find(ifaceName, project.path);
+            const ifaceInfo = infos.find(d => d.structureType === 'INTERFACE');
+            if (ifaceInfo) {
+                const uri = `file:///${ifaceInfo.filePath.replace(/\\/g, '/')}`;
+                let incTokens = this.tokenCache.getTokensByUri(uri);
+                if (!incTokens) {
+                    try {
+                        const incContent = fs.readFileSync(ifaceInfo.filePath, 'utf8');
+                        const incDoc = TextDocument.create(uri, 'clarion', 1, incContent);
+                        incTokens = this.tokenCache.getTokens(incDoc);
+                    } catch { /* fall through */ }
+                }
+                const iface = incTokens?.find(t =>
+                    t.type === TokenType.Structure &&
+                    t.subType === TokenType.Interface &&
+                    t.label?.toLowerCase() === ifaceName.toLowerCase()
+                );
+                if (iface) return iface;
+            }
+        }
+
+        // 4. equates.clw
         const equatesTokens = sm?.getEquatesTokens();
         if (equatesTokens) {
             const eq = equatesTokens.find(t =>

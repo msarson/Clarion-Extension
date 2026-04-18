@@ -3,10 +3,11 @@ import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
 import { ClarionTokenizer, Token, TokenType } from '../ClarionTokenizer';
 import { extractReturnType } from '../utils/AttributeKeywords';
 import { ProcedureSignatureUtils } from '../utils/ProcedureSignatureUtils';
+import { MemberLocatorService } from '../services/MemberLocatorService';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("DiagnosticProvider");
-logger.setLevel("error"); // Production: Only log errors
+logger.setLevel("error");
 
 /**
  * Diagnostic Provider for Clarion Language
@@ -1027,14 +1028,19 @@ export class DiagnosticProvider {
                                     // Look for return type in attributes after closing paren
                                     // IMPORTANT: Only look on the SAME line as the PROCEDURE declaration
                                     if (k + 1 < tokens.length && tokens[k + 1].line === tokens[j].line) {
-                                        const returnType = extractReturnType(tokens, k + 1, true);
-                                        if (returnType) {
-                                            declarationsWithReturnTypes.push({
-                                                name: procNameToken.value,  // Just procedure name, no class prefix
-                                                returnType: returnType,
-                                                line: procNameToken.line,
-                                                signature: docLines[tokens[j].line] || ''
-                                            });
+                                        const lineTokens = tokens.filter(t => t.line === tokens[j].line);
+                                        const hasProc = lineTokens.some(t => t.value.toUpperCase() === 'PROC');
+                                        const hasDerived = lineTokens.some(t => t.value.toUpperCase() === 'DERIVED');
+                                        if (!hasProc && !hasDerived) {
+                                            const returnType = extractReturnType(tokens, k + 1, true);
+                                            if (returnType) {
+                                                declarationsWithReturnTypes.push({
+                                                    name: procNameToken.value,  // Just procedure name, no class prefix
+                                                    returnType: returnType,
+                                                    line: procNameToken.line,
+                                                    signature: docLines[tokens[j].line] || ''
+                                                });
+                                            }
                                         }
                                     }
                                     break;
@@ -1056,12 +1062,18 @@ export class DiagnosticProvider {
                 
                 const className = classNameToken.value;
                 
-                // Find END of CLASS
-                let classEndLine = -1;
-                for (let j = i + 1; j < tokens.length; j++) {
-                    if (tokens[j].value.toUpperCase() === 'END' && tokens[j].start === 0) {
-                        classEndLine = tokens[j].line;
-                        break;
+                // Use finishesAt from DocumentStructure (reliable); fall back to scanning
+                // for END at column 0 only if finishesAt is absent. The manual scan is
+                // unreliable when the CLASS END is indented (start !== 0), causing the
+                // inner loop to bleed past the class body into the rest of the file and
+                // falsely attribute later declarations to this class name.
+                let classEndLine: number = token.finishesAt ?? -1;
+                if (classEndLine === -1) {
+                    for (let j = i + 1; j < tokens.length; j++) {
+                        if (tokens[j].value.toUpperCase() === 'END' && tokens[j].start === 0) {
+                            classEndLine = tokens[j].line;
+                            break;
+                        }
                     }
                 }
                 
@@ -1087,14 +1099,21 @@ export class DiagnosticProvider {
                                     // Look for return type in attributes after closing paren
                                     // IMPORTANT: Only look on the SAME line as the PROCEDURE declaration
                                     if (k + 1 < tokens.length && tokens[k + 1].line === tokens[j].line) {
-                                        const returnType = extractReturnType(tokens, k + 1, true);
-                                        if (returnType) {
-                                             declarationsWithReturnTypes.push({
-                                                name: className + '.' + methodNameToken.value,
-                                                returnType: returnType,
-                                                line: methodNameToken.line,
-                                                signature: docLines[tokens[j].line] || ''
-                                            });
+                                        // Skip if PROC attribute present (callers don't have to capture, so
+                                        // empty RETURN is intentional) or DERIVED (override may drop return type)
+                                        const lineTokens = tokens.filter(t => t.line === tokens[j].line);
+                                        const hasProc = lineTokens.some(t => t.value.toUpperCase() === 'PROC');
+                                        const hasDerived = lineTokens.some(t => t.value.toUpperCase() === 'DERIVED');
+                                        if (!hasProc && !hasDerived) {
+                                            const returnType = extractReturnType(tokens, k + 1, true);
+                                            if (returnType) {
+                                                declarationsWithReturnTypes.push({
+                                                    name: className + '.' + methodNameToken.value,
+                                                    returnType: returnType,
+                                                    line: methodNameToken.line,
+                                                    signature: docLines[tokens[j].line] || ''
+                                                });
+                                            }
                                         }
                                     }
                                     break;
@@ -1323,6 +1342,197 @@ export class DiagnosticProvider {
             }
         }
         
+        return diagnostics;
+    }
+
+    // ─── Discarded return value helpers ─────────────────────────────────────
+
+    /**
+     * Identifies CODE block line ranges in the token stream, along with the
+     * class name that SELF refers to inside each block (null for non-method bodies).
+     * Uses `token.executionMarker` (set by DocumentStructure on PROCEDURE/ROUTINE tokens)
+     * and `token.finishesAt` — the same metadata used by ClarionDocumentSymbolProvider.
+     */
+    private static getCodeBlockRanges(
+        tokens: Token[]
+    ): { start: number; end: number; selfClassName: string | null }[] {
+        const ranges: { start: number; end: number; selfClassName: string | null }[] = [];
+
+        for (let i = 0; i < tokens.length; i++) {
+            const t = tokens[i];
+            // Find PROCEDURE/ROUTINE/FUNCTION keyword tokens that are implementations
+            if (t.type !== TokenType.Procedure && t.type !== TokenType.Routine) continue;
+            // Must have an explicit CODE section
+            if (!t.executionMarker) continue;
+
+            // Skip declarations (no body): MethodDeclaration, InterfaceMethod
+            const sub = t.subType;
+            if (sub === TokenType.MethodDeclaration || sub === TokenType.InterfaceMethod) continue;
+
+            const codeStart = t.executionMarker.line + 1;
+            const procEnd = t.finishesAt ?? tokens[tokens.length - 1].line;
+
+            // Look back on the same line for the col-0 label (to get selfClassName)
+            let selfClassName: string | null = null;
+            for (let k = i - 1; k >= 0; k--) {
+                if (tokens[k].line < t.line) break;
+                if (tokens[k].type === TokenType.Label && tokens[k].start === 0) {
+                    const parts = tokens[k].value.split('.');
+                    selfClassName = parts.length >= 2 ? parts[0] : null;
+                    break;
+                }
+            }
+
+            ranges.push({ start: codeStart, end: procEnd, selfClassName });
+        }
+
+        return ranges;
+    }
+
+    /**
+     * Returns true if `typeStr` (the attribute string after the member name, e.g.
+     * "PROCEDURE (), string, virtual") describes a method that has a return type
+     * and does NOT carry the PROC attribute — meaning callers MUST capture the value.
+     */
+    private static isNonProcReturnMethod(typeStr: string): boolean {
+        const upper = typeStr.toUpperCase();
+        if (!upper.startsWith('PROCEDURE') && !upper.startsWith('FUNCTION')) return false;
+        // PROC attribute suppresses the return-value requirement
+        if (/\bPROC\b/.test(upper)) return false;
+
+        // Strip the PROCEDURE/FUNCTION parameter list to get the attribute section
+        let afterParen = upper;
+        const parenIdx = upper.indexOf('(');
+        if (parenIdx !== -1) {
+            let depth = 0;
+            for (let i = parenIdx; i < upper.length; i++) {
+                if (upper[i] === '(') depth++;
+                else if (upper[i] === ')') {
+                    depth--;
+                    if (depth === 0) { afterParen = upper.substring(i + 1); break; }
+                }
+            }
+        } else {
+            afterParen = upper.substring(upper.indexOf('PROCEDURE') + 9).trimStart().substring(
+                upper.indexOf('FUNCTION') !== -1 ? 8 : 0
+            );
+        }
+
+        // Check for a Clarion data-type keyword in the attribute section
+        return /\b(LONG|SHORT|BYTE|SIGNED|UNSIGNED|STRING|CSTRING|PSTRING|REAL|DECIMAL|DATE|TIME|SREAL|BLOB|QUEUE|GROUP|CLASS|BOOL|ANY|BFILE|FILE)\b/.test(afterParen);
+    }
+
+    /**
+     * Async validation pass: warns when a dot-access method call discards a return value.
+     * Reuses MemberLocatorService (the same resolution path as hover and F12) for type lookup.
+     *
+     * Design notes:
+     * - Only examines lines inside CODE blocks (token-derived ranges).
+     * - Detects standalone `obj.Method(...)` / `obj.Method` lines via regex, then falls
+     *   through silently on any resolution failure — no false positives.
+     * - Handles SELF/PARENT by determining the enclosing class from the implementation label.
+     * - paramCount is passed to resolveDotAccess for correct overload selection.
+     *
+     * Closes #61
+     */
+    public static async validateDiscardedReturnValues(
+        tokens: Token[],
+        document: TextDocument,
+        memberLocator: MemberLocatorService
+    ): Promise<Diagnostic[]> {
+        const diagnostics: Diagnostic[] = [];
+        const docLines = document.getText().split('\n');
+        const codeRanges = this.getCodeBlockRanges(tokens);
+        if (codeRanges.length === 0) return diagnostics;
+
+        // Regex to check that a line STARTS with obj.Method — we validate the rest manually
+        const DOTCALL_PREFIX = /^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)/;
+
+        for (let lineIdx = 0; lineIdx < docLines.length; lineIdx++) {
+            const range = codeRanges.find(r => lineIdx >= r.start && lineIdx <= r.end);
+            if (!range) continue;
+
+            const rawLine = docLines[lineIdx];
+            // Strip Clarion line comment (! outside strings) — conservative: may produce
+            // false negatives when ! is inside a string argument, never false positives.
+            const stripped = rawLine.replace(/!.*$/, '').trim();
+            if (!stripped) continue;
+
+            const prefixMatch = stripped.match(DOTCALL_PREFIX);
+            if (!prefixMatch) continue;
+
+            const objectName = prefixMatch[1];
+            const methodName = prefixMatch[2];
+            const afterMatch = stripped.substring(prefixMatch[0].length).trimStart();
+
+            // Determine whether the rest of the line is empty (no parens) or just (...)
+            let argsStr = '';
+            if (afterMatch === '') {
+                // obj.Method with no parentheses — valid Clarion call
+            } else if (afterMatch.startsWith('(')) {
+                // Walk to matching close paren
+                let depth = 0;
+                let closeIdx = -1;
+                for (let i = 0; i < afterMatch.length; i++) {
+                    if (afterMatch[i] === '(') depth++;
+                    else if (afterMatch[i] === ')') {
+                        depth--;
+                        if (depth === 0) { closeIdx = i; break; }
+                    }
+                }
+                if (closeIdx === -1) continue; // Unclosed paren — multi-line or syntax error, skip
+                const afterClose = afterMatch.substring(closeIdx + 1).trim();
+                if (afterClose) continue; // Something after call (e.g. assignment, chained) — not standalone
+                argsStr = afterMatch.substring(1, closeIdx);
+            } else {
+                continue; // Something between identifier and end-of-line — not a bare call
+            }
+
+            // Count top-level arguments for overload resolution
+            let paramCount = 0;
+            if (argsStr.trim()) {
+                paramCount = 1;
+                let depth = 0;
+                for (const ch of argsStr) {
+                    if (ch === '(' || ch === '[') depth++;
+                    else if (ch === ')' || ch === ']') depth--;
+                    else if (ch === ',' && depth === 0) paramCount++;
+                }
+            }
+
+            // Resolve: SELF/PARENT → use class from implementation label; otherwise dot-access
+            let memberInfo;
+            const objUpper = objectName.toUpperCase();
+            if (objUpper === 'SELF' || objUpper === 'PARENT') {
+                if (!range.selfClassName) continue;
+                memberInfo = await memberLocator.findMemberInClass(
+                    range.selfClassName, methodName, document, paramCount
+                );
+            } else {
+                memberInfo = await memberLocator.resolveDotAccess(
+                    objectName, methodName, document, paramCount
+                );
+            }
+
+            if (!memberInfo) {
+                logger.debug(`🔍 Line ${lineIdx + 1}: no memberInfo resolved for ${objectName}.${methodName}`);
+                continue;
+            }
+            logger.debug(`🔍 Line ${lineIdx + 1}: ${objectName}.${methodName} → type="${memberInfo.type}" isNonProc=${this.isNonProcReturnMethod(memberInfo.type ?? '')}`);
+            if (!this.isNonProcReturnMethod(memberInfo.type ?? '')) continue;
+
+            const colStart = rawLine.search(/\S/);
+            diagnostics.push({
+                severity: DiagnosticSeverity.Warning,
+                range: {
+                    start: { line: lineIdx, character: colStart >= 0 ? colStart : 0 },
+                    end: { line: lineIdx, character: colStart + stripped.length }
+                },
+                message: `Return value of '${objectName}.${methodName}' is discarded. Capture the return value or add the PROC attribute to the declaration to suppress this warning.`,
+                source: 'clarion'
+            });
+        }
+
         return diagnostics;
     }
 }

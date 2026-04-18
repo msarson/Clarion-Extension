@@ -1,15 +1,14 @@
 import { Hover, Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../../ClarionTokenizer';
-import { TokenHelper } from '../../utils/TokenHelper';
 import { TokenCache } from '../../TokenCache';
-import { ClarionDocumentSymbolProvider } from '../ClarionDocumentSymbolProvider';
 import { HoverFormatter, VariableInfo } from './HoverFormatter';
 import { ScopeAnalyzer } from '../../utils/ScopeAnalyzer';
-import { ClassDefinitionIndexer } from '../../utils/ClassDefinitionIndexer';
+import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationIndexer';
 import { CrossFileCache } from './CrossFileCache';
 import { SymbolFinderService } from '../../services/SymbolFinderService';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
+import { SolutionManager } from '../../solution/solutionManager';
 import LoggerManager from '../../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -21,7 +20,7 @@ logger.setLevel("error");
  * Resolves hover information for variables (parameters, local, module, global)
  */
 export class VariableHoverResolver {
-    private classIndexer: ClassDefinitionIndexer;
+    private sdi: StructureDeclarationIndexer;
     private symbolFinder: SymbolFinderService;
     private memberLocator: MemberLocatorService;
     
@@ -31,7 +30,7 @@ export class VariableHoverResolver {
         private tokenCache: TokenCache,
         private crossFileCache?: CrossFileCache
     ) {
-        this.classIndexer = ClassDefinitionIndexer.getInstance();
+        this.sdi = StructureDeclarationIndexer.getInstance();
         this.symbolFinder = new SymbolFinderService(tokenCache, scopeAnalyzer);
         this.memberLocator = new MemberLocatorService(crossFileCache);
     }
@@ -137,7 +136,7 @@ export class VariableHoverResolver {
     /**
      * Find and format hover for a global variable (in current or parent file)
      */
-    async findGlobalVariableHover(searchWord: string, tokens: Token[], document: TextDocument, hoverLine?: number): Promise<Hover | null> {
+    async findGlobalVariableHover(searchWord: string, tokens: Token[], document: TextDocument, hoverLine?: number, shallowOnly = false): Promise<Hover | null> {
         // First, check for global variable in CURRENT file (PROGRAM)
         const firstCodeToken = tokens.find(t => 
             t.type === TokenType.Keyword && 
@@ -146,16 +145,22 @@ export class VariableHoverResolver {
         const globalScopeEndLine = firstCodeToken ? firstCodeToken.line : Number.MAX_SAFE_INTEGER;
         
         const globalVar = tokens.find(t =>
-            t.type === TokenType.Label &&
             t.start === 0 &&
             t.line < globalScopeEndLine &&
-            t.value.toLowerCase() === searchWord.toLowerCase()
+            (t.type === TokenType.Label
+                ? t.value.toLowerCase() === searchWord.toLowerCase()
+                : (t.type === TokenType.Structure || t.type === TokenType.Procedure) && t.label?.toLowerCase() === searchWord.toLowerCase()
+            )
         );
         
         if (globalVar) {
             logger.info(`✅ Found global variable in current file: ${globalVar.value} at line ${globalVar.line}`);
             return this.buildGlobalVariableHover(globalVar, tokens, document, hoverLine);
         }
+
+        // When shallowOnly=true (e.g. checking a MEMBER parent doc), skip the recursive
+        // cross-file include chain traversal — the caller will handle includes separately.
+        if (shallowOnly) return null;
         
         // Check MEMBER parent + its INCLUDE chain, plus current file's INCLUDE chain
         const crossFileResult = await this.memberLocator.findVariableTokenInParentChain(searchWord, document);
@@ -174,9 +179,23 @@ export class VariableHoverResolver {
 
     /**
      * Search the INCLUDE chain of a file and equates.clw for a label.
+     * Also handles prefix:field notation (e.g. "SetG:SettingsGroup") by looking for
+     * structure fields with the matching PRE prefix and field name.
      * Used by HoverProvider after all scope-based checks fail (parameter/local/module/global).
      */
     public async findInIncludesAndEquates(searchWord: string, tokens: Token[], document: TextDocument): Promise<Hover | null> {
+        // For prefix:field notation, try resolving the structure field directly
+        const colonIdx = searchWord.lastIndexOf(':');
+        if (colonIdx > 0) {
+            const prefix = searchWord.substring(0, colonIdx);
+            const fieldName = searchWord.substring(colonIdx + 1);
+            const prefixResult = await this.memberLocator.findPrefixFieldTokenInChain(prefix, fieldName, document);
+            if (prefixResult) {
+                logger.info(`✅ Found "${searchWord}" as prefix:field in chain: ${path.basename(prefixResult.doc.uri)}`);
+                return this.buildGlobalVariableHover(prefixResult.token, prefixResult.tokens, prefixResult.doc);
+            }
+        }
+
         const crossFileResult = await this.memberLocator.findVariableTokenInParentChain(searchWord, document);
         if (crossFileResult) {
             logger.info(`✅ Found "${searchWord}" in INCLUDE file: ${path.basename(crossFileResult.doc.uri)}`);
@@ -220,17 +239,17 @@ export class VariableHoverResolver {
         );
         let containingClassName: string | undefined;
         if (isClassProperty) {
-            const classToken = tokens.slice(0, tokens.indexOf(globalVar)).reverse().find(t =>
-                t.type === TokenType.Structure &&
-                (t as any).subType === TokenType.Class
+            // 🚀 PERF: use structure index (O(classes)) instead of full token scan + slice + reverse
+            const classToken = structure.getClasses().find(t =>
+                t.line < globalVar.line && (t.finishesAt === undefined || t.finishesAt >= globalVar.line)
             );
             containingClassName = classToken?.label ?? classToken?.value;
         }
         let containingInterfaceName: string | undefined;
         if (isInterfaceMethod) {
-            const ifaceToken = tokens.slice(0, tokens.indexOf(globalVar)).reverse().find(t =>
-                t.type === TokenType.Structure &&
-                (t as any).subType === TokenType.Interface
+            // 🚀 PERF: use structure index (O(interfaces)) instead of full token scan + slice + reverse
+            const ifaceToken = structure.getInterfaces().find(t =>
+                t.line < globalVar.line && (t.finishesAt === undefined || t.finishesAt >= globalVar.line)
             );
             containingInterfaceName = ifaceToken?.label ?? ifaceToken?.value;
         }
@@ -239,7 +258,7 @@ export class VariableHoverResolver {
         const scopeInfo = this.scopeAnalyzer.getTokenScope(document, globalPos);
         
         const markdown = [
-            `**${globalVar.value}** — \`${typeInfo}\``,
+            `**${globalVar.label ?? globalVar.value}** — \`${typeInfo}\``,
             ``
         ];
         
@@ -299,8 +318,6 @@ export class VariableHoverResolver {
      * Search equates.clw (implicitly global in all Clarion programs via MAP/END) for a label.
      */
     private async searchEquatesFile(searchWord: string): Promise<Hover | null> {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { SolutionManager } = require('../../solution/solutionManager');
         const sm = SolutionManager.getInstance();
         const equatesPath = sm?.getEquatesPath();
         if (!equatesPath || !fs.existsSync(equatesPath)) return null;
@@ -358,19 +375,19 @@ export class VariableHoverResolver {
             logger.info(`Looking up class definition for type: ${cleanTypeName}`);
             
             // Get project path from document URI
-            const docPath = document.uri.replace('file:///', '').replace(/\//g, '\\');
-            const projectPath = path.dirname(docPath);
+            const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+            const projectPath = SolutionManager.getInstance()?.getProjectPathForFile(docPath) ?? path.dirname(docPath);
             
             // Try to get or build index for this project
-            const index = await this.classIndexer.getOrBuildIndex(projectPath);
+            const index = await this.sdi.getOrBuildIndex(projectPath);
             
             // Look up the class
-            const definitions = this.classIndexer.findClass(cleanTypeName, projectPath);
+            const definitions = this.sdi.find(cleanTypeName, projectPath);
             
-            if (definitions && definitions.length > 0) {
+            if (definitions.length > 0) {
                 const def = definitions[0]; // Use first definition
                 
-                logger.info(`Found class definition: ${def.className} in ${def.filePath}:${def.lineNumber}`);
+                logger.info(`Found class definition: ${def.name} in ${def.filePath}:${def.line + 1}`);
                 
                 // Extract just the filename from the full path
                 const fileName = path.basename(def.filePath);
@@ -380,16 +397,16 @@ export class VariableHoverResolver {
                     ``,
                     `---`,
                     `**Class Definition:**`,
-                    `- File: \`${fileName}\` (line ${def.lineNumber})`,
+                    `- File: \`${fileName}\` (line ${def.line + 1})`,
                     `- Type: ${def.isType ? 'CLASS,TYPE' : 'CLASS'}`,
                 ];
                 
-                if (def.parentClass) {
-                    classInfo.push(`- Parent: \`${def.parentClass}\``);
+                if (def.parentName) {
+                    classInfo.push(`- Parent: \`${def.parentName}\``);
                 }
                 
                 // Add indexer stats
-                classInfo.push(``,  `*Indexed ${index.classes.size} classes in project*`);
+                classInfo.push(``,  `*Indexed ${index.byName.size} structures in project*`);
                 
                 // Append to existing hover content
                 let existingContent = '';

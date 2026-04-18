@@ -1,6 +1,7 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
+import { SolutionManager } from '../solution/solutionManager';
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -42,35 +43,37 @@ export class IncludeVerifier {
      */
     async isClassIncluded(classFileName: string, document: TextDocument): Promise<boolean> {
         try {
-            logger.info(`Checking if ${classFileName} is included in ${document.uri}`);
+            logger.error(`⏱️ [IV] isClassIncluded start: "${classFileName}" in ${document.uri.split('/').pop()}`);
 
             // Get includes from current file
+            const t0 = Date.now();
             const currentIncludes = await this.getIncludesForFile(document);
-            logger.info(`Found ${currentIncludes.length} includes in current file`);
-            currentIncludes.forEach(inc => logger.info(`  - ${inc.fileName} at line ${inc.lineNumber}`));
+            logger.error(`⏱️ [IV] getIncludesForFile (current) took ${Date.now() - t0}ms → ${currentIncludes.length} includes`);
             
             // Check if class file is in current file's includes
             if (this.hasInclude(classFileName, currentIncludes)) {
-                logger.info(`✅ Found ${classFileName} in current file`);
+                logger.error(`⏱️ [IV] ✅ Found "${classFileName}" in current file`);
                 return true;
             }
 
             // Not found in current file - check MEMBER parent
-            logger.info(`${classFileName} not in current file - checking MEMBER parent`);
+            const t1 = Date.now();
+            logger.error(`⏱️ [IV] "${classFileName}" not in current file — checking MEMBER parent...`);
             const memberParent = await this.getMemberParentDocument(document);
+            logger.error(`⏱️ [IV] getMemberParentDocument took ${Date.now() - t1}ms → ${memberParent ? memberParent.uri.split('/').pop() : 'null'}`);
             
             if (memberParent) {
+                const t2 = Date.now();
                 const parentIncludes = await this.getIncludesForFile(memberParent);
-                logger.info(`Found ${parentIncludes.length} includes in MEMBER parent`);
-                parentIncludes.forEach(inc => logger.info(`  - ${inc.fileName} at line ${inc.lineNumber}`));
+                logger.error(`⏱️ [IV] getIncludesForFile (parent) took ${Date.now() - t2}ms → ${parentIncludes.length} includes`);
                 
                 if (this.hasInclude(classFileName, parentIncludes)) {
-                    logger.info(`✅ Found ${classFileName} in MEMBER parent`);
+                    logger.error(`⏱️ [IV] ✅ Found "${classFileName}" in MEMBER parent`);
                     return true;
                 }
             }
 
-            logger.info(`❌ ${classFileName} not found in any accessible scope`);
+            logger.error(`⏱️ [IV] ❌ "${classFileName}" not found in any accessible scope`);
             return false;
 
         } catch (error) {
@@ -233,24 +236,41 @@ export class IncludeVerifier {
             );
 
             if (!memberToken || !memberToken.referencedFile) {
-                logger.info('No MEMBER statement found');
+                logger.error(`⏱️ [IV] getMemberParentDocument: no MEMBER token in ${document.uri.split('/').pop()}`);
                 return null;
             }
 
-            logger.info(`Found MEMBER: ${memberToken.referencedFile}`);
+            logger.error(`⏱️ [IV] getMemberParentDocument: resolving "${memberToken.referencedFile}"`);
 
-            // Resolve path relative to current document
-            const currentFilePath = document.uri.replace('file:///', '').replace(/\//g, '\\');
+            // Resolve path: try redirection parser first, then local directory fallback
+            const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
             const currentFileDir = path.dirname(currentFilePath);
-            const resolvedPath = path.resolve(currentFileDir, memberToken.referencedFile);
+            let resolvedPath: string | null = null;
 
-            if (!fs.existsSync(resolvedPath)) {
-                logger.warn(`MEMBER file not found: ${resolvedPath}`);
+            const solutionManager = SolutionManager.getInstance();
+            if (solutionManager?.solution) {
+                for (const project of solutionManager.solution.projects) {
+                    const resolved = project.getRedirectionParser().findFile(memberToken.referencedFile);
+                    if (resolved?.path && fs.existsSync(resolved.path)) {
+                        resolvedPath = resolved.path;
+                        break;
+                    }
+                }
+            }
+            if (!resolvedPath) {
+                const candidate = path.resolve(currentFileDir, memberToken.referencedFile);
+                if (fs.existsSync(candidate)) resolvedPath = candidate;
+            }
+
+            if (!resolvedPath) {
+                logger.error(`⏱️ [IV] getMemberParentDocument: MEMBER file not found: ${memberToken.referencedFile}`);
                 return null;
             }
 
             // Read and create document
+            const t0 = Date.now();
             const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
+            logger.error(`⏱️ [IV] readFile "${path.basename(resolvedPath)}" took ${Date.now() - t0}ms (${parentContents.length} chars)`);
             const parentDoc = TextDocument.create(
                 `file:///${resolvedPath.replace(/\\/g, '/')}`,
                 'clarion',
@@ -259,7 +279,9 @@ export class IncludeVerifier {
             );
 
             // Check for empty member (has MEMBER or CODE keyword)
+            const t1 = Date.now();
             const parentTokens = this.tokenCache.getTokens(parentDoc);
+            logger.error(`⏱️ [IV] tokenize parent "${path.basename(resolvedPath)}" took ${Date.now() - t1}ms (${parentTokens.length} tokens)`);
             const hasEmptyMemberMarker = parentTokens.some(t =>
                 t.start === 0 && 
                 t.type === TokenType.Keyword &&
@@ -267,7 +289,7 @@ export class IncludeVerifier {
             );
 
             if (hasEmptyMemberMarker) {
-                logger.info('MEMBER parent has empty member marker - skipping include scan');
+                logger.error(`⏱️ [IV] MEMBER parent has empty member marker - skipping include scan`);
                 return null;
             }
 

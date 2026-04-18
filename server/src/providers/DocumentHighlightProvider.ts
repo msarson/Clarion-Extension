@@ -1,6 +1,8 @@
-import { DocumentHighlight, DocumentHighlightKind } from 'vscode-languageserver-protocol';
+import { DocumentHighlight, DocumentHighlightKind, Range } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { ReferencesProvider } from './ReferencesProvider';
+import { TokenCache } from '../TokenCache';
+import { TokenType } from '../ClarionTokenizer';
+import { TokenHelper } from '../utils/TokenHelper';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("DocumentHighlightProvider");
@@ -8,44 +10,62 @@ logger.setLevel("error");
 
 /**
  * Provides Document Highlight — highlights all occurrences of the symbol under
- * the cursor within the current file.  Delegates to ReferencesProvider for
- * location discovery and converts the same-file results to DocumentHighlight[].
+ * the cursor within the current file only.
+ *
+ * Uses a fast local token scan (no cross-file work) so it never blocks F12 or hover.
  *
  * Highlight kinds:
- *   Write (3) — declaration line (lowest line number in results)
+ *   Write (3) — declaration/label tokens
  *   Read  (2) — all other usages
  */
 export class DocumentHighlightProvider {
-    private referencesProvider: ReferencesProvider;
+    private tokenCache: TokenCache;
 
     constructor() {
-        this.referencesProvider = new ReferencesProvider();
+        this.tokenCache = TokenCache.getInstance();
     }
 
-    public async provideDocumentHighlights(
+    public provideDocumentHighlights(
         document: TextDocument,
         position: { line: number; character: number }
-    ): Promise<DocumentHighlight[] | null> {
-        const locations = await this.referencesProvider.provideReferences(
-            document,
-            position,
-            { includeDeclaration: true }
-        );
+    ): DocumentHighlight[] | null {
+        const wordRange = TokenHelper.getWordRangeAtPosition(document, position);
+        if (!wordRange) return null;
 
-        if (!locations || locations.length === 0) return null;
+        const word = document.getText(wordRange);
+        if (!word) return null;
 
-        // Filter to current file only
-        const sameFile = locations.filter(loc => loc.uri === document.uri);
-        if (sameFile.length === 0) return null;
+        const wordUpper = word.toUpperCase();
+        const tokens = this.tokenCache.getTokensByUri(document.uri);
+        if (!tokens || tokens.length === 0) return null;
 
-        // Treat the earliest line as the declaration → Write kind
-        const declarationLine = Math.min(...sameFile.map(loc => loc.range.start.line));
+        const highlights: DocumentHighlight[] = [];
 
-        return sameFile.map(loc => {
-            const kind = loc.range.start.line === declarationLine
+        for (const t of tokens) {
+            // Skip comment, string, and directive tokens — they don't represent symbol usages
+            if (t.type === TokenType.Comment || t.type === TokenType.String || t.type === TokenType.Directive) continue;
+
+            // For Structure/Procedure tokens the symbol name is in t.label; for all others it's t.value
+            const tokenName = (t.type === TokenType.Structure || t.type === TokenType.Procedure)
+                ? t.label
+                : t.value;
+
+            if (!tokenName || tokenName.toUpperCase() !== wordUpper) continue;
+
+            const col = t.start;
+            const len = tokenName.length;
+            const range = Range.create(t.line, col, t.line, col + len);
+
+            // Declaration tokens get Write kind; references get Read kind
+            const isDeclaration = t.type === TokenType.Label
+                || t.type === TokenType.Structure
+                || (t.type === TokenType.Procedure && t.subType !== TokenType.Procedure);
+
+            highlights.push(DocumentHighlight.create(range, isDeclaration
                 ? DocumentHighlightKind.Write
-                : DocumentHighlightKind.Read;
-            return DocumentHighlight.create(loc.range, kind);
-        });
+                : DocumentHighlightKind.Read));
+        }
+
+        return highlights.length > 0 ? highlights : null;
     }
 }

@@ -6,6 +6,51 @@ All notable changes to the Clarion Extension are documented here.
 
 ## Recent Versions
 
+### [0.9.2] - 2026-04-18
+
+**Performance Fixes**
+
+- 🚀 **Replace `ClassDefinitionIndexer` with `StructureDeclarationIndexer`** — the legacy `ClassDefinitionIndexer` only covered CLASS/QUEUE/GROUP and used a per-file sequential scan. The new `StructureDeclarationIndexer` covers CLASS, INTERFACE, QUEUE, GROUP, RECORD, FILE, VIEW, EQUATE, and ITEMIZE equates; stores 0-based line numbers canonically; and exposes a simpler API (`find`, `findInFile`, `getOrBuildIndex`). All 8 callers (MemberLocatorService, ClassMemberResolver, HoverProvider, MethodHoverResolver, VariableHoverResolver, ClassConstantsCodeActionProvider, ReferencesProvider, DefinitionProvider) have been migrated to use the new indexer directly, and the legacy class has been deleted.
+
+**Diagnostics**
+
+- ⚠️ **Warn on discarded method return values** ([#61](https://github.com/msarson/Clarion-Extension/issues/61)) — a new warning diagnostic fires when a dot-access method call that returns a value (and lacks the `PROC` attribute) is used as a statement with no capture. Reuses the same cross-file type resolution path as hover and F12 so results stay consistent. The async resolution pass is re-triggered after the solution finishes loading so files opened before the solution is ready are still validated. `SELF`/`PARENT` calls inside class method implementations are resolved via the implementation label. Assignments (`obj.Field = value`) and chained expressions are correctly excluded.
+
+**Performance Fixes**
+
+- 🚀 **Eliminate unnecessary disk reads in hot paths** ([#59](https://github.com/msarson/Clarion-Extension/issues/59)) — replaced `readFileSync` + O(n²) scans with token cache lookups across three providers:
+  - `VariableHoverResolver`: O(n²) backward scan to find enclosing CLASS replaced with `DocumentStructure.getClasses()` range check (O(n) → O(k) where k = class count)
+  - `SymbolFinderService.extractTypeInfo`: three sequential O(n) `filter/indexOf` passes collapsed into a single `lineTokens` build
+  - `MemberLocatorService`: full token-based `findMemberFromTokens` / `extractMembersFromTokens` fast-path; disk-based fallback retained for uncached files
+  - `ImplementationProvider.searchFileForMethodImplementation`: checks token cache first; single-candidate case returns without any disk read
+  - `DefinitionProvider` equates fallback: skips `readFileSync` when equates.clw is already in the token cache
+- 🐛 **Fix token cache overwrite in `MemberLocatorService`** — synthetic `TextDocument(version=1)` objects used for cross-file lookups no longer overwrite live editor tokens; providers now use `getTokensByUri` first and only fall back to `getTokens` for uncached files
+- 🚀 **Structure/outline view no longer freezes during rapid undo** — added a `maxWait` of 1500ms to the document-change debounce so the structure tree always refreshes within 1.5 s even when the user holds Ctrl+Z continuously (previously the 500 ms rolling debounce reset on every undo step, starving the refresh indefinitely)
+- 🚀 **Parallelize CLASS index build** — `ClassDefinitionIndexer.buildIndex` now scans all `.inc` files concurrently (`Promise.all`) instead of one-at-a-time; on large installations with hundreds of libsrc files this is 10–100× faster. Added always-on timing logs so build duration is visible in the Output channel.
+- 🚀 **Eliminate hover/F12 hang on cursor movement** — `DocumentHighlightProvider` (occurrence highlighting, triggered by VS Code on every cursor move) was calling `ReferencesProvider.provideReferences()` which performed a full cross-file scan of all project source files then discarded every result outside the current file. On a 40-project solution this blocked the LSP event loop for 3–8 seconds on every cursor movement, preventing hover and F12 from running. `DocumentHighlightProvider` has been rewritten with a fast local token-cache scan (O(n) over current file tokens, synchronous, <1ms).
+- ✨ **Client logs routed to VS Code Output channel** — log messages from the extension client side are now written to a `"Clarion Extension (Client)"` output channel in VS Code, making client-side diagnostics visible without needing a separate developer tools console.
+
+**Bug Fixes**
+
+- 🐛 **F12 now works for procedure parameters** — pressing F12 on a parameter name inside a procedure body (or inside a local class method body that can access the outer procedure's parameters) now navigates to the parameter declaration in the `PROCEDURE()` signature. Previously `DefinitionProvider` only searched column-0 labels and never found parameters. `DefinitionProvider` now delegates to `SymbolFinderService.findParameter` — the same code path already used by hover — so both providers share one source of truth for parameter resolution.
+- 🔧 **Share type-definition SDI lookup between hover and F12** — `SymbolFinderService.findIndexedTypeDeclaration()` is now the single source of truth for looking up named types (CLASS, INTERFACE, QUEUE, GROUP, etc.) via the `StructureDeclarationIndexer`. Both `HoverProvider._checkClassTypeHoverInternal` and `DefinitionProvider.findClassTypeDefinition` delegate to this shared method; the hover-only include-verification guard (`IncludeVerifier.isClassIncluded`) remains exclusively in `HoverProvider`, so F12 navigation behaviour is unchanged.
+- 🐛 **Hover: show both declaration and implementation for inherited class methods**— `SELF.Method()` hover on methods inherited from a parent class defined in an `.inc` file (e.g. `WindowManager.SetAlerts` from `ABWINDOW.INC`) was only showing the declaration. The fix reads the `MODULE('...')` attribute from the class definition to locate the correct `.clw` implementation file via redirection, rather than guessing from the `.inc` filename. Local classes (declared in `.clw`) are unaffected.
+- 🐛 **Hover for `LOC:`-prefixed procedure parameters** ([#60](https://github.com/msarson/Clarion-Extension/issues/60)) — hovering over `LOC:Test` inside a procedure body where the parameter is declared as `PROCEDURE(STRING LOC:test)` now shows the correct type. The parameter extraction regex previously only matched simple identifiers; it now handles `PREFIX:Name` style parameter names and matches both the full prefixed form (`LOC:test`) and the bare name (`test`).
+- 🐛 **F12 on overloaded class method implementations now resolves the correct overload** — `MethodOverloadResolver` was scanning for `TokenType.Label` tokens at column 0, but class member methods are tokenized as `Procedure/MethodDeclaration` with an indented label. Fixed to use the class token's `children[]` array (populated by `DocumentStructure`) for direct matching by label and subType. Also removed an incorrect `line > 0` filter that excluded classes declared at the top of a file.
+- 🐛 **Find All References no longer triggers on attribute keywords** — words like `ONCE` in `INCLUDE('file.inc'),ONCE` were silently triggering a full cross-file reference scan. Added an `isAttributeKeyword()` early-exit guard to `ReferencesProvider` (same pattern used in `HoverRouter`).
+- 🐛 **Find All References no longer hangs on locally-defined class methods** — when running "Find All References" on a method declared in a CLASS body inside the current MEMBER file (e.g. `TakeAccepted PROCEDURE(),DERIVED` in `MetroForm CLASS(ce_MetroWizardForm)` declared inside `Main PROCEDURE` with no `MODULE` attribute), the provider was scanning all source files in every project in the solution, causing an indefinite hang on large solutions. If the class is declared in the current document and has no `MODULE` attribute, the search is now restricted to the current file only. Added a 15-second timeout guard on `textDocument/references` as a safety net.
+- ✨ **Multi-level variable chain hover/F12/Ctrl+F12** — `variable.property.method` chains now resolve correctly through CLASS, QUEUE, and GROUP types. For example `thisStartup.Settings.PutGlobalSetting(...)` fully resolves: `thisStartup` → its declared class, `.Settings` → the property type, `.PutGlobalSetting` → the method on that type. Hover shows the correct declaration, F12 navigates to it, and Ctrl+F12 finds the implementation.
+- 🐛 **Fix hover/F12 for `PREFIX:Name` reference variables** — variables declared with a colon in their name (e.g. `Access:IBSDataSets &DirectFM,THREAD`) were incorrectly resolved: the old code stripped the prefix before the colon and found an unrelated `IBSDataSets FILE` declaration. Hover and F12 now search the MEMBER parent using the full label name first, so `Access:IBSDataSets` correctly navigates to the reference variable declaration.
+- 🐛 **Remove colon-stripping fallback from hover and F12** — a general colon-stripping fallback was stripping `Prefix:` from variable names before searching, causing wrong matches. This fallback is unnecessary because the word extractor already returns the full `Prefix:Name` label (colons are treated as word characters). Structure prefix fields (`PRE(x)` notation) are correctly handled by `findPrefixFieldTokenInChain` without needing this fallback.
+- 🐛 **Suppress hover/F12/Ctrl+F12 inside string literals** — hovering or pressing F12/Ctrl+F12 on text inside a quoted string (e.g. `'ContainsSpaces'`) was incorrectly triggering symbol resolution. All three providers now bail out immediately when the cursor falls within a `String` token's span.
+
+**Tests**
+
+- 🔧 **Fix test state pollution in `DefinitionProvider.test.ts`** — added `TokenCache.clearTokens` teardown to all `🔒 Behavior Lock` suites; the `LOC:Field` prefixed variable test was failing only due to cached state from a prior test
+- 🧹 **Test suite cleanup** — removed 9 pre-existing pending tests: deleted `UnlabeledGroupNesting.test.ts` (test skipped due to flattened outline), moved `ClassDefinitionIndexer.test.ts` to `server/src/test/env/` (excluded from CI; requires Clarion 11.1 installed). Rescued the one passing `UnlabeledGroupNesting` test into `DocumentSymbolProvider.test.ts`. Fixed cross-test `SolutionManager` singleton dependency in `EquatesScope.test.ts`. Fixed `DocumentHighlightProvider` tests: Clarion labels must be at column 0 to be tokenised as `Label` tokens. Suite now runs at **747 passing, 0 pending, 0 failing**.
+
+---
+
 ### [0.9.1] - 2026-04-14
 
 **Infrastructure**
@@ -68,44 +113,29 @@ All notable changes to the Clarion Extension are documented here.
 ---
 
 ### [0.8.9] - 2026-04-13
-**Security**
+**Security Patch**
 
-- Updated dev dependencies to resolve Dependabot security alerts:
-  - `serialize-javascript` — RCE via `RegExp.flags` and CPU exhaustion DoS (via mocha transitive dependency)
-  - `diff` — Denial of Service in `parsePatch`/`applyPatch` (via mocha transitive dependency)
-  - Replaced deprecated `vscode-test` with `@vscode/test-electron` in client (fixes `@tootallnate/once` vulnerability)
+**Highlights:**
+- 🔒 Resolved Dependabot alerts: `serialize-javascript` RCE, `diff` DoS
+- 🔧 Replaced deprecated `vscode-test` with `@vscode/test-electron`
+
+[**→ Full details**](docs/changelogs/CHANGELOG-0.8.9.md)
 
 ---
 
 ### [0.8.8] - 2026-04-12
-**New Features**
+**Rename Symbol, Document Highlight & Workspace Search**
 
-- ✨ **Rename Symbol (F2)** — rename any user-defined symbol across the entire workspace in one step:
-  - Delegates to the References provider for scope-aware coverage — local/module/global variables, procedures, class members via `SELF`/`PARENT` chains
-  - `prepareRename` validates the position before the rename dialog opens and rejects Clarion keywords and built-in types
-  - Library/read-only files are protected — symbols declared in `.inc` files outside the project cannot be renamed
-- ✨ **Document Highlight** — pressing on a symbol highlights all occurrences in the current file
-- ✨ **Workspace Symbol Search** (`Ctrl+T`) — search for any procedure, class, or label across all files in the solution
+**Highlights:**
+- ✏️ Rename Symbol (F2) — scope-aware rename across entire workspace
+- 🔦 Document Highlight — all occurrences highlighted on cursor
+- 🔎 Workspace Symbol Search (Ctrl+T) — find any procedure/class/label across solution
+- 🐛 Hover/F12 for local class instances inside `MethodImplementation` scopes
+- 🐛 `!!!` doc comments now shown in hover for local variables and classes
+- 🐛 FAR on CLASS labels now returns correct positions and method implementations
+- 🐛 `SELF.Method()` / `PARENT.Method()` Go to Implementation and hover cross-file fix
 
-**Bug Fixes**
-
-- 🐛 **Hover and Go to Definition for local class instances inside `MethodImplementation` scopes** now correctly resolves variables declared in the parent `GlobalProcedure`'s data section:
-  - In Clarion, local classes declared in a `PROCEDURE`'s data section (e.g. `Kanban CLASS(KanbanWrapperClass)`) have their method implementations (`Kanban.Init PROCEDURE`, `Kanban.RegisterEvents PROCEDURE`, etc.) tokenized as flat, independent `MethodImplementation` scopes with no parent link — yet at runtime they share the parent procedure's local variable stack
-  - **Hover** (`SymbolFinderService.findLocalVariable`): when a variable isn't found in the method's own scope, the resolver now also searches all `GlobalProcedure` data sections in the file
-  - **Go to Definition** (`DefinitionProvider`): the same fallback was added — after the method's own DATA section search turns up nothing, all `GlobalProcedure` data sections are searched before giving up
-- 🐛 **`!!!` doc comments now appear in hover for local variables, classes, groups, and other procedure-level declarations:**
-  - `formatVariable` in `HoverFormatter` was not calling `DocCommentReader` at all — doc comments above local declarations were silently ignored
-  - `DocCommentReader.parseXml` now handles unclosed `<summary>` tags and plain `!!!` text with no XML tags — mirrors Clarion IDE's forgiving `<docroot>` wrapping behaviour where plain text nodes and malformed tags all fall back gracefully to showing the raw comment text
-  - The scope label in the hover card now uses a contextual noun derived from the declaration type: `CLASS(...)` → "class", `GROUP` → "group", `QUEUE` → "queue", etc., instead of always saying "variable"
-- 🐛 Fixed false-positive diagnostic "Procedure returns X but all RETURN statements are empty" for overloaded procedures — the validator now matches implementations by parameter signature, not just name, so a non-returning overload is no longer incorrectly flagged because another overload of the same name has a return type ([#44](https://github.com/msarson/Clarion-Extension/issues/44))
-- 🐛 **Find All References on a local CLASS label** now returns correct positions and complete results:
-  - Previously, FAR on a CLASS declaration label (e.g. `ThisWindow` in `ThisWindow CLASS(WindowManager)`) returned the CLASS *keyword* column for every CLASS declaration in the procedure instead of actual `ThisWindow` references — caused by `varName` extraction using `split(' ')[0]` on `"CLASS (ThisWindow)"`, yielding `"CLASS"` rather than the label
-  - Method implementation headers (`ThisWindow.Init PROCEDURE`, `ThisWindow.Kill PROCEDURE`, etc.) are now included — the token scan is expanded to the full file when a CLASS label is detected, since implementations live outside the declaring procedure's scope
-- 🐛 **Go to Implementation (Ctrl+F12) and hover for `SELF.Method()`** now correctly find implementations inherited from an external base class:
-  - Previously, `SELF.Method()` on a method declared in an external `.inc` file (e.g. `KanbanWrapper.inc`) and implemented in the corresponding `.clw` file only found the declaration — the implementation search was limited to the current file
-  - `ImplementationProvider` now resolves the member declaration first to obtain the declaration file, then uses the existing `.inc` → `.clw` redirection fallback to locate the implementation
-  - `MethodHoverResolver` now derives the `.clw` filename from `memberInfo.file` and passes it to the redirection-aware cross-file search (fixes both `SELF.Method()` and `PARENT.Method()` hover)
-  - Hover now also shows the implementation signature as a code snippet alongside the file/line reference
+[**→ Full details**](docs/changelogs/CHANGELOG-0.8.8.md)
 
 ---
 

@@ -20,6 +20,7 @@ import { TokenCache } from '../TokenCache';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { TokenHelper } from '../utils/TokenHelper';
 import { SolutionManager } from '../solution/solutionManager';
+import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -61,6 +62,21 @@ export interface SymbolInfo {
 }
 
 /**
+ * A located type declaration returned by the StructureDeclarationIndexer.
+ * Intentionally small — callers format their own output from this.
+ */
+export interface IndexedTypeInfo {
+    name: string;
+    filePath: string;
+    /** 0-based line number */
+    line: number;
+    structureType: string;
+    parentName?: string;
+    isType: boolean;
+    lineContent: string;
+}
+
+/**
  * Options for symbol search
  */
 export interface SymbolSearchOptions {
@@ -92,10 +108,11 @@ export class SymbolFinderService {
      * Handles QUEUE(TypeName), GROUP(TypeName), CLASS(TypeName) as well as plain types.
      */
     public static extractTypeInfo(labelToken: Token, tokens: Token[]): string {
-        const idx = tokens.indexOf(labelToken);
-        if (idx + 1 >= tokens.length) return 'UNKNOWN';
-        const next = tokens[idx + 1];
-        if (next.line !== labelToken.line) return 'UNKNOWN';
+        // 🚀 PERF: build line tokens once — avoids O(n) indexOf + multiple O(n) filter passes
+        const lineTokens = tokens.filter(t => t.line === labelToken.line);
+        const idx = lineTokens.indexOf(labelToken);
+        if (idx + 1 >= lineTokens.length) return 'UNKNOWN';
+        const next = lineTokens[idx + 1];
 
         if (next.type === TokenType.Type) return next.value;
         if (next.type === TokenType.Variable || next.type === TokenType.Label) return next.value;
@@ -105,8 +122,8 @@ export class SymbolFinderService {
         }
         if (next.type === TokenType.Structure) {
             // Look for type arg: QUEUE(TypeName) → "QUEUE(TypeName)"
-            const lineTokens = tokens.filter(t => t.line === labelToken.line && t.start > next.start);
-            const typeArg = lineTokens.find(t =>
+            const afterNext = lineTokens.filter(t => t.start > next.start);
+            const typeArg = afterNext.find(t =>
                 (t.type === TokenType.Label || t.type === TokenType.Variable) &&
                 t.value !== '(' && t.value !== ')'
             );
@@ -114,8 +131,8 @@ export class SymbolFinderService {
         }
         if (next.type === TokenType.TypeReference) {
             // LIKE(TypeName) → "LIKE(TypeName)"
-            const lineTokens = tokens.filter(t => t.line === labelToken.line && t.start > next.start);
-            const typeArg = lineTokens.find(t =>
+            const afterNext = lineTokens.filter(t => t.start > next.start);
+            const typeArg = afterNext.find(t =>
                 (t.type === TokenType.Label || t.type === TokenType.Variable) &&
                 t.value !== '(' && t.value !== ')'
             );
@@ -163,13 +180,20 @@ export class SymbolFinderService {
             // Strip optional-parameter angle brackets: <Key K> → Key K
             const stripped = trimmedParam.replace(/^<(.*)>$/, '$1').trim();
             // Match: [*&]? TYPE NAME [= default]
-            const paramMatch = stripped.match(/([*&]?\s*\w+)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*=.*)?$/i);
+            // NAME may be a prefixed identifier: PREFIX:Name (e.g. LOC:test)
+            const paramMatch = stripped.match(/([*&]?\s*\w+)\s+([A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)?)(?:\s*=.*)?$/i);
             
             if (paramMatch) {
                 const type = paramMatch[1].trim();
                 const paramName = paramMatch[2];
                 
-                if (paramName.toLowerCase() === word.toLowerCase()) {
+                // Match exact name (LOC:test === LOC:test) or bare suffix (test matches LOC:test)
+                const paramLower = paramName.toLowerCase();
+                const wordLower = word.toLowerCase();
+                const isMatch = paramLower === wordLower ||
+                    paramLower.endsWith(':' + wordLower);
+                
+                if (isMatch) {
                     logger.info(`✅ Found parameter: ${paramName} of type ${type}`);
                     
                     // Create a synthetic token for the parameter
@@ -323,6 +347,13 @@ export class SymbolFinderService {
                     t.subType === TokenType.GlobalProcedure
                 );
                 for (const gp of globalProcs) {
+                    // Check parameters of the outer procedure first
+                    const paramResult = this.findParameter(word, document, gp);
+                    if (paramResult) {
+                        logger.info(`✅ Found "${searchText}" as parameter of outer GlobalProcedure at line ${gp.line}`);
+                        return paramResult;
+                    }
+
                     const gpStart = gp.line;
                     const gpEnd = gp.finishesAt ?? Number.MAX_SAFE_INTEGER;
                     const found = tokens.find(t =>
@@ -482,6 +513,100 @@ export class SymbolFinderService {
         };
     }
     
+    /**
+     * Find a structure field or sub-structure accessed via PRE:Field notation.
+     * e.g. "IBSDataSets:Record" → prefix="IBSDataSets", fieldName="Record"
+     * Finds the structure with structurePrefix="IBSDataSets" and returns scope='field'
+     * so FAR only matches IBSDataSets:Record tokens (not bare "Record").
+     */
+    private async findPrefixedField(word: string, tokens: Token[], document: TextDocument): Promise<SymbolInfo | null> {
+        const colonIndex = word.indexOf(':');
+        if (colonIndex <= 0) return null;
+
+        const prefixUpper = word.substring(0, colonIndex).toUpperCase();
+        const fieldName = word.substring(colonIndex + 1); // preserve original case
+
+        // Search current file
+        const result = this.findPrefixedFieldInTokens(prefixUpper, fieldName, tokens, document.uri);
+        if (result) return result;
+
+        // If MEMBER file, search the parent PROGRAM file
+        const memberToken = tokens.find(t =>
+            t.value && t.value.toUpperCase() === 'MEMBER' &&
+            t.line < 5 &&
+            t.referencedFile
+        );
+        if (memberToken?.referencedFile) {
+            try {
+                const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '').replace(/\//g, '\\'));
+                const resolvedPath = path.resolve(path.dirname(currentFilePath), memberToken.referencedFile);
+                if (fs.existsSync(resolvedPath)) {
+                    const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
+                    const parentDoc = TextDocument.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, 'clarion', 1, parentContents);
+                    const parentTokens = this.tokenCache.getTokens(parentDoc);
+                    const parentResult = this.findPrefixedFieldInTokens(prefixUpper, fieldName, parentTokens, parentDoc.uri);
+                    if (parentResult) return parentResult;
+                }
+            } catch (err) {
+                logger.error(`Error reading MEMBER parent file for prefixed field: ${err}`);
+            }
+        }
+
+        return null;
+    }
+
+    private findPrefixedFieldInTokens(prefixUpper: string, fieldName: string, tokens: Token[], uri: string): SymbolInfo | null {
+        const fieldNameUpper = fieldName.toUpperCase();
+
+        // Find structure with matching structurePrefix (e.g. FILE,PRE(IBSDataSets))
+        const structureToken = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.structurePrefix?.toUpperCase() === prefixUpper
+        );
+        if (!structureToken) return null;
+
+        // Find child token within the structure's range
+        const childToken = tokens.find(t => {
+            if (t.line <= structureToken.line) return false;
+            if (structureToken.finishesAt !== undefined && t.line > structureToken.finishesAt) return false;
+            // Label at col 0 with matching value (e.g. a field named "Record")
+            if (t.type === TokenType.Label && t.start === 0 && t.value.toUpperCase() === fieldNameUpper) return true;
+            // Sub-structure with matching label (e.g. "Record  RECORD" → label="Record")
+            if (t.type === TokenType.Structure && t.label?.toUpperCase() === fieldNameUpper) return true;
+            return false;
+        });
+
+        // Determine the field name value to use as searchWord — preserves original casing
+        const resolvedName = childToken
+            ? (childToken.type === TokenType.Structure ? (childToken.label ?? fieldName) : childToken.value)
+            : fieldName;
+        const targetToken = childToken ?? structureToken;
+
+        // Synthetic token so token.value = fieldName (FAR uses token.value as searchWord)
+        const syntheticToken: Token = {
+            type: TokenType.Label,
+            value: resolvedName,
+            line: targetToken.line,
+            start: targetToken.start,
+            maxLabelLength: 0
+        };
+
+        logger.info(`✅ Found PRE:Field "${prefixUpper}:${fieldName}" — structure "${structureToken.label ?? structureToken.value}" at line ${targetToken.line} in ${uri}`);
+
+        return {
+            token: syntheticToken,
+            type: 'field',
+            scope: {
+                token: structureToken, // structurePrefix used by collectFieldPrefixes
+                type: 'field'
+            },
+            location: { uri, line: targetToken.line, character: targetToken.start },
+            declaration: `${structureToken.label ?? structureToken.value} PRE(${prefixUpper})`,
+            originalWord: `${prefixUpper}:${fieldName}`,
+            searchWord: resolvedName
+        };
+    }
+
     /**
      * Find a structure field declaration — a col-0 Label whose parent token is a Structure (QUEUE, GROUP, CLASS, FILE).
      * Used when the cursor is on a field declaration line inside a structure definition.
@@ -808,6 +933,18 @@ export class SymbolFinderService {
             return result;
         }
         
+        // If not found and word has colon, first try to resolve as PRE:Field notation.
+        // e.g. "IBSDataSets:Record" → find structure with structurePrefix="IBSDataSets",
+        // return scope='field' so FAR only matches IBSDataSets:Record tokens (not bare "Record").
+        const colonIdx = word.indexOf(':');
+        if (colonIdx > 0) {
+            const prefixedResult = await this.findPrefixedField(word, tokens, document);
+            if (prefixedResult) {
+                logger.info(`✅ Found as prefixed field (PRE:Field): ${word}`);
+                return prefixedResult;
+            }
+        }
+
         // If not found and word has colon, try with stripped prefix
         const colonIndex = word.lastIndexOf(':');
         if (colonIndex > 0) {
@@ -921,6 +1058,49 @@ export class SymbolFinderService {
             originalWord: word,
             searchWord: word
         };
+    }
+
+    /**
+     * Look up a named type (CLASS, INTERFACE, QUEUE, GROUP, etc.) in the
+     * StructureDeclarationIndexer for the document's owning project.
+     *
+     * This is the single source of truth for SDI-based type resolution.
+     * Callers (DefinitionProvider, HoverProvider) apply their own post-filters
+     * (e.g. IncludeVerifier) and format the result for their own output.
+     *
+     * @returns IndexedTypeInfo for the first matching declaration, or null.
+     */
+    async findIndexedTypeDeclaration(word: string, document: TextDocument): Promise<IndexedTypeInfo | null> {
+        try {
+            const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+            const solutionManager = SolutionManager.getInstance();
+            const projectPath = solutionManager?.getProjectPathForFile(fromPath) ?? path.dirname(fromPath);
+
+            const sdi = StructureDeclarationIndexer.getInstance();
+            await sdi.getOrBuildIndex(projectPath);
+            let definitions = sdi.find(word, projectPath);
+            if (definitions.length === 0) {
+                // Key mismatch guard: the runtime project path may differ from the pre-build path
+                // (e.g. different drive letter case, wrong project matched by basename).
+                // Fall back to searching ALL available indexes before giving up.
+                definitions = sdi.find(word);
+            }
+            if (definitions.length === 0) return null;
+
+            const def = definitions[0];
+            return {
+                name: def.name,
+                filePath: def.filePath,
+                line: def.line,
+                structureType: def.structureType,
+                parentName: def.parentName,
+                isType: def.isType,
+                lineContent: def.lineContent
+            };
+        } catch (e) {
+            logger.error(`findIndexedTypeDeclaration error for "${word}": ${e}`);
+            return null;
+        }
     }
 
     /**

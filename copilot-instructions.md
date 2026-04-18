@@ -185,6 +185,8 @@ Key features:
 - **ClarionTokenizer.ts** - **Core tokenizer** - converts Clarion source to tokens
 - **DocumentStructure.ts** - Build parent/child relationships, scope hierarchy
 - **TokenCache.ts** - In-memory cache of tokenized documents (singleton)
+
+> ⚠️ **Before writing any provider or utility code:** read `docs/tokenizer-reference.md` (or invoke the `clarion-tokens` skill). It documents the full `Token` interface, `TokenType` enum, `DocumentStructure` indexes, `TokenCache` API, common lookup patterns, and anti-patterns. Most symbol search, navigation, and structure inspection needs are already solved by the token tree — avoid re-parsing source text.
 - **serverSettings.ts** - Server configuration (paths, macros, version info)
 - **serverState.ts** - Server-wide state management
 

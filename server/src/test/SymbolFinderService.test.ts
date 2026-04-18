@@ -129,6 +129,41 @@ MyProc PROCEDURE()
             
             assert.strictEqual(result, null, 'Should return null when no parameters');
         });
+
+        test('Should find LOC:-prefixed parameter by full name (LOC:test)', () => {
+            const code = `
+TestProc1 PROCEDURE(STRING LOC:test)
+  CODE
+  LOC:test = 'Hello'
+  END`.trim();
+
+            const doc = createDocument(code, 'test://symbol6.clw');
+            const tokens = tokenCache.getTokens(doc);
+            const scope = TokenHelper.getInnermostScopeAtLine(tokens, 0);
+
+            const result = service.findParameter('LOC:test', doc, scope!);
+
+            assert.ok(result, 'Should find LOC:-prefixed parameter by full name');
+            assert.strictEqual(result.type, 'STRING');
+            assert.strictEqual(result.scope.type, 'parameter');
+        });
+
+        test('Should find LOC:-prefixed parameter by bare name (test)', () => {
+            const code = `
+TestProc1 PROCEDURE(STRING LOC:test)
+  CODE
+  LOC:test = 'Hello'
+  END`.trim();
+
+            const doc = createDocument(code, 'test://symbol7.clw');
+            const tokens = tokenCache.getTokens(doc);
+            const scope = TokenHelper.getInnermostScopeAtLine(tokens, 0);
+
+            const result = service.findParameter('test', doc, scope!);
+
+            assert.ok(result, 'Should find LOC:-prefixed parameter by bare name');
+            assert.strictEqual(result.type, 'STRING');
+        });
     });
 
     suite('findLocalVariable', () => {

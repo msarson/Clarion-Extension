@@ -223,7 +223,7 @@ Name         STRING(40)
         });
     });
 
-    suite.skip('🟢 Regression Prevention: Parameters with Colons', () => {
+    suite('🟢 Regression Prevention: Parameters with Colons', () => {
         
         test('Should handle parameter that looks like prefixed variable', async () => {
             const code = `

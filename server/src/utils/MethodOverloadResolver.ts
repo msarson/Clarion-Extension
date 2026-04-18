@@ -49,56 +49,37 @@ export class MethodOverloadResolver {
         // Search in current file first
         const candidates: MethodDeclarationInfo[] = [];
         
-        const classTokens = TokenHelper.findClassStructures(tokens)
-            .filter(token => token.line > 0);
+        const classTokens = TokenHelper.findClassStructures(tokens);
         
         for (const classToken of classTokens) {
-            const labelToken = tokens.find(t =>
-                t.type === TokenType.Label &&
-                t.line === classToken.line &&
-                t.value.toLowerCase() === className.toLowerCase()
-            );
-            
-            if (labelToken) {
-                logger.info(`Found class ${className} at line ${labelToken.line}`);
-                
-                // Get file content once
-                const content = document.getText();
-                const lines = content.split('\n');
-                
-                // Search for all method overloads in class by iterating through tokens
-                // This is O(n) instead of O(n²) with repeated filter calls
-                for (const token of tokens) {
-                    // Only process tokens after the class start
-                    if (token.line <= labelToken.line) continue;
-                    
-                    // Stop at END token at column 0
-                    if (token.type === TokenType.Keyword && 
-                        token.value.toUpperCase() === 'END' && 
-                        token.start === 0) {
-                        break;
-                    }
-                    
-                    // Check if this is a method declaration at start of line
-                    if (token.type === TokenType.Label &&
-                        token.value.toLowerCase() === methodName.toLowerCase() &&
-                        token.start === 0) {
-                        
-                        const i = token.line;
-                        const signature = lines[i].trim();
-                        
-                        // Count parameters in the declaration using centralized method
-                        const declParamCount = ClarionPatterns.countParameters(signature);
-                        
-                        candidates.push({
-                            signature,
-                            file: document.uri,
-                            line: i,
-                            paramCount: declParamCount
-                        });
-                        
-                        logger.info(`Found method candidate at line ${i} with ${declParamCount} parameters`);
-                    }
+            if (classToken.label?.toLowerCase() !== className.toLowerCase()) {
+                continue;
+            }
+
+            logger.info(`Found class ${className} at line ${classToken.line}`);
+
+            const content = document.getText();
+            const lines = content.split('\n');
+
+            // Use classToken.children (populated by DocumentStructure) for O(1) scope access.
+            // Class member methods are tokenized as Procedure/MethodDeclaration with label = method name.
+            const children = classToken.children ?? [];
+            for (const childToken of children) {
+                if (childToken.type === TokenType.Procedure &&
+                    childToken.subType === TokenType.MethodDeclaration &&
+                    childToken.label?.toLowerCase() === methodName.toLowerCase()) {
+
+                    const signature = lines[childToken.line]?.trim() ?? '';
+                    const declParamCount = ClarionPatterns.countParameters(signature);
+
+                    candidates.push({
+                        signature,
+                        file: document.uri,
+                        line: childToken.line,
+                        paramCount: declParamCount
+                    });
+
+                    logger.info(`Found method candidate at line ${childToken.line} with ${declParamCount} parameters`);
                 }
             }
         }

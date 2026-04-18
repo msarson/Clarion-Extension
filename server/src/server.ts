@@ -67,6 +67,7 @@ import { DocumentHighlightProvider } from './providers/DocumentHighlightProvider
 import { WorkspaceSymbolProvider } from './providers/WorkspaceSymbolProvider';
 import { UnreachableCodeProvider } from './providers/UnreachableCodeProvider';
 import { CompletionProvider } from './providers/CompletionProvider';
+import { MemberLocatorService } from './services/MemberLocatorService';
 import { ClarionSolutionInfo } from 'common/types';
 import { URI } from 'vscode-languageserver';
 import { setServerInitialized, serverInitialized } from './serverState';
@@ -286,7 +287,7 @@ export let globalClarionSettings: any = {};
 const lastValidatedVersions = new Map<string, number>();
 
 // ✅ Diagnostic validation function
-function validateTextDocument(document: TextDocument, caller: string = 'unknown'): void {
+async function validateTextDocument(document: TextDocument, caller: string = 'unknown'): Promise<void> {
     try {
         // Skip non-Clarion files
         if (!document.uri.toLowerCase().endsWith('.clw') && 
@@ -304,17 +305,36 @@ function validateTextDocument(document: TextDocument, caller: string = 'unknown'
 
         logger.info(`🔍 Validating document: ${document.uri} (caller: ${caller})`);
         
+        // Record version before any async work so duplicate-skip still works
+        const startVersion = document.version;
+        lastValidatedVersions.set(document.uri, document.version);
+
         // PERFORMANCE: Use cached tokens instead of re-tokenizing
         const tokens = getTokens(document);
         const diagnostics = DiagnosticProvider.validateDocument(document, tokens, caller);
-        
-        // Remember we validated this version
-        lastValidatedVersions.set(document.uri, document.version);
-        
-        logger.info(`🔍 Found ${diagnostics.length} diagnostics for: ${document.uri}`);
-        
-        // Send diagnostics to client
+
+        // Send sync diagnostics immediately for fast feedback
+        logger.info(`🔍 Found ${diagnostics.length} sync diagnostics for: ${document.uri}`);
         connection.sendDiagnostics({ uri: document.uri, diagnostics });
+
+        // Async pass: detect discarded return values via cross-file type resolution
+        const memberLocator = new MemberLocatorService();
+        const discardedReturnDiags = await DiagnosticProvider.validateDiscardedReturnValues(
+            tokens, document, memberLocator
+        );
+
+        // Stale-version guard: document may have changed while we were resolving types
+        const currentDoc = documents.get(document.uri);
+        if (!currentDoc || currentDoc.version !== startVersion) {
+            logger.info(`⚡ Skipping stale async diagnostics for ${document.uri} (version changed during async pass)`);
+            return;
+        }
+
+        if (discardedReturnDiags.length > 0) {
+            diagnostics.push(...discardedReturnDiags);
+            logger.info(`🔍 Found ${discardedReturnDiags.length} async diagnostics for: ${document.uri}`);
+            connection.sendDiagnostics({ uri: document.uri, diagnostics });
+        }
     } catch (error) {
         logger.error(`❌ Error validating document: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -558,7 +578,10 @@ documents.onDidChangeContent(event => {
                 
                 // Token cache already cleared if structure-affecting (above)
                 // Otherwise incremental tokenization will handle it efficiently
+                const tokensStart = performance.now();
                 const tokens = getTokens(document);
+                const tokensMs = (performance.now() - tokensStart).toFixed(1);
+                logger.error(`⏱️ [SERVER] getTokens: ${tokensMs}ms, ${tokens.length} tokens for ${path.basename(decodeURIComponent(uri))}`);
                 logger.info(`🔍 Successfully refreshed tokens after edit: ${uri}, got ${tokens.length} tokens`);
                 
                 // Validate document using fresh tokens
@@ -942,6 +965,34 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 `  Projects (${globalSolution.projects.length}):\n` +
                 (projectSummary || '  (none)'));
             
+            // Re-validate all open documents now that cross-file type info is available.
+            // The async diagnostic pass (discarded return value detection) needs the solution
+            // to be ready; it may have already run (and silently skipped resolutions) before
+            // this point, so force a fresh pass on every open file.
+            logger.info("🔁 Re-validating open documents after solution ready...");
+            lastValidatedVersions.clear();
+            for (const doc of documents.all()) {
+                validateTextDocument(doc, 'solutionReady');
+            }
+
+            // Pre-build structure declaration index for all project paths in the background.
+            // Without this, the first hover on a CLASS/INTERFACE/EQUATE etc. triggers a full scan
+            // of all .inc files (potentially thousands), causing a 4-5s freeze.
+            setImmediate(async () => {
+                const { StructureDeclarationIndexer } = await import('./utils/StructureDeclarationIndexer');
+                const indexer = StructureDeclarationIndexer.getInstance();
+                const projectPaths = [...new Set(
+                    globalSolution!.projects.map(p => p.path).filter(Boolean)
+                )];
+                logger.error(`⏱️ [INDEX] Pre-building structure index for ${projectPaths.length} project(s) in background`);
+                await Promise.all(projectPaths.map(p =>
+                    indexer.getOrBuildIndex(p).catch(err =>
+                        logger.error(`❌ [INDEX] Background build failed for ${p}: ${err}`)
+                    )
+                ));
+                logger.error(`⏱️ [INDEX] Background structure index pre-build complete`);
+            });
+            
             // Log each project in the global solution
             for (let i = 0; i < globalSolution.projects.length; i++) {
                 const project = globalSolution.projects[i];
@@ -1266,7 +1317,6 @@ connection.onRequest('clarion/documentSymbols', async (params: { uri: string }) 
 
 // Handle definition requests
 connection.onDefinition(async (params) => {
-    logger.info(`📂 Received definition request for: ${params.textDocument.uri} at position ${params.position.line}:${params.position.character}`);
     
     if (!serverInitialized) {
         logger.info(`⚠️ [DELAY] Server not initialized yet, delaying definition request`);
@@ -1275,7 +1325,7 @@ connection.onDefinition(async (params) => {
     
     const document = documents.get(params.textDocument.uri);
     if (!document) {
-        logger.info(`⚠️ Document not found: ${params.textDocument.uri}`);
+        logger.error(`⚠️ [SERVER] Document not found for definition: ${params.textDocument.uri}`);
         return null;
     }
     
@@ -1295,7 +1345,7 @@ connection.onDefinition(async (params) => {
 
 // Handle implementation requests
 connection.onImplementation(async (params) => {
-    logger.info(`📂 Received implementation request for: ${params.textDocument.uri} at position ${params.position.line}:${params.position.character}`);
+    logger.error(`⏱️ [SERVER] onImplementation received: ${params.textDocument.uri.split('/').pop()} at ${params.position.line}:${params.position.character}`);
     
     if (!serverInitialized) {
         logger.info(`⚠️ [DELAY] Server not initialized yet, delaying implementation request`);
@@ -1338,7 +1388,10 @@ connection.onReferences(async (params: ReferenceParams) => {
     }
 
     try {
-        const references = await referencesProvider.provideReferences(document, params.position, params.context);
+        const references = await Promise.race([
+            referencesProvider.provideReferences(document, params.position, params.context),
+            new Promise<null>(resolve => setTimeout(() => resolve(null), 15000))
+        ]);
         logger.info(references ? `✅ Found ${references.length} reference(s)` : `⚠️ No references found`);
         return references;
     } catch (error) {

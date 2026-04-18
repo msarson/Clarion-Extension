@@ -10,6 +10,7 @@ import { SolutionManager } from '../../solution/solutionManager';
 import { TokenHelper } from '../../utils/TokenHelper';
 import LoggerManager from '../../logger';
 import { SymbolFinderService } from '../../services/SymbolFinderService';
+import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationIndexer';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -271,9 +272,7 @@ export class MethodHoverResolver {
         const isMethod = memberInfo.type.toUpperCase().includes('PROCEDURE') || memberInfo.type.toUpperCase().includes('FUNCTION');
         
         if (isMethod) {
-            const declFilePath = decodeURIComponent(memberInfo.file.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-            const declExt = path.extname(declFilePath).toLowerCase();
-            const implModuleFile = declExt !== '.clw' ? path.basename(declFilePath, declExt) + '.clw' : null;
+            const implModuleFile = this.resolveModuleFile(memberInfo.className, memberInfo.file);
 
             const implLocation = await this.findMethodImplementationCrossFile(
                 memberInfo.className,
@@ -313,9 +312,7 @@ export class MethodHoverResolver {
         const isMethod = memberInfo.type.toUpperCase().includes('PROCEDURE') || memberInfo.type.toUpperCase().includes('FUNCTION');
 
         if (isMethod) {
-            const declFilePath = decodeURIComponent(memberInfo.file.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-            const declExt = path.extname(declFilePath).toLowerCase();
-            const implModuleFile = declExt !== '.clw' ? path.basename(declFilePath, declExt) + '.clw' : null;
+            const implModuleFile = this.resolveModuleFile(memberInfo.className, memberInfo.file);
 
             const implLocation = await this.findMethodImplementationCrossFile(
                 memberInfo.className,
@@ -391,6 +388,35 @@ export class MethodHoverResolver {
             }
         }
         
+        return null;
+    }
+
+    /**
+     * Determines the .clw module file for a class by:
+     * 1. Checking the MODULE('...') attribute in the class definition (most reliable)
+     * 2. Falling back to substituting the declaration file extension with .clw
+     */
+    private resolveModuleFile(className: string, declarationFileUri: string): string | null {
+        // 1. Look up the class in the indexer for a MODULE attribute
+        const sdi = StructureDeclarationIndexer.getInstance();
+        const classInfos = sdi.find(className);
+        if (classInfos.length > 0) {
+            const classInfo = classInfos.find(d => !d.isType) || classInfos[0];
+            const moduleMatch = classInfo.lineContent.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i);
+            if (moduleMatch) {
+                logger.info(`✅ Resolved MODULE from class definition: ${moduleMatch[1]}`);
+                return moduleMatch[1];
+            }
+        }
+
+        // 2. Fall back to replacing the declaration file extension with .clw
+        const declFilePath = decodeURIComponent(declarationFileUri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const declExt = path.extname(declFilePath).toLowerCase();
+        if (declExt !== '.clw') {
+            const fallback = path.basename(declFilePath, declExt) + '.clw';
+            logger.info(`⚠️ No MODULE attribute found, falling back to: ${fallback}`);
+            return fallback;
+        }
         return null;
     }
 
