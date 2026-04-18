@@ -65,6 +65,11 @@ export class DefinitionProvider {
                 return null;
             }
 
+            // Don't navigate on words inside string literals
+            if (TokenHelper.isPositionInString(tokens, position.line, position.character)) {
+                return null;
+            }
+
             // Get the word at the current position
             const wordRange = TokenHelper.getWordRangeAtPosition(document, position);
             if (!wordRange) {

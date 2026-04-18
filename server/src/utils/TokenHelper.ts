@@ -239,6 +239,15 @@ export class TokenHelper {
         );
     }
 
+    public static isPositionInString(tokens: Token[], line: number, character: number): boolean {
+        return tokens.some(t =>
+            t.line === line &&
+            t.type === TokenType.String &&
+            t.start <= character &&
+            character <= t.start + t.value.length
+        );
+    }
+
     /**
      * Case-insensitive string comparison (optimized to avoid unnecessary allocations)
      * 🚀 PERFORMANCE: Only allocates uppercase strings once, not in tight loops

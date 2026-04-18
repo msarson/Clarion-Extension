@@ -67,6 +67,11 @@ export class ImplementationProvider {
             return null;
         }
 
+        // Don't navigate on words inside string literals
+        if (TokenHelper.isPositionInString(tokens, position.line, position.character)) {
+            return null;
+        }
+
         const documentStructure = this.tokenCache.getStructure(document);
         
         const line = document.getText({
