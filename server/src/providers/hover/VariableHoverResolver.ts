@@ -136,7 +136,7 @@ export class VariableHoverResolver {
     /**
      * Find and format hover for a global variable (in current or parent file)
      */
-    async findGlobalVariableHover(searchWord: string, tokens: Token[], document: TextDocument, hoverLine?: number): Promise<Hover | null> {
+    async findGlobalVariableHover(searchWord: string, tokens: Token[], document: TextDocument, hoverLine?: number, shallowOnly = false): Promise<Hover | null> {
         // First, check for global variable in CURRENT file (PROGRAM)
         const firstCodeToken = tokens.find(t => 
             t.type === TokenType.Keyword && 
@@ -145,16 +145,22 @@ export class VariableHoverResolver {
         const globalScopeEndLine = firstCodeToken ? firstCodeToken.line : Number.MAX_SAFE_INTEGER;
         
         const globalVar = tokens.find(t =>
-            t.type === TokenType.Label &&
             t.start === 0 &&
             t.line < globalScopeEndLine &&
-            t.value.toLowerCase() === searchWord.toLowerCase()
+            (t.type === TokenType.Label
+                ? t.value.toLowerCase() === searchWord.toLowerCase()
+                : (t.type === TokenType.Structure || t.type === TokenType.Procedure) && t.label?.toLowerCase() === searchWord.toLowerCase()
+            )
         );
         
         if (globalVar) {
             logger.info(`✅ Found global variable in current file: ${globalVar.value} at line ${globalVar.line}`);
             return this.buildGlobalVariableHover(globalVar, tokens, document, hoverLine);
         }
+
+        // When shallowOnly=true (e.g. checking a MEMBER parent doc), skip the recursive
+        // cross-file include chain traversal — the caller will handle includes separately.
+        if (shallowOnly) return null;
         
         // Check MEMBER parent + its INCLUDE chain, plus current file's INCLUDE chain
         const crossFileResult = await this.memberLocator.findVariableTokenInParentChain(searchWord, document);
@@ -173,9 +179,23 @@ export class VariableHoverResolver {
 
     /**
      * Search the INCLUDE chain of a file and equates.clw for a label.
+     * Also handles prefix:field notation (e.g. "SetG:SettingsGroup") by looking for
+     * structure fields with the matching PRE prefix and field name.
      * Used by HoverProvider after all scope-based checks fail (parameter/local/module/global).
      */
     public async findInIncludesAndEquates(searchWord: string, tokens: Token[], document: TextDocument): Promise<Hover | null> {
+        // For prefix:field notation, try resolving the structure field directly
+        const colonIdx = searchWord.lastIndexOf(':');
+        if (colonIdx > 0) {
+            const prefix = searchWord.substring(0, colonIdx);
+            const fieldName = searchWord.substring(colonIdx + 1);
+            const prefixResult = await this.memberLocator.findPrefixFieldTokenInChain(prefix, fieldName, document);
+            if (prefixResult) {
+                logger.info(`✅ Found "${searchWord}" as prefix:field in chain: ${path.basename(prefixResult.doc.uri)}`);
+                return this.buildGlobalVariableHover(prefixResult.token, prefixResult.tokens, prefixResult.doc);
+            }
+        }
+
         const crossFileResult = await this.memberLocator.findVariableTokenInParentChain(searchWord, document);
         if (crossFileResult) {
             logger.info(`✅ Found "${searchWord}" in INCLUDE file: ${path.basename(crossFileResult.doc.uri)}`);
@@ -238,7 +258,7 @@ export class VariableHoverResolver {
         const scopeInfo = this.scopeAnalyzer.getTokenScope(document, globalPos);
         
         const markdown = [
-            `**${globalVar.value}** — \`${typeInfo}\``,
+            `**${globalVar.label ?? globalVar.value}** — \`${typeInfo}\``,
             ``
         ];
         

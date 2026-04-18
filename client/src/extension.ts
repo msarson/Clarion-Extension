@@ -1,4 +1,4 @@
-import { commands, ExtensionContext, TreeView, workspace, Disposable, languages, DiagnosticCollection } from 'vscode';
+import { commands, ExtensionContext, TreeView, workspace, Disposable, languages, DiagnosticCollection, window } from 'vscode';
 import { LanguageClient } from 'vscode-languageclient/node';
 
 import { DocumentManager } from './documentManager';
@@ -47,6 +47,11 @@ export async function activate(context: ExtensionContext): Promise<void> {
     const isRefreshingRef = { value: false };
     const diagnosticCollection = languages.createDiagnosticCollection("clarion");
     context.subscriptions.push(diagnosticCollection);
+
+    // Route all client-side logger output to the Output window
+    const clientOutputChannel = window.createOutputChannel("Clarion Extension (Client)");
+    context.subscriptions.push(clientOutputChannel);
+    LoggerManager.setOutputChannel(clientOutputChannel);
     
     const state: ActivationManager.ActivationState = {
         client,

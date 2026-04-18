@@ -1,10 +1,14 @@
 import { LoggingConfig } from '../../../common/LoggingConfig';
 
+interface OutputChannel {
+    appendLine(value: string): void;
+}
+
 class Logger {
     private level: "debug" | "info" | "warn" | "error";
     private name: string;
-    public fullDebugging: boolean = false; // default is false, toggle externally if needed
-    public static enabled: boolean = true; 
+    public fullDebugging: boolean = false;
+    public static enabled: boolean = true;
 
     constructor(name: string, level: "debug" | "info" | "warn" | "error" = "error") {
         this.name = name;
@@ -22,53 +26,39 @@ class Logger {
         return levels.indexOf(level) >= levels.indexOf(this.level);
     }
 
+    private emit(label: string, message: string, args: any[]) {
+        const line = args.length
+            ? `[${this.getTimestamp()}] [${this.name}] ${label} ${message} ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}`
+            : `[${this.getTimestamp()}] [${this.name}] ${label} ${message}`;
+        console.log(line);
+        LoggerManager.outputChannel?.appendLine(line);
+    }
+
     debug(message: string, ...args: any[]) {
-        // In perf test mode, allow PERF messages through, skip others
         if (LoggingConfig.PERF_TEST_MODE && !message.includes('🚀') && !message.includes('[PERF]')) return;
-        if (this.shouldLog("debug")) {
-            console.log(`[${this.getTimestamp()}] [${this.name}] 🐛 DEBUG:`, message, ...args);
-        }
+        if (this.shouldLog("debug")) this.emit('🐛 DEBUG:', message, args);
     }
 
     info(message: string, ...args: any[]) {
-        // In perf test mode, allow PERF messages through, skip others
         if (LoggingConfig.PERF_TEST_MODE && !message.includes('🚀') && !message.includes('[PERF]')) return;
-        if (this.shouldLog("info")) {
-            console.log(`[${this.getTimestamp()}] [${this.name}] ℹ️ INFO:`, message, ...args);
-        }
+        if (this.shouldLog("info")) this.emit('ℹ️ INFO:', message, args);
     }
 
     warn(message: string, ...args: any[]) {
-        // In perf test mode, allow PERF messages through, skip others
         if (LoggingConfig.PERF_TEST_MODE && !message.includes('🚀') && !message.includes('[PERF]')) return;
-        if (this.shouldLog("warn")) {
-            console.log(`[${this.getTimestamp()}] [${this.name}] ⚠️ WARN:`, message, ...args);
-        }
+        if (this.shouldLog("warn")) this.emit('⚠️ WARN:', message, args);
     }
 
     error(message: string, ...args: any[]) {
-        if (this.shouldLog("error")) {
-            console.log(`[${this.getTimestamp()}] [${this.name}] ❌ ERROR:`, message, ...args);
-        }
+        if (this.shouldLog("error")) this.emit('❌ ERROR:', message, args);
     }
 
-    /**
-     * 📊 Log performance metrics - only logs at DEBUG level to reduce console noise
-     * Search for "PERF:" in debug console to see all performance metrics
-     */
     perf(message: string, metrics?: Record<string, number | string>) {
-        // In perf test mode, always log perf metrics regardless of level
         if (!LoggingConfig.PERF_TEST_MODE && !this.shouldLog("debug")) return;
-        
-        const timestamp = this.getTimestamp();
-        if (metrics) {
-            const metricsStr = Object.entries(metrics)
-                .map(([key, value]) => `${key}=${value}`)
-                .join(', ');
-            console.log(`[${timestamp}] [${this.name}] 📊 PERF: ${message} | ${metricsStr}`);
-        } else {
-            console.log(`[${timestamp}] [${this.name}] 📊 PERF: ${message}`);
-        }
+        const suffix = metrics
+            ? ` | ${Object.entries(metrics).map(([k, v]) => `${k}=${v}`).join(', ')}`
+            : '';
+        this.emit('📊 PERF:', message + suffix, []);
     }
 
     setLevel(newLevel: "debug" | "info" | "warn" | "error") {
@@ -78,16 +68,18 @@ class Logger {
 
 class LoggerManager {
     private static loggers: Map<string, Logger> = new Map();
+    static outputChannel: OutputChannel | undefined;
 
     /**
-     * Get or create a logger instance
-     * @param name Logger name (usually module/class name)
-     * @param level Optional log level override. If not provided, uses environment-appropriate default
+     * Register a VS Code OutputChannel to receive all log messages.
+     * Call once from extension.ts activate() with window.createOutputChannel(...)
      */
+    static setOutputChannel(channel: OutputChannel): void {
+        LoggerManager.outputChannel = channel;
+    }
+
     static getLogger(name: string, level?: "debug" | "info" | "warn" | "error"): Logger {
-        // Use provided level, or get default based on release/dev mode
         const logLevel = level ?? LoggingConfig.getDefaultLogLevel();
-        
         if (!LoggerManager.loggers.has(name)) {
             LoggerManager.loggers.set(name, new Logger(name, logLevel));
         }

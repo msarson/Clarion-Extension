@@ -84,7 +84,6 @@ export async function startLanguageServer(
         },
         middleware: {
             provideDefinition: async (document, position, token, next) => {
-                logger.info(`🔥 CLIENT MIDDLEWARE: Definition request for ${document.uri.toString()} at ${position.line}:${position.character}`);
                 
                 // First check if we're on a PROCEDURE implementation - if so, find MAP declaration
                 // This handles reverse navigation: implementation → declaration

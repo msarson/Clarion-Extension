@@ -20,7 +20,6 @@ import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { SymbolFinderService } from '../services/SymbolFinderService';
-import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
@@ -57,8 +56,6 @@ export class DefinitionProvider {
      * @returns A Definition (Location or Location[]) or null if no definition is found
      */
     public async provideDefinition(document: TextDocument, position: Position): Promise<Definition | null> {
-        logger.info(`Providing definition for position ${position.line}:${position.character} in ${document.uri}`);
-
         try {
             // Get tokens once for reuse throughout the method
             const tokens = this.tokenCache.getTokens(document);
@@ -76,19 +73,35 @@ export class DefinitionProvider {
             }
 
             const word = document.getText(wordRange);
-            logger.info(`Found word: "${word}" at position`);
             
             // Get the line to check context
             const line = document.getText({
                 start: { line: position.line, character: 0 },
                 end: { line: position.line, character: Number.MAX_VALUE }
             });
-            logger.info(`Full line text: "${line}"`);
-            logger.info(`Position character: ${position.character}`);
+
+            // ⚡ FAST PATH: if the cursor is on a type argument — CLASS(Type), QUEUE(Type),
+            // GROUP(Type), INTERFACE(Type), or LIKE(Type) — skip all slow symbol resolution
+            // and go straight to the SDI-based type lookup (pre-built, O(1)).
+            // This prevents findSymbolDefinition() from running for minutes on large solutions
+            // when the word is a class/type name that will never be found there anyway.
+            {
+                const typeArgRegex = /\b(?:CLASS|INTERFACE|QUEUE|GROUP|LIKE)\s*\(\s*([A-Za-z_]\w*)\b/gi;
+                let typeArgMatch: RegExpExecArray | null;
+                while ((typeArgMatch = typeArgRegex.exec(line)) !== null) {
+                    if (typeArgMatch[1].toLowerCase() === word.toLowerCase()) {
+                        logger.error(`⚡ [DEF] Fast-path: "${word}" is a type argument — skipping to SDI lookup`);
+                        return this.findClassTypeDefinition(word, document);
+                    }
+                }
+            }
 
             // Check if this is a method call (e.g., "self.SaveFile()" or "obj.Method()")
+            // Skip if this line is a method implementation (e.g., "ThisWindow.Init PROCEDURE") — that
+            // must be handled by the method implementation path below, not the dot-access path.
             const dotBeforeIndex = line.lastIndexOf('.', position.character - 1);
-            if (dotBeforeIndex > 0) {
+            const lineIsMethodImpl = ClarionPatterns.METHOD_IMPLEMENTATION_STRICT.test(line.trimStart());
+            if (dotBeforeIndex > 0 && !lineIsMethodImpl) {
                 const rawBeforeDot = line.substring(0, dotBeforeIndex).trim();
                 const beforeDot = ChainedPropertyResolver.extractChain(rawBeforeDot);
                 const afterDot = line.substring(dotBeforeIndex + 1).trim();
@@ -408,6 +421,39 @@ export class DefinitionProvider {
                 return structureFieldDefinition;
             }
 
+            // Check if word is a parameter of the containing procedure.
+            // Parameters live in the PROCEDURE() signature, not at column 0, so findAllLabelCandidates
+            // cannot find them. SymbolFinderService.findParameter parses the signature line.
+            const scopeInfo = this.scopeAnalyzer.getTokenScope(document, position);
+            const containingProc = scopeInfo?.containingProcedure;
+            if (containingProc) {
+                const paramResult = this.symbolFinder.findParameter(word, document, containingProc);
+                if (paramResult) {
+                    return Location.create(paramResult.location.uri, {
+                        start: { line: paramResult.location.line, character: paramResult.location.character },
+                        end: { line: paramResult.location.line, character: paramResult.location.character }
+                    });
+                }
+
+                // For MethodImplementation scope, also check outer GlobalProcedure parameters.
+                // A local class method can access the parameters of the procedure that declares the class.
+                if (containingProc.subType === TokenType.MethodImplementation) {
+                    const outerProcs = tokens.filter(t =>
+                        t.type === TokenType.Procedure &&
+                        t.subType === TokenType.GlobalProcedure
+                    );
+                    for (const gp of outerProcs) {
+                        const outerParamResult = this.symbolFinder.findParameter(word, document, gp);
+                        if (outerParamResult) {
+                            return Location.create(outerParamResult.location.uri, {
+                                start: { line: outerParamResult.location.line, character: outerParamResult.location.character },
+                                end: { line: outerParamResult.location.line, character: outerParamResult.location.character }
+                            });
+                        }
+                    }
+                }
+            }
+
             // First, check if this is a reference to a label in the current document
             // Get ALL label candidates and filter by scope using ScopeAnalyzer
             const labelCandidates = this.symbolResolver.findAllLabelCandidates(word, document, tokens);
@@ -497,8 +543,17 @@ export class DefinitionProvider {
                 return structureDefinition;
             }
 
+            // Check if word is a CLASS/INTERFACE/QUEUE/GROUP type name via the structure index.
+            // The SDI is pre-built on solution load and is O(1) per lookup — check it BEFORE
+            // walking the include chain (findTypeInIncludes) which can be slow on large solutions.
+            const classLocation = await this.findClassTypeDefinition(word, document);
+            if (classLocation) {
+                return classLocation;
+            }
+
             // Check if this word is a type name (QUEUE/GROUP/etc) declared in an INCLUDE file
             // Handles F12 on type names in LIKE(TypeName), QUEUE(TypeName), etc.
+            // Fallback for types not covered by the SDI (e.g. not yet indexed).
             const typeDefInIncludes = await this.findTypeInIncludes(word, document);
             if (typeDefInIncludes) {
                 return typeDefInIncludes;
@@ -508,13 +563,6 @@ export class DefinitionProvider {
             // This is the lowest priority - only look for files if no local definitions are found
             if (this.fileResolver.isLikelyFileReference(word, document, position, tokens)) {
                 return await this.fileResolver.findFileDefinition(word, document.uri);
-            }
-
-            // Last resort: check if word is a CLASS type name via the class definition indexer
-            // This handles parameter types, variable types, etc. (e.g. "EditClass EC" in a PROCEDURE signature)
-            const classLocation = await this.findClassTypeDefinition(word, document);
-            if (classLocation) {
-                return classLocation;
             }
 
             return null;
@@ -2111,19 +2159,28 @@ export class DefinitionProvider {
 
 
     private async findClassTypeDefinition(word: string, document: TextDocument): Promise<Location | null> {
+        let timeoutId: NodeJS.Timeout | undefined;
+        const timeout = new Promise<null>(resolve => {
+            timeoutId = setTimeout(() => {
+                logger.error(`⏱️ [DEF] findClassTypeDefinition timed out for "${word}" — index build too slow`);
+                resolve(null);
+            }, 10000);
+        });
         try {
-            const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
-            const projectPath = SolutionManager.getInstance()?.getProjectPathForFile(fromPath) ?? path.dirname(fromPath);
+            return await Promise.race([this._findClassTypeDefinitionInternal(word, document), timeout]);
+        } finally {
+            if (timeoutId !== undefined) clearTimeout(timeoutId);
+        }
+    }
 
-            const sdi = StructureDeclarationIndexer.getInstance();
-            await sdi.getOrBuildIndex(projectPath);
-            const definitions = sdi.find(word, projectPath);
-            if (definitions.length === 0) return null;
+    private async _findClassTypeDefinitionInternal(word: string, document: TextDocument): Promise<Location | null> {
+        try {
+            const info = await this.symbolFinder.findIndexedTypeDeclaration(word, document);
+            if (!info) return null;
 
-            const def = definitions[0];
-            const uri = `file:///${def.filePath.replace(/\\/g, '/')}`;
-            logger.error(`✅ ${def.structureType} type F12: "${word}" → ${def.filePath}:${def.line + 1}`);
-            return Location.create(uri, Range.create(def.line, 0, def.line, 0));
+            const uri = `file:///${info.filePath.replace(/\\/g, '/')}`;
+            logger.error(`✅ ${info.structureType} type F12: "${word}" → ${info.filePath}:${info.line + 1}`);
+            return Location.create(uri, Range.create(info.line, 0, info.line, 0));
         } catch (e) {
             logger.error(`findClassTypeDefinition error: ${e}`);
             return null;

@@ -52,38 +52,34 @@ export class MethodOverloadResolver {
         const classTokens = TokenHelper.findClassStructures(tokens);
         
         for (const classToken of classTokens) {
-            const labelToken = tokens.find(t =>
-                t.type === TokenType.Label &&
-                t.line === classToken.line &&
-                t.value.toLowerCase() === className.toLowerCase()
-            );
-            
-            if (labelToken) {
-                logger.info(`Found class ${className} at line ${labelToken.line}`);
-                
-                const content = document.getText();
-                const lines = content.split('\n');
-                
-                // Use classToken.children (populated by DocumentStructure) for O(1) scope access.
-                // Class member methods are tokenized as Procedure/MethodDeclaration with label = method name.
-                const children = classToken.children ?? [];
-                for (const childToken of children) {
-                    if (childToken.type === TokenType.Procedure &&
-                        childToken.subType === TokenType.MethodDeclaration &&
-                        childToken.label?.toLowerCase() === methodName.toLowerCase()) {
-                        
-                        const signature = lines[childToken.line]?.trim() ?? '';
-                        const declParamCount = ClarionPatterns.countParameters(signature);
-                        
-                        candidates.push({
-                            signature,
-                            file: document.uri,
-                            line: childToken.line,
-                            paramCount: declParamCount
-                        });
-                        
-                        logger.info(`Found method candidate at line ${childToken.line} with ${declParamCount} parameters`);
-                    }
+            if (classToken.label?.toLowerCase() !== className.toLowerCase()) {
+                continue;
+            }
+
+            logger.info(`Found class ${className} at line ${classToken.line}`);
+
+            const content = document.getText();
+            const lines = content.split('\n');
+
+            // Use classToken.children (populated by DocumentStructure) for O(1) scope access.
+            // Class member methods are tokenized as Procedure/MethodDeclaration with label = method name.
+            const children = classToken.children ?? [];
+            for (const childToken of children) {
+                if (childToken.type === TokenType.Procedure &&
+                    childToken.subType === TokenType.MethodDeclaration &&
+                    childToken.label?.toLowerCase() === methodName.toLowerCase()) {
+
+                    const signature = lines[childToken.line]?.trim() ?? '';
+                    const declParamCount = ClarionPatterns.countParameters(signature);
+
+                    candidates.push({
+                        signature,
+                        file: document.uri,
+                        line: childToken.line,
+                        paramCount: declParamCount
+                    });
+
+                    logger.info(`Found method candidate at line ${childToken.line} with ${declParamCount} parameters`);
                 }
             }
         }

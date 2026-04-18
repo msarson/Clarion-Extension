@@ -1317,7 +1317,6 @@ connection.onRequest('clarion/documentSymbols', async (params: { uri: string }) 
 
 // Handle definition requests
 connection.onDefinition(async (params) => {
-    logger.info(`📂 Received definition request for: ${params.textDocument.uri} at position ${params.position.line}:${params.position.character}`);
     
     if (!serverInitialized) {
         logger.info(`⚠️ [DELAY] Server not initialized yet, delaying definition request`);
@@ -1326,7 +1325,7 @@ connection.onDefinition(async (params) => {
     
     const document = documents.get(params.textDocument.uri);
     if (!document) {
-        logger.info(`⚠️ Document not found: ${params.textDocument.uri}`);
+        logger.error(`⚠️ [SERVER] Document not found for definition: ${params.textDocument.uri}`);
         return null;
     }
     
@@ -1346,7 +1345,7 @@ connection.onDefinition(async (params) => {
 
 // Handle implementation requests
 connection.onImplementation(async (params) => {
-    logger.info(`📂 Received implementation request for: ${params.textDocument.uri} at position ${params.position.line}:${params.position.character}`);
+    logger.error(`⏱️ [SERVER] onImplementation received: ${params.textDocument.uri.split('/').pop()} at ${params.position.line}:${params.position.character}`);
     
     if (!serverInitialized) {
         logger.info(`⚠️ [DELAY] Server not initialized yet, delaying implementation request`);

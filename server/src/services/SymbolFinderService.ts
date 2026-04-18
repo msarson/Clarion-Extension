@@ -20,6 +20,7 @@ import { TokenCache } from '../TokenCache';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { TokenHelper } from '../utils/TokenHelper';
 import { SolutionManager } from '../solution/solutionManager';
+import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -58,6 +59,21 @@ export interface SymbolInfo {
     
     /** Search word used to find this symbol (may be stripped) */
     searchWord: string;
+}
+
+/**
+ * A located type declaration returned by the StructureDeclarationIndexer.
+ * Intentionally small — callers format their own output from this.
+ */
+export interface IndexedTypeInfo {
+    name: string;
+    filePath: string;
+    /** 0-based line number */
+    line: number;
+    structureType: string;
+    parentName?: string;
+    isType: boolean;
+    lineContent: string;
 }
 
 /**
@@ -331,6 +347,13 @@ export class SymbolFinderService {
                     t.subType === TokenType.GlobalProcedure
                 );
                 for (const gp of globalProcs) {
+                    // Check parameters of the outer procedure first
+                    const paramResult = this.findParameter(word, document, gp);
+                    if (paramResult) {
+                        logger.info(`✅ Found "${searchText}" as parameter of outer GlobalProcedure at line ${gp.line}`);
+                        return paramResult;
+                    }
+
                     const gpStart = gp.line;
                     const gpEnd = gp.finishesAt ?? Number.MAX_SAFE_INTEGER;
                     const found = tokens.find(t =>
@@ -1035,6 +1058,49 @@ export class SymbolFinderService {
             originalWord: word,
             searchWord: word
         };
+    }
+
+    /**
+     * Look up a named type (CLASS, INTERFACE, QUEUE, GROUP, etc.) in the
+     * StructureDeclarationIndexer for the document's owning project.
+     *
+     * This is the single source of truth for SDI-based type resolution.
+     * Callers (DefinitionProvider, HoverProvider) apply their own post-filters
+     * (e.g. IncludeVerifier) and format the result for their own output.
+     *
+     * @returns IndexedTypeInfo for the first matching declaration, or null.
+     */
+    async findIndexedTypeDeclaration(word: string, document: TextDocument): Promise<IndexedTypeInfo | null> {
+        try {
+            const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+            const solutionManager = SolutionManager.getInstance();
+            const projectPath = solutionManager?.getProjectPathForFile(fromPath) ?? path.dirname(fromPath);
+
+            const sdi = StructureDeclarationIndexer.getInstance();
+            await sdi.getOrBuildIndex(projectPath);
+            let definitions = sdi.find(word, projectPath);
+            if (definitions.length === 0) {
+                // Key mismatch guard: the runtime project path may differ from the pre-build path
+                // (e.g. different drive letter case, wrong project matched by basename).
+                // Fall back to searching ALL available indexes before giving up.
+                definitions = sdi.find(word);
+            }
+            if (definitions.length === 0) return null;
+
+            const def = definitions[0];
+            return {
+                name: def.name,
+                filePath: def.filePath,
+                line: def.line,
+                structureType: def.structureType,
+                parentName: def.parentName,
+                isType: def.isType,
+                lineContent: def.lineContent
+            };
+        } catch (e) {
+            logger.error(`findIndexedTypeDeclaration error for "${word}": ${e}`);
+            return null;
+        }
     }
 
     /**

@@ -69,7 +69,7 @@ export class MemberLocatorService {
                 const parentData = await this.loadDocument(parentPath);
                 if (parentData) {
                     const parentVar = parentData.tokens.find(t =>
-                        t.start === 0 && t.value.toLowerCase() === varName.toLowerCase()
+                        t.start === 0 && this.tokenMatchesName(t, varName.toLowerCase())
                     );
                     if (parentVar) return { token: parentVar, tokens: parentData.tokens, doc: parentData.doc };
                     const incResult = await this.searchIncludesForToken(
@@ -201,8 +201,8 @@ export class MemberLocatorService {
         tokens: Token[],
         document: TextDocument
     ): Promise<{ token: Token; tokens: Token[]; doc: TextDocument } | null> {
-        // 1. Current file (column 0 label)
-        const local = tokens.find(t => t.start === 0 && t.value.toLowerCase() === varName.toLowerCase());
+        // 1. Current file (column 0 label or structure)
+        const local = tokens.find(t => t.start === 0 && this.tokenMatchesName(t, varName.toLowerCase()));
         if (local) return { token: local, tokens, doc: document };
 
         const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
@@ -216,7 +216,7 @@ export class MemberLocatorService {
                 const parentData = await this.loadDocument(parentPath);
                 if (parentData) {
                     const parentVar = parentData.tokens.find(t =>
-                        t.start === 0 && t.value.toLowerCase() === varName.toLowerCase()
+                        t.start === 0 && this.tokenMatchesName(t, varName.toLowerCase())
                     );
                     if (parentVar) return { token: parentVar, tokens: parentData.tokens, doc: parentData.doc };
                     const incResult = await this.searchIncludesForToken(
@@ -248,9 +248,8 @@ export class MemberLocatorService {
             if (!data) continue;
 
             const found = data.tokens.find(t =>
-                t.type === TokenType.Label &&
                 t.start === 0 &&
-                t.value.toLowerCase() === varName.toLowerCase()
+                this.tokenMatchesName(t, varName.toLowerCase())
             );
             if (found) return { token: found, tokens: data.tokens, doc: data.doc };
 
@@ -258,6 +257,94 @@ export class MemberLocatorService {
             if (nested) return nested;
         }
         return null;
+    }
+
+    /**
+     * Searches the current file, MEMBER parent, and INCLUDE chain for a structure field
+     * identified by PRE prefix and field name (e.g. "SetG:SettingsGroup" → prefix="SetG", field="SettingsGroup").
+     * Structure fields have token.structurePrefix === prefix and are not at column 0.
+     */
+    async findPrefixFieldTokenInChain(
+        prefix: string,
+        fieldName: string,
+        document: TextDocument
+    ): Promise<{ token: Token; tokens: Token[]; doc: TextDocument } | null> {
+        const tokens = this.tokenCache.getTokens(document);
+        const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const currentDir = path.dirname(currentFilePath);
+
+        // 1. Current file
+        const found = this.findPrefixFieldInTokens(prefix, fieldName, tokens);
+        if (found) return { token: found, tokens, doc: document };
+
+        // 2. MEMBER parent + its include chain
+        const memberToken = tokens.find(t => t.value?.toUpperCase() === 'MEMBER' && t.line < 5 && t.referencedFile);
+        if (memberToken?.referencedFile) {
+            const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir);
+            if (parentPath) {
+                const parentData = await this.loadDocument(parentPath);
+                if (parentData) {
+                    const parentFound = this.findPrefixFieldInTokens(prefix, fieldName, parentData.tokens);
+                    if (parentFound) return { token: parentFound, tokens: parentData.tokens, doc: parentData.doc };
+                    const incResult = await this.searchIncludesForPrefixField(
+                        prefix, fieldName, parentData.tokens, path.dirname(parentPath), new Set([parentPath.toLowerCase()])
+                    );
+                    if (incResult) return incResult;
+                }
+            }
+        }
+
+        // 3. Current file include chain
+        return this.searchIncludesForPrefixField(prefix, fieldName, tokens, currentDir, new Set());
+    }
+
+    private findPrefixFieldInTokens(prefix: string, fieldName: string, tokens: Token[]): Token | undefined {
+        const prefixUpper = prefix.toUpperCase();
+        const fieldUpper = fieldName.toUpperCase();
+        return tokens.find(t =>
+            t.structurePrefix?.toUpperCase() === prefixUpper &&
+            // Label tokens: t.value is the name; Structure tokens (nested GROUP etc): t.label is the name
+            (t.value.toUpperCase() === fieldUpper || t.label?.toUpperCase() === fieldUpper)
+        );
+    }
+
+    private async searchIncludesForPrefixField(
+        prefix: string,
+        fieldName: string,
+        tokens: Token[],
+        fromDir: string,
+        visited: Set<string>
+    ): Promise<{ token: Token; tokens: Token[]; doc: TextDocument } | null> {
+        const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
+        for (const inc of includeTokens) {
+            const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
+            if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
+            visited.add(resolvedPath.toLowerCase());
+
+            const data = await this.loadDocument(resolvedPath);
+            if (!data) continue;
+
+            const found = this.findPrefixFieldInTokens(prefix, fieldName, data.tokens);
+            if (found) return { token: found, tokens: data.tokens, doc: data.doc };
+
+            const nested = await this.searchIncludesForPrefixField(prefix, fieldName, data.tokens, path.dirname(resolvedPath), visited);
+            if (nested) return nested;
+        }
+        return null;
+    }
+
+
+    /**
+     * Returns true if a token's declared name matches varName.
+     * - Label tokens: the name is token.value
+     * - Structure/Procedure tokens: the name is token.label (e.g. "SetG:SettingsGroup GROUP" → label="SetG:SettingsGroup")
+     */
+    private tokenMatchesName(t: Token, nameLower: string): boolean {
+        if (t.type === TokenType.Label) return t.value.toLowerCase() === nameLower;
+        if (t.type === TokenType.Structure || t.type === TokenType.Procedure) {
+            return t.label?.toLowerCase() === nameLower;
+        }
+        return false;
     }
 
     /** Walks the INCLUDE chain of a document searching for className.memberName. */
