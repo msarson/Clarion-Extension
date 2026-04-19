@@ -58,6 +58,7 @@ import { RedirectionFileParserServer } from './solution/redirectionFileParserSer
 import { DefinitionProvider } from './providers/DefinitionProvider';
 import { HoverProvider } from './providers/HoverProvider';
 import { ClassConstantsCodeActionProvider } from './providers/ClassConstantsCodeActionProvider';
+import { FlattenCodeActionProvider } from './providers/FlattenCodeActionProvider';
 import { DiagnosticProvider } from './providers/DiagnosticProvider';
 import { SignatureHelpProvider } from './providers/SignatureHelpProvider';
 import { ImplementationProvider } from './providers/ImplementationProvider';
@@ -1508,8 +1509,13 @@ connection.onCodeAction(async (params) => {
             params.context,
             params as any // CancellationToken
         );
-        logger.info(`Provided ${actions.length} code actions`);
-        return actions;
+
+        const flattenProvider = new FlattenCodeActionProvider();
+        const flattenActions = flattenProvider.provideCodeActions(document, params.range);
+
+        const allActions = [...actions, ...flattenActions];
+        logger.info(`Provided ${allActions.length} code actions`);
+        return allActions;
     } catch (error) {
         logger.error(`❌ Error providing code actions: ${error instanceof Error ? error.message : String(error)}`);
         return [];
