@@ -128,6 +128,32 @@ suite('ClarionCodeLensProvider — buildCodeLenses', () => {
         assert.ok(typeof data.symbolName === 'string' && data.symbolName.length > 0);
     });
 
+    test('dotted method label — character points to method name part (after last dot)', () => {
+        // For "Kanban.Init PROCEDURE", character must point to "Init" (col 7)
+        // so getWordRangeAtPosition returns "Init", triggering dot-chain reconstruction
+        const code = [
+            'Kanban.Init  PROCEDURE(LONG pCtrl)',  // 0
+            '  CODE',                               // 1
+            '  PARENT.Init(pCtrl)',                 // 2
+        ].join('\n');
+        const tokens = tokenize(code);
+        const lenses = buildCodeLenses('file:///test2.clw', tokens);
+        assert.ok(lenses.length >= 1, 'should have at least one lens');
+        const data = lenses[0].data as { uri: string; line: number; character: number; symbolName: string };
+        // "Kanban.Init" — "Init" starts at index 7
+        assert.strictEqual(data.character, 7, 'character should point to "Init" after the dot');
+        assert.strictEqual(data.symbolName, 'Kanban.Init');
+    });
+
+    test('simple (non-dotted) procedure — character is 0', () => {
+        const code = ['SimpleProc  PROCEDURE()', 'CODE', 'END'].join('\n');
+        const tokens = tokenize(code);
+        const lenses = buildCodeLenses('file:///test3.clw', tokens);
+        assert.ok(lenses.length >= 1);
+        const data = lenses[0].data as { uri: string; line: number; character: number; symbolName: string };
+        assert.strictEqual(data.character, 0);
+    });
+
     test('no lenses for empty token array', () => {
         const lenses = buildCodeLenses('file:///test.clw', []);
         assert.strictEqual(lenses.length, 0);

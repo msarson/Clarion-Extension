@@ -47,9 +47,12 @@ export function buildCodeLenses(uri: string, tokens: Token[]): CodeLens[] {
         const symbolName = token.label ?? token.value;
         const line = token.line;
 
-        // Position the lens at column 0 — labels in Clarion always start at column 0.
-        // token.start is the column of the keyword (PROCEDURE/CLASS), not the label.
-        const character = 0;
+        // For dotted labels (e.g. "Kanban.Init"), position on the method name part
+        // so getWordRangeAtPosition returns "Init" and the dot-chain reconstruction
+        // in ReferencesProvider reconstructs the full "Kanban.Init" expression.
+        // For plain labels there is no dot so we use column 0.
+        const dotIndex = symbolName.lastIndexOf('.');
+        const character = dotIndex >= 0 ? dotIndex + 1 : 0;
 
         const data: CodeLensData = { uri, line, character, symbolName };
 
