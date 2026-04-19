@@ -49,6 +49,11 @@ All notable changes to the Clarion Extension are documented here.
 **Code Quality**
 
 - 🔧 **Refactor DiagnosticProvider into focused sub-modules** — the 1943-line `DiagnosticProvider.ts` has been split into four focused helper modules in `server/src/providers/diagnostics/`: `StructureDiagnostics.ts`, `ClassDiagnostics.ts`, `ReturnValueDiagnostics.ts`, and `ControlFlowDiagnostics.ts`. `DiagnosticProvider` is now a thin facade that delegates to these modules, making the code easier to maintain and extend.
+
+**Hover**
+
+- ✨ **Hover documentation for `PROP:` runtime properties** ([#73](https://github.com/msarson/Clarion-Extension/issues/73)) — hovering over any Clarion runtime property equate (e.g. `PROP:Enabled`, `PROP:Handle`, `PROP:Text`, `PROP:Thread`) now shows documentation sourced from the Clarion 11.1 Language Reference. Covers all 215 runtime properties. Read-only properties are labelled accordingly. Works wherever `PROP:` equates appear: `?Ctrl{PROP:Enabled}`, `SYSTEM{PROP:Thread}`, etc.
+
 ### [0.9.2] - 2026-04-18
 
 **Performance Fixes**

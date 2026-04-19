@@ -6,6 +6,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import LoggerManager from '../../logger';
 import { DocCommentReader, DocComment } from '../../utils/DocCommentReader';
+import { PropEntry } from '../../utils/PropertyService';
 
 const logger = LoggerManager.getLogger("HoverFormatter");
 logger.setLevel("error");
@@ -794,6 +795,23 @@ export class HoverFormatter {
                 kind: 'markdown',
                 value: content.trim()
             }
+        };
+    }
+
+    /** Formats hover for a PROP: runtime property equate. */
+    public formatPropEquate(entry: PropEntry): Hover {
+        let content = `**${entry.name}**\n\n`;
+        if (entry.readOnly) {
+            content += `_Read-only runtime property_\n\n`;
+        } else {
+            content += `_Runtime property_\n\n`;
+        }
+        if (entry.description) {
+            content += `${entry.description}\n\n`;
+        }
+        content += `**Usage:** \`?Control{${entry.name}}\``;
+        return {
+            contents: { kind: 'markdown', value: content.trim() }
         };
     }
 

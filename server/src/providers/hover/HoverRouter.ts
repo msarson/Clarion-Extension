@@ -8,6 +8,7 @@ import { RoutineHoverResolver } from './RoutineHoverResolver';
 import { ContextualHoverHandler } from './ContextualHoverHandler';
 import { BuiltinFunctionService } from '../../utils/BuiltinFunctionService';
 import { AttributeService } from '../../utils/AttributeService';
+import { PropertyService } from '../../utils/PropertyService';
 import { HoverFormatter } from './HoverFormatter';
 import { TokenCache } from '../../TokenCache';
 import { Token, TokenType } from '../../ClarionTokenizer';
@@ -24,6 +25,7 @@ logger.setLevel("error");
 export class HoverRouter {
     private builtinService = BuiltinFunctionService.getInstance();
     private attributeService = AttributeService.getInstance();
+    private propertyService = PropertyService.getInstance();
 
     constructor(
         private procedureResolver: ProcedureHoverResolver,
@@ -82,6 +84,10 @@ export class HoverRouter {
         // 9. Handle attributes
         const attributeHover = this.handleAttribute(word, line, wordRange, document);
         if (attributeHover) return attributeHover;
+
+        // 9.5 Handle PROP: runtime property equates
+        const propHover = this.handlePropEquate(word);
+        if (propHover) return propHover;
 
         // 10. Handle built-in functions (AFTER method declarations to avoid shadowing)
         const builtinHover = this.handleBuiltin(word, line, wordRange, document, position);
@@ -181,6 +187,16 @@ export class HoverRouter {
         logger.info(`Attribute parameter count: ${paramCount}`);
 
         return this.formatter.formatAttribute(word, attribute, paramCount);
+    }
+
+    /**
+     * Handle PROP: runtime property equates (e.g. PROP:Enabled, PROP:Handle)
+     */
+    private handlePropEquate(word: string): Hover | null {
+        const entry = this.propertyService.getPropEntry(word);
+        if (!entry) return null;
+        logger.info(`Found PROP: equate: ${word}`);
+        return this.formatter.formatPropEquate(entry);
     }
 
     /**
