@@ -57,7 +57,7 @@ export async function getAllOpenDocuments(): Promise<TextDocument[]> {
         }
     } else {
         logger.warn("⚠️ `tabGroups` API not available, falling back to `visibleTextEditors`.");
-        return vscodeWindow.visibleTextEditors.map((editor: TextEditor) => editor.document);
+        return (vscodeWindow as any).visibleTextEditors.map((editor: TextEditor) => editor.document);
     }
 
     logger.info(`🔍 Found ${openDocuments.length} open documents.`);
