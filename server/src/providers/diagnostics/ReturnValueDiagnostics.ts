@@ -120,6 +120,16 @@ function validateCrossFilePlainCalls(
                 }
             }
 
+            // Guard: startIdx must still be on the same line as the procedure declaration.
+            // If the ')' was the last token on the line, startIdx points to the next line —
+            // extractReturnType would then use that next line as its anchor and falsely pick
+            // up the return type of the following declaration.
+            if (startIdx >= otherTokens.length || otherTokens[startIdx].line !== t.line) {
+                excluded.add(name);
+                warnableProcs.delete(name);
+                continue;
+            }
+
             const returnType = extractReturnType(otherTokens, startIdx, true);
             if (!returnType) {
                 excluded.add(name);
@@ -472,6 +482,13 @@ export function validateDiscardedReturnValuesForPlainCalls(
                 }
             }
 
+            // Guard: startIdx must still be on the same declaration line.
+            if (startIdx >= tokens.length || tokens[startIdx].line !== t.line) {
+                excluded.add(name);
+                warnableProcs.delete(name);
+                continue;
+            }
+
             const returnType = extractReturnType(tokens, startIdx, true);
             if (!returnType) {
                 excluded.add(name);
@@ -517,6 +534,13 @@ export function validateDiscardedReturnValuesForPlainCalls(
                 }
             }
             if (afterIdx === -1) continue;
+
+            // Guard: afterIdx must still be on the same declaration line.
+            if (afterIdx >= tokens.length || tokens[afterIdx].line !== t.line) {
+                excluded.add(name);
+                warnableProcs.delete(name);
+                continue;
+            }
 
             const returnType = extractReturnType(tokens, afterIdx, true);
             if (!returnType) {

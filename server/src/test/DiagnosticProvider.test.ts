@@ -1412,6 +1412,26 @@ MainProc    PROCEDURE()
             assert.strictEqual(diags.length, 0, 'void procedure should not warn');
         });
 
+        test('void procedure followed by returning procedure: void must not inherit return type', () => {
+            // Regression: when DoNothing() has nothing after its closing ')' on the same
+            // line, startIdx pointed to the NEXT line's first token. extractReturnType then
+            // used that next line as its anchor and falsely picked up LONG from GetValue,
+            // causing DoNothing() calls to be warned.
+            const code = `
+  MAP
+DoNothing   PROCEDURE(STRING pText)
+GetValue    PROCEDURE(),LONG
+  END
+
+MainProc    PROCEDURE()
+  CODE
+  DoNothing('hello')
+  DoNothing('world')
+`;
+            const diags = discardDiags(code);
+            assert.strictEqual(diags.length, 0, 'void procedure before a returning one must not generate warnings');
+        });
+
         test('any overload with PROC suppresses warning for that name', () => {
             const code = `
   MAP
