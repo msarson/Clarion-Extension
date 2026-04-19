@@ -47,8 +47,9 @@ export function buildCodeLenses(uri: string, tokens: Token[]): CodeLens[] {
         const symbolName = token.label ?? token.value;
         const line = token.line;
 
-        // Position the lens at the label column (col 0 for globals, wherever the label starts)
-        const character = token.start;
+        // Position the lens at column 0 — labels in Clarion always start at column 0.
+        // token.start is the column of the keyword (PROCEDURE/CLASS), not the label.
+        const character = 0;
 
         const data: CodeLensData = { uri, line, character, symbolName };
 
