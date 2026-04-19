@@ -59,6 +59,7 @@ import { DefinitionProvider } from './providers/DefinitionProvider';
 import { HoverProvider } from './providers/HoverProvider';
 import { ClassConstantsCodeActionProvider } from './providers/ClassConstantsCodeActionProvider';
 import { FlattenCodeActionProvider } from './providers/FlattenCodeActionProvider';
+import { SelectionRangeProvider } from './providers/SelectionRangeProvider';
 import { DiagnosticProvider } from './providers/DiagnosticProvider';
 import { SignatureHelpProvider } from './providers/SignatureHelpProvider';
 import { ImplementationProvider } from './providers/ImplementationProvider';
@@ -161,6 +162,7 @@ connection.onInitialize((params) => {
                 workspaceSymbolProvider: true,
                 hoverProvider: true,
                 codeActionProvider: true,
+                selectionRangeProvider: true,
                 signatureHelpProvider: {
                     triggerCharacters: ['(', ','],
                     retriggerCharacters: [')']
@@ -449,6 +451,19 @@ connection.onFoldingRanges((params: FoldingRangeParams) => {
         return ranges;
     } catch (error) {
         logger.error(`❌ [DEBUG] Error computing folding ranges: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
+    }
+});
+
+// Handle selection range requests (Shift+Alt+→ expand selection)
+connection.onSelectionRanges((params) => {
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return [];
+    try {
+        const provider = new SelectionRangeProvider();
+        return provider.provideSelectionRanges(document, params.positions);
+    } catch (error) {
+        logger.error(`❌ Error providing selection ranges: ${error instanceof Error ? error.message : String(error)}`);
         return [];
     }
 });
