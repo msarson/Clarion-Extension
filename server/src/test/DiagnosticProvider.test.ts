@@ -1478,6 +1478,33 @@ MainProc    PROCEDURE()
             assert.strictEqual(diags.length, 1, 'MODULE declaration should be included');
         });
 
+        test('MAP with MODULE blocks plus returning proc outside MODULE warns', () => {
+            // Mirrors real-world files where MODULE blocks are inside the MAP alongside
+            // plain procedure declarations (like Trace PROCEDURE(...),LONG).
+            const code = `
+  MAP
+    MODULE('kernel32')
+      cz_LoadLibrary(*CSTRING lpFileName),LONG,PASCAL,RAW
+      cz_FreeLibrary(LONG hModule),BOOL,PROC,PASCAL,RAW
+    END
+    MODULE('user32')
+      ShowWindow(LONG hWnd, LONG nCmdShow),BOOL,PASCAL,RAW
+    END
+Trace       PROCEDURE(STRING p_LogText),LONG
+VoidHelper  PROCEDURE(STRING pText)
+  END
+
+MainProc    PROCEDURE()
+  CODE
+  Trace('hello')
+  Trace('world')
+  VoidHelper('no warn')
+`;
+            const diags = discardDiags(code);
+            assert.strictEqual(diags.length, 2, 'Trace() calls should each warn; VoidHelper should not');
+            assert.ok(diags.every(d => d.message.includes("'Trace'")), 'warnings are for Trace only');
+        });
+
         test('multiple returning procedures - warns for each bare call', () => {
             const code = `
   MAP
