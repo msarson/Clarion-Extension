@@ -25,6 +25,7 @@ export interface ClassMemberInfo {
     className: string;
     line: number;
     file: string;
+    isInterface?: boolean;
 }
 
 export interface MethodDeclarationInfo {
@@ -157,22 +158,25 @@ export class HoverFormatter {
     formatClassMember(name: string, info: ClassMemberInfo): Hover {
         const isMethod = info.type.toUpperCase().includes('PROCEDURE') || info.type.toUpperCase().includes('FUNCTION');
         const memberType = isMethod ? 'Method' : 'Property';
+        const memberCategory = info.isInterface ? 'Interface' : 'Class';
 
         // Extract visibility modifier from type string (e.g. ",PRIVATE" or ",PROTECTED")
-        let visibility = 'PUBLIC';
+        let visibility = info.isInterface ? '' : 'PUBLIC ';
         let visibilityIcon = '';
-        if (/,\s*PRIVATE\b/i.test(info.type)) {
-            visibility = 'PRIVATE';
-            visibilityIcon = '🔒 ';
-        } else if (/,\s*PROTECTED\b/i.test(info.type)) {
-            visibility = 'PROTECTED';
-            visibilityIcon = '🔐 ';
+        if (!info.isInterface) {
+            if (/,\s*PRIVATE\b/i.test(info.type)) {
+                visibility = 'PRIVATE ';
+                visibilityIcon = '🔒 ';
+            } else if (/,\s*PROTECTED\b/i.test(info.type)) {
+                visibility = 'PROTECTED ';
+                visibilityIcon = '🔐 ';
+            }
         }
 
         const markdown = [
-            `**${visibilityIcon}${name}** (${visibility} Class ${memberType})`,
+            `**${visibilityIcon}${name}** (${visibility}${memberCategory} ${memberType})`,
             ``,
-            `**Class:** ${info.className}`,
+            `**${memberCategory}:** ${info.className}`,
             ``
         ];
         
@@ -219,10 +223,11 @@ export class HoverFormatter {
      * Constructs hover for a method call (SELF.method) with both declaration and implementation
      */
     formatMethodCall(name: string, declarationInfo: ClassMemberInfo, implementationLocation: string): Hover {
+        const memberCategory = declarationInfo.isInterface ? 'Interface' : 'Class';
         const markdown = [
-            `**${name}** (Class Method)`,
+            `**${name}** (${memberCategory} Method)`,
             ``,
-            `**Class:** ${declarationInfo.className}`,
+            `**${memberCategory}:** ${declarationInfo.className}`,
             ``
         ];
 

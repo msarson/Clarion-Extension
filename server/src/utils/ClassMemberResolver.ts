@@ -14,7 +14,7 @@ import LoggerManager from '../logger';
 const logger = LoggerManager.getLogger("ClassMemberResolver");
 logger.setLevel("error");
 
-export type MemberInfo = { type: string; className: string; line: number; file: string; signature?: string };
+export type MemberInfo = { type: string; className: string; line: number; file: string; signature?: string; isInterface?: boolean };
 
 /** Access level for a class member. */
 export type MemberAccess = 'public' | 'protected' | 'private';

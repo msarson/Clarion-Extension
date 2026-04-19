@@ -392,7 +392,7 @@ export class MemberLocatorService {
         const best = selectBestMemberOverload(candidates, paramCount);
         if (!best) return null;
         const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
-        return { type: best.type, className: ifaceName, line: best.line, file: fileUri, signature: best.signature };
+        return { type: best.type, className: ifaceName, line: best.line, file: fileUri, signature: best.signature, isInterface: true };
     }
 
     /** Walks the INCLUDE chain searching for an INTERFACE method declaration. */
