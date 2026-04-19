@@ -8,6 +8,10 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [0.9.3] - Unreleased
 
+**Tokenizer & Outline**
+
+- 🐛 **Fix WINDOW (and other structure keywords) used as labels in the outline** ([#68](https://github.com/msarson/Clarion-Extension/issues/68)) — the Clarion language spec explicitly allows `WINDOW`, `CLASS`, `FILE`, `GROUP`, `QUEUE`, `VIEW`, `RECORD`, `MAP`, `MODULE`, `INTERFACE`, and `REPORT` to be used as data-structure labels. The tokenizer's Label pattern was incorrectly excluding all of these keywords via a negative lookahead, so a line like `Window  WINDOW('Caption'),...` caused `W` to be silently skipped and `indow` to be produced as a spurious Variable token. This left the WINDOW structure with no label, resulting in two outline entries instead of one. Fixed by removing all structure keywords from the Label exclusion list (keeping only the truly reserved words: `COMPILE`, `OMIT`, `EMBED`, `SECTION`, `ENDSECTION`, `INCLUDE`, `PROGRAM`, `MEMBER`, `END`). The `PatternMatcher` `lower` charClass was also missing `TokenType.Label`, meaning lowercase-starting labels such as `window` were never matched as labels; this has been corrected.
+
 **Formatter**
 
 - 🔧 **Fix document formatter — 6 bugs resolved** ([#66](https://github.com/msarson/Clarion-Extension/issues/66)):

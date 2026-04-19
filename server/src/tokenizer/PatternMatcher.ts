@@ -46,9 +46,9 @@ export class PatternMatcher {
             'operator': [TokenType.Operator],
             'delimiter': [TokenType.Delimiter, TokenType.DataTypeParameter, TokenType.EndStatement],
             'upper': [ // Uppercase letter - identifiers, keywords, structures
-                TokenType.Directive, TokenType.EndStatement, TokenType.Label, TokenType.Keyword,
+                TokenType.Directive, TokenType.EndStatement, TokenType.Structure, TokenType.Label, TokenType.Keyword,
                 TokenType.ClarionDocument, TokenType.ExecutionMarker,
-                TokenType.ConditionalContinuation, TokenType.Structure, TokenType.WindowElement,
+                TokenType.ConditionalContinuation, TokenType.WindowElement,
                 TokenType.Type, TokenType.TypeAnnotation, // MUST be before Function to avoid STRING(50) as function
                 TokenType.TypeReference, TokenType.Function, TokenType.FunctionArgumentParameter, TokenType.PropertyFunction,
                 TokenType.Property, TokenType.StructurePrefix, TokenType.StructureField, TokenType.Class,
@@ -57,7 +57,7 @@ export class PatternMatcher {
             ],
             'lower': [ // Lowercase letter - identifiers, keywords (case-insensitive)
                 TokenType.Keyword, TokenType.Directive, TokenType.ClarionDocument,
-                TokenType.ExecutionMarker, TokenType.ConditionalContinuation, TokenType.Structure,
+                TokenType.ExecutionMarker, TokenType.ConditionalContinuation, TokenType.Structure, TokenType.Label,
                 TokenType.Type, TokenType.TypeAnnotation, // MUST be before Function
                 TokenType.TypeReference, TokenType.Function, TokenType.FunctionArgumentParameter, TokenType.PropertyFunction,
                 TokenType.Property, TokenType.StructurePrefix, TokenType.StructureField, TokenType.Class,

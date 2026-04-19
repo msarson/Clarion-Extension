@@ -779,4 +779,81 @@ field4        long
             assert.ok(!group2ChildNames.some(n => n.includes('field1')), 'field1 should NOT be in second GROUP');
         });
     });
+
+    // Issue #68 - WINDOW structure with label at col0 should produce exactly one outline entry
+    suite('Issue #68 - WINDOW label outline', () => {
+
+        test('Window WINDOW should produce exactly one outline symbol with label', () => {
+            // Bug: Window at col0 was excluded from Label pattern because WINDOW was
+            // in the negative lookahead. Tokenizer skipped 'W', producing spurious 'indow'
+            // Variable token, and the WINDOW structure got no label → two outline entries.
+            const code = [
+                '  MEMBER(\'TestApp.clw\')',
+                'Main  PROCEDURE',
+                'Window  WINDOW(\'Caption\'),AT(,,395,224),GRAY,RESIZE',
+                '          BUTTON(\'&OK\'),AT(291,201,41,14),USE(?OkButton)',
+                '        END',
+                '',
+                '  CODE',
+                '  RETURN',
+            ].join('\n');
+
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionDocumentSymbolProvider();
+            const symbols = provider.provideDocumentSymbols(tokens, 'test://window-label.clw');
+
+            console.log('\n=== Issue #68 - Window label outline ===');
+            console.log(formatSymbolTree(symbols));
+
+            // Must not have a spurious symbol starting with 'indow' (artifact from 'W' being skipped)
+            // Note: substring search would falsely match 'Window' because it contains 'indow',
+            // so use filterSymbolsByName with start-of-string anchor '^indow'.
+            const indowSymbols = filterSymbolsByName(symbols, '^indow');
+            assert.strictEqual(indowSymbols.length, 0, 'Should NOT have a spurious symbol starting with "indow"');
+
+            // The WINDOW symbol must include the label "Window" in its name, e.g. WINDOW('Caption') (Window)
+            const windowSymbol = findSymbol(symbols, 'WINDOW');
+            assert.ok(windowSymbol, 'Should find the WINDOW symbol');
+            assert.ok(windowSymbol!.name.includes('(Window)'),
+                `WINDOW symbol should include label "(Window)", got: "${windowSymbol?.name}"`);
+        });
+
+        test('Multiple CLASS/WINDOW labels at col0 all get correct label names', () => {
+            const code = [
+                '  MEMBER(\'TestApp.clw\')',
+                'Main  PROCEDURE',
+                'Window  WINDOW(\'Caption\'),AT(,,300,200),GRAY',
+                '          BUTTON(\'OK\'),USE(?OK)',
+                '        END',
+                'ThisWindow  CLASS(WindowManager)',
+                'Init          PROCEDURE(),BYTE,PROC,DERIVED',
+                '            END',
+                '',
+                '  CODE',
+                '  RETURN',
+            ].join('\n');
+
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionDocumentSymbolProvider();
+            const symbols = provider.provideDocumentSymbols(tokens, 'test://multi-label.clw');
+
+            console.log('\n=== Multiple labels at col0 ===');
+            console.log(formatSymbolTree(symbols));
+
+            // Must not have symbols starting with 'indow' (use start-of-string to avoid matching 'Window')
+            const indowSymbols = filterSymbolsByName(symbols, '^indow');
+            assert.strictEqual(indowSymbols.length, 0, 'Should NOT have spurious symbol starting with "indow"');
+
+            // Window WINDOW: symbol must include label "(Window)"
+            const windowSym = findSymbol(symbols, 'WINDOW');
+            assert.ok(windowSym, 'Should find "WINDOW" symbol');
+            assert.ok(windowSym!.name.includes('(Window)'),
+                `WINDOW symbol should include "(Window)", got: "${windowSym?.name}"`);
+
+            const thisWindowSym = findSymbol(symbols, 'ThisWindow');
+            assert.ok(thisWindowSym, 'Should find "ThisWindow" symbol');
+        });
+    });
 });
