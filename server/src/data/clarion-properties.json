@@ -1679,6 +1679,131 @@
       "name": "PROP:Zoom",
       "description": "The ZOOM attribute (PROP:ZOOM, write-only) specifies the OLE object stretches to fill the size specified by the OLE container control's AT attribute while maintaining the object's aspect ratio.",
       "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Collate",
+      "description": "Specify the printer should collate the output: 0=off, 1=on (not supported by all printers).",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Color",
+      "description": "Color or monochrome print flag:1=mono, 2=color (not supported by all printers).",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Context",
+      "description": "Returns the handle to the printer's device context after the first PRINT statement for the report, or an information context before the first PRINT statement. This may not be set for the built-in Global PRINTER variable and is normally only read (not set).",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Copies",
+      "description": "The number of copies to print (not supported by all printers).",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Device",
+      "description": "The name of the Printer as it appears in the Windows Printer Dialog. If multiple printer names start with the same characters, the first encountered is used (not case sensitive). May be set for the PRINTER built-in variable only before the report is open.",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:DevMode",
+      "description": "The entire device mode (devmode) structure as defined in the Windows Software Development Kit. This provides direct API access to all printer properties. Consult a Windows API manual before using this.",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Driver",
+      "description": "The printer driver's filename (without the .DLL extension).",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Duplex",
+      "description": "The duplex printing mode (not supported by all printers). Equates(DUPLEX::xxx) for the standard choices are listed in the PRNPROP.CLW file.",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Extend",
+      "description": "PROPPRINT:Extend can be set to TRUE or FALSE at runtime, and references the REPORT target. This determines whether or not the runtime library generates extra information inside the WMF files, which is being used to generate the new report output formats (XML, HTML, PDF etc.).",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:FontMode",
+      "description": "The TrueType font mode. Equates (FONTMODE:xxx) for the modes are listed in the PRNPROP.CLW file.",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:FromMin",
+      "description": "When set for the built-in PRINTER variable, this forces the value into the \"From:\" page number in the PRINTERDIALOG. Specify -1 to disable ranges",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:FromPage",
+      "description": "The page number on which to start printing. Specify -1 to print from the start.",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Paper",
+      "description": "Standard paper size. Equates (PAPER:xxx) for the standard sizes are listed in the PRNPROP.CLW file. This defines the dimensions of the .WMF files that are created by the Clarion runtime library's \"print engine.\"",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:PaperBin",
+      "description": "The paper source. Equates (PAPERBIN:xxx) for the standard locations are listed in the PRNPROP.CLW file.",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:PaperHeight",
+      "description": "The paper height in tenths of millimeters (mm/10). There are 25.4 mm per inch. Used when setting PROPPRINT:Paper to PAPER:Custom (not normally used for laser printers).",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:PaperWidth",
+      "description": "The paper width in tenths of millimeters (mm/10).There are 25.4 mm per inch. Used when setting PROPPRINT:Paper to PAPER:Custom (not normally used for laser printers).",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Percent",
+      "description": "The scaling factor used to enlarge or reduce the printed output, in percent (not supported by all printers). This defaults to 100 percent. Set this value to print at the desired percentage (if your printer and driver support scaling). For example, set to 200 to print at double size, or 50 to print at half size.",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Port",
+      "description": "Output port name (LPT1, COM1, etc.).",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:PrintToFile",
+      "description": "The Print to File flag: 0=off, 1=on.",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:PrintToName",
+      "description": "The output filename when printing to a file.",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Resolution",
+      "description": "The print resolution in Dots Per Inch (DPI). Equates (RESOLUTION:xxx)for the standard resolutions are listed in the PRNPROP.CLW file. Must be issued before the report is open.",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:SupportCollate",
+      "description": "A READ-ONLY property that returns TRUE if the current printer supports collating of copies.",
+      "readOnly": true
+    },
+    {
+      "name": "PROPPRINT:ToMax",
+      "description": "When set for the built-in PRINTER variable, this forces the value into the \"To:\" page number in the PRINTERDIALOG. Specify -1 to disable ranges",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:ToPage",
+      "description": "The page number on which to end printing. Specify -1 to print to end.",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Yresolution",
+      "description": "Vertical print resolution in Dots Per Inch (DPI). Equates (RESOLUTION:xxx)for the standard resolutions are listed in the PRNPROP.CLW file.",
+      "readOnly": false
     }
   ]
 }

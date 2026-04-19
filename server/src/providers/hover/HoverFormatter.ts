@@ -800,16 +800,20 @@ export class HoverFormatter {
 
     /** Formats hover for a PROP: runtime property equate. */
     public formatPropEquate(entry: PropEntry): Hover {
+        const isPropPrint = entry.name.toUpperCase().startsWith('PROPPRINT:');
         let content = `**${entry.name}**\n\n`;
-        if (entry.readOnly) {
-            content += `_Read-only runtime property_\n\n`;
+        if (isPropPrint) {
+            content += entry.readOnly ? `_Read-only printer control property_\n\n` : `_Printer control property_\n\n`;
         } else {
-            content += `_Runtime property_\n\n`;
+            content += entry.readOnly ? `_Read-only runtime property_\n\n` : `_Runtime property_\n\n`;
         }
         if (entry.description) {
             content += `${entry.description}\n\n`;
         }
-        content += `**Usage:** \`?Control{${entry.name}}\``;
+        const usageExample = isPropPrint
+            ? `PRINTER{${entry.name}}`
+            : `?Control{${entry.name}}`;
+        content += `**Usage:** \`${usageExample}\``;
         return {
             contents: { kind: 'markdown', value: content.trim() }
         };
