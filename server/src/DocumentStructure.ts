@@ -346,6 +346,12 @@ export class DocumentStructure {
         // Close any procedures that are still open at the end of the file
         this.closeRemainingProcedures();
         this.assignMaxLabelLengths();
+
+        // Rebuild the parentIndex now that finishesAt and subType are set by process().
+        // The constructor built it before process() ran, so finishesAt was undefined and
+        // isStructureToken() had no subType data — the index was effectively empty.
+        this.parentIndex.clear();
+        this.buildParentIndex();
     }
     
     private handleExecutionMarker(token: Token): void {

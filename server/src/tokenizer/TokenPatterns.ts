@@ -61,7 +61,7 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.ClarionDocument]: /\b(?:PROGRAM|MEMBER)\b/i,
     // ✅ ELSE, ELSIF, OF, OROF should not match after : or . (though unlikely, be safe)
     [TokenType.ConditionalContinuation]: /(?<![:\w.])\b(?:ELSE|ELSIF|OROF|OF)\b/i,  // ✅ OROF must come before OF to match correctly
-    [TokenType.Keyword]: /(?<![:\w.])\b(?:RETURN|THEN|UNTIL|WHILE|EXIT|NEW|PROCEDURE|FUNCTION|ROUTINE|PROC|BREAK|KEY)\b/i, // ✅ Added negative lookbehind and FUNCTION
+    [TokenType.Keyword]: /(?<![:\w.])\b(?:RETURN|THEN|UNTIL|WHILE|EXIT|NEW|PROCEDURE|FUNCTION|ROUTINE|PROC|BREAK|CYCLE|KEY)\b/i, // ✅ Added negative lookbehind and FUNCTION
     [TokenType.PictureFormat]: /(@N[^\s,]*|@[Ee][^\s,]*|@S\d+|@D\d{1,2}[.\-_'`<>]?\d{0,2}B?|@T\d{1,2}[.\-_'`]?[B]?|@[Pp][^Pp\n]+[Pp]B?|@[Kk][^Kk\n]+[Kk]B?)/i,
     [TokenType.ExecutionMarker]: /\b(?:CODE|DATA)\b/i,
     [TokenType.Type]: /\b(?:BYTE|SHORT|USHORT|LONG|ULONG|REAL|SREAL|DECIMAL|PDECIMAL|STRING|CSTRING|PSTRING|DATE|TIME|ASTRING|ANY|BSTRING|MEMO|SIGNED|UNSIGNED)(?=\(|\s|,|$)/i,
@@ -70,13 +70,13 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     // ✅ Structure is handled specially in PatternMatcher - see STRUCTURE_PATTERNS
     // DO NOT combine patterns here as it breaks negative lookbehinds!
     [TokenType.WindowElement]: /\b(?:BUTTON|ENTRY|TEXT|LIST|COMBO|CHECK|RADIO|IMAGE|LINE|BOX|ELLIPSE|PANEL|PROGRESS|REGION|PROMPT|SPIN|ITEM)\b|STRING\s*\(@[^)]*\)/i,
-    [TokenType.Attribute]: /\b(?:ALONE|AUTO|BINARY|BINDABLE|CENTERED|COM|CREATE|CURSOR|DEFAULT|DERIVED|DLL|DOUBLE|DROP|DRIVER|DUP|EXTERNAL|FILL|FILTER|FIRST|FLAT|HLP|ICON|IMM|IMPLEMENTS|INS|MASK|MAX|MDI|MODAL|MODULE|MSG|NAME|NOBAR|NOCASE|NOFRAME|NOMERGE|NOSHEET|OEM|OVER|OVR|OWNER|PAGE|PASCAL|PRE|PRIMARY|PRIVATE|PROTECTED|RAW|RECLAIM|REQ|RESIZE|RIGHT|SCROLL|STATUS|STATIC|STD|SYSTEM|THREAD|TIMER|TIP|TIMES|TRN|TYPE|UPR|USE|VBX|VCR|VIRTUAL|WALLPAPER|REF)\b/i,
+    [TokenType.Attribute]: /\b(?:ALONE|AT|AUTO|BINARY|BINDABLE|CENTERED|COM|CREATE|CURSOR|DEFAULT|DERIVED|DLL|DOUBLE|DROP|DRIVER|DUP|EXTERNAL|FILL|FILTER|FIRST|FLAT|HLP|ICON|IMM|IMPLEMENTS|INS|MASK|MAX|MDI|MODAL|MODULE|MSG|NAME|NOBAR|NOCASE|NOFRAME|NOMERGE|NOSHEET|OEM|OVER|OVR|OWNER|PAGE|PASCAL|PRE|PRIMARY|PRIVATE|PROTECTED|RAW|RECLAIM|REQ|RESIZE|RIGHT|SCROLL|STATUS|STATIC|STD|SYSTEM|THREAD|TIMER|TIP|TIMES|TRN|TYPE|UPR|USE|VBX|VCR|VIRTUAL|WALLPAPER|REF)\b/i,
     [TokenType.Constant]: /\b(?:TRUE|FALSE|NULL|LEVEL:BENIGN|LEVEL:NOTIFY|LEVEL:FATAL|ICON:Asterisk|ICON:Exclamation|ICON:Hand|ICON:Question|BUTTON:YES|BUTTON:NO|BUTTON:OK|BUTTON:CANCEL|CENTER|LEFT|RIGHT)\b/i,
     [TokenType.Property]: /\b(?:color|width|height|top|left|right|bottom|text|visible|enabled|font|size|style|value|caption)\b/i,
     [TokenType.Number]: /\b[0-9]+(\.[0-9]+)?\b/i,
     [TokenType.Operator]: /[\+\-\*\/\=\>\<\&\|\~]/,
     [TokenType.Delimiter]: /[\(\)\[\]\{\}\,\:\;]/,
-    [TokenType.Label]: /^(?!(?:COMPILE|OMIT|EMBED|SECTION|ENDSECTION|INCLUDE|MODULE|MAP|CLASS|FILE|GROUP|QUEUE|VIEW|WINDOW|REPORT|INTERFACE|RECORD|PROGRAM|MEMBER|END)(?![:\w]))[A-Za-z_][A-Za-z0-9_:]*/i,  // Starts at column 0, can include colons. Excludes bare keywords but NOT colon-qualified names like FILE:Queue
+    [TokenType.Label]: /^(?!(?:COMPILE|OMIT|EMBED|SECTION|ENDSECTION|INCLUDE|PROGRAM|MEMBER|END)(?![:\w]))[A-Za-z_][A-Za-z0-9_:]*/i,  // Starts at column 0, can include colons. Excludes truly reserved words. Structure keywords (CLASS, FILE, WINDOW, etc.) are valid Clarion labels per language spec.
     [TokenType.Variable]: /\b(?!(?:IF|LOOP|CASE|ACCEPT|EXECUTE|BEGIN|FILE|QUEUE|GROUP|RECORD|CLASS|WINDOW|REPORT|MODULE|MAP|VIEW|INTERFACE|END)\b)[A-Za-z_][A-Za-z0-9_]*\b/i,  // Exclude structure keywords to allow them to match Structure type first
     [TokenType.ImplicitVariable]: /\b[A-Za-z_][A-Za-z0-9_]*[$#"]/i,  // ✅ Variables ending with implicit type suffixes
     [TokenType.Function]: /\b[A-Za-z_][A-Za-z0-9_]*(?=\()/i,
@@ -104,9 +104,9 @@ export const orderedTokenTypes: TokenType[] = [
     TokenType.StructurePrefix, TokenType.StructureField,
     // ✅ Add WindowElement after Structure elements but before other types
     TokenType.WindowElement,
-    TokenType.ConditionalContinuation, TokenType.TypeReference, TokenType.Function,  // ✅ TypeReference (LIKE) before Function
+    TokenType.ConditionalContinuation, TokenType.TypeReference, TokenType.Attribute, TokenType.Function,  // ✅ Attribute before Function so AT(...) is Attribute not Function
     TokenType.FunctionArgumentParameter, TokenType.TypeAnnotation, TokenType.PictureFormat, TokenType.Number,
     TokenType.EndStatement,  // ✅ MOVED AFTER Number to avoid matching dots in decimals
-    TokenType.Operator, TokenType.Class, TokenType.Attribute, TokenType.Constant, TokenType.Variable,
+    TokenType.Operator, TokenType.Class, TokenType.Constant, TokenType.Variable,
     TokenType.ImplicitVariable, TokenType.Delimiter, TokenType.Unknown
 ];

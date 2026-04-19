@@ -16,9 +16,11 @@ import {
     TreeViewExpansionEvent,
     Disposable
 } from 'vscode';
+import * as path from 'path';
 import { DocumentSymbol, SymbolKind as LSPSymbolKind } from 'vscode-languageserver-types';
 import LoggerManager from '../utils/LoggerManager';
 import { SymbolElementRegistry } from '../utils/SymbolElementRegistry';
+import { globalSettings } from '../globals';
 const logger = LoggerManager.getLogger("StructureViewProvider");
 logger.setLevel("error"); // Enable debug logging to troubleshoot follow cursor
 
@@ -727,6 +729,13 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         const context = element ? `child of ${element.name}` : 'root';
         
         if (!this.activeEditor) return [];
+
+        // Skip LSP call entirely for non-Clarion documents (e.g. output channels, settings)
+        const fileExt = path.extname(this.activeEditor.document.uri.fsPath).toLowerCase();
+        const clarionExtensions = globalSettings.fileSearchExtensions;
+        if (!clarionExtensions.some(ext => ext.toLowerCase() === fileExt)) {
+            return [];
+        }
 
         if (element) {
             this.registry.trackSymbol(element);

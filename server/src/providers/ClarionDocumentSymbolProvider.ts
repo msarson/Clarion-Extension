@@ -1947,7 +1947,8 @@ export class ClarionDocumentSymbolProvider {
                     // Add type components to fullType
                     if (t.type === TokenType.Type || 
                         (t.type === TokenType.Keyword && !isAttributeKeyword(t.value)) ||
-                        t.type === TokenType.Number) {
+                        t.type === TokenType.Number ||
+                        t.type === TokenType.ReferenceVariable) {
                         fullType += t.value;
                         logger.info(`     - Adding to fullType: "${t.value}"`);
                     } else if (t.type === TokenType.Delimiter && (t.value === '(' || t.value === ')')) {

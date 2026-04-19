@@ -102,13 +102,14 @@ export class MemberLocatorService {
     /**
      * Resolves the type of a named variable.
      * Search order: current file → MEMBER parent → INCLUDE chain.
-     * Returns { typeName, isClass } or null if not found/unresolvable.
+     * Returns { typeName, isClass, isReference } or null if not found/unresolvable.
+     * isReference is true when the variable was declared as &TypeName (Clarion reference).
      */
     async resolveVariableType(
         varName: string,
         tokens: Token[],
         document: TextDocument
-    ): Promise<{ typeName: string; isClass: boolean } | null> {
+    ): Promise<{ typeName: string; isClass: boolean; isReference: boolean } | null> {
         const found = await this.findVariableTokenCrossFile(varName, tokens, document);
         if (!found) return null;
         return this.extractTypeFromToken(found.token, found.tokens);
@@ -116,7 +117,7 @@ export class MemberLocatorService {
 
     /**
      * Finds a named member inside a class.
-     * Search order: document INCLUDE chain → ClassDefinitionIndexer → parent chain.
+     * Search order: current document → INCLUDE chain → ClassDefinitionIndexer → parent chain.
      */
     async findMemberInClass(
         className: string,
@@ -126,6 +127,10 @@ export class MemberLocatorService {
     ): Promise<MemberInfo | null> {
         const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         const tokens = this.tokenCache.getTokensByUri(document.uri) ?? this.tokenCache.getTokens(document);
+
+        // 0. Current document tokens (class defined in the same file)
+        const fromCurrentDoc = await this.scanBodyForMember(docPath, className, memberName, paramCount, 'CLASS');
+        if (fromCurrentDoc) return fromCurrentDoc;
 
         // 1. Walk INCLUDE chain reachable from this document
         const fromInclude = await this.findInIncludeChain(
@@ -150,7 +155,7 @@ export class MemberLocatorService {
     }
 
     /**
-     * Combined convenience: resolves variable type then finds member in that class.
+     * Combined convenience: resolves variable type then finds member in that class or interface.
      * This is the primary entry point for hover, F12, and Ctrl+F12 dot-access lookups.
      */
     async resolveDotAccess(
@@ -163,6 +168,11 @@ export class MemberLocatorService {
         const typeInfo = await this.resolveVariableType(objectName, tokens, document);
         if (!typeInfo) return null;
         logger.info(`resolveDotAccess: "${objectName}" → type "${typeInfo.typeName}", looking for "${memberName}"`);
+        // Try interface lookup first for reference variables (&TypeName), then fall back to class
+        if (typeInfo.isReference) {
+            const ifaceResult = await this.findMemberInInterface(typeInfo.typeName, memberName, document, paramCount);
+            if (ifaceResult) return ifaceResult;
+        }
         return this.findMemberInClass(typeInfo.typeName, memberName, document, paramCount);
     }
 
@@ -347,6 +357,113 @@ export class MemberLocatorService {
         return false;
     }
 
+    /**
+     * Finds a named method inside an INTERFACE body using token data.
+     * Interface methods are Procedure tokens with subType InterfaceMethod.
+     * Falls back to null (caller then tries disk scan or include chain).
+     */
+    private findInterfaceMemberFromTokens(
+        tokens: Token[],
+        doc: TextDocument,
+        filePath: string,
+        ifaceName: string,
+        methodName: string,
+        paramCount: number | undefined
+    ): MemberInfo | null {
+        const ifaceToken = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.subType === TokenType.Interface &&
+            t.label?.toLowerCase() === ifaceName.toLowerCase() &&
+            t.finishesAt !== undefined
+        );
+        if (!ifaceToken || ifaceToken.finishesAt === undefined) return null;
+        const ifaceEnd = ifaceToken.finishesAt;
+
+        const docLines = doc.getText().split(/\r?\n/);
+        const candidates: OverloadCandidate[] = [];
+
+        for (const token of tokens) {
+            if (token.line <= ifaceToken.line || token.line >= ifaceEnd) continue;
+            if (token.type !== TokenType.Procedure) continue;
+            if (token.subType !== TokenType.InterfaceMethod) continue;
+            if (token.label?.toLowerCase() !== methodName.toLowerCase()) continue;
+
+            const memberLine = docLines[token.line] ?? '';
+            const declParamCount = this.countParamsInDecl(memberLine);
+            candidates.push({ type: 'PROCEDURE', line: token.line, paramCount: declParamCount, signature: memberLine.trim() });
+        }
+
+        const best = selectBestMemberOverload(candidates, paramCount);
+        if (!best) return null;
+        const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
+        return { type: best.type, className: ifaceName, line: best.line, file: fileUri, signature: best.signature, isInterface: true };
+    }
+
+    /** Walks the INCLUDE chain searching for an INTERFACE method declaration. */
+    private async findInterfaceInIncludeChain(
+        ifaceName: string,
+        methodName: string,
+        tokens: Token[],
+        fromDir: string,
+        paramCount: number | undefined,
+        visited: Set<string>
+    ): Promise<MemberInfo | null> {
+        const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
+        for (const inc of includeTokens) {
+            const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
+            if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
+            visited.add(resolvedPath.toLowerCase());
+
+            const data = await this.loadDocument(resolvedPath);
+            if (data) {
+                const result = this.findInterfaceMemberFromTokens(data.tokens, data.doc, resolvedPath, ifaceName, methodName, paramCount);
+                if (result) return result;
+
+                const nested = await this.findInterfaceInIncludeChain(
+                    ifaceName, methodName, data.tokens, path.dirname(resolvedPath), paramCount, visited
+                );
+                if (nested) return nested;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Finds a named method inside an INTERFACE.
+     * Search order: current document INCLUDE chain → StructureDeclarationIndexer.
+     */
+    async findMemberInInterface(
+        ifaceName: string,
+        methodName: string,
+        document: TextDocument,
+        paramCount?: number
+    ): Promise<MemberInfo | null> {
+        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const tokens = this.tokenCache.getTokensByUri(document.uri) ?? this.tokenCache.getTokens(document);
+
+        // 1. Search current document tokens
+        const localResult = this.findInterfaceMemberFromTokens(tokens, document, docPath, ifaceName, methodName, paramCount);
+        if (localResult) return localResult;
+
+        // 2. Walk INCLUDE chain reachable from this document
+        const fromInclude = await this.findInterfaceInIncludeChain(
+            ifaceName, methodName, tokens, path.dirname(docPath), paramCount,
+            new Set([docPath.toLowerCase()])
+        );
+        if (fromInclude) return fromInclude;
+
+        // 3. StructureDeclarationIndexer (covers libsrc / accessory paths)
+        await this.ensureIndexBuilt();
+        const infos = this.sdi.find(ifaceName);
+        if (infos.length > 0) {
+            const info = infos.find(d => d.structureType === 'INTERFACE') ?? infos[0];
+            const result = await this.scanBodyForMember(info.filePath, ifaceName, methodName, paramCount, 'INTERFACE');
+            if (result) return result;
+        }
+
+        return null;
+    }
+
     /** Walks the INCLUDE chain of a document searching for className.memberName. */
     private async findInIncludeChain(
         className: string,
@@ -416,11 +533,16 @@ export class MemberLocatorService {
         className: string,
         memberName: string,
         paramCount: number | undefined,
-        structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS'
+        structureType: 'CLASS' | 'QUEUE' | 'GROUP' | 'INTERFACE' = 'CLASS'
     ): Promise<MemberInfo | null> {
         const data = await this.loadDocument(filePath);
         if (data) {
-            const result = this.findMemberFromTokens(data.tokens, data.doc, filePath, className, memberName, paramCount, structureType);
+            let result: MemberInfo | null = null;
+            if (structureType === 'INTERFACE') {
+                result = this.findInterfaceMemberFromTokens(data.tokens, data.doc, filePath, className, memberName, paramCount);
+            } else {
+                result = this.findMemberFromTokens(data.tokens, data.doc, filePath, className, memberName, paramCount, structureType);
+            }
             if (result) return result;
         }
         // Fallback to disk-based scan — prefer live editor text if file is open
@@ -572,29 +694,35 @@ export class MemberLocatorService {
     }
 
     /**
-     * Extracts { typeName, isClass } from a token using the same logic as
-     * StructureFieldResolver.resolveVariableClassType.
+     * Extracts { typeName, isClass, isReference } from a token.
+     * isReference is true when the variable was declared as &TypeName.
+     * isClass is true for CLASS/INTERFACE and bare user-defined type names.
      */
-    private extractTypeFromToken(token: Token, tokens: Token[]): { typeName: string; isClass: boolean } | null {
+    private extractTypeFromToken(token: Token, tokens: Token[]): { typeName: string; isClass: boolean; isReference: boolean } | null {
         const typeStr = SymbolFinderService.extractTypeInfo(token, tokens);
         if (!typeStr || typeStr === 'UNKNOWN') return null;
+
+        // Check whether the next token on the declaration line is a reference (&TypeName)
+        const lineTokens = tokens.filter(t => t.line === token.line);
+        const idx = lineTokens.indexOf(token);
+        const isReference = idx + 1 < lineTokens.length && lineTokens[idx + 1].type === TokenType.ReferenceVariable;
 
         // CLASS(TypeName), QUEUE(TypeName), GROUP(TypeName), FILE(TypeName)
         const structMatch = typeStr.match(/^(CLASS|QUEUE|GROUP|FILE)\((\w+)\)$/i);
         if (structMatch) {
-            return { typeName: structMatch[2], isClass: structMatch[1].toUpperCase() === 'CLASS' };
+            return { typeName: structMatch[2], isClass: structMatch[1].toUpperCase() === 'CLASS', isReference };
         }
 
         // LIKE(TypeName)
         const likeMatch = typeStr.match(/^LIKE\((\w+)\)$/i);
-        if (likeMatch) return { typeName: likeMatch[1], isClass: false };
+        if (likeMatch) return { typeName: likeMatch[1], isClass: false, isReference };
 
         // Bare structure keywords — can't resolve members
         const bareStructures = new Set(['CLASS', 'QUEUE', 'GROUP', 'FILE', 'RECORD', 'WINDOW', 'VIEW', 'REPORT', 'LIKE', 'PROCEDURE']);
         if (bareStructures.has(typeStr.toUpperCase())) return null;
 
-        // Plain user-defined type name (assumed to be a CLASS for member access)
-        return { typeName: typeStr, isClass: true };
+        // Plain user-defined type name (assumed to be a CLASS/INTERFACE for member access)
+        return { typeName: typeStr, isClass: true, isReference };
     }
 
     /** Resolves a filename using SolutionManager redirection, then relative path fallback. */

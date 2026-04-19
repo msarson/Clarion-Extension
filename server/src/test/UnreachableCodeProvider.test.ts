@@ -5,11 +5,14 @@ import { Range } from 'vscode-languageserver/node';
 
 suite('UnreachableCodeProvider Tests', () => {
     
+    let docVersion = 0;
+
     /**
-     * Helper to create a TextDocument from Clarion code
+     * Helper to create a TextDocument from Clarion code.
+     * Uses a unique version per call so the TokenCache always re-tokenizes.
      */
     function createDocument(code: string): TextDocument {
-        return TextDocument.create('file:///test.clw', 'clarion', 1, code);
+        return TextDocument.create('file:///test.clw', 'clarion', ++docVersion, code);
     }
 
     /**
@@ -263,6 +266,44 @@ MyRoutine ROUTINE
         
         // Line 6 (MESSAGE in ROUTINE) should NOT be marked unreachable
         assert.ok(!isLineUnreachable(ranges, 6), 'ROUTINE code should be reachable even after RETURN');
+    });
+
+    test('Issue #67: Multiple sequential IF..RETURN..END blocks should not flag code after them as unreachable', () => {
+        // Exact pattern from issue #67 report (wrapped in a procedure)
+        const code = `CheckWebView2Runtime PROCEDURE(LONG hWnd)
+  CODE
+  Trace('CheckWebView2Runtime - Entry, hWnd=[' & hWnd & ']')
+
+  Trace('CheckWebView2Runtime - About to call LoadWebView2Libs()')
+  IF LoadWebView2Libs() <> LEVEL:Benign
+      Trace('CheckWebView2Runtime - LoadWebView2Libs() failed')
+      RETURN -1
+  END
+  Trace('CheckWebView2Runtime - LoadWebView2Libs() succeeded')
+
+  Trace('CheckWebView2Runtime - Checking function pointers')
+  IF fp_CreateEnv = 0 OR fp_CoInitializeEx = 0
+      Trace('CheckWebView2Runtime - Function pointers are NULL, freeing libs')
+      FreeWebView2Libs()
+      RETURN -1
+  END
+
+  Trace('CheckWebView2Runtime - About to call CoInitializeEx')
+`;
+        const doc = createDocument(code);
+        const ranges = UnreachableCodeProvider.provideUnreachableRanges(doc);
+
+        console.log('\n=== Issue #67: Multiple sequential IF..RETURN..END ===');
+        ranges.forEach(r => console.log(`  Unreachable line ${r.start.line}: "${code.split('\n')[r.start.line].trim()}"`));
+
+        // Line 19 (final Trace) should NOT be unreachable
+        const finalTraceLine = code.split('\n').findIndex(l => l.includes('About to call CoInitializeEx'));
+        assert.ok(finalTraceLine > 0, 'Final Trace line should exist in code');
+        assert.ok(!isLineUnreachable(ranges, finalTraceLine), `Line ${finalTraceLine} (final Trace after second IF..END) should be reachable`);
+
+        // The Trace after the first IF..END should also be reachable
+        const firstSuccessLine = code.split('\n').findIndex(l => l.includes('succeeded'));
+        assert.ok(!isLineUnreachable(ranges, firstSuccessLine), `Line ${firstSuccessLine} (Trace after first IF..END) should be reachable`);
     });
 
     test('Empty document should return no unreachable ranges', () => {

@@ -265,6 +265,40 @@ suite('MemberLocatorService', () => {
             assert.ok(result!.line >= 0, 'Line should be non-negative');
             assert.ok(result!.file.startsWith('file:///'), 'file should be a URI');
         });
+
+        test('finds member of a CLASS defined in the same document (no INCLUDE)', async () => {
+            const src = [
+                'LocalClass  CLASS',
+                '  DoSomething  PROCEDURE(LONG pVal)',
+                '  Count        LONG',
+                '             END',
+                '',
+                'MyProc  PROCEDURE',
+                'obj  LocalClass',
+                'CODE',
+                '  obj.DoSomething(1)',
+            ].join('\n');
+            const doc = makeDoc('fmic9.clw', src);
+            const result = await service.findMemberInClass('LocalClass', 'DoSomething', doc);
+
+            assert.ok(result, 'Should find DoSomething in same-document CLASS');
+            assert.strictEqual(result!.className, 'LocalClass');
+            assert.ok(result!.type.toUpperCase().includes('PROCEDURE'));
+        });
+
+        test('finds property of a CLASS defined in the same document', async () => {
+            const src = [
+                'LocalClass  CLASS',
+                '  DoSomething  PROCEDURE(LONG pVal)',
+                '  Count        LONG',
+                '             END',
+            ].join('\n');
+            const doc = makeDoc('fmic10.clw', src);
+            const result = await service.findMemberInClass('LocalClass', 'Count', doc);
+
+            assert.ok(result, 'Should find Count property in same-document CLASS');
+            assert.ok(result!.type.toUpperCase().includes('LONG'));
+        });
     });
 
     // =========================================================================

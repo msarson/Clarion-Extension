@@ -30,17 +30,21 @@ Full language support for Clarion code, basic support for templates.
 Get instant parameter hints and documentation - works immediately, no solution needed!
 - 148 built-in functions with parameter hints
 - Method overload support — all overloads shown with full signatures
-- Hover documentation for all symbols
+- Hover documentation for all symbols — procedures, classes, variables, attributes, built-ins
+- Hover for **PROP:/PROPPRINT:** runtime properties — descriptions from Clarion 11.1 docs
+- Hover for **EVENT:** equates — category, description, and usage example
 - Signature help for class methods including inherited members
 - **[Learn more about Signature Help →](docs/features/signature-help.md)**
 
-### 🤖 **IntelliSense — Dot-Triggered Member Completion**
-Type `SELF.` or `MyVar.` for instant context-aware member suggestions.
+### 🤖 **IntelliSense — Smart Completions**
+Type `SELF.` or `MyVar.` for context-aware member suggestions. Type `PROP:`, `PROPPRINT:`, or `EVENT:` for documented equate completions.
 - Resolves `SELF.`, `PARENT.`, `MyVar.`, or `ClassName.` to the correct class
 - Full inheritance walk — shows methods and properties from parent classes
 - Access control aware — `PRIVATE` / `PROTECTED` / `PUBLIC` scoping enforced
 - Each overload shown as a distinct entry with parameter signatures
 - Chained expressions (`SELF.Order.`) resolve intermediate types
+- **PROP:/PROPPRINT:** completions with description and read-only badge
+- **EVENT:** completions with category label (Field-Specific / Field-Independent / DDE)
 - **[Learn more about Navigation →](docs/features/navigation.md)**
 
 ### ✏️ **Code Snippets**
@@ -138,7 +142,36 @@ Productivity features to write code faster.
 
 ## 🆕 What's New
 
-### Latest: v0.9.2 (2026-04-18) — Navigation & Bug Fixes
+### Latest: v0.9.3 (2026-04-19) — Documentation, Events & Editor Power-Ups
+
+#### 📚 PROP: / PROPPRINT: Hover Documentation
+Hover over any runtime property equate (`PROP:Enabled`, `PROP:Color`, `PROPPRINT:Device`, …) to see an instant description, read-only badge, and usage example. Covers **336 PROP:** entries and **25 PROPPRINT:** printer properties, sourced from the Clarion 11.1 Language Reference.
+
+#### ⚡ EVENT: Hover & Autocomplete
+Type `EVENT:` (or any partial name) for a full autocomplete list of all **63 EVENT:** equates — field-specific, field-independent, DDE, and user-defined. Hovering over an event shows its category and description. Includes `EVENT:User` (the user-defined event base).
+
+#### 🔢 CodeLens — Inline Reference Counts
+A `N references` lens now appears above every procedure and CLASS declaration, making dead code immediately visible. Clicking the lens opens the full References panel.
+
+#### 📐 Expand / Shrink Selection (`Shift+Alt+→` / `Shift+Alt+←`)
+Progressively widen the selection through Clarion's scope hierarchy: token → line → innermost structure → parent structure → whole document. Shrink back through the same chain.
+
+#### 🔗 Flatten Continuation Lines (`Ctrl+.`)
+Joins `|`-continued lines into a single line, trims whitespace from continuations, and collapses adjacent string literals (`'abc' & 'def'` → `'abcdef'`). Pipe characters inside string literals are never misread as continuations.
+
+#### 🐛 Document Formatter — 6 Bug Fixes
+Procedures now detected correctly; single-line structures indented properly; EOL style preserved; dot-method labels no longer drop the dot; CLASS/GROUP/QUEUE inside local data sections indent correctly; method keywords align to a shared column.
+
+#### ⚠️ New Diagnostics
+- Reserved keywords used as labels are now flagged as errors
+- Warn on discarded plain MAP/MODULE procedure return values (#51)
+- Warn on BREAK/CYCLE outside LOOP or ACCEPT (#64)
+
+**[See full changelog →](CHANGELOG.md)**
+
+---
+
+### Recent: v0.9.2 (2026-04-18) — Navigation & Bug Fixes
 
 #### 🔗 Multi-Level Chain Navigation
 `variable.property.method` chains now resolve all the way through. Hover, F12, and Ctrl+F12 on `thisStartup.Settings.PutGlobalSetting(...)` correctly walk from `thisStartup` → its class → `.Settings` property type → the method on that type.
@@ -191,30 +224,6 @@ Pressing on a symbol highlights all its occurrences in the current file.
 
 #### 🔍 Workspace Symbol Search (Ctrl+T)
 Search for any procedure, class, or label across all files in the solution.
-
-**[See full changelog →](CHANGELOG.md)**
-
----
-
-### Recent: v0.8.6 (2026-01-12)
-
-#### 🚀 Cross-Project Navigation Performance
-- **50-70% faster Ctrl+F12** - CrossFileCache reduces subsequent navigations to <100ms
-- First navigation: 2-4 seconds (reads + caches file)
-- Subsequent navigations: **<100ms** (cache hits)
-
-#### 🎯 Routine Support Enhancements
-- **Full namespace prefix support** - `DO DumpQue::SaveQState` now works with hover and Ctrl+F12
-- New RoutineHoverResolver with code preview
-- Added `DO_ROUTINE` and `ROUTINE_LABEL` patterns
-
-#### 🏗️ Solution View Enhancements
-- **Dependency-aware build order** - Projects build in correct dependency order
-- **Application sort toggle** - Switch between Solution Order and Build Order
-- **Build progress indicators** - Spinning icon, build counter (e.g., "Building 2/5")
-- **Batch UpperPark commands** - Import/Export/Show All Differences
-- **New context menu commands** - Build Project, Generate + Build, Copy Path, Open in Clarion IDE
-- **Generate All/Build All** - Build multiple applications in dependency order
 
 **[See full changelog →](CHANGELOG.md)**
 

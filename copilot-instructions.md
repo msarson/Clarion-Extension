@@ -186,7 +186,9 @@ Key features:
 - **DocumentStructure.ts** - Build parent/child relationships, scope hierarchy
 - **TokenCache.ts** - In-memory cache of tokenized documents (singleton)
 
-> ⚠️ **Before writing any provider or utility code:** read `docs/tokenizer-reference.md` (or invoke the `clarion-tokens` skill). It documents the full `Token` interface, `TokenType` enum, `DocumentStructure` indexes, `TokenCache` API, common lookup patterns, and anti-patterns. Most symbol search, navigation, and structure inspection needs are already solved by the token tree — avoid re-parsing source text.
+> ⚠️ **Before writing any provider or utility code:** invoke the **`clarion-tokens` skill** (or read `docs/tokenizer-reference.md`). It documents the full `Token` interface, `TokenType` enum, `DocumentStructure` indexes, `TokenCache` API, common lookup patterns, and anti-patterns. Most symbol search, navigation, and structure inspection needs are already solved by the token tree — avoid re-parsing source text.
+
+> 📖 **When you need Clarion language reference** (attribute syntax, built-in functions, PROP: properties, runtime behaviour): invoke the **`clarion-docs` skill** (provides access to the full Clarion 11.1 help documentation, ~2000 topics). Use `clarion_search_docs` to find topics and `clarion_read_doc` to read them. This is the authoritative source — prefer it over guessing.
 - **serverSettings.ts** - Server configuration (paths, macros, version info)
 - **serverState.ts** - Server-wide state management
 
@@ -288,7 +290,7 @@ Key features:
 - \onImplementation\ - Handle Ctrl+F12 (goto implementation)
 - \onHover\ - Show hover tooltip
 - \onSignatureHelp\ - Show parameter hints
-- \onCompletion\ (not implemented yet)
+- \onCompletion\ - Autocomplete (PROP:/PROPPRINT: completions via CompletionProvider)
 - \publishDiagnostics\ - Send errors/warnings to client
 
 **Custom Requests (if any):**
@@ -884,5 +886,5 @@ For questions about specific components, refer to:
 - Source code comments for implementation details
 - docs/ folder for user-facing feature documentation
 
-Last Updated: 2026-01-12
-Analysis Version: Clarion Extension v0.8.7
+Last Updated: 2026-04-19
+Analysis Version: Clarion Extension v0.9.3

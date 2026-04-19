@@ -1,4 +1,4 @@
-import { commands, Uri, window as vscodeWindow, workspace, Range, TreeView, Disposable } from 'vscode';
+import { commands, Uri, Position, Location, Range, window as vscodeWindow, workspace, TreeView, Disposable } from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { SolutionCache } from '../SolutionCache';
@@ -89,6 +89,26 @@ export function registerNavigationCommands(
                 }
             }
         }),
+
+        // Show pre-computed references in the peek view — used by CodeLens reference counts.
+        // The server resolves the lens and passes the LSP Location[] array here so we can
+        // convert to vscode types before calling editor.action.showReferences.
+        commands.registerCommand('clarion.showReferences',
+            async (uriStr: string, position: { line: number; character: number }, lspLocations: { uri: string; range: { start: { line: number; character: number }; end: { line: number; character: number } } }[]) => {
+                const uri = Uri.parse(uriStr);
+                const pos = new Position(position.line, position.character);
+                const locations = (lspLocations ?? []).map(loc =>
+                    new Location(
+                        Uri.parse(loc.uri),
+                        new Range(
+                            new Position(loc.range.start.line, loc.range.start.character),
+                            new Position(loc.range.end.line, loc.range.end.character)
+                        )
+                    )
+                );
+                await commands.executeCommand('editor.action.showReferences', uri, pos, locations);
+            }
+        ),
 
         // Register the openFile command
         commands.registerCommand('clarion.openFile', async (filePath: string | Uri) => {

@@ -197,4 +197,57 @@ TestProc PROCEDURE()
         assert.strictEqual(caseKeywords.length, 0, 'myObject.case should not be CASE keyword');
         assert.strictEqual(endKeywords.length, 0, 'myObject.end should not be END keyword');
     });
+
+    // Issue #68: structure keywords at col0 must tokenize as Label tokens
+    suite('Issue #68 - Structure keywords as labels (col0)', () => {
+
+        test('Window at col0 should produce a Label token, not skip the W', () => {
+            // Clarion spec: WINDOW (and other structure keywords) CAN be used as labels
+            // "A label MUST begin in column one (1)" — so Window at col0 is a label
+            const code = `Window  WINDOW('Caption'),AT(,,395,224)\n  BUTTON('&OK'),AT(0,0,40,14),USE(?OK)\nEND`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+
+            // Must NOT produce a spurious 'indow' Variable token (the bug: 'W' was skipped)
+            const indowToken = tokens.find(t => t.value === 'indow');
+            assert.strictEqual(indowToken, undefined, 'Should NOT produce spurious "indow" Variable token');
+
+            // Must produce a Label token "Window" at col0
+            const labelToken = tokens.find(t => t.type === TokenType.Label && t.value === 'Window');
+            assert.ok(labelToken, 'Should produce Label token "Window" at col0');
+            assert.strictEqual(labelToken!.start, 0, 'Label "Window" must be at column 0');
+        });
+
+        test('CLASS at col0 should produce a Label token', () => {
+            const code = `MyClass CLASS\n  Init  PROCEDURE()\n  END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+
+            const labelToken = tokens.find(t => t.type === TokenType.Label && t.value === 'MyClass');
+            assert.ok(labelToken, 'Should produce Label token "MyClass"');
+        });
+
+        test('FILE at col0 should produce a Label token', () => {
+            const code = `Customers FILE,DRIVER('TOPSPEED'),PRE(CUST)\nRecord  RECORD\nName    STRING(30)\n  END\n  END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+
+            const labelToken = tokens.find(t => t.type === TokenType.Label && t.value === 'Customers');
+            assert.ok(labelToken, 'Should produce Label token "Customers"');
+        });
+
+        test('lowercase window at col0 should produce a Label token', () => {
+            // Clarion is case insensitive - "window" at col0 is still a valid label
+            const code = `window  WINDOW('Caption'),AT(,,300,200)\n  BUTTON('OK'),USE(?OK)\nEND`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+
+            const indowToken = tokens.find(t => t.value === 'indow');
+            assert.strictEqual(indowToken, undefined, 'Should NOT produce spurious "indow" token');
+
+            // processLabels() will retype it to Label; just verify no 'indow' garbage
+            const windowLabelTokens = tokens.filter(t => t.type === TokenType.Label);
+            assert.ok(windowLabelTokens.length > 0, 'Should have at least one Label token');
+        });
+    });
 });
