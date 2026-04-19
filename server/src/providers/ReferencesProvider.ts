@@ -464,7 +464,29 @@ export class ReferencesProvider {
         }
 
         logger.error(`✅ [FAR] Interface method "${methodName}" — ${locations.length} reference(s) found`);
-        return locations.length > 0 ? locations : null;
+
+        // ── Call sites: varName.MethodName() where varName &IfaceName ──
+        for (const fileUri of filesToSearch) {
+            const ft = this.getTokensForUri(fileUri);
+            if (!ft || ft.length === 0) continue;
+            const varNames = this.collectInterfaceVarNames(ft, ifaceName);
+            for (const varName of varNames) {
+                const callHits = this.findMemberReferencesInFile(fileUri, methodName, undefined, undefined, varName, undefined, false);
+                locations.push(...callHits);
+            }
+        }
+
+        // Deduplicate by uri+line
+        const seen = new Set<string>();
+        const deduped = locations.filter(loc => {
+            const key = `${loc.uri}:${loc.range.start.line}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+
+        logger.error(`✅ [FAR] Interface method "${methodName}" — ${deduped.length} reference(s) after call-site scan`);
+        return deduped.length > 0 ? deduped : null;
     }
 
     /**
@@ -2027,6 +2049,26 @@ export class ReferencesProvider {
             logger.error(`❌ Failed to tokenize ${uri}: ${error instanceof Error ? error.message : String(error)}`);
             return [];
         }
+    }
+
+    /**
+     * Returns the names of all variables declared as &IfaceName in the given token list.
+     * Used by provideInterfaceMethodReferences to find call sites like conn.MethodName().
+     */
+    private collectInterfaceVarNames(tokens: Token[], ifaceName: string): string[] {
+        const ifaceLower = ifaceName.toLowerCase();
+        const varNames: string[] = [];
+        for (let i = 0; i < tokens.length - 1; i++) {
+            const t = tokens[i];
+            const next = tokens[i + 1];
+            if (t.type === TokenType.Label && next.type === TokenType.ReferenceVariable) {
+                const refType = next.value.replace(/^&\s*/, '').toLowerCase();
+                if (refType === ifaceLower) {
+                    varNames.push(t.value);
+                }
+            }
+        }
+        return varNames;
     }
 }
 

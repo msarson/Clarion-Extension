@@ -459,6 +459,28 @@ suite('ReferencesProvider — INTERFACE references', () => {
         const hasImpl = refs!.some(r => r.range.start.line === 5);
         assert.ok(hasImpl, `Expected reference at line 5 (IMPLEMENTS), got lines: ${refs!.map(r => r.range.start.line).join(', ')}`);
     });
+
+    test('Shift+F12 on interface method finds &IfaceName variable call sites', async () => {
+        const codeWithCallSite = [
+            'IConn  INTERFACE,TYPE',             // line 0
+            '  CloseSocket  PROCEDURE',           // line 1
+            'END',                                // line 2
+            '',                                   // line 3
+            'MyProc  PROCEDURE',                  // line 4
+            'conn  &IConn',                       // line 5  — interface variable
+            'CODE',                               // line 6
+            '  conn.CloseSocket()',               // line 7  — call site
+            'END',                                // line 8
+        ].join('\n');
+        const callDoc = TextDocument.create('file:///callsite.clw', 'clarion', 1, codeWithCallSite);
+        TokenCache.getInstance().getTokens(callDoc);
+        // Cursor on "CloseSocket" inside INTERFACE body (line 1)
+        const col = '  CloseSocket'.indexOf('CloseSocket');
+        const refs = await provider.provideReferences(callDoc, { line: 1, character: col + 2 }, { includeDeclaration: true });
+        assert.ok(refs && refs.length > 0, 'Expected references for interface method with call sites');
+        const hasCallSite = refs!.some(r => r.range.start.line === 7);
+        assert.ok(hasCallSite, `Expected call site at line 7, got lines: ${refs!.map(r => r.range.start.line).join(', ')}`);
+    });
 });
 
 // ---------------------------------------------------------------------------
