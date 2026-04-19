@@ -32,7 +32,7 @@
     },
     {
       "name": "PROP:Alrt",
-      "description": "ALRT( keycode )",
+      "description": "Specifies a hot key active while the APPLICATION, WINDOW, or control on which it is placed has focus. When pressed, generates EVENT:PreAlertKey and EVENT:AlertKey events. Up to 255 keys may be specified as an array.",
       "readOnly": false
     },
     {
@@ -87,7 +87,7 @@
     },
     {
       "name": "PROP:Ave",
-      "description": "AVE( [ variable ] )",
+      "description": "Specifies printing the average (arithmetic mean) of the STRING control's USE variable in a REPORT. Calculated each time DETAIL structures print; reset only if RESET or PAGE attribute is also specified.",
       "readOnly": false
     },
     {
@@ -187,7 +187,7 @@
     },
     {
       "name": "PROP:Choice",
-      "description": "CHOICE( [ control ] )",
+      "description": "Returns or sets the current selection (sequence number) in a LIST, COMBO, SHEET, or OPTION control. Returns the memory QUEUE entry number of the selected item for LIST or COMBO.",
       "readOnly": false
     },
     {
@@ -247,7 +247,7 @@
     },
     {
       "name": "PROP:Cnt",
-      "description": "CNT( [ variable ] )",
+      "description": "Specifies an automatic count of the number of times DETAIL structures have been printed in a REPORT. Reset only if the RESET or PAGE attribute is also specified.",
       "readOnly": false
     },
     {
@@ -277,7 +277,7 @@
     },
     {
       "name": "PROP:Compatibility",
-      "description": "COMPATIBILITY( mode )",
+      "description": "Specifies a compatibility mode for certain OLE or .OCX controls that require it (write-only). The mode should generally be zero (0); set to one (1) for OLE objects like the Windows bitmap editor.",
       "readOnly": false
     },
     {
@@ -352,7 +352,7 @@
     },
     {
       "name": "PROP:Details",
-      "description": "",
+      "description": "Property of a FILE structure. See Runtime VIEW and FILE Properties for the complete list of file structure properties.",
       "readOnly": false
     },
     {
@@ -367,17 +367,17 @@
     },
     {
       "name": "PROP:Dock",
-      "description": "DOCK( positions )",
+      "description": "Specifies a non-MDI TOOLBOX window may be docked to an edge of the application frame. Uses DOCK: equates (DOCK:Left=1, DOCK:Right=4, DOCK:Top=2, DOCK:Bottom=8, DOCK:Float=16, DOCK:All=31).",
       "readOnly": false
     },
     {
       "name": "PROP:Docked",
-      "description": "DOCKED( position )",
+      "description": "Specifies that a dockable TOOLBOX window with the DOCK attribute is docked at a specified edge when the window is opened. Uses DOCK: equates for the position value.",
       "readOnly": false
     },
     {
       "name": "PROP:Document",
-      "description": "DOCUMENT( filename )",
+      "description": "Specifies creating an OLE control object from a data file specific to an OLE server application (write-only). The filename must be a fully-qualified pathname unless the file is in the same directory.",
       "readOnly": false
     },
     {
@@ -407,7 +407,7 @@
     },
     {
       "name": "PROP:Drop",
-      "description": "DROP( count [, width ] )",
+      "description": "Specifies the selection list appears only when the user presses an arrow cursor key or clicks the drop icon. Sets the count of elements displayed and optionally the width of the dropped list.",
       "readOnly": false
     },
     {
@@ -482,12 +482,12 @@
     },
     {
       "name": "PROP:Files",
-      "description": "view{PROP:files, N }",
+      "description": "Returns the total number of files in a VIEW (number of JOIN structures plus one). view{PROP:Files, N} returns the number of JOINs for a specific file position. (READ ONLY)",
       "readOnly": true
     },
     {
       "name": "PROP:FileSize",
-      "description": "file {PROP:FileSize}",
+      "description": "Returns the number of bytes in the file. Unlike BYTES(), returns the full file size even after the first GET/NEXT/ADD statement.",
       "readOnly": false
     },
     {
@@ -497,7 +497,7 @@
     },
     {
       "name": "PROP:Filter",
-      "description": "FILTER( expression )",
+      "description": "Specifies a filter expression used to evaluate which records to include in the VIEW. The expression may reference any field at all JOIN levels; all referenced variables must be BINDed.",
       "readOnly": false
     },
     {
@@ -522,7 +522,7 @@
     },
     {
       "name": "PROP:FlushPreview",
-      "description": "SomeReport PROCEDURE",
+      "description": "Flushes the REPORT structure's PREVIEW attribute metafiles to the printer (0 = off, else on). Always 0 at report open. Set to 1 to send the previewed pages to the printer.",
       "readOnly": false
     },
     {
@@ -542,7 +542,7 @@
     },
     {
       "name": "PROP:Format",
-      "description": "FORMAT( format string )",
+      "description": "Sets or returns the FORMAT attribute string for a LIST or COMBO control's columns at runtime. Individual column properties can also be accessed via PROPLIST: equates.",
       "readOnly": false
     },
     {
@@ -662,7 +662,7 @@
     },
     {
       "name": "PROP:Image",
-      "description": "IMAGE( file ) ,",
+      "description": "Specifies the image file displayed in an IMAGE control at runtime. Supports BMP, PCX, GIF, JPG, WMF, and ICO formats. The image is stretched to fill the AT area unless TILED or CENTERED is set.",
       "readOnly": false
     },
     {
@@ -747,7 +747,7 @@
     },
     {
       "name": "PROP:Layout",
-      "description": "LAYOUT ( style )",
+      "description": "Specifies the left-to-right (0) or right-to-left (1) display orientation of a WINDOW or APPLICATION. A style of 1 mirrors the window controls. Setting on the Application Frame cascades to child windows.",
       "readOnly": false
     },
     {
@@ -792,12 +792,12 @@
     },
     {
       "name": "PROP:Linewidth",
-      "description": "LINEWIDTH( width )",
+      "description": "Specifies the thickness of the LINE control and the BOX and ELLIPSE controls' border. Width is in pixels for WINDOW structures or report units for REPORT structures.",
       "readOnly": false
     },
     {
       "name": "PROP:Link",
-      "description": "LINK( filename )",
+      "description": "Specifies creating a link to an OLE control object from a data file specific to an OLE server application (write-only). The filename must be a fully-qualified pathname unless the file is in the same directory.",
       "readOnly": false
     },
     {
@@ -852,7 +852,7 @@
     },
     {
       "name": "PROP:Max",
-      "description": "MAX( [ variable ] )",
+      "description": "Specifies a maximize control on an APPLICATION or WINDOW, or calculates the maximum value a REPORT STRING control's USE variable has contained so far. Reset only if RESET or PAGE attribute is also specified.",
       "readOnly": false
     },
     {
@@ -897,7 +897,7 @@
     },
     {
       "name": "PROP:Min",
-      "description": "MIN( [ variable ] )",
+      "description": "Specifies printing the minimum value the STRING control's USE variable has contained so far in a REPORT. Reset only if the RESET or PAGE attribute is also specified.",
       "readOnly": false
     },
     {
@@ -992,7 +992,7 @@
     },
     {
       "name": "PROP:Ole",
-      "description": "Attribute Properties",
+      "description": "Indicates whether there is an OCX or OLE object in the OLE container control (READ ONLY). The OLE container also exposes attribute properties like PROP:Create, PROP:Document, PROP:Link, and PROP:Compatibility.",
       "readOnly": true
     },
     {
@@ -1017,7 +1017,7 @@
     },
     {
       "name": "PROP:Order",
-      "description": "ORDER( expression list )",
+      "description": "Specifies an expression list used to sort the records in the VIEW. Expressions are evaluated left-to-right; a leading minus (-) sorts descending. All variables must be BINDed.",
       "readOnly": false
     },
     {
@@ -1032,7 +1032,7 @@
     },
     {
       "name": "PROP:Owner",
-      "description": "OWNER( password )",
+      "description": "Specifies the password used by the ENCRYPT attribute to encrypt the data file. An Invalid Data File error occurs if the password does not match the one used to encrypt the file.",
       "readOnly": false
     },
     {
@@ -1042,22 +1042,22 @@
     },
     {
       "name": "PROP:Pageafter",
-      "description": "PAGEAFTER( [ newpage ] )",
+      "description": "Specifies the DETAIL, HEADER, or FOOTER structure initiates page overflow after it is printed. The optional newpage parameter resets the page number; -1 increments it automatically.",
       "readOnly": false
     },
     {
       "name": "PROP:Pagebefore",
-      "description": "PAGEBEFORE( [ newpage ] )",
+      "description": "Specifies the DETAIL, HEADER, or FOOTER structure is printed on a new page after page overflow. The optional newpage parameter resets the page number; -1 increments it automatically.",
       "readOnly": false
     },
     {
       "name": "PROP:Pageno",
-      "description": "PAGENO( [ variable ] )",
+      "description": "Specifies the STRING control prints the current page number in a REPORT. Page numbers can be affected by the PAGEBEFORE and PAGEAFTER attributes.",
       "readOnly": false
     },
     {
       "name": "PROP:Palette",
-      "description": "PALETTE( colors )",
+      "description": "Specifies how many colors in the hardware palette the WINDOW uses when it is the foreground window. Only applicable in 256-color mode. Values above 256 are not recommended.",
       "readOnly": false
     },
     {
@@ -1082,7 +1082,7 @@
     },
     {
       "name": "PROP:Preview",
-      "description": "PREVIEW( queue )",
+      "description": "Specifies report output goes to Windows metafiles containing one report page per file (write-only). Names a QUEUE to receive the metafile names. Temporary files are deleted when the REPORT is closed.",
       "readOnly": false
     },
     {
@@ -1142,7 +1142,7 @@
     },
     {
       "name": "PROP:Range",
-      "description": "RANGE( lower,upper )",
+      "description": "Specifies the valid range of data values the user may select in a SPIN control, or the range of values displayed in a PROGRESS control. PROP:RangeLow and PROP:RangeHigh access the individual limits.",
       "readOnly": true
     },
     {
@@ -1177,7 +1177,7 @@
     },
     {
       "name": "PROP:Reset",
-      "description": "RESET( breaklevel )",
+      "description": "Specifies the group break at which the CNT, SUM, AVE, MIN, or MAX total is reset to zero (0) in a REPORT. PROP:RESET returns zero if not present, else the breaklevel nesting depth.",
       "readOnly": false
     },
     {
@@ -1322,7 +1322,7 @@
     },
     {
       "name": "PROP:Std",
-      "description": "STD( behavior )",
+      "description": "Specifies the control activates a standard Windows action from the STD: equates in EQUATES.CLW (e.g. STD:Cut, STD:Copy, STD:Paste, STD:Undo). No EVENT:Accepted is generated for STD actions.",
       "readOnly": false
     },
     {
@@ -1347,7 +1347,7 @@
     },
     {
       "name": "PROP:Sum",
-      "description": "SUM( [ variable ] )",
+      "description": "Specifies printing the sum of the values contained in the STRING control's USE variable in a REPORT. Reset only if the RESET or PAGE attribute is also specified.",
       "readOnly": false
     },
     {
@@ -1407,7 +1407,7 @@
     },
     {
       "name": "PROP:Tally",
-      "description": "TALLY( points )",
+      "description": "Specifies when to calculate an AVE, CNT, MAX, MIN, or SUM in a REPORT — calculated each time any DETAIL or BREAK structure in the points list prints.",
       "readOnly": false
     },
     {
@@ -1492,7 +1492,7 @@
     },
     {
       "name": "PROP:Timer",
-      "description": "TIMER( period )",
+      "description": "Specifies generation of a periodic field-independent event (EVENT:Timer) whenever the time period passes. Period is in hundredths of a second; zero (0) disables timed events.",
       "readOnly": false
     },
     {
@@ -1587,7 +1587,7 @@
     },
     {
       "name": "PROP:Vcr",
-      "description": "VCR( [ field ] )",
+      "description": "Places VCR-style navigation buttons on a LIST or COMBO control: top, page-up, up, locate, down, page-down, bottom. The optional field parameter names a locator ENTRY control.",
       "readOnly": false
     },
     {
@@ -1622,7 +1622,7 @@
     },
     {
       "name": "PROP:Wallpaper",
-      "description": "WALLPAPER( image )",
+      "description": "Specifies an image displayed as the background for a TOOLBAR or WINDOW's client area. The image is stretched to fill unless the TILED or CENTERED attribute is present.",
       "readOnly": false
     },
     {
@@ -1647,12 +1647,12 @@
     },
     {
       "name": "PROP:Withnext",
-      "description": "WITHNEXT( [ siblings ] )",
+      "description": "Specifies a DETAIL, HEADER, or FOOTER structure is always printed on the same page as the specified number of following print structures. Eliminates widow print structures at page breaks.",
       "readOnly": false
     },
     {
       "name": "PROP:Withprior",
-      "description": "WITHPRIOR( [ siblings ] )",
+      "description": "Specifies a DETAIL, HEADER, or FOOTER structure is always printed on the same page as the specified number of preceding print structures. Eliminates orphan print structures at page breaks.",
       "readOnly": false
     },
     {
