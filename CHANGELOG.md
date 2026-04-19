@@ -8,6 +8,17 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [0.9.3] - Unreleased
 
+**Formatter**
+
+- 🔧 **Fix document formatter — 6 bugs resolved** ([#66](https://github.com/msarson/Clarion-Extension/issues/66)):
+  - 🐛 Procedures and routines were not being detected correctly due to a wrong `subType` check, causing local data sections and execution ranges to be misidentified.
+  - 🐛 Single-line structures (open and close on the same line) were indented using a hardcoded minimum instead of the current indent stack level.
+  - 🐛 Formatted output always used CRLF regardless of the source file's line endings; the formatter now preserves the original EOL style.
+  - 🐛 Dot-notation method implementations (e.g. `ThisWindow.Init PROCEDURE`) lost the dot — the formatter emitted `ThisWindow  Init PROCEDURE`. The full label text including dot is now preserved.
+  - 🐛 `CLASS`/`GROUP`/`QUEUE` declarations inside a procedure's local data section were treated as flat variables. This caused the structure body (`END` and member declarations) to use incorrect indentation. Structures now push to the indent stack even inside local data sections.
+  - 🐛 Within a `CLASS` body, each method's `PROCEDURE` keyword was aligned independently per label length, producing ragged columns. All method keywords now align to a single shared column determined by the longest method label in the class.
+  - 🐛 `CLASS` keyword column in a local data section did not match the type-keyword column of surrounding variable declarations. It now uses the same `snap0(maxLabel+1)` formula as all other local data lines.
+
 **Diagnostics**
 
 - ⚠️ **Warn on discarded plain MAP/MODULE procedure return values** ([#51](https://github.com/msarson/Clarion-Extension/issues/51)) — a new warning fires when a plain (non-dot-access) call to a MAP or MODULE procedure that returns a value is used as a statement without capturing the result. Covers procedures declared directly in a `MAP` block, inside a `MODULE(...)` within a MAP, and in local procedure MAPs. Cross-file detection is supported: procedures declared in a global MAP in the program file (or any other cached file) are also checked when called from a MEMBER file. Add the `PROC` attribute to the declaration, or assign the return value, to suppress the warning.
@@ -16,9 +27,6 @@ All notable changes to the Clarion Extension are documented here.
 **Code Quality**
 
 - 🔧 **Refactor DiagnosticProvider into focused sub-modules** — the 1943-line `DiagnosticProvider.ts` has been split into four focused helper modules in `server/src/providers/diagnostics/`: `StructureDiagnostics.ts`, `ClassDiagnostics.ts`, `ReturnValueDiagnostics.ts`, and `ControlFlowDiagnostics.ts`. `DiagnosticProvider` is now a thin facade that delegates to these modules, making the code easier to maintain and extend.
-
----
-
 ### [0.9.2] - 2026-04-18
 
 **Performance Fixes**
