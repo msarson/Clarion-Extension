@@ -460,3 +460,71 @@ suite('ReferencesProvider — INTERFACE references', () => {
         assert.ok(hasImpl, `Expected reference at line 5 (IMPLEMENTS), got lines: ${refs!.map(r => r.range.start.line).join(', ')}`);
     });
 });
+
+// ---------------------------------------------------------------------------
+// Interface variable dot-access: hover and F12 on &InterfaceName variables
+// ---------------------------------------------------------------------------
+
+suite('Interface variable dot-access — hover and F12', () => {
+    let defProvider: DefinitionProvider;
+    let hoverProvider: HoverProvider;
+
+    setup(() => {
+        setServerInitialized(true);
+        TokenCache.getInstance().clearAllTokens();
+        defProvider = new DefinitionProvider();
+        hoverProvider = new HoverProvider();
+    });
+
+    const code = [
+        'IConn  INTERFACE,TYPE',                    // line 0
+        '  CloseSocket  PROCEDURE',                  // line 1
+        '  GetState     PROCEDURE,LONG',             // line 2
+        'END',                                        // line 3
+        '',                                           // line 4
+        'MyProc  PROCEDURE',                          // line 5
+        'conn  &IConn',                               // line 6  — interface reference variable
+        'CODE',                                       // line 7
+        '  conn.CloseSocket()',                       // line 8  — method call on interface variable
+        'END',                                        // line 9
+    ].join('\n');
+
+    function makeDoc() {
+        const doc = TextDocument.create('file:///test.clw', 'clarion', 1, code);
+        TokenCache.getInstance().getTokens(doc);
+        return doc;
+    }
+
+    test('resolveVariableType returns isReference=true for &InterfaceName variable', async () => {
+        const { MemberLocatorService } = require('../services/MemberLocatorService');
+        const doc = makeDoc();
+        const tokens = TokenCache.getInstance().getTokens(doc);
+        const svc = new MemberLocatorService();
+        const typeInfo = await svc.resolveVariableType('conn', tokens, doc);
+        assert.ok(typeInfo !== null, 'Expected typeInfo for "conn"');
+        assert.strictEqual(typeInfo!.typeName, 'IConn', `Expected typeName 'IConn', got '${typeInfo!.typeName}'`);
+        assert.strictEqual(typeInfo!.isReference, true, 'Expected isReference=true for &IConn');
+    });
+
+    test('findMemberInInterface finds method declared in current file', async () => {
+        const { MemberLocatorService } = require('../services/MemberLocatorService');
+        const doc = makeDoc();
+        const svc = new MemberLocatorService();
+        const result = await svc.findMemberInInterface('IConn', 'CloseSocket', doc);
+        assert.ok(result !== null, 'Expected findMemberInInterface to find CloseSocket');
+        assert.strictEqual(result!.line, 1, `Expected line 1 for CloseSocket, got ${result!.line}`);
+    });
+
+    test('F12 on interface method call navigates to interface method declaration', async () => {
+        const doc = makeDoc();
+        // "conn.CloseSocket()" — cursor on CloseSocket in line 8
+        const callLine = '  conn.CloseSocket()';
+        const col = callLine.indexOf('CloseSocket') + 3;
+        const result = await defProvider.provideDefinition(doc, { line: 8, character: col });
+        assert.ok(result !== null, 'Expected definition result for conn.CloseSocket()');
+        if (result && !Array.isArray(result)) {
+            assert.strictEqual(result.range.start.line, 1, `Expected line 1 (interface method), got ${result.range.start.line}`);
+        }
+    });
+});
+

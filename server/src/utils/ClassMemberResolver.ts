@@ -55,14 +55,14 @@ export function detectMemberAccess(line: string): MemberAccess {
 export function scanClassBodyForAllMembers(
     filePath: string,
     className: string,
-    structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS',
+    structureType: 'CLASS' | 'QUEUE' | 'GROUP' | 'INTERFACE' = 'CLASS',
     contentOverride?: string
 ): MemberEnumItem[] {
     const results: MemberEnumItem[] = [];
     try {
         const content = contentOverride ?? fs.readFileSync(filePath, 'utf8');
         const lines = content.split(/\r?\n/);
-        const headerPattern = new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP)`, 'i');
+        const headerPattern = new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP|INTERFACE)`, 'i');
 
         for (let j = 0; j < lines.length; j++) {
             if (!headerPattern.test(lines[j])) continue;
@@ -136,7 +136,7 @@ export function scanClassBodyForMember(
     className: string,
     memberName: string,
     paramCount: number | undefined,
-    structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS',
+    structureType: 'CLASS' | 'QUEUE' | 'GROUP' | 'INTERFACE' = 'CLASS',
     countParamsInDecl: (line: string) => number,
     selectBestOverload: (candidates: { type: string; line: number; paramCount: number; signature?: string }[], paramCount: number | undefined) => { type: string; line: number; paramCount: number; signature?: string } | null,
     contentOverride?: string
@@ -144,7 +144,7 @@ export function scanClassBodyForMember(
     try {
         const content = contentOverride ?? fs.readFileSync(filePath, 'utf8');
         const lines = content.split(/\r?\n/);
-        const headerPattern = new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP)`, 'i');
+        const headerPattern = new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP|INTERFACE)`, 'i');
 
         for (let j = 0; j < lines.length; j++) {
             if (!headerPattern.test(lines[j])) continue;

@@ -189,11 +189,19 @@ export class StructureFieldResolver {
                 // then look up the member in that class (e.g., st.GetValue() where st StringTheory)
                 const varTypeInfo = await this.memberLocator.resolveVariableType(structureName, tokens, document);
                 if (varTypeInfo) {
-                    const { typeName: varType, isClass } = varTypeInfo;
-                    logger.info(`✅ Variable "${structureName}" has type "${varType}" (isClass=${isClass}), looking up member "${fieldName}"`);
+                    const { typeName: varType, isClass, isReference } = varTypeInfo;
+                    logger.info(`✅ Variable "${structureName}" has type "${varType}" (isClass=${isClass}, isReference=${isReference}), looking up member "${fieldName}"`);
                     let paramCount: number | undefined;
                     if (hasParentheses) {
                         paramCount = countParametersInCall(line, fieldName) ?? undefined;
+                    }
+                    // Try interface lookup first for reference variables (&InterfaceName)
+                    if (isReference) {
+                        const ifaceInfo = await this.memberLocator.findMemberInInterface(varType, fieldName, document, paramCount);
+                        if (ifaceInfo) {
+                            logger.info(`✅ Found interface method "${fieldName}" in "${varType}"`);
+                            return await this.methodResolver.resolveChainedMethodCall(fieldName, ifaceInfo, document, paramCount);
+                        }
                     }
                     if (isClass) {
                         // CLASS member resolver (methods, properties)
