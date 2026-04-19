@@ -552,6 +552,40 @@ export function validateDiscardedReturnValuesForPlainCalls(
         }
     }
 
+    // Also collect GlobalProcedure subtypes defined in this file.
+    // The MAP/CLASS passes above only find declarations; a procedure with a body
+    // (GlobalProcedure) that is never declared in a MAP is missed by those paths.
+    for (let i = 0; i < tokens.length; i++) {
+        const t = tokens[i];
+        if (t.type !== TokenType.Procedure || t.subType !== TokenType.GlobalProcedure) continue;
+
+        const name = (t.label ?? '').toUpperCase();
+        if (!name || excluded.has(name)) continue;
+
+        const lineTokens = tokens.filter(tok => tok.line === t.line);
+        if (lineTokens.some(tok => ['PROC', 'DERIVED'].includes(tok.value.toUpperCase()))) {
+            excluded.add(name);
+            warnableProcs.delete(name);
+            continue;
+        }
+
+        // Find the closing ')' of the parameter list then check for a return type
+        let afterIdx = -1;
+        let depth = 0;
+        for (let k = i; k < tokens.length && tokens[k].line === t.line; k++) {
+            if (tokens[k].value === '(') depth++;
+            else if (tokens[k].value === ')') {
+                depth--;
+                if (depth === 0) { afterIdx = k + 1; break; }
+            }
+        }
+        if (afterIdx === -1 || afterIdx >= tokens.length || tokens[afterIdx].line !== t.line) continue;
+
+        const returnType = extractReturnType(tokens, afterIdx, true);
+        if (!returnType) continue;
+        if (!excluded.has(name)) warnableProcs.set(name, returnType);
+    }
+
     if (warnableProcs.size === 0) return diagnostics;
 
     interface PlainCodeRange { start: number; end: number; }

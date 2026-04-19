@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import { ClarionTokenizer } from '../ClarionTokenizer';
+import { DocumentStructure } from '../DocumentStructure';
 import { DiagnosticProvider } from '../providers/DiagnosticProvider';
 import { validateCycleBreakOutsideLoop } from '../providers/diagnostics/ControlFlowDiagnostics';
 import { TextDocument } from 'vscode-languageserver-textdocument';
@@ -1552,6 +1553,125 @@ MainProc    PROCEDURE()
 `;
             const diags = discardDiags(code);
             assert.strictEqual(diags.length, 0, 'used in IF condition — return value is consumed');
+        });
+    });
+
+    // ── Same tests via the production code path (DocumentStructure pre-processed) ───────────
+    // In production, TokenCache runs DocumentStructure before validateDocument, which sets
+    // MapProcedure subtypes — activating the hasSubType branch. The tests above use the raw
+    // tokenizer path (no DocumentStructure), exercising only the !hasSubType branch.
+
+    suite('validateDiscardedReturnValuesForPlainCalls (with DocumentStructure — production path)', () => {
+
+        function discardDiagsWithDS(code: string) {
+            const doc = createDocument(code);
+            const tokens = new ClarionTokenizer(code).tokenize();
+            new DocumentStructure(tokens).process();
+            return DiagnosticProvider.validateDocument(doc, tokens).filter(d =>
+                /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
+            );
+        }
+
+        test('bare call to returning MAP procedure warns (DS path)', () => {
+            const code = `
+  MAP
+GetStatus   PROCEDURE(),LONG
+  END
+
+MainProc    PROCEDURE()
+  CODE
+  GetStatus()
+`;
+            const diags = discardDiagsWithDS(code);
+            assert.strictEqual(diags.length, 1, 'should warn once');
+        });
+
+        test('void procedure followed by returning procedure: void must not inherit return type (DS path)', () => {
+            const code = `
+  MAP
+VoidProc    PROCEDURE(STRING pText)
+Returning   PROCEDURE(),LONG
+  END
+
+MainProc    PROCEDURE()
+  CODE
+  VoidProc('test')
+  Returning()
+`;
+            const diags = discardDiagsWithDS(code);
+            assert.ok(diags.every(d => d.message.includes("'Returning'")), 'VoidProc must not warn');
+            assert.strictEqual(diags.length, 1, 'only Returning() should warn');
+        });
+
+        test('MAP with MODULE blocks plus returning proc outside MODULE warns (DS path)', () => {
+            const code = `
+  MAP
+    MODULE('kernel32')
+      cz_LoadLibrary(*CSTRING lpFileName),LONG,PASCAL,RAW
+      cz_FreeLibrary(LONG hModule),BOOL,PROC,PASCAL,RAW
+    END
+    MODULE('user32')
+      ShowWindow(LONG hWnd, LONG nCmdShow),BOOL,PASCAL,RAW
+    END
+Trace       PROCEDURE(STRING p_LogText),LONG
+VoidHelper  PROCEDURE(STRING pText)
+  END
+
+MainProc    PROCEDURE()
+  CODE
+  Trace('hello')
+  Trace('world')
+  VoidHelper('no warn')
+`;
+            const diags = discardDiagsWithDS(code);
+            assert.strictEqual(diags.length, 2, 'Trace() calls should each warn; VoidHelper should not');
+            assert.ok(diags.every(d => d.message.includes("'Trace'")), 'warnings are for Trace only');
+        });
+
+        test('GlobalProcedure with return type warns when return value discarded (no MAP)', () => {
+            // Trace is a standalone procedure (GlobalProcedure subtype) — no MAP declaration.
+            // Calls that discard its return value should be flagged.
+            const code = `
+Trace       PROCEDURE(STRING p_LogText),LONG
+  CODE
+  RETURN 0
+
+MainProc    PROCEDURE()
+  CODE
+  Trace('hello')
+  Trace('world')
+`;
+            const diags = discardDiagsWithDS(code);
+            assert.strictEqual(diags.length, 2, 'each Trace() call should warn');
+            assert.ok(diags.every(d => d.message.includes("'Trace'")), 'warnings name Trace');
+        });
+
+        test('GlobalProcedure with PROC attribute does not warn', () => {
+            const code = `
+Trace       PROCEDURE(STRING p_LogText),PROC,LONG
+  CODE
+  RETURN 0
+
+MainProc    PROCEDURE()
+  CODE
+  Trace('hello')
+`;
+            const diags = discardDiagsWithDS(code);
+            assert.strictEqual(diags.length, 0, 'PROC attribute suppresses warning');
+        });
+
+        test('GlobalProcedure with no return type does not warn', () => {
+            const code = `
+Trace       PROCEDURE(STRING p_LogText)
+  CODE
+  RETURN
+
+MainProc    PROCEDURE()
+  CODE
+  Trace('hello')
+`;
+            const diags = discardDiagsWithDS(code);
+            assert.strictEqual(diags.length, 0, 'void GlobalProcedure should not warn');
         });
     });
 

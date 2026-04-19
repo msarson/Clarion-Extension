@@ -245,41 +245,22 @@ documents.onDidOpen((event) => {
     try {
         const document = event.document;
         const uri = document.uri;
-        
-        // Log all document details
-        logger.info(`📂 [CRITICAL] Document opened: ${uri}`);
-        logger.info(`📂 [CRITICAL] Document details:
-            - URI: ${uri}
-            - Language ID: ${document.languageId}
-            - Version: ${document.version}
-            - Line Count: ${document.lineCount}
-            - Content Length: ${document.getText().length}
-            - First 100 chars: ${document.getText().substring(0, 100).replace(/\n/g, '\\n')}
-        `);
+
+        logger.info(`📂 Document opened: ${uri}`);
         
         if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
-            logger.info(`🔍 [CRITICAL] XML file detected: ${uri}`);
-            logger.info(`🔍 [CRITICAL] XML file content (first 200 chars): ${document.getText().substring(0, 200).replace(/\n/g, '\\n')}`);
-            
-            // Try to parse the XML to see if it's valid
-            try {
-                // Just check if it starts with XML declaration or a root element
-                const content = document.getText();
-                if (content.trim().startsWith('<?xml') || content.trim().startsWith('<')) {
-                    logger.info(`🔍 [CRITICAL] File appears to be valid XML: ${uri}`);
-                } else {
-                    logger.warn(`⚠️ [CRITICAL] File doesn't appear to be valid XML despite extension: ${uri}`);
-                }
-            } catch (xmlError) {
-                logger.error(`❌ [CRITICAL] Error checking XML content: ${xmlError instanceof Error ? xmlError.message : String(xmlError)}`);
-            }
+            return;
         }
-        
+
         // Validate document for diagnostics
         validateTextDocument(document, 'onDidOpen');
+
+        // Notify client so the structure view refreshes on initial open.
+        // (clarion/symbolsRefreshed is otherwise only sent from onDidChangeContent,
+        // so the outline would stay empty until the user edited or switched tabs.)
+        connection.sendNotification('clarion/symbolsRefreshed', { uri });
     } catch (error) {
-        logger.error(`❌ [CRITICAL] Error in onDidOpen: ${error instanceof Error ? error.message : String(error)}`);
-        logger.error(`❌ [CRITICAL] Error stack: ${error instanceof Error && error.stack ? error.stack : 'No stack available'}`);
+        logger.error(`❌ Error in onDidOpen: ${error instanceof Error ? error.message : String(error)}`);
     }
 });
 
