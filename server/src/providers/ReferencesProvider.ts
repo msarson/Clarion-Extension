@@ -1169,6 +1169,16 @@ export class ReferencesProvider {
             return line === overloadFilter.declarationLine && fileNorm === overloadFilter.declarationFileNorm;
         };
 
+        // Pre-build the set of lines that are MethodImplementation headers for the target class.
+        // When !includeDeclaration, any token that lands on these lines is part of a declaration
+        // and must be excluded — even if pattern-matched by another branch (e.g. StructureField).
+        const implHeaderLines: Set<number> = !includeDeclaration && classLower
+            ? new Set(tokens
+                .filter(t => t.subType === TokenType.MethodImplementation && t.label &&
+                             t.label.substring(0, t.label.lastIndexOf('.')).toLowerCase() === classLower)
+                .map(t => t.line))
+            : new Set<number>();
+
         for (let i = 0; i < tokens.length; i++) {
             const token = tokens[i];
             if (token.type === TokenType.Comment || token.type === TokenType.String) continue;
@@ -1236,6 +1246,7 @@ export class ReferencesProvider {
                                    parts[0].toLowerCase() === chainPrefixLower) {
                             // Typed variable direct access: e.g. INIMgr.Init
                             // where chainPrefix is the variable name (INIMgr).
+                            if (!includeDeclaration && implHeaderLines.has(token.line)) continue; // impl header line
                             if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
                                 locations.push(Location.create(fileUri,
                                     Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
@@ -1270,14 +1281,34 @@ export class ReferencesProvider {
                                         Range.create(token.line, token.start, token.line, token.start + token.value.length)));
                                 }
                             } else if (isInTargetClass(token.line)) {
-                                if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                                const preDot = i >= 2 ? tokens[i - 2] : undefined;
+                                if (preDot && /^parent$/i.test(preDot.value) && classLower) {
+                                    // PARENT.Member: only include from subclass methods, not from
+                                    // the declaring class itself (that would be a grandparent call).
+                                    const scope = methodScopes.find(s => token.line >= s.startLine && token.line <= s.endLine);
+                                    if (!scope || scope.classLower !== classLower) {
+                                        if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                                            locations.push(Location.create(fileUri,
+                                                Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                                        }
+                                    }
+                                } else if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
                                     locations.push(Location.create(fileUri,
                                         Range.create(token.line, token.start, token.line, token.start + token.value.length)));
                                 }
                             }
                         } else if (isInTargetClass(token.line)) {
                             // Explicit dot: e.g. var.Thumb where var is resolved to the right class
-                            if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                            const preDot = i >= 2 ? tokens[i - 2] : undefined;
+                            if (preDot && /^parent$/i.test(preDot.value) && classLower) {
+                                const scope = methodScopes.find(s => token.line >= s.startLine && token.line <= s.endLine);
+                                if (!scope || scope.classLower !== classLower) {
+                                    if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                                        locations.push(Location.create(fileUri,
+                                            Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                                    }
+                                }
+                            } else if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
                                 locations.push(Location.create(fileUri,
                                     Range.create(token.line, token.start, token.line, token.start + token.value.length)));
                             }
