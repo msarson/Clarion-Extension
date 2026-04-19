@@ -396,9 +396,9 @@ export class VariableHoverResolver {
                 const classInfo = [
                     ``,
                     `---`,
-                    `**Class Definition:**`,
+                    `**${def.structureType} Definition:**`,
                     `- File: \`${fileName}\` (line ${def.line + 1})`,
-                    `- Type: ${def.isType ? 'CLASS,TYPE' : 'CLASS'}`,
+                    `- Type: ${def.structureType}${def.isType ? ',TYPE' : ''}`,
                 ];
                 
                 if (def.parentName) {

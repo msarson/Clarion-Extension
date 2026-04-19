@@ -1,6 +1,8 @@
 import * as assert from 'assert';
 import { ClarionTokenizer } from '../ClarionTokenizer';
+import { DocumentStructure } from '../DocumentStructure';
 import { DiagnosticProvider } from '../providers/DiagnosticProvider';
+import { validateCycleBreakOutsideLoop } from '../providers/diagnostics/ControlFlowDiagnostics';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
 /**
@@ -1411,6 +1413,26 @@ MainProc    PROCEDURE()
             assert.strictEqual(diags.length, 0, 'void procedure should not warn');
         });
 
+        test('void procedure followed by returning procedure: void must not inherit return type', () => {
+            // Regression: when DoNothing() has nothing after its closing ')' on the same
+            // line, startIdx pointed to the NEXT line's first token. extractReturnType then
+            // used that next line as its anchor and falsely picked up LONG from GetValue,
+            // causing DoNothing() calls to be warned.
+            const code = `
+  MAP
+DoNothing   PROCEDURE(STRING pText)
+GetValue    PROCEDURE(),LONG
+  END
+
+MainProc    PROCEDURE()
+  CODE
+  DoNothing('hello')
+  DoNothing('world')
+`;
+            const diags = discardDiags(code);
+            assert.strictEqual(diags.length, 0, 'void procedure before a returning one must not generate warnings');
+        });
+
         test('any overload with PROC suppresses warning for that name', () => {
             const code = `
   MAP
@@ -1455,6 +1477,33 @@ MainProc    PROCEDURE()
 `;
             const diags = discardDiags(code);
             assert.strictEqual(diags.length, 1, 'MODULE declaration should be included');
+        });
+
+        test('MAP with MODULE blocks plus returning proc outside MODULE warns', () => {
+            // Mirrors real-world files where MODULE blocks are inside the MAP alongside
+            // plain procedure declarations (like Trace PROCEDURE(...),LONG).
+            const code = `
+  MAP
+    MODULE('kernel32')
+      cz_LoadLibrary(*CSTRING lpFileName),LONG,PASCAL,RAW
+      cz_FreeLibrary(LONG hModule),BOOL,PROC,PASCAL,RAW
+    END
+    MODULE('user32')
+      ShowWindow(LONG hWnd, LONG nCmdShow),BOOL,PASCAL,RAW
+    END
+Trace       PROCEDURE(STRING p_LogText),LONG
+VoidHelper  PROCEDURE(STRING pText)
+  END
+
+MainProc    PROCEDURE()
+  CODE
+  Trace('hello')
+  Trace('world')
+  VoidHelper('no warn')
+`;
+            const diags = discardDiags(code);
+            assert.strictEqual(diags.length, 2, 'Trace() calls should each warn; VoidHelper should not');
+            assert.ok(diags.every(d => d.message.includes("'Trace'")), 'warnings are for Trace only');
         });
 
         test('multiple returning procedures - warns for each bare call', () => {
@@ -1504,6 +1553,125 @@ MainProc    PROCEDURE()
 `;
             const diags = discardDiags(code);
             assert.strictEqual(diags.length, 0, 'used in IF condition — return value is consumed');
+        });
+    });
+
+    // ── Same tests via the production code path (DocumentStructure pre-processed) ───────────
+    // In production, TokenCache runs DocumentStructure before validateDocument, which sets
+    // MapProcedure subtypes — activating the hasSubType branch. The tests above use the raw
+    // tokenizer path (no DocumentStructure), exercising only the !hasSubType branch.
+
+    suite('validateDiscardedReturnValuesForPlainCalls (with DocumentStructure — production path)', () => {
+
+        function discardDiagsWithDS(code: string) {
+            const doc = createDocument(code);
+            const tokens = new ClarionTokenizer(code).tokenize();
+            new DocumentStructure(tokens).process();
+            return DiagnosticProvider.validateDocument(doc, tokens).filter(d =>
+                /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
+            );
+        }
+
+        test('bare call to returning MAP procedure warns (DS path)', () => {
+            const code = `
+  MAP
+GetStatus   PROCEDURE(),LONG
+  END
+
+MainProc    PROCEDURE()
+  CODE
+  GetStatus()
+`;
+            const diags = discardDiagsWithDS(code);
+            assert.strictEqual(diags.length, 1, 'should warn once');
+        });
+
+        test('void procedure followed by returning procedure: void must not inherit return type (DS path)', () => {
+            const code = `
+  MAP
+VoidProc    PROCEDURE(STRING pText)
+Returning   PROCEDURE(),LONG
+  END
+
+MainProc    PROCEDURE()
+  CODE
+  VoidProc('test')
+  Returning()
+`;
+            const diags = discardDiagsWithDS(code);
+            assert.ok(diags.every(d => d.message.includes("'Returning'")), 'VoidProc must not warn');
+            assert.strictEqual(diags.length, 1, 'only Returning() should warn');
+        });
+
+        test('MAP with MODULE blocks plus returning proc outside MODULE warns (DS path)', () => {
+            const code = `
+  MAP
+    MODULE('kernel32')
+      cz_LoadLibrary(*CSTRING lpFileName),LONG,PASCAL,RAW
+      cz_FreeLibrary(LONG hModule),BOOL,PROC,PASCAL,RAW
+    END
+    MODULE('user32')
+      ShowWindow(LONG hWnd, LONG nCmdShow),BOOL,PASCAL,RAW
+    END
+Trace       PROCEDURE(STRING p_LogText),LONG
+VoidHelper  PROCEDURE(STRING pText)
+  END
+
+MainProc    PROCEDURE()
+  CODE
+  Trace('hello')
+  Trace('world')
+  VoidHelper('no warn')
+`;
+            const diags = discardDiagsWithDS(code);
+            assert.strictEqual(diags.length, 2, 'Trace() calls should each warn; VoidHelper should not');
+            assert.ok(diags.every(d => d.message.includes("'Trace'")), 'warnings are for Trace only');
+        });
+
+        test('GlobalProcedure with return type warns when return value discarded (no MAP)', () => {
+            // Trace is a standalone procedure (GlobalProcedure subtype) — no MAP declaration.
+            // Calls that discard its return value should be flagged.
+            const code = `
+Trace       PROCEDURE(STRING p_LogText),LONG
+  CODE
+  RETURN 0
+
+MainProc    PROCEDURE()
+  CODE
+  Trace('hello')
+  Trace('world')
+`;
+            const diags = discardDiagsWithDS(code);
+            assert.strictEqual(diags.length, 2, 'each Trace() call should warn');
+            assert.ok(diags.every(d => d.message.includes("'Trace'")), 'warnings name Trace');
+        });
+
+        test('GlobalProcedure with PROC attribute does not warn', () => {
+            const code = `
+Trace       PROCEDURE(STRING p_LogText),PROC,LONG
+  CODE
+  RETURN 0
+
+MainProc    PROCEDURE()
+  CODE
+  Trace('hello')
+`;
+            const diags = discardDiagsWithDS(code);
+            assert.strictEqual(diags.length, 0, 'PROC attribute suppresses warning');
+        });
+
+        test('GlobalProcedure with no return type does not warn', () => {
+            const code = `
+Trace       PROCEDURE(STRING p_LogText)
+  CODE
+  RETURN
+
+MainProc    PROCEDURE()
+  CODE
+  Trace('hello')
+`;
+            const diags = discardDiagsWithDS(code);
+            assert.strictEqual(diags.length, 0, 'void GlobalProcedure should not warn');
         });
     });
 
@@ -1640,5 +1808,259 @@ CallerProc  PROCEDURE()
             );
             assert.strictEqual(plain.length, 0, 'void procedure — no warning');
         });
+    });
+
+    // ─── CYCLE / BREAK outside LOOP or ACCEPT (issue #64) ───────────────────
+
+    suite('validateCycleBreakOutsideLoop', () => {
+
+        function cycleBreakDiags(code: string) {
+            const doc = createDocument(code);
+            const tokens = new ClarionTokenizer(code).tokenize();
+            return validateCycleBreakOutsideLoop(tokens, doc);
+        }
+
+        test('BREAK inside LOOP — no warning', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+  LOOP
+    IF SomeCondition
+      BREAK
+    END
+  END
+`;
+            assert.strictEqual(cycleBreakDiags(code).length, 0);
+        });
+
+        test('CYCLE inside LOOP — no warning', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+  LOOP
+    IF SomeCondition
+      CYCLE
+    END
+  END
+`;
+            assert.strictEqual(cycleBreakDiags(code).length, 0);
+        });
+
+        test('BREAK inside ACCEPT — no warning', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+  OPEN(Window)
+  ACCEPT
+    IF ACCEPTED() = ?Ok
+      BREAK
+    END
+  END
+`;
+            assert.strictEqual(cycleBreakDiags(code).length, 0);
+        });
+
+        test('CYCLE inside ACCEPT — no warning', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+  OPEN(Window)
+  ACCEPT
+    CASE EVENT()
+    OF EVENT:Move
+      CYCLE
+    END
+  END
+`;
+            assert.strictEqual(cycleBreakDiags(code).length, 0);
+        });
+
+        test('BREAK outside any loop — warns', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+  BREAK
+`;
+            const diags = cycleBreakDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes('BREAK'));
+        });
+
+        test('CYCLE outside any loop — warns', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+  CYCLE
+`;
+            const diags = cycleBreakDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes('CYCLE'));
+        });
+
+        test('nested LOOP/ACCEPT — inner BREAK valid', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+  LOOP
+    ACCEPT
+      IF x
+        BREAK
+      END
+    END
+  END
+`;
+            assert.strictEqual(cycleBreakDiags(code).length, 0);
+        });
+
+        test('BREAK after LOOP ends — warns', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+  LOOP
+    x = 1
+  END
+  BREAK
+`;
+            const diags = cycleBreakDiags(code);
+            assert.strictEqual(diags.length, 1);
+        });
+
+        test('validateDocument includes CYCLE/BREAK diagnostic', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+  CYCLE
+`;
+            const doc = createDocument(code);
+            const diags = DiagnosticProvider.validateDocument(doc);
+            const cfDiags = diags.filter(d => d.message.includes('CYCLE') || d.message.includes('BREAK'));
+            assert.ok(cfDiags.length >= 1, 'validateDocument should include CYCLE/BREAK diagnostics');
+        });
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Issue #69 — Reserved keyword label diagnostics
+// ─────────────────────────────────────────────────────────────────────────────
+suite('DiagnosticProvider - Reserved Keyword Labels (#69)', () => {
+
+    function labelDiags(code: string) {
+        return DiagnosticProvider.validateDocument(createDocument(code))
+            .filter(d => d.message.includes('reserved') || d.message.includes('cannot be used as a label') || d.message.includes('cannot be the label of a PROCEDURE'));
+    }
+
+    // ── Case 1: fully reserved keywords used as labels ───────────────────────
+
+    test('RETURN at col 0 as variable label → error', () => {
+        const code = `TestProc  PROCEDURE()
+RETURN  BYTE,AUTO
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 1, 'Should flag RETURN as reserved label');
+        assert.ok(diags[0].message.toUpperCase().includes('RETURN'));
+    });
+
+    test('WHILE at col 0 as variable label → error', () => {
+        const code = `TestProc  PROCEDURE()
+WHILE   LONG
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 1, 'Should flag WHILE as reserved label');
+    });
+
+    test('CYCLE at col 0 as variable label → error', () => {
+        const code = `TestProc  PROCEDURE()
+CYCLE   BYTE
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 1, 'Should flag CYCLE as reserved label');
+    });
+
+    test('GOTO at col 0 as variable label → error', () => {
+        const code = `TestProc  PROCEDURE()
+GOTO    LONG
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 1, 'Should flag GOTO as reserved label');
+    });
+
+    test('Keyword matching is case-insensitive', () => {
+        const code = `TestProc  PROCEDURE()
+return  BYTE,AUTO
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 1, 'Case-insensitive: return should be flagged');
+    });
+
+    test('Normal label (non-reserved) at col 0 → no error', () => {
+        const code = `TestProc  PROCEDURE()
+MyVar   LONG
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 0, 'Normal label should not be flagged');
+    });
+
+    test('RETURN keyword in code body (not col 0) → no error', () => {
+        const code = `TestProc  PROCEDURE()
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 0, 'Keyword in code section should not be flagged');
+    });
+
+    // ── Case 2: structure-only keywords as PROCEDURE labels ──────────────────
+
+    test('WINDOW as PROCEDURE label → error', () => {
+        const code = `WINDOW  PROCEDURE()
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 1, 'Should flag WINDOW as PROCEDURE label');
+        assert.ok(diags[0].message.toUpperCase().includes('WINDOW'));
+    });
+
+    test('CLASS as PROCEDURE label → error', () => {
+        const code = `CLASS   PROCEDURE()
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 1, 'Should flag CLASS as PROCEDURE label');
+    });
+
+    test('QUEUE as PROCEDURE label → error', () => {
+        const code = `QUEUE   PROCEDURE()
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 1, 'Should flag QUEUE as PROCEDURE label');
+    });
+
+    test('WINDOW as structure label (valid) → no error', () => {
+        const code = `TestProc  PROCEDURE()
+WINDOW  WINDOW('Caption'),AT(,,300,200)
+          BUTTON('OK'),AT(10,10,50,14),USE(?OK)
+        END
+  CODE
+  OPEN(WINDOW)
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 0, 'WINDOW as data structure label should not be flagged');
+    });
+
+    test('CLASS as structure label (valid) → no error', () => {
+        const code = `TestProc  PROCEDURE()
+CLASS   CLASS(BaseClass)
+Init      PROCEDURE()
+        END
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 0, 'CLASS as CLASS structure label should not be flagged');
     });
 });

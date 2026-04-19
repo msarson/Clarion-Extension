@@ -19,15 +19,18 @@ export class ClarionTokenizer {
     private lines: string[];
     private tabSize: number;  // ✅ Store tabSize
     maxLabelWidth: number = 0;
+    private _documentStructure: DocumentStructure | null = null;
+    private skipStructureProcessing: boolean;
     
     // 🚀 PERF: Cache analyzed procedures to avoid re-scanning in incremental updates
     private static analyzedProcedures = new Map<string, Set<number>>();  // uri -> Set of procedure line numbers
 
-    constructor(text: string, tabSize: number = 2) {  // ✅ Default to 2 if not provided
+    constructor(text: string, tabSize: number = 2, skipStructureProcessing: boolean = false) {  // ✅ Default to 2 if not provided
         this.text = text;
         this.tokens = [];
         this.lines = [];
         this.tabSize = tabSize;  // ✅ Store the provided or default value
+        this.skipStructureProcessing = skipStructureProcessing;
         
         // 🚀 PERFORMANCE: Initialize compiled patterns once
         PatternMatcher.initializePatterns();
@@ -60,22 +63,30 @@ export class ClarionTokenizer {
             logger.info(`🔍 [DEBUG] Tokenized ${this.tokens.length} tokens (${tokenizeTime.toFixed(2)}ms)`);
             
             const structureStart = performance.now();
-            this.processDocumentStructure(); // ✅ Step 2: Process relationships
+            if (!this.skipStructureProcessing) {
+                this.processDocumentStructure(); // ✅ Step 2: Process relationships
+            }
             const structureTime = performance.now() - structureStart;
             logger.info("🔍 [DEBUG] Document structure processed");
             
             const prefixStart = performance.now();
-            StructureProcessor.processStructureFieldPrefixes(this.tokens, this.lines); // ✅ Step 2.5: Process structure field prefixes
+            if (!this.skipStructureProcessing) {
+                StructureProcessor.processStructureFieldPrefixes(this.tokens, this.lines); // ✅ Step 2.5: Process structure field prefixes
+            }
             const prefixTime = performance.now() - prefixStart;
             logger.info(`🔍 [DEBUG] Structure field prefixes processed (${prefixTime.toFixed(2)}ms)`);
             
             const routineVarsStart = performance.now();
-            this.tokenizeRoutineVariables(); // ✅ Step 3: Tokenize routine DATA section variables
+            if (!this.skipStructureProcessing) {
+                this.tokenizeRoutineVariables(); // ✅ Step 3: Tokenize routine DATA section variables
+            }
             const routineVarsTime = performance.now() - routineVarsStart;
             logger.info(`🔍 [DEBUG] Routine variables tokenized (${routineVarsTime.toFixed(2)}ms)`);
             
             const procedureVarsStart = performance.now();
-            this.tokenizeProcedureLocalVariables(); // ✅ Step 4: Tokenize procedure local variables
+            if (!this.skipStructureProcessing) {
+                this.tokenizeProcedureLocalVariables(); // ✅ Step 4: Tokenize procedure local variables
+            }
             const procedureVarsTime = performance.now() - procedureVarsStart;
             logger.info(`🔍 [DEBUG] Procedure local variables tokenized (${procedureVarsTime.toFixed(2)}ms)`);
             
@@ -156,8 +167,13 @@ export class ClarionTokenizer {
                 inCodeSection = true;
             } else if (line.match(/^\s*(DATA|ROUTINE)\b/i)) {
                 inCodeSection = false; // DATA/ROUTINE sections can have structures
-            } else if (line.match(/\b(?:PROCEDURE|FUNCTION)\b/i)) {
-                inCodeSection = false; // PROCEDURE/FUNCTION declarations sections can have structures (before CODE)
+            } else if (/\b(?:PROCEDURE|FUNCTION)\b/i.test(line)) {
+                // Strip string literals and comments before checking — "function" inside a string
+                // like Trace('...function pointers...') must not reset inCodeSection.
+                const stripped = line.replace(/'([^']|'')*'/g, '').replace(/!.*$/, '');
+                if (/\b(?:PROCEDURE|FUNCTION)\b/i.test(stripped)) {
+                    inCodeSection = false; // PROCEDURE/FUNCTION declarations sections can have structures (before CODE)
+                }
             }
 
             while (position < line.length) {
@@ -517,7 +533,14 @@ export class ClarionTokenizer {
         // ✅ Create a DocumentStructure instance and process the tokens
         const documentStructure = new DocumentStructure(this.tokens, this.lines);
         documentStructure.process();
+        this._documentStructure = documentStructure;
+    }
 
+    /** Returns the DocumentStructure built during tokenize(). Callers should use this
+     *  instead of creating a new DocumentStructure and calling process() again, which
+     *  would mutate tokens a second time and corrupt subType assignments. */
+    public getDocumentStructure(): DocumentStructure | null {
+        return this._documentStructure;
     }
 
     /** ✅ Tokenize variables in routine DATA sections */

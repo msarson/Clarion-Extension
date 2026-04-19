@@ -2002,6 +2002,12 @@ export class DefinitionProvider {
             return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
         }
 
+        // Fourth: try INTERFACE lookup (for &InterfaceName reference variables)
+        const ifaceInfo = await this.memberLocator.findMemberInInterface(className, memberName, document, paramCount);
+        if (ifaceInfo) {
+            return Location.create(ifaceInfo.file, Range.create(ifaceInfo.line, 0, ifaceInfo.line, 0));
+        }
+
         // Fallback: equates.clw (implicitly global — not always in INCLUDE chain)
         const equatesPath = SolutionManager.getInstance()?.getEquatesPath();
         if (equatesPath && fs.existsSync(equatesPath)) {

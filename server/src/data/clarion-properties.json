@@ -1,0 +1,1809 @@
+{
+  "properties": [
+    {
+      "name": "PROP:Above",
+      "description": "Specifies the tick marks on a horizontal slider display at the top of the slider.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Absolute",
+      "description": "The ABSOLUTE attribute (PROP:ABSOLUTE) ensures that the DETAIL, or group HEADER or FOOTER structure (contained within a BREAK structure), always prints at a fixed position on the page. When ABSOLUTE is present, the position specified by the x and y parameters of the structure's AT attribute is relative to the top left corner of the page. ABSOLUTE has no effect on following structures printed without the ABSOLUTE attribute.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:AcceptAll",
+      "description": "Property of a WINDOW which returns one (1) if AcceptAll mode is active and zero (0) if it is not, and may also be used to toggle AcceptAll (non-stop) mode. SELECT with no parameters usually initiates AcceptAll mode. This is a field edit mode in which each control in the window is processed by generating EVENT:Accepted for each. This allows data entry validation code to execute for all controls, including those that the user has not touched. AcceptAll mode immediately terminates when any of the following conditions is met:",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Active",
+      "description": "A WINDOW, SYSTEM or IMAGE property. If the target is a WINDOW, PROP:Active returns 1 if the window is the active window, blank if not. Set to 1 to make the top window of a thread the active window.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Alias",
+      "description": "PROP:Alias is a read/write file property that sets or returns the alias the SQL Accelerator driver uses when generating SELECT statements for a view. It will return an empty string if PROP:Alias has not previously been called to set the alias. PROP:Alias only returns a value previously set using PROP:Alias. For example:",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Alone",
+      "description": "The ALONE attribute (PROP:ALONE) specifies that the DETAIL, or group HEADER or FOOTER structure (contained within a BREAK structure), is to print on the page without any FORM, or page HEADER or FOOTER (not within a BREAK structure). The normal use is for report title and grand total pages.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Alrt",
+      "description": "Specifies a hot key active while the APPLICATION, WINDOW, or control on which it is placed has focus. When pressed, generates EVENT:PreAlertKey and EVENT:AlertKey events. Up to 255 keys may be specified as an array.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:AlwaysDrop",
+      "description": "MDIChild WINDOW('Child One'),AT(0,0,320,200),MDI,MAX,HVSCROLL",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:AlwaysRebind",
+      "description": "PROP:AlwaysRebind sets or returns the toggle that controls whether the SQL Accelerator rebinds memory locations when a NULL state changes.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Angle",
+      "description": "Defines the orientation of a STRING control.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:AppInstance",
+      "description": "Returns the instance handle (HInstance) of the .EXE file for use in low-level API calls which require it. This is only used with the SYSTEM built-in variable. (READ-ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:AssertHook",
+      "description": "A property of the SYSTEM built-in variable that sets the override procedure for the ASSERT internal Clarion procedure. Equivalent to {PROP:LibHook,8}. Assign the ADDRESS of the overriding procedure, and the runtime library will call the overriding procedure instead of the ASSERTprocedure. Assign zero and the runtime library will once again call its internal procedure. The overriding procedure's prototype must be exactly the same as the ASSERT procedure (STRING filename,UNSIGNED LineNumber). (WRITE-ONLY)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:AssertHook2",
+      "description": "AssertMy1 PROCEDURE(STRING filename,UNSIGNED LineNumber)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:At",
+      "description": "AT( [ x ] [, y ] [, width ] [, height ] )",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Auto",
+      "description": "The AUTO attribute (PROP:AUTO) specifies all window and toolbar controls' USE variables re-display on screen each time through the ACCEPT loop. This incurs some overhead, but ensures the data displayed is current, without requiring explicit DISPLAY statements.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:AutoPaper",
+      "description": "SYSTEM{PROP:AutoPaper} = '' !Turn off best-fit paper selection",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Autosize",
+      "description": "The AUTOSIZE attribute (PROP:AUTOSIZE, write-only) specifies the OLE object automatically resizes itself when the OLE container control's AT attribute parameters change at runtime using property syntax to change the values of PROP:AT.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Ave",
+      "description": "Specifies printing the average (arithmetic mean) of the STRING control's USE variable in a REPORT. Calculated each time DETAIL structures print; reset only if RESET or PAGE attribute is also specified.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Below",
+      "description": "Sets the placement of ticks on a SLIDER control to both the Top and Bottom, or if the SLIDER is displayed vertically, then both Right and Left.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Bevel",
+      "description": "BEVEL( outer [, inner ] [, style ] )",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Binary",
+      "description": "The BINARY attribute (PROP:BINARY) of a MEMO or BLOB declaration specifies the MEMO or BLOB will receive data that is not just ASCII characters. This attribute is normally used to store graphic images for display in an IMAGE field on screen. OEM conversion is not applied to MEMO or BLOB fields with the BINARY attribute. Some file drivers (Clarion, Btrieve, xBase) assume that the data in a BINARY MEMO or BLOB field is zero-padded, while non-BINARY data is space-padded.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Both",
+      "description": "Sets the placement of ticks on a SLIDER control to both the Top and Bottom, or if the SLIDER is displayed vertically, then both Right and Left.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Boxed",
+      "description": "The BOXED attribute (PROP:BOXED) specifies a single-track border around a TEXT control, or a GROUP or OPTION structure. The text parameter appears in a gap at the top of the border box. If BOXED is omitted, the text parameter is not printed or displayed on screen.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Break",
+      "description": "BREAK( variable ) [, USE( ) ] [, NOCASE ]",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:BreakVar",
+      "description": "Sets the variable for a BREAK structure within a REPORT.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Buffer",
+      "description": "The default value is zero (0) which draws directly to the screen. This is fastest and incurs no memory overhead, but may create flicker in some cases.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Busyhandling",
+      "description": "DRIVER('SQLDriver', '/BUSYHANDLING = 1|2|3|4 ' )",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Busymessage",
+      "description": "DRIVER('SQLDriver', '/BUSYMESSAGE = str ' )",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Busyretries",
+      "description": "DRIVER('SQLDriver', '/BUSYRETRIES = n ' )",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Cap",
+      "description": "The CAP and UPR attributes specify the automatic case of text entered into ENTRY or TEXT controls when the MASK attribute is on the window or of text printed in a TEXT control.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Center",
+      "description": "The CENTER attribute (PROP:CENTER) indicates that the window's default position is centered. A WINDOW structure with the MDI attribute is centered on the APPLICATION. An APPLICATION structure is centered on the screen. A non-MDI WINDOW is centered on its parent (the window currently with focus when the non-MDI WINDOW is opened).",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Centered",
+      "description": "The CENTERED attribute (PROP:CENTERED) indicates an image displayed at its default size and centered in its display area:",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:CharSet",
+      "description": "The charset parameter may name any character set registered in the Windows system. For a report, the printer driver must support the specified character set. The EQUATES.CLW file contains EQUATE values for standard character set values.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Check",
+      "description": "The CHECK attribute (PROP:CHECK) specifies an ITEM that may be either ON or OFF. When ON, a check appears to the left of the menu selection and the USE variable receives the value one (1). When OFF, the check to the left of the menu selection disappears and the USE variable receives the value zero (0).",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Checked",
+      "description": "Returns the current display state of a CHECK control--checked (1) or un-checked (''). (READ ONLY). PROP:Checked can also be used with menu items that have the CHECK attribute applied.",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:Child",
+      "description": "PROP:Child is an array property which returns the control number (e.g., Field Equate number) of a child control in a parent control structure (such as a SHEET, TAB, OPTION, or GROUP). (READ ONLY) The element number (array index into the property) is the ordinal position of the control in the parent structure. Returns null string ('') if the element number is out of range. ?Sheet{Prop:Child,Choice(?Sheet)} is equivalent to using ?Sheet{Prop:ChoiceFEQ} .",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:ChildIndex",
+      "description": "PROP:Child is an array property which returns the control number (e.g., Field Equate number) of a child control in a parent control structure (such as a SHEET, TAB, OPTION, or GROUP). (READ ONLY) The element number (array index into the property) is the ordinal position of the control in the parent structure. Returns null string ('') if the element number is out of range. ?Sheet{Prop:Child,Choice(?Sheet)} is equivalent to using ?Sheet{Prop:ChoiceFEQ} .",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:Choice",
+      "description": "Returns or sets the current selection (sequence number) in a LIST, COMBO, SHEET, or OPTION control. Returns the memory QUEUE entry number of the selected item for LIST or COMBO.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:ChoiceFeq",
+      "description": "Returns or sets the field number of the currently selected TAB in a SHEET, or RADIO in an OPTION structure.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:ClientHandle",
+      "description": "WINDOW property which returns the client window handle (the area of the window that contains the controls) for use with low-level Windows API calls that require it. (READ-ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:ClientHeight",
+      "description": "APPLICATION or WINDOW property which returns the height of the client area for use with low-level Windows API calls that require it. (READ-ONLY).",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:ClientWidth",
+      "description": "APPLICATION or WINDOW property which returns the width of the client area for use with low-level Windows API calls that require it. (READ-ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:ClientWndProc",
+      "description": "WINDOW property which sets or gets the client window (not including title or status areas) messaging procedure for use with low-level Windows API calls that require it. Generally used with sub-classing to track all Windows messages.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:ClientX",
+      "description": "APPLICATION or WINDOW property which returns the horizontal position of the top left corner of the client area . (READ-ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:ClientY",
+      "description": "APPLICATION or WINDOW property which returns the vertical position of the top left corner of the client area . (READ-ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:Clip",
+      "description": "The CLIP attribute (PROP:CLIP, write-only) specifies the OLE object only displays what fits into the size of the OLE container control's AT attribute. If the object is larger than the OLE container control, only the top left corner displays.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:ClipBits",
+      "description": "Property of an IMAGE control that allows bitmap images to be moved into (but not out of) the Windows clipboard when set to one (1). Only .BMP, .PCX, or .GIF image types can be stored as a bitmap (.BMP) image in the Clipboard.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:CloseReportHook",
+      "description": "A property of the SYSTEM built-in variable that sets the override procedure for the CLOSE(Report) internal Clarion procedure. Equivalent to {PROP:LibHook,22}. Assign the ADDRESS of the overriding procedure, and the runtime library will call the overriding procedure instead of the default CLOSE procedure. Assign zero and the runtime library will once again call its internal procedure. The overriding procedure's prototype must be exactly the same as the CLOSE procedure found in the BUILTINS.CLW. (WRITE-ONLY)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:CloseWindowHook",
+      "description": "A property of the SYSTEM built-in variable that sets the override procedure for the CLOSE(Window) internal Clarion procedure. Equivalent to {PROP:LibHook,20}. Assign the ADDRESS of the overriding procedure, and the runtime library will call the overriding procedure instead of the default CLOSE procedure. Assign zero and the runtime library will once again call its internal procedure. The overriding procedure's prototype must be exactly the same as the CLOSE procedure found in the BUILTINS.CLW. (WRITE-ONLY)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Cnt",
+      "description": "Specifies an automatic count of the number of times DETAIL structures have been printed in a REPORT. Reset only if the RESET or PAGE attribute is also specified.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Codepage",
+      "description": "Setting PROP:Codepage and PROP:Locale properties respectively for the internal SYSTEM variable,",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Color",
+      "description": "COLOR( color [, selected fore ] [, selected back ] )",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:ColorDialogHook",
+      "description": "A property of the SYSTEM built-in variable that sets the override procedure for the COLORDIALOG internal Clarion procedure. Equivalent to {PROP:LibHook,1}. Assign the ADDRESS of the overriding procedure, and the runtime library will call the overriding procedure instead of the COLORDIALOG procedure. Assign zero and the runtime library will once again call its internal procedure. The overriding procedure's prototype must be exactly the same as the COLORDIALOG procedure found in the BUILTINS.CLW. (WRITE-ONLY)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:ColorHighByte",
+      "description": "A property of the SYSTEM built-in variable that sets the high byte of the RGB DWORD using",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Column",
+      "description": "The COLUMN attribute (PROP:COLUMN) specifies a field-by-field highlight bar on a LIST or COMBO control with multiple display columns. PROP:COLUMN returns zero (0) if off, else it returns the currently highlighted column number.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Compatibility",
+      "description": "Specifies a compatibility mode for certain OLE or .OCX controls that require it (write-only). The mode should generally be zero (0); set to one (1) for OLE objects like the Windows bitmap editor.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Completed",
+      "description": "PROP:Completed is a property of a FILE that returns the percentage completed of the re-build during a BUILD or PACK operation for which PROP:ProgressEvents has been turned on. Returns zero (0) if the file driver does not know how much of the BUILD or PACK has been done (READ ONLY).",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:ConnectString",
+      "description": "Property of a FILE using the ODBC driver that returns the connection string (normally stored in the file's OWNER attribute) that would allow a complete connection. If the OWNER attribute contains only a data source name, a login screen appears to ask for the rest of the required details before the connection is made. This login window appears every time you log on. With this property, the developer can enter information in the login screen once, then set the OWNER attribute to the return value from PROP:ConnectString, eliminating the login.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Create",
+      "description": "The CREATE attribute (PROP:CREATE) of a FILE declaration allows a disk file to be created by the CREATE statement from within the PROGRAM where the FILE is declared. This adds some overhead, as all the file information must be contained in the excutable program.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:CurrentKey",
+      "description": "Property of a FILE that returns a reference to the current KEY or INDEX being used for sequential processing, or the current key being built during a BUILD or PACK operation (READ ONLY). Valid only as the source side of a reference assignment statement or in a logical expression comparing the return result to NULL. Returns NULL if the file is being processed in record order.",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:Cursor",
+      "description": "Specifies a mouse cursor to display.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:CustomColor",
+      "description": "A read/write SYSTEM property that can be used to save custom colors added by a user between program sessions.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:DataPath",
+      "description": "All files with unqualified file names (e.g., those files with no NAME attribute or a NAME with only a relative path) will be looked for in the directory specified by SYSTEM{PROP:DataPath}.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:DBMSver",
+      "description": "Applicable for all SQL Drivers except Oracle.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:DDEMode",
+      "description": "A property of the SYSTEM built-in variable that allows you to set normal DDE event behavior (0, the default) whereby all DDE events are sent to the window that opened the DDE channel, or one (1), which causes all DDE events to be sent to the top window of the current thread.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:DDETimeOut",
+      "description": "A property of the SYSTEM built-in variable that allows you to set and get the DDE timeout used for all DDE commands. This value is in hundredths of seconds and the default value is 500.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Default",
+      "description": "The DEFAULT attribute (PROP:DEFAULT) specifies a BUTTON that is automatically pressed when the user presses the ENTER key. Only one active BUTTON on a window should have this attribute.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:DefaultExtension",
+      "description": "A read only FILE property that returns the file extension, including the dot, added to a file if no extension is supplied.",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:DeferMove",
+      "description": "A property of the SYSTEM built-in variable that defers the resizing and/or movement of controls until the end of the ACCEPT loop or SYSTEM{PROP:DeferMove} is reset to zero (0). This disables the immediate effect of all assignments to position and size properties, enabling the library to perform all moves at once (which eliminates temporarily overlapping controls). The absolute value of the number assigned to SYSTEM{PROP:DeferMove} defines the number of deferred moves for which space is pre-allocated (automatically expanded when necessary, but less efficient and may fail). Assigning a positive number automatically resets PROP:DeferMove to zero at the next ACCEPT, while a negative number leaves it set until explicitly reset to zero (0).",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:Delay",
+      "description": "Specifies the delay between first and second event generation.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Details",
+      "description": "Property of a FILE structure. See Runtime VIEW and FILE Properties for the complete list of file structure properties.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Disable",
+      "description": "The DISABLE attribute (PROP:Disable) specifies a control that is disabled when the WINDOW or APPLICATION is opened. The disabled control may be activated with the ENABLE statement. PROP:Disable returns a (1) if the control is DISABLEd and a (0) if ENABLEd.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Disconnect",
+      "description": "PROP:Disconnect CLOSEs any open files in the target file's database, then disconnects the application from the database.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Dock",
+      "description": "Specifies a non-MDI TOOLBOX window may be docked to an edge of the application frame. Uses DOCK: equates (DOCK:Left=1, DOCK:Right=4, DOCK:Top=2, DOCK:Bottom=8, DOCK:Float=16, DOCK:All=31).",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Docked",
+      "description": "Specifies that a dockable TOOLBOX window with the DOCK attribute is docked at a specified edge when the window is opened. Uses DOCK: equates for the position value.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Document",
+      "description": "Specifies creating an OLE control object from a data file specific to an OLE server application (write-only). The filename must be a fully-qualified pathname unless the file is in the same directory.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Double",
+      "description": "The DOUBLE , NOFRAME , and RESIZE attributes specify a WINDOW or APPLICATION border frame style other than the default single-width border. The DOUBLE attribute (PROP:DOUBLE) places a double-width border around the window and the NOFRAME attribute (PROP:NOFRAME) places no border on the window. A window with these frame types may not be resized.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Dragid",
+      "description": "DRAGID( signature [, signature ] )",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Driver",
+      "description": "There are switches or \"driver strings\" you can set to control the way your application creates, reads, and writes files with a specific driver. Driver strings are simply messages or parameters that are sent to the file driver at run-time to control its behavior. The various driver specific driver strings are described in the Driver Strings section for each driver.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:DriverLogsoutAlias",
+      "description": "Property of a FILE that returns whether the file driver allows the LOGOUT statement to name both a file and an alias for the file in the same statement (READ ONLY).",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:DriverTracing",
+      "description": "If this property is set to '' , then all driver tracing for all file drivers is disabled. No INI file or registry entry will be read. However file specific settings set via SEND commands or file property settings will still take effect.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Drop",
+      "description": "Specifies the selection list appears only when the user presses an arrow cursor key or clicks the drop icon. Sets the count of elements displayed and optionally the width of the dropped list.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Dropid",
+      "description": "DROPID( signature [, signature ] )",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Dup",
+      "description": "The DUP attribute (PROP:DUP) of a KEY declaration allows multiple records with the same key values to occur in a FILE. If the DUP attribute is omitted, attempting to ADD or PUT records with duplicate key values will generate the \"Creates Duplicate Key\" error, and the record will not be written to the file. During sequential processing using the KEY, records with duplicate key values are accessed in the physical order their entries appear in the KEY. The GET and SET statements generally access the first record in a set of duplicates.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:DuplicateKey",
+      "description": "Read-Only property of a FILE that returns the key that caused the last duplicate key error. It is cleared only when a subsequent ADD or PUT is attempted.",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:Edit",
+      "description": "LIST control property which specifies the field equate label of the control to perform edit-in-place for a LIST box column. This is an array whose element number indicates the column number to edit. When non-zero, the control is unhidden and moved/resized over the current row in the column indicated to allow the user to input data. Assign zero to re-hide the data entry control.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Enabled",
+      "description": "Returns an empty string if the control is not enabled either because it itself has been disabled, or because it is a member of a \"parent\" control (OPTION, GROUP, MENU, SHEET, or TAB) that has been disabled. (READ-ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:Encrypt",
+      "description": "The ENCRYPT attribute (PROP:ENCRYPT) is used in conjunction with the OWNER attribute to disguise the information in a data file. ENCRYPT is only valid with an OWNER attribute. Even with a \"hex-dump\" utility, the data in an encrypted file is extremely difficult to decipher.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:EventsWaiting",
+      "description": "WINDOW property which returns whether the window has any further events waiting to be processed. Generally only used by H5 to know when to format an HTML page. (READ-ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:ExeVersion",
+      "description": "A property of the SYSTEM built-in variable that returns the version information of an EXE created by Clarion Win32.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:FatalErrorHook",
+      "description": "A property of the SYSTEM built-in variable that sets the override procedure for the internal Clarion procedure. Equivalent to {PROP:LibHook,9}. Assign the ADDRESS of the overriding procedure, and the runtime library will call the overriding procedure instead of the internal procedure. Assign zero and the runtime library will once again call its internal procedure. The overriding procedure's prototype must be exactly the same as the internal procedure's (STRING message,UNSIGNED ErrorNumber). (WRITE-ONLY)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:FetchSize",
+      "description": "Property of a FILE or VIEW which sets or gets the pagesize parameter for the last BUFFER statement executed.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Field",
+      "description": "Property of a VIEW which returns the field number in a file for the specified field number in a VIEW. (READ ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:FieldsFile",
+      "description": "Property of a VIEW which returns a reference to the file that contains the specified field number in a VIEW. (READ ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:File",
+      "description": "An array property of a VIEW. Each array element returns a reference to the numbered file in the VIEW. This reference can be used as the source side of a reference assignment statement. The files are numbered within the VIEW starting with 1 (the primary file in the VIEW) and continuing for each JOIN, as they appear within the VIEW structure. (READ ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:FileDialogHook",
+      "description": "A property of the SYSTEM built-in variable that sets the override procedure for the FILEDIALOG internal Clarion procedure. Equivalent to {PROP:LibHook,2}. Assign the ADDRESS of the overriding procedure, and the runtime library will call the overriding procedure instead of the FILEDIALOG procedure. Assign zero and the runtime library will once again call its internal procedure. The overriding procedure's prototype must be exactly the same as the FILEDIALOG procedure found in the BUILTINS.CLW. (WRITE-ONLY)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Files",
+      "description": "Returns the total number of files in a VIEW (number of JOIN structures plus one). view{PROP:Files, N} returns the number of JOINs for a specific file position. (READ ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:FileSize",
+      "description": "Returns the number of bytes in the file. Unlike BYTES(), returns the full file size even after the first GET/NEXT/ADD statement.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Fill",
+      "description": "Specifies the fill color of a BOX, ELLIPSE or PANEL control.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Filter",
+      "description": "Specifies a filter expression used to evaluate which records to include in the VIEW. The expression may reference any field at all JOIN levels; all referenced variables must be BINDed.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:First",
+      "description": "The FIRST and LAST attributes (PROP:FIRST and PROP:LAST) specify menu selection positioning within the global pulldown menu, when a WINDOW's MENUBAR is merged into the global menu. The order of priorities is:",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Flat",
+      "description": "The FLAT attribute (PROP:FLAT) specifies the BUTTON, CHECK, or RADIO with an ICON attribute appears flat until the mouse cursor passes over it. This attribute is typically used on controls placed in a TOOLBAR.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:FlushLog",
+      "description": "filelabel {PROP:FlushLog} = 0|1",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:FlushPageNumFunc",
+      "description": "A property of a REPORT that sets the callback function called during the flushing of previewed pages. This callback function returns the number of the next page to be flushed. The callback function must be a PROCEDURE that takes a single LONG parameter and returns a LONG.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:FlushPreview",
+      "description": "Flushes the REPORT structure's PREVIEW attribute metafiles to the printer (0 = off, else on). Always 0 at report open. Set to 1 to send the previewed pages to the printer.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Follows",
+      "description": "Changes the tab order to specify the position within the parent that the control will occupy. The control follows the control number you specify in the tab order. This must specify an existing control within the parent (window, option, group, menu, report, detail, etc.). Setting PROP:Follows to a REGION control will be ignored, as REGIONs are not in the Windows tab order. (WRITE-ONLY)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Font",
+      "description": "Here is a brief summary of the FONT attribute, and FONT language support:",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:FontDialogHook",
+      "description": "A property of the SYSTEM built-in variable that sets the override procedure for the FONTDIALOG internal Clarion procedure. Equivalent to {PROP:LibHook,3}. Assign the ADDRESS of the overriding procedure, and the runtime library will call the overriding procedure instead of the FONTDIALOGA procedure. Assign zero and the runtime library will once again call its internal procedure. The overriding procedure's prototype must be exactly the same as the FONTDIALOGA procedure found in the BUILTINS.CLW. (WRITE-ONLY)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Format",
+      "description": "Sets or returns the FORMAT attribute string for a LIST or COMBO control's columns at runtime. Individual column properties can also be accessed via PROPLIST: equates.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:From",
+      "description": "Specifies the source of the data displayed or printed in a LIST control.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Full",
+      "description": "The FULL attribute (PROP:FULL) specifies the control expands to occupy the entire size of the WINDOW for any missing AT attribute width or height parameter.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Getinfo",
+      "description": "Result = filelabel{PROP:GETINFO, property}",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:GlobalHelp",
+      "description": "SYSTEM{ PROP:GlobalHelp } = TRUE !Disable automatic HLP file close",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Gray",
+      "description": "The GRAY attribute (PROP:GRAY) indicates that the WINDOW has a gray background, suitable for use with three-dimensional dialog controls. All controls on a WINDOW with the GRAY attribute are automatically given a three-dimensional appearance. Controls in a TOOLBAR are always automatically given a three-dimensional appearance, without the GRAY attribute.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:GroupBy",
+      "description": "The SQL view engine supports PROP:GroupBy and PROP:Having. These properties allow you to add respectively GROUP BY and HAVING clauses to your SELECT statement. Note that PROP:GroupBy must be set first to allow PROP:Having to be generated.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:HaltHook",
+      "description": "A property of the SYSTEM built-in variable that sets the override procedure for the HALT internal Clarion procedure. Equivalent to {PROP:LibHook,5}. Assign the ADDRESS of the overriding procedure, and the runtime library will call the overriding procedure instead of the HALT procedure. Assign zero and the runtime library will once again call its internal procedure. The overriding procedure's prototype must be exactly the same as the HALT procedure found in the BUILTINS.CLW. (WRITE-ONLY)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Handle",
+      "description": "Returns the window or control handle for use with low-level Windows API calls that require it.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Having",
+      "description": "The SQL view engine supports PROP:GroupBy and PROP:Having. These properties allow you to add respectively GROUP BY and HAVING clauses to your SELECT statement. Note that PROP:GroupBy must be set first to allow PROP:Having to be generated.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:hdbc",
+      "description": "PROP:hdbc returns the current hdbc used by the ODBC driver. Thus ?MyFile{PROP:hdbc} may be used for ODBC API calls requiring an hdbc.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:HeaderHeight",
+      "description": "Returns the height of the header in a LIST or COMBO control. The height is measured in dialog units (unless PROP:Pixels is active). (READ-ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:Held",
+      "description": "Property of a FILE that returns whether the current record is held. Returns 1 if the record is held and an empty string ('') if not. (READ ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:henv",
+      "description": "PROP:henv returns the current henv (environment handle) used by the SQL driver. Thus ?MyFile{PROP:henv} may be used for ODBC API calls requiring henv. For example, for the SQLDataSources function:",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Hide",
+      "description": "The HIDE attribute (PROP:HIDE) specifies the control does not appear when the WINDOW or APPLICATION is first opened. UNHIDE must be used to display it. In a REPORT, the control does not print unless the UNHIDE statement is used to allow it to print. PROP:HIDE may be used with the TARGET built-in variable to hide/unhide the current target window. Care must be taken when assigning PROP:HIDE at runtime. If it is assigned prior to opening the desired window, it may inadvertently affect another window TARGET.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Hint",
+      "description": "The HINT driver string is valid for Oracle and MS-SQL drivers..",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Hlp",
+      "description": "Specifies the helpID for the APPLICATION, WINDOW, or control.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Hscroll",
+      "description": "The HSCROLL , VSCROLL , and HVSCROLL attributes place scroll bars on an APPLICATION or WINDOW structure, or a COMBO, LIST, IMAGE, or TEXT control. HSCROLL (PROP:HSCROLL) adds a horizontal scroll bar to the bottom, VSCROLL (PROP:VSCROLL) adds a vertical scroll bar on the right side, and HVSCROLL adds both.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:HscrollPos",
+      "description": "Returns the position of the horizontal scroll bar's \"thumb\" (from 0 to 255) on a window, IMAGE, TEXT, LIST or COMBO with the HSCROLL attribute. Setting this causes the control or window's contents to scroll horizontally.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:hstmt",
+      "description": "PROP:hstmt returns the current hstmt used by the SQL driver. Thus ?MyFile{PROP:hstmt} may be used for ODBC API calls requiring hstmt. For example, the SQLDescribeCol function:",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Icon",
+      "description": "Specifies an icon to display for the APPLICATION, WINDOW, or control.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Iconize",
+      "description": "The ICONIZE attribute (PROP:ICONIZE) specifies the APPLICATION or WINDOW is opened minimized as the icon specified by the ICON attribute. When an APPLICATION or non-MDI WINDOW is minimized, the icon file is displayed in the operating system's desktop; when a WINDOW with the MDI attribute is minimized, the icon file is displayed in the APPLICATION.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:IconList",
+      "description": "An array that sets or returns the icons displayed in a LIST formatted to display icons (usually a tree control). If the name of the icon file to assign has a number in square brackets appended to its end, this indicates the file contains multiple icons and the number specifies which to assign (zero-based). If the name of the icon file has a tilde (~) prepended to it (~IconFile.ICO), this indicates the file has been linked into the project as a resource and is not on disk.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Ignoretruncation",
+      "description": "DRIVER('SQLDriver', '/IGNORETRUNCATION = TRUE | FALSE ' )",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Image",
+      "description": "Specifies the image file displayed in an IMAGE control at runtime. Supports BMP, PCX, GIF, JPG, WMF, and ICO formats. The image is stretched to fill the AT area unless TILED or CENTERED is set.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:ImageBits",
+      "description": "Property of an IMAGE control that allows bitmap images displayed in the control to be moved into and out of memo fields. Any image displayed in the control can be stored. PROP:ImageBlob performs the same type of function for a BLOB.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:ImageBlob",
+      "description": "Property of an IMAGE control that allows bitmap images displayed in the control to be moved into and out of BLOB fields. Any image displayed in the control can be stored. PROP:ImageBits performs the same type of function for a MEMO. Most images are stored in a bitmap format by default (except PCX and GIF), unless PROP:PrintMode is set to store the native format.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:ImageInstance",
+      "description": "A SYSTEM property that returns the HINSTANCE of the active EXE/DLL for use with linked-in image files.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Imm",
+      "description": "The IMM attribute (PROP:IMM) specifies immediate event generation.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:InitAStringHook",
+      "description": "A property of the SYSTEM built-in variable that allows a procedure to be set up to automatically initialize the TIE values the first time an ASTRING representing a particular value is assigned. Equivalent to {PROP:LibHook,14}. Assign the ADDRESS of the InitAString procedure, and the runtime library will call this procedure when an ASTRING variable is first assigned. Assign zero and the runtime library will stop calling the InitAString procedure. (WRITE-ONLY)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Inner",
+      "description": "PROP:Inner is a writable property for SQL Accelerator drivers. This is useful for testing the ODBC USEINNERJOIN driver string. See PROP:Inner in the Language Reference for more information.",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:Ins",
+      "description": "The INS and OVR attributes (PROP:INS and PROP:OVR) specify the typing mode for an ENTRY control. INS specifies insert mode while OVR specifies overwrite mode.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Interface",
+      "description": "A property of a TEXT control used to get an interface to the RTF control�s host interface.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:InToolbar",
+      "description": "A toggle attribute which returns whether the control is in a TOOLBAR structure. (READ-ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:IPRequestCount",
+      "description": "IPRequestCount is a read/write property used exclusively by the SoftVelocity IP Driver that sets the number of requests to be sent to the server in a single MRP (Multiple Request Packet). The server will then execute the specified number of statements, and return the results in an MRP packet to the client. If this property is set to -1, the current packet is immediately sent. If this property is set to zero, the current packet is reset, and nothing is sent to the server.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:IsolationLevel",
+      "description": "PROP:IsolationLevel is used to define transaction isolation levels. See ISOLATIONLEVEL",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Items",
+      "description": "Returns or sets the number of entries visible in a LIST or COMBO control.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Join",
+      "description": "JOIN( | secondary key ,linking fields | ) [ , INNER ]",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Key",
+      "description": "Specifies a \"hot\" key for the control",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Landscape",
+      "description": "The LANDSCAPE attribute (PROP:LANDSCAPE) on a REPORT indicates the report is to print in landscape mode by default. If the LANDSCAPE attribute is omitted, printing defaults to portrait mode.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:LastChanceHook",
+      "description": "This is a SYSTEM read/write property (returning a LONG) that allows you to specify your own function that will be invoked if an exception has occurred. The hook function allows you to display information about the exception and choose one of the following actions:",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Layout",
+      "description": "Specifies the left-to-right (0) or right-to-left (1) display orientation of a WINDOW or APPLICATION. A style of 1 mirrors the window controls. Setting on the Application Frame cascades to child windows.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:LazyDisplay",
+      "description": "SYSTEM property which disables (when set to 1) or enables (when set to 0, the default) the feature where all window re-painting is completely done before processing continues with the next statement following a DISPLAY. Setting PROP:LazyDisplay = 1 creates seemingly faster video processing, since the re-paints occur at the end of the ACCEPT loop if there are no other messages pending. This can improve the performance of some applications, but can also have a negative impact on appearance.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Left",
+      "description": "Sets the placement of ticks on a SLIDER control to the Left side of the SLIDER.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:LFNSupport",
+      "description": "NOTE: This property has been deprecated in this release.",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:LibHook",
+      "description": "An array property of the SYSTEM built-in variable that sets override procedures for several internal Clarion procedures. For each of these procedures, you assign the ADDRESS of the overriding procedure, and the runtime library will call the overriding procedure instead of the Clarion library procedure. The overriding procedure's prototype must be exactly the same as the internal Clarion procedure as declared in Builtins.Clw. These properties were implemented to facilitate H5. (WRITE-ONLY)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:LibVersion",
+      "description": "A property of the SYSTEM built-in variable that returns the version information for the Clarion RTL DLL loaded for the EXE currently executing. Note, this could be different from the version number of the RTL in use when the EXE was compiled.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Line",
+      "description": "PROP:Line is an array whose elements each contain one line of the text in a TEXT control. (READ ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:LineCount",
+      "description": "PROP:Line is an array whose elements each contain one line of the text in a TEXT control. (READ ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:LineHeight",
+      "description": "Sets or returns the height of the rows in a LIST or COMBO control. The height is measured in dialog units (unless PROP:Pixels is active). For a TEXT control, it returns the character cell height of the control's font (the distance from the top of one line of text to the top of the next) in whatever measurement unit is currently in use. READ-ONLY for a TEXT control.",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:Linewidth",
+      "description": "Specifies the thickness of the LINE control and the BOX and ELLIPSE controls' border. Width is in pixels for WINDOW structures or report units for REPORT structures.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Link",
+      "description": "Specifies creating a link to an OLE control object from a data file specific to an OLE server application (write-only). The filename must be a fully-qualified pathname unless the file is in the same directory.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Locale",
+      "description": "Setting PROP:Codepage and PROP:Locale properties respectively for the internal SYSTEM variable, for example: SYSTEM {PROP:Codepage} = 1253 !Greek",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Log",
+      "description": "Property of a FILE that writes a string to the current profile output file (assigned to PROP:Profile). This string is placed on its own line in the file. (WRITE ONLY)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:LogFile",
+      "description": "Same as PROP:Profile -- for backward compatibility.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:LoginTimeout",
+      "description": "PROP:LoginTimeout sets a time limit in seconds for an SQL database's login screen. If the user does not respond in the allotted time, the connection fails and the login is aborted. The default is to wait indefinitely for user input. Some servers do not support this feature and may ignore the instruction. For example:",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:LogonScreen",
+      "description": "AFile FILE,DRIVER('SQLAnywhere')",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Logout",
+      "description": "Property of a FILE that assigns or returns the priority level of the referenced FILE within a transaction. PROP:Logout may be used to build the list of files in the transaction before issuing the LOGOUT( seconds ) statement to begin the transaction. By using PROP:Logout, you can add more files to the transaction than the limited number of parameters the LOGOUT statement will allow. If the LOGOUT statement lists any files at all, all files previously set for the transaction by PROP:Logout are removed from the transaction and only the files listed in the LOGOUT statement are logged out.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:LogoutIsolationLevel",
+      "description": "PROP:LogoutIsolationLevel uses the ODBC isolation level standard. This may not be the same as the isolation levels documented on the target driver�s native back end. For example, with Sybase's ASA, the documented isolation levels are 0, 1, 2 and 3 and they correspond to",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:LogSQL",
+      "description": "A FILE property specifically used for SQL based tables; turns on or off logging of calls to the backend for SQL drivers. A value of 1 turns on logging, a value of 0 turns off logging.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Mark",
+      "description": "Enables multiple items selection.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Mask",
+      "description": "The MASK attribute (PROP:MASK) specifies pattern input editing mode for all controls in the window (when placed on the WINDOW statement). Toggling the value of PROP:MASK for a window only affects controls created after--it does not affect any existing controls.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Max",
+      "description": "Specifies a maximize control on an APPLICATION or WINDOW, or calculates the maximum value a REPORT STRING control's USE variable has contained so far. Reset only if RESET or PAGE attribute is also specified.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:MaxHeight",
+      "description": "PROP:MaxHeight sets or returns the maximum height of a resizable window.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Maximize",
+      "description": "The MAXIMIZE attribute (PROP:MAXIMIZE) specifies the APPLICATION or WINDOW is opened maximized. When maximized, an APPLICATION or non-MDI WINDOW expands to occupy the full screen, and an MDI WINDOW expands to occupy the entire APPLICATION.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:MaxStatements",
+      "description": "Property of a FILE that allows you to find out how many statements can be active before a new connection to the database is raised. This property can also set the maximum number of statements before another connection is raised. This property is valid on all SQL file types except Oracle.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:MaxWidth",
+      "description": "PROP:MaxWidth sets or returns the maximum width of a resizable window.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Mdi",
+      "description": "The MDI attribute (PROP:MDI, read-only) specifies a WINDOW that acts as a \"child\" window to an APPLICATION. MDI windows are clipped to the APPLICATION frame--they display only in the APPLICATION's client area. MDI windows automatically move when the APPLICATION frame is moved, and are totally concealed by minimizing the APPLICATION. An MDI WINDOW cannot open until there is an active APPLICATION.",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:MenuBar",
+      "description": "A WINDOW property used to return the Field Equate Label of a window�s menubar.",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:MenuStyle",
+      "description": "A read-only property used to identify the Interface to the default menu style",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:MessageHook",
+      "description": "A property of the SYSTEM built-in variable that sets the override procedure for the MESSAGE internal Clarion procedure. Equivalent to {PROP:LibHook,6}. Assign the ADDRESS of the overriding procedure, and the runtime library will call the overriding procedure instead of the MESSAGE procedure. Assign zero and the runtime library will once again call its internal procedure. The overriding procedure's prototype must be exactly the same as the MESSAGE procedure found in the BUILTINS.CLW file. (WRITE-ONLY)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Min",
+      "description": "Specifies printing the minimum value the STRING control's USE variable has contained so far in a REPORT. Reset only if the RESET or PAGE attribute is also specified.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:MinHeight",
+      "description": "PROP:MinHeight sets or returns the minimum height of a resizable window.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:MinWidth",
+      "description": "PROP:MinWidth sets or returns the minimum width of a resizable window. Also sets the minimum width of TAB controls in a SHEET.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Msg",
+      "description": "Specifies text to display in the status bar.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Name",
+      "description": "All of the SQL Accelerator Drivers now support the following syntax:",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:NextField",
+      "description": "An array property which returns the next control number in sequence of a window or report. (READ-ONLY) The control number returned is the control following the array element numbered control. The order in which PROP:NextField returns field numbers is undefined. PROP:NextField returns zero when the array element number is the last control in its list. This property easily allows you to loop through all the controls in a window or report, whether those controls have USE attributes or not. Controls without a USE attribute are assigned a control number starting at 32768.",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:NextPageNo",
+      "description": "A property which sets or returns the next page number in a report.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:NextTabStop",
+      "description": "PROP:NextTabStop returns the next control (field equate label) that can have input focus and be reached by pressing the Tab key.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Nobar",
+      "description": "The NOBAR attribute (PROP:NOBAR) specifies the currently selected element in the LIST is only highlighted when the LIST control has focus.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Nocase",
+      "description": "The NOCASE attribute (PROP:NOCASE) of a KEY or INDEX declaration makes the sorted sequence of alphabetic characters insensitive to the ASCII upper/lower case sorting convention. All alphabetic characters in key fields are converted to upper case as they are written to the KEY. This case conversion has no affect on the case of the stored data. The NOCASE attribute has no effect on non-alphabetic characters.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:NoFrame",
+      "description": "PROP:NoFrame is valid for any target control (BUTTON, CHECK, RADIO) containing an image.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:NoHeight",
+      "description": "PROP:NoHeight is a toggle attribute which returns whether the window or control was set to default its height (had an omitted height parameter in its AT attribute). Setting this property to TRUE is equivalent to resetting the control to its default height as determined by the library (which you cannot do using PROP:Height).",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Nomerge",
+      "description": "The NOMERGE attribute (PROP:NOMERGE) indicates that the MENUBAR or TOOLBAR on a WINDOW should not merge with the Global menu or toolbar.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Nosheet",
+      "description": "The NOSHEET attribute (PROP:NOSHEET) on a SHEET control specifies the TABs display without a visible sheet to contain the controls. This creates a \"floating tab\" effect.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:NoTheme",
+      "description": "PROP:NoTheme can be applied to a SHEET control. It prevents the Operating System theme color from being applied to the SHEET /TAB controls allowing you to set the Colors.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:NoTips",
+      "description": "Disables (when set to 1) or re-enables (when set to 0) tooltip display (TIP attribute) for the SYSTEM, window, or control.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:NoWidth",
+      "description": "PROP:NoHeight is a toggle attribute which returns whether the window or control was set to default its height (had an omitted height parameter in its AT attribute). Setting this property to TRUE is equivalent to resetting the control to its default height as determined by the library (which you cannot do using PROP:Height).",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:NumTabs",
+      "description": "MDIChild WINDOW('Child One'),AT(0,0,320,200),MDI,MAX,HVSCROLL",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:Oem",
+      "description": "The OEM attribute (PROP:OEM) specifies that the FILE on which it is placed contains non-English language string data that was stored by a ANSI based program or needs to be read by a ANSI based program. These strings are automatically translated from the OEM ASCII character set data contained in the file to the ANSI character set for display in Windows. All string data in the record is automatically translated from the ANSI character set to the OEM ASCII character set before the record is written to disk.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Ole",
+      "description": "Indicates whether there is an OCX or OLE object in the OLE container control (READ ONLY). The OLE container also exposes attribute properties like PROP:Create, PROP:Document, PROP:Link, and PROP:Compatibility.",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:Open",
+      "description": "Specifies opening a saved object for the OLE control from an OLE Compound Storage file.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:OpenReportHook",
+      "description": "A property of the SYSTEM built-in variable that sets the override procedure for the OPEN(Report) internal Clarion procedure. Equivalent to {PROP:LibHook,21}. Assign the ADDRESS of the overriding procedure, and the runtime library will call the overriding procedure instead of the default OPEN procedure. Assign zero and the runtime library will once again call its internal procedure. The overriding procedure's prototype must be exactly the same as the OPEN procedure found in the BUILTINS.CLW. (WRITE-ONLY)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:OpenWindowHook",
+      "description": "A property of the SYSTEM built-in variable that sets the override procedure for the OPEN(Window) internal Clarion procedure. Equivalent to {PROP:LibHook,19}. Assign the ADDRESS of the overriding procedure, and the runtime library will call the overriding procedure instead of the default OPEN procedure. Assign zero and the runtime library will once again call its internal procedure. The overriding procedure's prototype must be exactly the same as the OPEN procedure found in the BUILTINS.CLW. (WRITE-ONLY)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Opt",
+      "description": "The OPT attribute (PROP:OPT) excludes entries in the KEY or INDEX for records with \"null\" values in all fields comprising the KEY or INDEX. For the purpose of this attribute, a \"null\" value is defined as zero in a numeric field or all blank spaces (20h) in a string field.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Order",
+      "description": "Specifies an expression list used to sort the records in the VIEW. Expressions are evaluated left-to-right; a leading minus (-) sorts descending. All variables must be BINDed.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:OrderAllTables",
+      "description": "Setting PROP:OrderAllTables to True forces the SQL Accelerator driver to use linking fields and secondary files' key component fields, as well as the primary file's key component fields, in the ORDER BY clause it sends to the server. You may need this switch if you are using a Clarion VIEW that joins multiple tables. By default (View{PROP:OrderAllTables}=FALSE), the SQL Accelerator driver includes only the primary file's key components in the ORDER BY clause it sends to the SQL server.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:OrderInSelect",
+      "description": "Some SQL backends require that any fields used in the ORDER BY clause also appear in the SELECT statement. By setting this property to TRUE (1) the driver will make sure that this rule is applied for all views regardless of the fields that you project.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Owner",
+      "description": "Specifies the password used by the ENCRYPT attribute to encrypt the data file. An Invalid Data File error occurs if the password does not match the one used to encrypt the file.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Page",
+      "description": "The PAGE attribute (PROP:PAGE) specifies the CNT, SUM, AVE, MIN, or MAX is reset to zero (0) when page break occurs.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Pageafter",
+      "description": "Specifies the DETAIL, HEADER, or FOOTER structure initiates page overflow after it is printed. The optional newpage parameter resets the page number; -1 increments it automatically.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Pagebefore",
+      "description": "Specifies the DETAIL, HEADER, or FOOTER structure is printed on a new page after page overflow. The optional newpage parameter resets the page number; -1 increments it automatically.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Pageno",
+      "description": "Specifies the STRING control prints the current page number in a REPORT. Page numbers can be affected by the PAGEBEFORE and PAGEAFTER attributes.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Palette",
+      "description": "Specifies how many colors in the hardware palette the WINDOW uses when it is the foreground window. Only applicable in 256-color mode. Values above 256 are not recommended.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Parent",
+      "description": "Returns the parent control for a control within a structure (such as an OPTION, SHEET or GROUP control structure, or a DETAIL, TOOLBAR, or MENUBAR structure). It can also be used to name a control (e.g., PANEL) as a parent container for other controls.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Password",
+      "description": "The PASSWORD attribute (PROP:PASSWORD) specifies non-display of the data entered in the ENTRY control. When the user types in data, asterisks are displayed on screen for each character entered. The Windows standard Cut and Copy features are disabled when the PASSWORD attribute is active.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Pixels",
+      "description": "WINDOW property which toggles screen measurement between dialog units (DLUs) and pixels (not available for reports). After setting this property, all screen positioning (such as GETPOSITION, SETPOSITION, MOUSEX, MOUSEY, PROP:Xpos, PROP:Ypos, PROP:Width, and PROP:Height) return and require co-ordinates in pixels rather than DLUs.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Places",
+      "description": "An array that returns the number of decimal places declared for the specified DECIMAL or PDECIMAL field.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Preview",
+      "description": "Specifies report output goes to Windows metafiles containing one report page per file (write-only). Names a QUEUE to receive the metafile names. Temporary files are deleted when the REPORT is closed.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:PrevTabStop",
+      "description": "PROP:NextTabStop returns the next control (field equate label) that can have input focus and be reached by pressing the Tab key.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Primary",
+      "description": "The PRIMARY attribute (PROP:PRIMARY) specifies the KEY is unique, includes all records in the file, and does not allow \"null\" values in any of the fields comprising the KEY. This is the definition of a file's \"Primary Key\" per the relational database theory as expressed by E. F. Codd.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:PrintDocument",
+      "description": "reportlabel {PROP:PrintDocument}",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:PrinterDialogAHook",
+      "description": "A property of the SYSTEM built-in variable that sets the override procedure for the PRINTERDIALOGA internal Clarion procedure. Equivalent to {PROP:LibHook,24}. Assign the ADDRESS of the overriding procedure, and the runtime library will call the overriding procedure instead of the PRINTERDIALOGA procedure. Assign zero and the runtime library will once again call its internal procedure. The overriding procedure's prototype must be exactly the same as the PRINTERDIALOGA procedure found in the BUILTINS.CLW file. (WRITE-ONLY)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:PrinterDialogHook",
+      "description": "A property of the SYSTEM built-in variable that sets the override procedure for the PRINTERDIALOG internal Clarion procedure. Equivalent to {PROP:LibHook,4}. Assign the ADDRESS of the overriding procedure, and the runtime library will call the overriding procedure instead of the PRINTERDIALOG procedure. Assign zero and the runtime library will once again call its internal procedure. The overriding procedure's prototype must be exactly the same as the PRINTERDIALOG procedure found in the BUILTINS.CLW file. (WRITE-ONLY)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:PrintMode",
+      "description": "PROP:PrintMode is a property of a specific IMAGE control (or SYSTEM for all) that specifies how the PROP:ImageBlob property assignment stores images in the BLOB.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Profile",
+      "description": "Property of a FILE that toggles logging out (profiling) all file I/O calls and errors returned by the file driver to a specified text file. Assigning a filename to PROP:Profile initiates profiling, while assigning an empty string ('') turns off profiling. Querying this property returns the name of the current logfile, and an empty string ('') if profiling is turned off.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Progress",
+      "description": "You can directly update the display of a PROGRESS control by assigning a value (which must be within the range defined by the RANGE attribute) to the control's PROP:progress property.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:ProgressEvents",
+      "description": "PROP:ProgressEvents is a property of a FILE that generates events to the currently open window during a BUILD or PACK operation (WRITE ONLY). This property is driver-dependent, and currently only supported for Clarion and Topspeed files.",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:PropVScroll",
+      "description": "This property is used to determine how the vertical scroll bar's \"thumb.\" is displayed.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:QuoteString",
+      "description": "PROP:QuoteString sets or returns the column name delimiter (typically a quote) that the SQL Accelerator Driver uses to surround column names within its generated SQL statements. Different backends require different delimiter characters.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Range",
+      "description": "Specifies the valid range of data values the user may select in a SPIN control, or the range of values displayed in a PROGRESS control. PROP:RangeLow and PROP:RangeHigh access the individual limits.",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:Readonly",
+      "description": "The READONLY attribute (PROP:READONLY) specifies a display-only COMBO, ENTRY, SPIN or TEXT control. The control may receive input focus with the mouse, but may not enter data. If the user attempts to change the displayed value, a beep warns the user that data entry is not allowed.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Reclaim",
+      "description": "The RECLAIM attribute (PROP:RECLAIM) specifies that the file driver adds new records to the file in the space previously used by a record that has been deleted, if available. Otherwise, the record is added at the end of the file. Implementation of RECLAIM is file driver specific and may not be supported in all file systems.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Record",
+      "description": "Property of a FILE that returns a group reference to the file's record buffer. (READ ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:RejectCode",
+      "description": "MDIChild WINDOW('Child One'),AT(0,0,320,200),MDI,MAX,HVSCROLL",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Repeat",
+      "description": "Specifies the rate of event generation.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Req",
+      "description": "The REQ attribute (PROP:REQ) specifies an ENTRY, TEXT, COMBO or SPIN control that may not be left blank or zero. The REQ attribute on these controls are not checked until a BUTTON with the REQ attribute is pressed, or the INCOMPLETE() procedure is called.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Reset",
+      "description": "Specifies the group break at which the CNT, SUM, AVE, MIN, or MAX total is reset to zero (0) in a REPORT. PROP:RESET returns zero if not present, else the breaklevel nesting depth.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Resize",
+      "description": "The RESIZE attribute (PROP:RESIZE) specifies height of the TEXT control varies according to the amount of data to print in it, up to the maximum height specified by the control's AT attribute.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Right",
+      "description": "Sets the placement of ticks on a SLIDER control to the Right side of the SLIDER.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Round",
+      "description": "The ROUND attribute (PROP:ROUND) specifies a BOX control with rounded corners. This attribute is valid in Clarion Win32 Windows, and also for REPORT structures in both Clarion Win32 and Clarion#.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:ScreenText",
+      "description": "Returns the text displayed on screen in the specified control.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Scroll",
+      "description": "The SCROLL attribute (PROP:SCROLL) specifies a control that moves with the window when the WINDOW scrolls. This allows \"virtual\" windows larger than the physical video display.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Select",
+      "description": "SELECT( [ control ] [, position ] [, endposition ] )",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Selected",
+      "description": "PROP:SelStart (also named PROP:Selected) sets or retrieves the beginning (inclusive) character to mark as a block in an ENTRY or TEXT control. It positions the data entry cursor left of the character, and sets PROP:SelEnd to zero (0) to indicate no block is marked. It also identifies the currently highlighted entry in a LIST or COMBO control (usually coded as PROP:Selected for this purpose). For COMBO controls, PROP:Selected should be applied to the PROP:ListFeq of the COMBO, and not to the combo FEQ directly.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:SelEnd",
+      "description": "PROP:SelStart (also named PROP:Selected) sets or retrieves the beginning (inclusive) character to mark as a block in an ENTRY or TEXT control. It positions the data entry cursor left of the character, and sets PROP:SelEnd to zero (0) to indicate no block is marked. It also identifies the currently highlighted entry in a LIST or COMBO control (usually coded as PROP:Selected for this purpose). For COMBO controls, PROP:Selected should be applied to the PROP:ListFeq of the COMBO, and not to the combo FEQ directly.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:SelStart",
+      "description": "PROP:SelStart (also named PROP:Selected) sets or retrieves the beginning (inclusive) character to mark as a block in an ENTRY or TEXT control. It positions the data entry cursor left of the character, and sets PROP:SelEnd to zero (0) to indicate no block is marked. It also identifies the currently highlighted entry in a LIST or COMBO control (usually coded as PROP:Selected for this purpose). For COMBO controls, PROP:Selected should be applied to the PROP:ListFeq of the COMBO, and not to the combo FEQ directly.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Server",
+      "description": "All Clarion SQL drivers support the ability to automatically retrieve values set by the server when an INSERT is issued or to set values via server calls before an INSERT is issued. Normally, this usage is designed for auto incrementing columns that are not set up as auto number key columns on the client side.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:ServerCaseInsensitive",
+      "description": "The SQL drivers assume that the server is set up with case insensitive searches, and no longer generate UPPER calls in the SQL code when requested by the Clarion code. To turn off this behavior (force generation of UPPER calls), use PROP:ServerCaseInsensitive . When this file property is active (1), you will make the file driver use UPPER for all SQL sent to the backend.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Single",
+      "description": "The SINGLE attribute (PROP:SINGLE) specifies the control is only for single line data entry. This is specifically to allow use of TEXT controls instead of ENTRY for data entry in languages that write from right to left (such as Hebrew or Arabic).",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Size",
+      "description": "Returns or sets the size of a BLOB field. Before assigning data to the BLOB using the string slicing technique, if the BLOB does not yet contain any data you must set its size using PROP:Size. Before assigning additional data that will increase the amount of data in the BLOB (using the string slicing technique), you must reset its size using PROP:Size.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Skip",
+      "description": "The SKIP attribute (PROP:SKIP) on a window control specifies user access to the control is only with the mouse or an accelerator key, not the TAB key. This attribute is valid in Clarion Win32 Windows, and also for REPORT structures in both Clarion Win32 and Clarion#. Data entry controls receive input focus only during data entry and the control does not retain focus, while non-data entry controls do not receive or retain input focus (the same behavior demonstrated by controls in a toolbar or toolbox).",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Slider",
+      "description": "SLIDER , AT( ) , [, USE( ) ] [,CURSOR ( ) ] ,[, LAYOUT( ) ] [, DISABLE ] [, FULL ] [, SCROLL ] [, HIDE ]",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Smooth",
+      "description": "The SMOOTH attribute (PROP:Smooth) activates a smooth incremental display of the progress control instead of the standard \"block\" format. Valid only for a PROGRESS control.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:SnapHeight",
+      "description": "PROP:SnapHeight sets the snap height of any window or dockable toolbox when it is resized. When a toolbox is repositioned from vertical docking to horizontal docking, it is resized and adjusted according to the PROP:SnapHeight and PROPSnapWidth values.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:SnapWidth",
+      "description": "PROP:SnapHeight sets the snap height of any window or dockable toolbox when it is resized. When a toolbox is repositioned from vertical docking to horizontal docking, it is resized and adjusted according to the PROP:SnapHeight and PROPSnapWidth values.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Spread",
+      "description": "The SPREAD attribute (PROP:SPREAD) specifies a SHEET's TAB controls are evenly spaced.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:SQL",
+      "description": "You can use property syntax ( PROP:SQL ) to execute SQL statements in your program. You can send any SQL statements supported by the SQL backend.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:SQLDriver",
+      "description": "A property of a FILE that returns '1' if the file driver accepts SQL, otherwise it returns an empty string (''). (READ ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:SQLFilter",
+      "description": "Supported for backward compatibility; this statement should be replaced by the more versatile SQL() statement.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:SQLJoinExpression",
+      "description": "You can use PROP:SQLJoinExpression to structure your VIEWs using native SQL code rather than Clarion code.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:SQLOrder",
+      "description": "You can use PROP:SQLOrder to sort your VIEWs using native SQL code rather than Clarion code.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:SQLRowSet",
+      "description": "You can use property syntax (PROP:SQLRowSet) to execute SQL statements that return result sets in your program code by using PROP:SQLRowSet and naming the FILE or backend VIEW defined in the Clarion Data Dictionary as the target within your program. This is only valid when using an SQL file driver (such as the ODBC, MS-SQL, or Oracle drivers). You can send any SQL statement supported by the SQL server that returns a result set.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:State3Value",
+      "description": "Sets the value that is assigned to the USE variable for a three-state Checkbox control, when the control is in the third state.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Status",
+      "description": "The Status bar implementation exposes a set of 3 interfaces:",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:StatusFont",
+      "description": "A SYSTEM or WINDOW property that reads and writes the font settings for status bars. This property is used in conjunction with PROP:FontName, PROP:FontSize, PROP:FontColor, and PROP:FontStyle. The status bar uses the default character set (a value of the SYSTEM{PROP:CharSet}).",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Std",
+      "description": "Specifies the control activates a standard Windows action from the STD: equates in EQUATES.CLW (e.g. STD:Cut, STD:Copy, STD:Paste, STD:Undo). No EVENT:Accepted is generated for STD actions.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Step",
+      "description": "SLIDER (declare a Slider control)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:StmtAttr",
+      "description": "Property of a FILE that allows you to read or set the ODBC Statement Attribute. This is equivalent to calling the ODBC API functions SQLSetStmtOption or SQLGetStmtOption . This property is valid on all SQL file types except Oracle.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:StopHook",
+      "description": "A property of the SYSTEM built-in variable that sets the override procedure for the STOP internal Clarion procedure. Equivalent to {PROP:LibHook,7}. Assign the ADDRESS of the overriding procedure, and the runtime library will call the overriding procedure instead of the STOP procedure. Assign zero and the runtime library will once again call its internal procedure. The overriding procedure's prototype must be exactly the same as the STOP procedure found in the BUILTINS.CLW file. (WRITE-ONLY)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Stretch",
+      "description": "The STRETCH attribute (PROP:STRETCH, write-only) specifies the OLE object stretches to completely fill the size specified by the OLE container control's AT attribute. This attribute does not preserve the object's aspect ratio.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Sum",
+      "description": "Specifies printing the sum of the values contained in the STRING control's USE variable in a REPORT. Reset only if the RESET or PAGE attribute is also specified.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:SupportsOp",
+      "description": "Property of a FILE that returns whether the specified function is supported by the file driver. Returns 1 if the operation is supported and 0 if it is not. Valid functions supported by this property are the DriverOp:xxxx found in EQUATES.CLW. (READ ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:SupportsType",
+      "description": "Property of a FILE that returns whether the specified data type is supported by the file driver. Returns 1 if the data type is supported and 0 if it is not. Valid data types supported by this property are the DataType:xxxx found in EQUATES.CLW. (READ ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:System",
+      "description": "The SYSTEM attribute (PROP:SYSTEM) specifies the presence of a Windows system menu (also called the control menu) on the APPLICATION or WINDOW. This menu contains standard Windows menu selections, such as: Close, Minimize, Maximize (the window), and Switch To (another window). The actual selections available on a given window depend upon the attributes set for that window.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:SystemPropHook",
+      "description": "A property of the SYSTEM built-in variable that allows you to trap when SYSTEM{property} is being called. Equivalent to {PROP:LibHook,12}. You need to pass the address of a procedure which has a prototype of",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:TabBarColor",
+      "description": "FrameWindow{PROP:TabBarColor, index} = color",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:TabBarLocation",
+      "description": "PROP:TabBarLocation specifies the location of the MDI tab bar.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:TabBarStyle",
+      "description": "PROP:TabBarStyle specifies the visual style of the tab bar.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:TabBarVisible",
+      "description": "PROP:TabBarVisible turns on/off visibility of the tab bar. The property is Boolean (TRUE/FALSE).",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:TabRect",
+      "description": "PROP:TabRect returns the coordinates of the active SHEET controls. (READ-ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:TabRows",
+      "description": "PROP:TabRows returns the number of rows of TABs in a SHEET. (READ-ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:TabSheetStyle",
+      "description": "PROP:TabSheetStyle specifies the visual style of the target sheet/tab control.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Tally",
+      "description": "Specifies when to calculate an AVE, CNT, MAX, MIN, or SUM in a REPORT — calculated each time any DETAIL or BREAK structure in the points list prints.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Target",
+      "description": "A property of the SYSTEM built-in variable that is used to manipulate the current target. This property can be used to read or set the current target. It is equivalent to SETTARGET(target).",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:TempImage",
+      "description": "Property of an IMAGE control which returns the filename it creates for an image. Intended for internal use in the H5 templates.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:TempImagePath",
+      "description": "SYSTEM property which sets or returns the path containing the temporary image files set by PROP:PrintMode or PROP:TempImage. Equivalent to {PROP:TempPath,2}. Intended for internal use in the H5 templates.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:TempImageStatus",
+      "description": "Property of an IMAGE control which returns whether or not PROP:TempImage created a new file or overwrote an existing file. Intended for internal use in the H5 templates.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:TempNameFunc",
+      "description": "Property of a REPORT which allows you to create your own names for the metafiles generated for the PREVIEW attribute by writing a callback function to supply the metafile name for each page of the report. The callback function must be a PROCEDURE which takes a single SIGNED parameter and returns a STRING.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:TempPagePath",
+      "description": "SYSTEM property which sets or returns the path containing the temporary files for the page images. Equivalent to {PROP:TempPath,1}. For internal use in the H5 templates, only.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:TempPath",
+      "description": "Array SYSTEM property which sets or returns the path containing the temporary files for the page images or the path containing the temporary image files set by PROP:PrintMode. For internal use in the H5 templates.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Text",
+      "description": "An array property of a FILE that sets or returns the specified MEMO or BLOB field's data. MEMO and BLOB controls are negatively numbered, therefore the array element number must be a negative value. MEMO and BLOB declarations begin with -1 and decrement by 1 for each subsequent MEMO and BLOB, in the order in which they appear within the FILE structure.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:TextLeftMargin",
+      "description": "?control{PROP:TextLeftMargin} = n",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:TextRightMargin",
+      "description": "?control{PROP:TextRightMargin} = n",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:ThemeActive",
+      "description": "Returns a Boolean value (TRUE) if a Windows theme is currently active. This is usually a SYSTEM, READONLY property, but can also be used to test a specific control.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Thous",
+      "description": "The THOUS , MM , and POINTS attributes specify the coordinate measures used to position controls on the REPORT or WINDOW (using runtime properties).",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Thread",
+      "description": "Returns the thread number of a window. This is not necessarily the currently executing thread, if you've used SETTARGET to set the TARGET built-in variable. (READ-ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:Threading",
+      "description": "Property of the SYSTEM built-in variable which, when set to zero (0), disables all MDI behavior and turns the application into an SDI application.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Ticks",
+      "description": "SLIDER (declare a Slider control)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Tiled",
+      "description": "The TILED attribute (PROP:TILED) indicates that the image displayed in the IMAGE control, or the window or toolbar's background image )specified in the WALLPAPER attribute) displays at its default size and is tiled to fill the entire window, toolbar, or area specified by the IMAGE's AT attribute.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Timer",
+      "description": "Specifies generation of a periodic field-independent event (EVENT:Timer) whenever the time period passes. Period is in hundredths of a second; zero (0) disables timed events.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:TimeZeroIsLongOne",
+      "description": "System property when set to TRUE (1) forces a TIME field with value 0 to be converted to a Standard Time of 1. Normally such fields are converted to a Standard Time of 0. You can read this property to get the current conversion rules.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Tip",
+      "description": "Specifies the text to display when the mouse cursor pauses over the control.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:TipDelay",
+      "description": "PROP:TipDelay sets the time delay before tooltip display (TIP attribute) for the SYSTEM.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:TipDisplay",
+      "description": "PROP:TipDelay sets the time delay before tooltip display (TIP attribute) for the SYSTEM.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:TipsFont",
+      "description": "A property of the SYSTEM built-in variable that reads and writes the font settings for tooltips. This property is used in conjunction with PROP:FontName, PROP:FontSize, PROP:FontColor, and PROP:FontStyle. Tooltips use the default character set (a value of the SYSTEM{PROP:CharSet}).",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Together",
+      "description": "The TOGETHER attribute (PROP:Together) specifies that the DETAIL, or group HEADER or FOOTER structure (contained within a BREAK structure), is to only print on a single page, rather than being automatically split if there is not sufficient room for it. The normal use is for structures with multiple lines that need to be printed together, as in mailing labels.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:ToolBar",
+      "description": "A WINDOW property used to return the Field Equate Label of a window�s toolbar.",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:Toolbox",
+      "description": "The TOOLBOX attribute (PROP:TOOLBOX) specifies a WINDOW that is \"always on top\" and may be docked if the DOCK attribute is also present. Neither the WINDOW nor its controls retain input focus. This creates control behavior as if all the controls in the WINDOW had the SKIP attribute.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Touched",
+      "description": "When non-zero, indicates the data in the ENTRY, TEXT, SPIN, or COMBO control with input focus has been changed by the user since the last EVENT:Accepted. This is automatically reset to zero each time the control generates an EVENT:Accepted. Setting this property (in EVENT:Selected) allows you to ensure that EVENT:Accepted generates to force data validation code to execute, overriding Windows' standard behavior--simply pressing TAB to navigate to another control does not automatically generate EVENT:Accepted.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:TraceFile",
+      "description": "SYSTEM { PROP:TraceFile } = INIFilename",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:TraceKey",
+      "description": "SYSTEM { PROP:TraceKey } = keyName",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Trn",
+      "description": "The TRN attribute (PROP:TRN) on a control specifies the characters print or display transparently, without obliterating the background over which the control is placed. This attribute is valid in Clarion Win32 Windows, and also for REPORT structures in both Clarion Win32 and Clarion#. Only the dots or pixels required to create each character are printed or displayed. This allows you to place the control directly on top of an IMAGE without destroying the background picture.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Type",
+      "description": "Contains the type of control. Values are the CREATE:xxxx equates (listed in EQUATES.CLW). (READ-ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:Up",
+      "description": "The UP and DOWN attributes of a SHEET control specify the orientation of the text on the TAB controls. UP (PROP:UP) specifies the TAB text appears vertical reading upwards, while DOWN (PROP:DOWN) specifies the TAB text appears vertical reading downwards. If both UP and DOWN attributes are present, the TAB text appears inverted (PROP:UpsideDown).",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:UpsideDown",
+      "description": "This property toggles both the UP and DOWN attributes at once to display inverted TAB control text in a SHEET structure.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Use",
+      "description": "USE( | label | [, number ] [, equate ] )",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:UseAddress",
+      "description": "Returns the address of an ANY typed variable that refers to the USE variable of a control. This property is Read/Write, but the returned value can be used only in the right side of another property assignment to PROP:UseAddress (or, for comparison of values returned for 2 PROP:UseAddress properties).",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Value",
+      "description": "An array property of a FILE that sets or returns the data contained in a specified MEMO or BLOB column (use the WHAT procedure for any other type of column). The array element for PROP:Value is a simple negative number which indicates the MEMO or BLOB. MEMO and BLOB fields are numbered negatively. MEMO and BLOB declarations begin with -1 and decrement by 1 for each subsequent MEMO and BLOB, in the order in which they appear within the FILE structure.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Vcr",
+      "description": "Places VCR-style navigation buttons on a LIST or COMBO control: top, page-up, up, locate, down, page-down, bottom. The optional field parameter names a locator ENTRY control.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Vertical",
+      "description": "SLIDER (declare a Slider control)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Visible",
+      "description": "Returns an empty string if the control is not visible because either because it has been hidden, or it is a member of a \"parent\" control (OPTION, GROUP, MENU, SHEET, or TAB) that is hidden, or is on a TAB control page that is not currently selected. (READ-ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:VLBproc",
+      "description": "The procedure's prototype must take three parameters:",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:VLBval",
+      "description": "The procedure's prototype must take three parameters:",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Vscroll",
+      "description": "This Read/Write property mimics the VSCROLL attribute. If the value is set to zero ( 0 ), the vertical scrollbar will not be displayed, even if the number of records in the list is more than the number of visible rows.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:VscrollPos",
+      "description": "Returns the position of the vertical scroll bar's \"thumb.\" Valid values are from 0 to 255 on a window, IMAGE, or TEXT control with the VSCROLL attribute.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Wallpaper",
+      "description": "Specifies an image displayed as the background for a TOOLBAR or WINDOW's client area. The image is stretched to fill unless the TILED or CENTERED attribute is present.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Watched",
+      "description": "Property of a FILE that returns whether the current record is being WATCHed. Returns 1 if the record is watched and an empty string ('') if not. (READ ONLY)",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:WheelScroll",
+      "description": "A read/write property valid for list and combo box controls. Used to adjust the control sensitivity to mouse wheel scrolling. If property is set to a value less than 1, the property defaults to 1. The lower the value of the property results in more lines scrolled per wheel \"click\". Default value is 40 (approximately 3 rows per wheel \"click\" for standard mouse driver settings).",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Where",
+      "description": "[ Where\" = ] SEND (file, '/WHERE [ where-clause ]' )",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:WindowsVersion",
+      "description": "Returns a String that describes the Windows version information.",
+      "readOnly": true
+    },
+    {
+      "name": "PROP:Withnext",
+      "description": "Specifies a DETAIL, HEADER, or FOOTER structure is always printed on the same page as the specified number of following print structures. Eliminates widow print structures at page breaks.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Withprior",
+      "description": "Specifies a DETAIL, HEADER, or FOOTER structure is always printed on the same page as the specified number of preceding print structures. Eliminates orphan print structures at page breaks.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Wizard",
+      "description": "The WIZARD attribute (PROP:WIZARD) specifies a SHEET control that does not display its TAB controls. This allows the program to direct the user through each TAB in a specified sequence (usually with \"Next\" and \"Previous\" buttons.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:WndProc",
+      "description": "Sets or gets the window's (not the client area) or a specific control's messaging procedure for use with low-level Windows API calls that require it. Generally used in sub-classing to track all Windows messages.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Xorigin",
+      "description": "(how much a window or control has been scrolled)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:YOrigin",
+      "description": "(how much a window or control has been scrolled)",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:Zoom",
+      "description": "The ZOOM attribute (PROP:ZOOM, write-only) specifies the OLE object stretches to fill the size specified by the OLE container control's AT attribute while maintaining the object's aspect ratio.",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Collate",
+      "description": "Specify the printer should collate the output: 0=off, 1=on (not supported by all printers).",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Color",
+      "description": "Color or monochrome print flag:1=mono, 2=color (not supported by all printers).",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Context",
+      "description": "Returns the handle to the printer's device context after the first PRINT statement for the report, or an information context before the first PRINT statement. This may not be set for the built-in Global PRINTER variable and is normally only read (not set).",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Copies",
+      "description": "The number of copies to print (not supported by all printers).",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Device",
+      "description": "The name of the Printer as it appears in the Windows Printer Dialog. If multiple printer names start with the same characters, the first encountered is used (not case sensitive). May be set for the PRINTER built-in variable only before the report is open.",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:DevMode",
+      "description": "The entire device mode (devmode) structure as defined in the Windows Software Development Kit. This provides direct API access to all printer properties. Consult a Windows API manual before using this.",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Driver",
+      "description": "The printer driver's filename (without the .DLL extension).",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Duplex",
+      "description": "The duplex printing mode (not supported by all printers). Equates(DUPLEX::xxx) for the standard choices are listed in the PRNPROP.CLW file.",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Extend",
+      "description": "PROPPRINT:Extend can be set to TRUE or FALSE at runtime, and references the REPORT target. This determines whether or not the runtime library generates extra information inside the WMF files, which is being used to generate the new report output formats (XML, HTML, PDF etc.).",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:FontMode",
+      "description": "The TrueType font mode. Equates (FONTMODE:xxx) for the modes are listed in the PRNPROP.CLW file.",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:FromMin",
+      "description": "When set for the built-in PRINTER variable, this forces the value into the \"From:\" page number in the PRINTERDIALOG. Specify -1 to disable ranges",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:FromPage",
+      "description": "The page number on which to start printing. Specify -1 to print from the start.",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Paper",
+      "description": "Standard paper size. Equates (PAPER:xxx) for the standard sizes are listed in the PRNPROP.CLW file. This defines the dimensions of the .WMF files that are created by the Clarion runtime library's \"print engine.\"",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:PaperBin",
+      "description": "The paper source. Equates (PAPERBIN:xxx) for the standard locations are listed in the PRNPROP.CLW file.",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:PaperHeight",
+      "description": "The paper height in tenths of millimeters (mm/10). There are 25.4 mm per inch. Used when setting PROPPRINT:Paper to PAPER:Custom (not normally used for laser printers).",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:PaperWidth",
+      "description": "The paper width in tenths of millimeters (mm/10).There are 25.4 mm per inch. Used when setting PROPPRINT:Paper to PAPER:Custom (not normally used for laser printers).",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Percent",
+      "description": "The scaling factor used to enlarge or reduce the printed output, in percent (not supported by all printers). This defaults to 100 percent. Set this value to print at the desired percentage (if your printer and driver support scaling). For example, set to 200 to print at double size, or 50 to print at half size.",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Port",
+      "description": "Output port name (LPT1, COM1, etc.).",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:PrintToFile",
+      "description": "The Print to File flag: 0=off, 1=on.",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:PrintToName",
+      "description": "The output filename when printing to a file.",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Resolution",
+      "description": "The print resolution in Dots Per Inch (DPI). Equates (RESOLUTION:xxx)for the standard resolutions are listed in the PRNPROP.CLW file. Must be issued before the report is open.",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:SupportCollate",
+      "description": "A READ-ONLY property that returns TRUE if the current printer supports collating of copies.",
+      "readOnly": true
+    },
+    {
+      "name": "PROPPRINT:ToMax",
+      "description": "When set for the built-in PRINTER variable, this forces the value into the \"To:\" page number in the PRINTERDIALOG. Specify -1 to disable ranges",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:ToPage",
+      "description": "The page number on which to end printing. Specify -1 to print to end.",
+      "readOnly": false
+    },
+    {
+      "name": "PROPPRINT:Yresolution",
+      "description": "Vertical print resolution in Dots Per Inch (DPI). Equates (RESOLUTION:xxx)for the standard resolutions are listed in the PRNPROP.CLW file.",
+      "readOnly": false
+    }
+  ]
+}

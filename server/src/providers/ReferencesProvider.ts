@@ -464,7 +464,29 @@ export class ReferencesProvider {
         }
 
         logger.error(`✅ [FAR] Interface method "${methodName}" — ${locations.length} reference(s) found`);
-        return locations.length > 0 ? locations : null;
+
+        // ── Call sites: varName.MethodName() where varName &IfaceName ──
+        for (const fileUri of filesToSearch) {
+            const ft = this.getTokensForUri(fileUri);
+            if (!ft || ft.length === 0) continue;
+            const varNames = this.collectInterfaceVarNames(ft, ifaceName);
+            for (const varName of varNames) {
+                const callHits = this.findMemberReferencesInFile(fileUri, methodName, undefined, undefined, varName, undefined, false);
+                locations.push(...callHits);
+            }
+        }
+
+        // Deduplicate by uri+line
+        const seen = new Set<string>();
+        const deduped = locations.filter(loc => {
+            const key = `${loc.uri}:${loc.range.start.line}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+
+        logger.error(`✅ [FAR] Interface method "${methodName}" — ${deduped.length} reference(s) after call-site scan`);
+        return deduped.length > 0 ? deduped : null;
     }
 
     /**
@@ -745,7 +767,7 @@ export class ReferencesProvider {
         }
 
         for (const fileUri of filesToSearch) {
-            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter);
+            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter, context.includeDeclaration);
             locations.push(...hits);
         }
 
@@ -1108,7 +1130,8 @@ export class ReferencesProvider {
         className?: string,
         classFamily?: Set<string>,
         chainPrefix?: string,
-        overloadFilter?: OverloadFilter
+        overloadFilter?: OverloadFilter,
+        includeDeclaration: boolean = true
     ): Location[] {
         const tokens = this.getTokensForUri(fileUri);
         if (!tokens || tokens.length === 0) return [];
@@ -1168,6 +1191,16 @@ export class ReferencesProvider {
             return line === overloadFilter.declarationLine && fileNorm === overloadFilter.declarationFileNorm;
         };
 
+        // Pre-build the set of lines that are MethodImplementation headers for the target class.
+        // When !includeDeclaration, any token that lands on these lines is part of a declaration
+        // and must be excluded — even if pattern-matched by another branch (e.g. StructureField).
+        const implHeaderLines: Set<number> = !includeDeclaration && classLower
+            ? new Set(tokens
+                .filter(t => t.subType === TokenType.MethodImplementation && t.label &&
+                             t.label.substring(0, t.label.lastIndexOf('.')).toLowerCase() === classLower)
+                .map(t => t.line))
+            : new Set<number>();
+
         for (let i = 0; i < tokens.length; i++) {
             const token = tokens[i];
             if (token.type === TokenType.Comment || token.type === TokenType.String) continue;
@@ -1180,6 +1213,15 @@ export class ReferencesProvider {
                     const penultimate = parts.length >= 2 ? parts[parts.length - 2].toLowerCase() : '';
 
                     if ((penultimate === 'self' || penultimate === 'parent') && isInTargetClass(token.line)) {
+                        // PARENT.Member inside the TARGET class's own method calls the *parent's*
+                        // implementation — that is NOT a reference to the target class's method.
+                        // Only include PARENT.Member when we are inside a SUBCLASS method.
+                        if (penultimate === 'parent' && classLower) {
+                            const scope = methodScopes.find(s => token.line >= s.startLine && token.line <= s.endLine);
+                            if (scope && scope.classLower === classLower) {
+                                continue; // skip: calling grandparent, not target class
+                            }
+                        }
                         // 2-segment: SELF.Member — direct access, filter by enclosing method class
                         if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
                             locations.push(Location.create(fileUri,
@@ -1226,6 +1268,7 @@ export class ReferencesProvider {
                                    parts[0].toLowerCase() === chainPrefixLower) {
                             // Typed variable direct access: e.g. INIMgr.Init
                             // where chainPrefix is the variable name (INIMgr).
+                            if (!includeDeclaration && implHeaderLines.has(token.line)) continue; // impl header line
                             if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
                                 locations.push(Location.create(fileUri,
                                     Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
@@ -1260,14 +1303,34 @@ export class ReferencesProvider {
                                         Range.create(token.line, token.start, token.line, token.start + token.value.length)));
                                 }
                             } else if (isInTargetClass(token.line)) {
-                                if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                                const preDot = i >= 2 ? tokens[i - 2] : undefined;
+                                if (preDot && /^parent$/i.test(preDot.value) && classLower) {
+                                    // PARENT.Member: only include from subclass methods, not from
+                                    // the declaring class itself (that would be a grandparent call).
+                                    const scope = methodScopes.find(s => token.line >= s.startLine && token.line <= s.endLine);
+                                    if (!scope || scope.classLower !== classLower) {
+                                        if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                                            locations.push(Location.create(fileUri,
+                                                Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                                        }
+                                    }
+                                } else if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
                                     locations.push(Location.create(fileUri,
                                         Range.create(token.line, token.start, token.line, token.start + token.value.length)));
                                 }
                             }
                         } else if (isInTargetClass(token.line)) {
                             // Explicit dot: e.g. var.Thumb where var is resolved to the right class
-                            if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                            const preDot = i >= 2 ? tokens[i - 2] : undefined;
+                            if (preDot && /^parent$/i.test(preDot.value) && classLower) {
+                                const scope = methodScopes.find(s => token.line >= s.startLine && token.line <= s.endLine);
+                                if (!scope || scope.classLower !== classLower) {
+                                    if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                                        locations.push(Location.create(fileUri,
+                                            Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                                    }
+                                }
+                            } else if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
                                 locations.push(Location.create(fileUri,
                                     Range.create(token.line, token.start, token.line, token.start + token.value.length)));
                             }
@@ -1293,6 +1356,7 @@ export class ReferencesProvider {
             // Member declaration at column 0 — only inside the correct CLASS body
             if (token.type === TokenType.Label && token.start === 0 &&
                 token.value.toLowerCase() === memberLower) {
+                if (!includeDeclaration) continue; // skip CLASS body declarations when not wanted
                 const enclosingStruct = tokens.slice(0, i).reverse().find(t =>
                     t.type === TokenType.Structure &&
                     t.finishesAt !== undefined &&
@@ -1315,6 +1379,7 @@ export class ReferencesProvider {
             // All overloads of the same method name are included (overload resolution at
             // call sites requires full type inference, so we aggregate them).
             if (token.subType === TokenType.MethodImplementation && token.label) {
+                if (!includeDeclaration) continue; // skip implementation headers when not wanted
                 const dotIdx = token.label.indexOf('.');
                 if (dotIdx > 0) {
                     const implClass = token.label.substring(0, dotIdx).toLowerCase();
@@ -1984,6 +2049,26 @@ export class ReferencesProvider {
             logger.error(`❌ Failed to tokenize ${uri}: ${error instanceof Error ? error.message : String(error)}`);
             return [];
         }
+    }
+
+    /**
+     * Returns the names of all variables declared as &IfaceName in the given token list.
+     * Used by provideInterfaceMethodReferences to find call sites like conn.MethodName().
+     */
+    private collectInterfaceVarNames(tokens: Token[], ifaceName: string): string[] {
+        const ifaceLower = ifaceName.toLowerCase();
+        const varNames: string[] = [];
+        for (let i = 0; i < tokens.length - 1; i++) {
+            const t = tokens[i];
+            const next = tokens[i + 1];
+            if (t.type === TokenType.Label && next.type === TokenType.ReferenceVariable) {
+                const refType = next.value.replace(/^&\s*/, '').toLowerCase();
+                if (refType === ifaceLower) {
+                    varNames.push(t.value);
+                }
+            }
+        }
+        return varNames;
     }
 }
 

@@ -58,6 +58,9 @@ import { RedirectionFileParserServer } from './solution/redirectionFileParserSer
 import { DefinitionProvider } from './providers/DefinitionProvider';
 import { HoverProvider } from './providers/HoverProvider';
 import { ClassConstantsCodeActionProvider } from './providers/ClassConstantsCodeActionProvider';
+import { FlattenCodeActionProvider } from './providers/FlattenCodeActionProvider';
+import { SelectionRangeProvider } from './providers/SelectionRangeProvider';
+import { ClarionCodeLensProvider, formatReferenceCount } from './providers/ClarionCodeLensProvider';
 import { DiagnosticProvider } from './providers/DiagnosticProvider';
 import { SignatureHelpProvider } from './providers/SignatureHelpProvider';
 import { ImplementationProvider } from './providers/ImplementationProvider';
@@ -77,6 +80,7 @@ import * as path from 'path';
 const logger = LoggerManager.getLogger("Server");
 logger.setLevel("error");
 
+// Temporary diagnostic tracer — set to "warn" so traces appear in OUTPUT panel
 // Track if a solution operation is in progress
 export let solutionOperationInProgress = false;
 
@@ -92,6 +96,7 @@ const hoverProvider = new HoverProvider();
 const signatureHelpProvider = new SignatureHelpProvider();
 const implementationProvider = new ImplementationProvider();
 const referencesProvider = new ReferencesProvider();
+const codeLensProvider = new ClarionCodeLensProvider();
 const renameProvider = new RenameProvider();
 const documentHighlightProvider = new DocumentHighlightProvider();
 const workspaceSymbolProvider = new WorkspaceSymbolProvider();
@@ -160,12 +165,14 @@ connection.onInitialize((params) => {
                 workspaceSymbolProvider: true,
                 hoverProvider: true,
                 codeActionProvider: true,
+                selectionRangeProvider: true,
+                codeLensProvider: { resolveProvider: true },
                 signatureHelpProvider: {
                     triggerCharacters: ['(', ','],
                     retriggerCharacters: [')']
                 },
                 completionProvider: {
-                    triggerCharacters: ['.'],
+                    triggerCharacters: ['.', ':'],
                     resolveProvider: false
                 },
                 semanticTokensProvider: {
@@ -238,41 +245,22 @@ documents.onDidOpen((event) => {
     try {
         const document = event.document;
         const uri = document.uri;
-        
-        // Log all document details
-        logger.info(`📂 [CRITICAL] Document opened: ${uri}`);
-        logger.info(`📂 [CRITICAL] Document details:
-            - URI: ${uri}
-            - Language ID: ${document.languageId}
-            - Version: ${document.version}
-            - Line Count: ${document.lineCount}
-            - Content Length: ${document.getText().length}
-            - First 100 chars: ${document.getText().substring(0, 100).replace(/\n/g, '\\n')}
-        `);
+
+        logger.info(`📂 Document opened: ${uri}`);
         
         if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
-            logger.info(`🔍 [CRITICAL] XML file detected: ${uri}`);
-            logger.info(`🔍 [CRITICAL] XML file content (first 200 chars): ${document.getText().substring(0, 200).replace(/\n/g, '\\n')}`);
-            
-            // Try to parse the XML to see if it's valid
-            try {
-                // Just check if it starts with XML declaration or a root element
-                const content = document.getText();
-                if (content.trim().startsWith('<?xml') || content.trim().startsWith('<')) {
-                    logger.info(`🔍 [CRITICAL] File appears to be valid XML: ${uri}`);
-                } else {
-                    logger.warn(`⚠️ [CRITICAL] File doesn't appear to be valid XML despite extension: ${uri}`);
-                }
-            } catch (xmlError) {
-                logger.error(`❌ [CRITICAL] Error checking XML content: ${xmlError instanceof Error ? xmlError.message : String(xmlError)}`);
-            }
+            return;
         }
-        
+
         // Validate document for diagnostics
         validateTextDocument(document, 'onDidOpen');
+
+        // Notify client so the structure view refreshes on initial open.
+        // (clarion/symbolsRefreshed is otherwise only sent from onDidChangeContent,
+        // so the outline would stay empty until the user edited or switched tabs.)
+        connection.sendNotification('clarion/symbolsRefreshed', { uri });
     } catch (error) {
-        logger.error(`❌ [CRITICAL] Error in onDidOpen: ${error instanceof Error ? error.message : String(error)}`);
-        logger.error(`❌ [CRITICAL] Error stack: ${error instanceof Error && error.stack ? error.stack : 'No stack available'}`);
+        logger.error(`❌ Error in onDidOpen: ${error instanceof Error ? error.message : String(error)}`);
     }
 });
 
@@ -299,12 +287,10 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         // 🚀 PERF: Skip if we just validated this exact version
         const lastVersion = lastValidatedVersions.get(document.uri);
         if (lastVersion === document.version) {
-            logger.info(`⚡ Skipping duplicate validation for ${document.uri} v${document.version} (caller: ${caller})`);
+            logger.info(`⚡ [DIAG] Skipping duplicate validation caller=${caller} v${document.version} uri=${document.uri}`);
             return;
         }
 
-        logger.info(`🔍 Validating document: ${document.uri} (caller: ${caller})`);
-        
         // Record version before any async work so duplicate-skip still works
         const startVersion = document.version;
         lastValidatedVersions.set(document.uri, document.version);
@@ -314,7 +300,6 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         const diagnostics = DiagnosticProvider.validateDocument(document, tokens, caller);
 
         // Send sync diagnostics immediately for fast feedback
-        logger.info(`🔍 Found ${diagnostics.length} sync diagnostics for: ${document.uri}`);
         connection.sendDiagnostics({ uri: document.uri, diagnostics });
 
         // Async pass: detect discarded return values via cross-file type resolution
@@ -326,13 +311,11 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         // Stale-version guard: document may have changed while we were resolving types
         const currentDoc = documents.get(document.uri);
         if (!currentDoc || currentDoc.version !== startVersion) {
-            logger.info(`⚡ Skipping stale async diagnostics for ${document.uri} (version changed during async pass)`);
             return;
         }
 
         if (discardedReturnDiags.length > 0) {
             diagnostics.push(...discardedReturnDiags);
-            logger.info(`🔍 Found ${discardedReturnDiags.length} async diagnostics for: ${document.uri}`);
             connection.sendDiagnostics({ uri: document.uri, diagnostics });
         }
     } catch (error) {
@@ -450,6 +433,62 @@ connection.onFoldingRanges((params: FoldingRangeParams) => {
         logger.error(`❌ [DEBUG] Error computing folding ranges: ${error instanceof Error ? error.message : String(error)}`);
         return [];
     }
+});
+
+// Handle selection range requests (Shift+Alt+→ expand selection)
+connection.onSelectionRanges((params) => {
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return [];
+    try {
+        const provider = new SelectionRangeProvider();
+        return provider.provideSelectionRanges(document, params.positions);
+    } catch (error) {
+        logger.error(`❌ Error providing selection ranges: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
+    }
+});
+
+// Handle CodeLens requests — return unresolved lenses (ranges + data only)
+connection.onCodeLens((params) => {
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return [];
+    try {
+        return codeLensProvider.provideCodeLenses(document);
+    } catch (error) {
+        logger.error(`❌ Error providing code lenses: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
+    }
+});
+
+// Handle CodeLens resolve — fill in title + command by counting references
+connection.onCodeLensResolve(async (lens) => {
+    try {
+        const data = lens.data as { uri: string; line: number; character: number; symbolName: string } | undefined;
+        if (!data) return lens;
+
+        const document = documents.get(data.uri);
+        if (!document) return lens;
+
+        const refs = await referencesProvider.provideReferences(
+            document,
+            { line: data.line, character: data.character },
+            { includeDeclaration: true }
+        );
+
+        const count = refs?.length ?? 0;
+        lens.command = {
+            title: formatReferenceCount(count),
+            command: 'clarion.showReferences',
+            arguments: [
+                data.uri,
+                { line: data.line, character: data.character },
+                refs ?? []
+            ],
+        };
+    } catch (error) {
+        logger.error(`❌ Error resolving code lens: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return lens;
 });
 
 
@@ -1508,8 +1547,13 @@ connection.onCodeAction(async (params) => {
             params.context,
             params as any // CancellationToken
         );
-        logger.info(`Provided ${actions.length} code actions`);
-        return actions;
+
+        const flattenProvider = new FlattenCodeActionProvider();
+        const flattenActions = flattenProvider.provideCodeActions(document, params.range);
+
+        const allActions = [...actions, ...flattenActions];
+        logger.info(`Provided ${allActions.length} code actions`);
+        return allActions;
     } catch (error) {
         logger.error(`❌ Error providing code actions: ${error instanceof Error ? error.message : String(error)}`);
         return [];

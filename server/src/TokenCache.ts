@@ -4,7 +4,7 @@ import { DocumentStructure } from './DocumentStructure';
 import LoggerManager from './logger';
 
 const logger = LoggerManager.getLogger("TokenCache");
-logger.setLevel("error"); // Production: Only log errors
+logger.setLevel("error");
 
 /**
  * Line-based token data for incremental updates
@@ -99,15 +99,15 @@ export class TokenCache {
             // 🚀 PERFORMANCE: Check if we can use incremental update
             if (cached && cached.version === document.version) {
                 const cacheTime = performance.now() - perfStart;
-                logger.info(`🟢 Using cached tokens for ${document.uri} (version ${document.version}) - ${cacheTime.toFixed(2)}ms`);
+                logger.info(`🟢 [TC] Cache HIT v${document.version} tokens=${cached.tokens.length} uri=${document.uri}`);
                 return cached.tokens;
             }
             
             // 🚀 DEBUG: Log incremental check
             if (cached) {
-                logger.info(`🔍 [INCREMENTAL CHECK] cached=${!!cached}, hasDocText=${!!cached.documentText}, canIncremental=${cached.documentText ? this.canUseIncrementalUpdate(currentText, cached.documentText) : false}`);
+                logger.info(`🔴 [TC] Cache MISS v${document.version} cached.v=${cached.version} uri=${document.uri}`);
             } else {
-                logger.info(`🔍 [INCREMENTAL CHECK] No cached data available`);
+                logger.info(`🔴 [TC] Cache EMPTY (first tokenize) uri=${document.uri}`);
             }
             
             // 🚀 PERFORMANCE: Try incremental update if we have cached data
@@ -146,10 +146,14 @@ export class TokenCache {
                 const lineTokens = this.buildLineTokenMap(document, tokens);
                 const cacheTime = performance.now() - cacheStart;
                 
-                //Process tokens through DocumentStructure to set subtypes (MapProcedure, etc.)
-                // This modifies tokens in-place - must be done BEFORE caching
-                const structure = new DocumentStructure(tokens);
-                structure.process();
+                // ClarionTokenizer.tokenize() already ran DocumentStructure.process() internally.
+                // Reuse that instance — do NOT call process() again on the same token array,
+                // as a second pass corrupts subType assignments (e.g. MapProcedure explosion).
+                const structure = tokenizer.getDocumentStructure() ?? (() => {
+                    const s = new DocumentStructure(tokens);
+                    s.process();
+                    return s;
+                })();
                 
                 // 🚀 PERFORMANCE: Cache the structure to avoid rebuilding it
                 this.cache.set(document.uri, { 
@@ -457,7 +461,10 @@ export class TokenCache {
         
         // Tokenize the subset
         const tokenizeStart = performance.now();
-        const tokenizer = new ClarionTokenizer(linesToTokenize.join('\n'));
+        // skipStructureProcessing=true: partial-line tokens won't have full file context,
+        // so don't run process() on them. The full DocumentStructure.process() below on
+        // mergedTokens (the complete file) is the single authoritative pass.
+        const tokenizer = new ClarionTokenizer(linesToTokenize.join('\n'), 2, true);
         const newTokens = tokenizer.tokenize();
         const tokenizeTime = performance.now() - tokenizeStart;
         

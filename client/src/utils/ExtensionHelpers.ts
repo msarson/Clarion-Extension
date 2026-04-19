@@ -21,10 +21,10 @@ export function escapeRegExp(string: string): string {
 export async function getAllOpenDocuments(): Promise<TextDocument[]> {
     const openDocuments: TextDocument[] = [];
 
-    if ("tabGroups" in window) {
+    if ("tabGroups" in vscodeWindow) {
         logger.info("✅ Using `window.tabGroups.all` to fetch open tabs.");
 
-        const tabGroups = (window as any).tabGroups.all;
+        const tabGroups = (vscodeWindow as any).tabGroups.all;
 
         for (const group of tabGroups) {
             for (const tab of group.tabs) {
