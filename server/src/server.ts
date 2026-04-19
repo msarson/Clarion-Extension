@@ -501,10 +501,11 @@ connection.onCodeLensResolve(async (lens) => {
         const count = refs?.length ?? 0;
         lens.command = {
             title: formatReferenceCount(count),
-            command: 'editor.action.findReferences',
+            command: 'clarion.showReferences',
             arguments: [
                 data.uri,
-                { lineNumber: data.line + 1, column: data.character + 1 }
+                { line: data.line, character: data.character },
+                refs ?? []
             ],
         };
     } catch (error) {
