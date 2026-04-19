@@ -52,7 +52,7 @@ All notable changes to the Clarion Extension are documented here.
 
 **Hover**
 
-- ✨ **Hover documentation for `PROP:` runtime properties** ([#73](https://github.com/msarson/Clarion-Extension/issues/73)) — hovering over any Clarion runtime property equate (e.g. `PROP:Enabled`, `PROP:Handle`, `PROP:Text`, `PROP:Thread`) now shows documentation sourced from the Clarion 11.1 Language Reference. Covers all 215 runtime properties. Read-only properties are labelled accordingly. Works wherever `PROP:` equates appear: `?Ctrl{PROP:Enabled}`, `SYSTEM{PROP:Thread}`, etc.
+- ✨ **Hover documentation for `PROP:` and `PROPPRINT:` runtime properties** ([#73](https://github.com/msarson/Clarion-Extension/issues/73)) — hovering over any Clarion runtime property equate now shows documentation sourced from the Clarion 11.1 Language Reference. Covers 336 `PROP:` entries (window/control/file/system properties) and 25 `PROPPRINT:` printer control properties (`PROPPRINT:Device`, `PROPPRINT:Copies`, `PROPPRINT:Paper`, etc.). Read-only properties are labelled accordingly. `PROPPRINT:` hovers show a printer-appropriate usage example (`PRINTER{PROPPRINT:Device}`). Works wherever property equates appear in code.
 
 ### [0.9.2] - 2026-04-18
 
