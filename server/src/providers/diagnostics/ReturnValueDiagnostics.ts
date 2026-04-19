@@ -648,6 +648,7 @@ export function validateDiscardedReturnValuesForPlainCalls(
         });
     }
 
+    logger.info(`🔍 [RVD] validateDiscardedReturnValuesForPlainCalls produced ${diagnostics.length} diags uri=${document.uri}`);
     return diagnostics;
 }
 

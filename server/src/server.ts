@@ -80,6 +80,7 @@ import * as path from 'path';
 const logger = LoggerManager.getLogger("Server");
 logger.setLevel("error");
 
+// Temporary diagnostic tracer — set to "warn" so traces appear in OUTPUT panel
 // Track if a solution operation is in progress
 export let solutionOperationInProgress = false;
 
@@ -305,12 +306,10 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         // 🚀 PERF: Skip if we just validated this exact version
         const lastVersion = lastValidatedVersions.get(document.uri);
         if (lastVersion === document.version) {
-            logger.info(`⚡ Skipping duplicate validation for ${document.uri} v${document.version} (caller: ${caller})`);
+            logger.info(`⚡ [DIAG] Skipping duplicate validation caller=${caller} v${document.version} uri=${document.uri}`);
             return;
         }
 
-        logger.info(`🔍 Validating document: ${document.uri} (caller: ${caller})`);
-        
         // Record version before any async work so duplicate-skip still works
         const startVersion = document.version;
         lastValidatedVersions.set(document.uri, document.version);
@@ -320,7 +319,6 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         const diagnostics = DiagnosticProvider.validateDocument(document, tokens, caller);
 
         // Send sync diagnostics immediately for fast feedback
-        logger.info(`🔍 Found ${diagnostics.length} sync diagnostics for: ${document.uri}`);
         connection.sendDiagnostics({ uri: document.uri, diagnostics });
 
         // Async pass: detect discarded return values via cross-file type resolution
@@ -332,13 +330,11 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         // Stale-version guard: document may have changed while we were resolving types
         const currentDoc = documents.get(document.uri);
         if (!currentDoc || currentDoc.version !== startVersion) {
-            logger.info(`⚡ Skipping stale async diagnostics for ${document.uri} (version changed during async pass)`);
             return;
         }
 
         if (discardedReturnDiags.length > 0) {
             diagnostics.push(...discardedReturnDiags);
-            logger.info(`🔍 Found ${discardedReturnDiags.length} async diagnostics for: ${document.uri}`);
             connection.sendDiagnostics({ uri: document.uri, diagnostics });
         }
     } catch (error) {
