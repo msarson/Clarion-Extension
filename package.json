@@ -1,1236 +1,1236 @@
 {
-    "name": "clarion-extensions",
-    "displayName": "Clarion Extensions",
-    "description": "Extension for Clarion Language",
-    "version": "0.9.4",
-    "publisher": "msarson",
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/msarson/Clarion-Extension"
-    },
-    "bugs": {
-        "url": "https://github.com/msarson/Clarion-Extension/issues"
-    },
-    "galleryBanner": {
-        "color": "#474747",
-        "theme": "dark"
-    },
-    "engines": {
-        "vscode": "^1.97.0"
-    },
-    "activationEvents": [
-        "onStartupFinished"
+  "name": "clarion-extensions",
+  "displayName": "Clarion Extensions",
+  "description": "Extension for Clarion Language",
+  "version": "0.9.5",
+  "publisher": "msarson",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/msarson/Clarion-Extension"
+  },
+  "bugs": {
+    "url": "https://github.com/msarson/Clarion-Extension/issues"
+  },
+  "galleryBanner": {
+    "color": "#474747",
+    "theme": "dark"
+  },
+  "engines": {
+    "vscode": "^1.97.0"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/client/src/extension.js",
+  "icon": "images/sv57x57.png",
+  "license": "MIT",
+  "categories": [
+    "Snippets",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "clarion",
+    "json"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "clarion",
+        "aliases": [
+          "Clarion",
+          "clarion"
+        ],
+        "extensions": [
+          ".clw",
+          ".equ",
+          ".inc",
+          ".int"
+        ],
+        "configuration": "./syntaxes/clarion.configuration.json"
+      },
+      {
+        "id": "clarion-template",
+        "aliases": [
+          "Clarion Template",
+          "clarion-template"
+        ],
+        "extensions": [
+          ".tpl",
+          ".tpw"
+        ],
+        "configuration": "./syntaxes/clarion-template.configuration.json"
+      }
     ],
-    "main": "./out/client/src/extension.js",
-    "icon": "images/sv57x57.png",
-    "license": "MIT",
-    "categories": [
-        "Snippets",
-        "Programming Languages"
+    "grammars": [
+      {
+        "language": "clarion",
+        "scopeName": "source.clarion",
+        "path": "./syntaxes/clarion.tmLanguage.json"
+      },
+      {
+        "language": "clarion-template",
+        "scopeName": "source.clarion.template",
+        "path": "./syntaxes/clarion-template.tmLanguage.json"
+      }
     ],
-    "keywords": [
-        "clarion",
-        "json"
+    "semanticTokenTypes": [
+      {
+        "id": "keywordControl",
+        "description": "Control flow keywords (IF, LOOP, CASE)"
+      },
+      {
+        "id": "keywordStructure",
+        "description": "Data structure keywords (GROUP, RECORD, QUEUE)"
+      },
+      {
+        "id": "keywordOop",
+        "description": "OOP keywords (CLASS, INTERFACE)"
+      },
+      {
+        "id": "keywordWindow",
+        "description": "UI structure keywords (WINDOW, REPORT)"
+      }
     ],
-    "contributes": {
-        "languages": [
-            {
-                "id": "clarion",
-                "aliases": [
-                    "Clarion",
-                    "clarion"
-                ],
-                "extensions": [
-                    ".clw",
-                    ".equ",
-                    ".inc",
-                    ".int"
-                ],
-                "configuration": "./syntaxes/clarion.configuration.json"
-            },
-            {
-                "id": "clarion-template",
-                "aliases": [
-                    "Clarion Template",
-                    "clarion-template"
-                ],
-                "extensions": [
-                    ".tpl",
-                    ".tpw"
-                ],
-                "configuration": "./syntaxes/clarion-template.configuration.json"
-            }
+    "semanticTokenModifiers": [
+      {
+        "id": "endStructure",
+        "description": "END keyword closing a data structure"
+      },
+      {
+        "id": "endOop",
+        "description": "END keyword closing a class or interface"
+      },
+      {
+        "id": "endWindow",
+        "description": "END keyword closing a window or report"
+      },
+      {
+        "id": "endControl",
+        "description": "END keyword closing control flow"
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "clarion",
+        "scopes": {
+          "keywordControl": [
+            "keyword.control.clarion"
+          ],
+          "keywordStructure": [
+            "storage.type.structure.clarion"
+          ],
+          "keywordStructure.endStructure": [
+            "storage.type.structure.clarion"
+          ],
+          "keywordOop": [
+            "keyword.oop.clarion"
+          ],
+          "keywordOop.endOop": [
+            "keyword.oop.clarion"
+          ],
+          "keywordWindow": [
+            "storage.type.control.clarion"
+          ],
+          "keywordWindow.endWindow": [
+            "storage.type.control.clarion"
+          ],
+          "keywordControl.endControl": [
+            "keyword.control.clarion"
+          ]
+        }
+      }
+    ],
+    "submenus": [
+      {
+        "id": "clarion.solutionMenu",
+        "label": "Solution"
+      },
+      {
+        "id": "clarion.structureView.menu",
+        "label": "Structure View Options",
+        "icon": "$(ellipsis)"
+      }
+    ],
+    "problemMatchers": [
+      {
+        "name": "clarionBuildMatcher",
+        "owner": "clarion",
+        "fileLocation": [
+          "absolute"
         ],
-        "grammars": [
-            {
-                "language": "clarion",
-                "scopeName": "source.clarion",
-                "path": "./syntaxes/clarion.tmLanguage.json"
-            },
-            {
-                "language": "clarion-template",
-                "scopeName": "source.clarion.template",
-                "path": "./syntaxes/clarion-template.tmLanguage.json"
-            }
-        ],
-        "semanticTokenTypes": [
-            {
-                "id": "keywordControl",
-                "description": "Control flow keywords (IF, LOOP, CASE)"
-            },
-            {
-                "id": "keywordStructure",
-                "description": "Data structure keywords (GROUP, RECORD, QUEUE)"
-            },
-            {
-                "id": "keywordOop",
-                "description": "OOP keywords (CLASS, INTERFACE)"
-            },
-            {
-                "id": "keywordWindow",
-                "description": "UI structure keywords (WINDOW, REPORT)"
-            }
-        ],
-        "semanticTokenModifiers": [
-            {
-                "id": "endStructure",
-                "description": "END keyword closing a data structure"
-            },
-            {
-                "id": "endOop",
-                "description": "END keyword closing a class or interface"
-            },
-            {
-                "id": "endWindow",
-                "description": "END keyword closing a window or report"
-            },
-            {
-                "id": "endControl",
-                "description": "END keyword closing control flow"
-            }
-        ],
-        "semanticTokenScopes": [
-            {
-                "language": "clarion",
-                "scopes": {
-                    "keywordControl": [
-                        "keyword.control.clarion"
-                    ],
-                    "keywordStructure": [
-                        "storage.type.structure.clarion"
-                    ],
-                    "keywordStructure.endStructure": [
-                        "storage.type.structure.clarion"
-                    ],
-                    "keywordOop": [
-                        "keyword.oop.clarion"
-                    ],
-                    "keywordOop.endOop": [
-                        "keyword.oop.clarion"
-                    ],
-                    "keywordWindow": [
-                        "storage.type.control.clarion"
-                    ],
-                    "keywordWindow.endWindow": [
-                        "storage.type.control.clarion"
-                    ],
-                    "keywordControl.endControl": [
-                        "keyword.control.clarion"
-                    ]
-                }
-            }
-        ],
-        "submenus": [
-            {
-                "id": "clarion.solutionMenu",
-                "label": "Solution"
-            },
-            {
-                "id": "clarion.structureView.menu",
-                "label": "Structure View Options",
-                "icon": "$(ellipsis)"
-            }
-        ],
-        "problemMatchers": [
-            {
-                "name": "clarionBuildMatcher",
-                "owner": "clarion",
-                "fileLocation": [
-                    "absolute"
-                ],
-                "pattern": [
-                    {
-                        "regexp": "^\\s*\\d*>?\\s*(.+\\.(?i:clw))\\((\\d+),(\\d+)\\):\\s+(error|warning)\\s*:\\s*(.*)\\s+\\[.*\\]$",
-                        "file": 1,
-                        "line": 2,
-                        "column": 3,
-                        "severity": 4,
-                        "message": 5
-                    },
-                    {
-                        "regexp": "^\\s*(?:MSBUILD|.*)\\s*:\\s+(error|warning)\\s+([A-Z0-9]+):\\s+(.+)\\s+\\[(.+)\\]$",
-                        "severity": 1,
-                        "code": 2,
-                        "message": 3,
-                        "file": 4
-                    },
-                    {
-                        "regexp": "^\\s*\\d*>?\\s*(.+)\\((\\d+)\\):\\s+Solution file error\\s+([A-Z0-9]+):\\s+(.+)$",
-                        "file": 1,
-                        "line": 2,
-                        "code": 3,
-                        "severity": 1,
-                        "message": 4
-                    }
-                ]
-            }
-        ],
-        "keybindings": [
-            {
-                "command": "editor.action.goToImplementation",
-                "key": "ctrl+f12",
-                "when": "editorTextFocus"
-            },
-            {
-                "command": "clarion.runWithoutDebugging",
-                "key": "ctrl+f5",
-                "when": "clarion.solutionOpen && editorTextFocus"
-            },
-            {
-                "command": "clarion.quickOpen",
-                "key": "ctrl+p",
-                "when": "clarion.solutionOpen && editorTextFocus"
-            },
-            {
-                "command": "clarion.buildSolution",
-                "key": "ctrl+shift+b",
-                "when": "clarion.solutionOpen"
-            },
-            {
-                "command": "clarion.pasteAsString",
-                "key": "ctrl+shift+alt+v",
-                "when": "editorTextFocus && editorLangId == clarion"
-            },
-            {
-                "command": "clarion.addImplementation",
-                "key": "ctrl+shift+i",
-                "when": "editorTextFocus && editorLangId == clarion"
-            }
-        ],
-        "viewsContainers": {
-            "activitybar": [
-                {
-                    "id": "clarionViews",
-                    "title": "Clarion Tools",
-                    "icon": "images/sv57x57.png"
-                }
-            ]
+        "pattern": [
+          {
+            "regexp": "^\\s*\\d*>?\\s*(.+\\.(?i:clw))\\((\\d+),(\\d+)\\):\\s+(error|warning)\\s*:\\s*(.*)\\s+\\[.*\\]$",
+            "file": 1,
+            "line": 2,
+            "column": 3,
+            "severity": 4,
+            "message": 5
+          },
+          {
+            "regexp": "^\\s*(?:MSBUILD|.*)\\s*:\\s+(error|warning)\\s+([A-Z0-9]+):\\s+(.+)\\s+\\[(.+)\\]$",
+            "severity": 1,
+            "code": 2,
+            "message": 3,
+            "file": 4
+          },
+          {
+            "regexp": "^\\s*\\d*>?\\s*(.+)\\((\\d+)\\):\\s+Solution file error\\s+([A-Z0-9]+):\\s+(.+)$",
+            "file": 1,
+            "line": 2,
+            "code": 3,
+            "severity": 1,
+            "message": 4
+          }
+        ]
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "editor.action.goToImplementation",
+        "key": "ctrl+f12",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "clarion.runWithoutDebugging",
+        "key": "ctrl+f5",
+        "when": "clarion.solutionOpen && editorTextFocus"
+      },
+      {
+        "command": "clarion.quickOpen",
+        "key": "ctrl+p",
+        "when": "clarion.solutionOpen && editorTextFocus"
+      },
+      {
+        "command": "clarion.buildSolution",
+        "key": "ctrl+shift+b",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.pasteAsString",
+        "key": "ctrl+shift+alt+v",
+        "when": "editorTextFocus && editorLangId == clarion"
+      },
+      {
+        "command": "clarion.addImplementation",
+        "key": "ctrl+shift+i",
+        "when": "editorTextFocus && editorLangId == clarion"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "clarionViews",
+          "title": "Clarion Tools",
+          "icon": "images/sv57x57.png"
+        }
+      ]
+    },
+    "views": {
+      "clarionViews": [
+        {
+          "id": "solutionView",
+          "name": "Solution View",
+          "icon": "images/sv57x57.png"
         },
-        "views": {
-            "clarionViews": [
-                {
-                    "id": "solutionView",
-                    "name": "Solution View",
-                    "icon": "images/sv57x57.png"
-                },
-                {
-                    "id": "clarionStructureView",
-                    "name": "Structure",
-                    "icon": "symbol-structure"
-                }
-            ]
+        {
+          "id": "clarionStructureView",
+          "name": "Structure",
+          "icon": "symbol-structure"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "clarion.buildCurrentProject",
+        "title": "Build Current Project",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.runWithoutDebugging",
+        "title": "Run Without Debugging",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.setStartupProject",
+        "title": "Set as Startup Project",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.clearStartupProject",
+        "title": "Clear Startup Project",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.buildSolution",
+        "title": "Build Clarion Solution",
+        "key": "ctrl+shift+b",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.buildSolutionDirect",
+        "title": "Build Solution",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.forceRefreshSolutionCache",
+        "title": "Refresh Solution",
+        "when": "clarion.solutionOpen",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "clarion.openSolution",
+        "title": "Open Solution",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "clarion.openDetectedSolution",
+        "title": "Open Detected Solution"
+      },
+      {
+        "command": "clarion.openSolutionFromList",
+        "title": "Open Solution List",
+        "icon": "$(list-selection)"
+      },
+      {
+        "command": "clarion.openSolutionMenu",
+        "title": "Open Solution...",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "clarion.closeSolution",
+        "title": "Close Solution",
+        "when": "clarion.solutionOpen",
+        "icon": "$(close)"
+      },
+      {
+        "command": "clarion.quickOpen",
+        "title": "Clarion: Quick Open (Includes Redirection Paths)",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.setConfiguration",
+        "title": "Clarion: Set Configuration",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.buildProject",
+        "title": "Build Project"
+      },
+      {
+        "command": "clarion.reinitializeSolution",
+        "title": "Clarion: Reinitialize Solution",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.debugSolutionHistory",
+        "title": "Clarion: Debug Solution History"
+      },
+      {
+        "command": "clarion.showExtensionStatus",
+        "title": "Clarion: Show Extension Status"
+      },
+      {
+        "command": "clarion.navigateToProject",
+        "title": "Navigate to Project",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.addSourceFile",
+        "title": "Add Source File",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.removeSourceFile",
+        "title": "Remove Source File",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.structureView.expandAll",
+        "title": "Expand All",
+        "icon": "$(expand-all)"
+      },
+      {
+        "command": "clarion.structureView.filter",
+        "title": "Filter Structure View",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "clarion.structureView.clearFilter",
+        "title": "Clear Structure Filter",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "clarion.structureView.enableFollowCursor",
+        "title": "Enable Follow Cursor"
+      },
+      {
+        "command": "clarion.structureView.disableFollowCursor",
+        "title": "Disable Follow Cursor"
+      },
+      {
+        "command": "clarion.solutionView.filter",
+        "title": "Filter Solution Tree",
+        "icon": "$(filter)",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.solutionView.clearFilter",
+        "title": "Clear Filter",
+        "icon": "$(clear-all)",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.generateAllApps",
+        "title": "Generate All Applications"
+      },
+      {
+        "command": "clarion.generateAllAppsThenBuildSolution",
+        "title": "Generate All/Build All"
+      },
+      {
+        "command": "clarion.buildAllProjects",
+        "title": "Build All"
+      },
+      {
+        "command": "clarion.generateApp",
+        "title": "Generate Application"
+      },
+      {
+        "command": "clarion.buildProjectFromApp",
+        "title": "Build Project"
+      },
+      {
+        "command": "clarion.generateAndBuildApp",
+        "title": "Generate + Build Project"
+      },
+      {
+        "command": "clarion.copyFilePath",
+        "title": "Copy File Path"
+      },
+      {
+        "command": "clarion.copyRelativePath",
+        "title": "Copy Relative Path"
+      },
+      {
+        "command": "clarion.openContainingFolder",
+        "title": "Open Containing Folder"
+      },
+      {
+        "command": "clarion.openInClarionIDE",
+        "title": "Open in Clarion IDE"
+      },
+      {
+        "command": "clarion.importAppFromTextForSolution",
+        "title": "Import App from Version Control"
+      },
+      {
+        "command": "clarion.exportAppToVersionControl",
+        "title": "Export App to Version Control"
+      },
+      {
+        "command": "clarion.importAllAppsFromTextForSolution",
+        "title": "Import All Apps from Version Control"
+      },
+      {
+        "command": "clarion.exportAllAppsToVersionControl",
+        "title": "Export All Apps to Version Control"
+      },
+      {
+        "command": "clarion.toggleApplicationSortOrder",
+        "title": "Toggle Application Sort Order",
+        "icon": "$(arrow-swap)"
+      },
+      {
+        "command": "clarion.pasteAsString",
+        "title": "Clarion: Paste as String"
+      },
+      {
+        "command": "clarion.createClass",
+        "title": "Clarion: Create New Class"
+      },
+      {
+        "command": "clarion.addImplementation",
+        "title": "Clarion: Add Method Implementation"
+      }
+    ],
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "clarion.buildSolutionDirect",
+          "when": "view == solutionView && viewItem == clarionSolution",
+          "group": "build"
         },
-        "commands": [
-            {
-                "command": "clarion.buildCurrentProject",
-                "title": "Build Current Project",
-                "when": "clarion.solutionOpen"
-            },
-            {
-                "command": "clarion.runWithoutDebugging",
-                "title": "Run Without Debugging",
-                "when": "clarion.solutionOpen"
-            },
-            {
-                "command": "clarion.setStartupProject",
-                "title": "Set as Startup Project",
-                "when": "clarion.solutionOpen"
-            },
-            {
-                "command": "clarion.clearStartupProject",
-                "title": "Clear Startup Project",
-                "when": "clarion.solutionOpen"
-            },
-            {
-                "command": "clarion.buildSolution",
-                "title": "Build Clarion Solution",
-                "key": "ctrl+shift+b",
-                "when": "clarion.solutionOpen"
-            },
-            {
-                "command": "clarion.buildSolutionDirect",
-                "title": "Build Solution",
-                "when": "clarion.solutionOpen"
-            },
-            {
-                "command": "clarion.forceRefreshSolutionCache",
-                "title": "Refresh Solution",
-                "when": "clarion.solutionOpen",
-                "icon": "$(sync)"
-            },
-            {
-                "command": "clarion.openSolution",
-                "title": "Open Solution",
-                "icon": "$(folder-opened)"
-            },
-            {
-                "command": "clarion.openDetectedSolution",
-                "title": "Open Detected Solution"
-            },
-            {
-                "command": "clarion.openSolutionFromList",
-                "title": "Open Solution List",
-                "icon": "$(list-selection)"
-            },
-            {
-                "command": "clarion.openSolutionMenu",
-                "title": "Open Solution...",
-                "icon": "$(folder-opened)"
-            },
-            {
-                "command": "clarion.closeSolution",
-                "title": "Close Solution",
-                "when": "clarion.solutionOpen",
-                "icon": "$(close)"
-            },
-            {
-                "command": "clarion.quickOpen",
-                "title": "Clarion: Quick Open (Includes Redirection Paths)",
-                "when": "clarion.solutionOpen"
-            },
-            {
-                "command": "clarion.setConfiguration",
-                "title": "Clarion: Set Configuration",
-                "when": "clarion.solutionOpen"
-            },
-            {
-                "command": "clarion.buildProject",
-                "title": "Build Project"
-            },
-            {
-                "command": "clarion.reinitializeSolution",
-                "title": "Clarion: Reinitialize Solution",
-                "when": "clarion.solutionOpen"
-            },
-            {
-                "command": "clarion.debugSolutionHistory",
-                "title": "Clarion: Debug Solution History"
-            },
-            {
-                "command": "clarion.showExtensionStatus",
-                "title": "Clarion: Show Extension Status"
-            },
-            {
-                "command": "clarion.navigateToProject",
-                "title": "Navigate to Project",
-                "when": "clarion.solutionOpen"
-            },
-            {
-                "command": "clarion.addSourceFile",
-                "title": "Add Source File",
-                "when": "clarion.solutionOpen"
-            },
-            {
-                "command": "clarion.removeSourceFile",
-                "title": "Remove Source File",
-                "when": "clarion.solutionOpen"
-            },
-            {
-                "command": "clarion.structureView.expandAll",
-                "title": "Expand All",
-                "icon": "$(expand-all)"
-            },
-            {
-                "command": "clarion.structureView.filter",
-                "title": "Filter Structure View",
-                "icon": "$(filter)"
-            },
-            {
-                "command": "clarion.structureView.clearFilter",
-                "title": "Clear Structure Filter",
-                "icon": "$(clear-all)"
-            },
-            {
-                "command": "clarion.structureView.enableFollowCursor",
-                "title": "Enable Follow Cursor"
-            },
-            {
-                "command": "clarion.structureView.disableFollowCursor",
-                "title": "Disable Follow Cursor"
-            },
-            {
-                "command": "clarion.solutionView.filter",
-                "title": "Filter Solution Tree",
-                "icon": "$(filter)",
-                "when": "clarion.solutionOpen"
-            },
-            {
-                "command": "clarion.solutionView.clearFilter",
-                "title": "Clear Filter",
-                "icon": "$(clear-all)",
-                "when": "clarion.solutionOpen"
-            },
-            {
-                "command": "clarion.generateAllApps",
-                "title": "Generate All Applications"
-            },
-            {
-                "command": "clarion.generateAllAppsThenBuildSolution",
-                "title": "Generate All/Build All"
-            },
-            {
-                "command": "clarion.buildAllProjects",
-                "title": "Build All"
-            },
-            {
-                "command": "clarion.generateApp",
-                "title": "Generate Application"
-            },
-            {
-                "command": "clarion.buildProjectFromApp",
-                "title": "Build Project"
-            },
-            {
-                "command": "clarion.generateAndBuildApp",
-                "title": "Generate + Build Project"
-            },
-            {
-                "command": "clarion.copyFilePath",
-                "title": "Copy File Path"
-            },
-            {
-                "command": "clarion.copyRelativePath",
-                "title": "Copy Relative Path"
-            },
-            {
-                "command": "clarion.openContainingFolder",
-                "title": "Open Containing Folder"
-            },
-            {
-                "command": "clarion.openInClarionIDE",
-                "title": "Open in Clarion IDE"
-            },
-            {
-                "command": "clarion.importAppFromTextForSolution",
-                "title": "Import App from Version Control"
-            },
-            {
-                "command": "clarion.exportAppToVersionControl",
-                "title": "Export App to Version Control"
-            },
-            {
-                "command": "clarion.importAllAppsFromTextForSolution",
-                "title": "Import All Apps from Version Control"
-            },
-            {
-                "command": "clarion.exportAllAppsToVersionControl",
-                "title": "Export All Apps to Version Control"
-            },
-            {
-                "command": "clarion.toggleApplicationSortOrder",
-                "title": "Toggle Application Sort Order",
-                "icon": "$(arrow-swap)"
-            },
-            {
-                "command": "clarion.pasteAsString",
-                "title": "Clarion: Paste as String"
-            },
-            {
-                "command": "clarion.createClass",
-                "title": "Clarion: Create New Class"
-            },
-            {
-                "command": "clarion.addImplementation",
-                "title": "Clarion: Add Method Implementation"
-            }
-        ],
-        "menus": {
-            "view/item/context": [
-                {
-                    "command": "clarion.buildSolutionDirect",
-                    "when": "view == solutionView && viewItem == clarionSolution",
-                    "group": "build"
-                },
-                {
-                    "command": "clarion.buildSolution",
-                    "when": "view == solutionView && viewItem == clarionProject",
-                    "group": "build"
-                },
-                {
-                    "command": "clarion.buildSolution",
-                    "when": "view == solutionView && viewItem == clarionFile",
-                    "group": "build"
-                },
-                {
-                    "command": "clarion.buildProject",
-                    "when": "view == solutionView && viewItem == clarionProject",
-                    "group": "build"
-                },
-                {
-                    "command": "clarion.setStartupProject",
-                    "when": "view == solutionView && viewItem == clarionProject",
-                    "group": "startup"
-                },
-                {
-                    "command": "clarion.buildProject",
-                    "when": "view == solutionView && viewItem == clarionFile",
-                    "group": "build"
-                },
-                {
-                    "command": "clarion.closeSolution",
-                    "when": "view == solutionView && viewItem == clarionSolution",
-                    "group": "navigation"
-                },
-                {
-                    "command": "clarion.addSourceFile",
-                    "when": "view == solutionView && viewItem == clarionProject",
-                    "group": "1_modification"
-                },
-                {
-                    "command": "clarion.removeSourceFile",
-                    "when": "view == solutionView && viewItem == clarionFile",
-                    "group": "1_modification"
-                },
-                {
-                    "command": "clarion.generateAllApps",
-                    "when": "view == solutionView && viewItem == clarionApplicationsGroup",
-                    "group": "generate@1"
-                },
-                {
-                    "command": "clarion.generateAllAppsThenBuildSolution",
-                    "when": "view == solutionView && viewItem == clarionApplicationsGroup",
-                    "group": "generate@2"
-                },
-                {
-                    "command": "clarion.buildAllProjects",
-                    "when": "view == solutionView && viewItem == clarionApplicationsGroup",
-                    "group": "generate@3"
-                },
-                {
-                    "command": "clarion.importAllAppsFromTextForSolution",
-                    "when": "view == solutionView && viewItem == clarionApplicationsGroup",
-                    "group": "versioncontrol"
-                },
-                {
-                    "command": "clarion.exportAllAppsToVersionControl",
-                    "when": "view == solutionView && viewItem == clarionApplicationsGroup",
-                    "group": "versioncontrol"
-                },
-                {
-                    "command": "clarion.generateApp",
-                    "when": "view == solutionView && viewItem == clarionApp",
-                    "group": "generate"
-                },
-                {
-                    "command": "clarion.buildProjectFromApp",
-                    "when": "view == solutionView && viewItem == clarionApp",
-                    "group": "generate"
-                },
-                {
-                    "command": "clarion.generateAndBuildApp",
-                    "when": "view == solutionView && viewItem == clarionApp",
-                    "group": "generate"
-                },
-                {
-                    "command": "clarion.copyFilePath",
-                    "when": "view == solutionView && viewItem == clarionSolution",
-                    "group": "navigation"
-                },
-                {
-                    "command": "clarion.copyRelativePath",
-                    "when": "view == solutionView && viewItem == clarionSolution",
-                    "group": "navigation"
-                },
-                {
-                    "command": "clarion.openContainingFolder",
-                    "when": "view == solutionView && viewItem == clarionSolution",
-                    "group": "navigation"
-                },
-                {
-                    "command": "clarion.openInClarionIDE",
-                    "when": "view == solutionView && viewItem == clarionSolution",
-                    "group": "navigation"
-                },
-                {
-                    "command": "clarion.copyFilePath",
-                    "when": "view == solutionView && viewItem == clarionProject",
-                    "group": "navigation"
-                },
-                {
-                    "command": "clarion.copyRelativePath",
-                    "when": "view == solutionView && viewItem == clarionProject",
-                    "group": "navigation"
-                },
-                {
-                    "command": "clarion.openContainingFolder",
-                    "when": "view == solutionView && viewItem == clarionProject",
-                    "group": "navigation"
-                },
-                {
-                    "command": "clarion.copyFilePath",
-                    "when": "view == solutionView && viewItem == clarionFile",
-                    "group": "navigation"
-                },
-                {
-                    "command": "clarion.copyRelativePath",
-                    "when": "view == solutionView && viewItem == clarionFile",
-                    "group": "navigation"
-                },
-                {
-                    "command": "clarion.openContainingFolder",
-                    "when": "view == solutionView && viewItem == clarionFile",
-                    "group": "navigation"
-                },
-                {
-                    "command": "clarion.copyFilePath",
-                    "when": "view == solutionView && viewItem == clarionApp",
-                    "group": "navigation"
-                },
-                {
-                    "command": "clarion.copyRelativePath",
-                    "when": "view == solutionView && viewItem == clarionApp",
-                    "group": "navigation"
-                },
-                {
-                    "command": "clarion.openContainingFolder",
-                    "when": "view == solutionView && viewItem == clarionApp",
-                    "group": "navigation"
-                },
-                {
-                    "command": "clarion.importAppFromTextForSolution",
-                    "when": "view == solutionView && viewItem == clarionApp",
-                    "group": "versioncontrol"
-                },
-                {
-                    "command": "clarion.exportAppToVersionControl",
-                    "when": "view == solutionView && viewItem == clarionApp",
-                    "group": "versioncontrol"
-                }
-            ],
-            "commandPalette": [
-                {
-                    "command": "clarion.addSourceFile",
-                    "when": "false"
-                },
-                {
-                    "command": "clarion.removeSourceFile",
-                    "when": "false"
-                },
-                {
-                    "command": "clarion.openSolutionFromList",
-                    "when": "true"
-                },
-                {
-                    "command": "clarion.openSolutionMenu",
-                    "when": "false"
-                }
-            ],
-            "view/title": [
-                {
-                    "command": "clarion.openSolution",
-                    "when": "view == solutionView && !clarion.solutionOpen",
-                    "group": "navigation@1"
-                },
-                {
-                    "command": "clarion.closeSolution",
-                    "when": "view == solutionView && clarion.solutionOpen",
-                    "group": "navigation@1"
-                },
-                {
-                    "command": "clarion.openSolutionFromList",
-                    "when": "view == solutionView",
-                    "group": "navigation@2"
-                },
-                {
-                    "command": "clarion.forceRefreshSolutionCache",
-                    "when": "view == solutionView && clarion.solutionOpen",
-                    "group": "navigation@3"
-                },
-                {
-                    "command": "clarion.solutionView.filter",
-                    "when": "view == solutionView && clarion.solutionOpen",
-                    "group": "navigation@4"
-                },
-                {
-                    "command": "clarion.solutionView.clearFilter",
-                    "when": "view == solutionView && clarion.solutionOpen",
-                    "group": "navigation@5"
-                },
-                {
-                    "command": "clarion.toggleApplicationSortOrder",
-                    "when": "view == solutionView && clarion.solutionOpen",
-                    "group": "navigation@6"
-                },
-                {
-                    "command": "clarion.structureView.expandAll",
-                    "title": "Expand All",
-                    "icon": "$(expand-all)",
-                    "when": "view == clarionStructureView && clarionStructureViewVisible",
-                    "group": "navigation@1"
-                },
-                {
-                    "command": "clarion.structureView.filter",
-                    "title": "Filter Structure View",
-                    "icon": "$(filter)",
-                    "when": "view == clarionStructureView && clarionStructureViewVisible",
-                    "group": "navigation@2"
-                },
-                {
-                    "command": "clarion.structureView.clearFilter",
-                    "title": "Clear Filter",
-                    "icon": "$(clear-all)",
-                    "when": "view == clarionStructureView && clarionStructureViewVisible",
-                    "group": "navigation@3"
-                },
-                {
-                    "submenu": "clarion.structureView.menu",
-                    "icon": "$(ellipsis)",
-                    "when": "view == clarionStructureView && clarionStructureViewVisible",
-                    "group": "navigation@4"
-                }
-            ],
-            "viewContainer/context": [
-                {
-                    "submenu": "clarion.solutionMenu",
-                    "when": "viewContainer == clarionViews",
-                    "group": "navigation@1"
-                }
-            ],
-            "clarion.solutionMenu": [
-                {
-                    "command": "clarion.openSolution",
-                    "group": "navigation@1"
-                },
-                {
-                    "command": "clarion.openSolutionFromList",
-                    "group": "navigation@2"
-                },
-                {
-                    "command": "clarion.closeSolution",
-                    "when": "clarion.solutionOpen",
-                    "group": "navigation@3"
-                },
-                {
-                    "command": "clarion.forceRefreshSolutionCache",
-                    "when": "clarion.solutionOpen",
-                    "group": "navigation@4"
-                }
-            ],
-            "view/title/context": [],
-            "clarion.structureView.menu": [
-                {
-                    "command": "clarion.structureView.enableFollowCursor",
-                    "group": "navigation@1",
-                    "when": "!clarion.followCursorEnabled"
-                },
-                {
-                    "command": "clarion.structureView.disableFollowCursor",
-                    "group": "navigation@1",
-                    "when": "clarion.followCursorEnabled"
-                }
-            ]
+        {
+          "command": "clarion.buildSolution",
+          "when": "view == solutionView && viewItem == clarionProject",
+          "group": "build"
         },
-        "viewsWelcome": [
-            {
-                "view": "solutionView",
-                "contents": "Initializing Clarion Extension...\n\nPlease wait while the extension loads.",
-                "when": "!clarion.solutionOpen"
-            }
-        ],
-        "snippets": [
-            {
-                "language": "clarion",
-                "path": "./snippets/variables.json"
-            },
-            {
-                "language": "clarion",
-                "path": "./snippets/refvariables.json"
-            },
-            {
-                "language": "clarion",
-                "path": "./snippets/classes.json"
-            },
-            {
-                "language": "clarion",
-                "path": "./snippets/procedures.json"
-            },
-            {
-                "language": "clarion",
-                "path": "./snippets/procedurevars.json"
-            },
-            {
-                "language": "clarion",
-                "path": "./snippets/procedurerefvars.json"
-            },
-            {
-                "language": "clarion",
-                "path": "./snippets/statements.json"
-            },
-            {
-                "language": "jsonc",
-                "path": "./snippets/clarionbuildtask.json"
-            },
-            {
-                "language": "clarion",
-                "path": "./snippets/override.json"
-            }
-        ],
-        "configurationDefaults": {
-            "[clarion-template]": {
-                "editor.colorDecorators": false,
-                "editor.defaultColorDecorators": "never"
-            }
+        {
+          "command": "clarion.buildSolution",
+          "when": "view == solutionView && viewItem == clarionFile",
+          "group": "build"
         },
-        "configuration": {
+        {
+          "command": "clarion.buildProject",
+          "when": "view == solutionView && viewItem == clarionProject",
+          "group": "build"
+        },
+        {
+          "command": "clarion.setStartupProject",
+          "when": "view == solutionView && viewItem == clarionProject",
+          "group": "startup"
+        },
+        {
+          "command": "clarion.buildProject",
+          "when": "view == solutionView && viewItem == clarionFile",
+          "group": "build"
+        },
+        {
+          "command": "clarion.closeSolution",
+          "when": "view == solutionView && viewItem == clarionSolution",
+          "group": "navigation"
+        },
+        {
+          "command": "clarion.addSourceFile",
+          "when": "view == solutionView && viewItem == clarionProject",
+          "group": "1_modification"
+        },
+        {
+          "command": "clarion.removeSourceFile",
+          "when": "view == solutionView && viewItem == clarionFile",
+          "group": "1_modification"
+        },
+        {
+          "command": "clarion.generateAllApps",
+          "when": "view == solutionView && viewItem == clarionApplicationsGroup",
+          "group": "generate@1"
+        },
+        {
+          "command": "clarion.generateAllAppsThenBuildSolution",
+          "when": "view == solutionView && viewItem == clarionApplicationsGroup",
+          "group": "generate@2"
+        },
+        {
+          "command": "clarion.buildAllProjects",
+          "when": "view == solutionView && viewItem == clarionApplicationsGroup",
+          "group": "generate@3"
+        },
+        {
+          "command": "clarion.importAllAppsFromTextForSolution",
+          "when": "view == solutionView && viewItem == clarionApplicationsGroup",
+          "group": "versioncontrol"
+        },
+        {
+          "command": "clarion.exportAllAppsToVersionControl",
+          "when": "view == solutionView && viewItem == clarionApplicationsGroup",
+          "group": "versioncontrol"
+        },
+        {
+          "command": "clarion.generateApp",
+          "when": "view == solutionView && viewItem == clarionApp",
+          "group": "generate"
+        },
+        {
+          "command": "clarion.buildProjectFromApp",
+          "when": "view == solutionView && viewItem == clarionApp",
+          "group": "generate"
+        },
+        {
+          "command": "clarion.generateAndBuildApp",
+          "when": "view == solutionView && viewItem == clarionApp",
+          "group": "generate"
+        },
+        {
+          "command": "clarion.copyFilePath",
+          "when": "view == solutionView && viewItem == clarionSolution",
+          "group": "navigation"
+        },
+        {
+          "command": "clarion.copyRelativePath",
+          "when": "view == solutionView && viewItem == clarionSolution",
+          "group": "navigation"
+        },
+        {
+          "command": "clarion.openContainingFolder",
+          "when": "view == solutionView && viewItem == clarionSolution",
+          "group": "navigation"
+        },
+        {
+          "command": "clarion.openInClarionIDE",
+          "when": "view == solutionView && viewItem == clarionSolution",
+          "group": "navigation"
+        },
+        {
+          "command": "clarion.copyFilePath",
+          "when": "view == solutionView && viewItem == clarionProject",
+          "group": "navigation"
+        },
+        {
+          "command": "clarion.copyRelativePath",
+          "when": "view == solutionView && viewItem == clarionProject",
+          "group": "navigation"
+        },
+        {
+          "command": "clarion.openContainingFolder",
+          "when": "view == solutionView && viewItem == clarionProject",
+          "group": "navigation"
+        },
+        {
+          "command": "clarion.copyFilePath",
+          "when": "view == solutionView && viewItem == clarionFile",
+          "group": "navigation"
+        },
+        {
+          "command": "clarion.copyRelativePath",
+          "when": "view == solutionView && viewItem == clarionFile",
+          "group": "navigation"
+        },
+        {
+          "command": "clarion.openContainingFolder",
+          "when": "view == solutionView && viewItem == clarionFile",
+          "group": "navigation"
+        },
+        {
+          "command": "clarion.copyFilePath",
+          "when": "view == solutionView && viewItem == clarionApp",
+          "group": "navigation"
+        },
+        {
+          "command": "clarion.copyRelativePath",
+          "when": "view == solutionView && viewItem == clarionApp",
+          "group": "navigation"
+        },
+        {
+          "command": "clarion.openContainingFolder",
+          "when": "view == solutionView && viewItem == clarionApp",
+          "group": "navigation"
+        },
+        {
+          "command": "clarion.importAppFromTextForSolution",
+          "when": "view == solutionView && viewItem == clarionApp",
+          "group": "versioncontrol"
+        },
+        {
+          "command": "clarion.exportAppToVersionControl",
+          "when": "view == solutionView && viewItem == clarionApp",
+          "group": "versioncontrol"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "clarion.addSourceFile",
+          "when": "false"
+        },
+        {
+          "command": "clarion.removeSourceFile",
+          "when": "false"
+        },
+        {
+          "command": "clarion.openSolutionFromList",
+          "when": "true"
+        },
+        {
+          "command": "clarion.openSolutionMenu",
+          "when": "false"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "clarion.openSolution",
+          "when": "view == solutionView && !clarion.solutionOpen",
+          "group": "navigation@1"
+        },
+        {
+          "command": "clarion.closeSolution",
+          "when": "view == solutionView && clarion.solutionOpen",
+          "group": "navigation@1"
+        },
+        {
+          "command": "clarion.openSolutionFromList",
+          "when": "view == solutionView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "clarion.forceRefreshSolutionCache",
+          "when": "view == solutionView && clarion.solutionOpen",
+          "group": "navigation@3"
+        },
+        {
+          "command": "clarion.solutionView.filter",
+          "when": "view == solutionView && clarion.solutionOpen",
+          "group": "navigation@4"
+        },
+        {
+          "command": "clarion.solutionView.clearFilter",
+          "when": "view == solutionView && clarion.solutionOpen",
+          "group": "navigation@5"
+        },
+        {
+          "command": "clarion.toggleApplicationSortOrder",
+          "when": "view == solutionView && clarion.solutionOpen",
+          "group": "navigation@6"
+        },
+        {
+          "command": "clarion.structureView.expandAll",
+          "title": "Expand All",
+          "icon": "$(expand-all)",
+          "when": "view == clarionStructureView && clarionStructureViewVisible",
+          "group": "navigation@1"
+        },
+        {
+          "command": "clarion.structureView.filter",
+          "title": "Filter Structure View",
+          "icon": "$(filter)",
+          "when": "view == clarionStructureView && clarionStructureViewVisible",
+          "group": "navigation@2"
+        },
+        {
+          "command": "clarion.structureView.clearFilter",
+          "title": "Clear Filter",
+          "icon": "$(clear-all)",
+          "when": "view == clarionStructureView && clarionStructureViewVisible",
+          "group": "navigation@3"
+        },
+        {
+          "submenu": "clarion.structureView.menu",
+          "icon": "$(ellipsis)",
+          "when": "view == clarionStructureView && clarionStructureViewVisible",
+          "group": "navigation@4"
+        }
+      ],
+      "viewContainer/context": [
+        {
+          "submenu": "clarion.solutionMenu",
+          "when": "viewContainer == clarionViews",
+          "group": "navigation@1"
+        }
+      ],
+      "clarion.solutionMenu": [
+        {
+          "command": "clarion.openSolution",
+          "group": "navigation@1"
+        },
+        {
+          "command": "clarion.openSolutionFromList",
+          "group": "navigation@2"
+        },
+        {
+          "command": "clarion.closeSolution",
+          "when": "clarion.solutionOpen",
+          "group": "navigation@3"
+        },
+        {
+          "command": "clarion.forceRefreshSolutionCache",
+          "when": "clarion.solutionOpen",
+          "group": "navigation@4"
+        }
+      ],
+      "view/title/context": [],
+      "clarion.structureView.menu": [
+        {
+          "command": "clarion.structureView.enableFollowCursor",
+          "group": "navigation@1",
+          "when": "!clarion.followCursorEnabled"
+        },
+        {
+          "command": "clarion.structureView.disableFollowCursor",
+          "group": "navigation@1",
+          "when": "clarion.followCursorEnabled"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "solutionView",
+        "contents": "Initializing Clarion Extension...\n\nPlease wait while the extension loads.",
+        "when": "!clarion.solutionOpen"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "clarion",
+        "path": "./snippets/variables.json"
+      },
+      {
+        "language": "clarion",
+        "path": "./snippets/refvariables.json"
+      },
+      {
+        "language": "clarion",
+        "path": "./snippets/classes.json"
+      },
+      {
+        "language": "clarion",
+        "path": "./snippets/procedures.json"
+      },
+      {
+        "language": "clarion",
+        "path": "./snippets/procedurevars.json"
+      },
+      {
+        "language": "clarion",
+        "path": "./snippets/procedurerefvars.json"
+      },
+      {
+        "language": "clarion",
+        "path": "./snippets/statements.json"
+      },
+      {
+        "language": "jsonc",
+        "path": "./snippets/clarionbuildtask.json"
+      },
+      {
+        "language": "clarion",
+        "path": "./snippets/override.json"
+      }
+    ],
+    "configurationDefaults": {
+      "[clarion-template]": {
+        "editor.colorDecorators": false,
+        "editor.defaultColorDecorators": "never"
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "title": "Clarion Extension Configuration",
+      "properties": {
+        "clarion.build.revealOutput": {
+          "type": "string",
+          "enum": [
+            "never",
+            "always",
+            "onError"
+          ],
+          "default": "never",
+          "description": "Controls when to show the build output terminal. 'never': never show, 'always': always show, 'onError': only show when build fails."
+        },
+        "clarion.build.preserveLogFile": {
+          "type": "boolean",
+          "default": false,
+          "description": "When enabled, preserves the build_output.log file after build completion."
+        },
+        "clarion.build.logFilePath": {
+          "type": "string",
+          "default": "",
+          "description": "Custom path for the build output log file. If empty, the log file will be created in the solution directory."
+        },
+        "clarion.build.showInOutputPanel": {
+          "type": "boolean",
+          "default": false,
+          "description": "When enabled, also shows build output in the Output panel in addition to the Problems panel."
+        },
+        "clarion.fileSearchExtensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            ".clw",
+            ".inc",
+            ".equ",
+            ".eq"
+          ],
+          "scope": "resource",
+          "description": "Defines the file extensions used for searching files in Quick Open (Ctrl+P)."
+        },
+        "clarion.defaultLookupExtensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            ".clw",
+            ".inc",
+            ".equ",
+            ".eq"
+          ],
+          "scope": "resource",
+          "description": "Defines the file extensions used for document linking and hover previews when a file is not part of a project."
+        },
+        "clarion.solutionFile": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Path to the Clarion solution (.sln) file."
+        },
+        "clarion.propertiesFile": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Path to the ClarionProperties.xml file."
+        },
+        "clarion.version": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Selected Clarion version."
+        },
+        "clarion.configuration": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Selected Clarion configuration."
+        },
+        "clarion.currentSolution": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Path to the currently selected Clarion solution file."
+        },
+        "clarion.startupProject": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "GUID of the project to run when pressing Ctrl+F5 (Run Without Debugging). If not set, the project containing the current file will be used."
+        },
+        "clarion.telemetry.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable anonymous telemetry to help improve the extension. No personal information is collected."
+        },
+        "clarion.solutions": {
+          "type": "array",
+          "scope": "resource",
+          "items": {
             "type": "object",
-            "title": "Clarion Extension Configuration",
             "properties": {
-                "clarion.build.revealOutput": {
-                    "type": "string",
-                    "enum": [
-                        "never",
-                        "always",
-                        "onError"
-                    ],
-                    "default": "never",
-                    "description": "Controls when to show the build output terminal. 'never': never show, 'always': always show, 'onError': only show when build fails."
-                },
-                "clarion.build.preserveLogFile": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "When enabled, preserves the build_output.log file after build completion."
-                },
-                "clarion.build.logFilePath": {
-                    "type": "string",
-                    "default": "",
-                    "description": "Custom path for the build output log file. If empty, the log file will be created in the solution directory."
-                },
-                "clarion.build.showInOutputPanel": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "When enabled, also shows build output in the Output panel in addition to the Problems panel."
-                },
-                "clarion.fileSearchExtensions": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "default": [
-                        ".clw",
-                        ".inc",
-                        ".equ",
-                        ".eq"
-                    ],
-                    "scope": "resource",
-                    "description": "Defines the file extensions used for searching files in Quick Open (Ctrl+P)."
-                },
-                "clarion.defaultLookupExtensions": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "default": [
-                        ".clw",
-                        ".inc",
-                        ".equ",
-                        ".eq"
-                    ],
-                    "scope": "resource",
-                    "description": "Defines the file extensions used for document linking and hover previews when a file is not part of a project."
-                },
-                "clarion.solutionFile": {
-                    "type": "string",
-                    "default": "",
-                    "scope": "resource",
-                    "description": "Path to the Clarion solution (.sln) file."
-                },
-                "clarion.propertiesFile": {
-                    "type": "string",
-                    "default": "",
-                    "scope": "resource",
-                    "description": "Path to the ClarionProperties.xml file."
-                },
-                "clarion.version": {
-                    "type": "string",
-                    "default": "",
-                    "scope": "resource",
-                    "description": "Selected Clarion version."
-                },
-                "clarion.configuration": {
-                    "type": "string",
-                    "default": "",
-                    "scope": "resource",
-                    "description": "Selected Clarion configuration."
-                },
-                "clarion.currentSolution": {
-                    "type": "string",
-                    "default": "",
-                    "scope": "resource",
-                    "description": "Path to the currently selected Clarion solution file."
-                },
-                "clarion.startupProject": {
-                    "type": "string",
-                    "default": "",
-                    "scope": "resource",
-                    "description": "GUID of the project to run when pressing Ctrl+F5 (Run Without Debugging). If not set, the project containing the current file will be used."
-                },
-                "clarion.telemetry.enabled": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable anonymous telemetry to help improve the extension. No personal information is collected."
-                },
-                "clarion.solutions": {
-                    "type": "array",
-                    "scope": "resource",
-                    "items": {
+              "solutionFile": {
+                "type": "string",
+                "description": "Path to the Clarion solution (.sln) file."
+              },
+              "propertiesFile": {
+                "type": "string",
+                "description": "Path to the ClarionProperties.xml file."
+              },
+              "version": {
+                "type": "string",
+                "description": "Selected Clarion version."
+              },
+              "configuration": {
+                "type": "string",
+                "description": "Selected Clarion configuration."
+              }
+            }
+          },
+          "default": [],
+          "description": "Array of Clarion solution settings."
+        },
+        "clarion.maxNumberOfProblems": {
+          "scope": "resource",
+          "type": "number",
+          "default": 100,
+          "description": "Controls the maximum number of problems produced by the server."
+        },
+        "clarion.trace.server": {
+          "scope": "window",
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the language server."
+        },
+        "clarion-extensions.spacing.className": {
+          "scope": "window",
+          "type": "number",
+          "default": 4,
+          "description": "Spacing between ClassName and CLASS in snippets."
+        },
+        "clarion-extensions.spacing.methodName": {
+          "scope": "window",
+          "type": "number",
+          "default": 2,
+          "description": "Spacing between MethodName and PROCEDURE in snippets."
+        },
+        "clarion.highlighting": {
+          "type": "object",
+          "description": "Highlighting settings for Clarion code elements",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true,
+              "description": "Enable or disable all highlighting features"
+            },
+            "prefix": {
+              "type": "object",
+              "properties": {
+                "patterns": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "format": "color",
+                        "description": "Simple color value"
+                      },
+                      {
                         "type": "object",
                         "properties": {
-                            "solutionFile": {
+                          "color": {
+                            "type": "string",
+                            "format": "color",
+                            "description": "Text color"
+                          },
+                          "backgroundColor": {
+                            "type": "string",
+                            "format": "color",
+                            "description": "Background color"
+                          },
+                          "fontWeight": {
+                            "type": "string",
+                            "enum": [
+                              "normal",
+                              "bold"
+                            ],
+                            "description": "Font weight (normal or bold)"
+                          },
+                          "fontStyle": {
+                            "type": "string",
+                            "enum": [
+                              "normal",
+                              "italic"
+                            ],
+                            "description": "Font style (normal or italic)"
+                          },
+                          "textDecoration": {
+                            "type": "string",
+                            "enum": [
+                              "none",
+                              "underline",
+                              "line-through",
+                              "overline"
+                            ],
+                            "description": "Text decoration"
+                          },
+                          "before": {
+                            "type": "object",
+                            "properties": {
+                              "contentText": {
                                 "type": "string",
-                                "description": "Path to the Clarion solution (.sln) file."
-                            },
-                            "propertiesFile": {
+                                "description": "Text to insert before the variable"
+                              },
+                              "color": {
                                 "type": "string",
-                                "description": "Path to the ClarionProperties.xml file."
-                            },
-                            "version": {
-                                "type": "string",
-                                "description": "Selected Clarion version."
-                            },
-                            "configuration": {
-                                "type": "string",
-                                "description": "Selected Clarion configuration."
+                                "format": "color",
+                                "description": "Color of the before text"
+                              }
                             }
-                        }
-                    },
-                    "default": [],
-                    "description": "Array of Clarion solution settings."
-                },
-                "clarion.maxNumberOfProblems": {
-                    "scope": "resource",
-                    "type": "number",
-                    "default": 100,
-                    "description": "Controls the maximum number of problems produced by the server."
-                },
-                "clarion.trace.server": {
-                    "scope": "window",
-                    "type": "string",
-                    "enum": [
-                        "off",
-                        "messages",
-                        "verbose"
-                    ],
-                    "default": "off",
-                    "description": "Traces the communication between VS Code and the language server."
-                },
-                "clarion-extensions.spacing.className": {
-                    "scope": "window",
-                    "type": "number",
-                    "default": 4,
-                    "description": "Spacing between ClassName and CLASS in snippets."
-                },
-                "clarion-extensions.spacing.methodName": {
-                    "scope": "window",
-                    "type": "number",
-                    "default": 2,
-                    "description": "Spacing between MethodName and PROCEDURE in snippets."
-                },
-                "clarion.highlighting": {
-                    "type": "object",
-                    "description": "Highlighting settings for Clarion code elements",
-                    "properties": {
-                        "enabled": {
-                            "type": "boolean",
-                            "default": true,
-                            "description": "Enable or disable all highlighting features"
-                        },
-                        "prefix": {
+                          },
+                          "after": {
                             "type": "object",
                             "properties": {
-                                "patterns": {
-                                    "type": "object",
-                                    "additionalProperties": {
-                                        "oneOf": [
-                                            {
-                                                "type": "string",
-                                                "format": "color",
-                                                "description": "Simple color value"
-                                            },
-                                            {
-                                                "type": "object",
-                                                "properties": {
-                                                    "color": {
-                                                        "type": "string",
-                                                        "format": "color",
-                                                        "description": "Text color"
-                                                    },
-                                                    "backgroundColor": {
-                                                        "type": "string",
-                                                        "format": "color",
-                                                        "description": "Background color"
-                                                    },
-                                                    "fontWeight": {
-                                                        "type": "string",
-                                                        "enum": [
-                                                            "normal",
-                                                            "bold"
-                                                        ],
-                                                        "description": "Font weight (normal or bold)"
-                                                    },
-                                                    "fontStyle": {
-                                                        "type": "string",
-                                                        "enum": [
-                                                            "normal",
-                                                            "italic"
-                                                        ],
-                                                        "description": "Font style (normal or italic)"
-                                                    },
-                                                    "textDecoration": {
-                                                        "type": "string",
-                                                        "enum": [
-                                                            "none",
-                                                            "underline",
-                                                            "line-through",
-                                                            "overline"
-                                                        ],
-                                                        "description": "Text decoration"
-                                                    },
-                                                    "before": {
-                                                        "type": "object",
-                                                        "properties": {
-                                                            "contentText": {
-                                                                "type": "string",
-                                                                "description": "Text to insert before the variable"
-                                                            },
-                                                            "color": {
-                                                                "type": "string",
-                                                                "format": "color",
-                                                                "description": "Color of the before text"
-                                                            }
-                                                        }
-                                                    },
-                                                    "after": {
-                                                        "type": "object",
-                                                        "properties": {
-                                                            "contentText": {
-                                                                "type": "string",
-                                                                "description": "Text to insert after the variable"
-                                                            },
-                                                            "color": {
-                                                                "type": "string",
-                                                                "format": "color",
-                                                                "description": "Color of the after text"
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        ]
-                                    },
-                                    "default": {
-                                        "LOCS": "#ffffcc",
-                                        "GLOS": "#ccffff"
-                                    },
-                                    "description": "Defines prefix styling for variable highlighting. Each key is a prefix (e.g., 'LOCS', 'GLOS') and each value can be either a color or an object with detailed styling options."
-                                }
-                            },
-                            "description": "Settings for variable prefix highlighting"
-                        },
-                        "comment": {
-                            "type": "object",
-                            "properties": {
-                                "patterns": {
-                                    "type": "object",
-                                    "additionalProperties": {
-                                        "oneOf": [
-                                            {
-                                                "type": "string",
-                                                "format": "color",
-                                                "description": "Simple color value"
-                                            },
-                                            {
-                                                "type": "object",
-                                                "properties": {
-                                                    "color": {
-                                                        "type": "string",
-                                                        "format": "color",
-                                                        "description": "Text color"
-                                                    },
-                                                    "backgroundColor": {
-                                                        "type": "string",
-                                                        "format": "color",
-                                                        "description": "Background color"
-                                                    },
-                                                    "fontWeight": {
-                                                        "type": "string",
-                                                        "enum": [
-                                                            "normal",
-                                                            "bold"
-                                                        ],
-                                                        "description": "Font weight (normal or bold)"
-                                                    },
-                                                    "fontStyle": {
-                                                        "type": "string",
-                                                        "enum": [
-                                                            "normal",
-                                                            "italic"
-                                                        ],
-                                                        "description": "Font style (normal or italic)"
-                                                    },
-                                                    "textDecoration": {
-                                                        "type": "string",
-                                                        "enum": [
-                                                            "none",
-                                                            "underline",
-                                                            "line-through",
-                                                            "overline"
-                                                        ],
-                                                        "description": "Text decoration"
-                                                    },
-                                                    "before": {
-                                                        "type": "object",
-                                                        "properties": {
-                                                            "contentText": {
-                                                                "type": "string",
-                                                                "description": "Text to insert before the comment"
-                                                            },
-                                                            "color": {
-                                                                "type": "string",
-                                                                "format": "color",
-                                                                "description": "Color of the before text"
-                                                            }
-                                                        }
-                                                    },
-                                                    "after": {
-                                                        "type": "object",
-                                                        "properties": {
-                                                            "contentText": {
-                                                                "type": "string",
-                                                                "description": "Text to insert after the comment"
-                                                            },
-                                                            "color": {
-                                                                "type": "string",
-                                                                "format": "color",
-                                                                "description": "Color of the after text"
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        ]
-                                    },
-                                    "default": {
-                                        "TODO": {
-                                            "color": "#ff8c00",
-                                            "fontWeight": "bold"
-                                        },
-                                        "FIXME": {
-                                            "color": "#ff0000",
-                                            "fontWeight": "bold"
-                                        }
-                                    },
-                                    "description": "Defines styling for comment lines that start with specific patterns (e.g., '! TODO', '! FIXME'). Each key is a pattern and each value can be either a color or an object with detailed styling options."
-                                }
-                            },
-                            "description": "Settings for comment pattern highlighting"
+                              "contentText": {
+                                "type": "string",
+                                "description": "Text to insert after the variable"
+                              },
+                              "color": {
+                                "type": "string",
+                                "format": "color",
+                                "description": "Color of the after text"
+                              }
+                            }
+                          }
                         }
-                    }
-                },
-                "clarion.prefixHighlighting.enabled": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable or disable prefix highlighting for Clarion variables."
-                },
-                "clarion.firstFetchTimeoutMs": {
-                    "type": "number",
-                    "default": 2500,
-                    "description": "Timeout in milliseconds for the first solution fetch attempt after activation. Lower values improve startup time when the language server is not ready."
-                },
-                "clarion.enableLocalSlnFallback": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "When enabled, uses a local .sln file parser as a fast fallback when the language server is not ready or times out."
-                },
-                "clarion.pasteAsString.lineTerminator": {
-                    "type": "string",
-                    "enum": [
-                        "space",
-                        "crlf",
-                        "none"
-                    ],
-                    "default": "space",
-                    "enumDescriptions": [
-                        "Add a trailing space to each line (recommended for SQL queries)",
-                        "Add <13,10> line break to each line",
-                        "No line terminator (lines concatenate seamlessly)"
-                    ],
-                    "description": "How to terminate each line when pasting as Clarion string. Controls whether lines are separated by spaces, line breaks, or nothing."
-                },
-                "clarion.pasteAsString.trimLeadingWhitespace": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Remove leading whitespace from each line when pasting as Clarion string. Recommended when pasting indented code."
-                },
-                "clarion.unreachableCode.enabled": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable or disable visual dimming of unreachable code in Clarion procedures and methods. Detects code after unconditional RETURN, EXIT, or HALT statements at top execution level."
+                      }
+                    ]
+                  },
+                  "default": {
+                    "LOCS": "#ffffcc",
+                    "GLOS": "#ccffff"
+                  },
+                  "description": "Defines prefix styling for variable highlighting. Each key is a prefix (e.g., 'LOCS', 'GLOS') and each value can be either a color or an object with detailed styling options."
                 }
+              },
+              "description": "Settings for variable prefix highlighting"
+            },
+            "comment": {
+              "type": "object",
+              "properties": {
+                "patterns": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "format": "color",
+                        "description": "Simple color value"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "color": {
+                            "type": "string",
+                            "format": "color",
+                            "description": "Text color"
+                          },
+                          "backgroundColor": {
+                            "type": "string",
+                            "format": "color",
+                            "description": "Background color"
+                          },
+                          "fontWeight": {
+                            "type": "string",
+                            "enum": [
+                              "normal",
+                              "bold"
+                            ],
+                            "description": "Font weight (normal or bold)"
+                          },
+                          "fontStyle": {
+                            "type": "string",
+                            "enum": [
+                              "normal",
+                              "italic"
+                            ],
+                            "description": "Font style (normal or italic)"
+                          },
+                          "textDecoration": {
+                            "type": "string",
+                            "enum": [
+                              "none",
+                              "underline",
+                              "line-through",
+                              "overline"
+                            ],
+                            "description": "Text decoration"
+                          },
+                          "before": {
+                            "type": "object",
+                            "properties": {
+                              "contentText": {
+                                "type": "string",
+                                "description": "Text to insert before the comment"
+                              },
+                              "color": {
+                                "type": "string",
+                                "format": "color",
+                                "description": "Color of the before text"
+                              }
+                            }
+                          },
+                          "after": {
+                            "type": "object",
+                            "properties": {
+                              "contentText": {
+                                "type": "string",
+                                "description": "Text to insert after the comment"
+                              },
+                              "color": {
+                                "type": "string",
+                                "format": "color",
+                                "description": "Color of the after text"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "default": {
+                    "TODO": {
+                      "color": "#ff8c00",
+                      "fontWeight": "bold"
+                    },
+                    "FIXME": {
+                      "color": "#ff0000",
+                      "fontWeight": "bold"
+                    }
+                  },
+                  "description": "Defines styling for comment lines that start with specific patterns (e.g., '! TODO', '! FIXME'). Each key is a pattern and each value can be either a color or an object with detailed styling options."
+                }
+              },
+              "description": "Settings for comment pattern highlighting"
             }
+          }
+        },
+        "clarion.prefixHighlighting.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable or disable prefix highlighting for Clarion variables."
+        },
+        "clarion.firstFetchTimeoutMs": {
+          "type": "number",
+          "default": 2500,
+          "description": "Timeout in milliseconds for the first solution fetch attempt after activation. Lower values improve startup time when the language server is not ready."
+        },
+        "clarion.enableLocalSlnFallback": {
+          "type": "boolean",
+          "default": true,
+          "description": "When enabled, uses a local .sln file parser as a fast fallback when the language server is not ready or times out."
+        },
+        "clarion.pasteAsString.lineTerminator": {
+          "type": "string",
+          "enum": [
+            "space",
+            "crlf",
+            "none"
+          ],
+          "default": "space",
+          "enumDescriptions": [
+            "Add a trailing space to each line (recommended for SQL queries)",
+            "Add <13,10> line break to each line",
+            "No line terminator (lines concatenate seamlessly)"
+          ],
+          "description": "How to terminate each line when pasting as Clarion string. Controls whether lines are separated by spaces, line breaks, or nothing."
+        },
+        "clarion.pasteAsString.trimLeadingWhitespace": {
+          "type": "boolean",
+          "default": true,
+          "description": "Remove leading whitespace from each line when pasting as Clarion string. Recommended when pasting indented code."
+        },
+        "clarion.unreachableCode.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable or disable visual dimming of unreachable code in Clarion procedures and methods. Detects code after unconditional RETURN, EXIT, or HALT statements at top execution level."
         }
-    },
-    "scripts": {
-        "vscode:prepublish": "npm run bundle",
-        "bundle": "rimraf out && node esbuild.mjs",
-        "compile": "npm run compile:dev",
-        "compile:dev": "tsc -b && npm run copy-data",
-        "compile:release": "tsc -b && npm run copy-data",
-        "copy-data": "node -e \"const fs=require('fs'),path=require('path'); fs.mkdirSync('out/server/src/data',{recursive:true}); fs.copyFileSync('server/src/data/clarion-builtins.json','out/server/src/data/clarion-builtins.json'); fs.copyFileSync('server/src/data/clarion-attributes.json','out/server/src/data/clarion-attributes.json'); fs.copyFileSync('server/src/data/clarion-controls.json','out/server/src/data/clarion-controls.json'); fs.copyFileSync('server/src/data/clarion-datatypes.json','out/server/src/data/clarion-datatypes.json'); fs.copyFileSync('server/src/data/clarion-properties.json','out/server/src/data/clarion-properties.json'); fs.copyFileSync('server/src/data/clarion-events.json','out/server/src/data/clarion-events.json');\"",
-        "package": "npm run compile:dev && vsce package",
-        "package:release": "npm run compile:release && vsce package --allow-star-activation",
-        "watch": "tsc -b -w",
-        "test": "npm run test:server",
-        "test:server": "mocha",
-        "test:client": "mocha --config .mocharc-client.json",
-        "test:all": "npm run compile:dev && npm run test:server && npm run test:client"
-    },
-    "devDependencies": {
-        "@types/mocha": "^8.2.2",
-        "@types/node": "^22.13.5",
-        "@types/vscode": "^1.97.0",
-        "@types/xml2js": "^0.4.14",
-        "@typescript-eslint/parser": "^8.25.0",
-        "@vscode/test-electron": "^2.4.1",
-        "cross-env": "^10.1.0",
-        "esbuild": "^0.28.0",
-        "eslint": "^9.21.0",
-        "mocha": "^11.0.0",
-        "rimraf": "^6.0.1",
-        "typescript": "^4.2.4"
-    },
-    "dependencies": {
-        "glob": "^12.0.0",
-        "minimatch": "^10.2.3",
-        "minimist": "^1.2.6",
-        "mkdirp": "^3.0.1",
-        "vscode-languageclient": "^7.0.0",
-        "vscode-languageserver": "^7.0.0",
-        "vscode-languageserver-protocol": "^3.17.5",
-        "vscode-languageserver-textdocument": "^1.0.12",
-        "xml2js": "^0.6.2"
-    },
-    "overrides": {
-        "serialize-javascript": "^7.0.5",
-        "diff": "^8.0.0"
+      }
     }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run bundle",
+    "bundle": "rimraf out && node esbuild.mjs",
+    "compile": "npm run compile:dev",
+    "compile:dev": "tsc -b && npm run copy-data",
+    "compile:release": "tsc -b && npm run copy-data",
+    "copy-data": "node -e \"const fs=require('fs'),path=require('path'); fs.mkdirSync('out/server/src/data',{recursive:true}); fs.copyFileSync('server/src/data/clarion-builtins.json','out/server/src/data/clarion-builtins.json'); fs.copyFileSync('server/src/data/clarion-attributes.json','out/server/src/data/clarion-attributes.json'); fs.copyFileSync('server/src/data/clarion-controls.json','out/server/src/data/clarion-controls.json'); fs.copyFileSync('server/src/data/clarion-datatypes.json','out/server/src/data/clarion-datatypes.json'); fs.copyFileSync('server/src/data/clarion-properties.json','out/server/src/data/clarion-properties.json'); fs.copyFileSync('server/src/data/clarion-events.json','out/server/src/data/clarion-events.json');\"",
+    "package": "npm run compile:dev && vsce package",
+    "package:release": "npm run compile:release && vsce package --allow-star-activation",
+    "watch": "tsc -b -w",
+    "test": "npm run test:server",
+    "test:server": "mocha",
+    "test:client": "mocha --config .mocharc-client.json",
+    "test:all": "npm run compile:dev && npm run test:server && npm run test:client"
+  },
+  "devDependencies": {
+    "@types/mocha": "^8.2.2",
+    "@types/node": "^22.13.5",
+    "@types/vscode": "^1.97.0",
+    "@types/xml2js": "^0.4.14",
+    "@typescript-eslint/parser": "^8.25.0",
+    "@vscode/test-electron": "^2.4.1",
+    "cross-env": "^10.1.0",
+    "esbuild": "^0.28.0",
+    "eslint": "^9.21.0",
+    "mocha": "^11.0.0",
+    "rimraf": "^6.0.1",
+    "typescript": "^4.2.4"
+  },
+  "dependencies": {
+    "glob": "^12.0.0",
+    "minimatch": "^10.2.3",
+    "minimist": "^1.2.6",
+    "mkdirp": "^3.0.1",
+    "vscode-languageclient": "^7.0.0",
+    "vscode-languageserver": "^7.0.0",
+    "vscode-languageserver-protocol": "^3.17.5",
+    "vscode-languageserver-textdocument": "^1.0.12",
+    "xml2js": "^0.6.2"
+  },
+  "overrides": {
+    "serialize-javascript": "^7.0.5",
+    "diff": "^8.0.0"
+  }
 }
