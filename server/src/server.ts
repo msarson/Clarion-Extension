@@ -495,7 +495,7 @@ connection.onCodeLensResolve(async (lens) => {
         const refs = await referencesProvider.provideReferences(
             document,
             { line: data.line, character: data.character },
-            { includeDeclaration: false }
+            { includeDeclaration: true }
         );
 
         const count = refs?.length ?? 0;
