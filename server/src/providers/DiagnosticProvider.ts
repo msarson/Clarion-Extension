@@ -4,6 +4,7 @@ import { ClarionTokenizer, Token, TokenType } from '../ClarionTokenizer';
 import { extractReturnType } from '../utils/AttributeKeywords';
 import { ProcedureSignatureUtils } from '../utils/ProcedureSignatureUtils';
 import { MemberLocatorService } from '../services/MemberLocatorService';
+import { TokenCache } from '../TokenCache';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("DiagnosticProvider");
@@ -67,7 +68,11 @@ export class DiagnosticProvider {
         // Validate CLASS properties (QUEUE not allowed as direct property)
         const classPropertyDiagnostics = this.validateClassProperties(tokens, document);
         diagnostics.push(...classPropertyDiagnostics);
-        
+
+        // Warn when the return value of a plain (non-dot-access) MAP procedure call is discarded
+        const plainCallDiagnostics = this.validateDiscardedReturnValuesForPlainCalls(tokens, document);
+        diagnostics.push(...plainCallDiagnostics);
+
         const perfTime = performance.now() - perfStart;
         logger.perf(`🚀 Validation complete${caller ? ` (caller: ${caller})` : ''}`, {
             'time_ms': perfTime.toFixed(2),
@@ -1423,6 +1428,256 @@ export class DiagnosticProvider {
     }
 
     /**
+     * Warns when the return value of a plain (non-dot-access) MAP procedure call is discarded.
+     *
+     * Covers: global MAP blocks, MODULE-inside-MAP, and local MAP blocks inside procedures.
+     * Works with both raw ClarionTokenizer tokens (sync, tests) and DocumentStructure-enriched
+     * tokens (runtime). When DocumentStructure subtypes are available, shorthand MAP declarations
+     * (e.g. `ProcName(args),LONG` without the PROCEDURE keyword) are also handled.
+     *
+     * Conservative overload handling: if ANY overload of a name has PROC, DERIVED, or no
+     * return type, the name is excluded entirely to avoid false positives.
+     *
+     * Known v1 limitation: local MAP scope is not enforced — a local MAP procedure name
+     * inside ProcA may also be flagged as warnable in sibling procedures. Fix in v2.
+     *
+     * Closes #51
+     */
+    private static validateDiscardedReturnValuesForPlainCalls(
+        tokens: Token[],
+        document: TextDocument
+    ): Diagnostic[] {
+        const diagnostics: Diagnostic[] = [];
+        const docLines = document.getText().split('\n');
+
+        // ── Step 1: Build warnableProcs ──────────────────────────────────────────────────────
+        // Key: procedure name (uppercase). Excluded if ANY overload has PROC, DERIVED, or no return.
+        const warnableProcs = new Map<string, string>(); // nameUpper → returnType
+        const excluded = new Set<string>();
+
+        const hasSubType = tokens.some(t => t.subType === TokenType.MapProcedure);
+
+        if (hasSubType) {
+            // DocumentStructure path: use MapProcedure subType to catch all forms
+            // (standard PROCEDURE declarations, shorthand forms, and MODULE declarations).
+            for (let i = 0; i < tokens.length; i++) {
+                const t = tokens[i];
+                if (t.subType !== TokenType.MapProcedure) continue;
+
+                // Derive the procedure name from the label field (set by DocumentStructure).
+                // For shorthand single-token forms (e.g. "ProcName(args)"), split on "(".
+                const name = (t.label ?? t.value.split('(')[0].trim()).toUpperCase();
+                if (!name || excluded.has(name)) continue;
+
+                const lineTokens = tokens.filter(tok => tok.line === t.line);
+                if (lineTokens.some(tok => ['PROC', 'DERIVED'].includes(tok.value.toUpperCase()))) {
+                    excluded.add(name);
+                    warnableProcs.delete(name);
+                    continue;
+                }
+
+                // For standard PROCEDURE tokens, find the token index after the closing paren.
+                // For shorthand tokens (type != Procedure), start from the token itself —
+                // extractReturnType will scan forward on the same line to find a Type token.
+                let startIdx = i;
+                if (t.type === TokenType.Procedure) {
+                    let depth = 0;
+                    for (let k = i; k < tokens.length && tokens[k].line === t.line; k++) {
+                        if (tokens[k].value === '(') depth++;
+                        else if (tokens[k].value === ')') {
+                            depth--;
+                            if (depth === 0) { startIdx = k + 1; break; }
+                        }
+                    }
+                }
+
+                const returnType = extractReturnType(tokens, startIdx, true);
+                if (!returnType) {
+                    excluded.add(name);
+                    warnableProcs.delete(name);
+                    continue;
+                }
+                if (!excluded.has(name)) {
+                    warnableProcs.set(name, returnType);
+                }
+            }
+        } else {
+            // Raw-token path: scan for PROCEDURE keywords inside MAP blocks.
+            // Mirrors the approach used by validateReturnStatements.
+            let mapClassDepth = 0;
+            for (let i = 0; i < tokens.length; i++) {
+                const t = tokens[i];
+                const val = t.value.toUpperCase();
+
+                if (t.type === TokenType.Structure && (val === 'MAP' || val === 'CLASS')) {
+                    mapClassDepth++;
+                }
+                if (t.type === TokenType.EndStatement && mapClassDepth > 0) {
+                    mapClassDepth--;
+                }
+
+                // Only collect declarations inside MAP blocks.
+                // CLASS method declarations are handled by the async validateDiscardedReturnValues.
+                if (mapClassDepth === 0) continue;
+                if (t.type !== TokenType.Procedure && t.type !== TokenType.Routine) continue;
+                if (val !== 'PROCEDURE' && val !== 'FUNCTION') continue;
+
+                const nameToken = tokens.find(n =>
+                    n.line === t.line && n.start === 0 && n.type === TokenType.Label
+                );
+                if (!nameToken) continue;
+
+                const name = nameToken.value.toUpperCase();
+                if (excluded.has(name)) continue;
+
+                const lineTokens = tokens.filter(tok => tok.line === t.line);
+                if (lineTokens.some(tok => ['PROC', 'DERIVED'].includes(tok.value.toUpperCase()))) {
+                    excluded.add(name);
+                    warnableProcs.delete(name);
+                    continue;
+                }
+
+                let depth = 0, afterIdx = -1;
+                for (let k = i; k < tokens.length && tokens[k].line === t.line; k++) {
+                    if (tokens[k].value === '(') depth++;
+                    else if (tokens[k].value === ')') {
+                        depth--;
+                        if (depth === 0) { afterIdx = k + 1; break; }
+                    }
+                }
+                if (afterIdx === -1) continue;
+
+                const returnType = extractReturnType(tokens, afterIdx, true);
+                if (!returnType) {
+                    excluded.add(name);
+                    warnableProcs.delete(name);
+                    continue;
+                }
+                if (!excluded.has(name)) {
+                    warnableProcs.set(name, returnType);
+                }
+            }
+        }
+
+        if (warnableProcs.size === 0) return diagnostics;
+
+        // ── Step 2: Build code section ranges ─────────────────────────────────────────────────
+        // When DocumentStructure tokens are available (executionMarker set), delegate to
+        // getCodeBlockRanges for accurate ranges. Otherwise, use a manual CODE-token scan.
+        interface PlainCodeRange { start: number; end: number; }
+        const codeRanges: PlainCodeRange[] = [];
+
+        if (tokens.some(t => t.executionMarker)) {
+            for (const r of this.getCodeBlockRanges(tokens)) {
+                codeRanges.push({ start: r.start, end: r.end });
+            }
+        } else {
+            // Manual scan: find CODE tokens at outer scope (outside MAP/CLASS/INTERFACE blocks).
+            // A new PROCEDURE token at outer scope with a col-0 label ends the previous section.
+            let nonExecDepth = 0;
+            let codeStart = -1;
+            for (let i = 0; i < tokens.length; i++) {
+                const t = tokens[i];
+                const val = t.value.toUpperCase();
+
+                if (t.type === TokenType.Structure &&
+                    (val === 'MAP' || val === 'CLASS' || val === 'INTERFACE')) {
+                    if (codeStart !== -1) {
+                        codeRanges.push({ start: codeStart, end: t.line - 1 });
+                        codeStart = -1;
+                    }
+                    nonExecDepth++;
+                }
+                if (t.type === TokenType.EndStatement && nonExecDepth > 0) {
+                    nonExecDepth--;
+                }
+                if (nonExecDepth > 0) continue;
+
+                if (t.type === TokenType.ExecutionMarker && val === 'CODE') {
+                    codeStart = t.line + 1;
+                    continue;
+                }
+
+                // A new procedure implementation begins — close the current code section.
+                if (codeStart !== -1 &&
+                    (t.type === TokenType.Procedure || t.type === TokenType.Routine) &&
+                    (val === 'PROCEDURE' || val === 'FUNCTION' || val === 'ROUTINE') &&
+                    t.line > codeStart) {
+                    const labelOnLine = tokens.find(l =>
+                        l.line === t.line && l.start === 0 && l.type === TokenType.Label
+                    );
+                    if (labelOnLine) {
+                        codeRanges.push({ start: codeStart, end: t.line - 1 });
+                        codeStart = -1;
+                    }
+                }
+            }
+            if (codeStart !== -1) {
+                codeRanges.push({ start: codeStart, end: tokens[tokens.length - 1]?.line ?? 0 });
+            }
+        }
+
+        if (codeRanges.length === 0) return diagnostics;
+
+        // ── Step 3: Scan code lines for bare calls to warnable procedures ─────────────────────
+        // A "bare call" is:
+        //   ProcName           — no parens (valid Clarion call, return value discarded)
+        //   ProcName(args)     — with parens, nothing after the closing paren
+        // Excluded:
+        //   result = ProcName(...)   — assignment (return value captured)
+        //   Obj.Method(...)          — dot-access (handled by validateDiscardedReturnValues)
+        const ASSIGN_RE = /^[A-Za-z_][A-Za-z0-9_:]*\s*[+\-*/&|]?=/;
+
+        for (let lineIdx = 0; lineIdx < docLines.length; lineIdx++) {
+            if (!codeRanges.some(r => lineIdx >= r.start && lineIdx <= r.end)) continue;
+
+            const rawLine = docLines[lineIdx];
+            // Strip Clarion line comment (! outside strings).
+            const stripped = rawLine.replace(/!.*$/, '').trim();
+            if (!stripped) continue;
+
+            if (ASSIGN_RE.test(stripped)) continue;
+            // Skip dot-access — those are handled by validateDiscardedReturnValues
+            if (/^[A-Za-z_][A-Za-z0-9_]*\./.test(stripped)) continue;
+
+            const identMatch = stripped.match(/^([A-Za-z_][A-Za-z0-9_]*)/);
+            if (!identMatch) continue;
+
+            const callName = identMatch[1];
+            if (!warnableProcs.has(callName.toUpperCase())) continue;
+
+            // Verify the rest of the line is empty (no-paren call) or (args) with nothing after.
+            const afterIdent = stripped.substring(callName.length).trimStart();
+            if (afterIdent !== '') {
+                if (!afterIdent.startsWith('(')) continue;
+                let depth = 0, closeIdx = -1;
+                for (let ci = 0; ci < afterIdent.length; ci++) {
+                    if (afterIdent[ci] === '(') depth++;
+                    else if (afterIdent[ci] === ')') {
+                        depth--;
+                        if (depth === 0) { closeIdx = ci; break; }
+                    }
+                }
+                if (closeIdx === -1) continue; // Unclosed paren — multi-line call, skip
+                if (afterIdent.substring(closeIdx + 1).trim()) continue; // Something after — comparison or chain
+            }
+
+            const colStart = rawLine.search(/\S/);
+            diagnostics.push({
+                severity: DiagnosticSeverity.Warning,
+                range: {
+                    start: { line: lineIdx, character: colStart >= 0 ? colStart : 0 },
+                    end:   { line: lineIdx, character: colStart + stripped.length }
+                },
+                message: `Return value of '${callName}' is discarded. Capture the return value or add the PROC attribute to the declaration to suppress this warning.`,
+                source: 'clarion'
+            });
+        }
+
+        return diagnostics;
+    }
+
+    /**
      * Async validation pass: warns when a dot-access method call discards a return value.
      * Reuses MemberLocatorService (the same resolution path as hover and F12) for type lookup.
      *
@@ -1529,6 +1784,135 @@ export class DiagnosticProvider {
                     end: { line: lineIdx, character: colStart + stripped.length }
                 },
                 message: `Return value of '${objectName}.${methodName}' is discarded. Capture the return value or add the PROC attribute to the declaration to suppress this warning.`,
+                source: 'clarion'
+            });
+        }
+
+        // Cross-file plain call check: warn for MAP procs declared in OTHER cached files
+        // (e.g. PROGRAM file's global MAP, called from a MEMBER file).
+        const crossFileDiags = this.validateCrossFilePlainCalls(tokens, document, docLines, codeRanges);
+        diagnostics.push(...crossFileDiags);
+
+        return diagnostics;
+    }
+
+    /**
+     * Scans all OTHER cached files for MapProcedure declarations and warns when
+     * the current document calls one with its return value discarded.
+     *
+     * This is the cross-file counterpart to validateDiscardedReturnValuesForPlainCalls
+     * (which handles MAP procs declared in the SAME file).  A typical case is a MEMBER
+     * file calling a procedure that is declared in the PROGRAM file's global MAP.
+     */
+    private static validateCrossFilePlainCalls(
+        currentTokens: Token[],
+        document: TextDocument,
+        docLines: string[],
+        codeRanges: { start: number; end: number }[]
+    ): Diagnostic[] {
+        const cache = TokenCache.getInstance();
+        const currentUri = document.uri;
+
+        // Names already handled by the sync path (declared in this file's MAP)
+        const localMapNames = new Set<string>();
+        for (const t of currentTokens) {
+            if (t.subType === TokenType.MapProcedure) {
+                const name = (t.label ?? t.value.split('(')[0].trim()).toUpperCase();
+                if (name) localMapNames.add(name);
+            }
+        }
+
+        // Collect warnable procs from all OTHER cached files
+        const warnableProcs = new Map<string, string>(); // nameUpper → returnType
+        const excluded = new Set<string>();
+
+        for (const uri of cache.getAllCachedUris()) {
+            if (uri === currentUri) continue;
+            const otherTokens = cache.getTokensByUri(uri);
+            if (!otherTokens) continue;
+
+            for (let i = 0; i < otherTokens.length; i++) {
+                const t = otherTokens[i];
+                if (t.subType !== TokenType.MapProcedure) continue;
+
+                const name = (t.label ?? t.value.split('(')[0].trim()).toUpperCase();
+                if (!name || excluded.has(name) || localMapNames.has(name)) continue;
+
+                const lineTokens = otherTokens.filter(tok => tok.line === t.line);
+                if (lineTokens.some(tok => ['PROC', 'DERIVED'].includes(tok.value.toUpperCase()))) {
+                    excluded.add(name);
+                    warnableProcs.delete(name);
+                    continue;
+                }
+
+                let startIdx = i;
+                if (t.type === TokenType.Procedure) {
+                    let depth = 0;
+                    for (let k = i; k < otherTokens.length && otherTokens[k].line === t.line; k++) {
+                        if (otherTokens[k].value === '(') depth++;
+                        else if (otherTokens[k].value === ')') {
+                            depth--;
+                            if (depth === 0) { startIdx = k + 1; break; }
+                        }
+                    }
+                }
+
+                const returnType = extractReturnType(otherTokens, startIdx, true);
+                if (!returnType) {
+                    excluded.add(name);
+                    warnableProcs.delete(name);
+                    continue;
+                }
+                if (!excluded.has(name)) {
+                    warnableProcs.set(name, returnType);
+                }
+            }
+        }
+
+        if (warnableProcs.size === 0) return [];
+
+        const diagnostics: Diagnostic[] = [];
+        const ASSIGN_RE = /^[A-Za-z_][A-Za-z0-9_:]*\s*[+\-*/&|]?=/;
+
+        for (let lineIdx = 0; lineIdx < docLines.length; lineIdx++) {
+            if (!codeRanges.some(r => lineIdx >= r.start && lineIdx <= r.end)) continue;
+
+            const rawLine = docLines[lineIdx];
+            const stripped = rawLine.replace(/!.*$/, '').trim();
+            if (!stripped) continue;
+
+            if (ASSIGN_RE.test(stripped)) continue;
+            if (/^[A-Za-z_][A-Za-z0-9_]*\./.test(stripped)) continue;
+
+            const identMatch = stripped.match(/^([A-Za-z_][A-Za-z0-9_]*)/);
+            if (!identMatch) continue;
+
+            const callName = identMatch[1];
+            if (!warnableProcs.has(callName.toUpperCase())) continue;
+
+            const afterIdent = stripped.substring(callName.length).trimStart();
+            if (afterIdent !== '') {
+                if (!afterIdent.startsWith('(')) continue;
+                let depth = 0, closeIdx = -1;
+                for (let ci = 0; ci < afterIdent.length; ci++) {
+                    if (afterIdent[ci] === '(') depth++;
+                    else if (afterIdent[ci] === ')') {
+                        depth--;
+                        if (depth === 0) { closeIdx = ci; break; }
+                    }
+                }
+                if (closeIdx === -1) continue;
+                if (afterIdent.substring(closeIdx + 1).trim()) continue;
+            }
+
+            const colStart = rawLine.search(/\S/);
+            diagnostics.push({
+                severity: DiagnosticSeverity.Warning,
+                range: {
+                    start: { line: lineIdx, character: colStart >= 0 ? colStart : 0 },
+                    end:   { line: lineIdx, character: colStart + stripped.length }
+                },
+                message: `Return value of '${callName}' is discarded. Capture the return value or add the PROC attribute to the declaration to suppress this warning.`,
                 source: 'clarion'
             });
         }
