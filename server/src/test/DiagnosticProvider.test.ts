@@ -1771,3 +1771,129 @@ MyProc  PROCEDURE()
         });
     });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Issue #69 — Reserved keyword label diagnostics
+// ─────────────────────────────────────────────────────────────────────────────
+suite('DiagnosticProvider - Reserved Keyword Labels (#69)', () => {
+
+    function labelDiags(code: string) {
+        return DiagnosticProvider.validateDocument(createDocument(code))
+            .filter(d => d.message.includes('reserved') || d.message.includes('cannot be used as a label') || d.message.includes('cannot be the label of a PROCEDURE'));
+    }
+
+    // ── Case 1: fully reserved keywords used as labels ───────────────────────
+
+    test('RETURN at col 0 as variable label → error', () => {
+        const code = `TestProc  PROCEDURE()
+RETURN  BYTE,AUTO
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 1, 'Should flag RETURN as reserved label');
+        assert.ok(diags[0].message.toUpperCase().includes('RETURN'));
+    });
+
+    test('WHILE at col 0 as variable label → error', () => {
+        const code = `TestProc  PROCEDURE()
+WHILE   LONG
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 1, 'Should flag WHILE as reserved label');
+    });
+
+    test('CYCLE at col 0 as variable label → error', () => {
+        const code = `TestProc  PROCEDURE()
+CYCLE   BYTE
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 1, 'Should flag CYCLE as reserved label');
+    });
+
+    test('GOTO at col 0 as variable label → error', () => {
+        const code = `TestProc  PROCEDURE()
+GOTO    LONG
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 1, 'Should flag GOTO as reserved label');
+    });
+
+    test('Keyword matching is case-insensitive', () => {
+        const code = `TestProc  PROCEDURE()
+return  BYTE,AUTO
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 1, 'Case-insensitive: return should be flagged');
+    });
+
+    test('Normal label (non-reserved) at col 0 → no error', () => {
+        const code = `TestProc  PROCEDURE()
+MyVar   LONG
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 0, 'Normal label should not be flagged');
+    });
+
+    test('RETURN keyword in code body (not col 0) → no error', () => {
+        const code = `TestProc  PROCEDURE()
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 0, 'Keyword in code section should not be flagged');
+    });
+
+    // ── Case 2: structure-only keywords as PROCEDURE labels ──────────────────
+
+    test('WINDOW as PROCEDURE label → error', () => {
+        const code = `WINDOW  PROCEDURE()
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 1, 'Should flag WINDOW as PROCEDURE label');
+        assert.ok(diags[0].message.toUpperCase().includes('WINDOW'));
+    });
+
+    test('CLASS as PROCEDURE label → error', () => {
+        const code = `CLASS   PROCEDURE()
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 1, 'Should flag CLASS as PROCEDURE label');
+    });
+
+    test('QUEUE as PROCEDURE label → error', () => {
+        const code = `QUEUE   PROCEDURE()
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 1, 'Should flag QUEUE as PROCEDURE label');
+    });
+
+    test('WINDOW as structure label (valid) → no error', () => {
+        const code = `TestProc  PROCEDURE()
+WINDOW  WINDOW('Caption'),AT(,,300,200)
+          BUTTON('OK'),AT(10,10,50,14),USE(?OK)
+        END
+  CODE
+  OPEN(WINDOW)
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 0, 'WINDOW as data structure label should not be flagged');
+    });
+
+    test('CLASS as structure label (valid) → no error', () => {
+        const code = `TestProc  PROCEDURE()
+CLASS   CLASS(BaseClass)
+Init      PROCEDURE()
+        END
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 0, 'CLASS as CLASS structure label should not be flagged');
+    });
+});

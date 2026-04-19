@@ -8,6 +8,7 @@ import { validateStructureTerminators, validateConditionalBlocks, validateFileSt
 import { validateClassInterfaceImplementation, validateClassProperties } from './diagnostics/ClassDiagnostics';
 import { validateReturnStatements, validateDiscardedReturnValuesForPlainCalls, validateDiscardedReturnValues as _validateDiscardedReturnValues } from './diagnostics/ReturnValueDiagnostics';
 import { validateCycleBreakOutsideLoop } from './diagnostics/ControlFlowDiagnostics';
+import { validateReservedKeywordLabels } from './diagnostics/LabelDiagnostics';
 
 const logger = LoggerManager.getLogger("DiagnosticProvider");
 logger.setLevel("error");
@@ -37,6 +38,7 @@ export class DiagnosticProvider {
             ...validateClassProperties(tokens, document),
             ...validateDiscardedReturnValuesForPlainCalls(tokens, document),
             ...validateCycleBreakOutsideLoop(tokens, document),
+            ...validateReservedKeywordLabels(tokens, document),
         ];
 
         logger.perf(`🚀 Validation complete${caller ? ` (caller: ${caller})` : ''}`, {
