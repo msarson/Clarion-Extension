@@ -117,7 +117,9 @@ export class CompletionProvider {
                 kind: CompletionItemKind.Property,
                 // Insert only the part after the prefix already typed
                 insertText: e.name.slice(prefix.length),
-                detail: e.readOnly ? '(read-only)' : undefined,
+                detail: e.description
+                    ? (e.readOnly ? `(read-only) ${e.description.slice(0, 60)}…` : e.description.slice(0, 70) + (e.description.length > 70 ? '…' : ''))
+                    : (e.readOnly ? '(read-only)' : undefined),
                 documentation: e.description
                     ? { kind: 'markdown', value: e.description }
                     : undefined,
