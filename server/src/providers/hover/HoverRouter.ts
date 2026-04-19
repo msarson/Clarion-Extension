@@ -9,6 +9,7 @@ import { ContextualHoverHandler } from './ContextualHoverHandler';
 import { BuiltinFunctionService } from '../../utils/BuiltinFunctionService';
 import { AttributeService } from '../../utils/AttributeService';
 import { PropertyService } from '../../utils/PropertyService';
+import { EventService } from '../../utils/EventService';
 import { HoverFormatter } from './HoverFormatter';
 import { TokenCache } from '../../TokenCache';
 import { Token, TokenType } from '../../ClarionTokenizer';
@@ -26,6 +27,7 @@ export class HoverRouter {
     private builtinService = BuiltinFunctionService.getInstance();
     private attributeService = AttributeService.getInstance();
     private propertyService = PropertyService.getInstance();
+    private eventService = EventService.getInstance();
 
     constructor(
         private procedureResolver: ProcedureHoverResolver,
@@ -88,6 +90,10 @@ export class HoverRouter {
         // 9.5 Handle PROP: runtime property equates
         const propHover = this.handlePropEquate(word);
         if (propHover) return propHover;
+
+        // 9.6 Handle EVENT: equates
+        const eventHover = this.handleEventEquate(word);
+        if (eventHover) return eventHover;
 
         // 10. Handle built-in functions (AFTER method declarations to avoid shadowing)
         const builtinHover = this.handleBuiltin(word, line, wordRange, document, position);
@@ -197,6 +203,16 @@ export class HoverRouter {
         if (!entry) return null;
         logger.info(`Found PROP: equate: ${word}`);
         return this.formatter.formatPropEquate(entry);
+    }
+
+    /**
+     * Handle EVENT: equates (e.g. EVENT:Accepted, EVENT:CloseWindow)
+     */
+    private handleEventEquate(word: string): Hover | null {
+        const entry = this.eventService.getEventEntry(word);
+        if (!entry) return null;
+        logger.info(`Found EVENT: equate: ${word}`);
+        return this.formatter.formatEventEquate(entry);
     }
 
     /**

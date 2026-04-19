@@ -6,6 +6,7 @@ import { MemberEnumItem } from '../utils/ClassMemberResolver';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { PropertyService } from '../utils/PropertyService';
+import { EventService } from '../utils/EventService';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("CompletionProvider");
@@ -29,6 +30,7 @@ export class CompletionProvider {
     private memberLocator = new MemberLocatorService();
     private chainedResolver = new ChainedPropertyResolver();
     private propertyService = PropertyService.getInstance();
+    private eventService = EventService.getInstance();
 
     /**
      * Main entry point — called by connection.onCompletion.
@@ -47,6 +49,10 @@ export class CompletionProvider {
             // PROP: / PROPPRINT: completion — fires when user types the colon or a partial name after it
             const propCompletions = this.handlePropCompletion(lineText);
             if (propCompletions) return propCompletions;
+
+            // EVENT: completion
+            const eventCompletions = this.handleEventCompletion(lineText);
+            if (eventCompletions) return eventCompletions;
 
             // Ensure the trigger is actually '.'
             if (!lineText.trimEnd().endsWith('.')) return [];
@@ -120,6 +126,45 @@ export class CompletionProvider {
                 detail: e.description
                     ? (e.readOnly ? `(read-only) ${e.description.slice(0, 60)}…` : e.description.slice(0, 70) + (e.description.length > 70 ? '…' : ''))
                     : (e.readOnly ? '(read-only)' : undefined),
+                documentation: e.description
+                    ? { kind: 'markdown', value: e.description }
+                    : undefined,
+            };
+            return item;
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // EVENT: completion
+    // -------------------------------------------------------------------------
+
+    /**
+     * Returns completion items if the line ends with EVENT: (or a partial name after it),
+     * otherwise returns null to fall through to dot-completion.
+     *
+     * Matches patterns like:
+     *   OF EVENT:          → all EVENT: entries
+     *   OF EVENT:Cl        → EVENT: entries starting with "EVENT:CL"
+     */
+    private handleEventCompletion(lineBeforeCursor: string): CompletionItem[] | null {
+        const m = lineBeforeCursor.match(/EVENT:(\w*)$/i);
+        if (!m) return null;
+
+        const partial = m[1].toUpperCase();
+        const prefix = 'EVENT:';
+
+        const entries = this.eventService.getAllByPrefix(prefix).filter(e =>
+            e.name.toUpperCase().startsWith(prefix + partial)
+        );
+
+        return entries.map(e => {
+            const item: CompletionItem = {
+                label: e.name,
+                kind: CompletionItemKind.Event,
+                insertText: e.name.slice(prefix.length),
+                detail: e.description
+                    ? `(${e.category}) ${e.description.slice(0, 60)}${e.description.length > 60 ? '…' : ''}`
+                    : `(${e.category})`,
                 documentation: e.description
                     ? { kind: 'markdown', value: e.description }
                     : undefined,

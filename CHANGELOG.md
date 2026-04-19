@@ -53,6 +53,7 @@ All notable changes to the Clarion Extension are documented here.
 **Hover**
 
 - ✨ **Hover documentation for `PROP:` and `PROPPRINT:` runtime properties** ([#73](https://github.com/msarson/Clarion-Extension/issues/73)) — hovering over any Clarion runtime property equate now shows documentation sourced from the Clarion 11.1 Language Reference. Covers 336 `PROP:` entries (window/control/file/system properties) and 25 `PROPPRINT:` printer control properties (`PROPPRINT:Device`, `PROPPRINT:Copies`, `PROPPRINT:Paper`, etc.). Read-only properties are labelled accordingly. `PROPPRINT:` hovers show a printer-appropriate usage example (`PRINTER{PROPPRINT:Device}`). Works wherever property equates appear in code.
+- ✨ **Hover and autocomplete for `EVENT:` equates** ([#74](https://github.com/msarson/Clarion-Extension/issues/74)) — hovering over any Clarion event equate (e.g. `EVENT:Accepted`, `EVENT:CloseWindow`, `EVENT:Timer`) now shows a description, category (Field-Specific / Field-Independent / DDE), and a usage example. Autocomplete fires when typing `EVENT:` (or after the colon), listing all 62 event equates with category and description in the detail column. DDE events are included.
 
 ### [0.9.2] - 2026-04-18
 

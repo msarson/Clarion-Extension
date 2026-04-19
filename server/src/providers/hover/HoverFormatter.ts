@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import LoggerManager from '../../logger';
 import { DocCommentReader, DocComment } from '../../utils/DocCommentReader';
 import { PropEntry } from '../../utils/PropertyService';
+import { EventEntry } from '../../utils/EventService';
 
 const logger = LoggerManager.getLogger("HoverFormatter");
 logger.setLevel("error");
@@ -814,6 +815,19 @@ export class HoverFormatter {
             ? `PRINTER{${entry.name}}`
             : `?Control{${entry.name}}`;
         content += `**Usage:** \`${usageExample}\``;
+        return {
+            contents: { kind: 'markdown', value: content.trim() }
+        };
+    }
+
+    /** Formats hover for an EVENT: equate (e.g. EVENT:Accepted, EVENT:CloseWindow). */
+    public formatEventEquate(entry: EventEntry): Hover {
+        let content = `**${entry.name}**\n\n`;
+        content += `_${entry.category} Event_\n\n`;
+        if (entry.description) {
+            content += `${entry.description}\n\n`;
+        }
+        content += `**Usage:** \`OF EVENT:${entry.name.slice('EVENT:'.length)}\``;
         return {
             contents: { kind: 'markdown', value: content.trim() }
         };
