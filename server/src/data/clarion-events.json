@@ -64,6 +64,7 @@
     { "name": "EVENT:Suspend", "description": "The window still has input focus but is giving control to another thread to process timer events. The system is modal during this event. (Deprecated since Clarion 6)", "category": "Field-Independent" },
     { "name": "EVENT:TabChanging", "description": "On a SHEET control, focus is about to pass to another tab. This is the event on which you perform any necessary housekeeping code for the tab you are leaving.", "category": "Field-Specific" },
     { "name": "EVENT:Timer", "description": "The TIMER attribute has triggered. This is the event on which you perform any timed actions, such as clock display or background record processing for reports or batch processes.", "category": "Field-Independent" },
-    { "name": "EVENT:Undocked", "description": "A dockable toolbox window has been undocked.", "category": "Field-Independent" }
+    { "name": "EVENT:Undocked", "description": "A dockable toolbox window has been undocked.", "category": "Field-Independent" },
+    { "name": "EVENT:User", "description": "The base equate value (0x400 = 1024) for user-defined events. User-defined event numbers can be any integer between EVENT:User (400h) and 0FFFh. Use POST(EVENT:User) or POST(EVENT:User + n) to fire custom events and detect them with IF EVENT() = EVENT:User.", "category": "User-Defined" }
   ]
 }
