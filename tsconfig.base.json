@@ -7,9 +7,8 @@
     "strict": true,
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true,
-    "baseUrl": ".",
     "paths": {
-      "common/*": ["common/*"]
+      "common/*": ["./common/*"]
     }
   }
 }
