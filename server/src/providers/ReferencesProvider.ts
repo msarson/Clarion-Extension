@@ -745,7 +745,7 @@ export class ReferencesProvider {
         }
 
         for (const fileUri of filesToSearch) {
-            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter);
+            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter, context.includeDeclaration);
             locations.push(...hits);
         }
 
@@ -1108,7 +1108,8 @@ export class ReferencesProvider {
         className?: string,
         classFamily?: Set<string>,
         chainPrefix?: string,
-        overloadFilter?: OverloadFilter
+        overloadFilter?: OverloadFilter,
+        includeDeclaration: boolean = true
     ): Location[] {
         const tokens = this.getTokensForUri(fileUri);
         if (!tokens || tokens.length === 0) return [];
@@ -1180,6 +1181,15 @@ export class ReferencesProvider {
                     const penultimate = parts.length >= 2 ? parts[parts.length - 2].toLowerCase() : '';
 
                     if ((penultimate === 'self' || penultimate === 'parent') && isInTargetClass(token.line)) {
+                        // PARENT.Member inside the TARGET class's own method calls the *parent's*
+                        // implementation — that is NOT a reference to the target class's method.
+                        // Only include PARENT.Member when we are inside a SUBCLASS method.
+                        if (penultimate === 'parent' && classLower) {
+                            const scope = methodScopes.find(s => token.line >= s.startLine && token.line <= s.endLine);
+                            if (scope && scope.classLower === classLower) {
+                                continue; // skip: calling grandparent, not target class
+                            }
+                        }
                         // 2-segment: SELF.Member — direct access, filter by enclosing method class
                         if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
                             locations.push(Location.create(fileUri,
@@ -1293,6 +1303,7 @@ export class ReferencesProvider {
             // Member declaration at column 0 — only inside the correct CLASS body
             if (token.type === TokenType.Label && token.start === 0 &&
                 token.value.toLowerCase() === memberLower) {
+                if (!includeDeclaration) continue; // skip CLASS body declarations when not wanted
                 const enclosingStruct = tokens.slice(0, i).reverse().find(t =>
                     t.type === TokenType.Structure &&
                     t.finishesAt !== undefined &&
@@ -1315,6 +1326,7 @@ export class ReferencesProvider {
             // All overloads of the same method name are included (overload resolution at
             // call sites requires full type inference, so we aggregate them).
             if (token.subType === TokenType.MethodImplementation && token.label) {
+                if (!includeDeclaration) continue; // skip implementation headers when not wanted
                 const dotIdx = token.label.indexOf('.');
                 if (dotIdx > 0) {
                     const implClass = token.label.substring(0, dotIdx).toLowerCase();
