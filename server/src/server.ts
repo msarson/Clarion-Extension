@@ -60,6 +60,7 @@ import { HoverProvider } from './providers/HoverProvider';
 import { ClassConstantsCodeActionProvider } from './providers/ClassConstantsCodeActionProvider';
 import { FlattenCodeActionProvider } from './providers/FlattenCodeActionProvider';
 import { SelectionRangeProvider } from './providers/SelectionRangeProvider';
+import { ClarionCodeLensProvider, formatReferenceCount } from './providers/ClarionCodeLensProvider';
 import { DiagnosticProvider } from './providers/DiagnosticProvider';
 import { SignatureHelpProvider } from './providers/SignatureHelpProvider';
 import { ImplementationProvider } from './providers/ImplementationProvider';
@@ -94,6 +95,7 @@ const hoverProvider = new HoverProvider();
 const signatureHelpProvider = new SignatureHelpProvider();
 const implementationProvider = new ImplementationProvider();
 const referencesProvider = new ReferencesProvider();
+const codeLensProvider = new ClarionCodeLensProvider();
 const renameProvider = new RenameProvider();
 const documentHighlightProvider = new DocumentHighlightProvider();
 const workspaceSymbolProvider = new WorkspaceSymbolProvider();
@@ -163,6 +165,7 @@ connection.onInitialize((params) => {
                 hoverProvider: true,
                 codeActionProvider: true,
                 selectionRangeProvider: true,
+                codeLensProvider: { resolveProvider: true },
                 signatureHelpProvider: {
                     triggerCharacters: ['(', ','],
                     retriggerCharacters: [')']
@@ -466,6 +469,48 @@ connection.onSelectionRanges((params) => {
         logger.error(`❌ Error providing selection ranges: ${error instanceof Error ? error.message : String(error)}`);
         return [];
     }
+});
+
+// Handle CodeLens requests — return unresolved lenses (ranges + data only)
+connection.onCodeLens((params) => {
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return [];
+    try {
+        return codeLensProvider.provideCodeLenses(document);
+    } catch (error) {
+        logger.error(`❌ Error providing code lenses: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
+    }
+});
+
+// Handle CodeLens resolve — fill in title + command by counting references
+connection.onCodeLensResolve(async (lens) => {
+    try {
+        const data = lens.data as { uri: string; line: number; character: number; symbolName: string } | undefined;
+        if (!data) return lens;
+
+        const document = documents.get(data.uri);
+        if (!document) return lens;
+
+        const refs = await referencesProvider.provideReferences(
+            document,
+            { line: data.line, character: data.character },
+            { includeDeclaration: false }
+        );
+
+        const count = refs?.length ?? 0;
+        lens.command = {
+            title: formatReferenceCount(count),
+            command: 'editor.action.findReferences',
+            arguments: [
+                data.uri,
+                { lineNumber: data.line + 1, column: data.character + 1 }
+            ],
+        };
+    } catch (error) {
+        logger.error(`❌ Error resolving code lens: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return lens;
 });
 
 
