@@ -5,6 +5,7 @@ import { MemberLocatorService } from '../services/MemberLocatorService';
 import { MemberEnumItem } from '../utils/ClassMemberResolver';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { PropertyService } from '../utils/PropertyService';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("CompletionProvider");
@@ -27,6 +28,7 @@ export class CompletionProvider {
     private tokenCache = TokenCache.getInstance();
     private memberLocator = new MemberLocatorService();
     private chainedResolver = new ChainedPropertyResolver();
+    private propertyService = PropertyService.getInstance();
 
     /**
      * Main entry point — called by connection.onCompletion.
@@ -41,6 +43,10 @@ export class CompletionProvider {
                 end: { line: position.line, character: position.character }
             });
             if (this.isInCommentOrString(lineText)) return [];
+
+            // PROP: / PROPPRINT: completion — fires when user types the colon or a partial name after it
+            const propCompletions = this.handlePropCompletion(lineText);
+            if (propCompletions) return propCompletions;
 
             // Ensure the trigger is actually '.'
             if (!lineText.trimEnd().endsWith('.')) return [];
@@ -79,6 +85,45 @@ export class CompletionProvider {
             logger.error(`CompletionProvider error: ${err instanceof Error ? err.message : String(err)}`);
             return [];
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // PROP: / PROPPRINT: completion
+    // -------------------------------------------------------------------------
+
+    /**
+     * Returns completion items if the line ends with PROP: or PROPPRINT: (or a partial
+     * name after either prefix), otherwise returns null to fall through to dot-completion.
+     *
+     * Matches patterns like:
+     *   ?ctrl{PROP:          → all PROP: entries
+     *   ?ctrl{PROP:En        → PROP: entries starting with "PROP:EN"
+     *   PRINTER{PROPPRINT:   → all PROPPRINT: entries
+     */
+    private handlePropCompletion(lineBeforeCursor: string): CompletionItem[] | null {
+        const m = lineBeforeCursor.match(/(PROPPRINT:|PROP:)(\w*)$/i);
+        if (!m) return null;
+
+        const prefix = m[1].toUpperCase() as 'PROP:' | 'PROPPRINT:';
+        const partial = m[2].toUpperCase();
+
+        const entries = this.propertyService.getAllByPrefix(prefix).filter(e =>
+            e.name.toUpperCase().startsWith(prefix + partial)
+        );
+
+        return entries.map(e => {
+            const item: CompletionItem = {
+                label: e.name,
+                kind: CompletionItemKind.Property,
+                // Insert only the part after the prefix already typed
+                insertText: e.name.slice(prefix.length),
+                detail: e.readOnly ? '(read-only)' : undefined,
+                documentation: e.description
+                    ? { kind: 'markdown', value: e.description }
+                    : undefined,
+            };
+            return item;
+        });
     }
 
     // -------------------------------------------------------------------------

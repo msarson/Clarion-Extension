@@ -172,7 +172,7 @@ connection.onInitialize((params) => {
                     retriggerCharacters: [')']
                 },
                 completionProvider: {
-                    triggerCharacters: ['.'],
+                    triggerCharacters: ['.', ':'],
                     resolveProvider: false
                 },
                 semanticTokensProvider: {

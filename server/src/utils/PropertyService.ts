@@ -32,6 +32,12 @@ export class PropertyService {
         }
     }
 
+    /** Returns all entries whose name starts with the given prefix (case-insensitive). */
+    public getAllByPrefix(prefix: string): PropEntry[] {
+        const upper = prefix.toUpperCase();
+        return [...this.properties.values()].filter(e => e.name.toUpperCase().startsWith(upper));
+    }
+
     /** Returns true if the word (case-insensitive) matches a known PROP: equate. */
     public isPropEquate(word: string): boolean {
         return this.properties.has(word.toUpperCase());
