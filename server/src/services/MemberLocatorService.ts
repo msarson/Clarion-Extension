@@ -117,7 +117,7 @@ export class MemberLocatorService {
 
     /**
      * Finds a named member inside a class.
-     * Search order: document INCLUDE chain → ClassDefinitionIndexer → parent chain.
+     * Search order: current document → INCLUDE chain → ClassDefinitionIndexer → parent chain.
      */
     async findMemberInClass(
         className: string,
@@ -127,6 +127,10 @@ export class MemberLocatorService {
     ): Promise<MemberInfo | null> {
         const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         const tokens = this.tokenCache.getTokensByUri(document.uri) ?? this.tokenCache.getTokens(document);
+
+        // 0. Current document tokens (class defined in the same file)
+        const fromCurrentDoc = await this.scanBodyForMember(docPath, className, memberName, paramCount, 'CLASS');
+        if (fromCurrentDoc) return fromCurrentDoc;
 
         // 1. Walk INCLUDE chain reachable from this document
         const fromInclude = await this.findInIncludeChain(
