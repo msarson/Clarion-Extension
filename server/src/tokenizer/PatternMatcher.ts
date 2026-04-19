@@ -50,18 +50,18 @@ export class PatternMatcher {
                 TokenType.ClarionDocument, TokenType.ExecutionMarker,
                 TokenType.ConditionalContinuation, TokenType.WindowElement,
                 TokenType.Type, TokenType.TypeAnnotation, // MUST be before Function to avoid STRING(50) as function
-                TokenType.TypeReference, TokenType.Function, TokenType.FunctionArgumentParameter, TokenType.PropertyFunction,
+                TokenType.TypeReference, TokenType.Attribute, TokenType.Function, TokenType.FunctionArgumentParameter, TokenType.PropertyFunction,
                 TokenType.Property, TokenType.StructurePrefix, TokenType.StructureField, TokenType.Class,
-                TokenType.Attribute, TokenType.Constant,
+                TokenType.Constant,
                 TokenType.ImplicitVariable, TokenType.Variable, TokenType.Unknown
             ],
             'lower': [ // Lowercase letter - identifiers, keywords (case-insensitive)
                 TokenType.Keyword, TokenType.Directive, TokenType.ClarionDocument,
                 TokenType.ExecutionMarker, TokenType.ConditionalContinuation, TokenType.Structure, TokenType.Label,
                 TokenType.Type, TokenType.TypeAnnotation, // MUST be before Function
-                TokenType.TypeReference, TokenType.Function, TokenType.FunctionArgumentParameter, TokenType.PropertyFunction,
+                TokenType.TypeReference, TokenType.Attribute, TokenType.Function, TokenType.FunctionArgumentParameter, TokenType.PropertyFunction,
                 TokenType.Property, TokenType.StructurePrefix, TokenType.StructureField, TokenType.Class,
-                TokenType.Attribute, TokenType.Constant,
+                TokenType.Constant,
                 TokenType.ImplicitVariable, TokenType.Variable, TokenType.Unknown
             ],
             'underscore': [ // Underscore - identifiers only
