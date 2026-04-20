@@ -87,9 +87,7 @@ export class MethodHoverResolver {
                     ``,
                     '```clarion',
                     declaration,
-                    '```',
-                    ``,
-                    `F12 → Go to declaration`
+                    '```'
                 ];
                 return { contents: { kind: 'markdown', value: markdown.join('\n') } };
             }
@@ -231,9 +229,7 @@ export class MethodHoverResolver {
                     value: [
                         `**${className}.${currentToken.label}** (Method Declaration)`,
                         ``,
-                        `**Implemented in** \`${implFile}\` @ line ${implLine}`,
-                        ``,
-                        `*Ctrl+F12 to navigate*`
+                        `**Implemented in** \`${implFile}\` @ line ${implLine}`
                     ].join('\n')
                 }
             };

@@ -53,9 +53,7 @@ export class HoverFormatter {
             ``,
             `**Type:** \`${info.type}\``,
             ``,
-            `**Declared in:** ${scope.value} (line ${info.line + 1})`,
-            ``,
-            `*Press F12 to go to declaration*`
+            `**Declared in:** ${scope.value} (line ${info.line + 1})`
         ].join('\n');
 
         return {
@@ -142,11 +140,6 @@ export class HoverFormatter {
         } else {
             markdown.push(`Declared at line ${info.line + 1}`);
         }
-        markdown.push(``);
-        if (hoverLine === undefined || hoverLine !== info.line) {
-            markdown.push(`F12 → Go to declaration`);
-        }
-
         return {
             contents: {
                 kind: 'markdown',
@@ -194,7 +187,7 @@ export class HoverFormatter {
                 const trimmedDeclLine = declLine.trim();
                 const declFileName = path.basename(declUri);
                 const declLineNumber = info.line + 1;
-                markdown.push(`**Declaration in** \`${declFileName}\` @ line ${declLineNumber}: *(F12 to navigate)*`);
+                markdown.push(`**Declaration in** \`${declFileName}\` @ line ${declLineNumber}`);
                 markdown.push('```clarion');
                 markdown.push(trimmedDeclLine);
                 markdown.push('```');
@@ -202,7 +195,7 @@ export class HoverFormatter {
         } catch (error) {
             // Fallback if can't read file
             const fileName = info.file.split(/[\/\\]/).pop() || info.file;
-            markdown.push(`**Declaration in** \`${fileName}\` @ line ${info.line + 1}: *(F12 to navigate)*`);
+            markdown.push(`**Declaration in** \`${fileName}\` @ line ${info.line + 1}`);
             
             // Show type info as fallback
             markdown.push('```clarion');
@@ -249,7 +242,7 @@ export class HoverFormatter {
                 const trimmedDeclLine = declLine.trim();
                 const declFileName = path.basename(declUri);
                 const declLineNumber = declarationInfo.line + 1;
-                markdown.push(`**Declaration in** \`${declFileName}\` @ line ${declLineNumber}: *(F12 to navigate)*`);
+                markdown.push(`**Declaration in** \`${declFileName}\` @ line ${declLineNumber}`);
                 markdown.push('```clarion');
                 markdown.push(trimmedDeclLine);
                 markdown.push('```');
@@ -272,7 +265,7 @@ export class HoverFormatter {
             const implUri = decodeURIComponent(implFilePath);
             const implFileName = path.basename(implUri);
             const implLineNumber = implLine + 1;
-            markdown.push(`**Implemented in** \`${implFileName}\` @ line ${implLineNumber}: *(Ctrl+F12 to navigate)*`);
+            markdown.push(`**Implemented in** \`${implFileName}\` @ line ${implLineNumber}`);
             if (!implUri.startsWith('test://')) {
                 try {
                     const implContent = fs.readFileSync(implUri, 'utf-8');
@@ -290,8 +283,6 @@ export class HoverFormatter {
                     // File not readable — skip snippet and impl doc
                 }
             }
-            markdown.push(``);
-            markdown.push(`*Ctrl+F12 to navigate*`);
         } catch (error) {
             const lastColonIndex = implementationLocation.lastIndexOf(':');
             const implFilePath = implementationLocation.substring(0, lastColonIndex);
@@ -351,9 +342,6 @@ export class HoverFormatter {
         markdown.push('```clarion');
         markdown.push(declInfo.signature);
         markdown.push('```');
-        markdown.push(``);
-        markdown.push(`*F12 to go to declaration*`);
-
         // Doc comment: try declaration file, then let implementation override (definition wins)
         let docComment: DocComment | null = null;
         try {
@@ -619,21 +607,6 @@ export class HoverFormatter {
             }
         } else {
             logger.info(`formatProcedure: Skipping implementation (procImpl=${!!procImpl}, isAtImplementation=${isAtImplementation})`);
-        }
-        
-        // Add context-aware navigation hint
-        if (mapDecl || procImpl) {
-            if (isAtMapDeclaration) {
-                if (procImpl) {
-                    parts.push(`\n*Press Ctrl+F12 to navigate to implementation*`);
-                }
-            } else if (isAtImplementation) {
-                if (mapDecl) {
-                    parts.push(`\n*Press F12 to navigate to MAP declaration*`);
-                }
-            } else {
-                parts.push(`\n*(F12 to MAP declaration | Ctrl+F12 to implementation)*`);
-            }
         }
         
         if (parts.length > 1) {

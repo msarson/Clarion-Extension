@@ -121,9 +121,6 @@ export class VariableHoverResolver {
         }
         
         markdown.push(``);
-        if (hoverLine === undefined || hoverLine !== symbolInfo.location.line) {
-            markdown.push(`F12 → Go to declaration`);
-        }
         
         return {
             contents: {
@@ -302,11 +299,6 @@ export class VariableHoverResolver {
                 markdown.push(sourceLine);
                 markdown.push('```');
             }
-        }
-        
-        markdown.push(``);
-        if (hoverLine === undefined || hoverLine !== globalVar.line) {
-            markdown.push(`F12 → Go to declaration`);
         }
         
         return {
