@@ -4195,6 +4195,468 @@
           "syntax": "UPDATE([first] [,last])"
         }
       ]
+    },
+    {
+      "name": "CHANGES",
+      "description": "Returns a unique 'hash' value (LONG) for the current contents of a QUEUE. Save the value and later compare it to detect any change in the queue.",
+      "signatures": [
+        {
+          "label": "CHANGES( queue )",
+          "documentation": "Returns a LONG hash of the queue contents.\n- **queue** — label of a QUEUE structure or a passed QUEUE parameter.\n\nReturns: `LONG`",
+          "parameters": [
+            {
+              "label": "queue",
+              "documentation": "The QUEUE to hash."
+            }
+          ]
+        }
+      ],
+      "returnType": "LONG",
+      "category": "Queue"
+    },
+    {
+      "name": "CHOICE",
+      "description": "Returns the sequence number of the selected item in an OPTION structure, SHEET, LIST box, or COMBO control. With no parameter, returns the selection from the last control that generated a field-specific event.",
+      "signatures": [
+        {
+          "label": "CHOICE( [ control ] )",
+          "documentation": "Returns the selected item number.\n- **control** *(optional)* — field equate label of a LIST, COMBO, SHEET, or OPTION control.\n\nReturns: `SIGNED`",
+          "parameters": [
+            {
+              "label": "control",
+              "documentation": "Optional. Field equate label of a LIST, COMBO, SHEET, or OPTION control."
+            }
+          ]
+        }
+      ],
+      "returnType": "SIGNED",
+      "category": "Window/Event"
+    },
+    {
+      "name": "CLIPBOARD",
+      "description": "Returns the current contents of the Windows clipboard. If data is not in the specified format, returns an empty string.",
+      "signatures": [
+        {
+          "label": "CLIPBOARD( [ format ] )",
+          "documentation": "Returns clipboard contents as STRING.\n- **format** *(optional)* — integer clipboard format constant (e.g. CF_TEXT = 1). Defaults to CF_TEXT.\n\nReturns: `STRING`",
+          "parameters": [
+            {
+              "label": "format",
+              "documentation": "Optional. Windows CF_ clipboard format constant. Default is CF_TEXT (1)."
+            }
+          ]
+        }
+      ],
+      "returnType": "STRING",
+      "category": "Window/Event"
+    },
+    {
+      "name": "COLORDIALOG",
+      "description": "Displays the Windows standard color-choice dialog. Returns 1 if the user clicked OK, 0 if cancelled. The chosen color (RGB or system color) is stored in the `rgb` parameter.",
+      "signatures": [
+        {
+          "label": "COLORDIALOG( [ title ], rgb [, suppress ] )",
+          "documentation": "Displays the Windows color dialog.\n- **title** *(optional)* — string title for the dialog.\n- **rgb** — LONG variable to receive the selected RGB color value.\n- **suppress** *(optional)* — 1 to suppress the standard color list; 0 (default) to show it.\n\nReturns: `SIGNED` (1 = OK, 0 = Cancel)",
+          "parameters": [
+            {
+              "label": "title",
+              "documentation": "Optional. Title string for the color dialog."
+            },
+            {
+              "label": "rgb",
+              "documentation": "LONG variable to receive the chosen color."
+            },
+            {
+              "label": "suppress",
+              "documentation": "Optional. 1 to suppress standard colors list, 0 to show it (default)."
+            }
+          ]
+        }
+      ],
+      "returnType": "SIGNED",
+      "category": "Window/Event"
+    },
+    {
+      "name": "COMMAND",
+      "description": "Returns command-line parameters. Pass a flag name to retrieve its value (e.g. `/N` or `Option=value`), a number to get that positional parameter, `'0'` for the command itself, or an empty string for all parameters.",
+      "signatures": [
+        {
+          "label": "COMMAND( [ flag ] )",
+          "documentation": "Returns command-line information as STRING.\n- **flag** *(optional)* — string flag name (e.g. `'/N'`, `'Option'`) or position number (`'1'`, `'2'`, …). `'0'` returns the command path. Omit or pass `''` to get all parameters.\n\nReturns: `STRING`",
+          "parameters": [
+            {
+              "label": "flag",
+              "documentation": "Optional. Flag name, '/flag', or position number ('0'=command, '1'=first param, etc.)."
+            }
+          ]
+        }
+      ],
+      "returnType": "STRING",
+      "category": "System"
+    },
+    {
+      "name": "COMMIT",
+      "description": "Terminates an active transaction successfully. Once executed, ROLLBACK is impossible. Informs the file driver to delete temporary restore files.",
+      "signatures": [
+        {
+          "label": "COMMIT",
+          "documentation": "Commits the active transaction (started with LOGOUT).\n\nErrors posted: 48 (Unable to Log Transaction), 91 (No Logout Active).",
+          "parameters": []
+        }
+      ],
+      "returnType": "VOID",
+      "category": "File I/O"
+    },
+    {
+      "name": "EMPTY",
+      "description": "Deletes all records from a FILE. Requires exclusive access (file must be opened with access mode 12h or 22h).",
+      "signatures": [
+        {
+          "label": "EMPTY( file )",
+          "documentation": "Deletes all records from the specified FILE.\n- **file** — label of a FILE structure.\n\nErrors posted: 37 (File Not Open), 63 (Exclusive Access Required).",
+          "parameters": [
+            {
+              "label": "file",
+              "documentation": "Label of the FILE structure to empty."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "File I/O"
+    },
+    {
+      "name": "ENDPAGE",
+      "description": "Forces page overflow in a REPORT and flushes the print engine buffer. Used to finalize a PREVIEW report so all pages are available.",
+      "signatures": [
+        {
+          "label": "ENDPAGE( report [, printfooters ] )",
+          "documentation": "Forces page overflow and flushes the print buffer.\n- **report** — label of a REPORT structure.\n- **printfooters** *(optional)* — 0 (default) prints group footers by forcing a BREAK; 1 leaves group BREAKs open.",
+          "parameters": [
+            {
+              "label": "report",
+              "documentation": "Label of the REPORT structure."
+            },
+            {
+              "label": "printfooters",
+              "documentation": "Optional. 0 = print group footers (default); 1 = leave BREAKs open."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "Report"
+    },
+    {
+      "name": "ERRORFILE",
+      "description": "Returns the name of the file for which an error was posted. Returns the full path if open, the NAME attribute if not open, or the file label if there is no NAME attribute. Returns an empty string if no file-related error was posted.",
+      "signatures": [
+        {
+          "label": "ERRORFILE( )",
+          "documentation": "Returns the filename associated with the most recent file error.\n\nReturns: `STRING`",
+          "parameters": []
+        }
+      ],
+      "returnType": "STRING",
+      "category": "Error Handling"
+    },
+    {
+      "name": "EVALUATE",
+      "description": "Evaluates a runtime expression string and returns the result as a STRING. Requires variables to be bound with BIND first. Field qualification (dot syntax) cannot be used in the expression.",
+      "signatures": [
+        {
+          "label": "EVALUATE( expression )",
+          "documentation": "Evaluates a runtime expression string.\n- **expression** — string constant or variable containing the Clarion expression to evaluate.\n\nReturns: `STRING` (logical expressions return '0' or '1'; arithmetic returns the numeric result as string).\n\nErrors posted: 1010 (Illegal Expression), 1011 (Variable Not Found), 1012 (Mismatched), 1015 (Omitted parameter).",
+          "parameters": [
+            {
+              "label": "expression",
+              "documentation": "String expression to evaluate. Variables must be bound with BIND beforehand."
+            }
+          ]
+        }
+      ],
+      "returnType": "STRING",
+      "category": "Runtime"
+    },
+    {
+      "name": "GETFONT",
+      "description": "Gets display font information (typeface, size, color, style, charset) for a window control or for the window itself (control = 0).",
+      "signatures": [
+        {
+          "label": "GETFONT( control [, typeface ] [, size ] [, color ] [, style ] [, charset ] )",
+          "documentation": "Gets font information for a control or window.\n- **control** — field number or field equate label; 0 = entire window.\n- **typeface** *(optional)* — STRING variable to receive the font name.\n- **size** *(optional)* — integer variable to receive the point size.\n- **color** *(optional)* — LONG variable to receive the RGB color.\n- **style** *(optional)* — integer variable to receive the style flags.\n- **charset** *(optional)* — LONG variable to receive the character set.",
+          "parameters": [
+            {
+              "label": "control",
+              "documentation": "Field number or field equate label; 0 for the window."
+            },
+            {
+              "label": "typeface",
+              "documentation": "Optional. STRING variable to receive the typeface name."
+            },
+            {
+              "label": "size",
+              "documentation": "Optional. Integer variable to receive the point size."
+            },
+            {
+              "label": "color",
+              "documentation": "Optional. LONG variable to receive the RGB color."
+            },
+            {
+              "label": "style",
+              "documentation": "Optional. Integer variable to receive the style flags."
+            },
+            {
+              "label": "charset",
+              "documentation": "Optional. LONG variable to receive the character set."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "Window/Event"
+    },
+    {
+      "name": "GETPOSITION",
+      "description": "Gets the position and size of an APPLICATION, WINDOW, REPORT, or control. Values are in dialog units. If SCROLL is present on the control, values are relative to the virtual window.",
+      "signatures": [
+        {
+          "label": "GETPOSITION( control | window [, x ] [, y ] [, width ] [, height ] )",
+          "documentation": "Gets position and size of a window or control.\n- **control** — field number or equate label (0 = current window); or **window** — label of an APPLICATION, WINDOW, or REPORT.\n- **x** *(optional)* — integer variable for horizontal position.\n- **y** *(optional)* — integer variable for vertical position.\n- **width** *(optional)* — integer variable for width.\n- **height** *(optional)* — integer variable for height.\n\nValues are in dialog units.",
+          "parameters": [
+            {
+              "label": "control",
+              "documentation": "Field number, equate label (0 = window), or label of APPLICATION/WINDOW/REPORT."
+            },
+            {
+              "label": "x",
+              "documentation": "Optional. Integer variable to receive the horizontal position."
+            },
+            {
+              "label": "y",
+              "documentation": "Optional. Integer variable to receive the vertical position."
+            },
+            {
+              "label": "width",
+              "documentation": "Optional. Integer variable to receive the width."
+            },
+            {
+              "label": "height",
+              "documentation": "Optional. Integer variable to receive the height."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "Window/Event"
+    },
+    {
+      "name": "HALT",
+      "description": "Immediately terminates the program, closing all open windows and files. Passes an optional exit code (ERRORLEVEL) to the OS and can display a message. Should not be used in multi-DLL applications.",
+      "signatures": [
+        {
+          "label": "HALT( [ errorlevel ] [, message ] )",
+          "documentation": "Immediately exits the program.\n- **errorlevel** *(optional)* — positive integer exit code passed to the OS (default 0).\n- **message** *(optional)* — string displayed on screen after termination.",
+          "parameters": [
+            {
+              "label": "errorlevel",
+              "documentation": "Optional. Positive integer exit code (DOS ERRORLEVEL). Default is 0."
+            },
+            {
+              "label": "message",
+              "documentation": "Optional. String message displayed on screen after program terminates."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "System"
+    },
+    {
+      "name": "INLIST",
+      "description": "Compares a search value against a list of values. Returns the 1-based index of the first matching list item, or 0 if not found. Supports up to 25 list values.",
+      "signatures": [
+        {
+          "label": "INLIST( searchstring, liststring, liststring [, liststring... ] )",
+          "documentation": "Searches a list for a matching value.\n- **searchstring** — value to search for (numeric values are converted to string).\n- **liststring** — values to compare against (2 to 25 items).\n\nReturns: `LONG` (1-based index of first match, or 0 if not found)",
+          "parameters": [
+            {
+              "label": "searchstring",
+              "documentation": "The value to search for."
+            },
+            {
+              "label": "liststring",
+              "documentation": "Values to compare against (2–25 items required)."
+            }
+          ]
+        }
+      ],
+      "returnType": "LONG",
+      "category": "String"
+    },
+    {
+      "name": "INRANGE",
+      "description": "Tests whether a numeric expression falls within an inclusive range. Returns 1 (true) if within range, 0 (false) otherwise.",
+      "signatures": [
+        {
+          "label": "INRANGE( expression, low, high )",
+          "documentation": "Checks if a number is within an inclusive range.\n- **expression** — numeric value to test.\n- **low** — lower boundary (inclusive).\n- **high** — upper boundary (inclusive).\n\nReturns: `LONG` (1 = in range, 0 = out of range)",
+          "parameters": [
+            {
+              "label": "expression",
+              "documentation": "Numeric constant, variable, or expression to test."
+            },
+            {
+              "label": "low",
+              "documentation": "Lower boundary of the range (inclusive)."
+            },
+            {
+              "label": "high",
+              "documentation": "Upper boundary of the range (inclusive)."
+            }
+          ]
+        }
+      ],
+      "returnType": "LONG",
+      "category": "Math"
+    },
+    {
+      "name": "ISALPHA",
+      "description": "Returns TRUE if the first character of the string is alphabetic (upper or lower case). Requires CLACASE to be set in the environment file or via LOCALE.",
+      "signatures": [
+        {
+          "label": "ISALPHA( string )",
+          "documentation": "Tests whether a character is alphabetic.\n- **string** — string to test; only the first character is checked.\n\nReturns: `LONG` (1 = alphabetic, 0 = not alphabetic)",
+          "parameters": [
+            {
+              "label": "string",
+              "documentation": "String to test (first character only is checked)."
+            }
+          ]
+        }
+      ],
+      "returnType": "LONG",
+      "category": "String"
+    },
+    {
+      "name": "ISLOWER",
+      "description": "Returns TRUE if the first character of the string is a lowercase alphabetic character. Requires CLACASE to be set in the environment file or via LOCALE.",
+      "signatures": [
+        {
+          "label": "ISLOWER( string )",
+          "documentation": "Tests whether a character is lowercase.\n- **string** — string to test; only the first character is checked.\n\nReturns: `LONG` (1 = lowercase, 0 = not lowercase)",
+          "parameters": [
+            {
+              "label": "string",
+              "documentation": "String to test (first character only is checked)."
+            }
+          ]
+        }
+      ],
+      "returnType": "LONG",
+      "category": "String"
+    },
+    {
+      "name": "ISSTRING",
+      "description": "Returns TRUE if the field is a GROUP, STRING, CSTRING, or PSTRING data type; returns FALSE otherwise.",
+      "signatures": [
+        {
+          "label": "ISSTRING( field )",
+          "documentation": "Tests whether a field is a string-compatible type.\n- **field** — label of the field to test.\n\nReturns: `SIGNED` (1 = GROUP/STRING/CSTRING/PSTRING, 0 = other type)",
+          "parameters": [
+            {
+              "label": "field",
+              "documentation": "Label of the field to test."
+            }
+          ]
+        }
+      ],
+      "returnType": "SIGNED",
+      "category": "String"
+    },
+    {
+      "name": "ISUPPER",
+      "description": "Returns TRUE if the first character of the string is an uppercase alphabetic character. Requires CLACASE to be set in the environment file or via LOCALE.",
+      "signatures": [
+        {
+          "label": "ISUPPER( string )",
+          "documentation": "Tests whether a character is uppercase.\n- **string** — string to test; only the first character is checked.\n\nReturns: `LONG` (1 = uppercase, 0 = not uppercase)",
+          "parameters": [
+            {
+              "label": "string",
+              "documentation": "String to test (first character only is checked)."
+            }
+          ]
+        }
+      ],
+      "returnType": "LONG",
+      "category": "String"
+    },
+    {
+      "name": "POPUP",
+      "description": "Displays a popup menu and returns the 1-based index of the selected item, or 0 if dismissed. Menu items are separated by `|`; use `|-|` for separators, `~` to disable, `+`/`-` for check marks, and `{{...}` for sub-menus.",
+      "signatures": [
+        {
+          "label": "POPUP( selections [, x ] [, y ] [, position ] )",
+          "documentation": "Displays a popup menu and returns the user's choice.\n- **selections** — pipe-delimited string of menu choices (e.g. `'First|Second|Third'`).\n- **x** *(optional)* — horizontal position; defaults to current cursor position.\n- **y** *(optional)* — vertical position; defaults to current cursor position.\n- **position** *(optional)* — 1 = coordinates relative to window client area; 0 = screen coordinates (default).\n\nReturns: `SIGNED` (1-based choice index, or 0 if dismissed)",
+          "parameters": [
+            {
+              "label": "selections",
+              "documentation": "Pipe-delimited menu choices. Use |-| for separator, ~ to disable, + for check mark, {{...} for sub-menu."
+            },
+            {
+              "label": "x",
+              "documentation": "Optional. Horizontal position of the menu. Default: current cursor position."
+            },
+            {
+              "label": "y",
+              "documentation": "Optional. Vertical position of the menu. Default: current cursor position."
+            },
+            {
+              "label": "position",
+              "documentation": "Optional. 1 = window-relative coords; 0 = screen coords (default)."
+            }
+          ]
+        }
+      ],
+      "returnType": "SIGNED",
+      "category": "Window/Event"
+    },
+    {
+      "name": "PRESS",
+      "description": "Places a string of characters into the Windows keyboard input buffer, as if the user typed the text.",
+      "signatures": [
+        {
+          "label": "PRESS( string )",
+          "documentation": "Inserts a string into the keyboard input buffer.\n- **string** — string constant, variable, or expression to insert.",
+          "parameters": [
+            {
+              "label": "string",
+              "documentation": "String to place in the keyboard buffer."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "Window/Event"
+    },
+    {
+      "name": "PRESSKEY",
+      "description": "Places a single keystroke into the Windows keyboard input buffer, as if the user pressed the key. ALIAS does not transform a PRESSKEY keycode.",
+      "signatures": [
+        {
+          "label": "PRESSKEY( keycode )",
+          "documentation": "Inserts one keystroke into the keyboard input buffer.\n- **keycode** — integer constant or keycode EQUATE label (e.g. `EnterKey`, `EscKey`).",
+          "parameters": [
+            {
+              "label": "keycode",
+              "documentation": "Integer keycode or EQUATE label (e.g. EnterKey, EscKey)."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "Window/Event"
     }
   ]
 }
