@@ -1079,7 +1079,7 @@
           "syntax": "DLL([flag])"
         }
       ],
-      "description": "Marks a declaration as residing in an external .DLL. Required for 32-bit apps because .DLLs are relocatable in a flat address space, requiring an extra compiler dereference. Variable/FILE/QUEUE/GROUP/CLASS declarations must also have the EXTERNAL attribute. The common project flag _ABCDllMode_ is used by the ABC template chain to toggle DLL mode via a project DEFINE.",
+      "description": "Marks a declaration as residing in an external .DLL. Required for 32-bit apps because .DLLs are relocatable in a flat address space, requiring an extra compiler dereference. Variable/FILE/QUEUE/GROUP/CLASS declarations must also have the EXTERNAL attribute. The flag is typically a project-level conditional compilation symbol (defined via #pragma define(ident=>value) in the project file or the IDE's Conditional Compilation Symbols dialog). The pre-defined symbol _ABCDllMode_ is set automatically by the project system: 0 when link mode is Local, 1 otherwise.",
       "propertyEquate": ""
     },
     {
@@ -1322,7 +1322,7 @@
           "syntax": "LINK(linkfile [,flag])"
         }
       ],
-      "description": "Names a file to add to the link list for the current project when using this CLASS. linkfile is a string constant; .OBJ extension is assumed if none is given. Normally the same as the MODULE parameter but may explicitly name a .LIB or .OBJ file. The flag (commonly _ABCLinkMode_) activates linking when non-zero — zero means the attribute is inactive. LINK is only valid on a CLASS structure.",
+      "description": "Names a file to add to the link list for the current project when using this CLASS. linkfile is a string constant; .OBJ extension is assumed if none is given. Normally the same as the MODULE parameter but may explicitly name a .LIB or .OBJ file. The flag is typically a project-level conditional compilation symbol (defined via #pragma define(ident=>value) in the project file or the IDE's Conditional Compilation Symbols dialog) — commonly _ABCLinkMode_, which activates the link when non-zero. LINK is only valid on a CLASS structure.",
       "propertyEquate": ""
     },
     {
