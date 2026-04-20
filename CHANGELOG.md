@@ -8,7 +8,8 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [0.9.5] - Unreleased
 
-- ✨ Hover documentation for Clarion compiler directives: `ASSERT`, `BEGIN`, `COMPILE`, `EQUATE`, `INCLUDE`, `ITEMIZE`, `OMIT`, `ONCE`, `SECTION`, `SIZE`
+- ✨ Hover documentation for Clarion compiler directives: `ITEMIZE`, `SECTION` (new); existing `ASSERT`, `BEGIN`, `COMPILE`, `EQUATE`, `INCLUDE`, `OMIT`, `SIZE` already covered
+- ✨ Hover documentation for file I/O built-ins: `BUILD`, `HOLD`, `LOCK`, `UNLOCK`, `FLUSH`, `SHARE`, `RESET`
 
 ---
 

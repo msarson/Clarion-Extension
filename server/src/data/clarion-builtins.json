@@ -767,6 +767,111 @@
       ]
     },
     {
+      "name": "BUILD",
+      "signatures": [
+        {
+          "params": ["FILE file"],
+          "returnType": "",
+          "description": "Rebuilds all KEY declarations for the file. The file must be closed, LOCKed, or opened with exclusive read/write access (mode 12h or 22h)."
+        },
+        {
+          "params": ["KEY key | INDEX index"],
+          "returnType": "",
+          "description": "Rebuilds only the specified KEY or INDEX. The file must be closed, LOCKed, or opened with exclusive access (mode 12h or 22h)."
+        },
+        {
+          "params": ["INDEX index", "STRING components", "STRING filter"],
+          "returnType": "",
+          "description": "Builds a dynamic INDEX with specified component fields and optional filter expression. Does not require exclusive access — file must be open with any valid access mode. The dynamic INDEX is temporary and deleted when the file is closed."
+        }
+      ]
+    },
+    {
+      "name": "HOLD",
+      "signatures": [
+        {
+          "params": ["FILE|VIEW entity"],
+          "returnType": "",
+          "description": "Arms record locking for the following GET, REGET, NEXT, or PREVIOUS call. Waits indefinitely until the record can be held. When entity is a VIEW, operates on the primary file only."
+        },
+        {
+          "params": ["FILE|VIEW entity", "LONG seconds"],
+          "returnType": "",
+          "description": "Arms record locking for the following GET, REGET, NEXT, or PREVIOUS call. Posts 'Record Is Already Held' error after the specified wait time if the record cannot be held."
+        }
+      ]
+    },
+    {
+      "name": "LOCK",
+      "signatures": [
+        {
+          "params": ["FILE file"],
+          "returnType": "",
+          "description": "Locks a file against access by other workstations in a multi-user environment. Waits indefinitely until the file can be locked. The file must be opened for shared access."
+        },
+        {
+          "params": ["FILE file", "LONG seconds"],
+          "returnType": "",
+          "description": "Locks a file against access by other workstations. Posts 'File Is Already Locked' error after the specified wait time if the lock cannot be obtained."
+        }
+      ]
+    },
+    {
+      "name": "UNLOCK",
+      "signatures": [
+        {
+          "params": ["FILE file"],
+          "returnType": "",
+          "description": "Unlocks a previously LOCKed data file. Has no effect if the file is not locked or is locked by another user. Posts no errors."
+        }
+      ]
+    },
+    {
+      "name": "FLUSH",
+      "signatures": [
+        {
+          "params": ["FILE|VIEW file"],
+          "returnType": "",
+          "description": "Terminates a STREAM operation and flushes OS buffers to disk, updating the directory entry. Also flushes BUFFER statement buffers. If both STREAM and BUFFER are active, all buffers are flushed."
+        }
+      ]
+    },
+    {
+      "name": "SHARE",
+      "signatures": [
+        {
+          "params": ["FILE file"],
+          "returnType": "",
+          "description": "Legacy statement. Opens a FILE structure for shared access. Equivalent to OPEN with default access mode of 42h (Read/Write, Deny None). Prefer OPEN with an explicit access mode in new code."
+        },
+        {
+          "params": ["FILE file", "LONG accessMode"],
+          "returnType": "",
+          "description": "Legacy statement. Opens a FILE structure with the specified access mode. Exactly the same as OPEN except the default access mode differs. Prefer OPEN with an explicit access mode in new code."
+        }
+      ]
+    },
+    {
+      "name": "RESET",
+      "signatures": [
+        {
+          "params": ["VIEW view", "STRING positionString"],
+          "returnType": "",
+          "description": "Resets a VIEW's sequential position to the record identified by a string previously returned by POSITION(). The next NEXT or PREVIOUS call reads that record."
+        },
+        {
+          "params": ["VIEW view", "FILE file"],
+          "returnType": "",
+          "description": "Resets a VIEW's sequential position to the record identified by the current contents of the file's record buffer. Used when VIEW order is specified via PROP:Order."
+        },
+        {
+          "params": ["FILE|KEY|INDEX sequence", "STRING positionString"],
+          "returnType": "",
+          "description": "Resets file sequential processing to the record identified by the position string returned by POSITION(). The next NEXT or PREVIOUS call reads that record."
+        }
+      ]
+    },
+    {
       "name": "CREATE",
       "signatures": [
         {
