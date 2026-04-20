@@ -2182,6 +2182,459 @@
           "syntax": "MATCH(first, second [,mode])"
         }
       ]
+    },
+    {
+      "name": "ARC",
+      "signatures": [
+        {
+          "params": [
+            { "name": "x", "optional": false },
+            { "name": "y", "optional": false },
+            { "name": "width", "optional": false },
+            { "name": "height", "optional": false },
+            { "name": "startangle", "optional": false },
+            { "name": "endangle", "optional": false },
+            { "name": "attributelist", "optional": true }
+          ],
+          "returnType": "none",
+          "description": "Draws an arc of an ellipse on the current window or report. The ellipse is drawn inside a bounding box defined by x, y, width, height. Angles are in tenths of degrees (10 = 1 degree) measured counter-clockwise from three o'clock. Border uses current pen color, width, and style set by SETPENCOLOR/SETPENWIDTH/SETPENSTYLE.",
+          "syntax": "ARC(x, y, width, height, startangle, endangle [,attributelist])"
+        }
+      ]
+    },
+    {
+      "name": "BOX",
+      "signatures": [
+        {
+          "params": [
+            { "name": "x", "optional": false },
+            { "name": "y", "optional": false },
+            { "name": "width", "optional": false },
+            { "name": "height", "optional": false },
+            { "name": "fill", "optional": true },
+            { "name": "attributelist", "optional": true }
+          ],
+          "returnType": "none",
+          "description": "Draws a rectangular box on the current window or report. The fill parameter is a LONG RGB color value (e.g. 00FF0000h for red). Border uses current pen color, width, and style. Valid in Win32 windows and REPORT structures.",
+          "syntax": "BOX(x, y, width, height [,fill] [,attributelist])"
+        }
+      ]
+    },
+    {
+      "name": "CHORD",
+      "signatures": [
+        {
+          "params": [
+            { "name": "x", "optional": false },
+            { "name": "y", "optional": false },
+            { "name": "width", "optional": false },
+            { "name": "height", "optional": false },
+            { "name": "startangle", "optional": false },
+            { "name": "endangle", "optional": false },
+            { "name": "fill", "optional": true },
+            { "name": "attributelist", "optional": true }
+          ],
+          "returnType": "none",
+          "description": "Draws a closed sector of an ellipse (chord) on the current window or report. The two arc endpoints are connected by a straight line. Angles in tenths of degrees counter-clockwise from three o'clock. Border uses current pen color, width, and style.",
+          "syntax": "CHORD(x, y, width, height, startangle, endangle [,fill] [,attributelist])"
+        }
+      ]
+    },
+    {
+      "name": "ELLIPSE",
+      "signatures": [
+        {
+          "params": [
+            { "name": "x", "optional": false },
+            { "name": "y", "optional": false },
+            { "name": "width", "optional": false },
+            { "name": "height", "optional": false },
+            { "name": "fill", "optional": true },
+            { "name": "attributelist", "optional": true }
+          ],
+          "returnType": "none",
+          "description": "Draws an ellipse on the current window or report inside a bounding box defined by x, y, width, height. The fill parameter is a LONG RGB color value. Border uses current pen color, width, and style. Valid in Win32 windows and REPORT structures.",
+          "syntax": "ELLIPSE(x, y, width, height [,fill] [,attributelist])"
+        }
+      ]
+    },
+    {
+      "name": "LINE",
+      "signatures": [
+        {
+          "params": [
+            { "name": "x", "optional": false },
+            { "name": "y", "optional": false },
+            { "name": "width", "optional": false },
+            { "name": "height", "optional": false },
+            { "name": "attributelist", "optional": true }
+          ],
+          "returnType": "none",
+          "description": "Draws a straight line on the current window or report. x, y specify the starting point; width and height specify horizontal and vertical distance to the end point (may be negative). Line uses current pen color, width, and style. Valid in Win32 windows and REPORT structures.",
+          "syntax": "LINE(x, y, width, height [,attributelist])"
+        }
+      ]
+    },
+    {
+      "name": "PENCOLOR",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "LONG",
+          "description": "Returns the current pen color set by SETPENCOLOR. The returned LONG encodes the RGB color in its three low-order bytes. Valid in Win32 windows and REPORT structures.",
+          "syntax": "PENCOLOR()"
+        }
+      ]
+    },
+    {
+      "name": "PENSTYLE",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "SIGNED",
+          "description": "Returns the current line draw style set by SETPENSTYLE. Style equates (e.g. PEN:solid, PEN:dash, PEN:dot, PEN:dashdot) are defined in EQUATES.CLW. Valid in Win32 windows and REPORT structures.",
+          "syntax": "PENSTYLE()"
+        }
+      ]
+    },
+    {
+      "name": "PENWIDTH",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "SIGNED",
+          "description": "Returns the current pen thickness set by SETPENWIDTH. Value is in dialog units unless overridden by THOUS, MM, or POINTS attribute on a REPORT. Valid in Win32 windows and REPORT structures.",
+          "syntax": "PENWIDTH()"
+        }
+      ]
+    },
+    {
+      "name": "PIE",
+      "signatures": [
+        {
+          "params": [
+            { "name": "x", "optional": false },
+            { "name": "y", "optional": false },
+            { "name": "width", "optional": false },
+            { "name": "height", "optional": false },
+            { "name": "slices", "optional": false },
+            { "name": "colors", "optional": false },
+            { "name": "depth", "optional": true },
+            { "name": "wholevalue", "optional": true },
+            { "name": "startangle", "optional": true },
+            { "name": "attributelist", "optional": true }
+          ],
+          "returnType": "none",
+          "description": "Draws a pie chart on the current window or report. slices is a SIGNED array of relative slice sizes; colors is a LONG array of RGB fill colors. depth adds a 3D effect; wholevalue sets the total for a full circle (default: sum of slices); startangle sets the first slice start as a fraction of wholevalue. Valid in Win32 windows and REPORT structures.",
+          "syntax": "PIE(x, y, width, height, slices, colors [,depth] [,wholevalue] [,startangle] [,attributelist])"
+        }
+      ]
+    },
+    {
+      "name": "POLYGON",
+      "signatures": [
+        {
+          "params": [
+            { "name": "array", "optional": false },
+            { "name": "fill", "optional": true },
+            { "name": "attributelist", "optional": true }
+          ],
+          "returnType": "none",
+          "description": "Draws a multi-sided closed figure on the current window or report. array is a SIGNED integer array of alternating x, y corner coordinates (pairs); total corners = array elements / 2. Border uses current pen color, width, and style. Valid in Win32 windows and REPORT structures.",
+          "syntax": "POLYGON(array [,fill] [,attributelist])"
+        }
+      ]
+    },
+    {
+      "name": "ROUNDBOX",
+      "signatures": [
+        {
+          "params": [
+            { "name": "x", "optional": false },
+            { "name": "y", "optional": false },
+            { "name": "width", "optional": false },
+            { "name": "height", "optional": false },
+            { "name": "fill", "optional": true },
+            { "name": "attributelist", "optional": true }
+          ],
+          "returnType": "none",
+          "description": "Draws a rectangular box with rounded corners on the current window or report. The fill parameter is a LONG RGB color value. Border uses current pen color, width, and style. Valid in Win32 windows and REPORT structures.",
+          "syntax": "ROUNDBOX(x, y, width, height [,fill] [,attributelist])"
+        }
+      ]
+    },
+    {
+      "name": "SETPENCOLOR",
+      "signatures": [
+        {
+          "params": [
+            { "name": "color", "optional": true }
+          ],
+          "returnType": "none",
+          "description": "Sets the current pen color for all graphics procedures. color is a LONG RGB value (e.g. 000000FFh for blue). If omitted, resets to the Windows system window-text color. Each window has its own pen color. Valid in Win32 windows and REPORT structures.",
+          "syntax": "SETPENCOLOR([color])"
+        }
+      ]
+    },
+    {
+      "name": "SETPENSTYLE",
+      "signatures": [
+        {
+          "params": [
+            { "name": "style", "optional": true }
+          ],
+          "returnType": "none",
+          "description": "Sets the current line draw style for all graphics procedures. Style equates (PEN:solid, PEN:dash, PEN:dot, PEN:dashdot etc.) are defined in EQUATES.CLW. If omitted, resets to solid. Each window has its own pen style. Valid in Win32 windows and REPORT structures.",
+          "syntax": "SETPENSTYLE([style])"
+        }
+      ]
+    },
+    {
+      "name": "SETPENWIDTH",
+      "signatures": [
+        {
+          "params": [
+            { "name": "width", "optional": true }
+          ],
+          "returnType": "none",
+          "description": "Sets the current pen thickness for all graphics procedures, measured in dialog units (or THOUS/MM/POINTS units on a REPORT). Default (one pixel) is set when width is 0 or omitted. Each window has its own pen width. Valid in Win32 windows and REPORT structures.",
+          "syntax": "SETPENWIDTH([width])"
+        }
+      ]
+    },
+    {
+      "name": "OCXLOADIMAGE",
+      "signatures": [
+        {
+          "params": [
+            { "name": "name", "optional": false }
+          ],
+          "returnType": "STRING",
+          "description": "Returns an image object for a named file or resource. The returned image object can be assigned to any OLE/OCX control that accepts an image (e.g. a VB ImageList control). Used with ActiveX/OCX controls in Clarion windows.",
+          "syntax": "OCXLOADIMAGE(name)"
+        }
+      ]
+    },
+    {
+      "name": "OCXREGISTEREVENTPROC",
+      "signatures": [
+        {
+          "params": [
+            { "name": "control", "optional": false },
+            { "name": "procedure", "optional": false }
+          ],
+          "returnType": "none",
+          "description": "Installs an OCX event callback procedure for an OLE control. The callback is called whenever the operating system posts any event for the control. control is the field number or equate label of the OLE control; procedure is the label of the callback.",
+          "syntax": "OCXREGISTEREVENTPROC(control, procedure)"
+        }
+      ]
+    },
+    {
+      "name": "OCXREGISTERPROPCHANGE",
+      "signatures": [
+        {
+          "params": [
+            { "name": "control", "optional": false },
+            { "name": "procedure", "optional": false }
+          ],
+          "returnType": "none",
+          "description": "Installs a property change callback procedure for an OLE/OCX control. The callback is called whenever a property of the control changes. control is the field number or equate label; procedure is the label of the callback.",
+          "syntax": "OCXREGISTERPROPCHANGE(control, procedure)"
+        }
+      ]
+    },
+    {
+      "name": "OCXREGISTERPROPEDIT",
+      "signatures": [
+        {
+          "params": [
+            { "name": "control", "optional": false },
+            { "name": "procedure", "optional": false }
+          ],
+          "returnType": "none",
+          "description": "Installs a property edit callback function for an OLE/OCX control. The callback controls property edits to the control by allowing or disallowing them. control is the field number or equate label; procedure is the label of the callback.",
+          "syntax": "OCXREGISTERPROPEDIT(control, procedure)"
+        }
+      ]
+    },
+    {
+      "name": "OCXSETPARAM",
+      "signatures": [
+        {
+          "params": [
+            { "name": "reference", "optional": false },
+            { "name": "number", "optional": false },
+            { "name": "value", "optional": false }
+          ],
+          "returnType": "none",
+          "description": "Sets the value of a parameter associated with the current OCX event inside an event callback procedure. reference is the label of the first callback parameter; number is the 1-based parameter index to set; value is the new string value. Only allowed for parameters passed by address; ignored otherwise.",
+          "syntax": "OCXSETPARAM(reference, number, value)"
+        }
+      ]
+    },
+    {
+      "name": "OCXUNREGISTEREVENTPROC",
+      "signatures": [
+        {
+          "params": [
+            { "name": "control", "optional": false }
+          ],
+          "returnType": "none",
+          "description": "Uninstalls the OCX event callback procedure previously registered with OCXREGISTEREVENTPROC for the specified OLE control. control is the field number or equate label of the OLE control.",
+          "syntax": "OCXUNREGISTEREVENTPROC(control)"
+        }
+      ]
+    },
+    {
+      "name": "OCXUNREGISTERPROPCHANGE",
+      "signatures": [
+        {
+          "params": [
+            { "name": "control", "optional": false }
+          ],
+          "returnType": "none",
+          "description": "Uninstalls the property change callback procedure previously registered with OCXREGISTERPROPCHANGE for the specified OLE control. control is the field number or equate label of the OLE control.",
+          "syntax": "OCXUNREGISTERPROPCHANGE(control)"
+        }
+      ]
+    },
+    {
+      "name": "OCXUNREGISTERPROPEDIT",
+      "signatures": [
+        {
+          "params": [
+            { "name": "control", "optional": false }
+          ],
+          "returnType": "none",
+          "description": "Uninstalls the property edit callback procedure previously registered with OCXREGISTERPROPEDIT for the specified OLE control. control is the field number or equate label of the OLE control.",
+          "syntax": "OCXUNREGISTERPROPEDIT(control)"
+        }
+      ]
+    },
+    {
+      "name": "OLEDIRECTORY",
+      "signatures": [
+        {
+          "params": [
+            { "name": "list", "optional": false },
+            { "name": "flag", "optional": false },
+            { "name": "bits", "optional": true }
+          ],
+          "returnType": "none",
+          "description": "Populates a QUEUE with a list of all installed OLE servers or OCX controls. list must be declared matching the OleQ QUEUE structure in EQUATES.CLW (Name, CLSID, ProgID fields). flag: 0 = OLE servers, 1 = OCX controls. bits: 1 = 16-bit, 2 = 32-bit, 3 = both (default for current platform).",
+          "syntax": "OLEDIRECTORY(list, flag [,bits])"
+        }
+      ]
+    },
+    {
+      "name": "DELETEREG",
+      "signatures": [
+        {
+          "params": [
+            { "name": "root", "optional": false },
+            { "name": "keyname", "optional": false },
+            { "name": "valuename", "optional": true }
+          ],
+          "returnType": "none",
+          "description": "Deletes a value or entire key from the Windows registry. root is a REG_* equate (e.g. REG_CURRENT_USER, REG_LOCAL_MACHINE) from EQUATES.CLW. If valuename is omitted, the entire key is deleted. On Vista+, write access to HKLM requires elevated privileges; use HKCU for non-elevated apps.",
+          "syntax": "DELETEREG(root, keyname [,valuename])"
+        }
+      ]
+    },
+    {
+      "name": "GETREG",
+      "signatures": [
+        {
+          "params": [
+            { "name": "root", "optional": false },
+            { "name": "keyname", "optional": false },
+            { "name": "valuename", "optional": true },
+            { "name": "*?valuetype", "optional": true }
+          ],
+          "returnType": "STRING",
+          "description": "Returns the value of a Windows registry entry as a Clarion string. root is a REG_* equate (REG_CURRENT_USER, REG_LOCAL_MACHINE, etc.) from EQUATES.CLW. keyname may contain backslash-separated path segments. Optional valuetype variable receives the value type (REG_SZ, REG_DWORD, REG_BINARY, etc.). Returns empty string if the entry does not exist.",
+          "syntax": "GETREG(root, keyname [,valuename] [,*?valuetype])"
+        }
+      ]
+    },
+    {
+      "name": "GETREGSUBKEYS",
+      "signatures": [
+        {
+          "params": [
+            { "name": "root", "optional": false },
+            { "name": "keyName", "optional": false },
+            { "name": "subkeyQueue", "optional": false }
+          ],
+          "returnType": "none",
+          "description": "Collects the names of all sub-keys for a given Windows registry key into a QUEUE. root is a REG_* equate from EQUATES.CLW; keyName is the path to the parent key; subkeyQueue is a reference to a QUEUE that receives the sub-key name strings. Returns an empty QUEUE if the key does not exist.",
+          "syntax": "GETREGSUBKEYS(root, keyName, subkeyQueue)"
+        }
+      ]
+    },
+    {
+      "name": "GETREGVALUES",
+      "signatures": [
+        {
+          "params": [
+            { "name": "root", "optional": false },
+            { "name": "keyName", "optional": false },
+            { "name": "valueQueue", "optional": false }
+          ],
+          "returnType": "none",
+          "description": "Collects the names of all values under a given Windows registry key into a QUEUE. root is a REG_* equate from EQUATES.CLW; keyName is the path to the key; valueQueue is a reference to a QUEUE that receives the value name strings. Returns an empty QUEUE if the key does not exist.",
+          "syntax": "GETREGVALUES(root, keyName, valueQueue)"
+        }
+      ]
+    },
+    {
+      "name": "PUTREG",
+      "signatures": [
+        {
+          "params": [
+            { "name": "root", "optional": false },
+            { "name": "keyname", "optional": false },
+            { "name": "valuename", "optional": false },
+            { "name": "value", "optional": true },
+            { "name": "valuetype", "optional": true }
+          ],
+          "returnType": "LONG",
+          "description": "Writes a value to the Windows registry. root is a REG_* equate (REG_CURRENT_USER, REG_LOCAL_MACHINE, etc.) from EQUATES.CLW. The key and value are created if they do not exist. valuetype defaults to REG_SZ; supported types include REG_DWORD, REG_BINARY, REG_MULTI_SZ, etc. Returns 0 on success, non-zero on failure. On Vista+, write access to HKLM requires elevated privileges.",
+          "syntax": "PUTREG(root, keyname, valuename [,value] [,valuetype])"
+        }
+      ]
+    },
+    {
+      "name": "GETINI",
+      "signatures": [
+        {
+          "params": [
+            { "name": "section", "optional": false },
+            { "name": "entry", "optional": false },
+            { "name": "default", "optional": true },
+            { "name": "file", "optional": true }
+          ],
+          "returnType": "STRING",
+          "description": "Returns the value of an entry from a Windows-standard INI file (max 64KB). section and entry identify the [section] and key name. default is returned when the entry does not exist. file specifies the INI filename; a bare name (e.g. 'App.ini') looks in the Windows directory; prefix with '.\\' to search the current directory. If file is omitted, WIN.INI is used.",
+          "syntax": "GETINI(section, entry [,default] [,file])"
+        }
+      ]
+    },
+    {
+      "name": "PUTINI",
+      "signatures": [
+        {
+          "params": [
+            { "name": "section", "optional": false },
+            { "name": "entry", "optional": true },
+            { "name": "value", "optional": true },
+            { "name": "file", "optional": true }
+          ],
+          "returnType": "none",
+          "description": "Sets the value of an entry in a Windows-standard INI file (max 64KB). Omitting entry deletes the entire section; omitting value deletes the entry. A bare filename looks in the Windows directory; prefix with '.\\' for the current directory. If file is omitted, WIN.INI is used. The file is created if it does not exist.",
+          "syntax": "PUTINI(section [,entry] [,value] [,file])"
+        }
+      ]
     }
   ]
 }
