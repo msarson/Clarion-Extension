@@ -854,7 +854,12 @@ export class ClassMemberResolver {
         ]);
 
         // Strip leading & (reference prefix)
-        let name = typeStr.trim().replace(/^&/, '');
+        let name = typeStr.trim().replace(/^&/, '').trim();
+
+        // LIKE(TypeName) or LIKE(PREFIX:TypeName) — inherited type: resolve to the referenced name
+        const likeMatch = name.match(/^LIKE\s*\(\s*([\w:]+)\s*\)/i);
+        if (likeMatch) return likeMatch[1];
+
         // Take only the part before comma or parenthesis (attributes/dimensions)
         name = name.split(/[,(]/)[0].trim();
 
