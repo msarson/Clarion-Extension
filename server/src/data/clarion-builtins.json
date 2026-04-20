@@ -987,7 +987,7 @@
         {
           "params": ["FILE file"],
           "returnType": "",
-          "description": "Fixes a dynamic file (created with NEW(file)) so it can be used like any other FILE structure. Posts ERRORCODE 80 if the file was not created with NEW, or ERRORCODE 47 if the structure is invalid."
+          "description": "Fixes a dynamically-allocated FILE structure (created at runtime via `NEW(file)` and accessed through a reference variable `&FILE`) so it can be used like any statically-declared FILE. Posts ERRORCODE 80 if the file was not created with NEW, or ERRORCODE 47 if the structure is invalid."
         }
       ]
     },
@@ -997,7 +997,7 @@
         {
           "params": ["FILE file"],
           "returnType": "",
-          "description": "Reverts a previously fixed dynamic file back to an unfixed state, allowing further format changes. Posts ERRORCODE 80 if the file was not created with NEW."
+          "description": "Reverts a previously fixed dynamically-allocated FILE structure (one created via `NEW(file)` through a reference variable `&FILE`) back to an unfixed state, allowing further format changes before use. Posts ERRORCODE 80 if the file was not created with NEW."
         }
       ]
     },
