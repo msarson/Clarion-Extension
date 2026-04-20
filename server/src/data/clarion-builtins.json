@@ -4657,6 +4657,449 @@
       ],
       "returnType": "VOID",
       "category": "Window/Event"
+    },
+    {
+      "name": "CHAIN",
+      "description": "Terminates the current program (closing all files), then executes another program. Unlike RUN, the current program does not remain in memory.",
+      "signatures": [
+        {
+          "label": "CHAIN( program )",
+          "documentation": "Terminates the current program and executes another.\n- **program** — string constant or variable containing the program name and optional command line parameters (any .EXE or .COM).",
+          "parameters": [
+            {
+              "label": "program",
+              "documentation": "String with program name and optional parameters (e.g. 'Payroll /N=2')."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "System"
+    },
+    {
+      "name": "FONTDIALOG",
+      "description": "Displays the Windows standard font-choice dialog. Returns 1 if the user clicked OK, 0 if cancelled. Limited to ANSI/Default character sets — use FONTDIALOGA for other character sets.",
+      "signatures": [
+        {
+          "label": "FONTDIALOG( [ title ], typeface [, size ] [, color ] [, style ] [, added ] )",
+          "documentation": "Displays the Windows font dialog.\n- **title** *(optional)* — title string for the dialog.\n- **typeface** — STRING variable to receive the font name.\n- **size** *(optional)* — SIGNED variable to receive the point size.\n- **color** *(optional)* — LONG variable to receive the RGB color.\n- **style** *(optional)* — LONG variable to receive the style flags.\n- **added** *(optional)* — 0=screen fonts, 1=printer fonts, 2=both, 4=TrueType only, 8=fixed pitch only.\n\nReturns: `BOOL` (1 = OK, 0 = Cancel)",
+          "parameters": [
+            {
+              "label": "title",
+              "documentation": "Optional. Title string for the font dialog."
+            },
+            {
+              "label": "typeface",
+              "documentation": "STRING variable to receive the chosen font name."
+            },
+            {
+              "label": "size",
+              "documentation": "Optional. SIGNED variable to receive the point size."
+            },
+            {
+              "label": "color",
+              "documentation": "Optional. LONG variable to receive the RGB color."
+            },
+            {
+              "label": "style",
+              "documentation": "Optional. LONG variable to receive the style flags."
+            },
+            {
+              "label": "added",
+              "documentation": "Optional. 0=screen fonts, 1=printer fonts, 2=both, 4=TrueType only, 8=fixed pitch only."
+            }
+          ]
+        }
+      ],
+      "returnType": "BOOL",
+      "category": "Window/Event"
+    },
+    {
+      "name": "FONTDIALOGA",
+      "description": "Displays the Windows standard font-choice dialog with character set selection. Returns 1 if the user clicked OK, 0 if cancelled. Use instead of FONTDIALOG when a specific character set is required.",
+      "signatures": [
+        {
+          "label": "FONTDIALOGA( [ title ], typeface [, size ] [, color ] [, style ] [, charset ] [, added ] )",
+          "documentation": "Displays the Windows font dialog with charset support.\n- **title** *(optional)* — title string for the dialog.\n- **typeface** — STRING variable to receive the font name.\n- **size** *(optional)* — SIGNED variable to receive the point size.\n- **color** *(optional)* — LONG variable to receive the RGB color.\n- **style** *(optional)* — LONG variable to receive the style flags.\n- **charset** *(optional)* — BYTE variable to receive the character set value.\n- **added** *(optional)* — 0=screen fonts, 1=printer fonts, 2=both, 4=TrueType only, 8=fixed pitch only.\n\nReturns: `BOOL` (1 = OK, 0 = Cancel)",
+          "parameters": [
+            {
+              "label": "title",
+              "documentation": "Optional. Title string for the font dialog."
+            },
+            {
+              "label": "typeface",
+              "documentation": "STRING variable to receive the chosen font name."
+            },
+            {
+              "label": "size",
+              "documentation": "Optional. SIGNED variable to receive the point size."
+            },
+            {
+              "label": "color",
+              "documentation": "Optional. LONG variable to receive the RGB color."
+            },
+            {
+              "label": "style",
+              "documentation": "Optional. LONG variable to receive the style flags."
+            },
+            {
+              "label": "charset",
+              "documentation": "Optional. BYTE variable to receive the character set value."
+            },
+            {
+              "label": "added",
+              "documentation": "Optional. 0=screen fonts, 1=printer fonts, 2=both, 4=TrueType only, 8=fixed pitch only."
+            }
+          ]
+        }
+      ],
+      "returnType": "BOOL",
+      "category": "Window/Event"
+    },
+    {
+      "name": "GETEXITCODE",
+      "description": "Gets the program exit code (error level) without closing the program. Useful for displaying a meaningful message or taking action before termination.",
+      "signatures": [
+        {
+          "label": "GETEXITCODE( )",
+          "documentation": "Returns the current program exit code (same value that would be passed to the OS on termination).",
+          "parameters": []
+        }
+      ],
+      "returnType": "LONG",
+      "category": "System"
+    },
+    {
+      "name": "LONGPATH",
+      "description": "Returns the fully-qualified long filename for a given short (8.3) filename. The file must already exist on disk. With no parameter, returns the current drive and directory in long name form.",
+      "signatures": [
+        {
+          "label": "LONGPATH( [ shortfilename ] )",
+          "documentation": "Converts a short filename to its long filename form.\n- **shortfilename** *(optional)* — DOS 8.3 filename to convert (may include full path). Omit to get the current directory.\n\nReturns: `STRING`",
+          "parameters": [
+            {
+              "label": "shortfilename",
+              "documentation": "Optional. DOS short (8.3) filename/path to convert. Omit for current directory."
+            }
+          ]
+        }
+      ],
+      "returnType": "STRING",
+      "category": "File I/O"
+    },
+    {
+      "name": "NOMEMO",
+      "description": "Arms 'memoless' record retrieval for the next GET, REGET, NEXT, or PREVIOUS statement. The record is retrieved without reading MEMO or BLOB fields, improving performance when those fields are not needed.",
+      "signatures": [
+        {
+          "label": "NOMEMO( file )",
+          "documentation": "Arms memoless retrieval for the next GET/NEXT/PREVIOUS/REGET.\n- **file** — label of the FILE to read without its MEMO/BLOB fields.",
+          "parameters": [
+            {
+              "label": "file",
+              "documentation": "Label of the FILE to arm for memoless retrieval."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "File I/O"
+    },
+    {
+      "name": "NOTIFICATION",
+      "description": "Receives information sent by NOTIFY from another thread. Returns TRUE if the current event is EVENT:Notify; otherwise returns FALSE. Used in the receiving thread alongside an ACCEPT loop.",
+      "signatures": [
+        {
+          "label": "NOTIFICATION( notifycode, <thread>, <parameter> )",
+          "documentation": "Receives a notification posted by NOTIFY from another thread.\n- **notifycode** — UNSIGNED variable to receive the notify code.\n- **thread** *(optional)* — SIGNED variable to receive the sender's thread number.\n- **parameter** *(optional)* — LONG variable to receive the parameter passed by NOTIFY.\n\nReturns: `BYTE` (TRUE = EVENT:Notify was received; FALSE = other event)",
+          "parameters": [
+            {
+              "label": "notifycode",
+              "documentation": "UNSIGNED variable to receive the notification code."
+            },
+            {
+              "label": "thread",
+              "documentation": "Optional. SIGNED variable to receive the sender thread number."
+            },
+            {
+              "label": "parameter",
+              "documentation": "Optional. LONG variable to receive the parameter from NOTIFY."
+            }
+          ]
+        }
+      ],
+      "returnType": "BYTE",
+      "category": "Threading"
+    },
+    {
+      "name": "NOTIFY",
+      "description": "Sends an EVENT:Notify event and optional parameters to a receiver thread's event queue. Execution continues immediately without waiting for the receiver. A safe replacement for SETTARGET(,thread).",
+      "signatures": [
+        {
+          "label": "NOTIFY( notifycode [, thread ] [, parameter ] )",
+          "documentation": "Sends a notification event to a receiver thread.\n- **notifycode** — unsigned integer notification/request code.\n- **thread** *(optional)* — SIGNED thread number; 0 or omitted = current thread.\n- **parameter** *(optional)* — LONG value passed to the receiver as additional data.",
+          "parameters": [
+            {
+              "label": "notifycode",
+              "documentation": "Unsigned integer notification code to send."
+            },
+            {
+              "label": "thread",
+              "documentation": "Optional. Thread number of the receiver; 0 or omitted = current thread."
+            },
+            {
+              "label": "parameter",
+              "documentation": "Optional. LONG value to pass to the receiver."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "Threading"
+    },
+    {
+      "name": "PACK",
+      "description": "Removes deleted records from a data file and rebuilds its keys, producing the most compact file possible. Requires exclusive access (mode 12h or 22h). Generates EVENT:BuildFile, EVENT:BuildKey, and EVENT:BuildDone events if PROP:ProgressEvents is set.",
+      "signatures": [
+        {
+          "label": "PACK( file )",
+          "documentation": "Removes deleted records and rebuilds keys for a FILE.\n- **file** — label of a FILE declaration.\n\nErrors posted: 63 (Exclusive Access Required)\nEvents generated: EVENT:BuildFile, EVENT:BuildKey, EVENT:BuildDone",
+          "parameters": [
+            {
+              "label": "file",
+              "documentation": "Label of the FILE to pack."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "File I/O"
+    },
+    {
+      "name": "PRINT",
+      "description": "Prints a DETAIL report structure. PRINT automatically activates group breaks and page overflow as needed. The REPORT must be OPENed before use.",
+      "signatures": [
+        {
+          "label": "PRINT( structure | report, number )",
+          "documentation": "Prints a DETAIL structure within an open REPORT.\n- **structure** — label of a DETAIL structure, OR\n- **report** — label of the REPORT, **number** — field equate label of the DETAIL structure to print.",
+          "parameters": [
+            {
+              "label": "structure",
+              "documentation": "Label of a DETAIL structure to print; or use report + number form."
+            },
+            {
+              "label": "report",
+              "documentation": "Label of the REPORT (use with number parameter)."
+            },
+            {
+              "label": "number",
+              "documentation": "Field equate label of the DETAIL structure within the report."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "Report"
+    },
+    {
+      "name": "RELEASE",
+      "description": "Releases a record previously held by HOLD. Has no effect if the record is not held by the current user. Used in multi-user environments to release locks after processing.",
+      "signatures": [
+        {
+          "label": "RELEASE( entity )",
+          "documentation": "Releases a held record lock.\n- **entity** — label of a FILE or VIEW declaration.",
+          "parameters": [
+            {
+              "label": "entity",
+              "documentation": "Label of the FILE or VIEW whose held record should be released."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "File I/O"
+    },
+    {
+      "name": "RESUME",
+      "description": "Resumes execution of a thread suspended with SUSPEND. Each RESUME decrements the suspend count; execution only resumes when the count reaches zero. Can also be used to activate a new thread immediately upon start.",
+      "signatures": [
+        {
+          "label": "RESUME( threadno )",
+          "documentation": "Resumes a suspended thread.\n- **threadno** — SIGNED integer thread number to resume.\n\nExample: `RESUME(START(MyProc))` — starts a new thread immediately.",
+          "parameters": [
+            {
+              "label": "threadno",
+              "documentation": "Thread number to resume (must match a previous SUSPEND call)."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "Threading"
+    },
+    {
+      "name": "RIGHT",
+      "description": "Returns a right-justified string. Trailing spaces are removed, then the string is right-padded with leading spaces to the specified length.",
+      "signatures": [
+        {
+          "label": "RIGHT( string [, length ] )",
+          "documentation": "Right-justifies a string.\n- **string** — string constant, variable, or expression.\n- **length** *(optional)* — result length in characters. Defaults to the length of `string`.\n\nReturns: `STRING`",
+          "parameters": [
+            {
+              "label": "string",
+              "documentation": "String to right-justify."
+            },
+            {
+              "label": "length",
+              "documentation": "Optional. Length of the returned string. Defaults to length of the input string."
+            }
+          ]
+        }
+      ],
+      "returnType": "STRING",
+      "category": "String"
+    },
+    {
+      "name": "ROLLBACK",
+      "description": "Terminates an active transaction by restoring the database to the state it was in before the transaction began. Use after detecting an error inside a LOGOUT block.",
+      "signatures": [
+        {
+          "label": "ROLLBACK",
+          "documentation": "Rolls back the active transaction (started with LOGOUT).\n\nErrors posted: 65 (Unable to ROLLBACK Transaction), 91 (No Logout Active).",
+          "parameters": []
+        }
+      ],
+      "returnType": "VOID",
+      "category": "File I/O"
+    },
+    {
+      "name": "RUN",
+      "description": "Executes a DOS or Windows command. If `waitflag` is 0 (default) control returns immediately; if 1 control waits for the command to finish. Wrap STRING variables with CLIP to remove trailing spaces.",
+      "signatures": [
+        {
+          "label": "RUN( command [, waitflag ] )",
+          "documentation": "Executes a command or program.\n- **command** — string with the program/command and any parameters. Use CLIP if a STRING variable.\n- **waitflag** *(optional)* — 0 (default) = return immediately; 1 = wait for completion.\n\nUse RUNCODE to check the exit code after completion.",
+          "parameters": [
+            {
+              "label": "command",
+              "documentation": "String with the program name and parameters. Use CLIP for STRING variables."
+            },
+            {
+              "label": "waitflag",
+              "documentation": "Optional. 0 = return immediately (default); 1 = wait for program to exit."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "System"
+    },
+    {
+      "name": "RUNCODE",
+      "description": "Returns the exit code passed to the OS by the program last executed with RUN. Negative values indicate special conditions: -1 = Ctrl-C, -2 = Critical Error, -3 = TSR exit, -4 = program did not run.",
+      "signatures": [
+        {
+          "label": "RUNCODE( )",
+          "documentation": "Returns the exit code of the last RUN command.\n\nSpecial values: 0=normal, -1=Ctrl-C, -2=Critical Error, -3=TSR exit, -4=did not run (check ERROR()).\n\nReturns: `LONG`",
+          "parameters": []
+        }
+      ],
+      "returnType": "LONG",
+      "category": "System"
+    },
+    {
+      "name": "SEND",
+      "description": "Sends a driver-specific message string to a file driver at runtime. Valid messages depend on the file driver in use. Can also be used to send SQL statements to backend databases (though property syntax is preferred).",
+      "signatures": [
+        {
+          "label": "SEND( file, message )",
+          "documentation": "Sends a message to the file driver.\n- **file** — label of the FILE whose DRIVER attribute identifies the target driver.\n- **message** — string containing driver-specific information.\n\nReturns: `STRING` (driver response, if any)",
+          "parameters": [
+            {
+              "label": "file",
+              "documentation": "Label of the FILE declaration."
+            },
+            {
+              "label": "message",
+              "documentation": "Driver-specific message string (see driver documentation for valid values)."
+            }
+          ]
+        }
+      ],
+      "returnType": "STRING",
+      "category": "File I/O"
+    },
+    {
+      "name": "SETCLIPBOARD",
+      "description": "Places a string into the Windows clipboard (CF_TEXT format), overwriting any previous contents. The string should not contain embedded null characters.",
+      "signatures": [
+        {
+          "label": "SETCLIPBOARD( string )",
+          "documentation": "Sets the Windows clipboard contents to the given string.\n- **string** — string constant or variable to place in the clipboard (CF_TEXT format only).",
+          "parameters": [
+            {
+              "label": "string",
+              "documentation": "String to place in the Windows clipboard."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "Window/Event"
+    },
+    {
+      "name": "SETCLOCK",
+      "description": "Sets the operating system time of day. The time value is expressed as hundredths of a second since midnight, plus one (Clarion standard time format).",
+      "signatures": [
+        {
+          "label": "SETCLOCK( time )",
+          "documentation": "Sets the system clock.\n- **time** — standard Clarion time value (hundredths of a second since midnight, plus 1). Example: 1 = midnight, 6001 = one minute past midnight.",
+          "parameters": [
+            {
+              "label": "time",
+              "documentation": "Clarion standard time (hundredths of a second since midnight + 1)."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "System"
+    },
+    {
+      "name": "SETCOMMAND",
+      "description": "Internally sets command-line parameters that can be read by COMMAND. Overwrites any existing flag of the same name. Append `=` to a `/flag` to turn it off. Cannot set system-level switches that must be specified at load time.",
+      "signatures": [
+        {
+          "label": "SETCOMMAND( commandline )",
+          "documentation": "Sets internal command-line parameters.\n- **commandline** — string with the parameters to add/override (e.g. `' /N'` to add, `' /N='` to remove).",
+          "parameters": [
+            {
+              "label": "commandline",
+              "documentation": "String of parameters to set (e.g. ' /N' to add, ' /N=' to remove)."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "System"
+    },
+    {
+      "name": "SETCURSOR",
+      "description": "Specifies a temporary mouse cursor that overrides all CURSOR attributes until a SETCURSOR with no parameter turns it off. Typically used to show an hourglass during long operations.",
+      "signatures": [
+        {
+          "label": "SETCURSOR( [ cursor ] )",
+          "documentation": "Sets or clears a temporary mouse cursor.\n- **cursor** *(optional)* — EQUATE for a Windows-standard cursor (e.g. `CURSOR:Wait`), or a string naming a linked .CUR resource (prefix with `~`). Omit to restore normal cursors.\n\nCursor EQUATEs are in EQUATES.CLW.",
+          "parameters": [
+            {
+              "label": "cursor",
+              "documentation": "Optional. CURSOR: equate or '~Filename.CUR' string. Omit to turn off temporary cursor."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "Window/Event"
     }
   ]
 }
