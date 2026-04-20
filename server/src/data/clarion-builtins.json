@@ -872,6 +872,186 @@
       ]
     },
     {
+      "name": "REGET",
+      "signatures": [
+        {
+          "params": ["FILE|KEY|INDEX|VIEW sequence", "STRING positionString"],
+          "returnType": "",
+          "description": "Re-reads a previously accessed record identified by the string returned by POSITION(). For VIEWs, also reloads all component file record buffers. Use before CLOSE(view) to reset record buffers to their state at the last NEXT/PREVIOUS."
+        }
+      ]
+    },
+    {
+      "name": "MAXIMUM",
+      "signatures": [
+        {
+          "params": ["variable", "LONG subscript"],
+          "returnType": "LONG",
+          "description": "Returns the maximum subscript value for a given dimension of an explicitly dimensioned array (DIM attribute). subscript is 1-based in Win32 Clarion. Does not operate on the implicit dimension of STRING, CSTRING, or PSTRING variables."
+        }
+      ]
+    },
+    {
+      "name": "POSITION",
+      "signatures": [
+        {
+          "params": ["FILE|KEY|INDEX|VIEW sequence"],
+          "returnType": "STRING",
+          "description": "Returns a STRING identifying the unique position of the last accessed record in a FILE, KEY, INDEX, or VIEW. For QUEUE, returns a LONG pointer to the first matching entry in the current sort order. Use with RESET or REGET to resume sequential processing."
+        }
+      ]
+    },
+    {
+      "name": "GETSTATE",
+      "signatures": [
+        {
+          "params": ["FILE file"],
+          "returnType": "LONG",
+          "description": "Captures the current state of a data file including its record buffer, MEMOs, file pointer, sequencing order, and error state. Returns a LONG handle used with RESTORESTATE and FREESTATE."
+        },
+        {
+          "params": ["FILE file", "LONG saveblob"],
+          "returnType": "LONG",
+          "description": "Captures the current state of a data file including BLOBs if saveblob is 1. Returns a LONG handle used with RESTORESTATE and FREESTATE."
+        }
+      ]
+    },
+    {
+      "name": "RESTORESTATE",
+      "signatures": [
+        {
+          "params": ["FILE file", "LONG savedstate"],
+          "returnType": "",
+          "description": "Restores a file's state (pointer, sequencing order, error state) to the state captured by GETSTATE. Record buffer is NOT restored by default."
+        },
+        {
+          "params": ["FILE file", "LONG savedstate", "BYTE restoreflag"],
+          "returnType": "",
+          "description": "Restores a file's state to the state captured by GETSTATE. If restoreflag is TRUE (1), also restores the record buffer."
+        }
+      ]
+    },
+    {
+      "name": "FREESTATE",
+      "signatures": [
+        {
+          "params": ["FILE file", "LONG savedstate"],
+          "returnType": "",
+          "description": "Releases all resources allocated by a GETSTATE call. Always call FREESTATE after RESTORESTATE to avoid memory leaks."
+        }
+      ]
+    },
+    {
+      "name": "STATUS",
+      "signatures": [
+        {
+          "params": ["FILE file"],
+          "returnType": "LONG",
+          "description": "Returns zero (0) if the file is not open, or the file's access mode if it is open. If the actual access mode is zero (Read Only / Any Access), 40h is returned. For threaded files, reflects the current thread only."
+        },
+        {
+          "params": ["WINDOW|APPLICATION|REPORT window"],
+          "returnType": "LONG",
+          "description": "Returns WINDOW:OK (0) if the window/report is open, WINDOW:NotOpened (1) if it exists but is not open, or WINDOW:BadWindow (2) if the parameter is not a valid window. Also accepts TARGET, PRINTER, or SYSTEM."
+        }
+      ]
+    },
+    {
+      "name": "CONTENTS",
+      "signatures": [
+        {
+          "params": ["LONG control"],
+          "returnType": "STRING",
+          "description": "Returns the full-length value of the USE variable associated with an ENTRY, OPTION, RADIO, or TEXT control. Unlike reading the USE variable directly, CONTENTS returns the complete length regardless of display picture size."
+        }
+      ]
+    },
+    {
+      "name": "UNBIND",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Frees all variables and user-defined procedures currently bound for runtime expression evaluation. Unbinding unused names makes EVALUATE faster."
+        },
+        {
+          "params": ["STRING name"],
+          "returnType": "",
+          "description": "Frees the variable or procedure registered under the given logical name from runtime expression evaluation. The name must match the identifier passed to BIND."
+        }
+      ]
+    },
+    {
+      "name": "FIXFORMAT",
+      "signatures": [
+        {
+          "params": ["FILE file"],
+          "returnType": "",
+          "description": "Fixes a dynamic file (created with NEW(file)) so it can be used like any other FILE structure. Posts ERRORCODE 80 if the file was not created with NEW, or ERRORCODE 47 if the structure is invalid."
+        }
+      ]
+    },
+    {
+      "name": "UNFIXFORMAT",
+      "signatures": [
+        {
+          "params": ["FILE file"],
+          "returnType": "",
+          "description": "Reverts a previously fixed dynamic file back to an unfixed state, allowing further format changes. Posts ERRORCODE 80 if the file was not created with NEW."
+        }
+      ]
+    },
+    {
+      "name": "GETNULLS",
+      "signatures": [
+        {
+          "params": ["FILE table"],
+          "returnType": "STRING",
+          "description": "Returns a STRING encoding the NULL state of every column in the specified SQL table. The returned string can later be restored with SETNULLS. Valid on all SQL table types; string size is file driver dependent (typically 4 × column count for SQL accelerators)."
+        }
+      ]
+    },
+    {
+      "name": "SETNULLS",
+      "signatures": [
+        {
+          "params": ["FILE table", "STRING nullValue"],
+          "returnType": "",
+          "description": "Sets the NULL state of every column in the SQL table using a string previously obtained from GETNULLS. Valid on all SQL table types. Posts ERRORCODE 75 if the string is too small or ERRORCODE 80 if not supported."
+        }
+      ]
+    },
+    {
+      "name": "SETNULL",
+      "signatures": [
+        {
+          "params": ["field"],
+          "returnType": "",
+          "description": "Assigns a NULL value to a field in a FILE structure. If the field is a GROUP or RECORD, all component fields are set to null. Support is file driver dependent; the file must be open."
+        },
+        {
+          "params": ["FILE file", "field"],
+          "returnType": "",
+          "description": "Assigns a NULL value to a field in a FILE structure, passing the file as an explicit reference parameter. Allows use with reference variables."
+        }
+      ]
+    },
+    {
+      "name": "SETNONULL",
+      "signatures": [
+        {
+          "params": ["field"],
+          "returnType": "",
+          "description": "Assigns a non-null value (blank or zero) to a field in a FILE structure. If the field is a GROUP or RECORD, all component fields are set non-null. Support is file driver dependent."
+        },
+        {
+          "params": ["FILE file", "field"],
+          "returnType": "",
+          "description": "Assigns a non-null value to a field in a FILE structure, passing the file as an explicit reference parameter."
+        }
+      ]
+    },
+    {
       "name": "CREATE",
       "signatures": [
         {
