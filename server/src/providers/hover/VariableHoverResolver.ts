@@ -263,6 +263,7 @@ export class VariableHoverResolver {
         ];
         
         const isProcedure = typeInfo === 'PROCEDURE';
+        const isEquate = typeInfo === 'EQUATE';
 
         if (isClassProperty) {
             const classLabel = containingClassName ? `Class property of \`${containingClassName}\`` : 'Class property';
@@ -274,7 +275,9 @@ export class VariableHoverResolver {
             const scopeIcon = scopeInfo.type === 'global' ? '🌍' : '📦';
             const scopeLabel = isProcedure
                 ? (scopeInfo.type === 'global' ? 'Global procedure' : 'Module procedure')
-                : (scopeInfo.type === 'global' ? 'Global variable' : 'Module variable');
+                : isEquate
+                    ? (scopeInfo.type === 'global' ? 'Global constant' : 'Module constant')
+                    : (scopeInfo.type === 'global' ? 'Global variable' : 'Module variable');
             markdown.push(`${scopeIcon} ${scopeLabel}`);
         }
         
@@ -282,7 +285,7 @@ export class VariableHoverResolver {
         const lineNumber = globalVar.line + 1;
         // Append "Declared in" to the same line as scope/context label if it exists
         const lastLine = markdown[markdown.length - 1];
-        if (lastLine && (lastLine.includes('variable') || lastLine.includes('procedure') || lastLine.includes('property') || lastLine.includes('method'))) {
+        if (lastLine && (lastLine.includes('variable') || lastLine.includes('procedure') || lastLine.includes('property') || lastLine.includes('method') || lastLine.includes('constant'))) {
             markdown[markdown.length - 1] = `${lastLine} Declared in ${fileName}:${lineNumber}`;
         } else {
             markdown.push(`Declared in ${fileName}:${lineNumber}`);
