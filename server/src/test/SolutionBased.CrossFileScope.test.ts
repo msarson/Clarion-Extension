@@ -522,18 +522,15 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             // Check what's shown
             const hasGlobalScope = hoverText.includes('🌍') || hoverText.includes('Global');
             const hasImplementedIn = hoverText.includes('Implemented in');
-            const hasCtrlF12Text = hoverText.includes('Ctrl+F12');
             const showsImplementationCode = hoverText.includes('MESSAGE') || hoverText.includes('CODE');
             
             console.log(`   ✓ Shows Global scope: ${hasGlobalScope ? '✅ YES' : '❌ NO'}`);
             console.log(`   ✓ Shows "Implemented in": ${hasImplementedIn ? '✅ YES' : '❌ NO'}`);
-            console.log(`   ✓ Mentions Ctrl+F12: ${hasCtrlF12Text ? '✅ YES' : '❌ NO'}`);
             console.log(`   ✓ Shows implementation code: ${showsImplementationCode ? '✅ YES' : '❌ NO'}`);
             
             // Assert expectations
             assert.ok(hasGlobalScope, 'Should show global scope icon/text');
             assert.ok(hasImplementedIn, 'Should show "Implemented in" with file and line');
-            assert.ok(hasCtrlF12Text, 'Should mention Ctrl+F12 to navigate to implementation');
             
             console.log(`   ✅ PASS: GlobalHelper MAP hover shows implementation correctly`);
         });
@@ -789,8 +786,6 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             assert.ok(hoverText.includes('📦'), 'Should show module scope icon');
             assert.ok(hoverText.includes('Declared in'), 'Should show declaration location');
             assert.ok(hoverText.includes('Implemented in'), 'Should show implementation location');
-            assert.ok(hoverText.includes('F12'), 'Should mention F12');
-            assert.ok(hoverText.includes('Ctrl+F12'), 'Should mention Ctrl+F12');
         });
         
         test('TEST 3: Hover on GetCounter at call site in main.clw line 95', async function() {

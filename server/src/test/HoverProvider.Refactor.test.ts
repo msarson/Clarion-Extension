@@ -151,7 +151,7 @@ END`;
                 ? hover.contents 
                 : 'value' in hover.contents ? hover.contents.value : '';
             
-            assert.ok(content.includes('MAP Declaration') || content.includes('MAP'), 
+            assert.ok(content.includes('Declared in') || content.includes('MAP'), 
                 'Should show MAP declaration info');
         });
 
