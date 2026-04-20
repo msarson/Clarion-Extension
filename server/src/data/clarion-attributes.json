@@ -1063,19 +1063,23 @@
     {
       "name": "DLL",
       "applicableTo": [
-        "DATA_TYPE",
+        "VARIABLE",
+        "FILE",
+        "QUEUE",
+        "GROUP",
+        "CLASS",
         "PROCEDURE"
       ],
       "signatures": [
         {
           "params": [
-            { "name": "STRING dll_name", "optional": true }
+            { "name": "LONG flag", "optional": true }
           ],
-          "description": "Specifies the DLL containing the external definition",
-          "syntax": "DLL [('dll_name')]"
+          "description": "Declares a procedure, variable, FILE, QUEUE, GROUP, or CLASS defined externally in a .DLL. The optional flag (e.g. _ABCDllMode_) activates the attribute when non-zero; zero or omitted means inactive. May be an undefined label — in that case the attribute is active.",
+          "syntax": "DLL([flag])"
         }
       ],
-      "description": "Specifies that the variable or procedure is defined in a Dynamic Link Library (.DLL). Must be used in conjunction with the EXTERNAL attribute. The optional dll_name parameter specifies which DLL contains the definition.",
+      "description": "Marks a declaration as residing in an external .DLL. Required for 32-bit apps because .DLLs are relocatable in a flat address space, requiring an extra compiler dereference. Variable/FILE/QUEUE/GROUP/CLASS declarations must also have the EXTERNAL attribute. The common project flag _ABCDllMode_ is used by the ABC template chain to toggle DLL mode via a project DEFINE.",
       "propertyEquate": ""
     },
     {
@@ -1318,7 +1322,7 @@
           "syntax": "LINK(linkfile [,flag])"
         }
       ],
-      "description": "Names a file to add to the link list for the current project when using this CLASS. Typically names a .LIB or .OBJ file to be linked. Normally the same as the MODULE parameter but can explicitly name library or object files.",
+      "description": "Names a file to add to the link list for the current project when using this CLASS. linkfile is a string constant; .OBJ extension is assumed if none is given. Normally the same as the MODULE parameter but may explicitly name a .LIB or .OBJ file. The flag (commonly _ABCLinkMode_) activates linking when non-zero — zero means the attribute is inactive. LINK is only valid on a CLASS structure.",
       "propertyEquate": ""
     },
     {
