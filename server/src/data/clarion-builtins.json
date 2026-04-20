@@ -7,7 +7,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "expression", "optional": false }
+            {
+              "name": "expression",
+              "optional": false
+            }
           ],
           "returnType": "REAL or DECIMAL",
           "description": "Returns the absolute value of an expression. The absolute value is always positive (or zero). Useful for calculating differences without regard to sign.",
@@ -31,7 +34,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "expression", "optional": false }
+            {
+              "name": "expression",
+              "optional": false
+            }
           ],
           "returnType": "REAL",
           "description": "Returns the inverse cosine (arccosine). The inverse of a cosine is the angle that produces the cosine. Return value is angle in radians. Used for trigonometric calculations. There are 2π radians (360 degrees) in a circle.",
@@ -44,8 +50,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "birthDate", "optional": false },
-            { "name": "baseDate", "optional": true }
+            {
+              "name": "birthDate",
+              "optional": false
+            },
+            {
+              "name": "baseDate",
+              "optional": true
+            }
           ],
           "returnType": "STRING",
           "description": "Returns elapsed time between two standard Clarion dates as a formatted string. Format: 1–60 days = 'nn DAYS'; 61 days–24 months = 'nn MOS'; 2+ years = 'nnn YRS'. If baseDate is omitted, the current operating system date is used.",
@@ -58,8 +70,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "first-keycode", "optional": true },
-            { "name": "last-keycode", "optional": true }
+            {
+              "name": "first-keycode",
+              "optional": true
+            },
+            {
+              "name": "last-keycode",
+              "optional": true
+            }
           ],
           "returnType": "",
           "description": "Specifies keys that generate field-independent events (EVENT:PreAlertKey and EVENT:AlertKey). Can specify single key or range. ALERT() with no parameters clears all alert keys. Use CYCLE in EVENT:PreAlertKey to allow default action, omit CYCLE to shortstop it.",
@@ -72,8 +90,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "name", "optional": false },
-            { "name": "label", "optional": false }
+            {
+              "name": "name",
+              "optional": false
+            },
+            {
+              "name": "label",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Declares a variable or procedure as available for use in dynamic expression strings (EVALUATE or VIEW FILTER). The name string is the identifier used in the expression — it may match the variable label or be any string. Applies to variables, FILE/GROUP/QUEUE fields, and procedures returning STRING, REAL, or LONG.",
@@ -81,7 +105,10 @@
         },
         {
           "params": [
-            { "name": "groupLabel", "optional": false }
+            {
+              "name": "groupLabel",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Binds all fields within a GROUP, RECORD, or QUEUE structure declared with the BINDABLE attribute. Each field's NAME attribute (or its label if no NAME is set) becomes the identifier used in dynamic expressions.",
@@ -94,11 +121,26 @@
       "signatures": [
         {
           "params": [
-            { "name": "entity", "optional": false },
-            { "name": "pagesize", "optional": true },
-            { "name": "behind", "optional": true },
-            { "name": "ahead", "optional": true },
-            { "name": "timeout", "optional": true }
+            {
+              "name": "entity",
+              "optional": false
+            },
+            {
+              "name": "pagesize",
+              "optional": true
+            },
+            {
+              "name": "behind",
+              "optional": true
+            },
+            {
+              "name": "ahead",
+              "optional": true
+            },
+            {
+              "name": "timeout",
+              "optional": true
+            }
           ],
           "returnType": "",
           "description": "Specifies automatic record set buffering for FILE or VIEW. Pagesize sets records per fetch (default 1). Behind saves pages already read. Ahead reads additional pages asynchronously. Timeout sets cache validity in seconds. Dramatically improves browse performance and reduces network traffic in Client/Server environments.",
@@ -111,7 +153,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "file", "optional": false }
+            {
+              "name": "file",
+              "optional": false
+            }
           ],
           "returnType": "LONG",
           "description": "After OPEN: returns file size in bytes. After GET/NEXT/PREVIOUS/ADD/PUT: returns bytes in last record accessed. Useful for variable length records. For SQL tables, returns row count before open, record buffer size after. Files >2GB return negative value; assign to ULONG for correct positive value.",
@@ -124,8 +169,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "string", "optional": false },
-            { "name": "length", "optional": true }
+            {
+              "name": "string",
+              "optional": false
+            },
+            {
+              "name": "length",
+              "optional": true
+            }
           ],
           "returnType": "STRING",
           "description": "Removes leading and trailing spaces from string, then centers it within specified length by padding with spaces. If length omitted, uses string's declared length. Returns centered string.",
@@ -138,8 +189,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "control", "optional": false },
-            { "name": "value", "optional": false }
+            {
+              "name": "control",
+              "optional": false
+            },
+            {
+              "name": "value",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Changes the value displayed in a control. Updates the control's USE variable, clears all pending events, and displays the new value. Use field equate (?FieldName) to specify control.",
@@ -151,30 +208,57 @@
       "name": "CHOOSE",
       "signatures": [
         {
-          "params": ["expression", "value", "value"],
+          "params": [
+            "expression",
+            "value",
+            "value"
+          ],
           "returnType": "varies",
           "description": "Index-based selection: Returns the value parameter at position specified by expression. Expression must be a positive integer. If out of range, returns last value. Return type depends on value parameters (LONG if all LONG, DECIMAL if LONG/DECIMAL mix, STRING if any STRING, REAL otherwise)."
         },
         {
           "params": [
-            { "name": "expression", "optional": false },
-            { "name": "value", "optional": false },
-            { "name": "value", "optional": false },
-            { "name": "value...", "optional": true }
+            {
+              "name": "expression",
+              "optional": false
+            },
+            {
+              "name": "value",
+              "optional": false
+            },
+            {
+              "name": "value",
+              "optional": false
+            },
+            {
+              "name": "value...",
+              "optional": true
+            }
           ],
           "returnType": "varies",
           "description": "Index-based selection with variable values: Returns the value at position specified by expression (1-based index). Can have 2 or more value parameters. Return type depends on value types."
         },
         {
-          "params": ["condition"],
+          "params": [
+            "condition"
+          ],
           "returnType": "LONG",
           "description": "Boolean evaluation: Evaluates condition and returns 1 (true) or 0 (false). Use when you only need to convert a boolean to numeric."
         },
         {
           "params": [
-            { "name": "condition", "optional": false },
-            { "name": "truevalue", "optional": true },
-            { "name": "falsevalue", "optional": true }
+            {
+              "name": "condition",
+              "optional": false
+            },
+            {
+              "name": "truevalue",
+              "optional": true
+            },
+            {
+              "name": "falsevalue",
+              "optional": true
+            }
           ],
           "returnType": "varies",
           "description": "Boolean selection: Returns truevalue if condition is true, falsevalue if false. If values not provided, returns 1 (true) or 0 (false). Common use: CHOOSE(expression, 'Yes', 'No')."
@@ -185,7 +269,9 @@
       "name": "CLIP",
       "signatures": [
         {
-          "params": ["STRING string"],
+          "params": [
+            "STRING string"
+          ],
           "returnType": "STRING",
           "description": "Removes trailing spaces from a string and returns the trimmed result. Frequently used with concatenation. Not needed for CSTRING or PSTRING types."
         }
@@ -196,7 +282,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "radians", "optional": false }
+            {
+              "name": "radians",
+              "optional": false
+            }
           ],
           "returnType": "REAL",
           "description": "Returns the trigonometric tangent of an angle measured in radians. The tangent is the ratio of the angle's opposite side divided by its adjacent side. Convert degrees to radians by multiplying by 0.0174532925199 (Deg2Rad).",
@@ -208,7 +297,11 @@
       "name": "SUB",
       "signatures": [
         {
-          "params": ["STRING string", "LONG position", "LONG length"],
+          "params": [
+            "STRING string",
+            "LONG position",
+            "LONG length"
+          ],
           "returnType": "STRING",
           "description": "Returns a substring starting at position for length characters. Position can be negative to count from end (-1 is last char). Zero-based in Clarion#."
         }
@@ -218,7 +311,9 @@
       "name": "UPPER",
       "signatures": [
         {
-          "params": ["STRING string"],
+          "params": [
+            "STRING string"
+          ],
           "returnType": "STRING",
           "description": "Converts all alphabetic characters in the string to uppercase. Non-alphabetic characters are unchanged."
         }
@@ -228,7 +323,9 @@
       "name": "LOWER",
       "signatures": [
         {
-          "params": ["STRING string"],
+          "params": [
+            "STRING string"
+          ],
           "returnType": "STRING",
           "description": "Converts all alphabetic characters in the string to lowercase. Non-alphabetic characters are unchanged."
         }
@@ -238,7 +335,9 @@
       "name": "LEN",
       "signatures": [
         {
-          "params": ["STRING string"],
+          "params": [
+            "STRING string"
+          ],
           "returnType": "LONG",
           "description": "Returns the total length of the string including trailing spaces. For length without trailing spaces, use LEN(CLIP(string))."
         }
@@ -248,7 +347,10 @@
       "name": "FORMAT",
       "signatures": [
         {
-          "params": ["numeric value", "STRING picture"],
+          "params": [
+            "numeric value",
+            "STRING picture"
+          ],
           "returnType": "STRING",
           "description": "Formats a numeric value (BYTE/SHORT/LONG/REAL/DECIMAL) into a string using a picture token (e.g., '@n10.2' for decimals, '@d1' for dates)."
         }
@@ -259,12 +361,30 @@
       "signatures": [
         {
           "params": [
-            { "name": "STRING text", "optional": false },
-            { "name": "STRING caption", "optional": true },
-            { "name": "LONG icon", "optional": true },
-            { "name": "LONG buttons", "optional": true },
-            { "name": "LONG default", "optional": true },
-            { "name": "LONG style", "optional": true }
+            {
+              "name": "STRING text",
+              "optional": false
+            },
+            {
+              "name": "STRING caption",
+              "optional": true
+            },
+            {
+              "name": "LONG icon",
+              "optional": true
+            },
+            {
+              "name": "LONG buttons",
+              "optional": true
+            },
+            {
+              "name": "LONG default",
+              "optional": true
+            },
+            {
+              "name": "LONG style",
+              "optional": true
+            }
           ],
           "returnType": "BYTE",
           "description": "Displays a message box. Text is required, all other parameters optional (caption, icon, buttons, default button, and style/mode). Returns button code indicating which button was clicked. Use pipe character (|) in text for multi-line messages.",
@@ -276,7 +396,9 @@
       "name": "EOF",
       "signatures": [
         {
-          "params": ["FILE file"],
+          "params": [
+            "FILE file"
+          ],
           "returnType": "LONG",
           "description": "Returns non-zero (true) when the last record has been read by NEXT/SKIP. Not supported by all drivers - prefer checking ERRORCODE() after NEXT instead."
         }
@@ -286,7 +408,9 @@
       "name": "EXISTS",
       "signatures": [
         {
-          "params": ["STRING filename"],
+          "params": [
+            "STRING filename"
+          ],
           "returnType": "LONG",
           "description": "Returns non-zero if the specified file or directory exists on disk. Can include full path or use current directory. Returns 1 if found, 0 if not."
         }
@@ -297,8 +421,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "low", "optional": false },
-            { "name": "high", "optional": false }
+            {
+              "name": "low",
+              "optional": false
+            },
+            {
+              "name": "high",
+              "optional": false
+            }
           ],
           "returnType": "LONG",
           "description": "Returns a random integer between low and high values, inclusively. Only integer portion of parameters is used for the range. Useful for simulations, games, and random sampling. Example: RANDOM(1,49) returns random number 1-49 inclusive.",
@@ -310,7 +440,9 @@
       "name": "RECORDS",
       "signatures": [
         {
-          "params": ["FILE file"],
+          "params": [
+            "FILE file"
+          ],
           "returnType": "LONG",
           "description": "Returns the total number of records currently in the file. File must be open. Useful for progress bars and pre-sizing queues."
         }
@@ -320,7 +452,9 @@
       "name": "NAME",
       "signatures": [
         {
-          "params": ["FILE file"],
+          "params": [
+            "FILE file"
+          ],
           "returnType": "STRING",
           "description": "Returns the filename from the FILE's NAME attribute without the path. To get the full path, use FULLNAME attribute instead."
         }
@@ -341,7 +475,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "radians", "optional": false }
+            {
+              "name": "radians",
+              "optional": false
+            }
           ],
           "returnType": "REAL",
           "description": "Returns the trigonometric cosine of an angle measured in radians. The cosine is the ratio of the angle's adjacent side divided by the hypotenuse. Convert degrees to radians by multiplying by 0.0174532925199 (Deg2Rad).",
@@ -353,7 +490,10 @@
       "name": "COPY",
       "signatures": [
         {
-          "params": ["STRING source", "STRING destination"],
+          "params": [
+            "STRING source",
+            "STRING destination"
+          ],
           "returnType": "",
           "description": "Copies a file from source path to destination path. Overwrites destination if it exists. Check ERRORCODE() to verify success."
         }
@@ -374,7 +514,9 @@
       "name": "REMOVE",
       "signatures": [
         {
-          "params": ["STRING filename"],
+          "params": [
+            "STRING filename"
+          ],
           "returnType": "",
           "description": "Deletes the specified file from disk permanently. Check ERRORCODE() after to verify success. Cannot be undone."
         }
@@ -384,7 +526,10 @@
       "name": "RENAME",
       "signatures": [
         {
-          "params": ["STRING oldname", "STRING newname"],
+          "params": [
+            "STRING oldname",
+            "STRING newname"
+          ],
           "returnType": "",
           "description": "Renames a file or directory from oldname to newname. Can also move files between directories. Check ERRORCODE() for success."
         }
@@ -435,10 +580,22 @@
       "signatures": [
         {
           "params": [
-            { "name": "title", "optional": true },
-            { "name": "file", "optional": false },
-            { "name": "extensions", "optional": true },
-            { "name": "flag", "optional": true }
+            {
+              "name": "title",
+              "optional": true
+            },
+            {
+              "name": "file",
+              "optional": false
+            },
+            {
+              "name": "extensions",
+              "optional": true
+            },
+            {
+              "name": "flag",
+              "optional": true
+            }
           ],
           "returnType": "STRING",
           "description": "Displays Windows standard file choice dialog (Open or Save). Returns selected filename in file parameter. Extensions format: 'Description|*.ext|Description2|*.ext2' (pipe-delimited). Flag bitmap: bit 0=0 for Open dialog, bit 0=1 for Save dialog, bit 1=1 saves/restores current directory. Returns file parameter value or empty on cancel.",
@@ -451,11 +608,26 @@
       "signatures": [
         {
           "params": [
-            { "name": "title", "optional": true },
-            { "name": "file", "optional": false },
-            { "name": "extensions", "optional": true },
-            { "name": "flag", "optional": true },
-            { "name": "index", "optional": true }
+            {
+              "name": "title",
+              "optional": true
+            },
+            {
+              "name": "file",
+              "optional": false
+            },
+            {
+              "name": "extensions",
+              "optional": true
+            },
+            {
+              "name": "flag",
+              "optional": true
+            },
+            {
+              "name": "index",
+              "optional": true
+            }
           ],
           "returnType": "STRING",
           "description": "Extended file dialog with multi-select support. Similar to FILEDIALOG but with index parameter to select default extension by index number. Flag bitmap supports additional options including multiple file selection. Returns selected filename(s) in file parameter. For multiple files, use '|' as delimiter.",
@@ -467,37 +639,56 @@
       "name": "ADD",
       "signatures": [
         {
-          "params": ["FILE file"],
+          "params": [
+            "FILE file"
+          ],
           "returnType": "",
           "description": "Adds a new record to a file. The record buffer contains the data to write. Check ERRORCODE() after to verify success."
         },
         {
-          "params": ["FILE file", "LONG length"],
+          "params": [
+            "FILE file",
+            "LONG length"
+          ],
           "returnType": "",
           "description": "Adds a new record to a file with specified byte length. Used for variable-length records or MEMO fields."
         },
         {
-          "params": ["QUEUE queue"],
+          "params": [
+            "QUEUE queue"
+          ],
           "returnType": "",
           "description": "Adds a new entry to the end of a queue. The queue structure fields contain the data to add."
         },
         {
-          "params": ["QUEUE queue", "LONG position"],
+          "params": [
+            "QUEUE queue",
+            "LONG position"
+          ],
           "returnType": "",
           "description": "Inserts a new entry into a queue at the specified position (1-based). Existing entries shift down. If pointer is zero or greater than the number of entries, the entry is added at the end."
         },
         {
-          "params": ["QUEUE queue", "PARAMS KEY[] key"],
+          "params": [
+            "QUEUE queue",
+            "PARAMS KEY[] key"
+          ],
           "returnType": "",
           "description": "Inserts a new entry into a sorted queue maintaining sort order by the specified key field(s). Up to 16 key parameters separated by commas; leading +/- for ascending/descending. Entry is inserted after all other entries with matching key values."
         },
         {
-          "params": ["QUEUE queue", "STRING name"],
+          "params": [
+            "QUEUE queue",
+            "STRING name"
+          ],
           "returnType": "",
           "description": "Inserts a new entry into a sorted queue by field NAME attributes. The name string contains NAME attributes separated by commas with optional leading +/- for sort direction. Case sensitive. Entry is inserted after all other entries with matching field values."
         },
         {
-          "params": ["QUEUE queue", "*? functionLabel"],
+          "params": [
+            "QUEUE queue",
+            "*? functionLabel"
+          ],
           "returnType": "",
           "description": "Inserts a new entry into a queue at the position determined by a comparison function. The function takes two *GROUP parameters (passed by address) and returns SIGNED: negative = first < second, zero = equal (entry not added), positive = first > second."
         }
@@ -508,8 +699,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "fileLabel", "optional": false },
-            { "name": "length", "optional": true }
+            {
+              "name": "fileLabel",
+              "optional": false
+            },
+            {
+              "name": "length",
+              "optional": true
+            }
           ],
           "returnType": "",
           "description": "Writes a new record to a FILE without updating any KEYs. After all APPENDs are done, rebuild keys with BUILD. Significantly faster than ADD for bulk operations — e.g., 5000 records via APPEND + BUILD is much faster than 5000 ADD calls. Length defaults to the full RECORD length if omitted or out of range.",
@@ -521,42 +718,64 @@
       "name": "PUT",
       "signatures": [
         {
-          "params": ["FILE file"],
+          "params": [
+            "FILE file"
+          ],
           "returnType": "",
           "description": "Updates the current file record (last one read by GET/NEXT/PREVIOUS) with data from the record buffer."
         },
         {
-          "params": ["FILE file", "LONG pointer"],
+          "params": [
+            "FILE file",
+            "LONG pointer"
+          ],
           "returnType": "",
           "description": "Writes the record buffer to a specific record number in the file. Used for direct/random access updates."
         },
         {
-          "params": ["FILE file", "LONG pointer", "LONG length"],
+          "params": [
+            "FILE file",
+            "LONG pointer",
+            "LONG length"
+          ],
           "returnType": "",
           "description": "Writes the record buffer to a specific position with specified byte length. For variable-length records."
         },
         {
-          "params": ["QUEUE queue"],
+          "params": [
+            "QUEUE queue"
+          ],
           "returnType": "",
           "description": "Updates the current queue entry (last one accessed by GET or ADD) with data from the queue structure."
         },
         {
-          "params": ["QUEUE queue", "PARAMS KEY[] key"],
+          "params": [
+            "QUEUE queue",
+            "PARAMS KEY[] key"
+          ],
           "returnType": "",
           "description": "Updates a sorted queue entry after GET or ADD, maintaining sort order by the specified key field(s). Entry is re-inserted after all other entries with matching key values. Up to 16 key parameters with optional +/- for direction."
         },
         {
-          "params": ["QUEUE queue", "STRING name"],
+          "params": [
+            "QUEUE queue",
+            "STRING name"
+          ],
           "returnType": "",
           "description": "Updates a sorted queue entry after GET or ADD, maintaining sort order by field NAME attributes. The name string contains NAME attributes separated by commas with optional +/- for direction. Case sensitive."
         },
         {
-          "params": ["QUEUE queue", "*? functionLabel"],
+          "params": [
+            "QUEUE queue",
+            "*? functionLabel"
+          ],
           "returnType": "",
           "description": "Updates a queue entry at the position determined by a comparison function after a successful GET or ADD. Function returns SIGNED: zero = equal (no write), negative = first < second, positive = first > second."
         },
         {
-          "params": ["VIEW view"],
+          "params": [
+            "VIEW view"
+          ],
           "returnType": "",
           "description": "Updates the current view record (last one read by NEXT/PREVIOUS) in the view's primary file."
         }
@@ -566,42 +785,67 @@
       "name": "GET",
       "signatures": [
         {
-          "params": ["FILE file", "KEY key"],
+          "params": [
+            "FILE file",
+            "KEY key"
+          ],
           "returnType": "",
           "description": "Reads a record from file by matching the key fields. Key fields in record buffer must be set first. Posts error if not found."
         },
         {
-          "params": ["FILE file", "LONG pointer"],
+          "params": [
+            "FILE file",
+            "LONG pointer"
+          ],
           "returnType": "",
           "description": "Reads a specific record by record number (1-based) into the record buffer. Used for direct/random access."
         },
         {
-          "params": ["QUEUE queue", "LONG position"],
+          "params": [
+            "QUEUE queue",
+            "LONG position"
+          ],
           "returnType": "",
           "description": "Retrieves a queue entry at the specified position (1-based) into the queue structure fields. If pointer is zero, clears the current record pointer."
         },
         {
-          "params": ["FILE file", "POINTER_T filePointer", "<UNSIGNED length>"],
+          "params": [
+            "FILE file",
+            "POINTER_T filePointer",
+            "<UNSIGNED length>"
+          ],
           "returnType": "",
           "description": "Reads a record from file by relative file pointer position. If filePointer is zero, clears the current record pointer without retrieving a record. Optional length limits bytes read (1 to RECORD length; defaults to full RECORD). Pointer semantics are file-driver dependent."
         },
         {
-          "params": ["KEY key", "POINTER_T keyPointer"],
+          "params": [
+            "KEY key",
+            "POINTER_T keyPointer"
+          ],
           "returnType": "",
           "description": "Reads a record from file using a key pointer position. Pointer semantics are file-driver dependent. Posts 'Record Not Found' if the pointer value is out of range."
         },
         {
-          "params": ["QUEUE queue", "PARAMS KEY[] key"],
+          "params": [
+            "QUEUE queue",
+            "PARAMS KEY[] key"
+          ],
           "returnType": "",
           "description": "Searches for the first queue entry matching the value in the specified key field(s). Up to 16 key parameters; leading +/- for sort direction. If the queue is not sorted on those fields, the key specifies an alternate sort order (cached for efficient subsequent SORT on the same fields)."
         },
         {
-          "params": ["QUEUE queue", "STRING name"],
+          "params": [
+            "QUEUE queue",
+            "STRING name"
+          ],
           "returnType": "",
           "description": "Searches for a queue entry matching the value in the named field(s). The name string contains field NAME attributes separated by commas with optional +/- for direction. Case sensitive. If not already sorted on those fields, specifies an alternate sort order."
         },
         {
-          "params": ["QUEUE queue", "*? functionLabel"],
+          "params": [
+            "QUEUE queue",
+            "*? functionLabel"
+          ],
           "returnType": "",
           "description": "Reads from a positional value returned by a comparison function. The function takes two *GROUP parameters (passed by address) and returns SIGNED. Posts 'Entry Not Found' if no match."
         }
@@ -612,8 +856,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "string", "optional": false },
-            { "name": "picture", "optional": true }
+            {
+              "name": "string",
+              "optional": false
+            },
+            {
+              "name": "picture",
+              "optional": true
+            }
           ],
           "returnType": "STRING",
           "description": "Removes formatting characters from a numeric string, returning only the numbers. If picture omitted, uses string's declared picture or returns only valid numeric characters. For date/time pictures, returns Clarion Standard Date/Time. Example: DEFORMAT('$1,234.56') returns '1234.56'.",
@@ -625,17 +875,23 @@
       "name": "DELETE",
       "signatures": [
         {
-          "params": ["FILE file"],
+          "params": [
+            "FILE file"
+          ],
           "returnType": "",
           "description": "Removes the current record from the file (last one accessed by GET/NEXT/PREVIOUS/ADD/PUT). Removes all key entries too."
         },
         {
-          "params": ["QUEUE queue"],
+          "params": [
+            "QUEUE queue"
+          ],
           "returnType": "",
           "description": "Removes the current queue entry (last one accessed by GET or ADD). All subsequent entries shift up. Memory is deallocated."
         },
         {
-          "params": ["VIEW view"],
+          "params": [
+            "VIEW view"
+          ],
           "returnType": "",
           "description": "Removes the current record from the view's primary file (last accessed by NEXT/PREVIOUS). Secondary files are not affected."
         }
@@ -645,22 +901,32 @@
       "name": "SET",
       "signatures": [
         {
-          "params": ["FILE file"],
+          "params": [
+            "FILE file"
+          ],
           "returnType": "",
           "description": "Positions file pointer to the beginning of the file in record number sequence. Used before NEXT to read from start."
         },
         {
-          "params": ["FILE file", "KEY key"],
+          "params": [
+            "FILE file",
+            "KEY key"
+          ],
           "returnType": "",
           "description": "Positions file pointer to the start of a specific key's sequence. Key fields in record buffer define the position. Used before NEXT."
         },
         {
-          "params": ["FILE file", "LONG pointer"],
+          "params": [
+            "FILE file",
+            "LONG pointer"
+          ],
           "returnType": "",
           "description": "Positions file pointer to a specific record number. Used before NEXT to start sequential reading from that record."
         },
         {
-          "params": ["KEY key"],
+          "params": [
+            "KEY key"
+          ],
           "returnType": "",
           "description": "Positions to the start of a specific key's sequence for the implied file. Key fields define position. Used before NEXT."
         }
@@ -670,12 +936,16 @@
       "name": "NEXT",
       "signatures": [
         {
-          "params": ["FILE file"],
+          "params": [
+            "FILE file"
+          ],
           "returnType": "",
           "description": "Reads the next record in the current sequence (set by SET or last key used) into the record buffer. Returns error at end of file."
         },
         {
-          "params": ["VIEW view"],
+          "params": [
+            "VIEW view"
+          ],
           "returnType": "",
           "description": "Reads the next record in the view's sequence into the view structure. Joins related file records automatically."
         }
@@ -685,12 +955,16 @@
       "name": "PREVIOUS",
       "signatures": [
         {
-          "params": ["FILE file"],
+          "params": [
+            "FILE file"
+          ],
           "returnType": "",
           "description": "Reads the previous record in the current sequence (opposite of NEXT) into the record buffer. Returns error at beginning of file."
         },
         {
-          "params": ["VIEW view"],
+          "params": [
+            "VIEW view"
+          ],
           "returnType": "",
           "description": "Reads the previous record in the view's sequence into the view structure. Moves backward through the result set."
         }
@@ -700,42 +974,61 @@
       "name": "OPEN",
       "signatures": [
         {
-          "params": ["FILE file"],
+          "params": [
+            "FILE file"
+          ],
           "returnType": "",
           "description": "Opens a file for reading and writing. Creates the file if it doesn't exist (unless CREATE attribute is 0). Check ERRORCODE() after."
         },
         {
-          "params": ["FILE file", "LONG mode"],
+          "params": [
+            "FILE file",
+            "LONG mode"
+          ],
           "returnType": "",
           "description": "Opens a file with specific access mode (Read/Write + Deny Write/Read/None/All). Mode controls user access and multi-user sharing."
         },
         {
-          "params": ["VIEW view"],
+          "params": [
+            "VIEW view"
+          ],
           "returnType": "",
           "description": "Opens a VIEW for processing. The component files must already be open. Use SET before OPEN to establish sequence."
         },
         {
-          "params": ["WINDOW window"],
+          "params": [
+            "WINDOW window"
+          ],
           "returnType": "",
           "description": "Activates a WINDOW for processing. Nothing displays until DISPLAY or ACCEPT is encountered. Allows pre-display customization."
         },
         {
-          "params": ["WINDOW window", "WINDOW owner"],
+          "params": [
+            "WINDOW window",
+            "WINDOW owner"
+          ],
           "returnType": "",
           "description": "Opens a WINDOW with an owner window. The owned window appears on top and is auto-hidden/closed with its owner."
         },
         {
-          "params": ["APPLICATION app"],
+          "params": [
+            "APPLICATION app"
+          ],
           "returnType": "",
           "description": "Activates an APPLICATION window. Nothing displays until DISPLAY or ACCEPT. Use for main application window setup."
         },
         {
-          "params": ["APPLICATION app", "WINDOW owner"],
+          "params": [
+            "APPLICATION app",
+            "WINDOW owner"
+          ],
           "returnType": "",
           "description": "Opens an APPLICATION with an owner window. Establishes parent-child window relationship."
         },
         {
-          "params": ["REPORT report"],
+          "params": [
+            "REPORT report"
+          ],
           "returnType": "",
           "description": "Activates a REPORT structure for printing. Must OPEN before printing any REPORT structures."
         }
@@ -745,22 +1038,30 @@
       "name": "CLOSE",
       "signatures": [
         {
-          "params": ["FILE file"],
+          "params": [
+            "FILE file"
+          ],
           "returnType": "",
           "description": "Closes an open file and flushes any pending writes. Frees memory and releases locks. Always close files when done."
         },
         {
-          "params": ["VIEW view"],
+          "params": [
+            "VIEW view"
+          ],
           "returnType": "",
           "description": "Closes an open VIEW. Automatically closed on RETURN if declared locally. State of component files becomes undefined."
         },
         {
-          "params": ["WINDOW window"],
+          "params": [
+            "WINDOW window"
+          ],
           "returnType": "",
           "description": "Closes an APPLICATION or WINDOW. Releases memory and redraws underlying screen. Auto-closes child windows first."
         },
         {
-          "params": ["REPORT report"],
+          "params": [
+            "REPORT report"
+          ],
           "returnType": "",
           "description": "Closes a REPORT structure. Prints final page FOOTER and group FOOTERs. Deletes PREVIEW metafiles if applicable."
         }
@@ -770,17 +1071,25 @@
       "name": "BUILD",
       "signatures": [
         {
-          "params": ["FILE file"],
+          "params": [
+            "FILE file"
+          ],
           "returnType": "",
           "description": "Rebuilds all KEY declarations for the file. The file must be closed, LOCKed, or opened with exclusive read/write access (mode 12h or 22h)."
         },
         {
-          "params": ["KEY key | INDEX index"],
+          "params": [
+            "KEY key | INDEX index"
+          ],
           "returnType": "",
           "description": "Rebuilds only the specified KEY or INDEX. The file must be closed, LOCKed, or opened with exclusive access (mode 12h or 22h)."
         },
         {
-          "params": ["INDEX index", "STRING components", "STRING filter"],
+          "params": [
+            "INDEX index",
+            "STRING components",
+            "STRING filter"
+          ],
           "returnType": "",
           "description": "Builds a dynamic INDEX with specified component fields and optional filter expression. Does not require exclusive access — file must be open with any valid access mode. The dynamic INDEX is temporary and deleted when the file is closed."
         }
@@ -790,12 +1099,17 @@
       "name": "HOLD",
       "signatures": [
         {
-          "params": ["FILE|VIEW entity"],
+          "params": [
+            "FILE|VIEW entity"
+          ],
           "returnType": "",
           "description": "Arms record locking for the following GET, REGET, NEXT, or PREVIOUS call. Waits indefinitely until the record can be held. When entity is a VIEW, operates on the primary file only."
         },
         {
-          "params": ["FILE|VIEW entity", "LONG seconds"],
+          "params": [
+            "FILE|VIEW entity",
+            "LONG seconds"
+          ],
           "returnType": "",
           "description": "Arms record locking for the following GET, REGET, NEXT, or PREVIOUS call. Posts 'Record Is Already Held' error after the specified wait time if the record cannot be held."
         }
@@ -805,12 +1119,17 @@
       "name": "LOCK",
       "signatures": [
         {
-          "params": ["FILE file"],
+          "params": [
+            "FILE file"
+          ],
           "returnType": "",
           "description": "Locks a file against access by other workstations in a multi-user environment. Waits indefinitely until the file can be locked. The file must be opened for shared access."
         },
         {
-          "params": ["FILE file", "LONG seconds"],
+          "params": [
+            "FILE file",
+            "LONG seconds"
+          ],
           "returnType": "",
           "description": "Locks a file against access by other workstations. Posts 'File Is Already Locked' error after the specified wait time if the lock cannot be obtained."
         }
@@ -820,7 +1139,9 @@
       "name": "UNLOCK",
       "signatures": [
         {
-          "params": ["FILE file"],
+          "params": [
+            "FILE file"
+          ],
           "returnType": "",
           "description": "Unlocks a previously LOCKed data file. Has no effect if the file is not locked or is locked by another user. Posts no errors."
         }
@@ -830,7 +1151,9 @@
       "name": "FLUSH",
       "signatures": [
         {
-          "params": ["FILE|VIEW file"],
+          "params": [
+            "FILE|VIEW file"
+          ],
           "returnType": "",
           "description": "Terminates a STREAM operation and flushes OS buffers to disk, updating the directory entry. Also flushes BUFFER statement buffers. If both STREAM and BUFFER are active, all buffers are flushed."
         }
@@ -840,12 +1163,17 @@
       "name": "SHARE",
       "signatures": [
         {
-          "params": ["FILE file"],
+          "params": [
+            "FILE file"
+          ],
           "returnType": "",
           "description": "Legacy statement. Opens a FILE structure for shared access. Equivalent to OPEN with default access mode of 42h (Read/Write, Deny None). Prefer OPEN with an explicit access mode in new code."
         },
         {
-          "params": ["FILE file", "LONG accessMode"],
+          "params": [
+            "FILE file",
+            "LONG accessMode"
+          ],
           "returnType": "",
           "description": "Legacy statement. Opens a FILE structure with the specified access mode. Exactly the same as OPEN except the default access mode differs. Prefer OPEN with an explicit access mode in new code."
         }
@@ -855,17 +1183,26 @@
       "name": "RESET",
       "signatures": [
         {
-          "params": ["VIEW view", "STRING positionString"],
+          "params": [
+            "VIEW view",
+            "STRING positionString"
+          ],
           "returnType": "",
           "description": "Resets a VIEW's sequential position to the record identified by a string previously returned by POSITION(). The next NEXT or PREVIOUS call reads that record."
         },
         {
-          "params": ["VIEW view", "FILE file"],
+          "params": [
+            "VIEW view",
+            "FILE file"
+          ],
           "returnType": "",
           "description": "Resets a VIEW's sequential position to the record identified by the current contents of the file's record buffer. Used when VIEW order is specified via PROP:Order."
         },
         {
-          "params": ["FILE|KEY|INDEX sequence", "STRING positionString"],
+          "params": [
+            "FILE|KEY|INDEX sequence",
+            "STRING positionString"
+          ],
           "returnType": "",
           "description": "Resets file sequential processing to the record identified by the position string returned by POSITION(). The next NEXT or PREVIOUS call reads that record."
         }
@@ -875,7 +1212,10 @@
       "name": "REGET",
       "signatures": [
         {
-          "params": ["FILE|KEY|INDEX|VIEW sequence", "STRING positionString"],
+          "params": [
+            "FILE|KEY|INDEX|VIEW sequence",
+            "STRING positionString"
+          ],
           "returnType": "",
           "description": "Re-reads a previously accessed record identified by the string returned by POSITION(). For VIEWs, also reloads all component file record buffers. Use before CLOSE(view) to reset record buffers to their state at the last NEXT/PREVIOUS."
         }
@@ -885,7 +1225,10 @@
       "name": "MAXIMUM",
       "signatures": [
         {
-          "params": ["variable", "LONG subscript"],
+          "params": [
+            "variable",
+            "LONG subscript"
+          ],
           "returnType": "LONG",
           "description": "Returns the maximum subscript value for a given dimension of an explicitly dimensioned array (DIM attribute). subscript is 1-based in Win32 Clarion. Does not operate on the implicit dimension of STRING, CSTRING, or PSTRING variables."
         }
@@ -895,7 +1238,9 @@
       "name": "POSITION",
       "signatures": [
         {
-          "params": ["FILE|KEY|INDEX|VIEW sequence"],
+          "params": [
+            "FILE|KEY|INDEX|VIEW sequence"
+          ],
           "returnType": "STRING",
           "description": "Returns a STRING identifying the unique position of the last accessed record in a FILE, KEY, INDEX, or VIEW. For QUEUE, returns a LONG pointer to the first matching entry in the current sort order. Use with RESET or REGET to resume sequential processing."
         }
@@ -905,12 +1250,17 @@
       "name": "GETSTATE",
       "signatures": [
         {
-          "params": ["FILE file"],
+          "params": [
+            "FILE file"
+          ],
           "returnType": "LONG",
           "description": "Captures the current state of a data file including its record buffer, MEMOs, file pointer, sequencing order, and error state. Returns a LONG handle used with RESTORESTATE and FREESTATE."
         },
         {
-          "params": ["FILE file", "LONG saveblob"],
+          "params": [
+            "FILE file",
+            "LONG saveblob"
+          ],
           "returnType": "LONG",
           "description": "Captures the current state of a data file including BLOBs if saveblob is 1. Returns a LONG handle used with RESTORESTATE and FREESTATE."
         }
@@ -920,12 +1270,19 @@
       "name": "RESTORESTATE",
       "signatures": [
         {
-          "params": ["FILE file", "LONG savedstate"],
+          "params": [
+            "FILE file",
+            "LONG savedstate"
+          ],
           "returnType": "",
           "description": "Restores a file's state (pointer, sequencing order, error state) to the state captured by GETSTATE. Record buffer is NOT restored by default."
         },
         {
-          "params": ["FILE file", "LONG savedstate", "BYTE restoreflag"],
+          "params": [
+            "FILE file",
+            "LONG savedstate",
+            "BYTE restoreflag"
+          ],
           "returnType": "",
           "description": "Restores a file's state to the state captured by GETSTATE. If restoreflag is TRUE (1), also restores the record buffer."
         }
@@ -935,7 +1292,10 @@
       "name": "FREESTATE",
       "signatures": [
         {
-          "params": ["FILE file", "LONG savedstate"],
+          "params": [
+            "FILE file",
+            "LONG savedstate"
+          ],
           "returnType": "",
           "description": "Releases all resources allocated by a GETSTATE call. Always call FREESTATE after RESTORESTATE to avoid memory leaks."
         }
@@ -945,12 +1305,16 @@
       "name": "STATUS",
       "signatures": [
         {
-          "params": ["FILE file"],
+          "params": [
+            "FILE file"
+          ],
           "returnType": "LONG",
           "description": "Returns zero (0) if the file is not open, or the file's access mode if it is open. If the actual access mode is zero (Read Only / Any Access), 40h is returned. For threaded files, reflects the current thread only."
         },
         {
-          "params": ["WINDOW|APPLICATION|REPORT window"],
+          "params": [
+            "WINDOW|APPLICATION|REPORT window"
+          ],
           "returnType": "LONG",
           "description": "Returns WINDOW:OK (0) if the window/report is open, WINDOW:NotOpened (1) if it exists but is not open, or WINDOW:BadWindow (2) if the parameter is not a valid window. Also accepts TARGET, PRINTER, or SYSTEM."
         }
@@ -960,7 +1324,9 @@
       "name": "CONTENTS",
       "signatures": [
         {
-          "params": ["LONG control"],
+          "params": [
+            "LONG control"
+          ],
           "returnType": "STRING",
           "description": "Returns the full-length value of the USE variable associated with an ENTRY, OPTION, RADIO, or TEXT control. Unlike reading the USE variable directly, CONTENTS returns the complete length regardless of display picture size."
         }
@@ -975,7 +1341,9 @@
           "description": "Frees all variables and user-defined procedures currently bound for runtime expression evaluation. Unbinding unused names makes EVALUATE faster."
         },
         {
-          "params": ["STRING name"],
+          "params": [
+            "STRING name"
+          ],
           "returnType": "",
           "description": "Frees the variable or procedure registered under the given logical name from runtime expression evaluation. The name must match the identifier passed to BIND."
         }
@@ -985,7 +1353,9 @@
       "name": "FIXFORMAT",
       "signatures": [
         {
-          "params": ["FILE file"],
+          "params": [
+            "FILE file"
+          ],
           "returnType": "",
           "description": "Fixes a dynamically-allocated FILE structure (created at runtime via `NEW(file)` and accessed through a reference variable `&FILE`) so it can be used like any statically-declared FILE. Posts ERRORCODE 80 if the file was not created with NEW, or ERRORCODE 47 if the structure is invalid."
         }
@@ -995,7 +1365,9 @@
       "name": "UNFIXFORMAT",
       "signatures": [
         {
-          "params": ["FILE file"],
+          "params": [
+            "FILE file"
+          ],
           "returnType": "",
           "description": "Reverts a previously fixed dynamically-allocated FILE structure (one created via `NEW(file)` through a reference variable `&FILE`) back to an unfixed state, allowing further format changes before use. Posts ERRORCODE 80 if the file was not created with NEW."
         }
@@ -1005,7 +1377,9 @@
       "name": "GETNULLS",
       "signatures": [
         {
-          "params": ["FILE table"],
+          "params": [
+            "FILE table"
+          ],
           "returnType": "STRING",
           "description": "Returns a STRING encoding the NULL state of every column in the specified SQL table. The returned string can later be restored with SETNULLS. Valid on all SQL table types; string size is file driver dependent (typically 4 × column count for SQL accelerators)."
         }
@@ -1015,7 +1389,10 @@
       "name": "SETNULLS",
       "signatures": [
         {
-          "params": ["FILE table", "STRING nullValue"],
+          "params": [
+            "FILE table",
+            "STRING nullValue"
+          ],
           "returnType": "",
           "description": "Sets the NULL state of every column in the SQL table using a string previously obtained from GETNULLS. Valid on all SQL table types. Posts ERRORCODE 75 if the string is too small or ERRORCODE 80 if not supported."
         }
@@ -1025,12 +1402,17 @@
       "name": "SETNULL",
       "signatures": [
         {
-          "params": ["field"],
+          "params": [
+            "field"
+          ],
           "returnType": "",
           "description": "Assigns a NULL value to a field in a FILE structure. If the field is a GROUP or RECORD, all component fields are set to null. Support is file driver dependent; the file must be open."
         },
         {
-          "params": ["FILE file", "field"],
+          "params": [
+            "FILE file",
+            "field"
+          ],
           "returnType": "",
           "description": "Assigns a NULL value to a field in a FILE structure, passing the file as an explicit reference parameter. Allows use with reference variables."
         }
@@ -1040,12 +1422,17 @@
       "name": "SETNONULL",
       "signatures": [
         {
-          "params": ["field"],
+          "params": [
+            "field"
+          ],
           "returnType": "",
           "description": "Assigns a non-null value (blank or zero) to a field in a FILE structure. If the field is a GROUP or RECORD, all component fields are set non-null. Support is file driver dependent."
         },
         {
-          "params": ["FILE file", "field"],
+          "params": [
+            "FILE file",
+            "field"
+          ],
           "returnType": "",
           "description": "Assigns a non-null value to a field in a FILE structure, passing the file as an explicit reference parameter."
         }
@@ -1055,12 +1442,17 @@
       "name": "CREATE",
       "signatures": [
         {
-          "params": ["FILE file"],
+          "params": [
+            "FILE file"
+          ],
           "returnType": "",
           "description": "Creates an empty data file with the structure defined in the FILE declaration. Overwrites existing file if it exists."
         },
         {
-          "params": ["FILE file", "LONG mode"],
+          "params": [
+            "FILE file",
+            "LONG mode"
+          ],
           "returnType": "",
           "description": "Creates an empty data file with a specific create mode. Mode controls file creation behavior and options."
         }
@@ -1071,8 +1463,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "STRING filename", "optional": false },
-            { "name": "STRING section", "optional": true }
+            {
+              "name": "STRING filename",
+              "optional": false
+            },
+            {
+              "name": "STRING section",
+              "optional": true
+            }
           ],
           "returnType": "",
           "description": "Compiler directive that includes source code from another file. Section parameter is optional - if omitted, includes entire file. If provided, includes only the specified SECTION. Extension .CLW assumed if omitted.",
@@ -1085,7 +1483,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "STRING program", "optional": true }
+            {
+              "name": "STRING program",
+              "optional": true
+            }
           ],
           "returnType": "",
           "description": "Compiler directive that identifies this source file as a MEMBER module. Program parameter is optional - omit for single-program applications, specify for multi-program solutions. Must appear at top of file before any MAP.",
@@ -1098,8 +1499,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "variable label", "optional": false },
-            { "name": "LONG n", "optional": true }
+            {
+              "name": "variable label",
+              "optional": false
+            },
+            {
+              "name": "LONG n",
+              "optional": true
+            }
           ],
           "returnType": "",
           "description": "Clears a variable, GROUP, RECORD, QUEUE, CLASS, or FILE. N parameter is optional - if omitted, clears to default values (0, blank, etc.). If n=1, sets to highest possible value (all ASCII 255). If n=-1, sets to lowest value (all ASCII 0). Arrays are cleared entirely.",
@@ -1132,8 +1539,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "STRING terminator", "optional": false },
-            { "name": "expression", "optional": true }
+            {
+              "name": "STRING terminator",
+              "optional": false
+            },
+            {
+              "name": "expression",
+              "optional": true
+            }
           ],
           "returnType": "",
           "description": "Compiler directive that omits a block of source code from compilation. Expression parameter is optional - if omitted, always omits code. If provided (typically an EQUATE), omits code conditionally when expression is TRUE. Block ends at the line containing the terminator string.",
@@ -1146,8 +1559,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "STRING terminator", "optional": false },
-            { "name": "expression", "optional": true }
+            {
+              "name": "STRING terminator",
+              "optional": false
+            },
+            {
+              "name": "expression",
+              "optional": true
+            }
           ],
           "returnType": "",
           "description": "Compiler directive that includes a block of source code in compilation. Expression parameter is optional - if omitted, always compiles code. If provided (typically an EQUATE), compiles code conditionally when expression is TRUE. Block ends at the line containing the terminator string.",
@@ -1169,7 +1588,9 @@
       "name": "MODULE",
       "signatures": [
         {
-          "params": ["STRING sourcefile"],
+          "params": [
+            "STRING sourcefile"
+          ],
           "returnType": "",
           "description": "Declares a module block within a MAP structure. Names a MEMBER source file or external library containing procedure definitions. Contains procedure prototypes and ends with END. Can only be used inside MAP...END blocks."
         }
@@ -1260,7 +1681,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "STRING character", "optional": false }
+            {
+              "name": "STRING character",
+              "optional": false
+            }
           ],
           "returnType": "BYTE | USHORT | SIGNED",
           "description": "Returns the numeric code of a character. Returns BYTE for ANSI strings, USHORT for Unicode strings, or SIGNED if type cannot be determined at compile time. Use TOANSI or TOUNICODE to force specific encoding."
@@ -1272,7 +1696,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "radians", "optional": false }
+            {
+              "name": "radians",
+              "optional": false
+            }
           ],
           "returnType": "REAL",
           "description": "Returns the trigonometric sine of an angle measured in radians. The sine is the ratio of the angle's opposite side divided by the hypotenuse. Convert degrees to radians by multiplying by 0.0174532925199 (Deg2Rad).",
@@ -1285,7 +1712,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "variable | constant | picture", "optional": false }
+            {
+              "name": "variable | constant | picture",
+              "optional": false
+            }
           ],
           "returnType": "LONG",
           "description": "Returns memory size in bytes of a variable, constant, or picture. Evaluated at compile time if size is known, otherwise at runtime. For reference variables, retrieves size from the variable. For arrays with variable dimensions, calculates based on element size and actual count."
@@ -1327,7 +1757,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "datatype", "optional": false }
+            {
+              "name": "datatype",
+              "optional": false
+            }
           ],
           "returnType": "reference",
           "description": "Allocates heap memory for a new instance of the specified data type. Used on source side of reference assignment (reference &= NEW(datatype)). Memory is automatically initialized to blank/zero and must be explicitly de-allocated with DISPOSE to prevent memory leaks. Parentheses around datatype are optional."
@@ -1339,9 +1772,18 @@
       "signatures": [
         {
           "params": [
-            { "name": "queue", "optional": false },
-            { "name": "path", "optional": false },
-            { "name": "attributes", "optional": false }
+            {
+              "name": "queue",
+              "optional": false
+            },
+            {
+              "name": "path",
+              "optional": false
+            },
+            {
+              "name": "attributes",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Gets a file directory listing into specified queue. Queue must have structure starting with name, date, time, size, attrib fields (see EQUATES.CLW for ff_:queue or FILE:queue). Path supports wildcards (* and ?). Attributes specify file types to include. Like DOS DIR command.",
@@ -1354,7 +1796,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "reference", "optional": false }
+            {
+              "name": "reference",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "De-allocates heap memory previously allocated by NEW statement. Failure to call DISPOSE creates memory leaks. Reference may be NULL with no ill effects. Warning: Disposing a reference still in use (e.g., QUEUE in LIST control) may cause GPF. DISPOSE(SELF) must be last statement in procedure."
@@ -1376,7 +1821,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "label", "optional": true }
+            {
+              "name": "label",
+              "optional": true
+            }
           ],
           "returnType": "",
           "description": "Transfers control back to top of LOOP or ACCEPT structure. Optional label allows cycling to outer nested loops. In ACCEPT loop, terminates certain automatic actions before performed (Iconize, Maximize, Move, Size, Restore, CloseWindow events)."
@@ -1388,16 +1836,28 @@
       "signatures": [
         {
           "params": [
-            { "name": "QUEUE queue", "optional": false },
-            { "name": "[+|-]key", "optional": false }
+            {
+              "name": "QUEUE queue",
+              "optional": false
+            },
+            {
+              "name": "[+|-]key",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Reorders entries in a QUEUE by specified key fields. Supports up to 16 keys separated by commas. Leading +/- indicates ascending/descending order. Keys must include PRE prefix if QUEUE has one. Entries with identical keys maintain relative position."
         },
         {
           "params": [
-            { "name": "QUEUE queue", "optional": false },
-            { "name": "STRING name", "optional": false }
+            {
+              "name": "QUEUE queue",
+              "optional": false
+            },
+            {
+              "name": "STRING name",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Reorders a QUEUE by field NAME attributes. The name string contains NAME attributes separated by commas with optional leading +/- for ascending/descending order. Case sensitive. Entries with identical values maintain relative position.",
@@ -1405,8 +1865,14 @@
         },
         {
           "params": [
-            { "name": "QUEUE queue", "optional": false },
-            { "name": "*? functionLabel", "optional": false }
+            {
+              "name": "QUEUE queue",
+              "optional": false
+            },
+            {
+              "name": "*? functionLabel",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Reorders a QUEUE using a custom comparison function. The function takes two *GROUP parameters (passed by address) and returns SIGNED: negative = first < second, zero = equal, positive = first > second. RAW, C, and PASCAL attributes are not permitted in the prototype declaration.",
@@ -1419,7 +1885,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "expression", "optional": true }
+            {
+              "name": "expression",
+              "optional": true
+            }
           ],
           "returnType": "",
           "description": "Terminates PROGRAM or PROCEDURE and returns control to caller. Expression required for procedures returning values (may be NULL for reference returns). Automatically closes local APPLICATION/WINDOW/REPORT/VIEW/QUEUE structures. Implicit RETURN occurs at end if not specified. Closes program and files when used in PROGRAM."
@@ -1431,7 +1900,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "key", "optional": false }
+            {
+              "name": "key",
+              "optional": false
+            }
           ],
           "returnType": "LONG",
           "description": "Checks for duplicate entries in a unique key. Returns 0 if no duplicate, non-zero if duplicate exists. Used after ADD or PUT operations to detect uniqueness violations. Can test specific KEY or entire FILE.",
@@ -1444,7 +1916,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "LONG parameter", "optional": false }
+            {
+              "name": "LONG parameter",
+              "optional": false
+            }
           ],
           "returnType": "LONG",
           "description": "Tests whether a procedure parameter was actually passed when called. Returns 1 (true) if parameter was omitted, 0 (false) if passed. Parameter is ordinal position number (1, 2, 3, etc.) or parameter name. Used to detect optional parameters in called procedures. Can test any parameter type including SELF, references, arrays, structures."
@@ -1455,7 +1930,9 @@
       "name": "FREE",
       "signatures": [
         {
-          "params": ["QUEUE queue"],
+          "params": [
+            "QUEUE queue"
+          ],
           "returnType": "",
           "description": "Deletes all entries from a QUEUE and deallocates memory. Does not clear the queue's data buffer. Important: If queue contains reference variables or ANY fields, CLEAR each entry before FREE to avoid memory leaks."
         }
@@ -1466,8 +1943,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "control first", "optional": true },
-            { "name": "control last", "optional": true }
+            {
+              "name": "control first",
+              "optional": true
+            },
+            {
+              "name": "control last",
+              "optional": true
+            }
           ],
           "returnType": "",
           "description": "Writes contents of USE variables to their associated controls. All parameters optional - if omitted, displays all controls. If first only, displays that control. If both provided, displays range from first to last. Controls can be field numbers or field equate labels.",
@@ -1490,7 +1973,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "string", "optional": false }
+            {
+              "name": "string",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Compiler directive that sends project system statements from source code. Format: PRAGMA('project(statement)'), PRAGMA('compile(options)'), or PRAGMA('link(options)'). Dynamically adds pragma settings to project. Commonly used to control compilation, linking, and optimization settings from within code.",
@@ -1503,7 +1989,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "value", "optional": false }
+            {
+              "name": "value",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Assigns a label to a constant value, picture token, data type, or another label. Creates compile-time constant that uses no runtime memory. Used for readability and maintainability (e.g., TRUE EQUATE(1), PI EQUATE(3.1415927)). Cannot equate to itself. In ITEMIZE structure, value parameter is optional.",
@@ -1536,7 +2025,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "expression", "optional": false }
+            {
+              "name": "expression",
+              "optional": false
+            }
           ],
           "returnType": "REAL",
           "description": "Returns the inverse tangent (arctangent). The inverse of a tangent is the angle that produces the tangent. Return value is angle in radians. Used for trigonometric calculations. There are 2π radians (360 degrees) in a circle.",
@@ -1549,8 +2041,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "value", "optional": false },
-            { "name": "mask", "optional": false }
+            {
+              "name": "value",
+              "optional": false
+            },
+            {
+              "name": "mask",
+              "optional": false
+            }
           ],
           "returnType": "LONG",
           "description": "Performs bitwise AND operation. Returns LONG with 1 in bit positions where both value and mask contain 1, zeroes elsewhere. Used to test if specific bits are on/off. Both parameters converted to LONG if necessary.",
@@ -1563,8 +2061,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "value", "optional": false },
-            { "name": "mask", "optional": false }
+            {
+              "name": "value",
+              "optional": false
+            },
+            {
+              "name": "mask",
+              "optional": false
+            }
           ],
           "returnType": "LONG",
           "description": "Performs bitwise OR operation. Returns LONG with 1 in bit positions where value, mask, or both contain 1, zeroes elsewhere. Used to unconditionally turn on (set to 1) specific bits. Both parameters converted to LONG if necessary.",
@@ -1577,8 +2081,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "value", "optional": false },
-            { "name": "mask", "optional": false }
+            {
+              "name": "value",
+              "optional": false
+            },
+            {
+              "name": "mask",
+              "optional": false
+            }
           ],
           "returnType": "LONG",
           "description": "Performs bitwise exclusive OR operation. Returns LONG with 1 in bit positions where value and mask differ, 0 where they match. Used to toggle bits or compare bit patterns. Both parameters converted to LONG if necessary.",
@@ -1591,8 +2101,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "value", "optional": false },
-            { "name": "count", "optional": false }
+            {
+              "name": "value",
+              "optional": false
+            },
+            {
+              "name": "count",
+              "optional": false
+            }
           ],
           "returnType": "LONG",
           "description": "Performs bit shift operation. Positive count shifts left (toward high order), negative shifts right (toward low order). Zero bits fill vacated positions. Returns shifted LONG value. Shifting left by N multiplies by 2^N, right divides by 2^N.",
@@ -1605,7 +2121,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "variable", "optional": false }
+            {
+              "name": "variable",
+              "optional": false
+            }
           ],
           "returnType": "LONG",
           "description": "Returns the memory address of a variable or PROCEDURE. Used to pass addresses to external libraries written in other languages, or for reference assignment. Parameter can be any data item label or PROCEDURE name.",
@@ -1640,7 +2159,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "expression", "optional": false }
+            {
+              "name": "expression",
+              "optional": false
+            }
           ],
           "returnType": "REAL",
           "description": "Returns the inverse sine (arcsine). The inverse of a sine is the angle that produces the sine. Return value is angle in radians. Used for trigonometric calculations. There are 2π radians (360 degrees) in a circle.",
@@ -1653,8 +2175,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "expression", "optional": false },
-            { "name": "message", "optional": true }
+            {
+              "name": "expression",
+              "optional": false
+            },
+            {
+              "name": "message",
+              "optional": true
+            }
           ],
           "returnType": "",
           "description": "Debugging statement that evaluates an expression that should always be TRUE. If FALSE and debug is on, displays error message with line number and source file. Optional message parameter (up to 64K) shown in dialog. Use to catch erroneous assumptions. Enable in release builds with project define: asserts=>on",
@@ -1700,7 +2228,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "expression", "optional": false }
+            {
+              "name": "expression",
+              "optional": false
+            }
           ],
           "returnType": "REAL or DECIMAL",
           "description": "Returns the integer portion of a numeric expression. No rounding is performed - simply truncates the fractional part. Sign remains unchanged. Example: INT(8.5) returns 8, INT(-5.9) returns -5.",
@@ -1713,8 +2244,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "expression", "optional": false },
-            { "name": "order", "optional": false }
+            {
+              "name": "expression",
+              "optional": false
+            },
+            {
+              "name": "order",
+              "optional": false
+            }
           ],
           "returnType": "DECIMAL or REAL",
           "description": "Returns value rounded to a power of ten. Order specifies rounding precision (1, 10, 100, 0.1, 0.01, etc.). If order not exact power of 10, uses next lowest. Efficient as BCD operation when order is LONG or DECIMAL. Example: ROUND(5163,100) returns 5200, ROUND(51.64,.01) returns 51.64",
@@ -1727,7 +2264,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "character", "optional": false }
+            {
+              "name": "character",
+              "optional": false
+            }
           ],
           "returnType": "BYTE, USHORT or SIGNED",
           "description": "Returns the numeric code of a character. Returns BYTE for ANSI strings, USHORT for Unicode strings, or SIGNED if type can't be determined. Use TOANSI or TOUNICODE to force specific encoding. Example: VAL('A') returns 65, VAL('Ж') returns 1046",
@@ -1740,8 +2280,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "code", "optional": false },
-            { "name": "unicode", "optional": true }
+            {
+              "name": "code",
+              "optional": false
+            },
+            {
+              "name": "unicode",
+              "optional": true
+            }
           ],
           "returnType": "STRING (ANSI or Unicode character)",
           "description": "Returns single ANSI or Unicode character for given numeric code. If unicode parameter omitted or zero, returns ANSI character. If unicode is non-zero, returns Unicode character. Example: CHR(65) returns 'A', CHR(1046,1) returns Cyrillic 'Ж'",
@@ -1754,7 +2300,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "label", "optional": false }
+            {
+              "name": "label",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Executes a ROUTINE local to PROGRAM or PROCEDURE. When ROUTINE completes, control returns to statement following DO. ROUTINE can only be called within CODE section containing it. Use EXIT to leave ROUTINE early, or let it complete naturally.",
@@ -1789,7 +2338,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "expression", "optional": false }
+            {
+              "name": "expression",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Single statement execution structure. Executes statement at position based on expression value (1=first, 2=second, etc.). Can use BEGIN/END for multi-statement blocks. Optional ELSE clause for out-of-range values. More efficient than IF/ELSIF or CASE for numeric selection. Must terminate with END.",
@@ -1813,8 +2365,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "string", "optional": false },
-            { "name": "length", "optional": true }
+            {
+              "name": "string",
+              "optional": false
+            },
+            {
+              "name": "length",
+              "optional": true
+            }
           ],
           "returnType": "STRING",
           "description": "Returns string containing repetitions of character sequence. If length omitted, returns 255 characters. Useful for creating padding, separators, or initialized strings. Example: ALL('*',25) returns 25 asterisks, ALL('.') returns 255 dots.",
@@ -1827,10 +2385,22 @@
       "signatures": [
         {
           "params": [
-            { "name": "substring", "optional": false },
-            { "name": "string", "optional": false },
-            { "name": "step", "optional": true },
-            { "name": "start", "optional": true }
+            {
+              "name": "substring",
+              "optional": false
+            },
+            {
+              "name": "string",
+              "optional": false
+            },
+            {
+              "name": "step",
+              "optional": true
+            },
+            {
+              "name": "start",
+              "optional": true
+            }
           ],
           "returnType": "UNSIGNED",
           "description": "Searches for substring in string. Returns position (0 if not found). Step controls search interval (1=every char, 2=every other char, -1=right-to-left). Start specifies starting position. Returns step number when found, not character position if step > 1. Should CLIP variable substring to avoid trailing space matches.",
@@ -1843,7 +2413,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "label", "optional": true }
+            {
+              "name": "label",
+              "optional": true
+            }
           ],
           "returnType": "",
           "description": "Immediately exits LOOP or ACCEPT structure and transfers control to first statement after terminator (END/WHILE/UNTIL). Optional label allows breaking out of nested loops by specifying which loop to exit. Only valid within LOOP or ACCEPT structures.",
@@ -1867,8 +2440,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "address", "optional": false },
-            { "name": "destination", "optional": false }
+            {
+              "name": "address",
+              "optional": false
+            },
+            {
+              "name": "destination",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Reads data from memory address into destination variable. Reads as many bytes as needed to fill destination. Use ADDRESS() to get correct address. DANGEROUS: Can cause GPF if reading invalid address. Use Windows API procedures instead when possible.",
@@ -1881,7 +2460,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "string", "optional": false }
+            {
+              "name": "string",
+              "optional": false
+            }
           ],
           "returnType": "UNSIGNED",
           "description": "Returns 1 (true) if string contains only valid numeric characters (0-9, E, leading minus, decimal point), otherwise returns 0 (false). Accepts REAL format (e.g., '1.23E-4'). Use DEFORMAT to remove formatting before testing. Example: NUMERIC('1234.56') returns 1, NUMERIC('1,234.56') returns 0.",
@@ -1894,7 +2476,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "field", "optional": false }
+            {
+              "name": "field",
+              "optional": false
+            }
           ],
           "returnType": "LONG",
           "description": "Tests if database field contains null value. Returns non-zero (true) if field is null, zero (false) if field has known value (including blank/zero). For GROUP/RECORD, all components must be null to return true. Also used as constant for null reference assignment (e.g., variable &= NULL).",
@@ -1940,7 +2525,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "date", "optional": false }
+            {
+              "name": "date",
+              "optional": false
+            }
           ],
           "returnType": "LONG",
           "description": "Returns day of month (1-31) from standard date. Date parameter can be numeric, variable, expression, or STRING with date picture token. Automatically converts date picture to standard date.",
@@ -1953,7 +2541,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "date", "optional": false }
+            {
+              "name": "date",
+              "optional": false
+            }
           ],
           "returnType": "LONG",
           "description": "Returns month of year (1-12) from standard date. Date parameter can be numeric, variable, expression, or STRING with date picture token. Automatically converts date picture to standard date.",
@@ -1966,7 +2557,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "date", "optional": false }
+            {
+              "name": "date",
+              "optional": false
+            }
           ],
           "returnType": "LONG",
           "description": "Returns four-digit year (1801-9999) from standard date. Date parameter can be numeric, variable, expression, or STRING with date picture token. Automatically converts date picture to standard date.",
@@ -1979,9 +2573,18 @@
       "signatures": [
         {
           "params": [
-            { "name": "group", "optional": false },
-            { "name": "number", "optional": false },
-            { "name": "dimension", "optional": true }
+            {
+              "name": "group",
+              "optional": false
+            },
+            {
+              "name": "number",
+              "optional": false
+            },
+            {
+              "name": "dimension",
+              "optional": true
+            }
           ],
           "returnType": "ANY",
           "description": "Returns reference to field at ordinal position in GROUP/RECORD/CLASS/QUEUE. Used for runtime introspection. Assign to ANY variable. For dimensioned fields, dimension parameter specifies array element. Returns NULL if invalid position.",
@@ -1994,8 +2597,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "group", "optional": false },
-            { "name": "number", "optional": false }
+            {
+              "name": "group",
+              "optional": false
+            },
+            {
+              "name": "number",
+              "optional": false
+            }
           ],
           "returnType": "STRING",
           "description": "Returns field name at ordinal position in GROUP/RECORD/CLASS/QUEUE. Returns NAME attribute value if specified, otherwise returns field label. Used for runtime introspection and serialization. Group must have BINDABLE attribute.",
@@ -2008,7 +2617,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "queue", "optional": false }
+            {
+              "name": "queue",
+              "optional": false
+            }
           ],
           "returnType": "LONG",
           "description": "Returns entry number of last QUEUE entry accessed by ADD, GET, or PUT. Only valid if operation succeeded. Used to track current position in queue or pass position between routines.",
@@ -2021,8 +2633,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "label", "optional": false },
-            { "name": "element", "optional": false }
+            {
+              "name": "label",
+              "optional": false
+            },
+            {
+              "name": "element",
+              "optional": false
+            }
           ],
           "returnType": "SIGNED",
           "description": "Returns true if element at ordinal position in GROUP/QUEUE is a GROUP data type. Returns false otherwise. Used for runtime type checking and generic serialization routines.",
@@ -2035,9 +2653,18 @@
       "signatures": [
         {
           "params": [
-            { "name": "group", "optional": false },
-            { "name": "number", "optional": false },
-            { "name": "dimension", "optional": true }
+            {
+              "name": "group",
+              "optional": false
+            },
+            {
+              "name": "number",
+              "optional": false
+            },
+            {
+              "name": "dimension",
+              "optional": true
+            }
           ],
           "returnType": "STRING",
           "description": "Returns GROUP reference to field at ordinal position in GROUP/QUEUE. For dimensioned groups, dimension parameter required. Returns NULL if not a GROUP or if dimensioned group without dimension specified. Used for nested structure access.",
@@ -2050,8 +2677,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "label", "optional": false },
-            { "name": "element", "optional": false }
+            {
+              "name": "label",
+              "optional": false
+            },
+            {
+              "name": "element",
+              "optional": false
+            }
           ],
           "returnType": "LONG",
           "description": "Returns number of dimensions for field at ordinal position in GROUP/QUEUE/RECORD. Multi-dimensional arrays are flattened (e.g., DIM(3,3) returns 9). Returns 0 for non-dimensioned fields or fields within dimensioned groups.",
@@ -2064,7 +2697,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "message", "optional": true }
+            {
+              "name": "message",
+              "optional": true
+            }
           ],
           "returnType": "",
           "description": "Suspends program execution and displays message window. Offers option to continue or exit. On exit, closes all files and frees memory. Used for debugging and error handling. Message can be up to 64K.",
@@ -2077,9 +2713,18 @@
       "signatures": [
         {
           "params": [
-            { "name": "procedure", "optional": false },
-            { "name": "stack", "optional": true },
-            { "name": "passed value", "optional": true }
+            {
+              "name": "procedure",
+              "optional": false
+            },
+            {
+              "name": "stack",
+              "optional": true
+            },
+            {
+              "name": "passed value",
+              "optional": true
+            }
           ],
           "returnType": "SIGNED",
           "description": "Begins a new execution thread, calling the procedure and returning the thread number (minimum 2). Procedure may not be overloaded. Can pass up to three STRING or GROUP parameters by value. Stack defaults to 20,000 bytes if omitted. Returns 0 on failure (out of memory or system modal). Code continues immediately after START until ACCEPT is executed.",
@@ -2092,9 +2737,18 @@
       "signatures": [
         {
           "params": [
-            { "name": "first", "optional": false },
-            { "name": "second", "optional": false },
-            { "name": "mode", "optional": true }
+            {
+              "name": "first",
+              "optional": false
+            },
+            {
+              "name": "second",
+              "optional": false
+            },
+            {
+              "name": "mode",
+              "optional": true
+            }
           ],
           "returnType": "LONG",
           "description": "Returns starting position of substring match using regular expression. Second parameter contains regex pattern. Mode parameter: 0=case sensitive (default), 1=case insensitive. Uses Match:Regular mode. Returns 0 if no match found.",
@@ -2107,8 +2761,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "string", "optional": false },
-            { "name": "length", "optional": true }
+            {
+              "name": "string",
+              "optional": false
+            },
+            {
+              "name": "length",
+              "optional": true
+            }
           ],
           "returnType": "STRING",
           "description": "Returns left-justified string. Removes leading spaces, pads trailing spaces to specified length. If length omitted, uses string length. Use CLIP(LEFT()) to remove both leading and trailing spaces.",
@@ -2132,7 +2792,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "expression", "optional": false }
+            {
+              "name": "expression",
+              "optional": false
+            }
           ],
           "returnType": "REAL",
           "description": "Returns the base 10 logarithm of an expression. The base 10 logarithm is the power to which 10 must be raised to equal the value. Returns 0 if expression is zero or less (logarithm undefined for values ≤ 0). Example: LOG10(10) returns 1, LOG10(1) returns 0.",
@@ -2145,7 +2808,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "expression", "optional": false }
+            {
+              "name": "expression",
+              "optional": false
+            }
           ],
           "returnType": "REAL",
           "description": "Returns the natural logarithm of an expression. The natural logarithm is the power to which e (2.71828182846) must be raised to equal the value. Returns 0 if expression is less than zero (logarithm undefined for values < 0). Example: LOGE(2.71828) returns 1, LOGE(1) returns 0.",
@@ -2158,9 +2824,18 @@
       "signatures": [
         {
           "params": [
-            { "name": "timeout", "optional": false },
-            { "name": "fileLabel1", "optional": false },
-            { "name": "fileLabel2, ...", "optional": true }
+            {
+              "name": "timeout",
+              "optional": false
+            },
+            {
+              "name": "fileLabel1",
+              "optional": false
+            },
+            {
+              "name": "fileLabel2, ...",
+              "optional": true
+            }
           ],
           "returnType": "",
           "description": "Initiates transaction processing for one or more files. All files must share the same file driver and must already be open. Up to 100 files may be specified. The timeout parameter specifies how many seconds to attempt to begin the transaction before aborting with an error. Alternatively, set PROP:Logout on each file and call LOGOUT with no file parameters.",
@@ -2173,9 +2848,18 @@
       "signatures": [
         {
           "params": [
-            { "name": "first", "optional": false },
-            { "name": "second", "optional": false },
-            { "name": "mode", "optional": true }
+            {
+              "name": "first",
+              "optional": false
+            },
+            {
+              "name": "second",
+              "optional": false
+            },
+            {
+              "name": "mode",
+              "optional": true
+            }
           ],
           "returnType": "SIGNED",
           "description": "Returns true/false based on pattern match. Modes: Match:Simple (exact match), Match:Wild (wildcards * and ?), Match:Regular (regex). Default is Match:Wild. Can combine with Match:NoCase for case-insensitive matching.",
@@ -2188,13 +2872,34 @@
       "signatures": [
         {
           "params": [
-            { "name": "x", "optional": false },
-            { "name": "y", "optional": false },
-            { "name": "width", "optional": false },
-            { "name": "height", "optional": false },
-            { "name": "startangle", "optional": false },
-            { "name": "endangle", "optional": false },
-            { "name": "attributelist", "optional": true }
+            {
+              "name": "x",
+              "optional": false
+            },
+            {
+              "name": "y",
+              "optional": false
+            },
+            {
+              "name": "width",
+              "optional": false
+            },
+            {
+              "name": "height",
+              "optional": false
+            },
+            {
+              "name": "startangle",
+              "optional": false
+            },
+            {
+              "name": "endangle",
+              "optional": false
+            },
+            {
+              "name": "attributelist",
+              "optional": true
+            }
           ],
           "returnType": "none",
           "description": "Draws an arc of an ellipse on the current window or report. The ellipse is drawn inside a bounding box defined by x, y, width, height. Angles are in tenths of degrees (10 = 1 degree) measured counter-clockwise from three o'clock. Border uses current pen color, width, and style set by SETPENCOLOR/SETPENWIDTH/SETPENSTYLE.",
@@ -2207,12 +2912,30 @@
       "signatures": [
         {
           "params": [
-            { "name": "x", "optional": false },
-            { "name": "y", "optional": false },
-            { "name": "width", "optional": false },
-            { "name": "height", "optional": false },
-            { "name": "fill", "optional": true },
-            { "name": "attributelist", "optional": true }
+            {
+              "name": "x",
+              "optional": false
+            },
+            {
+              "name": "y",
+              "optional": false
+            },
+            {
+              "name": "width",
+              "optional": false
+            },
+            {
+              "name": "height",
+              "optional": false
+            },
+            {
+              "name": "fill",
+              "optional": true
+            },
+            {
+              "name": "attributelist",
+              "optional": true
+            }
           ],
           "returnType": "none",
           "description": "Draws a rectangular box on the current window or report. The fill parameter is a LONG RGB color value (e.g. 00FF0000h for red). Border uses current pen color, width, and style. Valid in Win32 windows and REPORT structures.",
@@ -2225,14 +2948,38 @@
       "signatures": [
         {
           "params": [
-            { "name": "x", "optional": false },
-            { "name": "y", "optional": false },
-            { "name": "width", "optional": false },
-            { "name": "height", "optional": false },
-            { "name": "startangle", "optional": false },
-            { "name": "endangle", "optional": false },
-            { "name": "fill", "optional": true },
-            { "name": "attributelist", "optional": true }
+            {
+              "name": "x",
+              "optional": false
+            },
+            {
+              "name": "y",
+              "optional": false
+            },
+            {
+              "name": "width",
+              "optional": false
+            },
+            {
+              "name": "height",
+              "optional": false
+            },
+            {
+              "name": "startangle",
+              "optional": false
+            },
+            {
+              "name": "endangle",
+              "optional": false
+            },
+            {
+              "name": "fill",
+              "optional": true
+            },
+            {
+              "name": "attributelist",
+              "optional": true
+            }
           ],
           "returnType": "none",
           "description": "Draws a closed sector of an ellipse (chord) on the current window or report. The two arc endpoints are connected by a straight line. Angles in tenths of degrees counter-clockwise from three o'clock. Border uses current pen color, width, and style.",
@@ -2245,12 +2992,30 @@
       "signatures": [
         {
           "params": [
-            { "name": "x", "optional": false },
-            { "name": "y", "optional": false },
-            { "name": "width", "optional": false },
-            { "name": "height", "optional": false },
-            { "name": "fill", "optional": true },
-            { "name": "attributelist", "optional": true }
+            {
+              "name": "x",
+              "optional": false
+            },
+            {
+              "name": "y",
+              "optional": false
+            },
+            {
+              "name": "width",
+              "optional": false
+            },
+            {
+              "name": "height",
+              "optional": false
+            },
+            {
+              "name": "fill",
+              "optional": true
+            },
+            {
+              "name": "attributelist",
+              "optional": true
+            }
           ],
           "returnType": "none",
           "description": "Draws an ellipse on the current window or report inside a bounding box defined by x, y, width, height. The fill parameter is a LONG RGB color value. Border uses current pen color, width, and style. Valid in Win32 windows and REPORT structures.",
@@ -2263,11 +3028,26 @@
       "signatures": [
         {
           "params": [
-            { "name": "x", "optional": false },
-            { "name": "y", "optional": false },
-            { "name": "width", "optional": false },
-            { "name": "height", "optional": false },
-            { "name": "attributelist", "optional": true }
+            {
+              "name": "x",
+              "optional": false
+            },
+            {
+              "name": "y",
+              "optional": false
+            },
+            {
+              "name": "width",
+              "optional": false
+            },
+            {
+              "name": "height",
+              "optional": false
+            },
+            {
+              "name": "attributelist",
+              "optional": true
+            }
           ],
           "returnType": "none",
           "description": "Draws a straight line on the current window or report. x, y specify the starting point; width and height specify horizontal and vertical distance to the end point (may be negative). Line uses current pen color, width, and style. Valid in Win32 windows and REPORT structures.",
@@ -2313,16 +3093,46 @@
       "signatures": [
         {
           "params": [
-            { "name": "x", "optional": false },
-            { "name": "y", "optional": false },
-            { "name": "width", "optional": false },
-            { "name": "height", "optional": false },
-            { "name": "slices", "optional": false },
-            { "name": "colors", "optional": false },
-            { "name": "depth", "optional": true },
-            { "name": "wholevalue", "optional": true },
-            { "name": "startangle", "optional": true },
-            { "name": "attributelist", "optional": true }
+            {
+              "name": "x",
+              "optional": false
+            },
+            {
+              "name": "y",
+              "optional": false
+            },
+            {
+              "name": "width",
+              "optional": false
+            },
+            {
+              "name": "height",
+              "optional": false
+            },
+            {
+              "name": "slices",
+              "optional": false
+            },
+            {
+              "name": "colors",
+              "optional": false
+            },
+            {
+              "name": "depth",
+              "optional": true
+            },
+            {
+              "name": "wholevalue",
+              "optional": true
+            },
+            {
+              "name": "startangle",
+              "optional": true
+            },
+            {
+              "name": "attributelist",
+              "optional": true
+            }
           ],
           "returnType": "none",
           "description": "Draws a pie chart on the current window or report. slices is a SIGNED array of relative slice sizes; colors is a LONG array of RGB fill colors. depth adds a 3D effect; wholevalue sets the total for a full circle (default: sum of slices); startangle sets the first slice start as a fraction of wholevalue. Valid in Win32 windows and REPORT structures.",
@@ -2335,9 +3145,18 @@
       "signatures": [
         {
           "params": [
-            { "name": "array", "optional": false },
-            { "name": "fill", "optional": true },
-            { "name": "attributelist", "optional": true }
+            {
+              "name": "array",
+              "optional": false
+            },
+            {
+              "name": "fill",
+              "optional": true
+            },
+            {
+              "name": "attributelist",
+              "optional": true
+            }
           ],
           "returnType": "none",
           "description": "Draws a multi-sided closed figure on the current window or report. array is a SIGNED integer array of alternating x, y corner coordinates (pairs); total corners = array elements / 2. Border uses current pen color, width, and style. Valid in Win32 windows and REPORT structures.",
@@ -2350,12 +3169,30 @@
       "signatures": [
         {
           "params": [
-            { "name": "x", "optional": false },
-            { "name": "y", "optional": false },
-            { "name": "width", "optional": false },
-            { "name": "height", "optional": false },
-            { "name": "fill", "optional": true },
-            { "name": "attributelist", "optional": true }
+            {
+              "name": "x",
+              "optional": false
+            },
+            {
+              "name": "y",
+              "optional": false
+            },
+            {
+              "name": "width",
+              "optional": false
+            },
+            {
+              "name": "height",
+              "optional": false
+            },
+            {
+              "name": "fill",
+              "optional": true
+            },
+            {
+              "name": "attributelist",
+              "optional": true
+            }
           ],
           "returnType": "none",
           "description": "Draws a rectangular box with rounded corners on the current window or report. The fill parameter is a LONG RGB color value. Border uses current pen color, width, and style. Valid in Win32 windows and REPORT structures.",
@@ -2368,7 +3205,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "color", "optional": true }
+            {
+              "name": "color",
+              "optional": true
+            }
           ],
           "returnType": "none",
           "description": "Sets the current pen color for all graphics procedures. color is a LONG RGB value (e.g. 000000FFh for blue). If omitted, resets to the Windows system window-text color. Each window has its own pen color. Valid in Win32 windows and REPORT structures.",
@@ -2381,7 +3221,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "style", "optional": true }
+            {
+              "name": "style",
+              "optional": true
+            }
           ],
           "returnType": "none",
           "description": "Sets the current line draw style for all graphics procedures. Style equates (PEN:solid, PEN:dash, PEN:dot, PEN:dashdot etc.) are defined in EQUATES.CLW. If omitted, resets to solid. Each window has its own pen style. Valid in Win32 windows and REPORT structures.",
@@ -2394,7 +3237,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "width", "optional": true }
+            {
+              "name": "width",
+              "optional": true
+            }
           ],
           "returnType": "none",
           "description": "Sets the current pen thickness for all graphics procedures, measured in dialog units (or THOUS/MM/POINTS units on a REPORT). Default (one pixel) is set when width is 0 or omitted. Each window has its own pen width. Valid in Win32 windows and REPORT structures.",
@@ -2407,7 +3253,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "name", "optional": false }
+            {
+              "name": "name",
+              "optional": false
+            }
           ],
           "returnType": "STRING",
           "description": "Returns an image object for a named file or resource. The returned image object can be assigned to any OLE/OCX control that accepts an image (e.g. a VB ImageList control). Used with ActiveX/OCX controls in Clarion windows.",
@@ -2420,8 +3269,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "control", "optional": false },
-            { "name": "procedure", "optional": false }
+            {
+              "name": "control",
+              "optional": false
+            },
+            {
+              "name": "procedure",
+              "optional": false
+            }
           ],
           "returnType": "none",
           "description": "Installs an OCX event callback procedure for an OLE control. The callback is called whenever the operating system posts any event for the control. control is the field number or equate label of the OLE control; procedure is the label of the callback.",
@@ -2434,8 +3289,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "control", "optional": false },
-            { "name": "procedure", "optional": false }
+            {
+              "name": "control",
+              "optional": false
+            },
+            {
+              "name": "procedure",
+              "optional": false
+            }
           ],
           "returnType": "none",
           "description": "Installs a property change callback procedure for an OLE/OCX control. The callback is called whenever a property of the control changes. control is the field number or equate label; procedure is the label of the callback.",
@@ -2448,8 +3309,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "control", "optional": false },
-            { "name": "procedure", "optional": false }
+            {
+              "name": "control",
+              "optional": false
+            },
+            {
+              "name": "procedure",
+              "optional": false
+            }
           ],
           "returnType": "none",
           "description": "Installs a property edit callback function for an OLE/OCX control. The callback controls property edits to the control by allowing or disallowing them. control is the field number or equate label; procedure is the label of the callback.",
@@ -2462,9 +3329,18 @@
       "signatures": [
         {
           "params": [
-            { "name": "reference", "optional": false },
-            { "name": "number", "optional": false },
-            { "name": "value", "optional": false }
+            {
+              "name": "reference",
+              "optional": false
+            },
+            {
+              "name": "number",
+              "optional": false
+            },
+            {
+              "name": "value",
+              "optional": false
+            }
           ],
           "returnType": "none",
           "description": "Sets the value of a parameter associated with the current OCX event inside an event callback procedure. reference is the label of the first callback parameter; number is the 1-based parameter index to set; value is the new string value. Only allowed for parameters passed by address; ignored otherwise.",
@@ -2477,7 +3353,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "control", "optional": false }
+            {
+              "name": "control",
+              "optional": false
+            }
           ],
           "returnType": "none",
           "description": "Uninstalls the OCX event callback procedure previously registered with OCXREGISTEREVENTPROC for the specified OLE control. control is the field number or equate label of the OLE control.",
@@ -2490,7 +3369,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "control", "optional": false }
+            {
+              "name": "control",
+              "optional": false
+            }
           ],
           "returnType": "none",
           "description": "Uninstalls the property change callback procedure previously registered with OCXREGISTERPROPCHANGE for the specified OLE control. control is the field number or equate label of the OLE control.",
@@ -2503,7 +3385,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "control", "optional": false }
+            {
+              "name": "control",
+              "optional": false
+            }
           ],
           "returnType": "none",
           "description": "Uninstalls the property edit callback procedure previously registered with OCXREGISTERPROPEDIT for the specified OLE control. control is the field number or equate label of the OLE control.",
@@ -2516,9 +3401,18 @@
       "signatures": [
         {
           "params": [
-            { "name": "list", "optional": false },
-            { "name": "flag", "optional": false },
-            { "name": "bits", "optional": true }
+            {
+              "name": "list",
+              "optional": false
+            },
+            {
+              "name": "flag",
+              "optional": false
+            },
+            {
+              "name": "bits",
+              "optional": true
+            }
           ],
           "returnType": "none",
           "description": "Populates a QUEUE with a list of all installed OLE servers or OCX controls. list must be declared matching the OleQ QUEUE structure in EQUATES.CLW (Name, CLSID, ProgID fields). flag: 0 = OLE servers, 1 = OCX controls. bits: 1 = 16-bit, 2 = 32-bit, 3 = both (default for current platform).",
@@ -2531,9 +3425,18 @@
       "signatures": [
         {
           "params": [
-            { "name": "root", "optional": false },
-            { "name": "keyname", "optional": false },
-            { "name": "valuename", "optional": true }
+            {
+              "name": "root",
+              "optional": false
+            },
+            {
+              "name": "keyname",
+              "optional": false
+            },
+            {
+              "name": "valuename",
+              "optional": true
+            }
           ],
           "returnType": "none",
           "description": "Deletes a value or entire key from the Windows registry. root is a REG_* equate (e.g. REG_CURRENT_USER, REG_LOCAL_MACHINE) from EQUATES.CLW. If valuename is omitted, the entire key is deleted. On Vista+, write access to HKLM requires elevated privileges; use HKCU for non-elevated apps.",
@@ -2546,10 +3449,22 @@
       "signatures": [
         {
           "params": [
-            { "name": "root", "optional": false },
-            { "name": "keyname", "optional": false },
-            { "name": "valuename", "optional": true },
-            { "name": "*?valuetype", "optional": true }
+            {
+              "name": "root",
+              "optional": false
+            },
+            {
+              "name": "keyname",
+              "optional": false
+            },
+            {
+              "name": "valuename",
+              "optional": true
+            },
+            {
+              "name": "*?valuetype",
+              "optional": true
+            }
           ],
           "returnType": "STRING",
           "description": "Returns the value of a Windows registry entry as a Clarion string. root is a REG_* equate (REG_CURRENT_USER, REG_LOCAL_MACHINE, etc.) from EQUATES.CLW. keyname may contain backslash-separated path segments. Optional valuetype variable receives the value type (REG_SZ, REG_DWORD, REG_BINARY, etc.). Returns empty string if the entry does not exist.",
@@ -2562,9 +3477,18 @@
       "signatures": [
         {
           "params": [
-            { "name": "root", "optional": false },
-            { "name": "keyName", "optional": false },
-            { "name": "subkeyQueue", "optional": false }
+            {
+              "name": "root",
+              "optional": false
+            },
+            {
+              "name": "keyName",
+              "optional": false
+            },
+            {
+              "name": "subkeyQueue",
+              "optional": false
+            }
           ],
           "returnType": "none",
           "description": "Collects the names of all sub-keys for a given Windows registry key into a QUEUE. root is a REG_* equate from EQUATES.CLW; keyName is the path to the parent key; subkeyQueue is a reference to a QUEUE that receives the sub-key name strings. Returns an empty QUEUE if the key does not exist.",
@@ -2577,9 +3501,18 @@
       "signatures": [
         {
           "params": [
-            { "name": "root", "optional": false },
-            { "name": "keyName", "optional": false },
-            { "name": "valueQueue", "optional": false }
+            {
+              "name": "root",
+              "optional": false
+            },
+            {
+              "name": "keyName",
+              "optional": false
+            },
+            {
+              "name": "valueQueue",
+              "optional": false
+            }
           ],
           "returnType": "none",
           "description": "Collects the names of all values under a given Windows registry key into a QUEUE. root is a REG_* equate from EQUATES.CLW; keyName is the path to the key; valueQueue is a reference to a QUEUE that receives the value name strings. Returns an empty QUEUE if the key does not exist.",
@@ -2592,11 +3525,26 @@
       "signatures": [
         {
           "params": [
-            { "name": "root", "optional": false },
-            { "name": "keyname", "optional": false },
-            { "name": "valuename", "optional": false },
-            { "name": "value", "optional": true },
-            { "name": "valuetype", "optional": true }
+            {
+              "name": "root",
+              "optional": false
+            },
+            {
+              "name": "keyname",
+              "optional": false
+            },
+            {
+              "name": "valuename",
+              "optional": false
+            },
+            {
+              "name": "value",
+              "optional": true
+            },
+            {
+              "name": "valuetype",
+              "optional": true
+            }
           ],
           "returnType": "LONG",
           "description": "Writes a value to the Windows registry. root is a REG_* equate (REG_CURRENT_USER, REG_LOCAL_MACHINE, etc.) from EQUATES.CLW. The key and value are created if they do not exist. valuetype defaults to REG_SZ; supported types include REG_DWORD, REG_BINARY, REG_MULTI_SZ, etc. Returns 0 on success, non-zero on failure. On Vista+, write access to HKLM requires elevated privileges.",
@@ -2609,10 +3557,22 @@
       "signatures": [
         {
           "params": [
-            { "name": "section", "optional": false },
-            { "name": "entry", "optional": false },
-            { "name": "default", "optional": true },
-            { "name": "file", "optional": true }
+            {
+              "name": "section",
+              "optional": false
+            },
+            {
+              "name": "entry",
+              "optional": false
+            },
+            {
+              "name": "default",
+              "optional": true
+            },
+            {
+              "name": "file",
+              "optional": true
+            }
           ],
           "returnType": "STRING",
           "description": "Returns the value of an entry from a Windows-standard INI file (max 64KB). section and entry identify the [section] and key name. default is returned when the entry does not exist. file specifies the INI filename; a bare name (e.g. 'App.ini') looks in the Windows directory; prefix with '.\\' to search the current directory. If file is omitted, WIN.INI is used.",
@@ -2625,14 +3585,614 @@
       "signatures": [
         {
           "params": [
-            { "name": "section", "optional": false },
-            { "name": "entry", "optional": true },
-            { "name": "value", "optional": true },
-            { "name": "file", "optional": true }
+            {
+              "name": "section",
+              "optional": false
+            },
+            {
+              "name": "entry",
+              "optional": true
+            },
+            {
+              "name": "value",
+              "optional": true
+            },
+            {
+              "name": "file",
+              "optional": true
+            }
           ],
           "returnType": "none",
           "description": "Sets the value of an entry in a Windows-standard INI file (max 64KB). Omitting entry deletes the entire section; omitting value deletes the entry. A bare filename looks in the Windows directory; prefix with '.\\' for the current directory. If file is omitted, WIN.INI is used. The file is created if it does not exist.",
           "syntax": "PUTINI(section [,entry] [,value] [,file])"
+        }
+      ]
+    },
+    {
+      "name": "ASK",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Halts program execution waiting for a keystroke. Unlike ACCEPT, ASK is not a loop - it processes a single keystroke and returns. Timer events may still fire while waiting. Used for simple prompts or pausing output.",
+          "syntax": "ASK"
+        }
+      ]
+    },
+    {
+      "name": "ALIAS",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "keycode",
+              "optional": false
+            },
+            {
+              "name": "new keycode",
+              "optional": false
+            }
+          ],
+          "returnType": "",
+          "description": "Redefines a keycode to another keycode globally for the application. When keycode is pressed, the event is treated as new keycode. Called with no parameters, ALIAS resets all redefined keycodes to their original values.",
+          "syntax": "ALIAS([keycode, new keycode])"
+        }
+      ]
+    },
+    {
+      "name": "BEEP",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "sound",
+              "optional": true
+            }
+          ],
+          "returnType": "",
+          "description": "Sounds a system alert. If sound is omitted, sounds the default system beep. Use BEEP equate constants: BEEP:SystemDefault, BEEP:SystemAsterisk, BEEP:SystemExclamation, BEEP:SystemHand (error), BEEP:SystemQuestion, defined in EQUATES.CLW.",
+          "syntax": "BEEP([sound])"
+        }
+      ]
+    },
+    {
+      "name": "BLANK",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "x",
+              "optional": true
+            },
+            {
+              "name": "y",
+              "optional": true
+            },
+            {
+              "name": "width",
+              "optional": true
+            },
+            {
+              "name": "height",
+              "optional": true
+            }
+          ],
+          "returnType": "",
+          "description": "Erases graphics from the current window or report within the specified rectangular area. If no parameters are given, erases the entire graphics area. Does not affect text or controls - only drawn graphics (BOX, LINE, ARC, etc.).",
+          "syntax": "BLANK([x, y, width, height])"
+        }
+      ]
+    },
+    {
+      "name": "EVENT",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "SIGNED",
+          "description": "Returns the number of the current event inside an ACCEPT loop. Field-specific events (tied to a control) return positive values; field-independent events return negative values. Event constants (EVENT:Accepted, EVENT:Selected, etc.) are defined in EQUATES.CLW.",
+          "syntax": "EVENT()"
+        }
+      ]
+    },
+    {
+      "name": "POST",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "event",
+              "optional": false
+            },
+            {
+              "name": "control",
+              "optional": true
+            },
+            {
+              "name": "thread",
+              "optional": true
+            },
+            {
+              "name": "position",
+              "optional": true
+            }
+          ],
+          "returnType": "",
+          "description": "Places an event into the event queue of the specified thread ACCEPT loop. If control is specified, the event is field-specific to that control. If thread is omitted, posts to the current thread. Set position=1 to put the event at the front of the queue. User-defined events must be in the range 400h-0FFFh.",
+          "syntax": "POST(event [,control] [,thread] [,position])"
+        }
+      ]
+    },
+    {
+      "name": "FIELD",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "SIGNED",
+          "description": "Returns the field number of the control that generated the current event. Returns 0 for field-independent events not tied to a specific control. Used inside an ACCEPT loop to identify which control triggered the current event.",
+          "syntax": "FIELD()"
+        }
+      ]
+    },
+    {
+      "name": "SELECT",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "control",
+              "optional": true
+            },
+            {
+              "name": "position",
+              "optional": true
+            },
+            {
+              "name": "endposition",
+              "optional": true
+            }
+          ],
+          "returnType": "",
+          "description": "Sets the next control to receive focus. With no parameters, initiates AcceptAll (non-stop) mode which generates EVENT:Accepted for every control in sequence. For entry controls, position and endposition select a text range. Used inside an ACCEPT loop to control navigation flow.",
+          "syntax": "SELECT([control] [,position] [,endposition])"
+        }
+      ]
+    },
+    {
+      "name": "SELECTED",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "SIGNED",
+          "description": "Returns the field number of the control that generated the most recent EVENT:Selected event. Returns 0 for all other events. Used inside an ACCEPT loop to identify which control the user just moved focus to.",
+          "syntax": "SELECTED()"
+        }
+      ]
+    },
+    {
+      "name": "CLONE",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "dest",
+              "optional": false
+            },
+            {
+              "name": "src",
+              "optional": false
+            },
+            {
+              "name": "parent",
+              "optional": true
+            },
+            {
+              "name": "position",
+              "optional": true
+            },
+            {
+              "name": "window",
+              "optional": true
+            }
+          ],
+          "returnType": "SIGNED",
+          "description": "Dynamically creates a copy of an existing window control (src) and assigns it a new field equate label (dest). Returns the new control field equate number. Optionally places it relative to a parent control, at a specific tab position, or on a different window.",
+          "syntax": "CLONE(dest, src [,parent] [,position] [,window])"
+        }
+      ]
+    },
+    {
+      "name": "DESTROY",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "first",
+              "optional": true
+            },
+            {
+              "name": "last",
+              "optional": true
+            }
+          ],
+          "returnType": "",
+          "description": "Dynamically removes one or more controls from the current window. With no parameters, removes all dynamically created controls. Using first alone removes that specific control. Using first and last removes an inclusive range. Typically paired with CLONE.",
+          "syntax": "DESTROY([first] [,last])"
+        }
+      ]
+    },
+    {
+      "name": "ENABLE",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "first",
+              "optional": true
+            },
+            {
+              "name": "last",
+              "optional": true
+            }
+          ],
+          "returnType": "",
+          "description": "Re-activates one or more window controls previously dimmed by DISABLE. With no parameters, enables all controls. Using first alone enables that control; first and last enables an inclusive range. Controls are active by default unless declared with the DISABLE attribute.",
+          "syntax": "ENABLE([first] [,last])"
+        }
+      ]
+    },
+    {
+      "name": "UNHIDE",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "first",
+              "optional": true
+            },
+            {
+              "name": "last",
+              "optional": true
+            }
+          ],
+          "returnType": "",
+          "description": "Makes one or more previously hidden window controls visible again. With no parameters, shows all hidden controls. Using first alone shows that control; first and last shows an inclusive range. Affects controls hidden by the HIDE attribute at declaration time or by the HIDE runtime function.",
+          "syntax": "UNHIDE([first] [,last])"
+        }
+      ]
+    },
+    {
+      "name": "FREEZE",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "feq",
+              "optional": false
+            }
+          ],
+          "returnType": "LONG",
+          "description": "Suspends screen redrawing for the specified control and returns a LONG state value that must be passed unchanged to a paired UNFREEZE call. Calls can be nested - every FREEZE must have a matching UNFREEZE. To freeze the menu bar use equate Freeze:MenuBar (10001h).",
+          "syntax": "FREEZE(feq)"
+        }
+      ]
+    },
+    {
+      "name": "UNFREEZE",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "feq",
+              "optional": false
+            },
+            {
+              "name": "state",
+              "optional": false
+            }
+          ],
+          "returnType": "",
+          "description": "Resumes screen redrawing for a control previously frozen by FREEZE. The state parameter must be the exact LONG value returned by the paired FREEZE call. Every FREEZE must be paired with an UNFREEZE. Nested calls are supported.",
+          "syntax": "UNFREEZE(feq, state)"
+        }
+      ]
+    },
+    {
+      "name": "SHOW",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "x",
+              "optional": false
+            },
+            {
+              "name": "y",
+              "optional": false
+            },
+            {
+              "name": "string",
+              "optional": false
+            }
+          ],
+          "returnType": "",
+          "description": "Writes a string at position (x, y) in the current window or report using dialog units. Useful for positioning text output before using the TYPE function. In a REPORT, SHOW writes to the current report band using the current font settings.",
+          "syntax": "SHOW(x, y, string)"
+        }
+      ]
+    },
+    {
+      "name": "KEYBOARD",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "UNSIGNED",
+          "description": "Returns the keycode of the next key waiting in the keyboard buffer without removing it. Returns 0 if the keyboard buffer is empty. Useful for checking whether user input is waiting before calling ASK or ACCEPT. Key constants are defined in KEYCODES.CLW.",
+          "syntax": "KEYBOARD()"
+        }
+      ]
+    },
+    {
+      "name": "KEYSTATE",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "UNSIGNED",
+          "description": "Returns a bitmap representing the current state of modifier and toggle keys. Bits correspond to: SHIFT, CTRL, ALT, CAPS LOCK, NUM LOCK, SCROLL LOCK, and INSERT mode. Use with bit-test operations (BAND) and KeyState: equate constants from EQUATES.CLW.",
+          "syntax": "KEYSTATE()"
+        }
+      ]
+    },
+    {
+      "name": "FOCUS",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "SIGNED",
+          "description": "Returns the field number of the control that received focus during the most recent EVENT:Selected event. Unlike FIELD(), FOCUS retains its value between events. Returns 0 if no EVENT:Selected has occurred in the current ACCEPT session.",
+          "syntax": "FOCUS()"
+        }
+      ]
+    },
+    {
+      "name": "IDLE",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "procedure",
+              "optional": true
+            },
+            {
+              "name": "separation",
+              "optional": true
+            }
+          ],
+          "returnType": "",
+          "description": "Arms a procedure to be called periodically when no events are pending in the ACCEPT loop. Only one IDLE procedure may be active at a time. Called with no parameters, IDLE disarms the current idle procedure. Executes on thread 1 (APPLICATION frame thread). separation=0 means continuous calls.",
+          "syntax": "IDLE([procedure] [,separation])"
+        }
+      ]
+    },
+    {
+      "name": "SHUTDOWN",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "procedure",
+              "optional": true
+            }
+          ],
+          "returnType": "",
+          "description": "Arms a procedure to be called when the application is about to terminate. Only one SHUTDOWN procedure can be active; a second call replaces the first. Called with no parameters, SHUTDOWN disarms the current termination procedure.",
+          "syntax": "SHUTDOWN([procedure])"
+        }
+      ]
+    },
+    {
+      "name": "YIELD",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "",
+          "description": "Passes control to other running applications, allowing them to process their pending events. Enables cooperative multitasking. Typically placed in long-running loops to keep the system responsive. Execution resumes immediately after other applications have processed their messages.",
+          "syntax": "YIELD"
+        }
+      ]
+    },
+    {
+      "name": "KEYCHAR",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "UNSIGNED",
+          "description": "Returns the ASCII value of the last key pressed at the time of the current keyboard event. Returns 0 for function keys and special keys with no ASCII value. Typically used alongside KEYCODE() inside an ACCEPT loop to distinguish printable characters.",
+          "syntax": "KEYCHAR()"
+        }
+      ]
+    },
+    {
+      "name": "FIRSTFIELD",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "SIGNED",
+          "description": "Returns the field number of the lowest-numbered control in the current window, excluding TOOLBAR and MENUBAR controls. Used to determine the first tabbable control. Useful for programmatic navigation and range operations with DISABLE, HIDE, ERASE, etc.",
+          "syntax": "FIRSTFIELD()"
+        }
+      ]
+    },
+    {
+      "name": "LASTFIELD",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "SIGNED",
+          "description": "Returns the field number of the highest-numbered control in the current window, excluding TOOLBAR and MENUBAR controls. Used to determine the last tabbable control. Useful for programmatic navigation and range operations.",
+          "syntax": "LASTFIELD()"
+        }
+      ]
+    },
+    {
+      "name": "IMAGE",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "x",
+              "optional": false
+            },
+            {
+              "name": "y",
+              "optional": false
+            },
+            {
+              "name": "width",
+              "optional": true
+            },
+            {
+              "name": "height",
+              "optional": true
+            },
+            {
+              "name": "filename",
+              "optional": false
+            },
+            {
+              "name": "attributelist",
+              "optional": true
+            }
+          ],
+          "returnType": "",
+          "description": "Draws a graphic image file at position (x, y) on the current window or report. If width and height are omitted, the image is drawn at its natural size. Supported formats include BMP, ICO, JPG, GIF, and PNG. The filename may be a resource name, file path, or URL.",
+          "syntax": "IMAGE(x, y [,width] [,height], filename [,attributelist])"
+        }
+      ]
+    },
+    {
+      "name": "INCOMPLETE",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "SIGNED",
+          "description": "Returns the field number of the first control with the REQ (required) attribute whose USE variable is empty or blank. Returns 0 if all required controls have been filled in. Used to validate mandatory fields before accepting a record.",
+          "syntax": "INCOMPLETE()"
+        }
+      ]
+    },
+    {
+      "name": "FORWARDKEY",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "targetcontrol",
+              "optional": false
+            }
+          ],
+          "returnType": "",
+          "description": "Passes the current keystroke to a different control as if the user pressed it while that control had focus. Used inside keyboard event handlers to redirect input. Useful for custom keyboard navigation and shortcut handling.",
+          "syntax": "FORWARDKEY(targetcontrol)"
+        }
+      ]
+    },
+    {
+      "name": "DRAGID",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "thread",
+              "optional": true
+            },
+            {
+              "name": "control",
+              "optional": true
+            }
+          ],
+          "returnType": "STRING",
+          "description": "Returns the matching drag-and-drop signature string after a successful EVENT:Drop. If the user aborted the operation, returns an empty string. The optional thread parameter receives the source control thread number; control receives its field equate label. Used with DROPID and SETDROPID.",
+          "syntax": "DRAGID([thread] [,control])"
+        }
+      ]
+    },
+    {
+      "name": "DROPID",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "thread",
+              "optional": true
+            },
+            {
+              "name": "control",
+              "optional": true
+            }
+          ],
+          "returnType": "STRING",
+          "description": "Returns the matching drag-and-drop signature string on a successful operation, or the string set by SETDROPID. The thread parameter receives the target control thread number (0 for external programs); control receives its field equate label. Used with DRAGID and SETDROPID.",
+          "syntax": "DROPID([thread] [,control])"
+        }
+      ]
+    },
+    {
+      "name": "ERASE",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "first",
+              "optional": true
+            },
+            {
+              "name": "last",
+              "optional": true
+            }
+          ],
+          "returnType": "",
+          "description": "Blanks the display of one or more window controls and clears their corresponding USE variables. With no parameters, erases all controls. Using first alone erases that specific control and its USE variable; first and last erases an inclusive range. Unlike HIDE, erased controls remain visible but empty.",
+          "syntax": "ERASE([first] [,last])"
+        }
+      ]
+    },
+    {
+      "name": "HELP",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "helpfile",
+              "optional": true
+            },
+            {
+              "name": "help-id",
+              "optional": true
+            }
+          ],
+          "returnType": "",
+          "description": "Opens a help file and optionally activates a specific help topic. helpfile may be a WinHelp (.HLP) or HTML Help (.CHM) file. If helpfile is omitted a comma must hold its position. help-id may be a keyword or a context string prefixed with ~ for an exact topic. If both omitted, opens the current help file at the current topic.",
+          "syntax": "HELP([helpfile] [,help-id])"
+        }
+      ]
+    },
+    {
+      "name": "UPDATE",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "first",
+              "optional": true
+            },
+            {
+              "name": "last",
+              "optional": true
+            }
+          ],
+          "returnType": "",
+          "description": "Reads the current displayed value of one or more window controls and writes it to their USE variables. With no parameters, updates all controls. Using first alone updates that control; first and last updates an inclusive range. USE variables are normally updated automatically by ACCEPT, but UPDATE is needed after ALERTed key events.",
+          "syntax": "UPDATE([first] [,last])"
         }
       ]
     }
