@@ -142,6 +142,8 @@ export class SymbolFinderService {
             // PROCEDURE, ROUTINE, FUNCTION — return the keyword as the type
             const upper = next.value.toUpperCase();
             if (upper === 'PROCEDURE' || upper === 'ROUTINE' || upper === 'FUNCTION') return upper;
+            // EQUATE with a space before '(' tokenizes as Keyword, not Function
+            if (upper === 'EQUATE') return 'EQUATE';
         }
         if (next.type === TokenType.Function) {
             // EQUATE(value) — matched as Function due to trailing '('
