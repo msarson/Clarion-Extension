@@ -1075,11 +1075,11 @@
           "params": [
             { "name": "LONG flag", "optional": true }
           ],
-          "description": "Declares a procedure, variable, FILE, QUEUE, GROUP, or CLASS defined externally in a .DLL. The optional flag (e.g. _ABCDllMode_) activates the attribute when non-zero; zero or omitted means inactive. May be an undefined label — in that case the attribute is active.",
+          "description": "Declares a procedure, variable, FILE, QUEUE, GROUP, or CLASS defined externally in a .DLL. The optional flag is a numeric constant, equate, or any project-level conditional compilation symbol — when non-zero the attribute is active; zero or omitted means inactive.",
           "syntax": "DLL([flag])"
         }
       ],
-      "description": "Marks a declaration as residing in an external .DLL. Required for 32-bit apps because .DLLs are relocatable in a flat address space, requiring an extra compiler dereference. Variable/FILE/QUEUE/GROUP/CLASS declarations must also have the EXTERNAL attribute. The flag is typically a project-level conditional compilation symbol (defined via #pragma define(ident=>value) in the project file or the IDE's Conditional Compilation Symbols dialog). The pre-defined symbol _ABCDllMode_ is set automatically by the project system: 0 when link mode is Local, 1 otherwise.",
+      "description": "Marks a declaration as residing in an external .DLL. Required for 32-bit apps because .DLLs are relocatable in a flat address space, requiring an extra compiler dereference. Variable/FILE/QUEUE/GROUP/CLASS declarations must also have the EXTERNAL attribute. The flag is a numeric constant or any conditional compilation symbol defined via #pragma define(ident=>value) in the project file or the IDE's Conditional Compilation Symbols dialog. The ABC template chain uses the pre-defined _ABCDllMode_ symbol (set automatically by the project system's dll_mode pragma) as a common example.",
       "propertyEquate": ""
     },
     {
@@ -1322,7 +1322,7 @@
           "syntax": "LINK(linkfile [,flag])"
         }
       ],
-      "description": "Names a file to add to the link list for the current project when using this CLASS. linkfile is a string constant; .OBJ extension is assumed if none is given. Normally the same as the MODULE parameter but may explicitly name a .LIB or .OBJ file. The flag is typically a project-level conditional compilation symbol (defined via #pragma define(ident=>value) in the project file or the IDE's Conditional Compilation Symbols dialog) — commonly _ABCLinkMode_, which activates the link when non-zero. LINK is only valid on a CLASS structure.",
+      "description": "Names a file to add to the link list for the current project when using this CLASS. linkfile is a string constant; .OBJ extension is assumed if none is given. Normally the same as the MODULE parameter but may explicitly name a .LIB or .OBJ file. The flag is a numeric constant or any conditional compilation symbol defined via #pragma define(ident=>value) in the project file or the IDE's Conditional Compilation Symbols dialog — when non-zero the file is linked, zero means inactive. The ABC template chain uses _ABCLinkMode_ as a common example. LINK is only valid on a CLASS structure.",
       "propertyEquate": ""
     },
     {
