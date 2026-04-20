@@ -10,6 +10,7 @@ import { BuiltinFunctionService } from '../../utils/BuiltinFunctionService';
 import { AttributeService } from '../../utils/AttributeService';
 import { PropertyService } from '../../utils/PropertyService';
 import { EventService } from '../../utils/EventService';
+import { DirectiveService } from '../../utils/DirectiveService';
 import { HoverFormatter } from './HoverFormatter';
 import { TokenCache } from '../../TokenCache';
 import { Token, TokenType } from '../../ClarionTokenizer';
@@ -28,6 +29,7 @@ export class HoverRouter {
     private attributeService = AttributeService.getInstance();
     private propertyService = PropertyService.getInstance();
     private eventService = EventService.getInstance();
+    private directiveService = DirectiveService.getInstance();
 
     constructor(
         private procedureResolver: ProcedureHoverResolver,
@@ -94,6 +96,10 @@ export class HoverRouter {
         // 9.6 Handle EVENT: equates
         const eventHover = this.handleEventEquate(word);
         if (eventHover) return eventHover;
+
+        // 9.7 Handle compiler directives (EQUATE, INCLUDE, COMPILE, OMIT, etc.)
+        const directiveHover = this.handleDirective(word);
+        if (directiveHover) return directiveHover;
 
         // 10. Handle built-in functions (AFTER method declarations to avoid shadowing)
         const builtinHover = this.handleBuiltin(word, line, wordRange, document, position);
@@ -213,6 +219,16 @@ export class HoverRouter {
         if (!entry) return null;
         logger.info(`Found EVENT: equate: ${word}`);
         return this.formatter.formatEventEquate(entry);
+    }
+
+    /**
+     * Handle compiler directives (EQUATE, INCLUDE, COMPILE, OMIT, ASSERT, etc.)
+     */
+    private handleDirective(word: string): Hover | null {
+        const entry = this.directiveService.getDirective(word);
+        if (!entry) return null;
+        logger.info(`Found compiler directive: ${word}`);
+        return this.formatter.formatDirective(entry);
     }
 
     /**

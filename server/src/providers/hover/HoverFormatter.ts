@@ -8,6 +8,7 @@ import LoggerManager from '../../logger';
 import { DocCommentReader, DocComment } from '../../utils/DocCommentReader';
 import { PropEntry } from '../../utils/PropertyService';
 import { EventEntry } from '../../utils/EventService';
+import { DirectiveEntry } from '../../utils/DirectiveService';
 
 const logger = LoggerManager.getLogger("HoverFormatter");
 logger.setLevel("error");
@@ -828,6 +829,19 @@ export class HoverFormatter {
             content += `${entry.description}\n\n`;
         }
         content += `**Usage:** \`OF EVENT:${entry.name.slice('EVENT:'.length)}\``;
+        return {
+            contents: { kind: 'markdown', value: content.trim() }
+        };
+    }
+
+    /** Formats hover for a compiler directive (e.g. EQUATE, INCLUDE, COMPILE). */
+    public formatDirective(entry: DirectiveEntry): Hover {
+        let content = `**${entry.name}**\n\n`;
+        content += `_${entry.category}_\n\n`;
+        if (entry.description) {
+            content += `${entry.description}\n\n`;
+        }
+        content += `**Syntax:** \`\`\`clarion\n${entry.syntax}\n\`\`\``;
         return {
             contents: { kind: 'markdown', value: content.trim() }
         };

@@ -8,6 +8,8 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [0.9.5] - Unreleased
 
+- ✨ Hover documentation for Clarion compiler directives: `ASSERT`, `BEGIN`, `COMPILE`, `EQUATE`, `INCLUDE`, `ITEMIZE`, `OMIT`, `ONCE`, `SECTION`, `SIZE`
+
 ---
 
 ### [0.9.4] - 2026-04-19

@@ -1,0 +1,64 @@
+{
+  "directives": [
+    {
+      "name": "ASSERT",
+      "syntax": "ASSERT(expression [, message])",
+      "description": "Specifies an assumption for debugging. If debug is on and the expression is false (blank or zero), an error message displays the line number and module where the assertion failed. If debug is off, the expression is still evaluated but no message is shown.",
+      "category": "Compiler Directive"
+    },
+    {
+      "name": "BEGIN",
+      "syntax": "BEGIN\n  statements\nEND",
+      "description": "Declares a single code statement structure — treats multiple statements as one. Usually used inside an EXECUTE structure to allow several lines of code to execute as one unit. Terminated by END or a period.",
+      "category": "Compiler Directive"
+    },
+    {
+      "name": "COMPILE",
+      "syntax": "COMPILE(terminator [, expression])",
+      "description": "Specifies a block of source code lines to be included in the compilation. The block begins at the COMPILE directive and ends at the line containing the terminator string. The optional expression (an EQUATE value or conditional) controls whether the block is compiled. Opposite of OMIT.",
+      "category": "Compiler Directive"
+    },
+    {
+      "name": "EQUATE",
+      "syntax": "label EQUATE([constant | picture | type])",
+      "description": "Assigns a label to another label or constant. Used to declare shorthand labels for constants, picture tokens, or data types. Does not use any run-time memory. Cannot label a PROCEDURE or ROUTINE statement. May be omitted only inside an ITEMIZE structure.",
+      "category": "Compiler Directive"
+    },
+    {
+      "name": "INCLUDE",
+      "syntax": "INCLUDE(filename [, section]) [,ONCE]",
+      "description": "Specifies source code in a separate file to be compiled as if it appeared inline. The optional section parameter names a SECTION within the file to include. ONCE prevents the included data from being compiled more than once. Searches the Redirection file for the filename.",
+      "category": "Compiler Directive"
+    },
+    {
+      "name": "ITEMIZE",
+      "syntax": "[label] ITEMIZE([seed]) [,PRE()]\n  equates\nEND",
+      "description": "Declares an enumerated data structure. Each EQUATE inside auto-increments by 1 from the previous (or from seed). Equates are referenced with the PRE prefix or the ITEMIZE label. If no value and no seed, the first equate defaults to 1.",
+      "category": "Compiler Directive"
+    },
+    {
+      "name": "OMIT",
+      "syntax": "OMIT(terminator [, expression])",
+      "description": "Specifies a block of source code lines to be omitted from compilation. The block begins at the OMIT directive and ends at the line containing the terminator string. The optional expression controls conditional omission. Opposite of COMPILE. Supports up to 8 nesting levels.",
+      "category": "Compiler Directive"
+    },
+    {
+      "name": "ONCE",
+      "syntax": "INCLUDE(filename),ONCE",
+      "description": "Attribute of INCLUDE — prevents the included file's data from being compiled more than once, avoiding duplicate declaration warnings or errors. ONCE is applied per filename, so all subsequent INCLUDE(filename, section) calls for the same file are also ignored.",
+      "category": "Compiler Directive"
+    },
+    {
+      "name": "SECTION",
+      "syntax": "SECTION(string)",
+      "description": "Identifies the beginning of a named block of executable source code or data declarations. The string parameter is used as the optional section parameter of the INCLUDE directive to include a specific block from a file. A SECTION ends at the next SECTION or end of file.",
+      "category": "Compiler Directive"
+    },
+    {
+      "name": "SIZE",
+      "syntax": "SIZE(variable | constant | picture)",
+      "description": "Directs the compiler to supply the amount of memory (in bytes) used to store a variable, constant, or picture token. Evaluated at compile time where possible; otherwise generates runtime code. For reference variables, retrieves the actual size of the referenced data.",
+      "category": "Compiler Directive"
+    }
+  ]
+}
