@@ -156,63 +156,29 @@ export class HoverFormatter {
         const memberType = isMethod ? 'Method' : 'Property';
         const memberCategory = info.isInterface ? 'Interface' : 'Class';
 
-        // Extract visibility modifier from type string (e.g. ",PRIVATE" or ",PROTECTED")
-        let visibility = info.isInterface ? '' : 'PUBLIC ';
-        let visibilityIcon = '';
-        if (!info.isInterface) {
-            if (/,\s*PRIVATE\b/i.test(info.type)) {
-                visibility = 'PRIVATE ';
-                visibilityIcon = '🔒 ';
-            } else if (/,\s*PROTECTED\b/i.test(info.type)) {
-                visibility = 'PROTECTED ';
-                visibilityIcon = '🔐 ';
-            }
-        }
+        const header = this.buildMethodHeader(name, info.type, memberCategory, memberType, info.className, isMethod);
+        const markdown = [header, ``];
 
-        const markdown = [
-            `**${visibilityIcon}${name}** (${visibility}${memberCategory} ${memberType})`,
-            ``,
-            `**${memberCategory}:** ${info.className}`,
-            ``
-        ];
-        
-        // Show declaration with code snippet
+        let declSnippet: string | null = null;
         try {
             const declUri = decodeURIComponent(info.file.replace('file:///', ''));
             const declContent = fs.readFileSync(declUri, 'utf-8');
-            const declLines = declContent.split('\n');
-            const declLine = declLines[info.line];
-            
-            if (declLine) {
-                const trimmedDeclLine = declLine.trim();
-                const declFileName = path.basename(declUri);
-                const declLineNumber = info.line + 1;
-                markdown.push(`**Declaration in** \`${declFileName}\` @ line ${declLineNumber}`);
-                markdown.push('```clarion');
-                markdown.push(trimmedDeclLine);
-                markdown.push('```');
-            }
-        } catch (error) {
-            // Fallback if can't read file
-            const fileName = info.file.split(/[\/\\]/).pop() || info.file;
-            markdown.push(`**Declaration in** \`${fileName}\` @ line ${info.line + 1}`);
-            
-            // Show type info as fallback
+            const declLine = declContent.split('\n')[info.line];
+            if (declLine) declSnippet = declLine.trim();
+        } catch {
+            declSnippet = info.type.length > 50 ? info.type : `${name}  ${info.type}`;
+        }
+
+        if (declSnippet) {
             markdown.push('```clarion');
-            if (info.type.length > 50) {
-                markdown.push(info.type);
-            } else {
-                markdown.push(`${name}  ${info.type}`);
-            }
+            markdown.push(declSnippet);
             markdown.push('```');
         }
 
-        return {
-            contents: {
-                kind: 'markdown',
-                value: markdown.join('\n')
-            }
-        };
+        const fileName = info.file.split(/[\/\\]/).pop() || info.file;
+        markdown.push(`${fileName}:${info.line + 1}`);
+
+        return { contents: { kind: 'markdown', value: markdown.join('\n') } };
     }
 
     /**
@@ -220,75 +186,52 @@ export class HoverFormatter {
      */
     formatMethodCall(name: string, declarationInfo: ClassMemberInfo, implementationLocation: string): Hover {
         const memberCategory = declarationInfo.isInterface ? 'Interface' : 'Class';
-        const markdown = [
-            `**${name}** (${memberCategory} Method)`,
-            ``,
-            `**${memberCategory}:** ${declarationInfo.className}`,
-            ``
-        ];
+        const header = this.buildMethodHeader(name, declarationInfo.type, memberCategory, 'Method', declarationInfo.className, true);
+        const markdown = [header, ``];
 
         let docComment: DocComment | null = null;
+        let declSnippet: string | null = null;
+        let declLocationStr = '';
 
-        // Show declaration from CLASS
         try {
             const declUri = decodeURIComponent(declarationInfo.file.replace('file:///', ''));
             const declContent = fs.readFileSync(declUri, 'utf-8');
             const declLines = declContent.split('\n');
             const declLine = declLines[declarationInfo.line];
-
             docComment = DocCommentReader.read(declLines, declarationInfo.line);
-
-            if (declLine) {
-                const trimmedDeclLine = declLine.trim();
-                const declFileName = path.basename(declUri);
-                const declLineNumber = declarationInfo.line + 1;
-                markdown.push(`**Declaration in** \`${declFileName}\` @ line ${declLineNumber}`);
-                markdown.push('```clarion');
-                markdown.push(trimmedDeclLine);
-                markdown.push('```');
-                markdown.push('');
-                markdown.push('---');
-                markdown.push('');
-            }
-        } catch (error) {
-            // Fallback if can't read file
-            const declFileName = declarationInfo.file.split(/[\/\\]/).pop() || declarationInfo.file;
-            markdown.push(`**Declaration:** \`${declFileName}\` @ line **${declarationInfo.line + 1}**`);
-            markdown.push('');
+            if (declLine) declSnippet = declLine.trim();
+            declLocationStr = `${path.basename(declUri)}:${declarationInfo.line + 1}`;
+        } catch {
+            const fileName = declarationInfo.file.split(/[\/\\]/).pop() || declarationInfo.file;
+            declLocationStr = `${fileName}:${declarationInfo.line + 1}`;
         }
 
-        // Show implementation location with signature snippet
+        if (declSnippet) {
+            markdown.push('```clarion');
+            markdown.push(declSnippet);
+            markdown.push('```');
+        }
+
+        let implLocationStr = '';
         try {
             const lastColonIndex = implementationLocation.lastIndexOf(':');
             const implFilePath = implementationLocation.substring(0, lastColonIndex).replace('file:///', '');
             const implLine = parseInt(implementationLocation.substring(lastColonIndex + 1));
             const implUri = decodeURIComponent(implFilePath);
-            const implFileName = path.basename(implUri);
-            const implLineNumber = implLine + 1;
-            markdown.push(`**Implemented in** \`${implFileName}\` @ line ${implLineNumber}`);
+            implLocationStr = `${path.basename(implUri)}:${implLine + 1}`;
             if (!implUri.startsWith('test://')) {
                 try {
-                    const implContent = fs.readFileSync(implUri, 'utf-8');
-                    const implLines = implContent.split('\n');
-                    const implSignature = implLines[implLine]?.trim();
-                    if (implSignature) {
-                        markdown.push('```clarion');
-                        markdown.push(implSignature);
-                        markdown.push('```');
-                    }
-                    // Definition wins: impl !!! comment overrides declaration comment
+                    const implLines = fs.readFileSync(implUri, 'utf-8').split('\n');
                     const implDoc = DocCommentReader.read(implLines, implLine);
-                    if (implDoc) docComment = implDoc;
-                } catch {
-                    // File not readable — skip snippet and impl doc
-                }
+                    if (implDoc) docComment = implDoc; // definition wins
+                } catch { }
             }
-        } catch (error) {
-            const lastColonIndex = implementationLocation.lastIndexOf(':');
-            const implFilePath = implementationLocation.substring(0, lastColonIndex);
-            const implLine = parseInt(implementationLocation.substring(lastColonIndex + 1)) + 1;
-            const implFile = implFilePath.split(/[\/\\]/).pop() || implFilePath;
-            markdown.push(`**Implementation:** \`${implFile}\` @ line **${implLine}**`);
+        } catch { }
+
+        if (declLocationStr && implLocationStr) {
+            markdown.push(`${declLocationStr} → ${implLocationStr}`);
+        } else if (declLocationStr) {
+            markdown.push(declLocationStr);
         }
 
         if (docComment) {
@@ -301,12 +244,7 @@ export class HoverFormatter {
             }
         }
 
-        return {
-            contents: {
-                kind: 'markdown',
-                value: markdown.join('\n')
-            }
-        };
+        return { contents: { kind: 'markdown', value: markdown.join('\n') } };
     }
 
     /**
@@ -319,38 +257,25 @@ export class HoverFormatter {
         ownerClassName?: string,
         implLocation?: { lines: string[], line: number }
     ): Hover {
-        const fileName = declInfo.file.split(/[\/\\]/).pop() || declInfo.file;
+        const memberCategory = ownerClassName ? 'Interface' : 'Class';
+        // For 3-part (Class.Interface.Method): show "Class.Interface" as the owner
+        const displayClass = ownerClassName ? `${ownerClassName}.${className}` : className;
+        const header = this.buildMethodHeader(methodName, declInfo.signature, memberCategory, 'Method', displayClass, true);
+        const markdown = [header, ``];
 
-        // className may be the interface name (3-part) or class name (2-part)
-        const isInterface = !!ownerClassName;
-        const title = ownerClassName
-            ? `**${ownerClassName}.${className}.${methodName}** — Method Implementation`
-            : `**${className}.${methodName}** — Method Implementation`;
-
-        const markdown = [title, ``];
-
-        if (isInterface) {
-            markdown.push(`🔷 Class: \`${ownerClassName}\``);
-            markdown.push(`🔌 Interface: \`${className}\``);
-        } else {
-            markdown.push(`🔷 Class: \`${className}\``);
-        }
-
-        markdown.push(``);
-        markdown.push(`**Declaration:** \`${fileName}\`:${declInfo.line + 1}`);
-        markdown.push(``);
         markdown.push('```clarion');
-        markdown.push(declInfo.signature);
+        markdown.push(declInfo.signature.trim());
         markdown.push('```');
-        // Doc comment: try declaration file, then let implementation override (definition wins)
+
+        const fileName = declInfo.file.split(/[\/\\]/).pop() || declInfo.file;
+        markdown.push(`${fileName}:${declInfo.line + 1}`);
+
         let docComment: DocComment | null = null;
         try {
             const declUri = decodeURIComponent(declInfo.file.replace('file:///', ''));
             const declContent = fs.readFileSync(declUri, 'utf-8');
             docComment = DocCommentReader.read(declContent.split('\n'), declInfo.line);
-        } catch {
-            // Declaration file not readable
-        }
+        } catch { }
         if (implLocation) {
             const implDoc = DocCommentReader.read(implLocation.lines, implLocation.line);
             if (implDoc) docComment = implDoc; // definition wins
@@ -366,12 +291,64 @@ export class HoverFormatter {
             }
         }
 
-        return {
-            contents: {
-                kind: 'markdown',
-                value: markdown.join('\n')
+        return { contents: { kind: 'markdown', value: markdown.join('\n') } };
+    }
+
+    /**
+     * Parses modifiers from a Clarion type/signature string.
+     * Attributes (PRIVATE, PROTECTED, VIRTUAL, DERIVED) can appear anywhere after the parameter list.
+     * The first unrecognized token after the params is treated as the return type.
+     */
+    private parseMethodModifiers(typeStr: string): { visibility: string; modifiers: string[]; returnType: string | null } {
+        const KNOWN_NON_TYPES = new Set(['PRIVATE', 'PROTECTED', 'VIRTUAL', 'DERIVED', 'STATIC', 'PROC', 'PROCEDURE', 'FUNCTION']);
+        let afterParams = typeStr;
+
+        // Find content after the closing paren of the parameter list
+        const parenOpen = typeStr.indexOf('(');
+        if (parenOpen !== -1) {
+            let depth = 0;
+            for (let i = parenOpen; i < typeStr.length; i++) {
+                if (typeStr[i] === '(') depth++;
+                else if (typeStr[i] === ')') {
+                    depth--;
+                    if (depth === 0) { afterParams = typeStr.substring(i + 1); break; }
+                }
             }
-        };
+        }
+
+        let visibility = '';
+        const modifiers: string[] = [];
+        let returnType: string | null = null;
+
+        for (const part of afterParams.split(',').map(p => p.trim()).filter(p => p)) {
+            const upper = part.toUpperCase();
+            if (upper === 'PRIVATE' || upper === 'PROTECTED') {
+                visibility = upper;
+            } else if (upper === 'VIRTUAL' || upper === 'DERIVED' || upper === 'STATIC') {
+                modifiers.push(upper);
+            } else if (!KNOWN_NON_TYPES.has(upper) && !returnType) {
+                returnType = part;
+            }
+        }
+
+        return { visibility, modifiers, returnType };
+    }
+
+    /**
+     * Builds the Option-C style header line for a method or property hover.
+     * Format: **Name** — [Private] [Virtual] Category MemberType · ClassName  returns `TYPE`
+     */
+    private buildMethodHeader(name: string, typeStr: string, memberCategory: string, memberType: string, className: string, isMethod: boolean): string {
+        const { visibility, modifiers, returnType } = this.parseMethodModifiers(typeStr);
+        const qualifierParts: string[] = [];
+        if (visibility === 'PRIVATE') qualifierParts.push('Private');
+        else if (visibility === 'PROTECTED') qualifierParts.push('Protected');
+        if (modifiers.includes('VIRTUAL')) qualifierParts.push('Virtual');
+        if (modifiers.includes('DERIVED')) qualifierParts.push('Derived');
+        const qualifiers = qualifierParts.length > 0 ? qualifierParts.join(' ') + ' ' : '';
+        let header = `**${name}** — ${qualifiers}${memberCategory} ${memberType} · ${className}`;
+        if (isMethod && returnType) header += `  returns \`${returnType}\``;
+        return header;
     }
 
     /**
