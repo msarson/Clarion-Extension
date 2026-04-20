@@ -5100,6 +5100,351 @@
       ],
       "returnType": "VOID",
       "category": "Window/Event"
+    },
+    {
+      "name": "SETFONT",
+      "description": "Dynamically sets the display font for a control or window, overriding any FONT attribute.",
+      "signatures": [
+        {
+          "label": "SETFONT(control|window [, typeface] [, size] [, color] [, style] [, charset])",
+          "documentation": "Sets the display font for a control (field equate or 0 for window) or a named window/report structure. typeface is a string font name; size is in points; color is a LONG RGB value; style combines FONT:thin/regular/bold/italic/underline/strikeout equates; charset is the character set value. SETFONT changes all parameters at once rather than one at a time. If called before a window is opened, the FONT attribute is completely ignored.",
+          "parameters": [
+            {
+              "label": "control|window",
+              "documentation": "A field number, field equate label (or 0 for window), or the label of a WINDOW/APPLICATION/REPORT structure."
+            },
+            {
+              "label": "typeface",
+              "documentation": "Optional. String constant or variable containing the font name. Omit to use the system font."
+            },
+            {
+              "label": "size",
+              "documentation": "Optional. Integer point size. Omit to use the system default."
+            },
+            {
+              "label": "color",
+              "documentation": "Optional. LONG integer with RGB color in the low-order three bytes."
+            },
+            {
+              "label": "style",
+              "documentation": "Optional. Integer combining FONT:thin (100), FONT:regular (400), FONT:bold (700), FONT:italic, FONT:underline, FONT:strikeout equates."
+            },
+            {
+              "label": "charset",
+              "documentation": "Optional. LONG integer specifying the Windows character set value."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "Window and Control"
+    },
+    {
+      "name": "SETPOSITION",
+      "description": "Dynamically specifies the position and size of an APPLICATION, WINDOW, REPORT, or control.",
+      "signatures": [
+        {
+          "label": "SETPOSITION(control|target [, x] [, y] [, width] [, height])",
+          "documentation": "Sets the position and/or dimensions of a control or window. control is a field number/equate (0 for the current window) or the label of an APPLICATION/WINDOW/REPORT. x and y are the top-left corner position; width and height are the dimensions — all measured in dialog units. Omitting any parameter leaves that value unchanged. SETPOSITION changes all parameters at once, avoiding the visible 'jump' that occurs with individual property assignments.",
+          "parameters": [
+            {
+              "label": "control|target",
+              "documentation": "Field number, field equate label (0 = current window), or the label of an APPLICATION, WINDOW, or REPORT structure."
+            },
+            {
+              "label": "x",
+              "documentation": "Optional. Horizontal position of the top-left corner in dialog units."
+            },
+            {
+              "label": "y",
+              "documentation": "Optional. Vertical position of the top-left corner in dialog units."
+            },
+            {
+              "label": "width",
+              "documentation": "Optional. Width in dialog units."
+            },
+            {
+              "label": "height",
+              "documentation": "Optional. Height in dialog units."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "Window and Control"
+    },
+    {
+      "name": "SHORTPATH",
+      "description": "Returns the fully-qualified short (8.3) filename for a given long filename.",
+      "signatures": [
+        {
+          "label": "SHORTPATH([longfilename])",
+          "documentation": "Returns the DOS standard short filename for the given longfilename. The file must exist on disk. If longfilename is omitted, returns the current drive and directory in short name form. If 8.3 name creation is disabled on NTFS, SHORTPATH and PATH return the same value. Can be used in expressions evaluated by the EVALUATE statement.",
+          "parameters": [
+            {
+              "label": "longfilename",
+              "documentation": "Optional. String constant, variable, or expression specifying the long filename to convert, including the full path."
+            }
+          ]
+        }
+      ],
+      "returnType": "STRING",
+      "category": "File"
+    },
+    {
+      "name": "SUSPEND",
+      "description": "Suspends the execution of a specified thread.",
+      "signatures": [
+        {
+          "label": "SUSPEND(threadno, quietmode)",
+          "documentation": "Suspends the thread identified by threadno. Each SUSPEND increments the thread's suspend counter; an equal number of RESUME calls is needed to resume execution. quietmode controls messaging: TRUE (1) suppresses the warning message if the suspension is unsafe; FALSE (0) displays the message. Returns TRUE (1) if the thread was suspended, FALSE (0) if it could not be suspended. Suspending an inactive thread is ignored. Improper use in MDI programs can cause lockups.",
+          "parameters": [
+            {
+              "label": "threadno",
+              "documentation": "A numeric constant, variable, or expression (SIGNED) identifying the thread to suspend."
+            },
+            {
+              "label": "quietmode",
+              "documentation": "A numeric constant, variable, or expression (SIGNED): TRUE (1) suppresses the unsafe-suspend message; FALSE (0) displays it."
+            }
+          ]
+        }
+      ],
+      "returnType": "SIGNED",
+      "category": "Threading"
+    },
+    {
+      "name": "THREAD",
+      "description": "Returns the number of the currently executing thread.",
+      "signatures": [
+        {
+          "label": "THREAD()",
+          "documentation": "Returns the currently executing thread number as a SIGNED integer (1 to 2,147,483,647). The returned value can be used with procedures such as SETTARGET and START that operate on specific execution threads.",
+          "parameters": []
+        }
+      ],
+      "returnType": "SIGNED",
+      "category": "Threading"
+    },
+    {
+      "name": "WATCH",
+      "description": "Arms automatic optimistic concurrency checking for a FILE or VIEW.",
+      "signatures": [
+        {
+          "label": "WATCH(entity)",
+          "documentation": "Arms automatic optimistic concurrency checking for the specified FILE or VIEW. After WATCH, the file driver retains a copy of the retrieved record. When the record is PUT back, the copy on disk is compared against the original. If another user has changed the record, PUT posts Error 89 (Record Changed By Another Station). WATCH terminates when the record is PUT or another GET/NEXT/PREVIOUS/REGET executes without a preceding WATCH.",
+          "parameters": [
+            {
+              "label": "entity",
+              "documentation": "The label of a FILE or VIEW declaration to arm for concurrency checking."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "File"
+    },
+    {
+      "name": "SETTARGET",
+      "description": "Sets the current window or report as the target for runtime property assignment and drawing statements.",
+      "signatures": [
+        {
+          "label": "SETTARGET([target] [, thread|band])",
+          "documentation": "Sets the built-in TARGET variable used by CREATE, SETPOSITION, GETPOSITION, SETFONT, GETFONT, DISABLE, HIDE, CONTENTS, DISPLAY, ERASE, UPDATE, and graphics primitives. target is the label or reference of an APPLICATION, WINDOW, or REPORT; thread selects the topmost window in that execution thread; band selects a REPORT band or IMAGE control for graphics drawing. SETTARGET() with no arguments resets to the active ACCEPT loop's procedure and thread. A REPORT is never the default TARGET — always call SETTARGET before drawing on a REPORT.",
+          "parameters": [
+            {
+              "label": "target",
+              "documentation": "Optional. Label or reference of an APPLICATION, WINDOW, or REPORT structure. Omit to use the topmost window in the specified thread."
+            },
+            {
+              "label": "thread|band",
+              "documentation": "Optional. The execution thread number (when target is omitted), or the field equate label of a REPORT band or IMAGE control (for graphics drawing)."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "Window and Control"
+    },
+    {
+      "name": "SETEXITCODE",
+      "description": "Sets the program exit code (DOS ERRORLEVEL) returned when the application terminates.",
+      "signatures": [
+        {
+          "label": "SETEXITCODE(exitcode)",
+          "documentation": "Sets the program exit code passed to the operating system (DOS ERRORLEVEL) when the application ends. exitcode is a positive integer constant or variable. If omitted, the default is zero. Useful for signalling meaningful exit status to calling scripts or programs without having to close the application immediately.",
+          "parameters": [
+            {
+              "label": "exitcode",
+              "documentation": "Optional. A positive integer constant or variable specifying the exit code (ERRORLEVEL) to return."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "System"
+    },
+    {
+      "name": "POPERRORS",
+      "description": "Restores error information previously saved by PUSHERRORS.",
+      "signatures": [
+        {
+          "label": "POPERRORS()",
+          "documentation": "Restores the last error state saved by PUSHERRORS, including ERRORCODE(), ERROR(), FILEERRORCODE(), FILEERROR(), ERRORFILE(), the C library errno, and the Windows GetLastError() code. Works on a LIFO stack with no depth limit other than available memory. Error state is thread-specific; POPERRORS from different threads operate on independent stacks.",
+          "parameters": []
+        }
+      ],
+      "returnType": "VOID",
+      "category": "Error Handling"
+    },
+    {
+      "name": "PUSHERRORS",
+      "description": "Saves the current error information to an internal stack for later retrieval with POPERRORS.",
+      "signatures": [
+        {
+          "label": "PUSHERRORS()",
+          "documentation": "Saves the current thread's error states — ERRORCODE(), ERROR(), FILEERRORCODE(), FILEERROR(), ERRORFILE(), the C library errno, and the Windows GetLastError() code — to a LIFO stack. Use POPERRORS to restore them. Useful to preserve error state before performing additional code that might change it. Error state is thread-specific; PUSHERRORS from different threads operate on independent stacks.",
+          "parameters": []
+        }
+      ],
+      "returnType": "VOID",
+      "category": "Error Handling"
+    },
+    {
+      "name": "PUSHBIND",
+      "description": "Creates a new scope for subsequent BIND statements, saving the current name space.",
+      "signatures": [
+        {
+          "label": "PUSHBIND([clearflag])",
+          "documentation": "Creates a new BIND name space scope. clearflag = 0 (default) clears all previously bound variable and procedure names; clearflag = 1 leaves them in place. The scope is terminated by the corresponding POPBIND. Useful when calling code that uses the same variable names as the outer scope, preventing name conflicts in runtime expression strings.",
+          "parameters": [
+            {
+              "label": "clearflag",
+              "documentation": "Optional. 0 (default) clears the BIND name space; 1 preserves existing bindings in the new scope."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "Runtime Expression"
+    },
+    {
+      "name": "POPBIND",
+      "description": "Restores the BIND name space to the state before the last PUSHBIND.",
+      "signatures": [
+        {
+          "label": "POPBIND",
+          "documentation": "Restores the previous BIND statement name space, undoing the scope created by PUSHBIND. Variable and procedure names that were bound before PUSHBIND are accessible again. PUSHBIND and POPBIND work as a LIFO stack.",
+          "parameters": []
+        }
+      ],
+      "returnType": "VOID",
+      "category": "Runtime Expression"
+    },
+    {
+      "name": "BINDEXPRESSION",
+      "description": "Pre-compiles a runtime expression and binds it to a name for efficient repeated evaluation.",
+      "signatures": [
+        {
+          "label": "BINDEXPRESSION(name, expression)",
+          "documentation": "Parses and pre-compiles the expression string once, storing the result under name. The named expression can then be used in EVALUATE or in other BINDEXPRESSION calls without re-parsing. This is more efficient than repeated EVALUATE calls when the same expression is evaluated frequently. All variables referenced in expression must first be bound with BIND.",
+          "parameters": [
+            {
+              "label": "name",
+              "documentation": "A string constant containing the identifier to assign to the pre-compiled expression."
+            },
+            {
+              "label": "expression",
+              "documentation": "A string containing a valid Clarion language logical or mathematical expression, which may reference BINDed variables or other named BINDEXPRESSION expressions."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "Runtime Expression"
+    },
+    {
+      "name": "LOCALE",
+      "description": "Loads a locale environment file (.ENV) or sets individual locale/environment settings at runtime.",
+      "signatures": [
+        {
+          "label": "LOCALE(file|setting [, value])",
+          "documentation": "Loads a named .ENV file (or the keyword WINDOWS for Windows defaults) to override locale settings such as collating sequence, case mappings, date/time formats, and button labels. Alternatively, sets individual environment variables by specifying setting (e.g. 'CLACODEPAGE', 'CLALCID') and value. Errors posted: 02 File Not Found, 05 Access Denied.",
+          "parameters": [
+            {
+              "label": "file|setting",
+              "documentation": "String constant or variable: the .ENV filename to load, the keyword WINDOWS, or the name of an individual environment variable to set (e.g. 'CLACODEPAGE', 'CLALCID', 'CLABUTTON')."
+            },
+            {
+              "label": "value",
+              "documentation": "Optional. The value to assign when setting an individual environment variable."
+            }
+          ]
+        }
+      ],
+      "returnType": "VOID",
+      "category": "System"
+    },
+    {
+      "name": "THREADLOCKED",
+      "description": "Returns the locked/unlocked state of the current execution thread.",
+      "signatures": [
+        {
+          "label": "THREADLOCKED()",
+          "documentation": "Returns 1 if the current execution thread is locked (the normal state inside an ACCEPT loop), or 0 if it has been unlocked by UNLOCKTHREAD. Use before calling LOCKTHREAD or UNLOCKTHREAD to check the current state.",
+          "parameters": []
+        }
+      ],
+      "returnType": "SIGNED",
+      "category": "Threading"
+    },
+    {
+      "name": "LOCKTHREAD",
+      "description": "Re-locks the current execution thread after it was unlocked with UNLOCKTHREAD.",
+      "signatures": [
+        {
+          "label": "LOCKTHREAD",
+          "documentation": "Re-locks the current execution thread that was previously unlocked with UNLOCKTHREAD. Must be called after the external (non-Clarion) procedure that required thread unlocking returns. Between UNLOCKTHREAD and LOCKTHREAD, no Clarion runtime library calls are permitted.",
+          "parameters": []
+        }
+      ],
+      "returnType": "VOID",
+      "category": "Threading"
+    },
+    {
+      "name": "UNLOCKTHREAD",
+      "description": "Unlocks the current execution thread to allow other threads to execute while calling external code with its own message loop.",
+      "signatures": [
+        {
+          "label": "UNLOCKTHREAD",
+          "documentation": "Unlocks the current execution thread so that other threads can run cooperatively while the current thread calls external (non-Clarion) code that has its own message loop. After the external call returns, use LOCKTHREAD to re-lock the thread. Between UNLOCKTHREAD and LOCKTHREAD, you must NOT call any Clarion runtime procedure or perform operations on STRING, CSTRING, PSTRING, DECIMAL, or PDECIMAL types.",
+          "parameters": []
+        }
+      ],
+      "returnType": "VOID",
+      "category": "Threading"
+    },
+    {
+      "name": "INSTANCE",
+      "description": "Returns the address of a variable's thread-specific instance.",
+      "signatures": [
+        {
+          "label": "INSTANCE(variable, threadno)",
+          "documentation": "Returns the address of the thread instance of variable allocated for the thread identified by threadno. If threadno is 0, returns the thread-independent ID (the address assigned by the program loader). If threadno is non-zero and that thread is not active or has no instance of variable, returns 0. Preferred over ADDRESS() for FILE and QUEUE structures, and for obtaining thread-independent IDs of threaded variables.",
+          "parameters": [
+            {
+              "label": "variable",
+              "documentation": "Label of a variable, field, FILE, KEY, QUEUE, or reference variable."
+            },
+            {
+              "label": "threadno",
+              "documentation": "A numeric constant, variable, or expression (SIGNED) identifying the thread. Use 0 to get the thread-independent ID."
+            }
+          ]
+        }
+      ],
+      "returnType": "LONG",
+      "category": "Threading"
     }
   ]
 }
