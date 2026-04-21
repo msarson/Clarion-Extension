@@ -5445,6 +5445,62 @@
       ],
       "returnType": "LONG",
       "category": "Threading"
+    },
+    {
+      "name": "HIDE",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "first",
+              "optional": true
+            },
+            {
+              "name": "last",
+              "optional": true
+            }
+          ],
+          "returnType": "",
+          "description": "Hides one or more window controls at runtime. With no parameters, hides all controls. Using first alone hides that control; first and last hides an inclusive range of controls by USE order. Controls remain in memory but are not visible. Use UNHIDE to make them visible again.",
+          "syntax": "HIDE([first] [,last])"
+        }
+      ]
+    },
+    {
+      "name": "DISABLE",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "first",
+              "optional": true
+            },
+            {
+              "name": "last",
+              "optional": true
+            }
+          ],
+          "returnType": "",
+          "description": "Dims (grays out) one or more window controls at runtime, preventing user interaction. With no parameters, disables all controls. Using first alone disables that control; first and last disables an inclusive range by USE order. Use ENABLE to re-activate.",
+          "syntax": "DISABLE([first] [,last])"
+        }
+      ]
+    },
+    {
+      "name": "TYPE",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "string",
+              "optional": false
+            }
+          ],
+          "returnType": "",
+          "description": "In a REPORT structure, writes a string to the current print position. Used to output dynamically formatted text at report generation time.",
+          "syntax": "TYPE(string)"
+        }
+      ]
     }
   ]
 }
