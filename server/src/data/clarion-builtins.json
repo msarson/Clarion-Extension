@@ -1677,21 +1677,6 @@
       ]
     },
     {
-      "name": "VAL",
-      "signatures": [
-        {
-          "params": [
-            {
-              "name": "STRING character",
-              "optional": false
-            }
-          ],
-          "returnType": "BYTE | USHORT | SIGNED",
-          "description": "Returns the numeric code of a character. Returns BYTE for ANSI strings, USHORT for Unicode strings, or SIGNED if type cannot be determined at compile time. Use TOANSI or TOUNICODE to force specific encoding."
-        }
-      ]
-    },
-    {
       "name": "SIN",
       "signatures": [
         {
@@ -5507,9 +5492,18 @@
       "signatures": [
         {
           "params": [
-            { "name": "file", "optional": false },
-            { "name": "procedure", "optional": false },
-            { "name": "flags", "optional": true }
+            {
+              "name": "file",
+              "optional": false
+            },
+            {
+              "name": "procedure",
+              "optional": false
+            },
+            {
+              "name": "flags",
+              "optional": true
+            }
           ],
           "returnType": "SIGNED",
           "description": "Calls a procedure from a Windows standard .DLL that has not been prototyped in the MAP structure. The DLL is loaded if not already resident. Returns 0 on success, or a Windows error code on failure. The DLL is unloaded when the procedure finishes unless flags bit 0 is set to 1. Use UNLOAD to explicitly unload a resident DLL.",
@@ -5522,9 +5516,18 @@
       "signatures": [
         {
           "params": [
-            { "name": "entity", "optional": false },
-            { "name": "FileCallBackInterface", "optional": false },
-            { "name": "flag", "optional": true }
+            {
+              "name": "entity",
+              "optional": false
+            },
+            {
+              "name": "FileCallBackInterface",
+              "optional": false
+            },
+            {
+              "name": "flag",
+              "optional": true
+            }
           ],
           "returnType": "",
           "description": "Registers or unregisters a FileCallBackInterface with a FILE or VIEW. The interface methods are called automatically before (FunctionCalled) and after (FunctionDone) each file operation. Multiple interfaces can be registered. Set flag to TRUE (1) to unregister. Registered interfaces must be unregistered before the implementing object is destroyed.",
@@ -5537,7 +5540,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "string", "optional": false }
+            {
+              "name": "string",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Translates a string or GROUP from the ANSI (Windows display) character set into the OEM character set (ASCII with extra characters defined by the active code page). Not required when the OEM file attribute is set. Companion to CONVERTOEMTOANSI.",
@@ -5550,7 +5556,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "string", "optional": false }
+            {
+              "name": "string",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Translates a string or GROUP from the OEM character set (ASCII with extra characters defined by the active code page) into the ANSI (Windows display) character set. Not required when the OEM file attribute is set. Companion to CONVERTANSITOOEM.",
@@ -5585,8 +5594,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "address", "optional": false },
-            { "name": "source", "optional": false }
+            {
+              "name": "address",
+              "optional": false
+            },
+            {
+              "name": "source",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Writes the contents of a variable to a memory address. Writes as many bytes as are in the source variable. Use ADDRESS() to obtain a safe protected-mode address. Incorrect use can cause General Protection Faults. Prefer Windows API functions over POKE where possible.",
@@ -5599,8 +5614,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "title", "optional": true },
-            { "name": "flag", "optional": true }
+            {
+              "name": "title",
+              "optional": true
+            },
+            {
+              "name": "flag",
+              "optional": true
+            }
           ],
           "returnType": "SIGNED",
           "description": "Displays the Windows standard printer choice dialog. flag: 0=Choose Printer, 1=Print Setup, 2=Page Setup. Sets the default printer for the next REPORT opened. Returns 1 if user clicked OK, 0 if Cancel.",
@@ -5613,11 +5634,26 @@
       "signatures": [
         {
           "params": [
-            { "name": "event", "optional": false },
-            { "name": "handler", "optional": false },
-            { "name": "object", "optional": false },
-            { "name": "window", "optional": true },
-            { "name": "control", "optional": true }
+            {
+              "name": "event",
+              "optional": false
+            },
+            {
+              "name": "handler",
+              "optional": false
+            },
+            {
+              "name": "object",
+              "optional": false
+            },
+            {
+              "name": "window",
+              "optional": true
+            },
+            {
+              "name": "control",
+              "optional": true
+            }
           ],
           "returnType": "",
           "description": "Registers an event handler procedure to be called by the ACCEPT loop whenever the specified event occurs. handler is the ADDRESS of the procedure. object is a unique 32-bit identifier (typically ADDRESS(SELF)). Multiple handlers can be registered for the same event; they execute in reverse registration order. Can also be prototyped as REGISTEREVENT.",
@@ -5630,11 +5666,26 @@
       "signatures": [
         {
           "params": [
-            { "name": "event", "optional": true },
-            { "name": "handler", "optional": true },
-            { "name": "object", "optional": true },
-            { "name": "window", "optional": true },
-            { "name": "control", "optional": true }
+            {
+              "name": "event",
+              "optional": true
+            },
+            {
+              "name": "handler",
+              "optional": true
+            },
+            {
+              "name": "object",
+              "optional": true
+            },
+            {
+              "name": "window",
+              "optional": true
+            },
+            {
+              "name": "control",
+              "optional": true
+            }
           ],
           "returnType": "",
           "description": "Unregisters a previously REGISTERed event handler. Omitting parameters unregisters all matching handlers (e.g., omit event to unregister all events for the object). The runtime automatically unregisters all handlers when a window closes, so explicit UNREGISTER is only needed for early deregistration. Can also be prototyped as UNREGISTEREVENT.",
@@ -5647,7 +5698,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "switch", "optional": false }
+            {
+              "name": "switch",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Toggles the three-dimensional look and feel for window controls. SET3DLOOK(0) disables 3D look; SET3DLOOK(1) enables it (default). The GRAY attribute on a WINDOW causes controls to appear three-dimensional. TOOLBAR controls are always 3D unless disabled by SET3DLOOK.",
@@ -5660,7 +5714,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "string", "optional": false }
+            {
+              "name": "string",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Sets the value that DROPID() will return, allowing data to be passed in a drag-and-drop operation. Used in EVENT:Drag processing to package the dragged data for the drop target, especially when passing data between separate Clarion applications.",
@@ -5673,7 +5730,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "keychar", "optional": false }
+            {
+              "name": "keychar",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Sets the internal ASCII character value returned by the KEYCHAR procedure. The character is not placed in the keyboard buffer. Used to override the character returned from the last keystroke event.",
@@ -5686,7 +5746,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "keycode", "optional": false }
+            {
+              "name": "keycode",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Sets the keycode value returned by the KEYCODE procedure. The keycode is not placed in the keyboard buffer. Used to override the keycode returned from the last keystroke event. Accepts integer constants or keycode EQUATE labels.",
@@ -5699,7 +5762,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "path", "optional": false }
+            {
+              "name": "path",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Changes the current drive and directory. If the drive and path are invalid, posts error 03 (Path Not Found). If only a drive letter and colon are specified, changes to the current directory of that drive. Companion to PATH, SHORTPATH, LONGPATH.",
@@ -5712,7 +5778,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "date", "optional": false }
+            {
+              "name": "date",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Sets the operating system date. date is a standard Clarion date numeric value. Use TODAY() to get the current date and arithmetic to calculate new dates.",
@@ -5725,8 +5794,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "entity", "optional": false },
-            { "name": "count", "optional": false }
+            {
+              "name": "entity",
+              "optional": false
+            },
+            {
+              "name": "count",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Bypasses records during sequential processing by moving the file pointer count records without loading data into the record buffer. More efficient than repeated NEXT/PREVIOUS calls. Positive count skips forward; negative count skips backward. Posts errors if past end/beginning of file or if SET has not been issued.",
@@ -5739,7 +5814,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "sql expression", "optional": false }
+            {
+              "name": "sql expression",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Specifies a native SQL expression for use in a VIEW FILTER, ORDER, or JOIN, or in PROP:Filter, PROP:Order, PROP:JoinExpression. Anything inside SQL() is passed directly to the SQL server without Clarion translation. The SQL driver generates aliases (A, B, etc.) for each file in a VIEW; use those aliases in your SQL expressions.",
@@ -5752,9 +5830,18 @@
       "signatures": [
         {
           "params": [
-            { "name": "entity", "optional": false },
-            { "name": "SQLCallBackInterface", "optional": false },
-            { "name": "flag", "optional": true }
+            {
+              "name": "entity",
+              "optional": false
+            },
+            {
+              "name": "SQLCallBackInterface",
+              "optional": false
+            },
+            {
+              "name": "flag",
+              "optional": true
+            }
           ],
           "returnType": "",
           "description": "Registers or unregisters a SQLCallBackInterface with a FILE or VIEW. The interface's ExecutingCode method is called just before each SQL statement is sent to the SQL server. Set flag to TRUE (1) to unregister. Only supported by SQL file drivers.",
@@ -5767,7 +5854,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "expression", "optional": false }
+            {
+              "name": "expression",
+              "optional": false
+            }
           ],
           "returnType": "REAL",
           "description": "Returns the square root of a numeric expression. If the value is less than zero, returns zero. The square root of X is the number that, when multiplied by itself, equals X.",
@@ -5780,7 +5870,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "file", "optional": false }
+            {
+              "name": "file",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Disables automatic file buffer flushing for a FILE, allowing the OS to buffer writes. Terminated by CLOSE (which flushes automatically) or FLUSH. Use in single-user or batch contexts; LOGOUT is safer in multi-user environments. Support is file driver dependent.",
@@ -5793,9 +5886,18 @@
       "signatures": [
         {
           "params": [
-            { "name": "stringtoken", "optional": false },
-            { "name": "index", "optional": true },
-            { "name": "value", "optional": false }
+            {
+              "name": "stringtoken",
+              "optional": false
+            },
+            {
+              "name": "index",
+              "optional": true
+            },
+            {
+              "name": "value",
+              "optional": false
+            }
           ],
           "returnType": "LONG",
           "description": "Associates a numeric value with an ASTRING token and index. If index is omitted or zero, a unique index is allocated at runtime and returned. Used with TIED and UNTIE to attach metadata to ASTRING values.",
@@ -5808,8 +5910,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "stringtoken", "optional": false },
-            { "name": "index", "optional": false }
+            {
+              "name": "stringtoken",
+              "optional": false
+            },
+            {
+              "name": "index",
+              "optional": false
+            }
           ],
           "returnType": "LONG",
           "description": "Retrieves a numeric value previously associated with an ASTRING token and index using TIE. Returns 0 if no value has been tied for that token and index.",
@@ -5822,8 +5930,14 @@
       "signatures": [
         {
           "params": [
-            { "name": "stringtoken", "optional": true },
-            { "name": "index", "optional": true }
+            {
+              "name": "stringtoken",
+              "optional": true
+            },
+            {
+              "name": "index",
+              "optional": true
+            }
           ],
           "returnType": "",
           "description": "Disassociates a value previously tied to an ASTRING token and index using TIE. If stringtoken is omitted, all ASTRINGs are affected. If index is omitted, all indexes for the token are untied.",
@@ -5836,7 +5950,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "file", "optional": false }
+            {
+              "name": "file",
+              "optional": false
+            }
           ],
           "returnType": "",
           "description": "Unloads a Windows standard .DLL that was left resident by CALL with flags bit 0 set. Use when the DLL is no longer needed to free memory.",
