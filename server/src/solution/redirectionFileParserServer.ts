@@ -80,6 +80,10 @@ export class RedirectionFileParserServer {
   }
 
   public parseRedFile(projectPath: string): RedirectionEntry[] {
+    if (!serverSettings.redirectionFile) {
+      logger.info("redirectionFile not configured — skipping red file lookup");
+      return [];
+    }
     const projectRedFile = path.join(projectPath, serverSettings.redirectionFile);
     const globalRedFile = path.join(serverSettings.primaryRedirectionPath, serverSettings.redirectionFile);
 
@@ -132,6 +136,10 @@ export class RedirectionFileParserServer {
 
   // Async version of parseRedFile for better performance
   public async parseRedFileAsync(projectPath: string): Promise<RedirectionEntry[]> {
+    if (!serverSettings.redirectionFile) {
+      logger.info("redirectionFile not configured — skipping red file lookup");
+      return [];
+    }
     const projectRedFile = path.join(projectPath, serverSettings.redirectionFile);
     const globalRedFile = path.join(serverSettings.primaryRedirectionPath, serverSettings.redirectionFile);
 

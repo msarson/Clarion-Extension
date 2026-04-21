@@ -904,6 +904,14 @@ connection.onNotification('clarion/updatePaths', async (params: {
         serverSettings.libsrcPaths = params.libsrcPaths || [];
         serverSettings.redirectionFile = params.redirectionFile || "";
         serverSettings.solutionFilePath = params.solutionFilePath || ""; // Store solution file path
+
+        // Clear the SDI cache so any stale empty index (built before redirectionFile was known)
+        // is discarded — it will be rebuilt with correct paths by the setImmediate below.
+        if (params.redirectionFile) {
+            const { StructureDeclarationIndexer } = await import('./utils/StructureDeclarationIndexer');
+            StructureDeclarationIndexer.getInstance().clearCache();
+            logger.info("🗑️ SDI cache cleared — will rebuild with correct redirection paths");
+        }
         
         // Update default lookup extensions if provided
         if (params.defaultLookupExtensions && params.defaultLookupExtensions.length > 0) {
