@@ -105,7 +105,16 @@ export class SmartSolutionOpener {
                         - version: ${existingSettings.version}
                         - configuration: ${existingSettings.configuration}`);
 
-                    // Save as current solution and update globals
+                    // Update globals BEFORE saving to settings so that onDidChangeConfiguration
+                    // handlers that fire during the save see the correct (new) solution path.
+                    await setGlobalClarionSelection(
+                        solutionPath,
+                        existingSettings.propertiesFile,
+                        existingSettings.version,
+                        existingSettings.configuration,
+                        true // skipSave — we save explicitly below
+                    );
+
                     const success = await SettingsStorageManager.saveSolutionSettings(
                         solutionPath,
                         existingSettings.propertiesFile,
@@ -114,14 +123,6 @@ export class SmartSolutionOpener {
                     );
 
                     if (success) {
-                        await setGlobalClarionSelection(
-                            solutionPath,
-                            existingSettings.propertiesFile,
-                            existingSettings.version,
-                            existingSettings.configuration,
-                            true
-                        );
-
                         // Set environment variable and context
                         process.env.CLARION_SOLUTION_FILE = solutionPath;
                         await commands.executeCommand("setContext", "clarion.solutionOpen", true);
@@ -198,7 +199,25 @@ export class SmartSolutionOpener {
                 selectedConfig = configurations[0] ?? "Release";
             }
 
-            // Step 5: Save settings using smart storage manager
+            // Step 5: Update global variables BEFORE saving to settings so that
+            // onDidChangeConfiguration handlers fired during the save see the correct solution.
+            logger.info(`📝 Updating global variables with:
+                - solutionPath: ${solutionPath}
+                - propertiesPath: ${selectedInstallation.propertiesPath}
+                - compiler: ${selectedCompiler}
+                - config: ${selectedConfig}`);
+
+            await setGlobalClarionSelection(
+                solutionPath,
+                selectedInstallation.propertiesPath,
+                selectedCompiler,
+                selectedConfig,
+                true // skipSave — we save explicitly below
+            );
+
+            logger.info("✅ Global variables updated");
+
+            // Step 6: Save settings using smart storage manager
             const success = await SettingsStorageManager.saveSolutionSettings(
                 solutionPath,
                 selectedInstallation.propertiesPath,
@@ -209,24 +228,7 @@ export class SmartSolutionOpener {
             if (!success) {
                 window.showErrorMessage("Failed to save solution settings");
                 return false;
-            }
-
-            // Step 6: Update global variables (skip saving since we already saved above)
-            logger.info(`📝 Updating global variables with:
-                - solutionPath: ${solutionPath}
-                - propertiesPath: ${selectedInstallation.propertiesPath}
-                - compiler: ${selectedCompiler}
-                - config: ${selectedConfig}`);
-                
-            await setGlobalClarionSelection(
-                solutionPath,
-                selectedInstallation.propertiesPath,
-                selectedCompiler,
-                selectedConfig,
-                true // skipSave = true, we already saved above
-            );
-            
-            logger.info("✅ Global variables updated");
+            };
 
             // Step 7: Add to global solution history
             const folderPath = path.dirname(solutionPath);
