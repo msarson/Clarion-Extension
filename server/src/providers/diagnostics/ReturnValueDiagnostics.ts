@@ -109,7 +109,11 @@ function validateCrossFilePlainCalls(
             }
 
             let startIdx = i;
-            if (t.type === TokenType.Procedure) {
+            {
+                // Skip past the parameter list '(...)' regardless of whether the declaration
+                // uses the explicit PROCEDURE keyword (type=Procedure) or the shorthand form
+                // (type=Label, e.g. `PQClear(Long pResult),Raw,C,...`). Without this, the
+                // parameter type (e.g. Long) is mistaken for a return type.
                 let depth = 0;
                 for (let k = i; k < otherTokens.length && otherTokens[k].line === t.line; k++) {
                     if (otherTokens[k].value === '(') depth++;
@@ -471,7 +475,9 @@ export function validateDiscardedReturnValuesForPlainCalls(
             }
 
             let startIdx = i;
-            if (t.type === TokenType.Procedure) {
+            {
+                // Skip past the parameter list '(...)' regardless of token type.
+                // See the same fix in validateCrossFilePlainCalls for the rationale.
                 let depth = 0;
                 for (let k = i; k < tokens.length && tokens[k].line === t.line; k++) {
                     if (tokens[k].value === '(') depth++;
