@@ -159,6 +159,39 @@ export class ContextualHoverHandler {
     }
 
     /**
+     * Handle keywords that serve as both a window/structure attribute and a runtime builtin
+     * (HIDE, DISABLE, TYPE): in window context → attribute hover; in code context → builtin hover
+     */
+    handleWindowBuiltin(word: string, isInWindowContext: boolean): Hover | null {
+        const upper = word.toUpperCase();
+        if (isInWindowContext) {
+            const attribute = this.attributeService.getAttribute(upper);
+            if (attribute) {
+                const appliesto = attribute.applicableTo?.join(', ') ?? '';
+                const lines = [`**${upper}** (Attribute)\n\n${attribute.description}`];
+                if (appliesto) lines.push(`**Applies to:** ${appliesto}`);
+                return { contents: { kind: 'markdown', value: lines.join('\n\n') } };
+            }
+        } else {
+            const signatures = this.builtinService.getSignatures(upper);
+            if (signatures.length > 0) {
+                const sig = signatures[0];
+                const docText = typeof sig.documentation === 'string'
+                    ? sig.documentation
+                    : (sig.documentation as any)?.value || '';
+                const syntaxStr = (sig as any).syntax || sig.label || '';
+                return {
+                    contents: {
+                        kind: 'markdown',
+                        value: `**${upper}** (Procedure)\n\n${docText}${syntaxStr ? `\n\n**Syntax:** \`${syntaxStr}\`` : ''}`
+                    }
+                };
+            }
+        }
+        return null;
+    }
+
+    /**
      * Handle PROCEDURE keyword - different contexts: MAP prototype, CLASS method, implementation
      */
     handleProcedureKeyword(line: string, isInMapBlock: boolean, isInClass: boolean): Hover | null {
