@@ -11,7 +11,7 @@ The Clarion Extension provides two main documentation features:
 - **Signature Help** - Parameter hints when calling functions/methods
 - **Hover Documentation** - Information when hovering over symbols
 
-**Note:** This extension does NOT provide auto-complete dropdowns as you type. It provides documentation for functions/methods you're already calling.
+
 
 ---
 
@@ -47,7 +47,7 @@ Parameters:
 3. Press `Ctrl+Shift+Space` manually
 
 **It appears for:**
-- Built-in Clarion functions (148 functions)
+- Built-in Clarion functions (310 functions)
 - Custom procedure calls
 - Class method calls (with overload support)
 
@@ -55,7 +55,7 @@ Parameters:
 
 ### Built-in Functions Supported
 
-**148 Clarion built-in functions documented:**
+**310 Clarion built-in functions documented:**
 
 #### String Functions
 - `SUB(string, start, <length>)` - Extract substring
@@ -127,6 +127,12 @@ Process(<STRING optional>)
 
 ---
 
+### Overload Narrowing by Argument Type
+
+When calling a function like `OPEN(Window)`, hover shows only the overloads relevant to a WINDOW argument — not all 8 signatures. The extension infers the structureType (FILE, VIEW, WINDOW, REPORT, etc.) from the argument label and filters signatures accordingly.
+
+---
+
 ### Keyboard Shortcuts
 
 **Show/Hide Signature Help:**
@@ -153,6 +159,21 @@ Process(<STRING optional>)
 - Hover over **built-in function** → See full documentation
 - Hover over **INCLUDE** → Preview file contents
 - Hover over **method** → See signature and implementation
+
+---
+
+### PROP: / PROPPRINT: / EVENT: Hover
+
+- Hover over any `PROP:` runtime property equate (e.g. `PROP:Enabled`) shows description, read-only badge, and usage example. Covers 336 PROP: entries and 25 PROPPRINT: entries.
+- Hover over any `EVENT:` equate shows category (Field-Specific / Field-Independent / DDE) and description. 63 events covered including `EVENT:User`.
+
+---
+
+### Context-Aware Hover
+
+`HIDE`, `DISABLE`, and `TYPE` show different documentation depending on context:
+- Inside a WINDOW/REPORT structure: shows the control attribute usage and PROP: equate
+- Outside: shows the statement/function usage
 
 ---
 

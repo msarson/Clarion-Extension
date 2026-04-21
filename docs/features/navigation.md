@@ -288,6 +288,59 @@ INCLUDE('MyFile.inc', 'MySection')  ! Hover shows MySection content
 
 ---
 
+---
+
+## CodeLens — Inline Reference Counts
+
+A `N references` count appears above every procedure and CLASS declaration.
+- Shows how many times the symbol is referenced across the solution
+- Click the lens to open the References panel with all locations
+- Dead code (0 references) is immediately visible
+- Requires solution to be open for cross-file counts
+
+---
+
+## Find All References (Shift+F12)
+
+- Press **Shift+F12** on any symbol to find all usages
+- Scope-aware: searches across all project files in the solution
+- Works for procedures, classes, variables, methods, type names in declarations
+- Results grouped by file with line previews
+
+---
+
+## Rename Symbol (F2)
+
+- Press **F2** on any user-defined symbol to rename it across the whole workspace
+- Scope-aware: only renames symbols in the correct scope
+- Protects library/read-only `.inc` files from modification
+- Validates cursor position before opening the rename dialog
+
+---
+
+## Document Highlight
+
+- Click on a symbol to highlight all its occurrences in the current file
+- Useful for quickly seeing all uses without opening the References panel
+
+---
+
+## INTERFACE Support
+
+- Hover, F12, Ctrl+F12, and Find All References work on interface methods
+- Supports `IMPLEMENTS()` declarations
+- Resolves 3-part `Class.Interface.Method` implementations
+- Navigate from interface method declaration to all class implementations
+
+---
+
+## LIKE(TypeName) Chain Navigation
+
+- `SELF.OrigWin.Maximized` where `OrigWin` is declared `LIKE(WindowPositionGroup)` navigates correctly to the `Maximized` field in the GROUP
+- Colon-qualified names such as `LIKE(PYA:RECORD)` are also supported
+
+---
+
 ## Navigation Tips
 
 ### Breadcrumb Navigation

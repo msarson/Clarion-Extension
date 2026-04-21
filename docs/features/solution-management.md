@@ -96,6 +96,8 @@ Clarion Tools
 - Single-click: Selects file
 - Double-click: Opens file in editor
 
+**Projects sorted by build order:** Projects in the Solution View are ordered dependency-first (libraries before the applications that depend on them), matching the actual build order.
+
 **Context menu (right-click):**
 - **Generate Application** - Build selected app
 - **Open in Explorer** - Show file in Windows Explorer
@@ -140,6 +142,8 @@ When opening a solution for the first time, you'll configure:
 #### 3. Build Configuration
 **What:** Debug or Release build  
 **Default:** Release|Win32
+
+The active build configuration is now **auto-detected from the `.sln.cache` file** when the solution is opened — it no longer defaults to the first config in the list.
 
 **Change anytime:**
 - Click configuration in status bar (bottom)
