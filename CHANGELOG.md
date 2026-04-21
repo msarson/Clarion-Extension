@@ -8,6 +8,10 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [0.9.6] - Unreleased
 
+**Bug Fixes**
+
+- 🐛 Variable hover no longer appends a spurious "EQUATE Definition" block from the structure index — `enhanceHoverWithClassInfo` now only enriches hover when the variable's type resolves to a `CLASS` or `INTERFACE` in the index; primitive type names such as `LONG` that happen to match an equate in a library file (e.g. `ABUTIL.INC`) are no longer shown
+
 ---
 
 ### [0.9.5] - 2026-04-21
