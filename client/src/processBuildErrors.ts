@@ -21,6 +21,11 @@ function processBuildErrors(
     const wrappedErrorPattern =
         /^(?:.*?>\s*)?([A-Za-z]:\\.*?\.(?:[cC][lL][wW]|[iI][nN][cC]|[eE][qQ][uU]|[iI][nN][tT]))\((\d+),\s*$\r?\n^\s*(\d+)\):\s+(error|warning)\s*:?\s*(.*?)(?:\s+\[([^\]]+)\])?/gm;
 
+    // Clarion compiler native format: "Message - C:\path\to\file.clw:line,col"
+    // e.g. "Unknown procedure label - C:\...\MSSQL2DriverClass.Clw:7220,3"
+    const clarionNativePattern =
+        /^(.+?)\s+-\s+([A-Za-z]:\\.*?\.(?:[cC][lL][wW]|[iI][nN][cC]|[eE][qQ][uU]|[iI][nN][tT])):(\d+),(\d+)\s*$/gm;
+
     // Generic MSBuild lines without a file:  MSBUILD : error MSB1009: ...
     const fallbackPattern =
         /^\s*(?:MSBUILD|.+?)\s*:\s+(error|warning)\s+([A-Z0-9]+)?:?\s*(.+)$/gm;
@@ -115,6 +120,12 @@ function processBuildErrors(
     for (let m; (m = wrappedErrorPattern.exec(buildOutput)) !== null;) {
         const [, filePath, line1, col, type, message, projTail] = m;
         processFileBased(filePath, line1, col, type, message, projTail);
+    }
+
+    // Clarion native format: treat all matches as errors (non-zero exit code confirms failure)
+    for (let m; (m = clarionNativePattern.exec(buildOutput)) !== null;) {
+        const [, message, filePath, line, column] = m;
+        processFileBased(filePath, line, column, 'error', message);
     }
 
     for (let m; (m = fallbackPattern.exec(buildOutput)) !== null;) {

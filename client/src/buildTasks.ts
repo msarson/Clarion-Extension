@@ -763,9 +763,8 @@ async function executeBuildTaskSync(params: {
                         if (errorCount > 0) {
                             reject(new Error(`Build failed: ${errorCount} error(s), ${warningCount} warning(s)`));
                         } else {
-                            // No actual errors found, treat as success
-                            diagnosticCollection.clear();
-                            resolve();
+                            // Non-zero exit but no parsed errors — still a failure
+                            reject(new Error(`Build failed with exit code ${event.exitCode} (check build log for details)`));
                         }
                     } else {
                         diagnosticCollection.clear();
