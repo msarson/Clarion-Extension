@@ -279,6 +279,11 @@
         "icon": "$(sync)"
       },
       {
+        "command": "clarion.newSolution",
+        "title": "New Solution",
+        "icon": "$(add)"
+      },
+      {
         "command": "clarion.openSolution",
         "title": "Open Solution",
         "icon": "$(folder-opened)"
@@ -636,6 +641,11 @@
         }
       ],
       "view/title": [
+        {
+          "command": "clarion.newSolution",
+          "when": "view == solutionView && !clarion.solutionOpen && workspaceFolderCount > 0",
+          "group": "navigation@0"
+        },
         {
           "command": "clarion.openSolution",
           "when": "view == solutionView && !clarion.solutionOpen",
