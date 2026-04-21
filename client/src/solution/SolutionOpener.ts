@@ -10,6 +10,7 @@ import { refreshSolutionTreeView } from '../views/ViewManager';
 import { createSolutionFileWatchers } from '../providers/FileWatcherManager';
 import { DocumentManager } from '../documentManager';
 import LoggerManager from '../utils/LoggerManager';
+import { readActiveConfigFromSlnCache, configNameFromFull } from '../utils/SlnCacheUtils';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -330,20 +331,31 @@ export async function openClarionSolution(
         const solutionFileContent = fs.readFileSync(solutionFilePath, 'utf-8');
         const availableConfigs = extractConfigurationsFromSolution(solutionFileContent);
 
-        // ✅ Prompt the user **only if multiple configurations exist**
-        if (availableConfigs.length > 1) {
+        // Try to auto-detect the active configuration from the .sln.cache file
+        // (written by Clarion IDE/MSBuild after each build — reflects last-used config)
+        const cachedFullConfig = readActiveConfigFromSlnCache(solutionFilePath);
+        const cachedConfigName = cachedFullConfig ? configNameFromFull(cachedFullConfig) : null;
+        const autoConfig = cachedConfigName && availableConfigs.includes(cachedConfigName)
+            ? cachedConfigName
+            : null;
+
+        if (autoConfig) {
+            globalSettings.configuration = autoConfig;
+            logger.info(`⚙️ Auto-detected configuration from .sln.cache: ${autoConfig}`);
+        } else if (availableConfigs.length > 1) {
+            // No cache hint — prompt the user
             const selectedConfig = await vscodeWindow.showQuickPick(availableConfigs, {
                 placeHolder: "Select Clarion Configuration",
             });
 
             if (!selectedConfig) {
                 vscodeWindow.showWarningMessage("Configuration selection canceled. Using 'Debug' as fallback.");
-                globalSettings.configuration = "Debug"; // ⬅️ Safe fallback
+                globalSettings.configuration = "Debug";
             } else {
                 globalSettings.configuration = selectedConfig;
             }
         } else {
-            globalSettings.configuration = availableConfigs[0] || "Debug"; // ⬅️ Single config or fallback
+            globalSettings.configuration = availableConfigs[0] || "Debug";
         }
 
         // ✅ Step 4: Save final selections to workspace settings
