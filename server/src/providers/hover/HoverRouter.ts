@@ -267,7 +267,6 @@ export class HoverRouter {
 
         // Resolve structureType of first argument for overload narrowing (e.g. OPEN(Names) → 'FILE')
         const firstArgType = this.resolveFirstArgStructureType(line, word, tokens);
-        logger.info(`First arg structureType: ${firstArgType ?? 'unknown'}`);
 
         return this.formatter.formatBuiltin(word, signatures, paramCount, firstArgType ?? undefined);
     }
