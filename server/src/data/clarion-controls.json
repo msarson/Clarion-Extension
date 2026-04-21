@@ -187,6 +187,30 @@
       "description": "Declares an image control for displaying graphics on reports",
       "syntax": "IMAGE([filename])",
       "commonAttributes": ["AT", "CENTERED", "TILED"]
+    },
+    {
+      "name": "DETAIL",
+      "description": "Declares a report detail band — the body of the report, printed explicitly via PRINT()",
+      "syntax": "label DETAIL",
+      "commonAttributes": ["AT", "FONT", "ALONE", "ABSOLUTE", "PAGEBEFORE", "PAGEAFTER", "WITHPRIOR", "WITHNEXT", "USE", "COLOR", "TOGETHER"]
+    },
+    {
+      "name": "HEADER",
+      "description": "Declares a page or group header band, printed automatically at the top of each page or when a BREAK group changes",
+      "syntax": "HEADER",
+      "commonAttributes": ["AT", "FONT", "ABSOLUTE", "PAGEBEFORE", "PAGEAFTER", "WITHPRIOR", "WITHNEXT", "ALONE", "USE", "COLOR", "TOGETHER"]
+    },
+    {
+      "name": "FOOTER",
+      "description": "Declares a page or group footer band, printed automatically at page overflow or when a BREAK group changes",
+      "syntax": "FOOTER",
+      "commonAttributes": ["AT", "FONT", "ABSOLUTE", "PAGEBEFORE", "PAGEAFTER", "WITHPRIOR", "WITHNEXT", "ALONE", "USE", "COLOR", "TOGETHER"]
+    },
+    {
+      "name": "FORM",
+      "description": "Declares a page layout structure printed on every page (e.g. pre-printed form background, watermarks, page borders)",
+      "syntax": "FORM",
+      "commonAttributes": ["AT", "FONT", "USE", "COLOR"]
     }
   ]
 }

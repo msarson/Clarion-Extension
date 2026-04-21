@@ -512,6 +512,52 @@
       "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
       "size": "8 bytes",
       "range": "0 to 18,446,744,073,709,551,615"
+    },
+    {
+      "name": "BFLOAT4",
+      "category": "numeric",
+      "description": "Four-byte signed floating point (Microsoft BASIC single-precision format)",
+      "syntax": "label BFLOAT4[(initial_value)] [,attributes...]",
+      "parameters": [
+        {
+          "name": "initial_value",
+          "type": "numeric",
+          "optional": true,
+          "description": "Initial value. If omitted, defaults to zero unless AUTO attribute is present"
+        }
+      ],
+      "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "4 bytes",
+      "range": "0, ±5.87747e-39 to ±1.70141e+38 (6 significant digits)",
+      "notes": "Microsoft BASIC single-precision format. Internally converted to REAL before arithmetic. Normally used for compatibility with existing data."
+    },
+    {
+      "name": "BFLOAT8",
+      "category": "numeric",
+      "description": "Eight-byte signed floating point (Microsoft BASIC double-precision format)",
+      "syntax": "label BFLOAT8[(initial_value)] [,attributes...]",
+      "parameters": [
+        {
+          "name": "initial_value",
+          "type": "numeric",
+          "optional": true,
+          "description": "Initial value. If omitted, defaults to zero unless AUTO attribute is present"
+        }
+      ],
+      "attributes": ["DIM", "OVER", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "8 bytes",
+      "range": "0, ±5.877471754e-39 to ±1.7014118346e+38 (15 significant digits)",
+      "notes": "Microsoft BASIC double-precision format. Internally converted to REAL before arithmetic. Normally used for compatibility with existing data."
+    },
+    {
+      "name": "VARIANT",
+      "category": "special",
+      "description": "OLE API VARIANT type for COM interop",
+      "syntax": "label VARIANT [,attributes...]",
+      "parameters": [],
+      "attributes": ["DIM", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
+      "size": "16 bytes",
+      "notes": "Equivalent to the OLE API Variant type. Can be assigned any data type and can be a field within a QUEUE. The AUTO attribute is ignored by the compiler. Use ANY instead if the program does not use OLE API functions."
     }
   ]
 }
