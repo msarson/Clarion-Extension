@@ -635,6 +635,7 @@ export async function buildSolutionWithDependencyOrder(
         // Analyze dependencies
         window.showInformationMessage('Analyzing project dependencies...');
         await resolver.analyzeDependencies();
+        window.showInformationMessage('Dependency analysis complete.');
         
         // Get build order
         const buildOrder = resolver.getBuildOrder();
