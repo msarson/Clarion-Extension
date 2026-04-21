@@ -1628,6 +1628,42 @@ MainProc    PROCEDURE()
             assert.ok(diags.every(d => d.message.includes("'Trace'")), 'warnings are for Trace only');
         });
 
+        test('shorthand MAP MODULE proc with param types but no return type must not warn (DS path)', () => {
+            // PQClear(Long pResult),Raw,C,Name('PQClear'),dll(1) — the parameter type Long
+            // must not be mistaken for a return type.
+            const code = `
+  MAP
+    MODULE('libpq.dll')
+      PQClear(Long pResult),Raw,C,Name('PQClear'),dll(1)
+    END
+  END
+
+MainProc    PROCEDURE()
+  CODE
+  PQClear(0)
+`;
+            const diags = discardDiagsWithDS(code);
+            assert.strictEqual(diags.length, 0, 'PQClear has no return type — no warning expected');
+        });
+
+        test('shorthand MAP MODULE proc with param types AND return type does warn (DS path)', () => {
+            // PQExec(Long conn, *CSTRING cmd),Long,Raw,C — return type Long after params.
+            const code = `
+  MAP
+    MODULE('libpq.dll')
+      PQExec(Long conn, *CSTRING cmd),Long,Raw,C,Name('PQExec'),dll(1)
+    END
+  END
+
+MainProc    PROCEDURE()
+  CODE
+  PQExec(0,'SELECT 1')
+`;
+            const diags = discardDiagsWithDS(code);
+            assert.strictEqual(diags.length, 1, 'PQExec returns Long — discarded call should warn');
+            assert.ok(diags[0].message.includes("'PQExec'"), 'warning is for PQExec');
+        });
+
         test('GlobalProcedure with return type warns when return value discarded (no MAP)', () => {
             // Trace is a standalone procedure (GlobalProcedure subtype) — no MAP declaration.
             // Calls that discard its return value should be flagged.

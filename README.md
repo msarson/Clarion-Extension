@@ -28,9 +28,10 @@ Full language support for Clarion code, basic support for templates.
 
 ### 💡 **Signature Help & Documentation**
 Get instant parameter hints and documentation - works immediately, no solution needed!
-- 148 built-in functions with parameter hints
-- Method overload support — all overloads shown with full signatures
+- 310 built-in functions with parameter hints and descriptions
+- Method overload support — overloads narrowed by argument type (e.g. `OPEN(Window)` shows only WINDOW signatures)
 - Hover documentation for all symbols — procedures, classes, variables, attributes, built-ins
+- Context-aware hover — `HIDE`, `DISABLE`, `TYPE` show attribute or statement usage depending on context
 - Hover for **PROP:/PROPPRINT:** runtime properties — descriptions from Clarion 11.1 docs
 - Hover for **EVENT:** equates — category, description, and usage example
 - Signature help for class methods including inherited members
@@ -81,7 +82,8 @@ Jump to definitions, find implementations, and explore references — works in s
 ### 🔧 **Build Integration**
 Generate applications directly from VS Code.
 - Right-click to build from Solution View
-- Multiple build configurations (Debug/Release)
+- Multiple build configurations (Debug/Release) — active config auto-detected from `.sln.cache`
+- Projects sorted by build order (dependency-first) in Solution View
 - Live build output
 - **[Learn more about Building →](docs/features/solution-management.md#build-integration)**
 

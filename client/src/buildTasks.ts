@@ -326,8 +326,10 @@ export function prepareBuildParameters(buildConfig: {
         `/fileLoggerParameters:LogFile="${buildLogPath}"`
     ];
     
-    // Add platform property if we have one
-    if (platformPart) {
+    // Add platform property if we have one.
+    // "Any CPU" is not a valid Clarion build platform (Clarion is always Win32)
+    // and its space causes shell-quoting issues, so skip it in that case.
+    if (platformPart && platformPart.toLowerCase() !== 'any cpu') {
         buildArgs.splice(3, 0, `/property:Platform=${platformPart}`);
     }
 
@@ -635,6 +637,7 @@ export async function buildSolutionWithDependencyOrder(
         // Analyze dependencies
         window.showInformationMessage('Analyzing project dependencies...');
         await resolver.analyzeDependencies();
+        window.showInformationMessage('Dependency analysis complete.');
         
         // Get build order
         const buildOrder = resolver.getBuildOrder();
@@ -666,13 +669,21 @@ export async function buildSolutionWithDependencyOrder(
                     projectObject: project
                 };
                 
-                const buildParams = {
-                    ...prepareBuildParameters(buildConfig),
-                    diagnosticCollection
-                };
-                
-                // Execute the build synchronously
-                await executeBuildTaskSync(buildParams);
+                const buildParams = prepareBuildParameters(buildConfig);
+                // Use a per-project log file so successive projects don't overwrite
+                // the log of a failed earlier project before it can be read.
+                // Also patch the /fileLoggerParameters arg since the path is baked in.
+                const perProjectLog = path.join(
+                    path.dirname(globalSolutionFile),
+                    `build_${project.name.replace(/[^a-zA-Z0-9_-]/g, '_')}.log`
+                );
+                buildParams.buildLogPath = perProjectLog;
+                const logArgIdx = buildParams.buildArgs.findIndex(a => a.startsWith('/fileLoggerParameters:'));
+                if (logArgIdx !== -1) {
+                    buildParams.buildArgs[logArgIdx] = `/fileLoggerParameters:LogFile="${perProjectLog}"`;
+                }
+
+                await executeBuildTaskSync({ ...buildParams, diagnosticCollection });
                 successCount++;
                 
                 // Clear building status for this project
@@ -760,9 +771,8 @@ async function executeBuildTaskSync(params: {
                         if (errorCount > 0) {
                             reject(new Error(`Build failed: ${errorCount} error(s), ${warningCount} warning(s)`));
                         } else {
-                            // No actual errors found, treat as success
-                            diagnosticCollection.clear();
-                            resolve();
+                            // Non-zero exit but no parsed errors — still a failure
+                            reject(new Error(`Build failed with exit code ${event.exitCode} (check build log for details)`));
                         }
                     } else {
                         diagnosticCollection.clear();

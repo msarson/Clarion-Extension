@@ -129,14 +129,15 @@ suite('MemberLocatorService', () => {
             assert.strictEqual(result!.isClass, false);
         });
 
-        test('LIKE(TypeName) → isClass=false, typeName=TypeName', async () => {
+        test('LIKE(TypeName) → isClass=true (navigable), typeName=TypeName', async () => {
             const doc = makeDoc('rv3.clw', 'myVar    LIKE(SomeType)\n');
             const tokens = tokenCache.getTokens(doc);
             const result = await service.resolveVariableType('myVar', tokens, doc);
 
             assert.ok(result, 'Should resolve LIKE(SomeType)');
             assert.strictEqual(result!.typeName, 'SomeType');
-            assert.strictEqual(result!.isClass, false);
+            // LIKE references a structure — mark as navigable so dot-access chains continue
+            assert.strictEqual(result!.isClass, true);
         });
 
         test('plain user-defined type name → isClass=true', async () => {

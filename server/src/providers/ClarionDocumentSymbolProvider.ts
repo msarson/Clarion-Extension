@@ -2249,6 +2249,10 @@ export class ClarionDocumentSymbolProvider {
         const prevToken = tokens[index - 1];
         const labelName = prevToken?.type === TokenType.Label ? prevToken.value : null;
 
+        // KEY used as a parameter type (e.g. PROCEDURE(FILE,KEY)) has no preceding label.
+        // File KEY definitions always have a label — bail out if this isn't one.
+        if (!labelName) return;
+
         // Extract what's inside the parentheses: KEY(SHI:ShipperCode)
         let keyField = "";
         const keyOptions: string[] = [];

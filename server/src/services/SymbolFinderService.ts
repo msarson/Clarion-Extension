@@ -143,6 +143,14 @@ export class SymbolFinderService {
             const upper = next.value.toUpperCase();
             if (upper === 'PROCEDURE' || upper === 'ROUTINE' || upper === 'FUNCTION') return upper;
         }
+        if (next.type === TokenType.Function) {
+            // EQUATE(value) — matched as Function due to trailing '('
+            if (next.value.toUpperCase() === 'EQUATE') return 'EQUATE';
+        }
+        if (next.type === TokenType.FunctionArgumentParameter) {
+            // EQUATE (value) with a space — tokenizer swallows it as a single FunctionArgumentParameter token
+            if (/^EQUATE\s*\(/i.test(next.value)) return 'EQUATE';
+        }
         return 'UNKNOWN';
     }
     

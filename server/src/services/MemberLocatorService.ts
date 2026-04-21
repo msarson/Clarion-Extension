@@ -713,9 +713,9 @@ export class MemberLocatorService {
             return { typeName: structMatch[2], isClass: structMatch[1].toUpperCase() === 'CLASS', isReference };
         }
 
-        // LIKE(TypeName)
-        const likeMatch = typeStr.match(/^LIKE\((\w+)\)$/i);
-        if (likeMatch) return { typeName: likeMatch[1], isClass: false, isReference };
+        // LIKE(TypeName) or LIKE(PREFIX:TypeName) — inherited type; treat as navigable structure
+        const likeMatch = typeStr.match(/^LIKE\(([\w:]+)\)$/i);
+        if (likeMatch) return { typeName: likeMatch[1], isClass: true, isReference };
 
         // Bare structure keywords — can't resolve members
         const bareStructures = new Set(['CLASS', 'QUEUE', 'GROUP', 'FILE', 'RECORD', 'WINDOW', 'VIEW', 'REPORT', 'LIKE', 'PROCEDURE']);

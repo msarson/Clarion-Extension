@@ -4,6 +4,7 @@ import { SolutionScanner, DetectedSolution } from '../utils/SolutionScanner';
 import { SettingsStorageManager } from '../utils/SettingsStorageManager';
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
 import { setGlobalClarionSelection } from '../globals';
+import { readActiveConfigFromSlnCache, configNameFromFull } from './SlnCacheUtils';
 import LoggerManager from './LoggerManager';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -173,19 +174,28 @@ export class SmartSolutionOpener {
                 selectedCompiler = result.compilerName;
             }
 
-            // Step 4: Extract configurations from .sln file
+            // Step 4: Extract configurations from .sln file, auto-detect from .sln.cache
             const configurations = this.extractConfigurationsFromSolution(solutionPath);
-            let selectedConfig = "Release"; // Default
+            let selectedConfig: string;
 
-            if (configurations.length > 1) {
+            // Check .sln.cache for the last-used config (written by Clarion IDE/MSBuild)
+            // configurations may be full "Config|Platform" strings; match by config name prefix
+            const cachedFullConfig = readActiveConfigFromSlnCache(solutionPath);
+            const cachedConfigName = cachedFullConfig ? configNameFromFull(cachedFullConfig) : null;
+            const matchedConfig = cachedConfigName
+                ? configurations.find(c => configNameFromFull(c) === cachedConfigName) ?? null
+                : null;
+
+            if (matchedConfig) {
+                selectedConfig = matchedConfig;
+                logger.info(`⚙️ Auto-detected configuration from .sln.cache: ${matchedConfig}`);
+            } else if (configurations.length > 1) {
                 const configChoice = await window.showQuickPick(configurations, {
                     placeHolder: "Select build configuration"
                 });
-                if (configChoice) {
-                    selectedConfig = configChoice;
-                }
-            } else if (configurations.length === 1) {
-                selectedConfig = configurations[0];
+                selectedConfig = configChoice ?? configurations[0] ?? "Release";
+            } else {
+                selectedConfig = configurations[0] ?? "Release";
             }
 
             // Step 5: Save settings using smart storage manager

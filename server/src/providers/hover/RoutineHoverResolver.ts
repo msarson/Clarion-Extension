@@ -59,9 +59,7 @@ export class RoutineHoverResolver {
                             value: [
                                 `**Routine:** \`${routineName}\``,
                                 '',
-                                `📍 Line ${i + 1}`,
-                                '',
-                                `*Ctrl+F12 to navigate*`
+                                `📍 Line ${i + 1}`
                             ].join('\n')
                         }
                     };

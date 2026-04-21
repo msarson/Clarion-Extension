@@ -77,4 +77,20 @@ suite('ClassMemberResolver.extractClassName', () => {
     test('handles whitespace around &', () => {
         assert.strictEqual(ClassMemberResolver.extractClassName('  &SortOrder  '), 'SortOrder');
     });
+
+    test('LIKE(TypeName) — returns the referenced type name', () => {
+        assert.strictEqual(ClassMemberResolver.extractClassName('LIKE(WindowPositionGroup)'), 'WindowPositionGroup');
+    });
+
+    test('LIKE(TypeName) with trailing attributes', () => {
+        assert.strictEqual(ClassMemberResolver.extractClassName('LIKE(WindowPositionGroup),PRIVATE'), 'WindowPositionGroup');
+    });
+
+    test('LIKE(PREFIX:TypeName) — supports colon-qualified names', () => {
+        assert.strictEqual(ClassMemberResolver.extractClassName('LIKE(PYA:RECORD)'), 'PYA:RECORD');
+    });
+
+    test('LIKE alone (no parens) — returns null', () => {
+        assert.strictEqual(ClassMemberResolver.extractClassName('LIKE'), null);
+    });
 });

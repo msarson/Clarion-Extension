@@ -10,6 +10,7 @@ import { BuiltinFunctionService } from '../../utils/BuiltinFunctionService';
 import { AttributeService } from '../../utils/AttributeService';
 import { PropertyService } from '../../utils/PropertyService';
 import { EventService } from '../../utils/EventService';
+import { DirectiveService } from '../../utils/DirectiveService';
 import { HoverFormatter } from './HoverFormatter';
 import { TokenCache } from '../../TokenCache';
 import { Token, TokenType } from '../../ClarionTokenizer';
@@ -28,6 +29,7 @@ export class HoverRouter {
     private attributeService = AttributeService.getInstance();
     private propertyService = PropertyService.getInstance();
     private eventService = EventService.getInstance();
+    private directiveService = DirectiveService.getInstance();
 
     constructor(
         private procedureResolver: ProcedureHoverResolver,
@@ -95,8 +97,12 @@ export class HoverRouter {
         const eventHover = this.handleEventEquate(word);
         if (eventHover) return eventHover;
 
+        // 9.7 Handle compiler directives (EQUATE, INCLUDE, COMPILE, OMIT, etc.)
+        const directiveHover = this.handleDirective(word);
+        if (directiveHover) return directiveHover;
+
         // 10. Handle built-in functions (AFTER method declarations to avoid shadowing)
-        const builtinHover = this.handleBuiltin(word, line, wordRange, document, position);
+        const builtinHover = this.handleBuiltin(word, line, wordRange, document, position, tokens);
         if (builtinHover) return builtinHover;
 
         // 11. Variables handled by downstream logic (structure access, self.member, local/global vars)
@@ -104,10 +110,10 @@ export class HoverRouter {
     }
 
     /**
-     * Handle special keywords (MODULE, TO, ELSE, PROCEDURE)
+     * Handle special keywords (MODULE, TO, ELSE, PROCEDURE, HIDE, DISABLE, TYPE)
      */
     private handleSpecialKeywords(context: HoverContext): Hover | null {
-        const { word, line, tokens, position, isInMapBlock, isInClassBlock } = context;
+        const { word, line, tokens, position, isInMapBlock, isInClassBlock, isInWindowContext } = context;
         const upperWord = word.toUpperCase();
 
         if (upperWord === 'MODULE') {
@@ -124,6 +130,16 @@ export class HoverRouter {
 
         if (upperWord === 'PROCEDURE') {
             return this.contextHandler.handleProcedureKeyword(line, isInMapBlock, isInClassBlock);
+        }
+
+        if (upperWord === 'HIDE' || upperWord === 'DISABLE') {
+            // Attribute when inside a window/control declaration; builtin when in code section
+            return this.contextHandler.handleWindowBuiltin(word, isInWindowContext);
+        }
+
+        if (upperWord === 'TYPE') {
+            // Attribute on GROUP/QUEUE/CLASS (outside window); builtin TYPE(string) inside REPORT
+            return this.contextHandler.handleWindowBuiltin(word, !isInWindowContext);
         }
 
         return null;
@@ -216,9 +232,19 @@ export class HoverRouter {
     }
 
     /**
+     * Handle compiler directives (EQUATE, INCLUDE, COMPILE, OMIT, ASSERT, etc.)
+     */
+    private handleDirective(word: string): Hover | null {
+        const entry = this.directiveService.getDirective(word);
+        if (!entry) return null;
+        logger.info(`Found compiler directive: ${word}`);
+        return this.formatter.formatDirective(entry);
+    }
+
+    /**
      * Handle built-in functions
      */
-    private handleBuiltin(word: string, line: string, wordRange: any, document: any, position: any): Hover | null {
+    private handleBuiltin(word: string, line: string, wordRange: any, document: any, position: any, tokens: any[]): Hover | null {
         if (!this.builtinService.isBuiltin(word)) {
             return null;
         }
@@ -239,7 +265,28 @@ export class HoverRouter {
         const paramCount = this.countFunctionParameters(line, word, wordRange, document);
         logger.info(`Parameter count in call: ${paramCount}`);
 
-        return this.formatter.formatBuiltin(word, signatures, paramCount);
+        // Resolve structureType of first argument for overload narrowing (e.g. OPEN(Names) → 'FILE')
+        const firstArgType = this.resolveFirstArgStructureType(line, word, tokens);
+
+        return this.formatter.formatBuiltin(word, signatures, paramCount, firstArgType ?? undefined);
+    }
+
+    /**
+     * Extracts the first argument name from a builtin call on the given line,
+     * then looks it up in tokens to find its structureType (e.g. 'FILE', 'VIEW').
+     * Returns null if the type cannot be determined.
+     */
+    private resolveFirstArgStructureType(line: string, word: string, tokens: Token[]): string | null {
+        const callMatch = line.match(new RegExp(`\\b${word}\\s*\\(\\s*([A-Za-z_][A-Za-z0-9_:]*)`, 'i'));
+        if (!callMatch) return null;
+        const firstArgName = callMatch[1].toUpperCase();
+
+        const labelToken = tokens.find(t =>
+            t.type === TokenType.Label &&
+            t.label?.toUpperCase() === firstArgName &&
+            t.structureType !== undefined
+        );
+        return labelToken?.structureType ?? null;
     }
 
     /**

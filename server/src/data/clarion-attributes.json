@@ -11,10 +11,22 @@
       "signatures": [
         {
           "params": [
-            { "name": "LONG x", "optional": true },
-            { "name": "LONG y", "optional": true },
-            { "name": "LONG width", "optional": true },
-            { "name": "LONG height", "optional": true }
+            {
+              "name": "LONG x",
+              "optional": true
+            },
+            {
+              "name": "LONG y",
+              "optional": true
+            },
+            {
+              "name": "LONG width",
+              "optional": true
+            },
+            {
+              "name": "LONG height",
+              "optional": true
+            }
           ],
           "description": "Sets position and size. All parameters are optional and can be omitted (e.g., AT(,,width,height)). Runtime library provides defaults for omitted parameters.",
           "syntax": "AT([x] [,y] [,width] [,height])"
@@ -73,9 +85,18 @@
       "signatures": [
         {
           "params": [
-            { "name": "LONG color", "optional": false },
-            { "name": "LONG selectedFore", "optional": true },
-            { "name": "LONG selectedBack", "optional": true }
+            {
+              "name": "LONG color",
+              "optional": false
+            },
+            {
+              "name": "LONG selectedFore",
+              "optional": true
+            },
+            {
+              "name": "LONG selectedBack",
+              "optional": true
+            }
           ],
           "description": "Specifies display or print colors. Color parameter is required, selectedFore and selectedBack are optional.",
           "syntax": "COLOR(color [,selectedFore] [,selectedBack])"
@@ -95,11 +116,26 @@
       "signatures": [
         {
           "params": [
-            { "name": "STRING typeface", "optional": true },
-            { "name": "LONG size", "optional": true },
-            { "name": "LONG color", "optional": true },
-            { "name": "LONG style", "optional": true },
-            { "name": "LONG charset", "optional": true }
+            {
+              "name": "STRING typeface",
+              "optional": true
+            },
+            {
+              "name": "LONG size",
+              "optional": true
+            },
+            {
+              "name": "LONG color",
+              "optional": true
+            },
+            {
+              "name": "LONG style",
+              "optional": true
+            },
+            {
+              "name": "LONG charset",
+              "optional": true
+            }
           ],
           "description": "Specifies the default display font. All parameters are optional and can be omitted (e.g., FONT(,size) or FONT('Arial',12,,FONT:bold)). Runtime library provides defaults for omitted parameters.",
           "syntax": "FONT([typeface] [,size] [,color] [,style] [,charset])"
@@ -289,16 +325,17 @@
     {
       "name": "AUTO",
       "applicableTo": [
-        "CONTROL"
+        "CONTROL",
+        "DATA_TYPE"
       ],
-      "description": "Sets the USE variable to automatically re-display when changed by program code. Normally, changes to the USE variable are only displayed when the window is opened or the field is updated.",
-      "propertyEquate": "PROP:Auto",
       "signatures": [
         {
           "params": [],
           "description": "No parameters"
         }
-      ]
+      ],
+      "description": "Two distinct uses:\\n\\n**CONTROL attribute**: Sets the USE variable to automatically re-display when changed by program code. Normally, changes to the USE variable are only displayed when the window is opened or the field is updated.\\n\\n**Variable declaration attribute**: Specifies the variable has no initial value and is not initialized. Without AUTO, numeric variables are initialized to zero and strings to blanks. AUTO variables contain whatever value was in memory at allocation time.",
+      "propertyEquate": "PROP:Auto"
     },
     {
       "name": "SKIP",
@@ -999,9 +1036,18 @@
       "signatures": [
         {
           "params": [
-            { "name": "LONG dimension1", "optional": false },
-            { "name": "LONG dimension2", "optional": true },
-            { "name": "LONG dimension3", "optional": true }
+            {
+              "name": "LONG dimension1",
+              "optional": false
+            },
+            {
+              "name": "LONG dimension2",
+              "optional": true
+            },
+            {
+              "name": "LONG dimension3",
+              "optional": true
+            }
           ],
           "description": "Dimensions the variable as an array. Up to 3 dimensions supported.",
           "syntax": "DIM(dimension1 [,dimension2] [,dimension3])"
@@ -1018,7 +1064,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "label", "optional": false }
+            {
+              "name": "label",
+              "optional": false
+            }
           ],
           "description": "Specifies the variable label to overlay in memory",
           "syntax": "OVER(label)"
@@ -1036,7 +1085,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "STRING external_name", "optional": false }
+            {
+              "name": "STRING external_name",
+              "optional": false
+            }
           ],
           "description": "Specifies the external name for the field",
           "syntax": "NAME('external_name')"
@@ -1063,19 +1115,26 @@
     {
       "name": "DLL",
       "applicableTo": [
-        "DATA_TYPE",
+        "VARIABLE",
+        "FILE",
+        "QUEUE",
+        "GROUP",
+        "CLASS",
         "PROCEDURE"
       ],
       "signatures": [
         {
           "params": [
-            { "name": "STRING dll_name", "optional": true }
+            {
+              "name": "LONG flag",
+              "optional": true
+            }
           ],
-          "description": "Specifies the DLL containing the external definition",
-          "syntax": "DLL [('dll_name')]"
+          "description": "Declares a procedure, variable, FILE, QUEUE, GROUP, or CLASS defined externally in a .DLL. The optional flag is a numeric constant, equate, or any project-level conditional compilation symbol \u00e2\u20ac\u201d when non-zero the attribute is active; zero or omitted means inactive.",
+          "syntax": "DLL([flag])"
         }
       ],
-      "description": "Specifies that the variable or procedure is defined in a Dynamic Link Library (.DLL). Must be used in conjunction with the EXTERNAL attribute. The optional dll_name parameter specifies which DLL contains the definition.",
+      "description": "Marks a declaration as residing in an external .DLL. Required for 32-bit apps because .DLLs are relocatable in a flat address space, requiring an extra compiler dereference. Variable/FILE/QUEUE/GROUP/CLASS declarations must also have the EXTERNAL attribute. The flag is a numeric constant or any conditional compilation symbol defined via #pragma define(ident=>value) in the project file or the IDE's Conditional Compilation Symbols dialog. The ABC template chain uses the pre-defined _ABCDllMode_ symbol (set automatically by the project system's dll_mode pragma) as a common example.",
       "propertyEquate": ""
     },
     {
@@ -1109,20 +1168,6 @@
         }
       ],
       "description": "Declares thread-local storage. Each execution thread gets its own separate copy of the variable. Ensures thread-safe access in multi-threaded applications. Also implicitly adds STATIC attribute for procedure-local data.",
-      "propertyEquate": ""
-    },
-    {
-      "name": "AUTO",
-      "applicableTo": [
-        "DATA_TYPE"
-      ],
-      "signatures": [
-        {
-          "params": [],
-          "description": "No parameters"
-        }
-      ],
-      "description": "Specifies that the variable has no initial value and is not initialized. Without AUTO, numeric variables are initialized to zero and strings to blanks. AUTO variables contain whatever value was in memory at allocation time.",
       "propertyEquate": ""
     },
     {
@@ -1185,7 +1230,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "STRING prefix", "optional": false }
+            {
+              "name": "STRING prefix",
+              "optional": false
+            }
           ],
           "description": "Specifies the prefix for field labels",
           "syntax": "PRE(prefix)"
@@ -1218,7 +1266,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "STRING driver_name", "optional": false }
+            {
+              "name": "STRING driver_name",
+              "optional": false
+            }
           ],
           "description": "Specifies the file driver type",
           "syntax": "DRIVER('driver_name')"
@@ -1249,7 +1300,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "STRING password", "optional": false }
+            {
+              "name": "STRING password",
+              "optional": false
+            }
           ],
           "description": "Specifies the owner password for encrypted files",
           "syntax": "OWNER('password')"
@@ -1294,7 +1348,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "INTERFACE interface_name", "optional": false }
+            {
+              "name": "INTERFACE interface_name",
+              "optional": false
+            }
           ],
           "description": "Specifies the interface to implement",
           "syntax": "IMPLEMENTS(interface_name)"
@@ -1311,14 +1368,20 @@
       "signatures": [
         {
           "params": [
-            { "name": "STRING linkfile", "optional": false },
-            { "name": "LONG flag", "optional": true }
+            {
+              "name": "STRING linkfile",
+              "optional": false
+            },
+            {
+              "name": "LONG flag",
+              "optional": true
+            }
           ],
           "description": "Names a file to add to the link list",
           "syntax": "LINK(linkfile [,flag])"
         }
       ],
-      "description": "Names a file to add to the link list for the current project when using this CLASS. Typically names a .LIB or .OBJ file to be linked. Normally the same as the MODULE parameter but can explicitly name library or object files.",
+      "description": "Names a file to add to the link list for the current project when using this CLASS. linkfile is a string constant; .OBJ extension is assumed if none is given. Normally the same as the MODULE parameter but may explicitly name a .LIB or .OBJ file. The flag is a numeric constant or any conditional compilation symbol defined via #pragma define(ident=>value) in the project file or the IDE's Conditional Compilation Symbols dialog \u00e2\u20ac\u201d when non-zero the file is linked, zero means inactive. The ABC template chain uses _ABCLinkMode_ as a common example. LINK is only valid on a CLASS structure.",
       "propertyEquate": ""
     },
     {
@@ -1329,7 +1392,10 @@
       "signatures": [
         {
           "params": [
-            { "name": "STRING module_name", "optional": false }
+            {
+              "name": "STRING module_name",
+              "optional": false
+            }
           ],
           "description": "Specifies the source file containing CLASS method implementations",
           "syntax": "MODULE('module_name')"
@@ -1449,6 +1515,1184 @@
       ],
       "description": "INCLUDE attribute. Prevents data contained in the INCLUDE file from being compiled more than once. Eliminates duplicate definition compile warnings or errors when the same include file is referenced multiple times.",
       "propertyEquate": ""
+    },
+    {
+      "name": "ABSOLUTE",
+      "applicableTo": [
+        "DETAIL",
+        "HEADER",
+        "FOOTER"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Report structure attribute. Ensures the DETAIL, group HEADER, or FOOTER structure always prints at a fixed position on the page. The AT position is relative to the top-left corner of the page rather than following normal flow.",
+      "propertyEquate": "PROP:Absolute"
+    },
+    {
+      "name": "ALONE",
+      "applicableTo": [
+        "DETAIL",
+        "HEADER",
+        "FOOTER"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Report structure attribute. Specifies the DETAIL, group HEADER, or FOOTER prints on the page without any FORM, or page HEADER or FOOTER. Commonly used for report title pages and grand total pages.",
+      "propertyEquate": "PROP:Alone"
+    },
+    {
+      "name": "ANGLE",
+      "applicableTo": [
+        "STRING"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "LONG size",
+              "optional": false
+            }
+          ],
+          "description": "Rotation in tenths of degrees, counter-clockwise from horizontal. Valid range: -3600 to 3600.",
+          "syntax": "ANGLE(size)"
+        }
+      ],
+      "description": "Sets the display or print angle of a STRING control. The FONT must be a TrueType font. Useful for vertical or rotated labels in windows and reports.",
+      "propertyEquate": "PROP:Angle"
+    },
+    {
+      "name": "AUTOSIZE",
+      "applicableTo": [
+        "OLE"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "OLE control attribute (write-only). Specifies the OLE object automatically resizes itself when the OLE container control's AT attribute parameters change at runtime.",
+      "propertyEquate": "PROP:Autosize"
+    },
+    {
+      "name": "AVE",
+      "applicableTo": [
+        "STRING"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "variable",
+              "optional": true
+            }
+          ],
+          "description": "Optional numeric variable to receive intermediate average values.",
+          "syntax": "AVE( [variable] )"
+        }
+      ],
+      "description": "Report total attribute. Calculates the average (arithmetic mean) of the STRING control's USE variable as DETAIL structures print. Reset with RESET or PAGE attributes. Typically placed in a group or page FOOTER.",
+      "propertyEquate": "PROP:Ave"
+    },
+    {
+      "name": "BINARY",
+      "applicableTo": [
+        "MEMO",
+        "BLOB"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Specifies the MEMO or BLOB contains binary data (e.g. graphic images) rather than plain text. OEM conversion is not applied. Some file drivers assume binary fields are zero-padded rather than space-padded.",
+      "propertyEquate": "PROP:Binary"
+    },
+    {
+      "name": "CLIP",
+      "applicableTo": [
+        "OLE"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "OLE control attribute (write-only). Specifies the OLE object only displays what fits within the container control's AT size \u00e2\u20ac\u201d larger objects are clipped to the top-left corner.",
+      "propertyEquate": "PROP:Clip"
+    },
+    {
+      "name": "CNT",
+      "applicableTo": [
+        "STRING"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "variable",
+              "optional": true
+            }
+          ],
+          "description": "Optional numeric variable to receive intermediate count values.",
+          "syntax": "CNT( [variable] )"
+        }
+      ],
+      "description": "Report total attribute. Counts the number of times DETAIL structures have been printed. Reset with RESET or PAGE. Typically placed in a group or page FOOTER.",
+      "propertyEquate": "PROP:Cnt"
+    },
+    {
+      "name": "COMPATIBILITY",
+      "applicableTo": [
+        "OLE"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "LONG mode",
+              "optional": false
+            }
+          ],
+          "description": "Integer compatibility mode constant (usually 0; some objects require 1).",
+          "syntax": "COMPATIBILITY(mode)"
+        }
+      ],
+      "description": "OLE control attribute (write-only). Sets a compatibility mode for OLE or OCX objects that require special handling. Normally zero; some objects (e.g. Windows bitmap editor) require one.",
+      "propertyEquate": "PROP:Compatibility"
+    },
+    {
+      "name": "CURSOR",
+      "applicableTo": [
+        "APPLICATION",
+        "WINDOW",
+        "TOOLBAR",
+        "CONTROL"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "STRING file",
+              "optional": false
+            }
+          ],
+          "description": "Name of a .CUR file or a CURSOR: equate from EQUATES.CLW.",
+          "syntax": "CURSOR(file)"
+        }
+      ],
+      "description": "Specifies the mouse cursor displayed when the pointer is over the structure or control. Inherited by contained controls unless overridden. Standard cursors are defined as CURSOR:Arrow, CURSOR:Wait, CURSOR:IBeam, etc. in EQUATES.CLW.",
+      "propertyEquate": "PROP:Cursor"
+    },
+    {
+      "name": "DELAY",
+      "applicableTo": [
+        "BUTTON",
+        "SPIN"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "LONG time",
+              "optional": false
+            }
+          ],
+          "description": "Delay in hundredths of a second between first and second event generation.",
+          "syntax": "DELAY(time)"
+        }
+      ],
+      "description": "Specifies the delay between first and second event generation for auto-repeating controls. For a BUTTON with IMM, this is the delay between first and second EVENT:Accepted. For a SPIN, the delay between first and second EVENT:NewSelection. Assigning 0 to PROP:DELAY resets the default.",
+      "propertyEquate": "PROP:Delay"
+    },
+    {
+      "name": "DOCUMENT",
+      "applicableTo": [
+        "OLE"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "STRING filename",
+              "optional": false
+            }
+          ],
+          "description": "Fully-qualified path of the OLE server data file to open.",
+          "syntax": "DOCUMENT(filename)"
+        }
+      ],
+      "description": "OLE control attribute (write-only). Creates an OLE object from a data file specific to an OLE server application (e.g. an Excel spreadsheet). The filename must be a fully-qualified path unless the file is in the same directory as the application.",
+      "propertyEquate": "PROP:Document"
+    },
+    {
+      "name": "DRAGID",
+      "applicableTo": [
+        "LIST",
+        "REGION"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "STRING signature",
+              "optional": false
+            },
+            {
+              "name": "STRING signature2...",
+              "optional": true
+            }
+          ],
+          "description": "One or more string identifiers (up to 16) used to match against DROPID targets. Signatures starting with ~ allow cross-application drag.",
+          "syntax": "DRAGID(signature [,signature])"
+        }
+      ],
+      "description": "Specifies a LIST or REGION control as a drag-and-drop host. The signature strings match against DROPID attributes on target controls. A successful drag-drop requires at least one identical signature in both DRAGID and DROPID. Drag signatures cannot start with '!'.",
+      "propertyEquate": "PROP:DragID"
+    },
+    {
+      "name": "DROPID",
+      "applicableTo": [
+        "CONTROL"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "STRING signature",
+              "optional": false
+            },
+            {
+              "name": "STRING signature2...",
+              "optional": true
+            }
+          ],
+          "description": "One or more string identifiers (up to 16). '~TEXT' accepts text from external apps; '~FILE' accepts filenames from Windows Explorer.",
+          "syntax": "DROPID(signature [,signature])"
+        }
+      ],
+      "description": "Specifies a control as a drag-and-drop target. Works with DRAGID \u00e2\u20ac\u201d at least one signature must match between host and target. '~TEXT' and '~FILE' are predefined signatures for external drag-drop from other applications.",
+      "propertyEquate": "PROP:DropID"
+    },
+    {
+      "name": "DUP",
+      "applicableTo": [
+        "KEY"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Allows multiple records with the same key values in a FILE. Without DUP, attempting to ADD or PUT records with duplicate key values generates a 'Creates Duplicate Key' error. INDEX declarations always allow duplicates (DUP is unnecessary on INDEX).",
+      "propertyEquate": "PROP:Dup"
+    },
+    {
+      "name": "FILTER",
+      "applicableTo": [
+        "VIEW"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "STRING expression",
+              "optional": false
+            }
+          ],
+          "description": "A string constant containing a logical Clarion expression. All variables used must be BINDed.",
+          "syntax": "FILTER(expression)"
+        }
+      ],
+      "description": "Specifies a filter expression to evaluate records included in the VIEW. The expression may reference any field in the VIEW at all JOIN levels. All variables in the expression must be BINDed. SQL databases can convert MATCH() calls to SQL WHERE clauses for server-side filtering.",
+      "propertyEquate": "PROP:Filter"
+    },
+    {
+      "name": "FIRST",
+      "applicableTo": [
+        "MENU",
+        "ITEM"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Positions a MENU or ITEM at the beginning when a window's MENUBAR is merged into the global pulldown menu. Global FIRST items have higher priority than local FIRST items in the merge order.",
+      "propertyEquate": "PROP:First"
+    },
+    {
+      "name": "LAST",
+      "applicableTo": [
+        "MENU",
+        "ITEM"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Positions a MENU or ITEM at the end when a window's MENUBAR is merged into the global pulldown menu. Items without FIRST or LAST appear between the two groups in the merge order.",
+      "propertyEquate": "PROP:Last"
+    },
+    {
+      "name": "INNER",
+      "applicableTo": [
+        "JOIN"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Specifies the JOIN declares an inner join instead of the default left outer join. With INNER, only primary file records that have matching secondary file records are retrieved. Inner joins are generally more efficient than outer joins.",
+      "propertyEquate": "PROP:Inner"
+    },
+    {
+      "name": "INS",
+      "applicableTo": [
+        "ENTRY"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Sets insert typing mode for an ENTRY control (new characters push existing characters right). Contrast with OVR (overwrite mode). Not valid for TEXT controls.",
+      "propertyEquate": "PROP:INS"
+    },
+    {
+      "name": "OVR",
+      "applicableTo": [
+        "ENTRY"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Sets overwrite typing mode for an ENTRY control (new characters replace existing characters). Contrast with INS (insert mode). Not valid for TEXT controls.",
+      "propertyEquate": "PROP:OVR"
+    },
+    {
+      "name": "JOIN",
+      "applicableTo": [
+        "SHEET"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Specifies the SHEET's TABs display all on one row instead of wrapping to multiple rows. Left and right scroll buttons appear together at the right end to allow scrolling through all TABs.",
+      "propertyEquate": "PROP:Join"
+    },
+    {
+      "name": "LANDSCAPE",
+      "applicableTo": [
+        "REPORT"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Sets the default page orientation for the REPORT to landscape mode. If omitted, printing defaults to portrait mode.",
+      "propertyEquate": "PROP:Landscape"
+    },
+    {
+      "name": "LINEWIDTH",
+      "applicableTo": [
+        "LINE",
+        "BOX",
+        "ELLIPSE"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "LONG width",
+              "optional": false
+            }
+          ],
+          "description": "Positive integer specifying thickness in pixels (WINDOW) or report coordinate units (REPORT).",
+          "syntax": "LINEWIDTH(width)"
+        }
+      ],
+      "description": "Specifies the thickness of a LINE control or the border of BOX and ELLIPSE controls. In WINDOW structures the unit is pixels; in REPORT structures the unit depends on the report measurement (THOUS, MM, POINTS, or dialog units).",
+      "propertyEquate": "PROP:Linewidth"
+    },
+    {
+      "name": "MIN",
+      "applicableTo": [
+        "STRING"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "variable",
+              "optional": true
+            }
+          ],
+          "description": "Optional numeric variable to receive intermediate minimum values.",
+          "syntax": "MIN( [variable] )"
+        }
+      ],
+      "description": "Report total attribute. Calculates the minimum value the STRING control's USE variable has held so far. Reset with RESET or PAGE. Typically placed in a group or page FOOTER.",
+      "propertyEquate": "PROP:Min"
+    },
+    {
+      "name": "NOCASE",
+      "applicableTo": [
+        "KEY",
+        "INDEX"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Makes the KEY or INDEX sort order case-insensitive. All alphabetic characters in key fields are converted to uppercase as entries are written. Case conversion does not affect the actual stored data.",
+      "propertyEquate": "PROP:NoCase"
+    },
+    {
+      "name": "NOMERGE",
+      "applicableTo": [
+        "MENUBAR",
+        "TOOLBAR"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Prevents the MENUBAR or TOOLBAR from merging with the global menu or toolbar. On a WINDOW, the window's own menu/toolbar overwrites the global menu/toolbar when that window has focus. On APPLICATION, indicates the menu/toolbar is local and shows only when no MDI child windows are open.",
+      "propertyEquate": "PROP:NoMerge"
+    },
+    {
+      "name": "NOSHEET",
+      "applicableTo": [
+        "SHEET"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Specifies the SHEET's TABs display without a visible sheet container around the controls. Creates a 'floating tab' appearance.",
+      "propertyEquate": "PROP:NoSheet"
+    },
+    {
+      "name": "OEM",
+      "applicableTo": [
+        "FILE"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Specifies the FILE contains non-English string data stored in the OEM ASCII character set. String data is automatically translated between ANSI (for Windows display) and OEM ASCII (for disk storage). Not supported by all file drivers.",
+      "propertyEquate": "PROP:OEM"
+    },
+    {
+      "name": "OPEN",
+      "applicableTo": [
+        "OLE"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "STRING object",
+              "optional": false
+            }
+          ],
+          "description": "OLE Compound Storage file and object name in the form 'Filename\\!ObjectName'.",
+          "syntax": "OPEN(object)"
+        }
+      ],
+      "description": "OLE control attribute (write-only). Opens a previously saved OLE object from an OLE Compound Storage file. Container properties saved with the object are reloaded automatically.",
+      "propertyEquate": "PROP:Open"
+    },
+    {
+      "name": "OPT",
+      "applicableTo": [
+        "KEY",
+        "INDEX"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Excludes records from the KEY or INDEX when all component fields contain null values (zero for numeric, all spaces for strings). Reduces key size by omitting blank/zero entries.",
+      "propertyEquate": "PROP:OPT"
+    },
+    {
+      "name": "ORDER",
+      "applicableTo": [
+        "VIEW"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "STRING expression list",
+              "optional": false
+            }
+          ],
+          "description": "Comma-separated expression list. Prefix with '-' for descending order. All variables must be BINDed.",
+          "syntax": "ORDER(expression list)"
+        }
+      ],
+      "description": "Specifies the sort order expression list for records in the VIEW. Expressions are evaluated left-to-right (leftmost = most significant). A leading '-' on an expression sorts descending. For SQL views, PROP:SQLOrder is an SQL-only equivalent.",
+      "propertyEquate": "PROP:Order"
+    },
+    {
+      "name": "PAGE",
+      "applicableTo": [
+        "STRING"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Report total attribute. Specifies that the CNT, SUM, AVE, MIN, or MAX total is reset to zero when a page break occurs.",
+      "propertyEquate": "PROP:Page"
+    },
+    {
+      "name": "PAGEAFTER",
+      "applicableTo": [
+        "DETAIL",
+        "HEADER",
+        "FOOTER"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "LONG newpage",
+              "optional": true
+            }
+          ],
+          "description": "Optional page number to begin on the next page. Use -1 to auto-increment page number.",
+          "syntax": "PAGEAFTER( [newpage] )"
+        }
+      ],
+      "description": "Report structure attribute. Initiates page overflow after the structure prints. The structure prints first, then the page FOOTER, followed by the FORM and page HEADER on the new page. The optional newpage parameter resets the automatic page number.",
+      "propertyEquate": "PROP:PageAfter"
+    },
+    {
+      "name": "PAGEBEFORE",
+      "applicableTo": [
+        "DETAIL",
+        "HEADER",
+        "FOOTER"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "LONG newpage",
+              "optional": true
+            }
+          ],
+          "description": "Optional page number to begin on the new page. Use -1 to auto-increment page number.",
+          "syntax": "PAGEBEFORE( [newpage] )"
+        }
+      ],
+      "description": "Report structure attribute. Initiates page overflow before the structure prints. The page FOOTER and FORM/page HEADER print first, then the structure prints on the new page. The optional newpage parameter resets the automatic page number.",
+      "propertyEquate": "PROP:PageBefore"
+    },
+    {
+      "name": "PAGENO",
+      "applicableTo": [
+        "STRING"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "variable",
+              "optional": true
+            }
+          ],
+          "description": "Optional numeric variable to receive the current page number.",
+          "syntax": "PAGENO( [variable] )"
+        }
+      ],
+      "description": "Report attribute. Specifies the STRING control prints the current page number. Page numbers can be affected by PAGEBEFORE and PAGEAFTER attributes.",
+      "propertyEquate": "PROP:PageNo"
+    },
+    {
+      "name": "PALETTE",
+      "applicableTo": [
+        "APPLICATION",
+        "WINDOW"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "LONG colors",
+              "optional": false
+            }
+          ],
+          "description": "Number of hardware palette colors to reserve for this window.",
+          "syntax": "PALETTE(colors)"
+        }
+      ],
+      "description": "Specifies how many hardware palette colors this window uses when it is the foreground window. Only applicable in 256-color mode. Values above 256 are not recommended. PROP:PALETTE returns the number of colors actually assigned (may be less than requested due to system reserves).",
+      "propertyEquate": "PROP:Palette"
+    },
+    {
+      "name": "PAPER",
+      "applicableTo": [
+        "REPORT"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "LONG type",
+              "optional": true
+            },
+            {
+              "name": "LONG width",
+              "optional": true
+            },
+            {
+              "name": "LONG height",
+              "optional": true
+            }
+          ],
+          "description": "type is a Windows paper size EQUATE (from EQUATES.CLW). width/height are only required when type is PAPER:User. Units default to 1/1000 inch regardless of THOUS/MM/POINTS.",
+          "syntax": "PAPER( [type] [,width] [,height] )"
+        }
+      ],
+      "description": "Defines the paper size for a REPORT. Paper size equates (PAPER:Letter, PAPER:A4, PAPER:User, etc.) are in EQUATES.CLW. Width and height in thousandths of an inch are required only for PAPER:User. Not all printers support all paper sizes.",
+      "propertyEquate": "PROPPRINT:Paper"
+    },
+    {
+      "name": "POINTS",
+      "applicableTo": [
+        "REPORT",
+        "WINDOW"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Specifies report or window runtime property coordinates are measured in points (72 points per inch, both vertically and horizontally). One of three metric alternatives to dialog units; see also THOUS and MM.",
+      "propertyEquate": "PROP:Points"
+    },
+    {
+      "name": "PREVIEW",
+      "applicableTo": [
+        "REPORT"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "queue",
+              "optional": false
+            }
+          ],
+          "description": "Label of a QUEUE or QUEUE field to receive the temporary metafile filenames (up to 64 chars each).",
+          "syntax": "PREVIEW(queue)"
+        }
+      ],
+      "description": "Sends report output to Windows metafiles (one per page) instead of directly to a printer. The queue receives the temporary metafile filenames for display in an IMAGE control. Temporary files are deleted when the REPORT is CLOSEd (remove from queue to preserve). Set PROP:FlushPreview to print.",
+      "propertyEquate": "PROP:Preview"
+    },
+    {
+      "name": "PRIMARY",
+      "applicableTo": [
+        "KEY"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Designates the KEY as the relational primary key per Codd's definition: unique, includes all records, and does not allow null values in any component field. Implies no duplicates and no null entries.",
+      "propertyEquate": "PROP:Primary"
+    },
+    {
+      "name": "RESET",
+      "applicableTo": [
+        "STRING"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "breaklevel",
+              "optional": false
+            }
+          ],
+          "description": "Label of a BREAK structure at which the total resets to zero.",
+          "syntax": "RESET(breaklevel)"
+        }
+      ],
+      "description": "Report total attribute. Resets a CNT, SUM, AVE, MIN, or MAX total to zero at the specified BREAK group boundary. PROP:RESET returns 0 if not present, otherwise the break nesting depth.",
+      "propertyEquate": "PROP:Reset"
+    },
+    {
+      "name": "ROUND",
+      "applicableTo": [
+        "BOX"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Specifies a BOX control displays with rounded corners. Valid in both Clarion Win32 windows and REPORT structures.",
+      "propertyEquate": "PROP:Round"
+    },
+    {
+      "name": "SPREAD",
+      "applicableTo": [
+        "SHEET"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Specifies the TAB controls within a SHEET are evenly spaced across the full width of the SHEET.",
+      "propertyEquate": "PROP:Spread"
+    },
+    {
+      "name": "STD",
+      "applicableTo": [
+        "BUTTON",
+        "ITEM"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "LONG behavior",
+              "optional": false
+            }
+          ],
+          "description": "Integer constant or EQUATE from EQUATES.CLW (e.g. STD:Cut, STD:Copy, STD:Paste, STD:Undo, STD:WindowList).",
+          "syntax": "STD(behavior)"
+        }
+      ],
+      "description": "Specifies the control activates a standard Windows action. The action is automatically executed by the runtime library and does not generate any events. Standard action equates (STD:Cut, STD:Copy, STD:Paste, STD:Undo, STD:WindowList, etc.) are in EQUATES.CLW.",
+      "propertyEquate": "PROP:STD"
+    },
+    {
+      "name": "STEP",
+      "applicableTo": [
+        "SPIN"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "NUMERIC count",
+              "optional": false
+            }
+          ],
+          "description": "Amount to increment or decrement the SPIN value within its RANGE.",
+          "syntax": "STEP(count)"
+        }
+      ],
+      "description": "Specifies the increment/decrement amount for a SPIN control within its RANGE. The default STEP is 1.0. Use decimal values for fractional steps (e.g. STEP(.05) for a 0.05 increment).",
+      "propertyEquate": "PROP:Step"
+    },
+    {
+      "name": "STRETCH",
+      "applicableTo": [
+        "OLE"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "OLE control attribute (write-only). Specifies the OLE object stretches to completely fill the AT size of the container control. Does not preserve the object's aspect ratio (see ZOOM for aspect-ratio-preserving stretch).",
+      "propertyEquate": "PROP:Stretch"
+    },
+    {
+      "name": "SUM",
+      "applicableTo": [
+        "STRING"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "variable",
+              "optional": true
+            }
+          ],
+          "description": "Optional numeric variable to receive intermediate sum values.",
+          "syntax": "SUM( [variable] )"
+        }
+      ],
+      "description": "Report total attribute. Calculates the running sum of the STRING control's USE variable as DETAIL structures print. Reset with RESET or PAGE. Typically placed in a group or page FOOTER.",
+      "propertyEquate": "PROP:Sum"
+    },
+    {
+      "name": "TALLY",
+      "applicableTo": [
+        "STRING"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "points",
+              "optional": false
+            }
+          ],
+          "description": "Comma-delimited list of DETAIL and/or BREAK structure labels on which to calculate the total.",
+          "syntax": "TALLY(points)"
+        }
+      ],
+      "description": "Report total attribute. Specifies when to calculate an AVE, CNT, MAX, MIN, or SUM. The total is calculated each time any named DETAIL structure prints, or when a named BREAK boundary occurs. Used with the other report total attributes.",
+      "propertyEquate": "PROP:Tally"
+    },
+    {
+      "name": "THOUS",
+      "applicableTo": [
+        "REPORT",
+        "WINDOW"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Specifies report or window runtime property coordinates are measured in thousandths of an inch. One of three metric alternatives to dialog units; see also MM and POINTS.",
+      "propertyEquate": "PROP:Thous"
+    },
+    {
+      "name": "MM",
+      "applicableTo": [
+        "REPORT",
+        "WINDOW"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Specifies report or window runtime property coordinates are measured in millimeters. One of three metric alternatives to dialog units; see also THOUS and POINTS.",
+      "propertyEquate": "PROP:MM"
+    },
+    {
+      "name": "TOGETHER",
+      "applicableTo": [
+        "DETAIL",
+        "HEADER",
+        "FOOTER"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Report structure attribute. Specifies the structure must print entirely on a single page rather than being split across a page boundary. Commonly used for multi-line structures such as mailing labels.",
+      "propertyEquate": "PROP:Together"
+    },
+    {
+      "name": "TRN",
+      "applicableTo": [
+        "CONTROL"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Specifies the control displays or prints transparently \u00e2\u20ac\u201d only the pixels needed for each character are drawn, without obliterating the background. Useful for placing text over an IMAGE control. Valid in both Clarion Win32 windows and REPORT structures.",
+      "propertyEquate": "PROP:TRN"
+    },
+    {
+      "name": "UP",
+      "applicableTo": [
+        "SHEET"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Specifies the TAB control text appears vertically, reading upwards. Used with SHEET controls. If both UP and DOWN are present the text appears inverted (PROP:UpsideDown).",
+      "propertyEquate": "PROP:UP"
+    },
+    {
+      "name": "DOWN",
+      "applicableTo": [
+        "SHEET"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Specifies the TAB control text appears vertically, reading downwards. Used with SHEET controls. If both UP and DOWN are present the text appears inverted (PROP:UpsideDown).",
+      "propertyEquate": "PROP:Down"
+    },
+    {
+      "name": "VCR",
+      "applicableTo": [
+        "LIST",
+        "COMBO"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "field equate",
+              "optional": true
+            }
+          ],
+          "description": "Optional field equate label of an ENTRY control to use as a locator when the user presses the '?' VCR button.",
+          "syntax": "VCR( [field] )"
+        }
+      ],
+      "description": "Adds VCR-style navigation buttons to a LIST or COMBO control: |< Top, << PageUp, < Up, ? Locate, > Down, >> PageDown, >| Bottom. The optional field parameter activates the locate button with the named ENTRY control. Setting PROP:VCR = TRUE adds buttons without the locate button.",
+      "propertyEquate": "PROP:VCR"
+    },
+    {
+      "name": "WITHNEXT",
+      "applicableTo": [
+        "DETAIL",
+        "HEADER",
+        "FOOTER"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "LONG siblings",
+              "optional": true
+            }
+          ],
+          "description": "Number of immediately following print structures that must print on the same page. Default is 1.",
+          "syntax": "WITHNEXT( [siblings] )"
+        }
+      ],
+      "description": "Report structure attribute. Ensures the structure always prints on the same page as the specified number of immediately following print structures from the same or nested BREAK. Eliminates 'widow' structures (group headers stranded at the bottom of a page).",
+      "propertyEquate": "PROP:WithNext"
+    },
+    {
+      "name": "WITHPRIOR",
+      "applicableTo": [
+        "DETAIL",
+        "HEADER",
+        "FOOTER"
+      ],
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "LONG siblings",
+              "optional": true
+            }
+          ],
+          "description": "Number of immediately preceding print structures that must print on the same page. Default is 1.",
+          "syntax": "WITHPRIOR( [siblings] )"
+        }
+      ],
+      "description": "Report structure attribute. Ensures the structure always prints on the same page as the specified number of immediately preceding print structures from the same or nested BREAK. Eliminates 'orphan' structures (group footers stranded at the top of a new page).",
+      "propertyEquate": "PROP:WithPrior"
+    },
+    {
+      "name": "WIZARD",
+      "applicableTo": [
+        "SHEET"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Specifies a SHEET control that does not display its TAB controls. Allows the program to direct the user through each TAB in a specified sequence, typically with 'Next' and 'Previous' buttons \u00e2\u20ac\u201d creating a wizard-style interface.",
+      "propertyEquate": "PROP:Wizard"
+    },
+    {
+      "name": "ZOOM",
+      "applicableTo": [
+        "OLE"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "OLE control attribute (write-only). Specifies the OLE object stretches to fill the AT size of the container control while maintaining the object's aspect ratio (contrast with STRETCH which ignores aspect ratio).",
+      "propertyEquate": "PROP:Zoom"
+    },
+    {
+      "name": "ABOVE",
+      "applicableTo": [
+        "SHEET"
+      ],
+      "description": "Specifies that the TAB controls appear at the top of the SHEET (the default position). The optional width parameter sets the size of the TAB controls in dialog units.",
+      "propertyEquate": "PROP:ABOVE",
+      "signatures": [
+        {
+          "params": [
+            "LONG width"
+          ],
+          "description": "Optional width of TAB controls in dialog units (PROP:AboveSize)."
+        },
+        {
+          "params": [],
+          "description": "Default width."
+        }
+      ]
+    },
+    {
+      "name": "BELOW",
+      "applicableTo": [
+        "SHEET"
+      ],
+      "description": "Specifies that the TAB controls appear at the bottom of the SHEET. The optional width parameter sets the size of the TAB controls in dialog units.",
+      "propertyEquate": "PROP:BELOW",
+      "signatures": [
+        {
+          "params": [
+            "LONG width"
+          ],
+          "description": "Optional width of TAB controls in dialog units (PROP:BelowSize)."
+        },
+        {
+          "params": [],
+          "description": "Default width."
+        }
+      ]
+    },
+    {
+      "name": "EXTEND",
+      "applicableTo": [
+        "REPORT",
+        "DETAIL",
+        "HEADER",
+        "FOOTER"
+      ],
+      "description": "Specifies attributes for a particular document output type (HTML, XML, TXT, PDF, ALL). A multi-purpose storage tag for information embedded in the generated report WMF file, later parsed and passed to appropriate processing code.",
+      "propertyEquate": "PROP:EXTEND",
+      "signatures": [
+        {
+          "params": [
+            "STRING attributelist"
+          ],
+          "description": "Attribute string(s), optionally prefixed with a document type: HTML(...), XML(...), TXT(...), PDF(...), ALL(...)."
+        }
+      ]
+    },
+    {
+      "name": "LAYOUT",
+      "applicableTo": [
+        "WINDOW",
+        "APPLICATION"
+      ],
+      "description": "Sets the orientation of window controls and field sequence. Style 1 mirrors the layout (right-to-left). Style 0 maintains left-to-right. Setting LAYOUT on APPLICATION cascades to child windows.",
+      "propertyEquate": "PROP:LAYOUT",
+      "signatures": [
+        {
+          "params": [
+            "BYTE style"
+          ],
+          "description": "0 = left-to-right (default), 1 = right-to-left (mirrored)."
+        }
+      ]
+    },
+    {
+      "name": "REPEAT",
+      "applicableTo": [
+        "BUTTON",
+        "SPIN"
+      ],
+      "description": "Specifies the rate of event generation for automatically repeating controls. For a BUTTON with IMM, this is the EVENT:Accepted rate. For a SPIN, this is EVENT:NewSelection rate. Assigning 0 resets to the default.",
+      "propertyEquate": "PROP:REPEAT",
+      "signatures": [
+        {
+          "params": [
+            "LONG time"
+          ],
+          "description": "Rate in hundredths of a second."
+        }
+      ]
+    },
+    {
+      "name": "SMOOTH",
+      "applicableTo": [
+        "PROGRESS"
+      ],
+      "description": "Activates a smooth incremental display of the PROGRESS control instead of the standard block format.",
+      "propertyEquate": "PROP:Smooth",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters; presence activates smooth display."
+        }
+      ]
+    },
+    {
+      "name": "VERTICAL",
+      "applicableTo": [
+        "PROGRESS"
+      ],
+      "description": "Allows the PROGRESS control to operate from bottom to top instead of the default left-to-right. Resize the control to a vertical orientation accordingly.",
+      "propertyEquate": "PROP:Vertical",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters; presence enables vertical mode."
+        }
+      ]
     }
   ]
 }

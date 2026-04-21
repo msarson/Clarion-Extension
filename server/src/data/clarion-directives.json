@@ -1,0 +1,17 @@
+{
+  "directives": [
+    {
+      "name": "ITEMIZE",
+      "syntax": "[label] ITEMIZE([seed]) [,PRE()]\n  equates\nEND",
+      "description": "Declares an enumerated data structure. Each EQUATE inside auto-increments by 1 from the previous (or from seed). Equates are referenced with the PRE prefix or the ITEMIZE label. If no value and no seed, the first equate defaults to 1.",
+      "category": "Compiler Directive"
+    },
+    {
+      "name": "SECTION",
+      "syntax": "SECTION(string)",
+      "description": "Identifies the beginning of a named block of executable source code or data declarations. The string parameter is used as the optional section parameter of the INCLUDE directive to include a specific block from a file. A SECTION ends at the next SECTION or end of file.",
+      "category": "Compiler Directive"
+    }
+  ]
+}
+

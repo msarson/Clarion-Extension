@@ -21,9 +21,12 @@ export interface ProjectNode {
 }
 
 export class ProjectDependencyResolver {
-    private projectNodes: Map<string, ProjectNode> = new Map();
+    private projectNodes: Map<string, ProjectNode> = new Map(); // keyed by sln GUID (always unique)
     private guidToProject: Map<string, ClarionProjectInfo> = new Map();
     private nameToNode: Map<string, ProjectNode> = new Map(); // Name-based lookup
+    // Maps cwproj-internal GUID → sln GUID, for resolving ProjectReference elements
+    // when cwproj GUIDs are duplicated (a known Clarion IDE bug).
+    private cwprojGuidToSlnGuid: Map<string, string> = new Map();
 
     constructor(private solutionDir: string, private projects: ClarionProjectInfo[]) {}
 
@@ -37,19 +40,29 @@ export class ProjectDependencyResolver {
                 const projectFilePath = path.join(project.path, project.filename || `${project.name}.cwproj`);
                 const projectData = await this.parseProjectFile(projectFilePath);
                 
-                if (projectData) {
-                    const guid = projectData.guid;
-                    const node: ProjectNode = {
-                        project,
-                        guid,
-                        references: projectData.references,
-                        outputType: projectData.outputType
-                    };
+                // Use the sln GUID (project.guid) as the primary key — it is always unique.
+                // The cwproj internal GUID (projectData.guid) may be duplicated across projects
+                // due to a Clarion IDE bug; keying on it would silently drop projects.
+                const slnGuid = project.guid.replace(/[{}]/g, '').toUpperCase();
+                const cwprojGuid = projectData?.guid?.toUpperCase() ?? slnGuid;
 
-                    this.projectNodes.set(guid, node);
-                    this.guidToProject.set(guid, project);
-                    this.nameToNode.set(project.name.toLowerCase(), node); // Case-insensitive name lookup
+                if (cwprojGuid && cwprojGuid !== slnGuid) {
+                    if (this.cwprojGuidToSlnGuid.has(cwprojGuid)) {
+                        logger.warn(`⚠️ Duplicate cwproj GUID detected for ${project.name} (${cwprojGuid}) — using sln GUID ${slnGuid} as key`);
+                    }
+                    this.cwprojGuidToSlnGuid.set(cwprojGuid, slnGuid);
                 }
+
+                const node: ProjectNode = {
+                    project,
+                    guid: slnGuid,
+                    references: projectData?.references ?? [],
+                    outputType: projectData?.outputType
+                };
+
+                this.projectNodes.set(slnGuid, node);
+                this.guidToProject.set(slnGuid, project);
+                this.nameToNode.set(project.name.toLowerCase(), node);
             } catch (error) {
                 logger.error(`Failed to parse project ${project.name}: ${error}`);
             }
@@ -149,12 +162,20 @@ export class ProjectDependencyResolver {
                 }
             }
             
-            // Fallback to GUID lookup
-            const nodeByGuid = this.projectNodes.get(ref.projectGuid);
+            // Try direct sln-GUID lookup
+            const refGuid = ref.projectGuid.toUpperCase();
+            const nodeByGuid = this.projectNodes.get(refGuid);
             if (nodeByGuid) {
                 return nodeByGuid;
             }
-            
+
+            // The ref GUID may be a cwproj-internal GUID (possibly duplicated) — remap to sln GUID
+            const slnGuid = this.cwprojGuidToSlnGuid.get(refGuid);
+            if (slnGuid) {
+                const nodeBySlnGuid = this.projectNodes.get(slnGuid);
+                if (nodeBySlnGuid) return nodeBySlnGuid;
+            }
+
             // Not found by either method
             logger.warn(`Cannot resolve project reference: name="${ref.projectName}", GUID=${ref.projectGuid}`);
             return null;

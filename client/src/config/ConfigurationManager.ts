@@ -3,6 +3,7 @@ import { globalSolutionFile, globalSettings, getClarionConfigTarget, setGlobalCl
 import { SolutionCache } from '../SolutionCache';
 import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { updateConfigurationStatusBar } from '../statusbar/StatusBarManager';
+import { readActiveConfigFromSlnCache, patchSlnCacheConfig, buildFullConfig } from '../utils/SlnCacheUtils';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("ConfigurationManager");
@@ -61,7 +62,13 @@ export async function setConfiguration(solutionTreeDataProvider?: SolutionTreeDa
             selectedConfig
         );
         logger.info(`💾 Called setGlobalClarionSelection with config: ${selectedConfig}`);
-        
+
+        // Patch .sln.cache if it already exists so Clarion IDE sees the updated config
+        if (globalSolutionFile) {
+            const existingFull = readActiveConfigFromSlnCache(globalSolutionFile);
+            patchSlnCacheConfig(globalSolutionFile, buildFullConfig(selectedConfig, existingFull));
+        }
+
         updateConfigurationStatusBar(selectedConfig);
         logger.info(`🔄 Updated status bar to: ${selectedConfig}`);
     } else {

@@ -1292,6 +1292,22 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
 
             logger.info(`🌲 Building tree for solution: ${solution.name}`);
             logger.info(`📁 Projects in solution: ${solution.projects.length}`);
+
+            // Build dependency order once — used for both application and project sorting
+            let buildOrderMap = new Map<string, number>();
+            if (this._applicationSortOrder === 'build') {
+                try {
+                    const solutionDir = path.dirname(globalSolutionFile);
+                    const resolver = new ProjectDependencyResolver(solutionDir, solution.projects);
+                    await resolver.analyzeDependencies();
+                    resolver.getBuildOrder().forEach((project, index) => {
+                        buildOrderMap.set(project.name.toLowerCase(), index);
+                    });
+                } catch (error) {
+                    logger.error(`Failed to compute build order for tree: ${error}`);
+                    buildOrderMap = new Map(); // fall back to alphabetical
+                }
+            }
             
             // Create the solution node
             const solutionNode = new TreeNode(
@@ -1312,37 +1328,15 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 // Determine application order based on sort preference
                 let orderedApplications = [...solution.applications];
                 
-                if (this._applicationSortOrder === 'build') {
-                    // Sort by build order (dependency order)
-                    try {
-                        const solutionDir = path.dirname(globalSolutionFile);
-                        const resolver = new ProjectDependencyResolver(solutionDir, solution.projects);
-                        
-                        await resolver.analyzeDependencies();
-                        
-                        const buildOrder = resolver.getBuildOrder();
-                        
-                        // Create a map of project names to their build order index
-                        const buildOrderMap = new Map<string, number>();
-                        buildOrder.forEach((project, index) => {
-                            buildOrderMap.set(project.name.toLowerCase(), index);
-                        });
-                        
-                        // Sort applications based on their matching project's build order
-                        orderedApplications.sort((a, b) => {
-                            const nameA = a.name.replace(/\.app$/i, '').toLowerCase();
-                            const nameB = b.name.replace(/\.app$/i, '').toLowerCase();
-                            
-                            const orderA = buildOrderMap.get(nameA) ?? 999999;
-                            const orderB = buildOrderMap.get(nameB) ?? 999999;
-                            
-                            return orderA - orderB;
-                        });
-                    } catch (error) {
-                        logger.error(`Failed to sort applications by build order: ${error}`);
-                        // Fall back to alphabetical order
-                        orderedApplications.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-                    }
+                if (this._applicationSortOrder === 'build' && buildOrderMap.size > 0) {
+                    // Sort applications based on their matching project's build order
+                    orderedApplications.sort((a, b) => {
+                        const nameA = a.name.replace(/\.app$/i, '').toLowerCase();
+                        const nameB = b.name.replace(/\.app$/i, '').toLowerCase();
+                        const orderA = buildOrderMap.get(nameA) ?? 999999;
+                        const orderB = buildOrderMap.get(nameB) ?? 999999;
+                        return orderA - orderB;
+                    });
                 } else {
                     // Default: Sort alphabetically (case-insensitive)
                     orderedApplications.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
@@ -1368,11 +1362,21 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 logger.info(`✅ Added Applications group with ${solution.applications.length} APP file(s)`);
             }
 
-            // Add project nodes with minimal information - details will be loaded on demand
-            // Sort projects alphabetically (case-insensitive)
-            const sortedProjects = [...solution.projects.filter(Boolean)].sort((a, b) => 
-                (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: 'base' })
-            );
+            // Sort projects — by build order when that mode is active, otherwise alphabetically
+            const sortedProjects = [...solution.projects.filter(Boolean)];
+            if (this._applicationSortOrder === 'build' && buildOrderMap.size > 0) {
+                sortedProjects.sort((a, b) => {
+                    const orderA = buildOrderMap.get((a.name || '').toLowerCase()) ?? 999999;
+                    const orderB = buildOrderMap.get((b.name || '').toLowerCase()) ?? 999999;
+                    return orderA !== orderB
+                        ? orderA - orderB
+                        : (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+                });
+            } else {
+                sortedProjects.sort((a, b) =>
+                    (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' })
+                );
+            }
             
             for (const project of sortedProjects) {
                 // Create a project node with no children initially

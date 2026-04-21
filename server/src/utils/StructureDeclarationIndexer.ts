@@ -225,6 +225,12 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
     }
 
     async getOrBuildIndex(projectPath: string): Promise<StructureIndex> {
+        // Without a redirection file we cannot meaningfully scan anything.
+        // Return an empty uncached index so the first real call after solution
+        // load builds and caches correctly (cache is also cleared on solution load).
+        if (!serverSettings.redirectionFile) {
+            return { byName: new Map(), lastIndexed: 0, projectPath };
+        }
         const key = this.normalizeKey(projectPath);
         if (this.indexes.has(key)) {
             return this.indexes.get(key)!;
