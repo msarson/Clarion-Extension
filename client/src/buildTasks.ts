@@ -671,11 +671,17 @@ export async function buildSolutionWithDependencyOrder(
                 
                 const buildParams = prepareBuildParameters(buildConfig);
                 // Use a per-project log file so successive projects don't overwrite
-                // the log of a failed earlier project before it can be read
-                buildParams.buildLogPath = path.join(
+                // the log of a failed earlier project before it can be read.
+                // Also patch the /fileLoggerParameters arg since the path is baked in.
+                const perProjectLog = path.join(
                     path.dirname(globalSolutionFile),
                     `build_${project.name.replace(/[^a-zA-Z0-9_-]/g, '_')}.log`
                 );
+                buildParams.buildLogPath = perProjectLog;
+                const logArgIdx = buildParams.buildArgs.findIndex(a => a.startsWith('/fileLoggerParameters:'));
+                if (logArgIdx !== -1) {
+                    buildParams.buildArgs[logArgIdx] = `/fileLoggerParameters:LogFile="${perProjectLog}"`;
+                }
 
                 await executeBuildTaskSync({ ...buildParams, diagnosticCollection });
                 successCount++;
