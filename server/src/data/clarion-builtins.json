@@ -5501,6 +5501,348 @@
           "syntax": "TYPE(string)"
         }
       ]
+    },
+    {
+      "name": "CALL",
+      "signatures": [
+        {
+          "params": [
+            { "name": "file", "optional": false },
+            { "name": "procedure", "optional": false },
+            { "name": "flags", "optional": true }
+          ],
+          "returnType": "SIGNED",
+          "description": "Calls a procedure from a Windows standard .DLL that has not been prototyped in the MAP structure. The DLL is loaded if not already resident. Returns 0 on success, or a Windows error code on failure. The DLL is unloaded when the procedure finishes unless flags bit 0 is set to 1. Use UNLOAD to explicitly unload a resident DLL.",
+          "syntax": "CALL(file, procedure [, flags])"
+        }
+      ]
+    },
+    {
+      "name": "CALLBACK",
+      "signatures": [
+        {
+          "params": [
+            { "name": "entity", "optional": false },
+            { "name": "FileCallBackInterface", "optional": false },
+            { "name": "flag", "optional": true }
+          ],
+          "returnType": "",
+          "description": "Registers or unregisters a FileCallBackInterface with a FILE or VIEW. The interface methods are called automatically before (FunctionCalled) and after (FunctionDone) each file operation. Multiple interfaces can be registered. Set flag to TRUE (1) to unregister. Registered interfaces must be unregistered before the implementing object is destroyed.",
+          "syntax": "CALLBACK(entity, FileCallBackInterface [, flag])"
+        }
+      ]
+    },
+    {
+      "name": "CONVERTANSITOOEM",
+      "signatures": [
+        {
+          "params": [
+            { "name": "string", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Translates a string or GROUP from the ANSI (Windows display) character set into the OEM character set (ASCII with extra characters defined by the active code page). Not required when the OEM file attribute is set. Companion to CONVERTOEMTOANSI.",
+          "syntax": "CONVERTANSITOOEM(string)"
+        }
+      ]
+    },
+    {
+      "name": "CONVERTOEMTOANSI",
+      "signatures": [
+        {
+          "params": [
+            { "name": "string", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Translates a string or GROUP from the OEM character set (ASCII with extra characters defined by the active code page) into the ANSI (Windows display) character set. Not required when the OEM file attribute is set. Companion to CONVERTANSITOOEM.",
+          "syntax": "CONVERTOEMTOANSI(string)"
+        }
+      ]
+    },
+    {
+      "name": "MOUSEX",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "SIGNED",
+          "description": "Returns the current horizontal position of the mouse cursor at the time of the event, relative to the origin of the active window. Returns dialog units by default; returns pixels if PROP:Pixels is set to TRUE.",
+          "syntax": "MOUSEX()"
+        }
+      ]
+    },
+    {
+      "name": "MOUSEY",
+      "signatures": [
+        {
+          "params": [],
+          "returnType": "SIGNED",
+          "description": "Returns the current vertical position of the mouse cursor at the time of the event, relative to the origin of the active window. Returns dialog units by default; returns pixels if PROP:Pixels is set to TRUE.",
+          "syntax": "MOUSEY()"
+        }
+      ]
+    },
+    {
+      "name": "POKE",
+      "signatures": [
+        {
+          "params": [
+            { "name": "address", "optional": false },
+            { "name": "source", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Writes the contents of a variable to a memory address. Writes as many bytes as are in the source variable. Use ADDRESS() to obtain a safe protected-mode address. Incorrect use can cause General Protection Faults. Prefer Windows API functions over POKE where possible.",
+          "syntax": "POKE(address, source)"
+        }
+      ]
+    },
+    {
+      "name": "PRINTERDIALOG",
+      "signatures": [
+        {
+          "params": [
+            { "name": "title", "optional": true },
+            { "name": "flag", "optional": true }
+          ],
+          "returnType": "SIGNED",
+          "description": "Displays the Windows standard printer choice dialog. flag: 0=Choose Printer, 1=Print Setup, 2=Page Setup. Sets the default printer for the next REPORT opened. Returns 1 if user clicked OK, 0 if Cancel.",
+          "syntax": "PRINTERDIALOG([title] [, flag])"
+        }
+      ]
+    },
+    {
+      "name": "REGISTER",
+      "signatures": [
+        {
+          "params": [
+            { "name": "event", "optional": false },
+            { "name": "handler", "optional": false },
+            { "name": "object", "optional": false },
+            { "name": "window", "optional": true },
+            { "name": "control", "optional": true }
+          ],
+          "returnType": "",
+          "description": "Registers an event handler procedure to be called by the ACCEPT loop whenever the specified event occurs. handler is the ADDRESS of the procedure. object is a unique 32-bit identifier (typically ADDRESS(SELF)). Multiple handlers can be registered for the same event; they execute in reverse registration order. Can also be prototyped as REGISTEREVENT.",
+          "syntax": "REGISTER(event, handler, object [, window] [, control])"
+        }
+      ]
+    },
+    {
+      "name": "UNREGISTER",
+      "signatures": [
+        {
+          "params": [
+            { "name": "event", "optional": true },
+            { "name": "handler", "optional": true },
+            { "name": "object", "optional": true },
+            { "name": "window", "optional": true },
+            { "name": "control", "optional": true }
+          ],
+          "returnType": "",
+          "description": "Unregisters a previously REGISTERed event handler. Omitting parameters unregisters all matching handlers (e.g., omit event to unregister all events for the object). The runtime automatically unregisters all handlers when a window closes, so explicit UNREGISTER is only needed for early deregistration. Can also be prototyped as UNREGISTEREVENT.",
+          "syntax": "UNREGISTER([event] [, handler] [, object] [, window] [, control])"
+        }
+      ]
+    },
+    {
+      "name": "SET3DLOOK",
+      "signatures": [
+        {
+          "params": [
+            { "name": "switch", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Toggles the three-dimensional look and feel for window controls. SET3DLOOK(0) disables 3D look; SET3DLOOK(1) enables it (default). The GRAY attribute on a WINDOW causes controls to appear three-dimensional. TOOLBAR controls are always 3D unless disabled by SET3DLOOK.",
+          "syntax": "SET3DLOOK(switch)"
+        }
+      ]
+    },
+    {
+      "name": "SETDROPID",
+      "signatures": [
+        {
+          "params": [
+            { "name": "string", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Sets the value that DROPID() will return, allowing data to be passed in a drag-and-drop operation. Used in EVENT:Drag processing to package the dragged data for the drop target, especially when passing data between separate Clarion applications.",
+          "syntax": "SETDROPID(string)"
+        }
+      ]
+    },
+    {
+      "name": "SETKEYCHAR",
+      "signatures": [
+        {
+          "params": [
+            { "name": "keychar", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Sets the internal ASCII character value returned by the KEYCHAR procedure. The character is not placed in the keyboard buffer. Used to override the character returned from the last keystroke event.",
+          "syntax": "SETKEYCHAR(keychar)"
+        }
+      ]
+    },
+    {
+      "name": "SETKEYCODE",
+      "signatures": [
+        {
+          "params": [
+            { "name": "keycode", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Sets the keycode value returned by the KEYCODE procedure. The keycode is not placed in the keyboard buffer. Used to override the keycode returned from the last keystroke event. Accepts integer constants or keycode EQUATE labels.",
+          "syntax": "SETKEYCODE(keycode)"
+        }
+      ]
+    },
+    {
+      "name": "SETPATH",
+      "signatures": [
+        {
+          "params": [
+            { "name": "path", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Changes the current drive and directory. If the drive and path are invalid, posts error 03 (Path Not Found). If only a drive letter and colon are specified, changes to the current directory of that drive. Companion to PATH, SHORTPATH, LONGPATH.",
+          "syntax": "SETPATH(path)"
+        }
+      ]
+    },
+    {
+      "name": "SETTODAY",
+      "signatures": [
+        {
+          "params": [
+            { "name": "date", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Sets the operating system date. date is a standard Clarion date numeric value. Use TODAY() to get the current date and arithmetic to calculate new dates.",
+          "syntax": "SETTODAY(date)"
+        }
+      ]
+    },
+    {
+      "name": "SKIP",
+      "signatures": [
+        {
+          "params": [
+            { "name": "entity", "optional": false },
+            { "name": "count", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Bypasses records during sequential processing by moving the file pointer count records without loading data into the record buffer. More efficient than repeated NEXT/PREVIOUS calls. Positive count skips forward; negative count skips backward. Posts errors if past end/beginning of file or if SET has not been issued.",
+          "syntax": "SKIP(entity, count)"
+        }
+      ]
+    },
+    {
+      "name": "SQL",
+      "signatures": [
+        {
+          "params": [
+            { "name": "sql expression", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Specifies a native SQL expression for use in a VIEW FILTER, ORDER, or JOIN, or in PROP:Filter, PROP:Order, PROP:JoinExpression. Anything inside SQL() is passed directly to the SQL server without Clarion translation. The SQL driver generates aliases (A, B, etc.) for each file in a VIEW; use those aliases in your SQL expressions.",
+          "syntax": "SQL(sql expression)"
+        }
+      ]
+    },
+    {
+      "name": "SQLCALLBACK",
+      "signatures": [
+        {
+          "params": [
+            { "name": "entity", "optional": false },
+            { "name": "SQLCallBackInterface", "optional": false },
+            { "name": "flag", "optional": true }
+          ],
+          "returnType": "",
+          "description": "Registers or unregisters a SQLCallBackInterface with a FILE or VIEW. The interface's ExecutingCode method is called just before each SQL statement is sent to the SQL server. Set flag to TRUE (1) to unregister. Only supported by SQL file drivers.",
+          "syntax": "SQLCALLBACK(entity, SQLCallBackInterface [, flag])"
+        }
+      ]
+    },
+    {
+      "name": "SQRT",
+      "signatures": [
+        {
+          "params": [
+            { "name": "expression", "optional": false }
+          ],
+          "returnType": "REAL",
+          "description": "Returns the square root of a numeric expression. If the value is less than zero, returns zero. The square root of X is the number that, when multiplied by itself, equals X.",
+          "syntax": "SQRT(expression)"
+        }
+      ]
+    },
+    {
+      "name": "STREAM",
+      "signatures": [
+        {
+          "params": [
+            { "name": "file", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Disables automatic file buffer flushing for a FILE, allowing the OS to buffer writes. Terminated by CLOSE (which flushes automatically) or FLUSH. Use in single-user or batch contexts; LOGOUT is safer in multi-user environments. Support is file driver dependent.",
+          "syntax": "STREAM(file)"
+        }
+      ]
+    },
+    {
+      "name": "TIE",
+      "signatures": [
+        {
+          "params": [
+            { "name": "stringtoken", "optional": false },
+            { "name": "index", "optional": true },
+            { "name": "value", "optional": false }
+          ],
+          "returnType": "LONG",
+          "description": "Associates a numeric value with an ASTRING token and index. If index is omitted or zero, a unique index is allocated at runtime and returned. Used with TIED and UNTIE to attach metadata to ASTRING values.",
+          "syntax": "TIE(stringtoken [, index], value)"
+        }
+      ]
+    },
+    {
+      "name": "TIED",
+      "signatures": [
+        {
+          "params": [
+            { "name": "stringtoken", "optional": false },
+            { "name": "index", "optional": false }
+          ],
+          "returnType": "LONG",
+          "description": "Retrieves a numeric value previously associated with an ASTRING token and index using TIE. Returns 0 if no value has been tied for that token and index.",
+          "syntax": "TIED(stringtoken, index)"
+        }
+      ]
+    },
+    {
+      "name": "UNTIE",
+      "signatures": [
+        {
+          "params": [
+            { "name": "stringtoken", "optional": true },
+            { "name": "index", "optional": true }
+          ],
+          "returnType": "",
+          "description": "Disassociates a value previously tied to an ASTRING token and index using TIE. If stringtoken is omitted, all ASTRINGs are affected. If index is omitted, all indexes for the token are untied.",
+          "syntax": "UNTIE([stringtoken] [, index])"
+        }
+      ]
+    },
+    {
+      "name": "UNLOAD",
+      "signatures": [
+        {
+          "params": [
+            { "name": "file", "optional": false }
+          ],
+          "returnType": "",
+          "description": "Unloads a Windows standard .DLL that was left resident by CALL with flags bit 0 set. Use when the DLL is no longer needed to free memory.",
+          "syntax": "UNLOAD(file)"
+        }
+      ]
     }
   ]
 }
