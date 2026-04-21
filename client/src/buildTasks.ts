@@ -669,13 +669,15 @@ export async function buildSolutionWithDependencyOrder(
                     projectObject: project
                 };
                 
-                const buildParams = {
-                    ...prepareBuildParameters(buildConfig),
-                    diagnosticCollection
-                };
-                
-                // Execute the build synchronously
-                await executeBuildTaskSync(buildParams);
+                const buildParams = prepareBuildParameters(buildConfig);
+                // Use a per-project log file so successive projects don't overwrite
+                // the log of a failed earlier project before it can be read
+                buildParams.buildLogPath = path.join(
+                    path.dirname(globalSolutionFile),
+                    `build_${project.name.replace(/[^a-zA-Z0-9_-]/g, '_')}.log`
+                );
+
+                await executeBuildTaskSync({ ...buildParams, diagnosticCollection });
                 successCount++;
                 
                 // Clear building status for this project
