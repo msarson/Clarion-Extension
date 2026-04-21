@@ -6,6 +6,10 @@ All notable changes to the Clarion Extension are documented here.
 
 ## Recent Versions
 
+### [0.9.6] - Unreleased
+
+---
+
 ### [0.9.5] - 2026-04-21
 
 **Hover Documentation — Major Expansion (310 built-ins, 158 attributes)**
