@@ -1130,7 +1130,7 @@
               "optional": true
             }
           ],
-          "description": "Declares a procedure, variable, FILE, QUEUE, GROUP, or CLASS defined externally in a .DLL. The optional flag is a numeric constant, equate, or any project-level conditional compilation symbol — when non-zero the attribute is active; zero or omitted means inactive.",
+          "description": "Declares a procedure, variable, FILE, QUEUE, GROUP, or CLASS defined externally in a .DLL. The optional flag is a numeric constant, equate, or any project-level conditional compilation symbol \u00e2\u20ac\u201d when non-zero the attribute is active; zero or omitted means inactive.",
           "syntax": "DLL([flag])"
         }
       ],
@@ -1381,7 +1381,7 @@
           "syntax": "LINK(linkfile [,flag])"
         }
       ],
-      "description": "Names a file to add to the link list for the current project when using this CLASS. linkfile is a string constant; .OBJ extension is assumed if none is given. Normally the same as the MODULE parameter but may explicitly name a .LIB or .OBJ file. The flag is a numeric constant or any conditional compilation symbol defined via #pragma define(ident=>value) in the project file or the IDE's Conditional Compilation Symbols dialog — when non-zero the file is linked, zero means inactive. The ABC template chain uses _ABCLinkMode_ as a common example. LINK is only valid on a CLASS structure.",
+      "description": "Names a file to add to the link list for the current project when using this CLASS. linkfile is a string constant; .OBJ extension is assumed if none is given. Normally the same as the MODULE parameter but may explicitly name a .LIB or .OBJ file. The flag is a numeric constant or any conditional compilation symbol defined via #pragma define(ident=>value) in the project file or the IDE's Conditional Compilation Symbols dialog \u00e2\u20ac\u201d when non-zero the file is linked, zero means inactive. The ABC template chain uses _ABCLinkMode_ as a common example. LINK is only valid on a CLASS structure.",
       "propertyEquate": ""
     },
     {
@@ -1628,7 +1628,7 @@
           "description": "No parameters"
         }
       ],
-      "description": "OLE control attribute (write-only). Specifies the OLE object only displays what fits within the container control's AT size — larger objects are clipped to the top-left corner.",
+      "description": "OLE control attribute (write-only). Specifies the OLE object only displays what fits within the container control's AT size \u00e2\u20ac\u201d larger objects are clipped to the top-left corner.",
       "propertyEquate": "PROP:Clip"
     },
     {
@@ -1781,7 +1781,7 @@
           "syntax": "DROPID(signature [,signature])"
         }
       ],
-      "description": "Specifies a control as a drag-and-drop target. Works with DRAGID — at least one signature must match between host and target. '~TEXT' and '~FILE' are predefined signatures for external drag-drop from other applications.",
+      "description": "Specifies a control as a drag-and-drop target. Works with DRAGID \u00e2\u20ac\u201d at least one signature must match between host and target. '~TEXT' and '~FILE' are predefined signatures for external drag-drop from other applications.",
       "propertyEquate": "PROP:DropID"
     },
     {
@@ -2449,7 +2449,7 @@
           "description": "No parameters"
         }
       ],
-      "description": "Specifies the control displays or prints transparently — only the pixels needed for each character are drawn, without obliterating the background. Useful for placing text over an IMAGE control. Valid in both Clarion Win32 windows and REPORT structures.",
+      "description": "Specifies the control displays or prints transparently \u00e2\u20ac\u201d only the pixels needed for each character are drawn, without obliterating the background. Useful for placing text over an IMAGE control. Valid in both Clarion Win32 windows and REPORT structures.",
       "propertyEquate": "PROP:TRN"
     },
     {
@@ -2556,7 +2556,7 @@
           "description": "No parameters"
         }
       ],
-      "description": "Specifies a SHEET control that does not display its TAB controls. Allows the program to direct the user through each TAB in a specified sequence, typically with 'Next' and 'Previous' buttons — creating a wizard-style interface.",
+      "description": "Specifies a SHEET control that does not display its TAB controls. Allows the program to direct the user through each TAB in a specified sequence, typically with 'Next' and 'Previous' buttons \u00e2\u20ac\u201d creating a wizard-style interface.",
       "propertyEquate": "PROP:Wizard"
     },
     {
@@ -2572,6 +2572,127 @@
       ],
       "description": "OLE control attribute (write-only). Specifies the OLE object stretches to fill the AT size of the container control while maintaining the object's aspect ratio (contrast with STRETCH which ignores aspect ratio).",
       "propertyEquate": "PROP:Zoom"
+    },
+    {
+      "name": "ABOVE",
+      "applicableTo": [
+        "SHEET"
+      ],
+      "description": "Specifies that the TAB controls appear at the top of the SHEET (the default position). The optional width parameter sets the size of the TAB controls in dialog units.",
+      "propertyEquate": "PROP:ABOVE",
+      "signatures": [
+        {
+          "params": [
+            "LONG width"
+          ],
+          "description": "Optional width of TAB controls in dialog units (PROP:AboveSize)."
+        },
+        {
+          "params": [],
+          "description": "Default width."
+        }
+      ]
+    },
+    {
+      "name": "BELOW",
+      "applicableTo": [
+        "SHEET"
+      ],
+      "description": "Specifies that the TAB controls appear at the bottom of the SHEET. The optional width parameter sets the size of the TAB controls in dialog units.",
+      "propertyEquate": "PROP:BELOW",
+      "signatures": [
+        {
+          "params": [
+            "LONG width"
+          ],
+          "description": "Optional width of TAB controls in dialog units (PROP:BelowSize)."
+        },
+        {
+          "params": [],
+          "description": "Default width."
+        }
+      ]
+    },
+    {
+      "name": "EXTEND",
+      "applicableTo": [
+        "REPORT",
+        "DETAIL",
+        "HEADER",
+        "FOOTER"
+      ],
+      "description": "Specifies attributes for a particular document output type (HTML, XML, TXT, PDF, ALL). A multi-purpose storage tag for information embedded in the generated report WMF file, later parsed and passed to appropriate processing code.",
+      "propertyEquate": "PROP:EXTEND",
+      "signatures": [
+        {
+          "params": [
+            "STRING attributelist"
+          ],
+          "description": "Attribute string(s), optionally prefixed with a document type: HTML(...), XML(...), TXT(...), PDF(...), ALL(...)."
+        }
+      ]
+    },
+    {
+      "name": "LAYOUT",
+      "applicableTo": [
+        "WINDOW",
+        "APPLICATION"
+      ],
+      "description": "Sets the orientation of window controls and field sequence. Style 1 mirrors the layout (right-to-left). Style 0 maintains left-to-right. Setting LAYOUT on APPLICATION cascades to child windows.",
+      "propertyEquate": "PROP:LAYOUT",
+      "signatures": [
+        {
+          "params": [
+            "BYTE style"
+          ],
+          "description": "0 = left-to-right (default), 1 = right-to-left (mirrored)."
+        }
+      ]
+    },
+    {
+      "name": "REPEAT",
+      "applicableTo": [
+        "BUTTON",
+        "SPIN"
+      ],
+      "description": "Specifies the rate of event generation for automatically repeating controls. For a BUTTON with IMM, this is the EVENT:Accepted rate. For a SPIN, this is EVENT:NewSelection rate. Assigning 0 resets to the default.",
+      "propertyEquate": "PROP:REPEAT",
+      "signatures": [
+        {
+          "params": [
+            "LONG time"
+          ],
+          "description": "Rate in hundredths of a second."
+        }
+      ]
+    },
+    {
+      "name": "SMOOTH",
+      "applicableTo": [
+        "PROGRESS"
+      ],
+      "description": "Activates a smooth incremental display of the PROGRESS control instead of the standard block format.",
+      "propertyEquate": "PROP:Smooth",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters; presence activates smooth display."
+        }
+      ]
+    },
+    {
+      "name": "VERTICAL",
+      "applicableTo": [
+        "PROGRESS"
+      ],
+      "description": "Allows the PROGRESS control to operate from bottom to top instead of the default left-to-right. Resize the control to a vertical orientation accordingly.",
+      "propertyEquate": "PROP:Vertical",
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters; presence enables vertical mode."
+        }
+      ]
     }
   ]
 }
