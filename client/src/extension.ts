@@ -20,6 +20,7 @@ import { registerClassCreationCommands } from './commands/ClassCreationCommands'
 import { registerImplementationCommands } from './commands/ImplementationCommands';
 import { registerClassConstantCommands } from './commands/ClassConstantCommands';
 import { registerIncludeStatementCommands } from './commands/IncludeStatementCommands';
+import { registerNewSolutionCommands } from './commands/NewSolutionCommands';
 import { createSolutionTreeView, createStructureView } from './views/ViewManager';
 import { registerLanguageFeatures } from './providers/LanguageFeatureManager';
 import * as SolutionOpener from './solution/SolutionOpener';
@@ -144,6 +145,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
     
     // Register include statement commands
     context.subscriptions.push(...registerIncludeStatementCommands(context));
+
+    // Register new solution command
+    context.subscriptions.push(...registerNewSolutionCommands(context));
     
     context.subscriptions.push(...disposables);
     

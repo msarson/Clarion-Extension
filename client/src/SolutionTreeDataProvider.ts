@@ -407,9 +407,16 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                     TreeItemCollapsibleState.None,
                     { type: 'browseSolution', tooltip: "Open a Clarion solution file from anywhere" }
                 );
-                
+
+                const newSolutionNode = new TreeNode(
+                    "✨ New Solution...",
+                    TreeItemCollapsibleState.None,
+                    { type: 'newSolution', tooltip: "Create a new Clarion solution in this folder" }
+                );
+
                 nodes.push(noSolutionsNode);
                 nodes.push(browseNode);
+                nodes.push(newSolutionNode);
                 return nodes;
             }
             
@@ -851,6 +858,17 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             treeItem.command = {
                 title: 'Browse for Solution',
                 command: 'clarion.openSolution',
+                arguments: []
+            };
+            return treeItem;
+        }
+
+        if ((data as any)?.type === 'newSolution') {
+            treeItem.iconPath = new ThemeIcon('add');
+            treeItem.tooltip = (data as any).tooltip || "Create a new Clarion solution in this folder";
+            treeItem.command = {
+                title: 'New Solution',
+                command: 'clarion.newSolution',
                 arguments: []
             };
             return treeItem;
