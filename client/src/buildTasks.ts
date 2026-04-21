@@ -326,9 +326,11 @@ export function prepareBuildParameters(buildConfig: {
         `/fileLoggerParameters:LogFile="${buildLogPath}"`
     ];
     
-    // Add platform property if we have one (quote value to handle "Any CPU" etc.)
-    if (platformPart) {
-        buildArgs.splice(3, 0, `/property:Platform="${platformPart}"`);
+    // Add platform property if we have one.
+    // "Any CPU" is not a valid Clarion build platform (Clarion is always Win32)
+    // and its space causes shell-quoting issues, so skip it in that case.
+    if (platformPart && platformPart.toLowerCase() !== 'any cpu') {
+        buildArgs.splice(3, 0, `/property:Platform=${platformPart}`);
     }
 
     // Log the build configuration
