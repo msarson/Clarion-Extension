@@ -132,8 +132,14 @@ export class HoverRouter {
             return this.contextHandler.handleProcedureKeyword(line, isInMapBlock, isInClassBlock);
         }
 
-        if (upperWord === 'HIDE' || upperWord === 'DISABLE' || upperWord === 'TYPE') {
+        if (upperWord === 'HIDE' || upperWord === 'DISABLE') {
+            // Attribute when inside a window/control declaration; builtin when in code section
             return this.contextHandler.handleWindowBuiltin(word, isInWindowContext);
+        }
+
+        if (upperWord === 'TYPE') {
+            // Attribute on GROUP/QUEUE/CLASS (outside window); builtin TYPE(string) inside REPORT
+            return this.contextHandler.handleWindowBuiltin(word, !isInWindowContext);
         }
 
         return null;
