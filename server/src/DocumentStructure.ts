@@ -58,7 +58,7 @@ export class DocumentStructure {
         
         // 🚀 PERFORMANCE: Build parent relationship index
         this.buildParentIndex();
-        
+
         const indexTime = performance.now() - perfStart;
         logger.perf('Built indexes', {
             'time_ms': indexTime.toFixed(2),
@@ -396,6 +396,20 @@ export class DocumentStructure {
                 token.label = token.value;
                 maxLabelWidth = Math.max(maxLabelWidth, token.value.length);
                 logger.info(`📌 Label '${token.value}' detected at Line ${token.line}, structureStack.length=${this.structureStack.length}`);
+
+                // Enrich structureType: look for a Structure/Type token after the label on the same line
+                // e.g. "Names FILE,DRIVER(...)" → Names.structureType = 'FILE'
+                // Must be done here (not in buildIndexes) because processLabels is what sets token.type=Label
+                const lineTokens = this.tokensByLine.get(token.line);
+                if (lineTokens) {
+                    const structToken = lineTokens.find(t =>
+                        t.start > token.start &&
+                        (t.type === TokenType.Structure || t.type === TokenType.Type)
+                    );
+                    if (structToken) {
+                        token.structureType = structToken.value.toUpperCase();
+                    }
+                }
 
                 if (this.structureStack.length > 0) {
                     let parentStructure = this.structureStack[this.structureStack.length - 1];

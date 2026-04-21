@@ -81,4 +81,5 @@ export interface Token {
         parentFile: string;   // File that has the INCLUDE statement
     };
     implementedInterfaces?: string[];  // Names of interfaces a CLASS implements (from IMPLEMENTS() attributes)
+    structureType?: string;           // ✅ Set by DocumentStructure: the Structure/Type keyword on the same line as this label (e.g. 'FILE', 'VIEW', 'GROUP', 'CLASS', 'WINDOW', 'QUEUE', 'REPORT', etc.)
 }

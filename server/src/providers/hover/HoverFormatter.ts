@@ -601,7 +601,7 @@ export class HoverFormatter {
     /**
      * Constructs hover information for built-in Clarion functions
      */
-    formatBuiltin(functionName: string, signatures: any[], paramCount: number | null): Hover {
+    formatBuiltin(functionName: string, signatures: any[], paramCount: number | null, firstArgType?: string): Hover {
         if (signatures.length === 0) {
             return {
                 contents: {
@@ -612,13 +612,25 @@ export class HoverFormatter {
         }
 
         let matchingSignatures = signatures;
+
+        // Narrow by first argument's structureType (e.g. FILE, VIEW, WINDOW, REPORT)
+        if (firstArgType) {
+            const typeNarrowed = signatures.filter(sig =>
+                sig.parameters && sig.parameters.length > 0 &&
+                sig.parameters[0].label.toUpperCase().startsWith(firstArgType)
+            );
+            if (typeNarrowed.length > 0) {
+                matchingSignatures = typeNarrowed;
+            }
+        }
+
         if (paramCount !== null) {
-            matchingSignatures = signatures.filter(sig => 
+            const countNarrowed = matchingSignatures.filter(sig => 
                 sig.parameters && sig.parameters.length === paramCount
             );
             
-            if (matchingSignatures.length === 0) {
-                matchingSignatures = signatures;
+            if (countNarrowed.length > 0) {
+                matchingSignatures = countNarrowed;
             }
         }
 
