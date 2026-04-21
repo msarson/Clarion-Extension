@@ -430,6 +430,149 @@ suite('ReferencesProvider – LIKE typed variable', () => {
 });
 
 // ---------------------------------------------------------------------------
+// ReferencesProvider — procedure-scope locals in locally-defined class methods (issue #78)
+// ---------------------------------------------------------------------------
+
+suite('ReferencesProvider – procedure locals in local class method bodies', () => {
+    let provider: ReferencesProvider;
+
+    setup(() => {
+        setServerInitialized(true);
+        TokenCache.getInstance().clearAllTokens();
+        provider = new ReferencesProvider();
+    });
+
+    /**
+     * A local variable declared in a procedure's data section must be found
+     * inside the method implementations of a locally-declared class.
+     * Bug: finishesAt was set before the method impl bodies, so they were excluded.
+     */
+    test('Local variable referenced inside locally-declared class method body is found', async () => {
+        const code = [
+            'Main PROCEDURE',                     // line 0
+            'FileLookup2    SelectFileClass',      // line 1 — local variable (declaration)
+            'ThisWindow      CLASS(WindowManager)',// line 2
+            'Init              PROCEDURE',         // line 3
+            'Kill              PROCEDURE',         // line 4
+            '               END',                 // line 5
+            'CODE',                               // line 6
+            '  FileLookup2.Init()',               // line 7 — usage in CODE section
+            '',                                   // line 8
+            'ThisWindow.Init PROCEDURE',          // line 9 — method implementation
+            'CODE',                               // line 10
+            '  FileLookup2.Run()',                // line 11 — usage inside method body (was missed)
+            '  RETURN',                           // line 12
+            '',                                   // line 13
+            'ThisWindow.Kill PROCEDURE',          // line 14 — second method implementation
+            'CODE',                               // line 15
+            '  FileLookup2.Kill()',               // line 16 — another usage (was missed)
+            '  RETURN',                           // line 17
+        ].join('\n');
+
+        const doc = createDocument(code, 'file:///local-class-local-var.clw');
+        seedCache(doc);
+
+        // Cursor on "FileLookup2" at its declaration (line 1, col 0)
+        const refs = await provider.provideReferences(doc, { line: 1, character: 0 },
+            { includeDeclaration: true });
+
+        assert.ok(refs !== null, 'Should find references');
+        const refLines = refs!.map(r => r.range.start.line).sort((a, b) => a - b);
+
+        assert.ok(refLines.includes(1), 'Should include declaration (line 1)');
+        assert.ok(refLines.includes(7), `Should find usage in CODE section (line 7). Got: ${refLines}`);
+        assert.ok(refLines.includes(11),
+            `Should find usage inside ThisWindow.Init body (line 11). Got: ${refLines}`);
+        assert.ok(refLines.includes(16),
+            `Should find usage inside ThisWindow.Kill body (line 16). Got: ${refLines}`);
+    });
+
+    /**
+     * A procedure parameter must be found inside locally-declared class method bodies.
+     */
+    test('Procedure parameter referenced inside locally-declared class method body is found', async () => {
+        const code = [
+            'Main PROCEDURE(LONG isCloning)',     // line 0 — parameter: isCloning
+            'ThisWindow      CLASS(WindowManager)',// line 1
+            'Init              PROCEDURE',         // line 2
+            '               END',                 // line 3
+            'CODE',                               // line 4
+            '  IF isCloning',                    // line 5 — param used in CODE
+            '  END',                             // line 6
+            '',                                   // line 7
+            'ThisWindow.Init PROCEDURE',          // line 8 — method implementation
+            'CODE',                               // line 9
+            '  IF isCloning = 1',                // line 10 — param used in method body (was missed)
+            '    RETURN',                         // line 11
+            '  END',                             // line 12
+        ].join('\n');
+
+        const doc = createDocument(code, 'file:///local-class-param.clw');
+        seedCache(doc);
+
+        // Cursor on "isCloning" at line 5 (usage inside CODE section)
+        const refs = await provider.provideReferences(doc, { line: 5, character: 6 },
+            { includeDeclaration: true });
+
+        assert.ok(refs !== null, 'Should find references to parameter');
+        const refLines = refs!.map(r => r.range.start.line).sort((a, b) => a - b);
+
+        assert.ok(refLines.includes(5), `Should find usage in CODE section (line 5). Got: ${refLines}`);
+        assert.ok(refLines.includes(10),
+            `Should find parameter usage inside ThisWindow.Init body (line 10). Got: ${refLines}`);
+    });
+
+    /**
+     * Two procedures each declaring a locally-named class must not cross-contaminate.
+     * Searching from ProcA's local variable must not find ProcB's method impl bodies.
+     */
+    test('No cross-contamination between two procedures with same-named local class', async () => {
+        const code = [
+            'ProcA PROCEDURE',                    // line 0
+            'myVar    LONG',                       // line 1 — local var in ProcA
+            'ThisWindow   CLASS(WindowManager)',   // line 2 — locally-declared class in ProcA
+            'Init           PROCEDURE',            // line 3
+            '             END',                   // line 4
+            'CODE',                               // line 5
+            '  myVar = 1',                        // line 6 — usage in ProcA CODE
+            '',                                   // line 7
+            'ThisWindow.Init PROCEDURE',          // line 8 — ProcA's ThisWindow.Init
+            'CODE',                               // line 9
+            '  myVar = 2',                        // line 10 — usage in ProcA's method body
+            '',                                   // line 11
+            'ProcB PROCEDURE',                    // line 12
+            'myVar    LONG',                       // line 13 — same-named var in ProcB
+            'ThisWindow   CLASS(WindowManager)',   // line 14 — same-named local class in ProcB
+            'Init           PROCEDURE',            // line 15
+            '             END',                   // line 16
+            'CODE',                               // line 17
+            '  myVar = 3',                        // line 18 — ProcB CODE usage (must NOT appear)
+            '',                                   // line 19
+            'ThisWindow.Init PROCEDURE',          // line 20 — ProcB's ThisWindow.Init
+            'CODE',                               // line 21
+            '  myVar = 4',                        // line 22 — ProcB method body (must NOT appear)
+        ].join('\n');
+
+        const doc = createDocument(code, 'file:///no-cross-contamination.clw');
+        seedCache(doc);
+
+        // Cursor on "myVar" in ProcA CODE section (line 6)
+        const refs = await provider.provideReferences(doc, { line: 6, character: 3 },
+            { includeDeclaration: true });
+
+        assert.ok(refs !== null, 'Should find references');
+        const refLines = refs!.map(r => r.range.start.line).sort((a, b) => a - b);
+
+        assert.ok(refLines.includes(1), `Should include ProcA declaration (line 1). Got: ${refLines}`);
+        assert.ok(refLines.includes(6), `Should find ProcA CODE usage (line 6). Got: ${refLines}`);
+        assert.ok(!refLines.includes(18),
+            `Must NOT include ProcB CODE usage (line 18). Got: ${refLines}`);
+        assert.ok(!refLines.includes(22),
+            `Must NOT include ProcB method body usage (line 22). Got: ${refLines}`);
+    });
+});
+
+// ---------------------------------------------------------------------------
 // ReferencesProvider — local CLASS declaration label
 // ---------------------------------------------------------------------------
 
