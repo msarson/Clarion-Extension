@@ -81,6 +81,40 @@ export class SettingsStorageManager {
     }
 
     /**
+     * Silently removes a solution (that no longer exists on disk) from all workspace settings.
+     * Clears the solutions array entry, currentSolution, solutionFile, propertiesFile, version,
+     * and configuration if they belong to the missing solution.
+     */
+    static async removeMissingSolution(solutionFile: string): Promise<void> {
+        const workspaceFolder = workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) return;
+
+        const config = workspace.getConfiguration('clarion', workspaceFolder.uri);
+        const solutions = config.get<ClarionSolutionSettings[]>('solutions', []);
+        const filtered = solutions.filter(s => s.solutionFile.toLowerCase() !== solutionFile.toLowerCase());
+
+        if (filtered.length !== solutions.length) {
+            await config.update('solutions', filtered, ConfigurationTarget.WorkspaceFolder);
+            logger.info(`✅ Removed missing solution from solutions array: ${solutionFile}`);
+        }
+
+        const currentSolution = config.get<string>('currentSolution', '');
+        if (currentSolution.toLowerCase() === solutionFile.toLowerCase()) {
+            await config.update('currentSolution', '', ConfigurationTarget.WorkspaceFolder);
+            logger.info(`✅ Cleared currentSolution`);
+        }
+
+        const storedSolutionFile = config.get<string>('solutionFile', '');
+        if (storedSolutionFile.toLowerCase() === solutionFile.toLowerCase()) {
+            await config.update('solutionFile', '', ConfigurationTarget.WorkspaceFolder);
+            await config.update('propertiesFile', '', ConfigurationTarget.WorkspaceFolder);
+            await config.update('version', '', ConfigurationTarget.WorkspaceFolder);
+            await config.update('configuration', '', ConfigurationTarget.WorkspaceFolder);
+            logger.info(`✅ Cleared legacy solutionFile/propertiesFile/version/configuration settings`);
+        }
+    }
+
+    /**
      * Updates the solutions array in folder settings
      */
     private static async updateSolutionsArray(
