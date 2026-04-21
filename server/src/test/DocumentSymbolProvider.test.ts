@@ -447,6 +447,37 @@ SaveData    PROCEDURE(STRING pFilename)
 
         // Test removed: relied on hierarchical container structure (Functions container)
         // that was removed when outline/structure view was flattened
+
+        test('KEY as parameter type in MAP MODULE should NOT appear in outline', () => {
+            // Regression test: KEY used as a parameter type (e.g. GET PROCEDURE(FILE,KEY))
+            // was incorrectly appearing in the outline view with a Key icon.
+            const code = [
+                '  PROGRAM',
+                '  MAP',
+                "    MODULE('ABFILE.CLW')",
+                '      GET     PROCEDURE(FILE,KEY)',
+                '      SET     PROCEDURE(FILE,KEY)',
+                '    END',
+                '  END',
+                '  CODE',
+                '  RETURN',
+            ].join('\n');
+
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const provider = new ClarionDocumentSymbolProvider();
+            const symbols = provider.provideDocumentSymbols(tokens, 'test://mapkey.clw');
+
+            // There should be no symbol named "KEY" anywhere in the tree
+            const keySymbol = findSymbol(symbols, 'KEY');
+            assert.strictEqual(keySymbol, undefined, 'KEY parameter type should NOT appear as an outline symbol');
+
+            // Procedures should still appear
+            const getProc = findSymbol(symbols, 'GET');
+            const setProc = findSymbol(symbols, 'SET');
+            assert.ok(getProc, 'GET procedure should appear in outline');
+            assert.ok(setProc, 'SET procedure should appear in outline');
+        });
     });
 
     suite('PROCEDURE Tests', () => {
