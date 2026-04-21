@@ -505,6 +505,59 @@ CODE
 
 ---
 
+## Expand / Shrink Selection
+
+**Keyboard shortcut:** `Shift+Alt+→` to expand, `Shift+Alt+←` to shrink
+
+Progressively widens the text selection through Clarion's scope hierarchy:
+
+1. Current token
+2. Current line
+3. Innermost structure (`IF`, `LOOP`, `CLASS`, etc.)
+4. Parent structure
+5. Whole document
+
+**Shrink** walks back through the same chain.
+
+**Example:**
+```clarion
+IF x > 0 THEN
+  DoSomething()   ! ← Cursor here
+  DoOther()
+END
+```
+- First `Shift+Alt+→`: selects `DoSomething()`
+- Second: selects the line
+- Third: selects the entire IF block
+
+---
+
+## Flatten Continuation Lines
+
+**Keyboard shortcut:** `Ctrl+.` on a continuation block  
+**Command:** "Clarion: Flatten Continuation Lines"
+
+Joins `|`-continued lines into a single line:
+- Trims whitespace from continuation segments
+- Collapses adjacent string literals: `'abc' & 'def'` → `'abcdef'`
+- Pipe characters inside string literals are never misread as continuation markers
+
+**Example:**
+
+Before:
+```clarion
+MyString = 'Hello ' & |
+           'World' & |
+           ' today'
+```
+
+After:
+```clarion
+MyString = 'Hello World today'
+```
+
+---
+
 ## Bracket Matching
 
 ### Auto-Closing Pairs

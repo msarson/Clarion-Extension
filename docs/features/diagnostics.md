@@ -220,6 +220,47 @@ COMPILE('DEBUG')
 
 ---
 
+### Reserved Keyword Usage
+
+**Detects user-defined labels that clash with Clarion reserved keywords:**
+
+```clarion
+LOOP LONG  ! ❌ Error: 'LOOP' is a reserved keyword and cannot be used as a label
+```
+
+---
+
+### Discarded Return Values
+
+**Warns when a procedure with a return type is called but the result is discarded:**
+
+```clarion
+MAP
+  GetCount(), LONG
+END
+
+CODE
+  GetCount()   ! ⚠️ Warning: Return value of GetCount() is discarded
+  x = GetCount()  ! ✅ OK
+```
+
+Note: Only applies to plain MAP/MODULE procedures, not class methods.
+
+---
+
+### BREAK/CYCLE Outside Loop
+
+**Detects control flow statements used in invalid context:**
+
+```clarion
+MyProc PROCEDURE
+CODE
+  BREAK    ! ❌ Error: BREAK must be inside a LOOP or ACCEPT block
+  CYCLE    ! ❌ Error: CYCLE must be inside a LOOP or ACCEPT block
+```
+
+---
+
 ## Viewing Diagnostics
 
 ### In-Editor Indicators

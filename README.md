@@ -144,30 +144,41 @@ Productivity features to write code faster.
 
 ## 🆕 What's New
 
-### Latest: v0.9.3 (2026-04-19) — Documentation, Events & Editor Power-Ups
+### Latest: v0.9.5 (2026-04-21) — Hover Expansion & Build Integration
+
+#### 📚 310 Built-ins, 158 Attributes
+Hover documentation now covers 310 Clarion built-in functions and 158 window/report attributes. Overload narrowing: hovering `OPEN(Window)` shows only the WINDOW-relevant signatures. Context-aware hover for `HIDE`, `DISABLE`, and `TYPE` — shows attribute or statement usage depending on whether you're inside a WINDOW/REPORT structure.
+
+#### 🏗️ Build Integration Improvements
+- Projects sorted by dependency order in Solution View
+- Active build config auto-detected from `.sln.cache` on open
+- Fixed MSBuild property quoting and per-project log files
+
+#### 🐛 Key Bug Fixes
+- **SDI startup fix**: hover and Go To Definition now work on first open without needing to reopen the solution
+- `LIKE(TypeName)` dot-access chains resolve correctly (e.g. `SELF.OrigWin.Maximized`)
+- Equate hover shows correct type (no longer shows `UNKNOWN`)
+
+**[See full changelog →](CHANGELOG.md)**
+
+---
+
+### Recent: v0.9.4 (2026-04-19) — PROP/EVENT Docs, CodeLens & Editor Power-Ups
 
 #### 📚 PROP: / PROPPRINT: Hover Documentation
-Hover over any runtime property equate (`PROP:Enabled`, `PROP:Color`, `PROPPRINT:Device`, …) to see an instant description, read-only badge, and usage example. Covers **336 PROP:** entries and **25 PROPPRINT:** printer properties, sourced from the Clarion 11.1 Language Reference.
+Hover over any runtime property equate (`PROP:Enabled`, `PROP:Color`, `PROPPRINT:Device`, …) to see an instant description, read-only badge, and usage example. Covers **336 PROP:** entries and **25 PROPPRINT:** printer properties.
 
 #### ⚡ EVENT: Hover & Autocomplete
-Type `EVENT:` (or any partial name) for a full autocomplete list of all **63 EVENT:** equates — field-specific, field-independent, DDE, and user-defined. Hovering over an event shows its category and description. Includes `EVENT:User` (the user-defined event base).
+Type `EVENT:` for a full autocomplete list of all **63 EVENT:** equates. Hovering shows category and description.
 
 #### 🔢 CodeLens — Inline Reference Counts
-A `N references` lens now appears above every procedure and CLASS declaration, making dead code immediately visible. Clicking the lens opens the full References panel.
+A `N references` lens above every procedure and CLASS declaration. Dead code is immediately visible. Click to open the References panel.
 
 #### 📐 Expand / Shrink Selection (`Shift+Alt+→` / `Shift+Alt+←`)
-Progressively widen the selection through Clarion's scope hierarchy: token → line → innermost structure → parent structure → whole document. Shrink back through the same chain.
+Progressively widen selection through Clarion's scope hierarchy.
 
 #### 🔗 Flatten Continuation Lines (`Ctrl+.`)
-Joins `|`-continued lines into a single line, trims whitespace from continuations, and collapses adjacent string literals (`'abc' & 'def'` → `'abcdef'`). Pipe characters inside string literals are never misread as continuations.
-
-#### 🐛 Document Formatter — 6 Bug Fixes
-Procedures now detected correctly; single-line structures indented properly; EOL style preserved; dot-method labels no longer drop the dot; CLASS/GROUP/QUEUE inside local data sections indent correctly; method keywords align to a shared column.
-
-#### ⚠️ New Diagnostics
-- Reserved keywords used as labels are now flagged as errors
-- Warn on discarded plain MAP/MODULE procedure return values (#51)
-- Warn on BREAK/CYCLE outside LOOP or ACCEPT (#64)
+Joins `|`-continued lines, trims whitespace, and collapses adjacent string literals.
 
 **[See full changelog →](CHANGELOG.md)**
 
@@ -176,41 +187,12 @@ Procedures now detected correctly; single-line structures indented properly; EOL
 ### Recent: v0.9.2 (2026-04-18) — Navigation & Bug Fixes
 
 #### 🔗 Multi-Level Chain Navigation
-`variable.property.method` chains now resolve all the way through. Hover, F12, and Ctrl+F12 on `thisStartup.Settings.PutGlobalSetting(...)` correctly walk from `thisStartup` → its class → `.Settings` property type → the method on that type.
+`variable.property.method` chains now resolve all the way through. Hover, F12, and Ctrl+F12 on `thisStartup.Settings.PutGlobalSetting(...)` correctly walk the type chain.
 
 #### 🐛 Key Bug Fixes
-- `PREFIX:Name` reference variables (e.g. `Access:IBSDataSets &DirectFM`) now resolve correctly — hover and F12 no longer find an unrelated `IBSDataSets FILE` declaration
-- Hover, F12, and Ctrl+F12 are suppressed inside string literals — no more false results on `'ContainsSpaces'`
-- Colon-stripping fallback removed from hover and F12 — was causing wrong matches for labelled variables
-
-**[See full changelog →](CHANGELOG.md)**
-
----
-
-### Recent: v0.9.1 (2026-04-14) — Faster Install
-
-#### 🚀 Dramatically Smaller Extension
-VSIX size drops from **19 MB → 0.6 MB** (10,849 bundled node_modules files eliminated). The extension now bundles all dependencies into two optimised files via esbuild — installs are much faster from the Marketplace and no functionality changes.
-
-**[See full changelog →](CHANGELOG.md)**
-
----
-
-### Recent: v0.9.0 (2026-04-14) — IntelliSense & Completion
-
-#### 🤖 Dot-Triggered Member Completion
-Type `SELF.` or `MyVar.` for a context-aware dropdown of all available methods and properties. Supports full inheritance chains, access control (`PRIVATE`/`PROTECTED`/`PUBLIC`), and shows each overload as a distinct entry with parameter signatures inline.
-
-#### 💡 Signature Help for Class Methods
-Typing `(` after a class method now shows parameter hints for the full inheritance chain — works for `SELF.Method(`, `MyVar.Method(`, and `ClassName.Method(`.
-
-#### 🐛 Bug Fixes
-- Signature help missing for `SELF.Method(` when class defined in same `.clw` file
-- Missing `END` now flagged as a diagnostic for `WINDOW`, `SHEET`, `TAB`, `OLE`, `MENU`, `MENUBAR`, `TOOLBAR`, `REPORT`, `APPLICATION`, and `OPTION`
-- Multiple cross-file F12, Ctrl+F12, hover, and Find All References fixes
-- Replaced deprecated `vscode-test` with `@vscode/test-electron`
-
-No functional changes — safe to upgrade immediately.
+- `PREFIX:Name` reference variables now resolve correctly
+- Hover, F12, and Ctrl+F12 suppressed inside string literals
+- Colon-stripping fallback removed from hover and F12
 
 **[See full changelog →](CHANGELOG.md)**
 
@@ -219,10 +201,10 @@ No functional changes — safe to upgrade immediately.
 ### Recent: v0.8.8 (2026-04-12)
 
 #### ✏️ Rename Symbol (F2)
-Rename any user-defined symbol across the entire workspace in one step — scope-aware, protects library/read-only `.inc` files, and validates the position before the dialog opens.
+Rename any user-defined symbol across the entire workspace — scope-aware, protects read-only `.inc` files.
 
 #### 🔆 Document Highlight
-Pressing on a symbol highlights all its occurrences in the current file.
+Click a symbol to highlight all its occurrences in the current file.
 
 #### 🔍 Workspace Symbol Search (Ctrl+T)
 Search for any procedure, class, or label across all files in the solution.
