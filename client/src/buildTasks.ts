@@ -326,9 +326,9 @@ export function prepareBuildParameters(buildConfig: {
         `/fileLoggerParameters:LogFile="${buildLogPath}"`
     ];
     
-    // Add platform property if we have one
+    // Add platform property if we have one (quote value to handle "Any CPU" etc.)
     if (platformPart) {
-        buildArgs.splice(3, 0, `/property:Platform=${platformPart}`);
+        buildArgs.splice(3, 0, `/property:Platform="${platformPart}"`);
     }
 
     // Log the build configuration

@@ -333,15 +333,16 @@ export async function openClarionSolution(
 
         // Try to auto-detect the active configuration from the .sln.cache file
         // (written by Clarion IDE/MSBuild after each build — reflects last-used config)
+        // availableConfigs may be full "Config|Platform" strings; match by config name prefix
         const cachedFullConfig = readActiveConfigFromSlnCache(solutionFilePath);
         const cachedConfigName = cachedFullConfig ? configNameFromFull(cachedFullConfig) : null;
-        const autoConfig = cachedConfigName && availableConfigs.includes(cachedConfigName)
-            ? cachedConfigName
+        const matchedConfig = cachedConfigName
+            ? availableConfigs.find(c => configNameFromFull(c) === cachedConfigName) ?? null
             : null;
 
-        if (autoConfig) {
-            globalSettings.configuration = autoConfig;
-            logger.info(`⚙️ Auto-detected configuration from .sln.cache: ${autoConfig}`);
+        if (matchedConfig) {
+            globalSettings.configuration = matchedConfig;
+            logger.info(`⚙️ Auto-detected configuration from .sln.cache: ${matchedConfig}`);
         } else if (availableConfigs.length > 1) {
             // No cache hint — prompt the user
             const selectedConfig = await vscodeWindow.showQuickPick(availableConfigs, {

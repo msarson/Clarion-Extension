@@ -179,15 +179,16 @@ export class SmartSolutionOpener {
             let selectedConfig: string;
 
             // Check .sln.cache for the last-used config (written by Clarion IDE/MSBuild)
+            // configurations may be full "Config|Platform" strings; match by config name prefix
             const cachedFullConfig = readActiveConfigFromSlnCache(solutionPath);
             const cachedConfigName = cachedFullConfig ? configNameFromFull(cachedFullConfig) : null;
-            const autoConfig = cachedConfigName && configurations.includes(cachedConfigName)
-                ? cachedConfigName
+            const matchedConfig = cachedConfigName
+                ? configurations.find(c => configNameFromFull(c) === cachedConfigName) ?? null
                 : null;
 
-            if (autoConfig) {
-                selectedConfig = autoConfig;
-                logger.info(`⚙️ Auto-detected configuration from .sln.cache: ${autoConfig}`);
+            if (matchedConfig) {
+                selectedConfig = matchedConfig;
+                logger.info(`⚙️ Auto-detected configuration from .sln.cache: ${matchedConfig}`);
             } else if (configurations.length > 1) {
                 const configChoice = await window.showQuickPick(configurations, {
                     placeHolder: "Select build configuration"
