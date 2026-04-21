@@ -49,7 +49,13 @@ export class SettingsStorageManager {
             // This prevents the configuration change event from reading stale data
             await this.updateSolutionsArray(solutionFile, propertiesFile, version, configuration);
 
-            // Save individual settings
+            // Save currentSolution BEFORE configuration so that when the
+            // onDidChangeConfiguration event fires (triggered by the 'configuration' write),
+            // initializeFromWorkspace() reads the correct new solution — not the old one.
+            await config.update('currentSolution', solutionFile, target);
+            logger.info(`✅ Saved currentSolution`);
+
+            // Save remaining individual settings
             await config.update('solutionFile', solutionFile, target);
             logger.info(`✅ Saved solutionFile`);
             await config.update('propertiesFile', propertiesFile, target);
@@ -58,8 +64,6 @@ export class SettingsStorageManager {
             logger.info(`✅ Saved version`);
             await config.update('configuration', configuration, target);
             logger.info(`✅ Saved configuration`);
-            await config.update('currentSolution', solutionFile, target);
-            logger.info(`✅ Saved currentSolution`);
 
             logger.info(`✅ Saved settings successfully:
                 - solutionFile: ${solutionFile}
