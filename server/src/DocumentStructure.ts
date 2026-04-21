@@ -58,6 +58,20 @@ export class DocumentStructure {
         
         // 🚀 PERFORMANCE: Build parent relationship index
         this.buildParentIndex();
+
+        // Enrich label tokens with structureType from their declaration line
+        // e.g. "Names FILE,DRIVER('TOPSPEED')" → Names.structureType = 'FILE'
+        for (const [, labelToken] of this.labelIndex) {
+            const lineTokens = this.tokensByLine.get(labelToken.line);
+            if (!lineTokens) continue;
+            const structToken = lineTokens.find(t =>
+                t.start > labelToken.start &&
+                (t.type === TokenType.Structure || t.type === TokenType.Type)
+            );
+            if (structToken) {
+                labelToken.structureType = structToken.value.toUpperCase();
+            }
+        }
         
         const indexTime = performance.now() - perfStart;
         logger.perf('Built indexes', {
