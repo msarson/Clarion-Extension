@@ -65,6 +65,36 @@ export class ClassConstantsCodeActionProvider {
                 }
             }
 
+            // Respond to missing-define-constants diagnostics (from MissingIncludeDiagnostics)
+            const missingConstantsDiags = context.diagnostics.filter(d => d.code === 'missing-define-constants');
+            if (missingConstantsDiags.length > 0) {
+                for (const diag of missingConstantsDiags) {
+                    const data = diag.data as { typeName: string; missingConstants: string[]; cwprojPath: string } | undefined;
+                    if (data?.typeName && data?.missingConstants?.length) {
+                        logger.warn(`[CodeAction] missing-define-constants diag: typeName="${data.typeName}" constants=${data.missingConstants.join(',')}`);
+                        const addConstantsAction = CodeAction.create(
+                            `Add missing ${data.typeName} link equates to project`,
+                            Command.create(
+                                'Add Constants',
+                                'clarion.addClassConstants',
+                                {
+                                    className: data.typeName,
+                                    projectPath: projectPath,
+                                    cwprojPath: cwprojPath,
+                                    constants: data.missingConstants.map(name => ({ name, type: 'Link' }))
+                                }
+                            ),
+                            CodeActionKind.QuickFix
+                        );
+                        addConstantsAction.isPreferred = true;
+                        actions.push(addConstantsAction);
+                    }
+                }
+                if (actions.length > 0) {
+                    return actions;
+                }
+            }
+
             // Check if we're on an INCLUDE line
             const includeMatch = line.match(/INCLUDE\s*\(\s*['"]([^'"]+)['"]\s*\)/i);
             if (includeMatch) {

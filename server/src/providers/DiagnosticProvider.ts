@@ -9,7 +9,7 @@ import { validateClassInterfaceImplementation, validateClassProperties } from '.
 import { validateReturnStatements, validateDiscardedReturnValuesForPlainCalls, validateDiscardedReturnValues as _validateDiscardedReturnValues } from './diagnostics/ReturnValueDiagnostics';
 import { validateCycleBreakOutsideLoop } from './diagnostics/ControlFlowDiagnostics';
 import { validateReservedKeywordLabels } from './diagnostics/LabelDiagnostics';
-import { validateMissingIncludes } from './diagnostics/MissingIncludeDiagnostics';
+import { validateMissingIncludes, validateMissingConstants } from './diagnostics/MissingIncludeDiagnostics';
 
 const logger = LoggerManager.getLogger("DiagnosticProvider");
 logger.setLevel("error");
@@ -66,5 +66,13 @@ export class DiagnosticProvider {
         document: TextDocument
     ): Promise<Diagnostic[]> {
         return validateMissingIncludes(tokens, document);
+    }
+
+    /** Async pass: info when a variable's class requires Link/DLL project constants not yet defined. Closes #83 */
+    public static async validateMissingConstants(
+        tokens: Token[],
+        document: TextDocument
+    ): Promise<Diagnostic[]> {
+        return validateMissingConstants(tokens, document);
     }
 }
