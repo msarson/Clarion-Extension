@@ -1099,6 +1099,18 @@ connection.onNotification('clarion/updatePaths', async (params: {
 });
 
 
+// Re-validate all open documents when a .cwproj changes (e.g. after addClassConstants).
+// The source .clw hasn't changed so the LSP wouldn't otherwise re-run diagnostics.
+connection.onNotification('clarion/projectConstantsChanged', () => {
+    logger.error('📥 clarion/projectConstantsChanged — re-validating all open documents');
+    for (const document of documents.all()) {
+        validateTextDocument(document).catch(err =>
+            logger.error(`❌ Re-validation error for ${document.uri}: ${err}`)
+        );
+    }
+});
+
+
 connection.onRequest('clarion/getSolutionTree', async (): Promise<ClarionSolutionInfo> => {
     const startTime = performance.now();
     logger.info("📂 Received request for solution tree");
