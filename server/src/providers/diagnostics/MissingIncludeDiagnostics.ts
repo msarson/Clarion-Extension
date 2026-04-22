@@ -45,6 +45,9 @@ export async function validateMissingIncludes(
     const solutionManager = SolutionManager.getInstance();
     const projectPath = solutionManager?.getProjectPathForFile(fromPath) ?? path.dirname(fromPath);
 
+    // Always invalidate the current document's include cache — it just changed
+    includeVerifier.clearCache(document.uri);
+
     const sdi = StructureDeclarationIndexer.getInstance();
     await sdi.getOrBuildIndex(projectPath);
 
