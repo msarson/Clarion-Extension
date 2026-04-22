@@ -2,7 +2,7 @@
   "name": "clarion-extensions",
   "displayName": "Clarion Extensions",
   "description": "Extension for Clarion Language",
-  "version": "0.9.5",
+  "version": "0.9.6",
   "publisher": "msarson",
   "repository": {
     "type": "git",
@@ -277,6 +277,11 @@
         "title": "Refresh Solution",
         "when": "clarion.solutionOpen",
         "icon": "$(sync)"
+      },
+      {
+        "command": "clarion.newSolution",
+        "title": "New Solution",
+        "icon": "$(add)"
       },
       {
         "command": "clarion.openSolution",
@@ -636,6 +641,11 @@
         }
       ],
       "view/title": [
+        {
+          "command": "clarion.newSolution",
+          "when": "view == solutionView && !clarion.solutionOpen && workspaceFolderCount > 0",
+          "group": "navigation@0"
+        },
         {
           "command": "clarion.openSolution",
           "when": "view == solutionView && !clarion.solutionOpen",

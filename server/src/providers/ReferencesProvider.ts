@@ -1568,11 +1568,64 @@ export class ReferencesProvider {
                 }
             }
 
+            // Build valid line ranges: base scope range + any locally-declared class method impl ranges.
+            // Locally-declared classes (e.g. ThisWindow CLASS(WindowManager) declared inside a procedure)
+            // have their method implementations outside the parent procedure's finishesAt, so we extend
+            // the search to include those implementation bodies.
+            let validLineRanges: Array<[number, number]> = [[startLine, endLine]];
+
+            if (startLine > 0 || endLine < Number.MAX_SAFE_INTEGER) {
+                const scopeToken = symbolInfo.scope.token;
+                if (scopeToken.type === TokenType.Procedure) {
+                    // Collect locally-declared CLASS names from the data section of the parent procedure.
+                    // Data section is between the procedure line and the CODE execution marker.
+                    const dataEndLine = scopeToken.executionMarker?.line ?? endLine;
+                    const localClassNames = new Set<string>();
+                    for (const t of tokens) {
+                        if (t.type === TokenType.Structure &&
+                            t.subType === TokenType.Class &&
+                            t.line > startLine && t.line < dataEndLine &&
+                            t.label) {
+                            localClassNames.add(t.label.toLowerCase());
+                        }
+                    }
+
+                    if (localClassNames.size > 0) {
+                        for (const t of tokens) {
+                            if (t.type === TokenType.Procedure &&
+                                t.subType === TokenType.MethodImplementation &&
+                                t.label &&
+                                t.line > endLine) {
+                                // Method impl labels are 2-part (ClassName.MethodName) for locally-declared
+                                // class methods. Extract the class name from the first segment.
+                                const dotIdx = t.label.indexOf('.');
+                                const implClassName = dotIdx > 0
+                                    ? t.label.substring(0, dotIdx).toLowerCase()
+                                    : '';
+                                if (implClassName && localClassNames.has(implClassName)) {
+                                    // Guard against cross-contamination: if another GlobalProcedure starts
+                                    // between our scope end and this impl, the impl belongs to that later
+                                    // procedure, not to our scope procedure.
+                                    const hasInterveningProc = tokens.some(tp =>
+                                        tp.type === TokenType.Procedure &&
+                                        tp.subType === TokenType.GlobalProcedure &&
+                                        tp.line > endLine && tp.line < t.line
+                                    );
+                                    if (!hasInterveningProc) {
+                                        validLineRanges.push([t.line, t.finishesAt ?? Number.MAX_SAFE_INTEGER]);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             const declarationLine = symbolInfo.location.line;
             const declarationUri = symbolInfo.location.uri;
 
             for (const token of tokens) {
-                if (token.line < startLine || token.line > endLine) continue;
+                if (!validLineRanges.some(([s, e]) => token.line >= s && token.line <= e)) continue;
                 if (token.type === TokenType.Comment || token.type === TokenType.String) continue;
 
                 let matchStart = token.start;

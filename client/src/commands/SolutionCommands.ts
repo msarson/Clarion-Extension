@@ -112,11 +112,11 @@ export function registerSolutionOpeningCommands(
             }
         }),
         
-        commands.registerCommand('clarion.openDetectedSolution', async (solutionPath: string) => {
+        commands.registerCommand('clarion.openDetectedSolution', async (solutionPath: string, preSelected?: import('../utils/SmartSolutionOpener').PreSelectedSettings) => {
             logger.info(`Executing clarion.openDetectedSolution command for ${solutionPath}`);
             
             try {
-                const success = await SmartSolutionOpener.openDetectedSolution(solutionPath);
+                const success = await SmartSolutionOpener.openDetectedSolution(solutionPath, preSelected);
                 
                 logger.debug(`SmartSolutionOpener returned: ${success}`);
                 
@@ -137,9 +137,12 @@ export function registerSolutionOpeningCommands(
                         await solutionTreeDataProvider.refresh();
                     }
                 }
+
+                return success;
             } catch (error) {
                 logger.error(`❌ Error in clarion.openDetectedSolution command: ${error instanceof Error ? error.message : String(error)}`);
                 vscodeWindow.showErrorMessage(`Error opening solution: ${error instanceof Error ? error.message : String(error)}`);
+                return false;
             }
         })
     ];

@@ -379,8 +379,11 @@ export class VariableHoverResolver {
             // Look up the class
             const definitions = this.sdi.find(cleanTypeName, projectPath);
             
-            if (definitions.length > 0) {
-                const def = definitions[0]; // Use first definition
+            const classDefs = definitions.filter(d =>
+                d.structureType === 'CLASS' || d.structureType === 'INTERFACE'
+            );
+            if (classDefs.length > 0) {
+                const def = classDefs[0]; // Use first class/interface definition
                 
                 logger.info(`Found class definition: ${def.name} in ${def.filePath}:${def.line + 1}`);
                 
@@ -399,9 +402,6 @@ export class VariableHoverResolver {
                 if (def.parentName) {
                     classInfo.push(`- Parent: \`${def.parentName}\``);
                 }
-                
-                // Add indexer stats
-                classInfo.push(``,  `*Indexed ${index.byName.size} structures in project*`);
                 
                 // Append to existing hover content
                 let existingContent = '';

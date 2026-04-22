@@ -343,6 +343,13 @@ export const globalSettings = {
             return;
         }
 
+        // ✅ If the solution file no longer exists on disk, silently remove it from settings
+        if (!fs.existsSync(solutionFile)) {
+            logger.info(`ℹ️ Solution file no longer exists, removing from settings: ${solutionFile}`);
+            await SettingsStorageManager.removeMissingSolution(solutionFile);
+            return;
+        }
+
         // ✅ Set global variables (skip save during initialization to avoid recursion)
         if (solutionFile) {
             // Skip save since we're loading from existing workspace settings

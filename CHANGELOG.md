@@ -6,6 +6,21 @@ All notable changes to the Clarion Extension are documented here.
 
 ## Recent Versions
 
+### [0.9.6] - Unreleased
+
+**New Features**
+
+- ✨ **New Solution wizard** (issue #79): create a minimal Clarion solution (`.sln`, `.cwproj`, `.clw`) from the Solution view `+` button or the command palette (`Clarion: New Solution`). Prompts for solution name and auto-detects the installed Clarion version and configuration.
+- ✨ **Stale solution cleanup**: if a solution referenced in workspace settings no longer exists on disk, it is silently removed from settings on startup rather than leaving the extension in a broken state.
+- ✨ **Missing Link/DLL equates code action** (issue #81): pressing `Ctrl+.` on a class name or its `INCLUDE` line now offers to add any missing `Link()`/`DLL()` equates to the project's `DefineConstants` in the `.cwproj` file. A QuickPick prompt lets you choose between static-link mode (`LinkMode=>1, DllMode=>0`) and DLL mode (`LinkMode=>0, DllMode=>1`), covering both single-exe and multi-DLL application setups.
+
+**Bug Fixes**
+
+- 🐛 **Find All References / Rename Symbol**: procedure-scope local variables and parameters are now found inside locally-derived class method bodies (issue #78).Clarion's language spec states that methods prototyped in a CLASS declared within a procedure's local data section share the declaring procedure's full local scope. Previously, `finishesAt` (set for folding) was also used as a hard scope boundary, cutting off any method implementations that appear after the parent procedure's data section. The fix extends the search to include all method implementation bodies whose class name matches a locally-declared class in the scope procedure's data section, guarded against cross-file contamination by requiring no intervening global procedure between the scope boundary and the implementation.
+- 🐛 Variable hover no longer appends a spurious "EQUATE Definition" block from the structure index — `enhanceHoverWithClassInfo` now only enriches hover when the variable's type resolves to a `CLASS` or `INTERFACE` in the index; primitive type names such as `LONG` that happen to match an equate in a library file (e.g. `ABUTIL.INC`) are no longer shown
+
+---
+
 ### [0.9.5] - 2026-04-21
 
 **Hover Documentation — Major Expansion (310 built-ins, 158 attributes)**
