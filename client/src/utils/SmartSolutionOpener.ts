@@ -263,25 +263,31 @@ export class SmartSolutionOpener {
     ): Promise<{ installation: ClarionInstallation; compilerName: string } | null> {
 
         interface SeparatorItem { kind: -1; label: string }
-        interface CompilerItem { label: string; installation: ClarionInstallation; compilerName: string }
+        interface CompilerItem { label: string; description?: string; installation: ClarionInstallation; compilerName: string }
         type PickerItem = SeparatorItem | CompilerItem;
 
+        const multipleIDEs = installations.length > 1;
         const items: PickerItem[] = [];
 
         for (const installation of installations) {
-            items.push({ kind: -1, label: `Clarion ${installation.ideVersion}` });
+            if (multipleIDEs) {
+                items.push({ kind: -1, label: `Clarion ${installation.ideVersion}` });
+            }
             for (const compiler of installation.compilerVersions) {
                 items.push({
                     label: compiler.name,
+                    description: multipleIDEs ? undefined : `Clarion ${installation.ideVersion}`,
                     installation,
                     compilerName: compiler.name
                 });
             }
         }
 
-        const selected = await window.showQuickPick(items as any[], {
-            placeHolder: "Select compiler version"
-        });
+        const placeHolder = multipleIDEs
+            ? "Select Clarion IDE and compiler version"
+            : `Clarion ${installations[0].ideVersion} — select compiler version`;
+
+        const selected = await window.showQuickPick(items as any[], { placeHolder });
 
         if (!selected || selected.kind === -1) {
             return null;
