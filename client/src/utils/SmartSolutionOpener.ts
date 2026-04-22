@@ -296,50 +296,40 @@ export class SmartSolutionOpener {
         installations: ClarionInstallation[]
     ): Promise<{ installation: ClarionInstallation; compilerName: string } | null> {
 
-        interface SeparatorItem { kind: -1; label: string }
-        interface CompilerItem { label: string; description?: string; installation: ClarionInstallation; compilerName: string }
-        type PickerItem = SeparatorItem | CompilerItem;
-
-        const multipleIDEs = installations.length > 1;
-        const items: PickerItem[] = [];
-
-        for (let i = 0; i < installations.length; i++) {
-            const installation = installations[i];
-            if (multipleIDEs) {
-                // VS Code does not render a separator as a full row when it is the very
-                // first item in the list — it falls back to showing the label inline on
-                // the first picker item.  Use a separator only between groups (i > 0)
-                // and show the IDE version as a description on the first group's items.
-                if (i > 0) {
-                    items.push({ kind: -1, label: `Clarion ${installation.ideVersion}` });
-                }
-            }
-            for (const compiler of installation.compilerVersions) {
-                items.push({
-                    label: compiler.name,
-                    description: (multipleIDEs && i === 0)
-                        ? `Clarion ${installation.ideVersion}`
-                        : (!multipleIDEs ? `Clarion ${installation.ideVersion}` : undefined),
-                    installation,
-                    compilerName: compiler.name
-                });
-            }
+        // Step 1: pick Clarion IDE version (skip if only one)
+        let installation: ClarionInstallation;
+        if (installations.length > 1) {
+            interface IdeItem { label: string; installation: ClarionInstallation }
+            const ideItems: IdeItem[] = installations.map(inst => ({
+                label: `Clarion ${inst.ideVersion}`,
+                installation: inst
+            }));
+            const ideSelected = await window.showQuickPick(ideItems, {
+                placeHolder: "Select Clarion IDE version"
+            });
+            if (!ideSelected) return null;
+            installation = ideSelected.installation;
+        } else {
+            installation = installations[0];
         }
 
-        const placeHolder = multipleIDEs
-            ? "Select Clarion IDE and compiler version"
-            : `Clarion ${installations[0].ideVersion} — select compiler version`;
-
-        const selected = await window.showQuickPick(items as any[], { placeHolder });
-
-        if (!selected || selected.kind === -1) {
-            return null;
+        // Step 2: pick compiler version (skip if only one)
+        const compilers = installation.compilerVersions;
+        if (compilers.length === 1) {
+            return { installation, compilerName: compilers[0].name };
         }
 
-        return {
-            installation: selected.installation,
-            compilerName: selected.compilerName
-        };
+        interface CompilerItem { label: string; compilerName: string }
+        const compilerItems: CompilerItem[] = compilers.map(c => ({
+            label: c.name,
+            compilerName: c.name
+        }));
+        const compilerSelected = await window.showQuickPick(compilerItems, {
+            placeHolder: `Clarion ${installation.ideVersion} — select compiler version`
+        });
+        if (!compilerSelected) return null;
+
+        return { installation, compilerName: compilerSelected.compilerName };
     }
 
     /**
