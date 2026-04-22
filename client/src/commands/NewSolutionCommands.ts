@@ -142,14 +142,28 @@ export async function newSolution(): Promise<void> {
     }
 
     try {
-        fs.writeFileSync(slnPath, buildSlnContent(trimmedName, projectGuid), 'utf8');
-        fs.writeFileSync(cwprojPath, buildCwprojContent(trimmedName, projectGuid, clwName), 'utf8');
-        fs.writeFileSync(clwPath, buildClwContent(), 'utf8');
+        const newlyCreated: string[] = [];
+        const writeIfNew = (filePath: string, content: string) => {
+            if (!fs.existsSync(filePath)) newlyCreated.push(filePath);
+            fs.writeFileSync(filePath, content, 'utf8');
+        };
+
+        writeIfNew(slnPath, buildSlnContent(trimmedName, projectGuid));
+        writeIfNew(cwprojPath, buildCwprojContent(trimmedName, projectGuid, clwName));
+        writeIfNew(clwPath, buildClwContent());
 
         logger.info(`✅ Created new solution: ${trimmedName} in ${folderPath}`);
 
-        // Open the solution
-        await vscode.commands.executeCommand('clarion.openDetectedSolution', slnPath);
+        // Open the solution — this prompts for Clarion version/config
+        const opened = await vscode.commands.executeCommand<boolean>('clarion.openDetectedSolution', slnPath);
+
+        if (!opened) {
+            // User cancelled — remove files we just created
+            for (const f of newlyCreated) {
+                try { fs.unlinkSync(f); } catch { /* ignore */ }
+            }
+            return;
+        }
 
     } catch (err) {
         logger.error(`❌ Failed to create solution files: ${err}`);

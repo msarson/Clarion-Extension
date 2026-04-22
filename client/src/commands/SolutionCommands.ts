@@ -137,9 +137,12 @@ export function registerSolutionOpeningCommands(
                         await solutionTreeDataProvider.refresh();
                     }
                 }
+
+                return success;
             } catch (error) {
                 logger.error(`❌ Error in clarion.openDetectedSolution command: ${error instanceof Error ? error.message : String(error)}`);
                 vscodeWindow.showErrorMessage(`Error opening solution: ${error instanceof Error ? error.message : String(error)}`);
+                return false;
             }
         })
     ];
