@@ -11,6 +11,7 @@ interface ClassConstant {
 interface AddConstantsArgs {
     className: string;
     projectPath: string;
+    cwprojPath?: string;     // Specific .cwproj file path — avoids wrong-file match when multiple cwprojs share a directory
     constants: ClassConstant[];
     mode?: 'link' | 'dll'; // Optional: if provided, skip the Quick Pick
 }
@@ -46,7 +47,7 @@ export function registerClassConstantCommands(context: vscode.ExtensionContext):
  * to avoid xml2js round-trip issues (namespace loss, formatting changes, etc.)
  */
 async function addClassConstantsToProject(args: AddConstantsArgs): Promise<void> {
-    const { className, projectPath, constants, mode } = args;
+    const { className, projectPath, cwprojPath, constants, mode } = args;
 
     let useLinkMode: boolean;
 
@@ -83,19 +84,29 @@ async function addClassConstantsToProject(args: AddConstantsArgs): Promise<void>
 
     const definitions = generateConstantDefinitions(constants, useLinkMode);
 
-    // Find .cwproj file
-    const projectFiles = await vscode.workspace.findFiles(
-        new vscode.RelativePattern(projectPath, '*.cwproj'),
-        null,
-        1
-    );
+    // Resolve .cwproj file — use the specific path if provided (avoids wrong-file match
+    // when multiple .cwproj files share the same directory)
+    let projectFilePath: string;
+    if (cwprojPath) {
+        projectFilePath = cwprojPath;
+    } else {
+        const projectFiles = await vscode.workspace.findFiles(
+            new vscode.RelativePattern(projectPath, '*.cwproj'),
+            null,
+            1
+        );
 
-    if (projectFiles.length === 0) {
-        throw new Error(`No .cwproj file found in: ${projectPath}`);
+        if (projectFiles.length === 0) {
+            throw new Error(`No .cwproj file found in: ${projectPath}`);
+        }
+
+        projectFilePath = projectFiles[0].fsPath;
     }
 
-    const projectFile = projectFiles[0];
-    let content = await fs.promises.readFile(projectFile.fsPath, 'utf-8');
+    let content = await fs.promises.readFile(projectFilePath, 'utf-8');
+    // Strip UTF-8 BOM if present — VS Code's TextDocument strips it, so keeping it
+    // causes it to be re-inserted as a visible character when writing back via WorkspaceEdit
+    if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1);
 
     // Use string replacement to avoid xml2js round-trip corruption
     const defineConstantsRegex = /<DefineConstants>([\s\S]*?)<\/DefineConstants>/i;
@@ -119,14 +130,15 @@ async function addClassConstantsToProject(args: AddConstantsArgs): Promise<void>
     }
 
     // Write the modified content back, preserving all other XML formatting
-    const doc = await vscode.workspace.openTextDocument(projectFile);
+    const cwprojUri = vscode.Uri.file(projectFilePath);
+    const doc = await vscode.workspace.openTextDocument(cwprojUri);
     const fullRange = new vscode.Range(
         new vscode.Position(0, 0),
         doc.lineAt(doc.lineCount - 1).range.end
     );
 
     const edit = new vscode.WorkspaceEdit();
-    edit.replace(projectFile, fullRange, content);
+    edit.replace(cwprojUri, fullRange, content);
     const success = await vscode.workspace.applyEdit(edit);
 
     if (success) {
@@ -135,7 +147,7 @@ async function addClassConstantsToProject(args: AddConstantsArgs): Promise<void>
         vscode.window.showInformationMessage(
             `✅ Added ${className} constants (${modeDesc}): ${constantList}`
         );
-        const updatedDoc = await vscode.workspace.openTextDocument(projectFile);
+        const updatedDoc = await vscode.workspace.openTextDocument(cwprojUri);
         await updatedDoc.save();
     } else {
         throw new Error('Failed to apply workspace edit');

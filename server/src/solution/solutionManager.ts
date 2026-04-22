@@ -307,7 +307,20 @@ export class SolutionManager {
     }
 
     public findProjectForFile(filePath: string): ClarionProjectServer | undefined {
-        const baseName = path.basename(filePath).toLowerCase();
+        const normalizedPath = path.normalize(filePath).toLowerCase();
+        const baseName = path.basename(normalizedPath);
+
+        // Prefer exact absolute path match (handles duplicate basenames across projects)
+        for (const project of this.solution.projects) {
+            for (const f of project.sourceFiles) {
+                const abs = f.getAbsolutePath();
+                if (abs && path.normalize(abs).toLowerCase() === normalizedPath) {
+                    return project;
+                }
+            }
+        }
+
+        // Fall back to basename match (for files resolved via redirection)
         return this.solution.projects.find(project =>
             project.sourceFiles.some(f => f.name.toLowerCase() === baseName)
         );
@@ -322,6 +335,13 @@ export class SolutionManager {
     public getProjectPathForFile(filePath: string): string {
         const project = this.findProjectForFile(filePath);
         return project?.path || path.dirname(filePath);
+    }
+
+    /** Returns the full path to the specific .cwproj file for the project owning filePath. */
+    public getProjectCwprojForFile(filePath: string): string | undefined {
+        const project = this.findProjectForFile(filePath);
+        if (!project) return undefined;
+        return path.join(project.path, `${project.name}.cwproj`);
     }
 
     /**

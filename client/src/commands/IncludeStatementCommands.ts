@@ -14,6 +14,7 @@ interface AddIncludeAndConstantsArgs {
     location: 'current' | 'member';
     className: string;
     projectPath: string;
+    cwprojPath?: string;     // Specific .cwproj file path — avoids wrong-file match
     constants: Array<{ name: string; type: string; relatedFile?: string }>;
     mode?: 'link' | 'dll';  // Optional: if omitted, user is prompted via QuickPick
 }
@@ -56,6 +57,7 @@ export function registerIncludeStatementCommands(context: vscode.ExtensionContex
                 await vscode.commands.executeCommand('clarion.addClassConstants', {
                     className: argsObject.className,
                     projectPath: argsObject.projectPath,
+                    cwprojPath: argsObject.cwprojPath,
                     constants: argsObject.constants,
                     mode: argsObject.mode
                 });
