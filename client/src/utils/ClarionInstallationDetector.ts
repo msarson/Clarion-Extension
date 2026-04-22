@@ -239,4 +239,25 @@ export class ClarionInstallationDetector {
         const installations = await this.detectInstallations();
         return installations.find(i => i.ideVersion === ideVersion) || null;
     }
+
+    /**
+     * Parses a ClarionProperties.xml at an arbitrary path and returns a ClarionInstallation.
+     * Used when the user browses for a properties file manually (e.g. /Configdir setups).
+     */
+    static async parseInstallationFromPropertiesPath(propertiesPath: string): Promise<ClarionInstallation | null> {
+        try {
+            const compilerVersions = await this.parseCompilerVersions(propertiesPath);
+            if (compilerVersions.length === 0) return null;
+            // Use the folder name containing the file as a best-effort ideVersion label
+            const folderName = path.basename(path.dirname(propertiesPath));
+            return {
+                ideVersion: folderName,
+                propertiesPath,
+                compilerVersions
+            };
+        } catch (error) {
+            logger.error(`❌ Error parsing user-selected ClarionProperties.xml: ${propertiesPath}`, error);
+            return null;
+        }
+    }
 }

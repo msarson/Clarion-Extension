@@ -296,21 +296,47 @@ export class SmartSolutionOpener {
         installations: ClarionInstallation[]
     ): Promise<{ installation: ClarionInstallation; compilerName: string } | null> {
 
-        // Step 1: pick Clarion IDE version (skip if only one)
+        const BROWSE_LABEL = "$(folder-opened) Browse for ClarionProperties.xml…";
+
+        // Step 1: pick Clarion IDE version (skip if only one), with browse option at bottom
         let installation: ClarionInstallation;
         if (installations.length > 1) {
-            interface IdeItem { label: string; installation: ClarionInstallation }
-            const ideItems: IdeItem[] = installations.map(inst => ({
-                label: `Clarion ${inst.ideVersion}`,
-                installation: inst
-            }));
+            interface IdeItem { label: string; installation?: ClarionInstallation; isBrowse?: boolean }
+            const ideItems: IdeItem[] = [
+                ...installations.map(inst => ({ label: `Clarion ${inst.ideVersion}`, installation: inst })),
+                { label: BROWSE_LABEL, isBrowse: true }
+            ];
             const ideSelected = await window.showQuickPick(ideItems, {
                 placeHolder: "Select Clarion IDE version"
             });
             if (!ideSelected) return null;
-            installation = ideSelected.installation;
+
+            if (ideSelected.isBrowse) {
+                const browsed = await this.browseForPropertiesFile();
+                if (!browsed) return null;
+                installation = browsed;
+            } else {
+                installation = ideSelected.installation!;
+            }
         } else {
-            installation = installations[0];
+            // Single IDE — still show a one-item picker so the browse option is accessible
+            interface IdeItem { label: string; installation?: ClarionInstallation; isBrowse?: boolean }
+            const ideItems: IdeItem[] = [
+                { label: `Clarion ${installations[0].ideVersion}`, installation: installations[0] },
+                { label: BROWSE_LABEL, isBrowse: true }
+            ];
+            const ideSelected = await window.showQuickPick(ideItems, {
+                placeHolder: "Select Clarion IDE version"
+            });
+            if (!ideSelected) return null;
+
+            if (ideSelected.isBrowse) {
+                const browsed = await this.browseForPropertiesFile();
+                if (!browsed) return null;
+                installation = browsed;
+            } else {
+                installation = ideSelected.installation!;
+            }
         }
 
         // Step 2: pick compiler version (skip if only one)
@@ -330,6 +356,23 @@ export class SmartSolutionOpener {
         if (!compilerSelected) return null;
 
         return { installation, compilerName: compilerSelected.compilerName };
+    }
+
+    private static async browseForPropertiesFile(): Promise<ClarionInstallation | null> {
+        const uris = await window.showOpenDialog({
+            title: "Select ClarionProperties.xml",
+            filters: { "ClarionProperties": ["xml"] },
+            canSelectMany: false,
+            openLabel: "Select"
+        });
+        if (!uris || uris.length === 0) return null;
+
+        const installation = await ClarionInstallationDetector.parseInstallationFromPropertiesPath(uris[0].fsPath);
+        if (!installation) {
+            window.showErrorMessage("No Clarion compiler versions found in the selected ClarionProperties.xml.");
+            return null;
+        }
+        return installation;
     }
 
     /**
