@@ -304,9 +304,10 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
 
         // Async pass: detect discarded return values via cross-file type resolution
         const memberLocator = new MemberLocatorService();
-        const discardedReturnDiags = await DiagnosticProvider.validateDiscardedReturnValues(
-            tokens, document, memberLocator
-        );
+        const [discardedReturnDiags, missingIncludeDiags] = await Promise.all([
+            DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator),
+            DiagnosticProvider.validateMissingIncludes(tokens, document),
+        ]);
 
         // Stale-version guard: document may have changed while we were resolving types
         const currentDoc = documents.get(document.uri);
@@ -314,8 +315,9 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             return;
         }
 
-        if (discardedReturnDiags.length > 0) {
-            diagnostics.push(...discardedReturnDiags);
+        const asyncDiags = [...discardedReturnDiags, ...missingIncludeDiags];
+        if (asyncDiags.length > 0) {
+            diagnostics.push(...asyncDiags);
             connection.sendDiagnostics({ uri: document.uri, diagnostics });
         }
     } catch (error) {
