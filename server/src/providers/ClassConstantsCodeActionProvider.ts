@@ -16,7 +16,7 @@ import LoggerManager from '../logger';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger('ClassConstantsCodeActionProvider');
-logger.setLevel('error');
+logger.setLevel('warn');
 
 /**
  * Provides Code Actions (lightbulb) for adding missing class constants
@@ -42,11 +42,13 @@ export class ClassConstantsCodeActionProvider {
             const text = document.getText();
             const line = document.getText(Range.create(range.start.line, 0, range.start.line, 1000));
             
+            logger.warn(`[CodeAction] triggered line=${range.start.line} file="${path.basename(document.uri)}"`);
+
             // Check if we're on an INCLUDE line
             const includeMatch = line.match(/INCLUDE\s*\(\s*['"]([^'"]+)['"]\s*\)/i);
             if (includeMatch) {
                 const includeFile = includeMatch[1];
-                logger.info(`Detected INCLUDE statement for: ${includeFile}`);
+                logger.warn(`[CodeAction] INCLUDE line detected: ${includeFile}`);
                 
                 // Check if this is a class include file
                 const includeActions = await this.getActionsForInclude(includeFile, document);
@@ -65,21 +67,21 @@ export class ClassConstantsCodeActionProvider {
                 return actions;
             }
 
-            logger.info(`Checking for code actions on word: ${word}`);
+            logger.warn(`[CodeAction] word="${word}" file="${path.basename(document.uri)}"`);
 
             // Check if this is a class type with missing constants
             const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
             const projectPath = SolutionManager.getInstance()?.getProjectPathForFile(fromPath) ?? path.dirname(fromPath);
             
-            logger.info(`Project path: ${projectPath}`);
+            logger.warn(`[CodeAction] projectPath="${projectPath}"`);
             
             // Build or get index for this project
             const index = await this.sdi.getOrBuildIndex(projectPath);
-            logger.info(`Index has ${index.byName.size} entries`);
+            logger.warn(`[CodeAction] SDI index has ${index.byName.size} entries`);
             
             // Look up the class
             const definitions = this.sdi.find(word, projectPath);
-            logger.info(`Found ${definitions.length} definitions for ${word}`);
+            logger.warn(`[CodeAction] found ${definitions.length} definitions for "${word}"`);
             
             if (definitions.length === 0) {
                 return actions;
@@ -87,20 +89,19 @@ export class ClassConstantsCodeActionProvider {
 
             const def = definitions[0];
             const fileName = path.basename(def.filePath);
-            logger.info(`Class file: ${fileName}, checking if included`);
+            logger.warn(`[CodeAction] class file="${fileName}" filePath="${def.filePath}"`);
 
             // Verify the class file is included
             const isIncluded = await this.includeVerifier.isClassIncluded(fileName, document);
-            logger.info(`Class ${fileName} included: ${isIncluded}`);
+            logger.warn(`[CodeAction] isIncluded=${isIncluded}`);
             if (!isIncluded) {
-                logger.info(`Class ${fileName} not included, offering to add INCLUDE`);
                 // Offer Code Action to add the missing INCLUDE
                 const addIncludeActions = await this.getActionsForMissingInclude(word, fileName, document);
                 actions.push(...addIncludeActions);
                 return actions;
             }
 
-            logger.info(`Found included class: ${word}, checking for missing constants`);
+            logger.warn(`[CodeAction] checking constants for ${word}`);
 
             // Parse class constants
             const constantParser = new ClassConstantParser();
@@ -108,6 +109,7 @@ export class ClassConstantsCodeActionProvider {
             const thisClassConstants = classConstants.find(c => c.className.toLowerCase() === def.name.toLowerCase());
 
             if (!thisClassConstants || thisClassConstants.constants.length === 0) {
+                logger.warn(`[CodeAction] no Link/DLL constants found in ${fileName} for class "${def.name}"`);
                 return actions;
             }
 
@@ -117,16 +119,18 @@ export class ClassConstantsCodeActionProvider {
 
             for (const constant of thisClassConstants.constants) {
                 const isDefined = await constantsChecker.isConstantDefined(constant.name, projectPath);
+                logger.warn(`[CodeAction] constant "${constant.name}" defined=${isDefined}`);
                 if (!isDefined) {
                     missingConstants.push(constant);
                 }
             }
 
             if (missingConstants.length === 0) {
+                logger.warn(`[CodeAction] all constants already defined — no action needed`);
                 return actions;
             }
 
-            logger.info(`Found ${missingConstants.length} missing constants for ${word}`);
+            logger.warn(`[CodeAction] offering action for ${missingConstants.length} missing constants`);
 
             // Single action — user chooses Link or DLL mode via QuickPick at execution time
             const addConstantsAction = CodeAction.create(
