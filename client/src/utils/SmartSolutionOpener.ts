@@ -303,14 +303,23 @@ export class SmartSolutionOpener {
         const multipleIDEs = installations.length > 1;
         const items: PickerItem[] = [];
 
-        for (const installation of installations) {
+        for (let i = 0; i < installations.length; i++) {
+            const installation = installations[i];
             if (multipleIDEs) {
-                items.push({ kind: -1, label: `Clarion ${installation.ideVersion}` });
+                // VS Code does not render a separator as a full row when it is the very
+                // first item in the list — it falls back to showing the label inline on
+                // the first picker item.  Use a separator only between groups (i > 0)
+                // and show the IDE version as a description on the first group's items.
+                if (i > 0) {
+                    items.push({ kind: -1, label: `Clarion ${installation.ideVersion}` });
+                }
             }
             for (const compiler of installation.compilerVersions) {
                 items.push({
                     label: compiler.name,
-                    description: multipleIDEs ? undefined : `Clarion ${installation.ideVersion}`,
+                    description: (multipleIDEs && i === 0)
+                        ? `Clarion ${installation.ideVersion}`
+                        : (!multipleIDEs ? `Clarion ${installation.ideVersion}` : undefined),
                     installation,
                     compilerName: compiler.name
                 });
