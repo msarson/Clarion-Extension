@@ -33,7 +33,7 @@ function resolveProjectPaths(document: TextDocument): {
  * Shared: collect Variable/ReferenceVariable type tokens at col 0 global scope,
  * skipping structure definitions and already-warned types.
  */
-function collectGlobalTypeTokens(tokens: Token[]): Array<{ label: Token; typeToken: Token; typeName: string }> {
+function collectGlobalTypeTokens(tokens: Token[]): Array<{ label: Token; typeToken: Token; typeName: string; typeNameStart: number }> {
     const localTypes = new Set<string>();
     for (const t of tokens) {
         if (t.type === TokenType.Structure && t.label) {
@@ -41,7 +41,7 @@ function collectGlobalTypeTokens(tokens: Token[]): Array<{ label: Token; typeTok
         }
     }
 
-    const result: Array<{ label: Token; typeToken: Token; typeName: string }> = [];
+    const result: Array<{ label: Token; typeToken: Token; typeName: string; typeNameStart: number }> = [];
     const seen = new Set<string>();
 
     for (let i = 0; i < tokens.length; i++) {
@@ -53,10 +53,13 @@ function collectGlobalTypeTokens(tokens: Token[]): Array<{ label: Token; typeTok
         if (!next || next.line !== token.line) continue;
 
         let typeName: string | undefined;
+        let typeNameStart = next.start;
         if (next.type === TokenType.Variable) {
             typeName = next.value;
         } else if (next.type === TokenType.ReferenceVariable) {
             typeName = next.value.replace(/^&\s*/, '');
+            // Advance start past '&' (and any spaces) to point at the type name itself
+            typeNameStart = next.start + (next.value.length - typeName.length);
         }
 
         if (!typeName) continue;
@@ -64,7 +67,7 @@ function collectGlobalTypeTokens(tokens: Token[]): Array<{ label: Token; typeTok
         if (seen.has(typeUpper) || localTypes.has(typeUpper)) continue;
         seen.add(typeUpper);
 
-        result.push({ label: token, typeToken: next, typeName });
+        result.push({ label: token, typeToken: next, typeName, typeNameStart });
     }
 
     return result;
@@ -94,7 +97,7 @@ export async function validateMissingIncludes(
     const sdi = StructureDeclarationIndexer.getInstance();
     await sdi.getOrBuildIndex(projectPath);
 
-    for (const { typeToken, typeName } of collectGlobalTypeTokens(tokens)) {
+    for (const { typeToken, typeName, typeNameStart } of collectGlobalTypeTokens(tokens)) {
         const definitions = sdi.find(typeName, projectPath).length > 0
             ? sdi.find(typeName, projectPath)
             : sdi.find(typeName);
@@ -111,8 +114,8 @@ export async function validateMissingIncludes(
         diagnostics.push({
             severity: DiagnosticSeverity.Warning,
             range: {
-                start: { line: typeToken.line, character: typeToken.start },
-                end:   { line: typeToken.line, character: typeToken.start + typeName.length },
+                start: { line: typeToken.line, character: typeNameStart },
+                end:   { line: typeToken.line, character: typeNameStart + typeName.length },
             },
             message: `'${typeName}' is defined in '${incFileName}' which is not included.`,
             source: 'clarion',
@@ -157,7 +160,7 @@ export async function validateMissingConstants(
     const constantParser = new ClassConstantParser();
     const constantsChecker = new ProjectConstantsChecker();
 
-    for (const { typeToken, typeName } of collectGlobalTypeTokens(tokens)) {
+    for (const { typeToken, typeName, typeNameStart } of collectGlobalTypeTokens(tokens)) {
         const definitions = sdi.find(typeName, projectPath).length > 0
             ? sdi.find(typeName, projectPath)
             : sdi.find(typeName);
@@ -190,8 +193,8 @@ export async function validateMissingConstants(
         diagnostics.push({
             severity: DiagnosticSeverity.Information,
             range: {
-                start: { line: typeToken.line, character: typeToken.start },
-                end:   { line: typeToken.line, character: typeToken.start + typeName.length },
+                start: { line: typeToken.line, character: typeNameStart },
+                end:   { line: typeToken.line, character: typeNameStart + typeName.length },
             },
             message: `'${typeName}' requires ${missing.length === 1 ? 'a project constant' : 'project constants'} that ${missing.length === 1 ? 'is' : 'are'} not defined: ${missing.join(', ')}.`,
             source: 'clarion',
