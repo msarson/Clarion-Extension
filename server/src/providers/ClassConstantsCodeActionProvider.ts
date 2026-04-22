@@ -71,9 +71,11 @@ export class ClassConstantsCodeActionProvider {
 
             // Check if this is a class type with missing constants
             const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
-            const projectPath = SolutionManager.getInstance()?.getProjectPathForFile(fromPath) ?? path.dirname(fromPath);
+            const sm = SolutionManager.getInstance();
+            const projectPath = sm?.getProjectPathForFile(fromPath) ?? path.dirname(fromPath);
+            const cwprojPath = sm?.getProjectCwprojForFile(fromPath);
             
-            logger.warn(`[CodeAction] projectPath="${projectPath}"`);
+            logger.warn(`[CodeAction] projectPath="${projectPath}" cwprojPath="${cwprojPath ?? '(none)'}"`);
             
             // Build or get index for this project
             const index = await this.sdi.getOrBuildIndex(projectPath);
@@ -96,7 +98,7 @@ export class ClassConstantsCodeActionProvider {
             logger.warn(`[CodeAction] isIncluded=${isIncluded}`);
             if (!isIncluded) {
                 // Offer Code Action to add the missing INCLUDE
-                const addIncludeActions = await this.getActionsForMissingInclude(word, fileName, document);
+                const addIncludeActions = await this.getActionsForMissingInclude(word, fileName, document, projectPath, cwprojPath);
                 actions.push(...addIncludeActions);
                 return actions;
             }
@@ -113,12 +115,12 @@ export class ClassConstantsCodeActionProvider {
                 return actions;
             }
 
-            // Check which constants are missing
+            // Check which constants are missing — use specific cwproj path to avoid wrong-project matches
             const constantsChecker = new ProjectConstantsChecker();
             const missingConstants = [];
 
             for (const constant of thisClassConstants.constants) {
-                const isDefined = await constantsChecker.isConstantDefined(constant.name, projectPath);
+                const isDefined = await constantsChecker.isConstantDefined(constant.name, cwprojPath ?? projectPath);
                 logger.warn(`[CodeAction] constant "${constant.name}" defined=${isDefined}`);
                 if (!isDefined) {
                     missingConstants.push(constant);
@@ -141,6 +143,7 @@ export class ClassConstantsCodeActionProvider {
                     {
                         className: def.name,
                         projectPath: projectPath,
+                        cwprojPath: cwprojPath,
                         constants: missingConstants.map(c => ({
                             name: c.name,
                             type: c.type,
@@ -170,7 +173,9 @@ export class ClassConstantsCodeActionProvider {
         
         try {
             const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
-            const projectPath = SolutionManager.getInstance()?.getProjectPathForFile(fromPath) ?? path.dirname(fromPath);
+            const sm = SolutionManager.getInstance();
+            const projectPath = sm?.getProjectPathForFile(fromPath) ?? path.dirname(fromPath);
+            const cwprojPath = sm?.getProjectCwprojForFile(fromPath);
             
             // Build or get index for this project
             await this.sdi.getOrBuildIndex(projectPath);
@@ -198,7 +203,7 @@ export class ClassConstantsCodeActionProvider {
                 
                 if (thisClassConstants && thisClassConstants.constants.length > 0) {
                     for (const constant of thisClassConstants.constants) {
-                        const isDefined = await constantsChecker.isConstantDefined(constant.name, projectPath);
+                        const isDefined = await constantsChecker.isConstantDefined(constant.name, cwprojPath ?? projectPath);
                         if (!isDefined) {
                             // Avoid duplicates
                             if (!allMissingConstants.find(c => c.name === constant.name)) {
@@ -225,6 +230,7 @@ export class ClassConstantsCodeActionProvider {
                     {
                         className: path.basename(includeFile, '.inc'),
                         projectPath: projectPath,
+                        cwprojPath: cwprojPath,
                         constants: allMissingConstants.map(c => ({
                             name: c.name,
                             type: c.type,
@@ -249,11 +255,11 @@ export class ClassConstantsCodeActionProvider {
     /**
      * Gets Code Actions for adding a missing INCLUDE statement
      */
-    private async getActionsForMissingInclude(className: string, includeFile: string, document: TextDocument): Promise<CodeAction[]> {
+    private async getActionsForMissingInclude(className: string, includeFile: string, document: TextDocument, projectPath: string, cwprojPath: string | undefined): Promise<CodeAction[]> {
         const actions: CodeAction[] = [];
         
         try {
-            const projectPath = path.dirname(decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\'));
+            // projectPath and cwprojPath are now passed in from the caller
             
             // Create action to add include to current file
             const addToCurrentFileAction = CodeAction.create(
@@ -311,7 +317,7 @@ export class ClassConstantsCodeActionProvider {
                     const missingConstants: Array<{name: string, type: string, relatedFile?: string}> = [];
                     
                     for (const constant of thisClassConstants.constants) {
-                        const isDefined = await constantsChecker.isConstantDefined(constant.name, projectPath);
+                        const isDefined = await constantsChecker.isConstantDefined(constant.name, cwprojPath ?? projectPath);
                         if (!isDefined) {
                             missingConstants.push(constant);
                         }
@@ -332,6 +338,7 @@ export class ClassConstantsCodeActionProvider {
                                     location: 'current',
                                     className: className,
                                     projectPath: projectPath,
+                                    cwprojPath: cwprojPath,
                                     constants: missingConstants.map(c => ({
                                         name: c.name,
                                         type: c.type,
@@ -357,6 +364,7 @@ export class ClassConstantsCodeActionProvider {
                                         location: 'member',
                                         className: className,
                                         projectPath: projectPath,
+                                        cwprojPath: cwprojPath,
                                         constants: missingConstants.map(c => ({
                                             name: c.name,
                                             type: c.type,

@@ -33,7 +33,7 @@ export class ProjectConstantsChecker {
 
     /**
      * Gets all constants defined in the project
-     * @param projectPath Path to the project directory
+     * @param projectPath Path to the project directory, OR full path to a .cwproj file
      * @returns Map of constant names (lowercase) to their values
      */
     async getProjectConstants(projectPath: string): Promise<Map<string, string>> {
@@ -58,23 +58,30 @@ export class ProjectConstantsChecker {
 
     /**
      * Parses a .cwproj file to extract DefineConstants
-     * @param projectPath Path to the project directory
+     * @param projectPath Full path to a .cwproj file, or path to the project directory
      * @returns Map of constant names to values
      */
     private async parseProjectFile(projectPath: string): Promise<Map<string, string>> {
         const constants = new Map<string, string>();
 
         try {
-            // Find .cwproj file in the directory
-            const files = await fs.promises.readdir(projectPath);
-            const projectFile = files.find(f => f.toLowerCase().endsWith('.cwproj'));
+            let projectFilePath: string;
 
-            if (!projectFile) {
-                logger.warn(`No .cwproj file found in ${projectPath}`);
-                return constants;
+            if (projectPath.toLowerCase().endsWith('.cwproj')) {
+                // Full path to specific cwproj provided — use it directly
+                projectFilePath = projectPath;
+            } else {
+                // Directory provided — find first .cwproj (legacy fallback)
+                const files = await fs.promises.readdir(projectPath);
+                const projectFile = files.find(f => f.toLowerCase().endsWith('.cwproj'));
+
+                if (!projectFile) {
+                    logger.warn(`No .cwproj file found in ${projectPath}`);
+                    return constants;
+                }
+
+                projectFilePath = path.join(projectPath, projectFile);
             }
-
-            const projectFilePath = path.join(projectPath, projectFile);
             logger.info(`Parsing project file: ${projectFilePath}`);
 
             const content = await fs.promises.readFile(projectFilePath, 'utf-8');
