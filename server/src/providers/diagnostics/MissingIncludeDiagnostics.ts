@@ -89,13 +89,16 @@ export async function validateMissingIncludes(
 ): Promise<Diagnostic[]> {
     const diagnostics: Diagnostic[] = [];
 
-    const { projectPath } = resolveProjectPaths(document);
+    const { projectPath, cwprojPath } = resolveProjectPaths(document);
 
     // Always invalidate the current document's include cache — it just changed
     includeVerifier.clearCache(document.uri);
 
     const sdi = StructureDeclarationIndexer.getInstance();
     await sdi.getOrBuildIndex(projectPath);
+
+    const constantParser = new ClassConstantParser();
+    const constantsChecker = cwprojPath ? new ProjectConstantsChecker() : undefined;
 
     for (const { typeToken, typeName, typeNameStart } of collectGlobalTypeTokens(tokens)) {
         const definitions = sdi.find(typeName, projectPath).length > 0
@@ -104,12 +107,31 @@ export async function validateMissingIncludes(
 
         if (definitions.length === 0) continue;
 
-        const incFileName = path.basename(definitions[0].filePath);
+        const incFilePath = definitions[0].filePath;
+        const incFileName = path.basename(incFilePath);
 
         const alreadyIncluded = await includeVerifier.isClassIncluded(incFileName, document);
         if (alreadyIncluded) continue;
 
-        logger.error(`⚠️ Missing include for type "${typeName}" (defined in "${incFileName}") at line ${typeToken.line + 1}`);
+        // Also check whether this class requires constants that are missing from the project.
+        // Include them in the message and data payload so the code action can handle both at once.
+        let missingConstants: string[] = [];
+        if (cwprojPath && constantsChecker) {
+            const classConstants = await constantParser.parseFile(incFilePath);
+            const thisClass = classConstants.find(c => c.className.toLowerCase() === typeName.toLowerCase());
+            if (thisClass && thisClass.constants.length > 0) {
+                for (const constant of thisClass.constants) {
+                    const isDefined = await constantsChecker.isConstantDefined(constant.name, cwprojPath);
+                    if (!isDefined) missingConstants.push(constant.name);
+                }
+            }
+        }
+
+        const constantsSuffix = missingConstants.length > 0
+            ? ` It also requires project constants: ${missingConstants.join(', ')}.`
+            : '';
+
+        logger.error(`⚠️ Missing include for type "${typeName}" (defined in "${incFileName}") at line ${typeToken.line + 1}${missingConstants.length > 0 ? ` + ${missingConstants.length} missing constants` : ''}`);
 
         diagnostics.push({
             severity: DiagnosticSeverity.Warning,
@@ -117,10 +139,10 @@ export async function validateMissingIncludes(
                 start: { line: typeToken.line, character: typeNameStart },
                 end:   { line: typeToken.line, character: typeNameStart + typeName.length },
             },
-            message: `'${typeName}' is defined in '${incFileName}' which is not included.`,
+            message: `'${typeName}' is defined in '${incFileName}' which is not included.${constantsSuffix}`,
             source: 'clarion',
             code: 'missing-include',
-            data: { typeName, incFileName },
+            data: { typeName, incFileName, missingConstants },
         });
     }
 
