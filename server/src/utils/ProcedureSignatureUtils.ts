@@ -81,6 +81,9 @@ export class ProcedureSignatureUtils {
         // Remove default values (=something)
         normalized = normalized.replace(/\s*=.+$/, '');
         
+        // Strip CONST and REF qualifiers (prototype-only modifiers, not part of the type)
+        normalized = normalized.replace(/\bCONST\s+/gi, '').replace(/\bREF\s+/gi, '');
+        
         // Extract type - everything before the last word (which is the variable name)
         // Handle special cases like *STRING, &STRING, etc.
         const words = normalized.trim().split(/\s+/);
