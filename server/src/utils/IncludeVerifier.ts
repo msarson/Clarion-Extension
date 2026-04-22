@@ -178,9 +178,13 @@ export class IncludeVerifier {
                 continue;
             }
 
+            // Strip Clarion line comment (!) before matching — commented INCLUDE must not count
+            const commentIdx = line.indexOf('!');
+            const effectiveLine = commentIdx >= 0 ? line.substring(0, commentIdx) : line;
+
             // Look for INCLUDE statement
             // Pattern: INCLUDE('filename.ext'),ONCE or INCLUDE('filename.ext')
-            const includeMatch = line.match(/INCLUDE\s*\(\s*['"]([^'"]+)['"]\s*\)(\s*,\s*ONCE)?/i);
+            const includeMatch = effectiveLine.match(/INCLUDE\s*\(\s*['"]([^'"]+)['"]\s*\)(\s*,\s*ONCE)?/i);
             
             if (includeMatch) {
                 const fileName = includeMatch[1].trim(); // Trim whitespace from filename
