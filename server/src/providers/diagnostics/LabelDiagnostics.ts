@@ -6,16 +6,19 @@ import { Token, TokenType } from '../../ClarionTokenizer';
  * Keywords that are fully reserved in Clarion — they may NOT be used as a label
  * for any purpose (variable, structure, or procedure).
  * Source: Clarion Language Reference, "Reserved Words" table.
+ * Note: THROW, TRY, CATCH, FINALLY are Clarion.NET (Clarion#) keywords only — they
+ * appear in the reserved words list in error. The Win32 Clarion compiler allows them
+ * as labels (SoftVelocity's own ABFile.inc uses Throw as a CLASS method). Omitted.
  */
 const FULLY_RESERVED = new Set([
     'ACCEPT', 'AND', 'ASSERT', 'BEGIN', 'BREAK', 'BY',
-    'CASE', 'CATCH', 'CHOOSE', 'CODE', 'COMPILE', 'CONST',
+    'CASE', 'CHOOSE', 'CODE', 'COMPILE', 'CONST',
     'CYCLE', 'DATA', 'DO', 'ELSE', 'ELSIF', 'END',
-    'EXECUTE', 'EXIT', 'FINALLY', 'FUNCTION', 'GOTO', 'IF',
+    'EXECUTE', 'EXIT', 'FUNCTION', 'GOTO', 'IF',
     'INCLUDE', 'LOOP', 'MEMBER', 'NEW', 'NOT', 'NULL',
     'OF', 'OMIT', 'OR', 'OROF', 'PRAGMA', 'PROCEDURE',
-    'PROGRAM', 'RETURN', 'ROUTINE', 'SECTION', 'THEN', 'THROW',
-    'TIMES', 'TO', 'TRY', 'UNTIL', 'WHILE', 'XOR',
+    'PROGRAM', 'RETURN', 'ROUTINE', 'SECTION', 'THEN',
+    'TIMES', 'TO', 'UNTIL', 'WHILE', 'XOR',
 ]);
 
 /**
