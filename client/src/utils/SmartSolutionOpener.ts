@@ -263,7 +263,7 @@ export class SmartSolutionOpener {
     ): Promise<{ installation: ClarionInstallation; compilerName: string } | null> {
 
         interface SeparatorItem { kind: -1; label: string }
-        interface CompilerItem { label: string; description: string; installation: ClarionInstallation; compilerName: string }
+        interface CompilerItem { label: string; installation: ClarionInstallation; compilerName: string }
         type PickerItem = SeparatorItem | CompilerItem;
 
         const items: PickerItem[] = [];
@@ -273,7 +273,6 @@ export class SmartSolutionOpener {
             for (const compiler of installation.compilerVersions) {
                 items.push({
                     label: compiler.name,
-                    description: installation.propertiesPath,
                     installation,
                     compilerName: compiler.name
                 });
@@ -281,8 +280,7 @@ export class SmartSolutionOpener {
         }
 
         const selected = await window.showQuickPick(items as any[], {
-            placeHolder: "Select compiler version",
-            matchOnDescription: true
+            placeHolder: "Select compiler version"
         });
 
         if (!selected || selected.kind === -1) {
