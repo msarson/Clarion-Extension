@@ -128,9 +128,9 @@ export class ClassConstantsCodeActionProvider {
 
             logger.info(`Found ${missingConstants.length} missing constants for ${word}`);
 
-            // Create Code Actions for Link Mode and DLL Mode
-            const linkModeAction = CodeAction.create(
-                `Add ${word} Constants (Link Mode)`,
+            // Single action — user chooses Link or DLL mode via QuickPick at execution time
+            const addConstantsAction = CodeAction.create(
+                `Add missing ${word} link equates to project`,
                 Command.create(
                     'Add Constants',
                     'clarion.addClassConstants',
@@ -141,34 +141,14 @@ export class ClassConstantsCodeActionProvider {
                             name: c.name,
                             type: c.type,
                             relatedFile: c.relatedFile
-                        })),
-                        mode: 'link'
+                        }))
                     }
                 ),
                 CodeActionKind.QuickFix
             );
-            linkModeAction.isPreferred = true; // Make Link Mode the default
+            addConstantsAction.isPreferred = true;
 
-            const dllModeAction = CodeAction.create(
-                `Add ${word} Constants (DLL Mode)`,
-                Command.create(
-                    'Add Constants',
-                    'clarion.addClassConstants',
-                    {
-                        className: def.name,
-                        projectPath: projectPath,
-                        constants: missingConstants.map(c => ({
-                            name: c.name,
-                            type: c.type,
-                            relatedFile: c.relatedFile
-                        })),
-                        mode: 'dll'
-                    }
-                ),
-                CodeActionKind.QuickFix
-            );
-
-            actions.push(linkModeAction, dllModeAction);
+            actions.push(addConstantsAction);
             logger.info(`Provided ${actions.length} code actions for ${word}`);
 
         } catch (error) {
@@ -232,9 +212,9 @@ export class ClassConstantsCodeActionProvider {
             
             logger.info(`Found ${allMissingConstants.length} missing constants for ${includeFile}`);
             
-            // Create Code Actions
-            const linkModeAction = CodeAction.create(
-                `Add ${path.basename(includeFile, '.inc')} Constants (Link Mode)`,
+            // Single action — user chooses Link or DLL mode via QuickPick at execution time
+            const addConstantsAction = CodeAction.create(
+                `Add missing ${path.basename(includeFile, '.inc')} link equates to project`,
                 Command.create(
                     'Add Constants',
                     'clarion.addClassConstants',
@@ -245,34 +225,14 @@ export class ClassConstantsCodeActionProvider {
                             name: c.name,
                             type: c.type,
                             relatedFile: c.relatedFile
-                        })),
-                        mode: 'link'
+                        }))
                     }
                 ),
                 CodeActionKind.QuickFix
             );
-            linkModeAction.isPreferred = true;
-            
-            const dllModeAction = CodeAction.create(
-                `Add ${path.basename(includeFile, '.inc')} Constants (DLL Mode)`,
-                Command.create(
-                    'Add Constants',
-                    'clarion.addClassConstants',
-                    {
-                        className: path.basename(includeFile, '.inc'),
-                        projectPath: projectPath,
-                        constants: allMissingConstants.map(c => ({
-                            name: c.name,
-                            type: c.type,
-                            relatedFile: c.relatedFile
-                        })),
-                        mode: 'dll'
-                    }
-                ),
-                CodeActionKind.QuickFix
-            );
-            
-            actions.push(linkModeAction, dllModeAction);
+            addConstantsAction.isPreferred = true;
+
+            actions.push(addConstantsAction);
             logger.info(`Provided ${actions.length} code actions for INCLUDE ${includeFile}`);
             
         } catch (error) {
@@ -356,9 +316,9 @@ export class ClassConstantsCodeActionProvider {
                     if (missingConstants.length > 0) {
                         logger.info(`Found ${missingConstants.length} missing constants for ${className}, adding combined actions`);
                         
-                        // Add combined actions (INCLUDE + Constants)
-                        const addBothLinkAction = CodeAction.create(
-                            `Add INCLUDE + Constants (Link Mode) to current file`,
+                        // Single action — user chooses mode via QuickPick at execution time
+                        const addBothAction = CodeAction.create(
+                            `Add INCLUDE + link equates (choose mode) to current file`,
                             Command.create(
                                 'Add INCLUDE and Constants',
                                 'clarion.addIncludeAndConstants',
@@ -372,41 +332,18 @@ export class ClassConstantsCodeActionProvider {
                                         name: c.name,
                                         type: c.type,
                                         relatedFile: c.relatedFile
-                                    })),
-                                    mode: 'link'
+                                    }))
                                 }
                             ),
                             CodeActionKind.QuickFix
                         );
                         
-                        const addBothDllAction = CodeAction.create(
-                            `Add INCLUDE + Constants (DLL Mode) to current file`,
-                            Command.create(
-                                'Add INCLUDE and Constants',
-                                'clarion.addIncludeAndConstants',
-                                {
-                                    includeFile,
-                                    targetFile: document.uri,
-                                    location: 'current',
-                                    className: className,
-                                    projectPath: projectPath,
-                                    constants: missingConstants.map(c => ({
-                                        name: c.name,
-                                        type: c.type,
-                                        relatedFile: c.relatedFile
-                                    })),
-                                    mode: 'dll'
-                                }
-                            ),
-                            CodeActionKind.QuickFix
-                        );
-                        
-                        actions.push(addBothLinkAction, addBothDllAction);
+                        actions.push(addBothAction);
                         
                         // Add same for MEMBER file if applicable
                         if (memberMatch) {
-                            const addBothToMemberLinkAction = CodeAction.create(
-                                `Add INCLUDE + Constants (Link Mode) to ${memberMatch[1]}`,
+                            const addBothToMemberAction = CodeAction.create(
+                                `Add INCLUDE + link equates (choose mode) to ${memberMatch[1]}`,
                                 Command.create(
                                     'Add INCLUDE and Constants',
                                     'clarion.addIncludeAndConstants',
@@ -420,36 +357,13 @@ export class ClassConstantsCodeActionProvider {
                                             name: c.name,
                                             type: c.type,
                                             relatedFile: c.relatedFile
-                                        })),
-                                        mode: 'link'
+                                        }))
                                     }
                                 ),
                                 CodeActionKind.QuickFix
                             );
                             
-                            const addBothToMemberDllAction = CodeAction.create(
-                                `Add INCLUDE + Constants (DLL Mode) to ${memberMatch[1]}`,
-                                Command.create(
-                                    'Add INCLUDE and Constants',
-                                    'clarion.addIncludeAndConstants',
-                                    {
-                                        includeFile,
-                                        targetFile: memberMatch[1],
-                                        location: 'member',
-                                        className: className,
-                                        projectPath: projectPath,
-                                        constants: missingConstants.map(c => ({
-                                            name: c.name,
-                                            type: c.type,
-                                            relatedFile: c.relatedFile
-                                        })),
-                                        mode: 'dll'
-                                    }
-                                ),
-                                CodeActionKind.QuickFix
-                            );
-                            
-                            actions.push(addBothToMemberLinkAction, addBothToMemberDllAction);
+                            actions.push(addBothToMemberAction);
                         }
                     }
                 }

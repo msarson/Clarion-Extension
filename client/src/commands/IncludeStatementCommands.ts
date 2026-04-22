@@ -15,7 +15,7 @@ interface AddIncludeAndConstantsArgs {
     className: string;
     projectPath: string;
     constants: Array<{ name: string; type: string; relatedFile?: string }>;
-    mode: 'link' | 'dll';
+    mode?: 'link' | 'dll';  // Optional: if omitted, user is prompted via QuickPick
 }
 
 /**
@@ -52,17 +52,13 @@ export function registerIncludeStatementCommands(context: vscode.ExtensionContex
                     location: argsObject.location
                 });
                 
-                // Then add the constants (reuse the existing command)
+                // Then add the constants — user will be prompted for Link/DLL mode if not pre-set
                 await vscode.commands.executeCommand('clarion.addClassConstants', {
                     className: argsObject.className,
                     projectPath: argsObject.projectPath,
                     constants: argsObject.constants,
                     mode: argsObject.mode
                 });
-                
-                vscode.window.showInformationMessage(
-                    `✅ Added INCLUDE and constants for ${argsObject.className} (${argsObject.mode} mode)`
-                );
             } catch (error) {
                 vscode.window.showErrorMessage(
                     `Failed to add INCLUDE and constants: ${error instanceof Error ? error.message : String(error)}`
