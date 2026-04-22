@@ -1103,6 +1103,9 @@ connection.onNotification('clarion/updatePaths', async (params: {
 // The source .clw hasn't changed so the LSP wouldn't otherwise re-run diagnostics.
 connection.onNotification('clarion/projectConstantsChanged', () => {
     logger.error('📥 clarion/projectConstantsChanged — re-validating all open documents');
+    // Clear the version-skip cache so validateTextDocument doesn't skip documents
+    // whose source hasn't changed but whose cwproj has.
+    lastValidatedVersions.clear();
     for (const document of documents.all()) {
         validateTextDocument(document).catch(err =>
             logger.error(`❌ Re-validation error for ${document.uri}: ${err}`)
