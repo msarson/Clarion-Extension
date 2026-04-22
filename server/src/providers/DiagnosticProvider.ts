@@ -9,6 +9,7 @@ import { validateClassInterfaceImplementation, validateClassProperties } from '.
 import { validateReturnStatements, validateDiscardedReturnValuesForPlainCalls, validateDiscardedReturnValues as _validateDiscardedReturnValues } from './diagnostics/ReturnValueDiagnostics';
 import { validateCycleBreakOutsideLoop } from './diagnostics/ControlFlowDiagnostics';
 import { validateReservedKeywordLabels } from './diagnostics/LabelDiagnostics';
+import { validateMissingIncludes, validateMissingConstants } from './diagnostics/MissingIncludeDiagnostics';
 
 const logger = LoggerManager.getLogger("DiagnosticProvider");
 logger.setLevel("error");
@@ -57,5 +58,21 @@ export class DiagnosticProvider {
         memberLocator: MemberLocatorService
     ): Promise<Diagnostic[]> {
         return _validateDiscardedReturnValues(tokens, document, memberLocator);
+    }
+
+    /** Async pass: warn when a variable's type is defined in an .inc not yet included. Closes #83 */
+    public static async validateMissingIncludes(
+        tokens: Token[],
+        document: TextDocument
+    ): Promise<Diagnostic[]> {
+        return validateMissingIncludes(tokens, document);
+    }
+
+    /** Async pass: info when a variable's class requires Link/DLL project constants not yet defined. Closes #83 */
+    public static async validateMissingConstants(
+        tokens: Token[],
+        document: TextDocument
+    ): Promise<Diagnostic[]> {
+        return validateMissingConstants(tokens, document);
     }
 }

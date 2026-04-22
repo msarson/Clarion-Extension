@@ -304,9 +304,11 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
 
         // Async pass: detect discarded return values via cross-file type resolution
         const memberLocator = new MemberLocatorService();
-        const discardedReturnDiags = await DiagnosticProvider.validateDiscardedReturnValues(
-            tokens, document, memberLocator
-        );
+        const [discardedReturnDiags, missingIncludeDiags, missingConstantsDiags] = await Promise.all([
+            DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator),
+            DiagnosticProvider.validateMissingIncludes(tokens, document),
+            DiagnosticProvider.validateMissingConstants(tokens, document),
+        ]);
 
         // Stale-version guard: document may have changed while we were resolving types
         const currentDoc = documents.get(document.uri);
@@ -314,8 +316,9 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             return;
         }
 
-        if (discardedReturnDiags.length > 0) {
-            diagnostics.push(...discardedReturnDiags);
+        const asyncDiags = [...discardedReturnDiags, ...missingIncludeDiags, ...missingConstantsDiags];
+        if (asyncDiags.length > 0) {
+            diagnostics.push(...asyncDiags);
             connection.sendDiagnostics({ uri: document.uri, diagnostics });
         }
     } catch (error) {
@@ -1092,6 +1095,21 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 projects: []
             };
         }
+    }
+});
+
+
+// Re-validate all open documents when a .cwproj changes (e.g. after addClassConstants).
+// The source .clw hasn't changed so the LSP wouldn't otherwise re-run diagnostics.
+connection.onNotification('clarion/projectConstantsChanged', () => {
+    logger.error('📥 clarion/projectConstantsChanged — re-validating all open documents');
+    // Clear the version-skip cache so validateTextDocument doesn't skip documents
+    // whose source hasn't changed but whose cwproj has.
+    lastValidatedVersions.clear();
+    for (const document of documents.all()) {
+        validateTextDocument(document).catch(err =>
+            logger.error(`❌ Re-validation error for ${document.uri}: ${err}`)
+        );
     }
 });
 

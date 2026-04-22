@@ -6,6 +6,7 @@ import { redirectionService } from '../paths/RedirectionService';
 import { DocumentManager } from '../documentManager';
 import { refreshSolutionTreeView } from '../views/ViewManager';
 import { registerLanguageFeatures } from './LanguageFeatureManager';
+import { getLanguageClient } from '../LanguageClientManager';
 import LoggerManager from '../utils/LoggerManager';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -210,6 +211,13 @@ async function handleProjectFileChange(
 
     // Reinitialize the Solution Cache and Document Manager
     await reinitializeEnvironment(true);
+
+    // Notify the language server so it re-validates open documents
+    // and updates missing-constants diagnostics immediately.
+    const client = getLanguageClient();
+    if (client) {
+        client.sendNotification('clarion/projectConstantsChanged');
+    }
 
     // Refresh the solution tree view
     await refreshSolutionTreeView();

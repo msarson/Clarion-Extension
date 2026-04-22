@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { getLanguageClient } from '../LanguageClientManager';
 
 interface ClassConstant {
     name: string;
@@ -149,13 +150,19 @@ async function addClassConstantsToProject(args: AddConstantsArgs): Promise<void>
         );
         const updatedDoc = await vscode.workspace.openTextDocument(cwprojUri);
         await updatedDoc.save();
+
+        // Notify the server that project constants changed so it re-validates
+        // all open documents and clears the missing-constants diagnostic immediately.
+        const client = getLanguageClient();
+        if (client) {
+            client.sendNotification('clarion/projectConstantsChanged');
+        }
     } else {
         throw new Error('Failed to apply workspace edit');
     }
 }
 
 /**
- * Generates constant definitions string  
  * Format: {constantName}=>{value};{constantName}=>{value};
  * Example: StringTheoryLinkMode=>1;StringTheoryDllMode=>0;
  */
