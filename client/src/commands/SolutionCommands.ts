@@ -112,11 +112,11 @@ export function registerSolutionOpeningCommands(
             }
         }),
         
-        commands.registerCommand('clarion.openDetectedSolution', async (solutionPath: string) => {
+        commands.registerCommand('clarion.openDetectedSolution', async (solutionPath: string, preSelected?: import('../utils/SmartSolutionOpener').PreSelectedSettings) => {
             logger.info(`Executing clarion.openDetectedSolution command for ${solutionPath}`);
             
             try {
-                const success = await SmartSolutionOpener.openDetectedSolution(solutionPath);
+                const success = await SmartSolutionOpener.openDetectedSolution(solutionPath, preSelected);
                 
                 logger.debug(`SmartSolutionOpener returned: ${success}`);
                 

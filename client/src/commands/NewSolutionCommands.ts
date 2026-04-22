@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import LoggerManager from '../utils/LoggerManager';
+import { SmartSolutionOpener } from '../utils/SmartSolutionOpener';
 
 const logger = LoggerManager.getLogger("NewSolutionCommands");
 logger.setLevel("error");
@@ -95,7 +96,17 @@ export async function newSolution(): Promise<void> {
     const folderPath = workspaceFolders[0].uri.fsPath;
     const defaultName = path.basename(folderPath);
 
-    // Prompt for solution name
+    // Step 1: Pick Clarion version/compiler before prompting for names
+    const installResult = await SmartSolutionOpener.detectAndPickInstallation();
+    if (!installResult) return;
+
+    // Step 2: Pick build configuration (no .sln exists yet, offer standard options)
+    const configChoice = await vscode.window.showQuickPick(['Debug', 'Release'], {
+        placeHolder: 'Select build configuration'
+    });
+    if (!configChoice) return;
+
+    // Step 3: Prompt for solution name
     const solutionName = await vscode.window.showInputBox({
         prompt: 'Solution name',
         value: defaultName,
@@ -109,7 +120,7 @@ export async function newSolution(): Promise<void> {
 
     const trimmedName = solutionName.trim();
 
-    // Prompt for main CLW filename
+    // Step 4: Prompt for main CLW filename
     const clwInput = await vscode.window.showInputBox({
         prompt: 'Main source file name',
         value: `${trimmedName}.clw`,
@@ -129,7 +140,7 @@ export async function newSolution(): Promise<void> {
     const cwprojPath = path.join(folderPath, `${trimmedName}.cwproj`);
     const clwPath = path.join(folderPath, clwName);
 
-    // Warn if any file already exists
+    // Step 5: Warn if any file already exists
     const existing = [slnPath, cwprojPath, clwPath].filter(f => fs.existsSync(f));
     if (existing.length > 0) {
         const names = existing.map(f => path.basename(f)).join(', ');
@@ -141,34 +152,24 @@ export async function newSolution(): Promise<void> {
         if (answer !== 'Overwrite') return;
     }
 
+    // Step 6: All user interaction done — write files
     try {
-        const newlyCreated: string[] = [];
-        const writeIfNew = (filePath: string, content: string) => {
-            if (!fs.existsSync(filePath)) newlyCreated.push(filePath);
-            fs.writeFileSync(filePath, content, 'utf8');
-        };
-
-        writeIfNew(slnPath, buildSlnContent(trimmedName, projectGuid));
-        writeIfNew(cwprojPath, buildCwprojContent(trimmedName, projectGuid, clwName));
-        writeIfNew(clwPath, buildClwContent());
-
+        fs.writeFileSync(slnPath, buildSlnContent(trimmedName, projectGuid), 'utf8');
+        fs.writeFileSync(cwprojPath, buildCwprojContent(trimmedName, projectGuid, clwName), 'utf8');
+        fs.writeFileSync(clwPath, buildClwContent(), 'utf8');
         logger.info(`✅ Created new solution: ${trimmedName} in ${folderPath}`);
-
-        // Open the solution — this prompts for Clarion version/config
-        const opened = await vscode.commands.executeCommand<boolean>('clarion.openDetectedSolution', slnPath);
-
-        if (!opened) {
-            // User cancelled — remove files we just created
-            for (const f of newlyCreated) {
-                try { fs.unlinkSync(f); } catch { /* ignore */ }
-            }
-            return;
-        }
-
     } catch (err) {
         logger.error(`❌ Failed to create solution files: ${err}`);
         vscode.window.showErrorMessage(`Failed to create solution: ${err instanceof Error ? err.message : String(err)}`);
+        return;
     }
+
+    // Step 6: Open with pre-selected values — skips all pickers in openDetectedSolution
+    await vscode.commands.executeCommand('clarion.openDetectedSolution', slnPath, {
+        installation: installResult.installation,
+        compilerName: installResult.compilerName,
+        configuration: configChoice
+    });
 }
 
 export function registerNewSolutionCommands(context: vscode.ExtensionContext): vscode.Disposable[] {

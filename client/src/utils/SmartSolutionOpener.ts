@@ -11,6 +11,12 @@ import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("SmartSolutionOpener", "info");
 
+export interface PreSelectedSettings {
+    installation: ClarionInstallation;
+    compilerName: string;
+    configuration: string;
+}
+
 export class SmartSolutionOpener {
     /**
      * Checks if existing settings for a solution are still valid
@@ -85,7 +91,7 @@ export class SmartSolutionOpener {
     /**
      * Opens a detected solution with smart auto-detection
      */
-    static async openDetectedSolution(solutionPath: string): Promise<boolean> {
+    static async openDetectedSolution(solutionPath: string, preSelected?: PreSelectedSettings): Promise<boolean> {
         try {
             logger.info(`📂 Opening detected solution: ${solutionPath}`);
 
@@ -140,6 +146,17 @@ export class SmartSolutionOpener {
             }
 
             // Step 2: No existing settings or they're invalid - proceed with auto-detection
+            // Skip detection if caller already selected version/config (e.g. new solution wizard)
+            let selectedInstallation: ClarionInstallation;
+            let selectedCompiler: string;
+            let selectedConfig: string;
+
+            if (preSelected) {
+                selectedInstallation = preSelected.installation;
+                selectedCompiler = preSelected.compilerName;
+                selectedConfig = preSelected.configuration;
+                logger.info(`✅ Using pre-selected: Clarion ${selectedInstallation.ideVersion} → ${selectedCompiler} (${selectedConfig})`);
+            } else {
             const installations = await ClarionInstallationDetector.detectInstallations();
 
             if (installations.length === 0) {
@@ -156,8 +173,6 @@ export class SmartSolutionOpener {
             }
 
             // Step 3: Let user select installation if multiple found
-            let selectedInstallation: ClarionInstallation;
-            let selectedCompiler: string;
 
             if (installations.length === 1 && installations[0].compilerVersions.length === 1) {
                 // Only one installation and one compiler - use it automatically
@@ -177,7 +192,6 @@ export class SmartSolutionOpener {
 
             // Step 4: Extract configurations from .sln file, auto-detect from .sln.cache
             const configurations = this.extractConfigurationsFromSolution(solutionPath);
-            let selectedConfig: string;
 
             // Check .sln.cache for the last-used config (written by Clarion IDE/MSBuild)
             // configurations may be full "Config|Platform" strings; match by config name prefix
@@ -198,6 +212,7 @@ export class SmartSolutionOpener {
             } else {
                 selectedConfig = configurations[0] ?? "Release";
             }
+            } // end else (not preSelected)
 
             // Step 5: Update global variables BEFORE saving to settings so that
             // onDidChangeConfiguration handlers fired during the save see the correct solution.
@@ -253,6 +268,25 @@ export class SmartSolutionOpener {
             window.showErrorMessage(`Error opening solution: ${errMessage}`);
             return false;
         }
+    }
+
+    /**
+     * Detects installations and lets the user pick one. Returns null if cancelled or none found.
+     * Used by the new solution wizard to do version selection before creating files.
+     */
+    static async detectAndPickInstallation(): Promise<{ installation: ClarionInstallation; compilerName: string } | null> {
+        const installations = await ClarionInstallationDetector.detectInstallations();
+
+        if (installations.length === 0) {
+            window.showErrorMessage("No Clarion installations detected. ClarionProperties.xml not found in standard locations.");
+            return null;
+        }
+
+        if (installations.length === 1 && installations[0].compilerVersions.length === 1) {
+            return { installation: installations[0], compilerName: installations[0].compilerVersions[0].name };
+        }
+
+        return this.showInstallationPicker(installations);
     }
 
     /**
