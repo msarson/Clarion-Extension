@@ -288,8 +288,15 @@ export const globalSettings = {
             }
             
             logger.info("✅ Migration to solutions array completed successfully.");
-        } else {
-            logger.info("✅ No migration needed or already migrated.");
+        }
+
+        // Always clean up legacy keys that are now redundant (they may linger from old installs)
+        for (const legacyKey of ['solutionFile', 'propertiesFile', 'version'] as const) {
+            const inspection = config.inspect(legacyKey);
+            if (inspection?.workspaceFolderValue !== undefined) {
+                await config.update(legacyKey, undefined, target);
+                logger.info(`✅ Removed legacy setting: clarion.${legacyKey}`);
+            }
         }
     },
     

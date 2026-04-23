@@ -44,6 +44,57 @@ export class ClassConstantsCodeActionProvider {
             
             logger.warn(`[CodeAction] triggered line=${range.start.line} file="${path.basename(document.uri)}"`);
 
+            const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+            const sm = SolutionManager.getInstance();
+            const projectPath = sm?.getProjectPathForFile(fromPath) ?? path.dirname(fromPath);
+            const cwprojPath = sm?.getProjectCwprojForFile(fromPath);
+
+            // Respond to missing-include diagnostics (from MissingIncludeDiagnostics)
+            const missingIncludeDiags = context.diagnostics.filter(d => d.code === 'missing-include');
+            if (missingIncludeDiags.length > 0) {
+                for (const diag of missingIncludeDiags) {
+                    const data = diag.data as { typeName: string; incFileName: string } | undefined;
+                    if (data?.typeName && data?.incFileName) {
+                        logger.warn(`[CodeAction] missing-include diag: typeName="${data.typeName}" incFile="${data.incFileName}"`);
+                        const diagActions = await this.getActionsForMissingInclude(data.typeName, data.incFileName, document, projectPath, cwprojPath);
+                        actions.push(...diagActions);
+                    }
+                }
+                if (actions.length > 0) {
+                    return actions;
+                }
+            }
+
+            // Respond to missing-define-constants diagnostics (from MissingIncludeDiagnostics)
+            const missingConstantsDiags = context.diagnostics.filter(d => d.code === 'missing-define-constants');
+            if (missingConstantsDiags.length > 0) {
+                for (const diag of missingConstantsDiags) {
+                    const data = diag.data as { typeName: string; missingConstants: string[]; cwprojPath: string } | undefined;
+                    if (data?.typeName && data?.missingConstants?.length) {
+                        logger.warn(`[CodeAction] missing-define-constants diag: typeName="${data.typeName}" constants=${data.missingConstants.join(',')}`);
+                        const addConstantsAction = CodeAction.create(
+                            `Add missing ${data.typeName} link equates to project`,
+                            Command.create(
+                                'Add Constants',
+                                'clarion.addClassConstants',
+                                {
+                                    className: data.typeName,
+                                    projectPath: projectPath,
+                                    cwprojPath: cwprojPath,
+                                    constants: data.missingConstants.map(name => ({ name, type: 'Link' }))
+                                }
+                            ),
+                            CodeActionKind.QuickFix
+                        );
+                        addConstantsAction.isPreferred = true;
+                        actions.push(addConstantsAction);
+                    }
+                }
+                if (actions.length > 0) {
+                    return actions;
+                }
+            }
+
             // Check if we're on an INCLUDE line
             const includeMatch = line.match(/INCLUDE\s*\(\s*['"]([^'"]+)['"]\s*\)/i);
             if (includeMatch) {
@@ -70,11 +121,6 @@ export class ClassConstantsCodeActionProvider {
             logger.warn(`[CodeAction] word="${word}" file="${path.basename(document.uri)}"`);
 
             // Check if this is a class type with missing constants
-            const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
-            const sm = SolutionManager.getInstance();
-            const projectPath = sm?.getProjectPathForFile(fromPath) ?? path.dirname(fromPath);
-            const cwprojPath = sm?.getProjectCwprojForFile(fromPath);
-            
             logger.warn(`[CodeAction] projectPath="${projectPath}" cwprojPath="${cwprojPath ?? '(none)'}"`);
             
             // Build or get index for this project

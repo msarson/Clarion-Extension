@@ -1,6 +1,7 @@
 import { workspace, ConfigurationTarget } from 'vscode';
 import LoggerManager from './utils/LoggerManager';
 import { getClarionConfigTarget } from './globals';
+import { SettingsStorageManager } from './utils/SettingsStorageManager';
 
 const logger = LoggerManager.getLogger("SettingsManager");
 logger.setLevel("error");
@@ -36,11 +37,7 @@ export class ClarionSettingsManager {
     public async updateConfiguration(newConfig: string): Promise<void> {
         if (!newConfig) return;
         this.configuration = newConfig;
-        const target = getClarionConfigTarget();
-        if (target && workspace.workspaceFolders) {
-            const config = workspace.getConfiguration("clarion", workspace.workspaceFolders[0].uri);
-            await config.update("configuration", newConfig, target);
-        }
+        await SettingsStorageManager.updateActiveConfiguration(newConfig);
         logger.info(`✅ Clarion configuration updated to: ${newConfig}`);
     }
 

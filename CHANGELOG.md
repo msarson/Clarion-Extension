@@ -6,18 +6,24 @@ All notable changes to the Clarion Extension are documented here.
 
 ## Recent Versions
 
-### [0.9.6] - Unreleased
+### [0.9.6] - 2026-04-23
 
 **New Features**
 
 - ✨ **New Solution wizard** (issue #79): create a minimal Clarion solution (`.sln`, `.cwproj`, `.clw`) from the Solution view `+` button or the command palette (`Clarion: New Solution`). Prompts for solution name and auto-detects the installed Clarion version and configuration.
 - ✨ **Stale solution cleanup**: if a solution referenced in workspace settings no longer exists on disk, it is silently removed from settings on startup rather than leaving the extension in a broken state.
 - ✨ **Missing Link/DLL equates code action** (issue #81): pressing `Ctrl+.` on a class name or its `INCLUDE` line now offers to add any missing `Link()`/`DLL()` equates to the project's `DefineConstants` in the `.cwproj` file. A QuickPick prompt lets you choose between static-link mode (`LinkMode=>1, DllMode=>0`) and DLL mode (`LinkMode=>0, DllMode=>1`), covering both single-exe and multi-DLL application setups.
+- ✨ **Missing INCLUDE diagnostic & code action** (issue #83): variables declared with a user-defined class type (e.g. `st StringTheory` or `af &FileManager`) now show a **Warning** squiggle when the type's `.inc` file is not included in the current file or its `MEMBER` parent. A code action (`Ctrl+.`) offers to insert the `INCLUDE('…'),ONCE` statement in the current file or the MEMBER parent, and a combined action adds both the INCLUDE and any missing project constants in one step. When both the include and constants are absent, the warning message lists the missing constants upfront.
+- ✨ **Missing DefineConstants diagnostic** (issue #83): when a class `.inc` is included but its required `Link()`/`DLL()` equates are not yet defined in the `.cwproj`, an **Information** diagnostic is shown on the type declaration. A code action offers to add the missing constants directly from the squiggle. The diagnostic clears immediately after constants are added — the extension watches the `.cwproj` file for any external changes too.
 
 **Bug Fixes**
 
 - 🐛 **Find All References / Rename Symbol**: procedure-scope local variables and parameters are now found inside locally-derived class method bodies (issue #78).Clarion's language spec states that methods prototyped in a CLASS declared within a procedure's local data section share the declaring procedure's full local scope. Previously, `finishesAt` (set for folding) was also used as a hard scope boundary, cutting off any method implementations that appear after the parent procedure's data section. The fix extends the search to include all method implementation bodies whose class name matches a locally-declared class in the scope procedure's data section, guarded against cross-file contamination by requiring no intervening global procedure between the scope boundary and the implementation.
 - 🐛 Variable hover no longer appends a spurious "EQUATE Definition" block from the structure index — `enhanceHoverWithClassInfo` now only enriches hover when the variable's type resolves to a `CLASS` or `INTERFACE` in the index; primitive type names such as `LONG` that happen to match an equate in a library file (e.g. `ABUTIL.INC`) are no longer shown
+- 🐛 Commented-out `INCLUDE` statements (e.g. `!INCLUDE('StringTheory.inc')`) are no longer treated as active includes by the missing-include diagnostic.
+- 🐛 False-positive missing-include / missing-constants diagnostics on built-in type names (issue #85): The structure declaration indexer now correctly handles blank-label `ITEMIZE` blocks (e.g. `ITEMIZE,PRE(CLType)` with no label at column 0, as found in `XMLType.inc` and similar library files). Previously such entries were indexed as bare standalone equates (`BYTE`, `SHORT`, `REAL`, etc.), causing spurious warnings. They are now indexed with the correct PRE-prefixed names (`CLType:BYTE`, etc.) and — equally important — the missing-include and missing-constants validators now only fire on `CLASS` and `INTERFACE` definitions, ignoring EQUATE/ITEMIZE entries from the index.
+- 🐛 False-positive `BREAK used outside LOOP` diagnostics (issue #86): The Clarion equate idiom `token:function` was incorrectly matching the `/\bFUNCTION\b/i` pattern (`:` is a non-word character, so `\b` fired between `:` and `f`). This reset `inCodeSection` to `false` mid-method, causing the tokenizer to silently skip `IF`/`CASE` structures, which in turn made `BREAK`/`CYCLE` diagnostics fire outside their containing loop.
+- 🐛 False-positive missing-include diagnostics for transitively-included types: the include verifier previously only checked direct `INCLUDE` statements of the current file and its `MEMBER` parent. Types defined in files included transitively (e.g. `FileA.clw → FileA.Inc → DriverClass.Inc`) were incorrectly flagged. The verifier now performs a full BFS walk of the include graph (any depth, cycle-safe) from both the current file and the MEMBER parent.
 
 ---
 

@@ -180,29 +180,15 @@ export async function setupFolderDependentFeatures(
                     
                     // Reload the configuration from workspace settings
                     if (event.affectsConfiguration("clarion.configuration")) {
-                        // Only try to read from workspace settings if we have a folder open
                         if (workspace.workspaceFolders && workspace.workspaceFolders.length > 0) {
-                            // Get configuration scoped to the workspace folder
                             const workspaceFolder = workspace.workspaceFolders[0];
                             const config = workspace.getConfiguration("clarion", workspaceFolder.uri);
-                            
-                            const currentSolution = config.get<string>("currentSolution", "");
-                            if (currentSolution) {
-                                const solutions = config.get<any[]>("solutions", []);
-                                const solution = solutions.find(s => s.solutionFile === currentSolution);
-                                if (solution) {
-                                    globalSettings.configuration = solution.configuration;
-                                    logger.info(`✅ Updated globalSettings.configuration to: ${solution.configuration} from solutions array`);
-                                }
-                            } else {
-                                const configValue = config.get<string>("configuration", "");
-                                if (configValue) {
-                                    globalSettings.configuration = configValue;
-                                    logger.info(`✅ Updated globalSettings.configuration to: ${configValue} from direct setting`);
-                                }
+                            const configValue = config.get<string>("configuration", "");
+                            if (configValue) {
+                                globalSettings.configuration = configValue;
+                                logger.info(`✅ Updated globalSettings.configuration to: ${configValue}`);
                             }
                         } else {
-                            // No folder open - globalSettings.configuration is already updated by setGlobalClarionSelection
                             logger.info(`ℹ️ No workspace folder open - using in-memory configuration: ${globalSettings.configuration}`);
                         }
                     }

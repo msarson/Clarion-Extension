@@ -167,11 +167,12 @@ export class ClarionTokenizer {
                 inCodeSection = true;
             } else if (line.match(/^\s*(DATA|ROUTINE)\b/i)) {
                 inCodeSection = false; // DATA/ROUTINE sections can have structures
-            } else if (/\b(?:PROCEDURE|FUNCTION)\b/i.test(line)) {
+            } else if (/(?<![:\w])(?:PROCEDURE|FUNCTION)\b/i.test(line)) {
                 // Strip string literals and comments before checking — "function" inside a string
                 // like Trace('...function pointers...') must not reset inCodeSection.
+                // Use negative lookbehind to avoid matching qualified identifiers like token:function.
                 const stripped = line.replace(/'([^']|'')*'/g, '').replace(/!.*$/, '');
-                if (/\b(?:PROCEDURE|FUNCTION)\b/i.test(stripped)) {
+                if (/(?<![:\w])(?:PROCEDURE|FUNCTION)\b/i.test(stripped)) {
                     inCodeSection = false; // PROCEDURE/FUNCTION declarations sections can have structures (before CODE)
                 }
             }

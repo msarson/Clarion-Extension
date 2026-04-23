@@ -92,6 +92,8 @@ Catch errors as you type.
 - Unterminated structures — including window sub-structures (`WINDOW`, `SHEET`, `TAB`, `OLE`, `MENU`, etc.)
 - Missing RETURN statements
 - FILE validation (DRIVER, RECORD)
+- **Missing INCLUDE** — warns when a variable's class type is defined in an `.inc` not included in the file; code action inserts the `INCLUDE` automatically
+- **Missing DefineConstants** — warns when a class's required `Link()`/`DLL()` constants are absent from the `.cwproj`; code action adds them with a QuickPick for static vs DLL mode
 - **[Learn more about Diagnostics →](docs/features/diagnostics.md)**
 
 ### ✏️ **Code Editing Tools**
@@ -144,7 +146,24 @@ Productivity features to write code faster.
 
 ## 🆕 What's New
 
-### Latest: v0.9.5 (2026-04-21) — Hover Expansion & Build Integration
+### Latest: v0.9.6 (2026-04-23) — Missing Include Diagnostics & Bug Fixes
+
+#### 🩺 Missing INCLUDE & DefineConstants Diagnostics
+Variables declared with a user-defined class type now show a **Warning** squiggle when the type's `.inc` file isn't included. A code action (`Ctrl+.`) inserts the `INCLUDE`,ONCE statement — optionally in the current file or the MEMBER parent. A companion **Information** diagnostic fires when the include is present but required `Link()`/`DLL()` project constants are missing from the `.cwproj`, with a QuickPick code action to add them. The include verifier walks the **full transitive include chain** (any depth, cycle-safe) to avoid false positives from transitively-included types.
+
+#### 🧙 New Solution Wizard
+Create a minimal Clarion solution (`.sln`, `.cwproj`, `.clw`) from the Solution View `+` button or `Clarion: New Solution` in the command palette. Clarion version and configuration are auto-detected.
+
+#### 🐛 Key Bug Fixes
+- `token:function` equate identifiers no longer reset `inCodeSection`, preventing false-positive `BREAK used outside LOOP` diagnostics
+- Blank-label `ITEMIZE` blocks (e.g. in `XMLType.inc`) no longer cause false-positive missing-include warnings
+- Settings no longer write redundant legacy individual keys alongside the `solutions` array
+
+**[See full changelog →](CHANGELOG.md)**
+
+---
+
+### Recent: v0.9.5 (2026-04-21) — Hover Expansion & Build Integration
 
 #### 📚 310 Built-ins, 158 Attributes
 Hover documentation now covers 310 Clarion built-in functions and 158 window/report attributes. Overload narrowing: hovering `OPEN(Window)` shows only the WINDOW-relevant signatures. Context-aware hover for `HIDE`, `DISABLE`, and `TYPE` — shows attribute or statement usage depending on whether you're inside a WINDOW/REPORT structure.
