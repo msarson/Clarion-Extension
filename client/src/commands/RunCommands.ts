@@ -598,6 +598,21 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
                 }
             }
 
+            // Offer to build before launching the debugger
+            const buildChoice = await window.showInformationMessage(
+                "Build the project before starting the debugger?",
+                "Build and Debug",
+                "Debug Without Building",
+                "Cancel"
+            );
+            if (!buildChoice || buildChoice === "Cancel") {
+                return;
+            }
+            if (buildChoice === "Build and Debug") {
+                logger.info("🔨 Building project before debugging...");
+                await commands.executeCommand('clarion.buildCurrentProject');
+            }
+
             const activeEditor = window.activeTextEditor;
             if (!activeEditor) {
                 window.showWarningMessage("No active file. Please open a file to debug its project.");
