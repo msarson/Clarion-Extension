@@ -27,12 +27,21 @@ interface IncludeCache {
 }
 
 /**
+ * Cache entry for a resolved file path (by filename)
+ */
+interface PathCache {
+    resolvedPath: string | null;
+    timestamp: number;
+}
+
+/**
  * Verifies if a class definition file is accessible via INCLUDE statements
  * in the current file or its MEMBER parent
  */
 export class IncludeVerifier {
     private tokenCache = TokenCache.getInstance();
     private includeCache = new Map<string, IncludeCache>(); // URI -> IncludeCache
+    private pathCache = new Map<string, PathCache>();       // filename.lower -> PathCache
     private static readonly CACHE_DURATION = 60000; // 60 seconds
 
     /**
@@ -50,13 +59,20 @@ export class IncludeVerifier {
             const currentIncludes = await this.getIncludesForFile(document);
             logger.error(`⏱️ [IV] getIncludesForFile (current) took ${Date.now() - t0}ms → ${currentIncludes.length} includes`);
             
-            // Check if class file is in current file's includes
+            // Check if class file is in current file's direct includes
             if (this.hasInclude(classFileName, currentIncludes)) {
                 logger.error(`⏱️ [IV] ✅ Found "${classFileName}" in current file`);
                 return true;
             }
 
-            // Not found in current file - check MEMBER parent
+            // Check one level of transitive includes (e.g. MSSQL2DriverClass.Inc → DriverClass.Inc)
+            const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+            if (await this.hasTransitiveInclude(classFileName, currentIncludes, fromPath)) {
+                logger.error(`⏱️ [IV] ✅ Found "${classFileName}" via transitive include`);
+                return true;
+            }
+
+            // Not found - check MEMBER parent
             const t1 = Date.now();
             logger.error(`⏱️ [IV] "${classFileName}" not in current file — checking MEMBER parent...`);
             const memberParent = await this.getMemberParentDocument(document);
@@ -71,6 +87,13 @@ export class IncludeVerifier {
                     logger.error(`⏱️ [IV] ✅ Found "${classFileName}" in MEMBER parent`);
                     return true;
                 }
+
+                // Check transitive includes of MEMBER parent
+                const parentPath = decodeURIComponent(memberParent.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+                if (await this.hasTransitiveInclude(classFileName, parentIncludes, parentPath)) {
+                    logger.error(`⏱️ [IV] ✅ Found "${classFileName}" via MEMBER parent transitive include`);
+                    return true;
+                }
             }
 
             logger.error(`⏱️ [IV] ❌ "${classFileName}" not found in any accessible scope`);
@@ -80,6 +103,99 @@ export class IncludeVerifier {
             logger.error(`Error verifying include: ${error instanceof Error ? error.message : String(error)}`);
             return false; // Fail safe - don't show hover if we can't verify
         }
+    }
+
+    /**
+     * Checks if a class file is reachable via any transitive include chain (BFS, cycle-safe).
+     */
+    private async hasTransitiveInclude(classFileName: string, directIncludes: IncludeStatement[], baseFilePath: string): Promise<boolean> {
+        const baseDir = path.dirname(baseFilePath);
+        const visited = new Set<string>();
+        const queue: Array<{ fileName: string; baseDir: string }> = directIncludes.map(inc => ({ fileName: inc.fileName, baseDir }));
+
+        while (queue.length > 0) {
+            const { fileName, baseDir: dir } = queue.shift()!;
+            const key = fileName.toLowerCase();
+            if (visited.has(key)) continue;
+            visited.add(key);
+
+            const incPath = await this.resolveIncludePath(fileName, dir);
+            if (!incPath) continue;
+
+            const subIncludes = await this.parseIncludesFromFilePath(incPath);
+            if (this.hasInclude(classFileName, subIncludes)) return true;
+
+            const subDir = path.dirname(incPath);
+            for (const sub of subIncludes) {
+                if (!visited.has(sub.fileName.toLowerCase())) {
+                    queue.push({ fileName: sub.fileName, baseDir: subDir });
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Resolves an include filename to an absolute path using redirection or local directory.
+     */
+    private async resolveIncludePath(fileName: string, baseDir: string): Promise<string | null> {
+        const cacheKey = fileName.toLowerCase();
+        const cached = this.pathCache.get(cacheKey);
+        const now = Date.now();
+        if (cached && (now - cached.timestamp) < IncludeVerifier.CACHE_DURATION) {
+            return cached.resolvedPath;
+        }
+
+        let resolved: string | null = null;
+        const solutionManager = SolutionManager.getInstance();
+        if (solutionManager?.solution) {
+            for (const project of solutionManager.solution.projects) {
+                const found = project.getRedirectionParser().findFile(fileName);
+                if (found?.path && fs.existsSync(found.path)) {
+                    resolved = found.path;
+                    break;
+                }
+            }
+        }
+        if (!resolved) {
+            const candidate = path.resolve(baseDir, fileName);
+            if (fs.existsSync(candidate)) resolved = candidate;
+        }
+
+        this.pathCache.set(cacheKey, { resolvedPath: resolved, timestamp: now });
+        return resolved;
+    }
+
+    /**
+     * Parses INCLUDE statements directly from a file path using a regex scan.
+     * Does not require a TextDocument — used for transitive include resolution.
+     */
+    private async parseIncludesFromFilePath(filePath: string): Promise<IncludeStatement[]> {
+        const cacheKey = `path:${filePath.toLowerCase()}`;
+        const cached = this.includeCache.get(cacheKey);
+        const now = Date.now();
+        if (cached && (now - cached.timestamp) < IncludeVerifier.CACHE_DURATION) {
+            return cached.includes;
+        }
+
+        const includes: IncludeStatement[] = [];
+        try {
+            const contents = await fs.promises.readFile(filePath, 'utf-8');
+            const lines = contents.split('\n');
+            for (let i = 0; i < lines.length; i++) {
+                const commentIdx = lines[i].indexOf('!');
+                const effectiveLine = commentIdx >= 0 ? lines[i].substring(0, commentIdx) : lines[i];
+                const m = effectiveLine.match(/INCLUDE\s*\(\s*['"]([^'"]+)['"]\s*\)(\s*,\s*ONCE)?/i);
+                if (m) {
+                    includes.push({ fileName: path.basename(m[1].trim()), hasOnce: !!m[2], lineNumber: i + 1 });
+                }
+            }
+        } catch {
+            // File unreadable — return empty
+        }
+
+        this.includeCache.set(cacheKey, { includes, timestamp: now });
+        return includes;
     }
 
     /**
