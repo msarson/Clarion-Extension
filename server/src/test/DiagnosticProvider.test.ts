@@ -1961,6 +1961,22 @@ MyProc  PROCEDURE()
             assert.strictEqual(diags.length, 1);
         });
 
+        test('BREAK inside LOOP with CASE containing token:function equate — no warning (#86)', () => {
+            // token:function is an equate identifier; the word "function" must not reset inCodeSection
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+  LOOP
+    CASE nexttoken
+    of token:function
+      x = 1
+    end
+    If x >= 10 then break.
+  END
+`;
+            assert.strictEqual(cycleBreakDiags(code).length, 0);
+        });
+
         test('validateDocument includes CYCLE/BREAK diagnostic', () => {
             const code = `
 MyProc  PROCEDURE()
