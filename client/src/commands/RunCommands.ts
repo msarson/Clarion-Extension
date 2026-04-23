@@ -585,6 +585,19 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
                 return;
             }
 
+            // Warn if not building in a debug configuration
+            const currentConfig = globalSettings.configuration;
+            if (currentConfig && currentConfig.toLowerCase() !== 'debug') {
+                const proceed = await window.showWarningMessage(
+                    `Current build configuration is '${currentConfig}'. Source files will not be available in the debugger unless the project is compiled in Debug mode.`,
+                    "Debug Anyway",
+                    "Cancel"
+                );
+                if (proceed !== "Debug Anyway") {
+                    return;
+                }
+            }
+
             const activeEditor = window.activeTextEditor;
             if (!activeEditor) {
                 window.showWarningMessage("No active file. Please open a file to debug its project.");
