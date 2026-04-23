@@ -196,8 +196,10 @@ function findDebuggerExecutable(): string | undefined {
  * Launches CladbNE.exe with the given program path (detached, no terminal)
  */
 function launchDebugger(debuggerPath: string, exePath: string): void {
-    logger.info(`🐛 Launching debugger: ${debuggerPath} ${exePath}`);
+    const exeDir = path.dirname(exePath);
+    logger.info(`🐛 Launching debugger: ${debuggerPath} ${exePath} (cwd: ${exeDir})`);
     const proc = spawn(debuggerPath, [exePath], {
+        cwd: exeDir,
         detached: true,
         stdio: 'ignore'
     });
