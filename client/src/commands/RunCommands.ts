@@ -1,10 +1,11 @@
-import { commands, window, Disposable, Terminal, Uri, workspace } from 'vscode';
+import { commands, window, Disposable, Terminal, Uri, workspace, languages } from 'vscode';
 import { SolutionCache } from '../SolutionCache';
 import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { ClarionProjectInfo } from 'common/types';
 import { getLanguageClient } from '../LanguageClientManager';
 import { redirectionService } from '../paths/RedirectionService';
 import { globalSettings } from '../globals';
+import { buildSolutionOrProject } from '../buildTasks';
 import * as path from 'path';
 import * as fs from 'fs';
 import { spawn } from 'child_process';
@@ -598,21 +599,6 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
                 }
             }
 
-            // Offer to build before launching the debugger
-            const buildChoice = await window.showInformationMessage(
-                "Build the project before starting the debugger?",
-                "Build and Debug",
-                "Debug Without Building",
-                "Cancel"
-            );
-            if (!buildChoice || buildChoice === "Cancel") {
-                return;
-            }
-            if (buildChoice === "Build and Debug") {
-                logger.info("🔨 Building project before debugging...");
-                await commands.executeCommand('clarion.buildCurrentProject');
-            }
-
             const activeEditor = window.activeTextEditor;
             if (!activeEditor) {
                 window.showWarningMessage("No active file. Please open a file to debug its project.");
@@ -664,6 +650,22 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
                     window.showWarningMessage("Current file does not belong to any project in the solution.");
                     return;
                 }
+            }
+
+            // Offer to build the startup project before launching the debugger
+            const buildChoice = await window.showInformationMessage(
+                `Build project '${selectedProject.name}' before starting the debugger?`,
+                "Build and Debug",
+                "Debug Without Building",
+                "Cancel"
+            );
+            if (!buildChoice || buildChoice === "Cancel") {
+                return;
+            }
+            if (buildChoice === "Build and Debug") {
+                logger.info(`🔨 Building project '${selectedProject.name}' before debugging...`);
+                const { languages } = await import('vscode');
+                await buildSolutionOrProject("Project", selectedProject, languages.createDiagnosticCollection("clarion-debug-build"));
             }
 
             // Resolve cwproj
