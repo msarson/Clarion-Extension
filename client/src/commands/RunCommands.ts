@@ -549,23 +549,34 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             
             logger.info(`✅ Output info: type=${outputInfo.outputType}, name=${outputInfo.outputName}`);
             
-            // No automatic build - developer is responsible for building
-            // Just find and run the executable
-            logger.info(`🔍 Looking for executable...`);
-            
-            // Find the executable
-            const exePath = findExecutable(outputInfo);
-            
-            if (!exePath) {
-                logger.warn(`Executable not found even after build for ${selectedProject.name}`);
-                window.showErrorMessage(`Executable not found. The build may have failed.`);
+            // Offer to build the startup project before running
+            const buildChoice = await window.showInformationMessage(
+                `Build project '${selectedProject.name}' before running?`,
+                "Build and Run",
+                "Run Without Building",
+                "Cancel"
+            );
+            if (!buildChoice || buildChoice === "Cancel") {
                 return;
             }
-            
+            if (buildChoice === "Build and Run") {
+                logger.info(`🔨 Building project '${selectedProject.name}' before running...`);
+                const { languages } = await import('vscode');
+                await buildSolutionOrProject("Project", selectedProject, languages.createDiagnosticCollection("clarion-run-build"), undefined, true);
+            }
+
+            logger.info(`🔍 Looking for executable...`);
+
+            const exePath = findExecutable(outputInfo);
+
+            if (!exePath) {
+                window.showErrorMessage(`Executable not found for project "${selectedProject.name}". Build the project first.`);
+                return;
+            }
+
             logger.info(`🚀 Found executable: ${exePath}`);
             logger.info(`🏃 Running executable...`);
-            
-            // Run the executable
+
             runExecutable(exePath);
             
             logger.info(`✅ Command completed successfully`);
