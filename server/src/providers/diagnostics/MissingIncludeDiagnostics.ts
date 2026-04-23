@@ -101,9 +101,10 @@ export async function validateMissingIncludes(
     const constantsChecker = cwprojPath ? new ProjectConstantsChecker() : undefined;
 
     for (const { typeToken, typeName, typeNameStart } of collectGlobalTypeTokens(tokens)) {
-        const definitions = sdi.find(typeName, projectPath).length > 0
+        const definitions = (sdi.find(typeName, projectPath).length > 0
             ? sdi.find(typeName, projectPath)
-            : sdi.find(typeName);
+            : sdi.find(typeName)
+        ).filter(d => d.structureType === 'CLASS' || d.structureType === 'INTERFACE');
 
         if (definitions.length === 0) continue;
 
@@ -183,9 +184,10 @@ export async function validateMissingConstants(
     const constantsChecker = new ProjectConstantsChecker();
 
     for (const { typeToken, typeName, typeNameStart } of collectGlobalTypeTokens(tokens)) {
-        const definitions = sdi.find(typeName, projectPath).length > 0
+        const definitions = (sdi.find(typeName, projectPath).length > 0
             ? sdi.find(typeName, projectPath)
-            : sdi.find(typeName);
+            : sdi.find(typeName)
+        ).filter(d => d.structureType === 'CLASS' || d.structureType === 'INTERFACE');
 
         if (definitions.length === 0) continue;
 

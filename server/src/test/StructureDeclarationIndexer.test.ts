@@ -168,6 +168,45 @@ suite('StructureDeclarationIndexer — scanSourceForDeclarations', () => {
     });
 
     // -----------------------------------------------------------------------
+    // Blank-label ITEMIZE (no label at column 0, e.g. XMLType.inc style)
+    // -----------------------------------------------------------------------
+    suite('blank-label ITEMIZE', () => {
+        const blankItemizeSource = [
+            '              ITEMIZE,PRE(CLType)',
+            'BYTE          EQUATE',
+            'SHORT         EQUATE',
+            'ULONG         EQUATE',
+            'END',
+        ].join('\n');
+
+        test('member EQUATEs get PRE prefix even with no block label', () => {
+            const r = scan(blankItemizeSource);
+            assert.ok(findByName(r, 'CLType:BYTE'), 'CLType:BYTE should be indexed');
+            assert.ok(findByName(r, 'CLType:SHORT'), 'CLType:SHORT should be indexed');
+            assert.ok(findByName(r, 'CLType:ULONG'), 'CLType:ULONG should be indexed');
+        });
+
+        test('bare names are NOT indexed for blank-label ITEMIZE', () => {
+            const r = scan(blankItemizeSource);
+            assert.strictEqual(findByName(r, 'BYTE'), undefined, '"BYTE" should not appear as bare name');
+            assert.strictEqual(findByName(r, 'SHORT'), undefined, '"SHORT" should not appear as bare name');
+        });
+
+        test('blank-label ITEMIZE without PRE indexes entries under plain name', () => {
+            const source = [
+                '              ITEMIZE',
+                'ValA          EQUATE(1)',
+                'ValB          EQUATE(2)',
+                'END',
+            ].join('\n');
+            const r = scan(source);
+            // No PRE → entries use their own label
+            assert.ok(findByName(r, 'ValA'), 'ValA should be indexed');
+            assert.ok(findByName(r, 'ValB'), 'ValB should be indexed');
+        });
+    });
+
+    // -----------------------------------------------------------------------
     // Comment handling
     // -----------------------------------------------------------------------
     suite('comments', () => {
