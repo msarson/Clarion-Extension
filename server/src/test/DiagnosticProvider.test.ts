@@ -2115,4 +2115,46 @@ Init      PROCEDURE()
         const diags = labelDiags(code);
         assert.strictEqual(diags.length, 0, 'CLASS as CLASS structure label should not be flagged');
     });
+
+    // ── Case 3: reserved keywords as field/method names inside structures ─────
+
+    test('CODE as field label inside GROUP → no error', () => {
+        const code = `MyGroup GROUP
+Code      LONG
+End`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 0, 'CODE is valid as a field name inside GROUP');
+    });
+
+    test('CODE as method name inside CLASS → no error', () => {
+        const code = `MyClass CLASS
+Code      PROCEDURE()
+End`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 0, 'CODE is valid as a method name inside CLASS');
+    });
+
+    test('JOIN as method name inside CLASS → no error', () => {
+        const code = `MyClass CLASS
+Join      PROCEDURE()
+End`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 0, 'JOIN is valid as a method name inside CLASS');
+    });
+
+    test('DATA as field label inside QUEUE → no error', () => {
+        const code = `MyQueue QUEUE
+Data      STRING(20)
+End`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 0, 'DATA is valid as a field name inside QUEUE');
+    });
+
+    test('CODE as standalone procedure label (outside structure) → error', () => {
+        const code = `CODE    PROCEDURE()
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 1, 'CODE as standalone procedure label should still be flagged');
+    });
 });

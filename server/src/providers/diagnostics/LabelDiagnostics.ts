@@ -39,10 +39,12 @@ const STRUCTURE_ONLY = new Set([
  * Validates that Clarion reserved keywords are not used as labels.
  *
  * Two cases are checked:
- *  1. A Label token whose value is fully reserved → always an error.
+ *  1. A Label token whose value is fully reserved → always an error,
+ *     UNLESS the label appears inside a structure (CLASS/GROUP/QUEUE etc.),
+ *     where keywords are valid as field or method names.
  *  2. A Label token whose value is structure-only AND the next token on the
- *     same line is PROCEDURE or FUNCTION → error (structure keywords may not
- *     label a procedure).
+ *     same line is PROCEDURE or FUNCTION → error, UNLESS the label is inside
+ *     a structure definition (e.g. a method declaration inside CLASS).
  *
  * Closes #69
  */
@@ -56,6 +58,9 @@ export function validateReservedKeywordLabels(tokens: Token[], document: TextDoc
         const upper = token.value.toUpperCase();
 
         if (FULLY_RESERVED.has(upper)) {
+            // Reserved words are valid as field names and method names inside structures
+            // (e.g. `Code LONG` inside GROUP, or `Code PROCEDURE()` inside CLASS)
+            if (findEnclosingStructure(tokens, i)) continue;
             diagnostics.push(makeDiagnostic(
                 token,
                 `'${token.value}' is a reserved keyword and cannot be used as a label.`
@@ -67,6 +72,9 @@ export function validateReservedKeywordLabels(tokens: Token[], document: TextDoc
             // Find the next non-Comment token on the same line
             const nextToken = findNextOnLine(tokens, i + 1, token.line);
             if (nextToken && isProcedureKeyword(nextToken)) {
+                // Structure keywords are valid method names inside CLASS/INTERFACE
+                // (e.g. `Join PROCEDURE()` inside a CLASS)
+                if (findEnclosingStructure(tokens, i)) continue;
                 diagnostics.push(makeDiagnostic(
                     token,
                     `'${token.value}' cannot be the label of a PROCEDURE or FUNCTION declaration.`
@@ -82,6 +90,25 @@ function findNextOnLine(tokens: Token[], from: number, line: number): Token | un
     for (let i = from; i < tokens.length; i++) {
         if (tokens[i].line !== line) return undefined;
         if (tokens[i].type !== TokenType.Comment) return tokens[i];
+    }
+    return undefined;
+}
+
+/**
+ * Scans backward from labelIndex to find the innermost open Structure token
+ * that contains the label's line. Uses finishesAt to determine if a structure
+ * is still open at the label's position.
+ */
+function findEnclosingStructure(tokens: Token[], labelIndex: number): Token | undefined {
+    const labelLine = tokens[labelIndex].line;
+    for (let j = labelIndex - 1; j >= 0; j--) {
+        const t = tokens[j];
+        if (t.type !== TokenType.Structure) continue;
+        // finishesAt undefined means the structure hasn't been closed yet
+        if (t.finishesAt === undefined || t.finishesAt >= labelLine) {
+            return t;
+        }
+        // This structure closed before our label — keep scanning outward
     }
     return undefined;
 }
