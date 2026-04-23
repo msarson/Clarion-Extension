@@ -33,8 +33,9 @@ export async function workspaceHasBeenTrusted(
 ): Promise<void> {
     logger.info("✅ Workspace has been trusted or refreshed. Initializing...");
 
-    // Read solution file directly from workspace settings first
-    const solutionFileFromSettings = workspace.getConfiguration().get<string>("clarion.solutionFile", "");
+    // Read current solution directly from workspace settings
+    const solutionFileFromSettings = workspace.getConfiguration().get<string>("clarion.currentSolution", "")
+        || workspace.getConfiguration().get<string>("clarion.solutionFile", "");
     logger.info(`🔍 Solution file from workspace settings: ${solutionFileFromSettings || 'not set'}`);
 
     // Load settings from workspace.json

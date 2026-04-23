@@ -1,6 +1,7 @@
 import { window, workspace, StatusBarItem, StatusBarAlignment } from 'vscode';
 import { globalSolutionFile, getClarionConfigTarget } from '../globals';
 import { SolutionCache } from '../SolutionCache';
+import { SettingsStorageManager } from '../utils/SettingsStorageManager';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("StatusBarManager");
@@ -34,11 +35,7 @@ export async function updateConfigurationStatusBar(configuration: string): Promi
 
     if (currentConfig !== configuration) {
         logger.info(`🔄 Updating folder configuration: clarion.configuration = ${configuration}`);
-        const target = getClarionConfigTarget();
-        if (target && workspace.workspaceFolders) {
-            const config = workspace.getConfiguration("clarion", workspace.workspaceFolders[0].uri);
-            await config.update("configuration", configuration, target);
-        }
+        await SettingsStorageManager.updateActiveConfiguration(configuration);
     }
 }
 
