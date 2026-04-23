@@ -588,7 +588,7 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
 
             // Warn if not building in a debug configuration
             const currentConfig = globalSettings.configuration;
-            if (currentConfig && currentConfig.toLowerCase() !== 'debug') {
+            if (currentConfig && !currentConfig.toLowerCase().startsWith('debug')) {
                 const proceed = await window.showWarningMessage(
                     `Current build configuration is '${currentConfig}'. Source files will not be available in the debugger unless the project is compiled in Debug mode.`,
                     "Debug Anyway",
