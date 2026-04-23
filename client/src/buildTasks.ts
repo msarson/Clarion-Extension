@@ -808,7 +808,8 @@ export async function buildSolutionOrProject(
     buildTarget: "Solution" | "Project",
     project: ClarionProjectInfo | undefined,
     diagnosticCollection: DiagnosticCollection,
-    solutionTreeDataProvider?: any
+    solutionTreeDataProvider?: any,
+    waitForCompletion: boolean = false
 ): Promise<void> {
     const buildConfig = {
         buildTarget,
@@ -838,7 +839,11 @@ export async function buildSolutionOrProject(
         diagnosticCollection
     };
 
-    await executeBuildTask(buildParams);
+    if (waitForCompletion) {
+        await executeBuildTaskSync(buildParams);
+    } else {
+        await executeBuildTask(buildParams);
+    }
 }
 
 /**

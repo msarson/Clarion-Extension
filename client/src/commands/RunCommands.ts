@@ -665,7 +665,7 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             if (buildChoice === "Build and Debug") {
                 logger.info(`🔨 Building project '${selectedProject.name}' before debugging...`);
                 const { languages } = await import('vscode');
-                await buildSolutionOrProject("Project", selectedProject, languages.createDiagnosticCollection("clarion-debug-build"));
+                await buildSolutionOrProject("Project", selectedProject, languages.createDiagnosticCollection("clarion-debug-build"), undefined, true);
             }
 
             // Resolve cwproj
