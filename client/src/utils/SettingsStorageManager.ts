@@ -55,15 +55,17 @@ export class SettingsStorageManager {
             await config.update('currentSolution', solutionFile, target);
             logger.info(`✅ Saved currentSolution`);
 
-            // Save remaining individual settings
-            await config.update('solutionFile', solutionFile, target);
-            logger.info(`✅ Saved solutionFile`);
-            await config.update('propertiesFile', propertiesFile, target);
-            logger.info(`✅ Saved propertiesFile`);
-            await config.update('version', version, target);
-            logger.info(`✅ Saved version`);
+            // Save configuration (still needed as a standalone key so onDidChangeConfiguration fires)
             await config.update('configuration', configuration, target);
             logger.info(`✅ Saved configuration`);
+
+            // Remove legacy individual keys that are now fully covered by the solutions array
+            for (const legacyKey of ['solutionFile', 'propertiesFile', 'version'] as const) {
+                const inspection = config.inspect(legacyKey);
+                if (inspection?.workspaceFolderValue !== undefined) {
+                    await config.update(legacyKey, undefined, target);
+                }
+            }
 
             logger.info(`✅ Saved settings successfully:
                 - solutionFile: ${solutionFile}
@@ -78,6 +80,32 @@ export class SettingsStorageManager {
             window.showErrorMessage(`Failed to save solution settings: ${errorMsg}`);
             return false;
         }
+    }
+
+    /**
+     * Updates the configuration of the active solution in the solutions array,
+     * and writes the standalone clarion.configuration key (so onDidChangeConfiguration fires).
+     * Call this whenever the user changes the build configuration.
+     */
+    static async updateActiveConfiguration(configuration: string): Promise<void> {
+        const workspaceFolder = workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) return;
+
+        const config = workspace.getConfiguration('clarion', workspaceFolder.uri);
+        const currentSolution = config.get<string>('currentSolution', '');
+        const solutions = config.get<ClarionSolutionSettings[]>('solutions', []);
+
+        const idx = currentSolution
+            ? solutions.findIndex(s => s.solutionFile === currentSolution)
+            : -1;
+
+        if (idx >= 0) {
+            solutions[idx] = { ...solutions[idx], configuration };
+            await config.update('solutions', solutions, ConfigurationTarget.WorkspaceFolder);
+        }
+
+        await config.update('configuration', configuration, ConfigurationTarget.WorkspaceFolder);
+        logger.info(`✅ Updated active configuration to: ${configuration}`);
     }
 
     /**
