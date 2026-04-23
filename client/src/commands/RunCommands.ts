@@ -4,8 +4,10 @@ import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { ClarionProjectInfo } from 'common/types';
 import { getLanguageClient } from '../LanguageClientManager';
 import { redirectionService } from '../paths/RedirectionService';
+import { globalSettings } from '../globals';
 import * as path from 'path';
 import * as fs from 'fs';
+import { spawn } from 'child_process';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("RunCommands");
@@ -167,6 +169,41 @@ function runExecutable(exePath: string): void {
     terminal.show();
     terminal.sendText(`.\\${exeName}`);
 }
+
+/**
+ * Finds the Clarion debugger executable (CladbNE.exe) from the Clarion bin folder
+ */
+function findDebuggerExecutable(): string | undefined {
+    const redirectionPath = globalSettings.redirectionPath;
+    if (!redirectionPath) {
+        logger.warn("⚠️ Clarion redirectionPath not set — cannot locate debugger");
+        return undefined;
+    }
+
+    const clarionBinPath = redirectionPath.replace(/redirection.*/i, "bin");
+    const debuggerPath = path.join(clarionBinPath, "CladbNE.exe");
+
+    if (fs.existsSync(debuggerPath)) {
+        logger.info(`✅ Found debugger: ${debuggerPath}`);
+        return debuggerPath;
+    }
+
+    logger.warn(`❌ CladbNE.exe not found at: ${debuggerPath}`);
+    return undefined;
+}
+
+/**
+ * Launches CladbNE.exe with the given program path (detached, no terminal)
+ */
+function launchDebugger(debuggerPath: string, exePath: string): void {
+    logger.info(`🐛 Launching debugger: ${debuggerPath} ${exePath}`);
+    const proc = spawn(debuggerPath, [exePath], {
+        detached: true,
+        stdio: 'ignore'
+    });
+    proc.unref();
+}
+
 
 /**
  * Registers all run-related commands
@@ -529,6 +566,104 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             runExecutable(exePath);
             
             logger.info(`✅ Command completed successfully`);
+        }),
+
+        commands.registerCommand('clarion.startDebugging', async () => {
+            logger.info("🐛 Starting Clarion debugger...");
+
+            const debuggerExe = findDebuggerExecutable();
+            if (!debuggerExe) {
+                const action = await window.showErrorMessage(
+                    "Clarion debugger (CladbNE.exe) not found. Ensure a solution with a valid Clarion version is loaded.",
+                    "Open Settings"
+                );
+                if (action === "Open Settings") {
+                    commands.executeCommand('workbench.action.openSettings', 'clarion');
+                }
+                return;
+            }
+
+            const activeEditor = window.activeTextEditor;
+            if (!activeEditor) {
+                window.showWarningMessage("No active file. Please open a file to debug its project.");
+                return;
+            }
+
+            const solutionCache = SolutionCache.getInstance();
+            const solutionInfo = solutionCache.getSolutionInfo();
+            if (!solutionInfo) {
+                window.showWarningMessage("No solution is currently loaded.");
+                return;
+            }
+
+            // Reuse startup project / current file logic (same as runWithoutDebugging)
+            const workspaceConfig = workspace.getConfiguration('clarion');
+            const startupProjectGuid = workspaceConfig.get<string>('startupProject');
+            let selectedProject: ClarionProjectInfo | undefined;
+
+            if (startupProjectGuid) {
+                selectedProject = solutionInfo.projects.find(p =>
+                    p.guid.replace(/[{}]/g, '').toLowerCase() === startupProjectGuid.replace(/[{}]/g, '').toLowerCase()
+                );
+                if (!selectedProject) {
+                    window.showWarningMessage("Configured startup project not found. Please set a valid startup project.");
+                    return;
+                }
+            } else {
+                const client = getLanguageClient();
+                if (!client) {
+                    window.showErrorMessage("Language client not available. Please wait for the extension to fully load.");
+                    return;
+                }
+
+                const filePath = activeEditor.document.uri.fsPath;
+                for (const proj of solutionInfo.projects) {
+                    try {
+                        const response = await client.sendRequest<{ files: any[] }>('clarion/getProjectFiles', { projectGuid: proj.guid });
+                        if (response?.files) {
+                            const found = response.files.find(f => {
+                                const fp = f.absolutePath || (f.relativePath ? path.resolve(proj.path, f.relativePath) : undefined);
+                                return fp && path.normalize(fp).toLowerCase() === path.normalize(filePath).toLowerCase();
+                            });
+                            if (found) { selectedProject = proj; break; }
+                        }
+                    } catch { /* continue */ }
+                }
+
+                if (!selectedProject) {
+                    window.showWarningMessage("Current file does not belong to any project in the solution.");
+                    return;
+                }
+            }
+
+            // Resolve cwproj
+            let cwprojPath: string;
+            if (selectedProject.filename) {
+                cwprojPath = path.join(selectedProject.path, selectedProject.filename);
+            } else {
+                const files = fs.existsSync(selectedProject.path) ? fs.readdirSync(selectedProject.path) : [];
+                const cwprojFile = files.find(f => f.toLowerCase().endsWith('.cwproj'));
+                if (!cwprojFile) {
+                    window.showWarningMessage(`No .cwproj file found for project "${selectedProject.name}".`);
+                    return;
+                }
+                cwprojPath = path.join(selectedProject.path, cwprojFile);
+            }
+
+            const outputInfo = extractProjectOutputInfo(cwprojPath);
+            if (!outputInfo) {
+                window.showWarningMessage(`Project "${selectedProject.name}" is not an executable project.`);
+                return;
+            }
+
+            const exePath = findExecutable(outputInfo);
+            if (!exePath) {
+                window.showErrorMessage(`Executable not found for project "${selectedProject.name}". Build the project first.`);
+                return;
+            }
+
+            launchDebugger(debuggerExe, exePath);
+            logger.info(`✅ Debugger launched for: ${exePath}`);
         })
     ];
 }

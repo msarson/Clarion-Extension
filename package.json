@@ -197,6 +197,11 @@
         "when": "clarion.solutionOpen && editorTextFocus"
       },
       {
+        "command": "clarion.startDebugging",
+        "key": "f5",
+        "when": "clarion.solutionOpen && editorTextFocus"
+      },
+      {
         "command": "clarion.quickOpen",
         "key": "ctrl+p",
         "when": "clarion.solutionOpen && editorTextFocus"
@@ -249,6 +254,11 @@
       {
         "command": "clarion.runWithoutDebugging",
         "title": "Run Without Debugging",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.startDebugging",
+        "title": "Start Debugging (Clarion Debugger)",
         "when": "clarion.solutionOpen"
       },
       {
