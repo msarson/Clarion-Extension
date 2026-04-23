@@ -261,6 +261,44 @@ CODE
 
 ---
 
+### Missing INCLUDE Diagnostic
+
+**Detects variables whose class type is defined in an `.inc` file that isn't included:**
+
+```clarion
+st   StringTheory    ! ⚠️ Warning: 'StringTheory' is defined in 'StringTheory.inc' which is not included.
+af   &FileManager    ! ⚠️ Warning: 'FileManager' is defined in 'ABFile.inc' which is not included.
+```
+
+**How it works:**
+- Checks global-scope variable declarations (column 0) whose type is a known `CLASS` or `INTERFACE`
+- Walks the full transitive include chain (any depth, cycle-safe) — a type included via `A.inc → B.inc` is correctly resolved
+- Also checks the `MEMBER` parent file's includes if the current file has a `MEMBER('parent.clw')` statement
+
+**Quick fix (`Ctrl+.`):**
+- **Add INCLUDE to this file** — inserts `INCLUDE('type.inc'),ONCE` at module scope
+- **Add INCLUDE to MEMBER parent** — inserts into the parent `.clw` file instead
+- **Add INCLUDE + constants** — inserts the include *and* any missing `DefineConstants` entries in one step
+
+---
+
+### Missing DefineConstants Diagnostic
+
+**Detects class types whose `.inc` is present but required `Link()`/`DLL()` constants are missing from the project:**
+
+```clarion
+st   StringTheory    ! ℹ️ Info: 'StringTheory' requires project constants that are not defined: ST_LinkMode, ST_DllMode
+```
+
+This fires as **Information** severity (blue squiggle) — the code compiles but will link or run incorrectly without the constants.
+
+**Quick fix (`Ctrl+.`):**
+- **Add Link constants** — QuickPick prompts: *Static link* (`LinkMode=>1, DllMode=>0`) or *DLL mode* (`LinkMode=>0, DllMode=>1`). Adds the chosen constants to `DefineConstants` in the `.cwproj`.
+
+The diagnostic clears immediately once the constants are added (the extension watches the `.cwproj` file for changes).
+
+---
+
 ## Viewing Diagnostics
 
 ### In-Editor Indicators
