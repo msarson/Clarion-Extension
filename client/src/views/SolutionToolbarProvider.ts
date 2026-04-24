@@ -85,10 +85,10 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
 </style>
 </head>
 <body>
-  <button title="Open in Clarion IDE" onclick="vscode.postMessage({command:'openInClarionIDE'})">
-    <img src="${iconUri}" alt="Open in Clarion IDE" />
+  <button title="Open Solution in Clarion IDE" onclick="vscode.postMessage({command:'openInClarionIDE'})">
+    <img src="${iconUri}" alt="Open Solution in Clarion IDE" />
   </button>
-  <span>Open in Clarion IDE</span>
+  <span>Open Solution in Clarion IDE</span>
   <script>
     const vscode = acquireVsCodeApi();
   </script>

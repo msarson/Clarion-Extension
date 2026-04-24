@@ -240,7 +240,7 @@
         },
         {
           "id": "clarionSolutionToolbar",
-          "name": "",
+          "name": "Clarion Actions",
           "type": "webview",
           "icon": "images/sv57x57.png",
           "visibility": "visible"
