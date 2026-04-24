@@ -19,7 +19,9 @@ interface ProjectOutputInfo {
     outputName: string;
     configuration: string;
     projectDir: string;
-    startProgram?: string; // Optional path from <StartProgram> element
+    startProgram?: string;
+    startWorkingDirectory?: string;
+    startArguments?: string;
 }
 
 /**
@@ -37,53 +39,65 @@ function extractProjectOutputInfo(cwprojPath: string): ProjectOutputInfo | undef
         const content = fs.readFileSync(cwprojPath, 'utf8');
         const projectDir = path.dirname(cwprojPath);
 
-        // Extract PropertyGroup sections
-        const propertyGroupRegex = /<PropertyGroup\b[^>]*>([\s\S]*?)<\/PropertyGroup>/gi;
+        // Active config from settings e.g. "Debug|Win32" → base name "Debug"
+        const activeFullConfig = globalSettings.configuration || 'Debug';
+        const activeConfigName = activeFullConfig.split('|')[0].trim();
+
+        const propertyGroupRegex = /<PropertyGroup(\b[^>]*)>([\s\S]*?)<\/PropertyGroup>/gi;
         const properties = new Map<string, string>();
 
         let propertyGroupMatch;
         while ((propertyGroupMatch = propertyGroupRegex.exec(content)) !== null) {
-            const propertyGroupContent = propertyGroupMatch[1];
-            
-            // Extract properties
+            const groupAttrs = propertyGroupMatch[1];
+            const groupBody = propertyGroupMatch[2];
+
+            // Evaluate the Condition attribute if present
+            const conditionAttr = groupAttrs.match(/Condition\s*=\s*"([^"]*)"/i)?.[1] ?? '';
+            if (conditionAttr) {
+                const rhsMatch = conditionAttr.match(/==\s*'([^']*)'/i);
+                if (rhsMatch) {
+                    const rhs = rhsMatch[1];
+                    const rhsLower = rhs.toLowerCase();
+                    // Accept if RHS matches full config ("Debug|Win32") or just config name ("Debug")
+                    if (rhsLower !== activeFullConfig.toLowerCase() && rhsLower !== activeConfigName.toLowerCase()) {
+                        continue;
+                    }
+                } else {
+                    // Condition exists but no == comparison we can evaluate — skip
+                    continue;
+                }
+            }
+
             const propertyRegex = /<([^>\s]+)>([^<]+)<\/\1>/g;
             let propertyMatch;
-            
-            while ((propertyMatch = propertyRegex.exec(propertyGroupContent)) !== null) {
-                const propertyName = propertyMatch[1];
-                const propertyValue = propertyMatch[2].trim();
-                
-                // Always overwrite with the latest value found (configuration-specific values come later)
-                properties.set(propertyName.toLowerCase(), propertyValue);
+            while ((propertyMatch = propertyRegex.exec(groupBody)) !== null) {
+                properties.set(propertyMatch[1].toLowerCase(), propertyMatch[2].trim());
             }
         }
 
         const outputType = properties.get('outputtype') || '';
         const outputName = properties.get('outputname') || properties.get('assemblyname') || '';
-        const configuration = properties.get('configuration') || 'Debug';
-        const model = properties.get('model') || '';
         const startProgram = properties.get('startprogram') || '';
+        const startWorkingDirectory = properties.get('startworkingdirectory') || '';
+        const startArguments = properties.get('startarguments') || '';
 
-        // Check if this is an executable project
-        // OutputType takes priority: Exe or WinExe = executable
-        // If OutputType is Library, it's definitely not executable regardless of Model
         const outputTypeLower = outputType.toLowerCase();
-        const isExecutable = (outputTypeLower === 'exe' || outputTypeLower === 'winexe') && 
-                            outputName.length > 0;
+        const isExecutable = (outputTypeLower === 'exe' || outputTypeLower === 'winexe') && outputName.length > 0;
 
-        // Only return info if this is an executable project
-        if (isExecutable) {
-            return {
-                outputType,
-                outputName,
-                configuration,
-                projectDir,
-                startProgram: startProgram || undefined
-            };
+        if (!isExecutable) {
+            logger.info(`Project is not executable: OutputType=${outputType}`);
+            return undefined;
         }
 
-        logger.info(`Project is not executable: OutputType=${outputType}, Model=${model}`);
-        return undefined;
+        return {
+            outputType,
+            outputName,
+            configuration: activeConfigName,
+            projectDir,
+            startProgram: startProgram || undefined,
+            startWorkingDirectory: startWorkingDirectory || undefined,
+            startArguments: startArguments || undefined,
+        };
     } catch (error) {
         logger.error(`Error extracting project output info: ${error instanceof Error ? error.message : String(error)}`);
         return undefined;
@@ -96,60 +110,57 @@ function extractProjectOutputInfo(cwprojPath: string): ProjectOutputInfo | undef
  * @returns Path to the executable or undefined if not found
  */
 function findExecutable(outputInfo: ProjectOutputInfo): string | undefined {
-    const { outputName, configuration, projectDir, startProgram } = outputInfo;
-    const exeName = outputName.endsWith('.exe') ? outputName : `${outputName}.exe`;
-    
+    const { outputName, projectDir, startProgram } = outputInfo;
+
+    // Only look for .exe files
+    const exeName = outputName.toLowerCase().endsWith('.exe') ? outputName : `${outputName}.exe`;
+
     logger.info(`Looking for executable: ${exeName} in project: ${projectDir}`);
-    logger.info(`Configuration: ${configuration}`);
-    
-    // Check StartProgram first - this is the most explicit setting
+
+    // StartProgram is the most explicit — relative to project dir
     if (startProgram) {
-        logger.info(`Found StartProgram setting: ${startProgram}`);
-        
-        // StartProgram path is relative to project directory
-        const startProgramPath = path.isAbsolute(startProgram) 
-            ? startProgram 
+        const startProgramPath = path.isAbsolute(startProgram)
+            ? startProgram
             : path.resolve(projectDir, startProgram);
-        
         if (fs.existsSync(startProgramPath)) {
             logger.info(`✅ Found executable via StartProgram: ${startProgramPath}`);
             return startProgramPath;
-        } else {
-            logger.warn(`⚠️ StartProgram path does not exist: ${startProgramPath}`);
         }
+        logger.warn(`⚠️ StartProgram path does not exist: ${startProgramPath}`);
     }
-    
-    // Try using redirection service
+
+    // Try redirection service — *.exe entries are relative to project dir
     try {
         const resolver = redirectionService.getResolver(projectDir);
-        const resolvedPath = resolver(exeName);
-        
-        if (resolvedPath && fs.existsSync(resolvedPath)) {
-            logger.info(`✅ Found executable via redirection: ${resolvedPath}`);
-            return resolvedPath;
+        const resolved = resolver(exeName);
+        if (resolved) {
+            const absoluteResolved = path.isAbsolute(resolved)
+                ? resolved
+                : path.resolve(projectDir, resolved);
+            if (fs.existsSync(absoluteResolved)) {
+                logger.info(`✅ Found executable via redirection: ${absoluteResolved}`);
+                return absoluteResolved;
+            }
         }
     } catch (error) {
         logger.warn(`Redirection resolution failed: ${error instanceof Error ? error.message : String(error)}`);
     }
-    
-    // Fallback to common locations
+
+    // Fallback: common locations relative to project dir
     const possiblePaths = [
         path.join(projectDir, exeName),
         path.join(projectDir, 'working', exeName),
         path.join(projectDir, 'bin', exeName),
-        path.join(projectDir, 'bin', configuration, exeName),
-        path.join(projectDir, 'obj', exeName),
-        path.join(projectDir, 'obj', configuration, exeName)
     ];
 
-    for (const exePath of possiblePaths) {
-        if (fs.existsSync(exePath)) {
-            logger.info(`✅ Found executable: ${exePath}`);
-            return exePath;
+    for (const p of possiblePaths) {
+        if (fs.existsSync(p)) {
+            logger.info(`✅ Found executable: ${p}`);
+            return p;
         }
     }
 
-    logger.warn(`❌ Executable not found. Searched in: ${possiblePaths.join(', ')}`);
+    logger.warn(`❌ Executable not found. Searched: ${possiblePaths.join(', ')}`);
     return undefined;
 }
 
@@ -157,18 +168,14 @@ function findExecutable(outputInfo: ProjectOutputInfo): string | undefined {
  * Runs an executable in a VS Code terminal
  * @param exePath - Path to the executable
  */
-function runExecutable(exePath: string): void {
-    const exeDir = path.dirname(exePath);
+function runExecutable(exePath: string, workingDir?: string, args?: string): void {
     const exeName = path.basename(exePath);
-    
-    // Create a new terminal
-    const terminal: Terminal = window.createTerminal({
-        name: `Run: ${exeName}`,
-        cwd: exeDir
-    });
-    
+    const cwd = workingDir ?? path.dirname(exePath);
+    const terminal: Terminal = window.createTerminal({ name: `Run: ${exeName}`, cwd });
     terminal.show();
-    terminal.sendText(`.\\${exeName}`);
+    // Use absolute path so the exe is found regardless of working directory
+    const cmd = args?.trim() ? `"${exePath}" ${args.trim()}` : `"${exePath}"`;
+    terminal.sendText(cmd);
 }
 
 /**
@@ -196,14 +203,11 @@ function findDebuggerExecutable(): string | undefined {
 /**
  * Launches CladbNE.exe with the given program path (detached, no terminal)
  */
-function launchDebugger(debuggerPath: string, exePath: string): void {
-    const exeDir = path.dirname(exePath);
-    logger.info(`🐛 Launching debugger: ${debuggerPath} ${exePath} (cwd: ${exeDir})`);
-    const proc = spawn(debuggerPath, [exePath], {
-        cwd: exeDir,
-        detached: true,
-        stdio: 'ignore'
-    });
+function launchDebugger(debuggerPath: string, exePath: string, workingDir?: string, args?: string): void {
+    const cwd = workingDir ?? path.dirname(exePath);
+    const spawnArgs = args?.trim() ? [exePath, ...args.trim().split(/\s+/)] : [exePath];
+    logger.info(`🐛 Launching debugger: ${debuggerPath} ${spawnArgs.join(' ')} (cwd: ${cwd})`);
+    const proc = spawn(debuggerPath, spawnArgs, { cwd, detached: true, stdio: 'ignore' });
     proc.unref();
 }
 
@@ -577,7 +581,9 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             logger.info(`🚀 Found executable: ${exePath}`);
             logger.info(`🏃 Running executable...`);
 
-            runExecutable(exePath);
+            runExecutable(exePath,
+                outputInfo.startWorkingDirectory ? path.resolve(outputInfo.projectDir, outputInfo.startWorkingDirectory) : undefined,
+                outputInfo.startArguments);
             
             logger.info(`✅ Command completed successfully`);
         }),
@@ -705,7 +711,9 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
                 return;
             }
 
-            launchDebugger(debuggerExe, exePath);
+            launchDebugger(debuggerExe, exePath,
+                outputInfo.startWorkingDirectory ? path.resolve(outputInfo.projectDir, outputInfo.startWorkingDirectory) : undefined,
+                outputInfo.startArguments);
             logger.info(`✅ Debugger launched for: ${exePath}`);
         })
     ];
