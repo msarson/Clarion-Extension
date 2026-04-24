@@ -121,12 +121,25 @@ export class SymbolFinderService {
             return next.value.startsWith('&') ? next.value.substring(1) : next.value;
         }
         if (next.type === TokenType.Structure) {
-            // Look for type arg: QUEUE(TypeName) → "QUEUE(TypeName)"
+            // Look for type arg ONLY in the immediate first (...) after the structure keyword.
+            // e.g. CLASS(WindowManager) → "CLASS(WindowManager)", CLASS() → "CLASS"
+            // Without this guard, Class(), Link('x',SomeName) would incorrectly yield CLASS(SomeName).
             const afterNext = lineTokens.filter(t => t.start > next.start);
-            const typeArg = afterNext.find(t =>
-                (t.type === TokenType.Label || t.type === TokenType.Variable) &&
-                t.value !== '(' && t.value !== ')'
-            );
+            let depth = 0;
+            let seenOpen = false;
+            let typeArg: Token | undefined;
+            for (const t of afterNext) {
+                if (t.value === '(') {
+                    depth++;
+                    seenOpen = true;
+                } else if (t.value === ')') {
+                    depth--;
+                    if (seenOpen && depth === 0) break; // closed the first group — stop
+                } else if (depth === 1 && (t.type === TokenType.Label || t.type === TokenType.Variable)) {
+                    typeArg = t;
+                    break;
+                }
+            }
             return typeArg ? `${next.value.toUpperCase()}(${typeArg.value})` : next.value.toUpperCase();
         }
         if (next.type === TokenType.TypeReference) {
