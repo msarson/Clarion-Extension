@@ -213,13 +213,24 @@ export async function createStatusView(
     return { statusView: view, provider };
 }
 
+let globalToolbarProvider: SolutionToolbarProvider | undefined;
+
 /**
  * Registers the solution toolbar webview view provider.
  */
-export function registerSolutionToolbar(context: ExtensionContext): void {
+export function registerSolutionToolbar(context: ExtensionContext): SolutionToolbarProvider {
     const provider = new SolutionToolbarProvider(context.extensionUri);
+    globalToolbarProvider = provider;
     context.subscriptions.push(
         window.registerWebviewViewProvider(SolutionToolbarProvider.viewId, provider)
     );
     logger.info("✅ Solution toolbar registered");
+    return provider;
+}
+
+/**
+ * Updates the solution toolbar state (solution open, startup project name).
+ */
+export function updateSolutionToolbar(solutionOpen: boolean, startupName?: string): void {
+    globalToolbarProvider?.update(solutionOpen, startupName);
 }

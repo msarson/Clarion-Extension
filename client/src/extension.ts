@@ -5,7 +5,7 @@ import { DocumentManager } from './documentManager';
 import { SolutionTreeDataProvider } from './SolutionTreeDataProvider';
 import { StructureViewProvider } from './views/StructureViewProvider';
 import { TreeNode } from './TreeNode';
-import { globalSolutionFile } from './globals';
+import { globalSolutionFile, globalSettings } from './globals';
 import LoggerManager from './utils/LoggerManager';
 
 import { registerNavigationCommands } from './commands/NavigationCommands';
@@ -21,7 +21,7 @@ import { registerImplementationCommands } from './commands/ImplementationCommand
 import { registerClassConstantCommands } from './commands/ClassConstantCommands';
 import { registerIncludeStatementCommands } from './commands/IncludeStatementCommands';
 import { registerNewSolutionCommands } from './commands/NewSolutionCommands';
-import { createSolutionTreeView, createStructureView, registerSolutionToolbar } from './views/ViewManager';
+import { createSolutionTreeView, createStructureView, registerSolutionToolbar, updateSolutionToolbar } from './views/ViewManager';
 import { registerLanguageFeatures } from './providers/LanguageFeatureManager';
 import * as SolutionOpener from './solution/SolutionOpener';
 import { showClarionQuickOpen } from './navigation/QuickOpenProvider';
@@ -193,10 +193,26 @@ async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: D
 
 async function initializeSolution(context: ExtensionContext, refreshDocs: boolean = false): Promise<void> {
     await SolutionInitializer.initializeSolution(context, refreshDocs, client, reinitializeEnvironment, documentManager);
+    _updateToolbar();
 }
 
 async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<DocumentManager> {
     return await SolutionInitializer.reinitializeEnvironment(refreshDocs, client, documentManager);
+}
+
+function _updateToolbar(): void {
+    if (!globalSolutionFile) { updateSolutionToolbar(false); return; }
+    const workspaceConfig = workspace.getConfiguration('clarion');
+    const startupGuid = workspaceConfig.get<string>('startupProject');
+    let startupName: string | undefined;
+    if (startupGuid) {
+        const { SolutionCache } = require('./SolutionCache');
+        const solution = SolutionCache.getInstance().getSolutionInfo();
+        startupName = solution?.projects?.find(
+            (p: any) => p.guid.replace(/[{}]/g, '').toLowerCase() === startupGuid.replace(/[{}]/g, '').toLowerCase()
+        )?.name;
+    }
+    updateSolutionToolbar(true, startupName);
 }
 
 
@@ -218,6 +234,7 @@ export async function openClarionSolution(context: ExtensionContext) {
 
 export async function closeClarionSolution(context: ExtensionContext) {
     await SolutionOpener.closeClarionSolution(context, reinitializeEnvironment, documentManager);
+    updateSolutionToolbar(false);
 }
 
 async function registerOpenCommand(context: ExtensionContext) {
