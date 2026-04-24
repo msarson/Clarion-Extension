@@ -21,7 +21,7 @@ import { registerImplementationCommands } from './commands/ImplementationCommand
 import { registerClassConstantCommands } from './commands/ClassConstantCommands';
 import { registerIncludeStatementCommands } from './commands/IncludeStatementCommands';
 import { registerNewSolutionCommands } from './commands/NewSolutionCommands';
-import { createSolutionTreeView, createStructureView } from './views/ViewManager';
+import { createSolutionTreeView, createStructureView, registerSolutionToolbar } from './views/ViewManager';
 import { registerLanguageFeatures } from './providers/LanguageFeatureManager';
 import * as SolutionOpener from './solution/SolutionOpener';
 import { showClarionQuickOpen } from './navigation/QuickOpenProvider';
@@ -122,6 +122,8 @@ export async function activate(context: ExtensionContext): Promise<void> {
     treeView = solutionTreeResult.treeView;
     solutionTreeDataProvider = solutionTreeResult.provider;
     context.subscriptions.push(treeView);
+
+    registerSolutionToolbar(context);
     
     const structureViewResult = await createStructureView(context, structureView, structureViewProvider);
     structureView = structureViewResult.structureView;

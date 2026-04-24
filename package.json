@@ -239,6 +239,13 @@
           "icon": "images/sv57x57.png"
         },
         {
+          "id": "clarionSolutionToolbar",
+          "name": "",
+          "type": "webview",
+          "icon": "images/sv57x57.png",
+          "visibility": "visible"
+        },
+        {
           "id": "clarionStructureView",
           "name": "Structure",
           "icon": "symbol-structure"
