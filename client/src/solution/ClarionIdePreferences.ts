@@ -47,11 +47,11 @@ export function computeSlnHash(slnPath: string): string {
  * Returns the full path to the Clarion IDE preferences XML for the given solution.
  * The folder is derived from the propertiesFile path:
  *   e.g. C:\...\SoftVelocity\Clarion\10.0\ClarionProperties.xml
- *     →  C:\...\SoftVelocity\Clarion\10.0\preferences\MySln.ecfee7f0.xml
+ *     →  C:\...\SoftVelocity\Clarion\10.0\preferences\MySln.sln.ecfee7f0.xml
  */
 export function getPreferencesFilePath(slnPath: string, propertiesFile: string): string {
     const preferencesDir = path.join(path.dirname(propertiesFile), 'preferences');
-    const slnBasename = path.basename(slnPath, path.extname(slnPath));
+    const slnBasename = path.basename(slnPath); // keep .sln extension: "MySln.sln.hash.xml"
     const hash = computeSlnHash(slnPath);
     return path.join(preferencesDir, `${slnBasename}.${hash}.xml`);
 }
