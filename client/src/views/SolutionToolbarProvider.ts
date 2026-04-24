@@ -64,7 +64,7 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
 <style>
   body {
     margin: 0;
-    padding: 4px 8px;
+    padding: 2px 6px;
     display: flex;
     align-items: center;
     gap: 2px;
@@ -75,7 +75,7 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
     background: none;
     border: none;
     cursor: pointer;
-    padding: 4px 6px;
+    padding: 3px 5px;
     border-radius: 4px;
     display: flex;
     align-items: center;

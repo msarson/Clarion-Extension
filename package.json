@@ -234,16 +234,16 @@
     "views": {
       "clarionViews": [
         {
-          "id": "solutionView",
-          "name": "Solution View",
-          "icon": "images/sv57x57.png"
-        },
-        {
           "id": "clarionSolutionToolbar",
           "name": "Clarion Actions",
           "type": "webview",
           "icon": "images/sv57x57.png",
           "visibility": "visible"
+        },
+        {
+          "id": "solutionView",
+          "name": "Solution View",
+          "icon": "images/sv57x57.png"
         },
         {
           "id": "clarionStructureView",
