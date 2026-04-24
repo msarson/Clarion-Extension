@@ -7,7 +7,6 @@ import { redirectionService } from '../paths/RedirectionService';
 import { globalSettings, globalSolutionFile, globalClarionPropertiesFile } from '../globals';
 import { buildSolutionOrProject } from '../buildTasks';
 import { writeIdePreferences } from '../solution/ClarionIdePreferences';
-import { updateSolutionToolbar } from '../views/ViewManager';
 import * as path from 'path';
 import * as fs from 'fs';
 import { spawn } from 'child_process';
@@ -324,7 +323,6 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             if (solutionTreeDataProvider) {
                 await solutionTreeDataProvider.refresh();
             }
-            updateSolutionToolbar(true, projectName);
         }),
         
         commands.registerCommand('clarion.clearStartupProject', async () => {
@@ -340,7 +338,6 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             if (solutionTreeDataProvider) {
                 await solutionTreeDataProvider.refresh();
             }
-            updateSolutionToolbar(true, undefined);
         }),
         
         commands.registerCommand('clarion.runWithoutDebugging', async () => {
