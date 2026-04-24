@@ -175,8 +175,8 @@ function runExecutable(exePath: string, workingDir?: string, args?: string): voi
     const cwd = workingDir ?? path.dirname(exePath);
     const terminal: Terminal = window.createTerminal({ name: `Run: ${exeName}`, cwd });
     terminal.show();
-    // Use absolute path so the exe is found regardless of working directory
-    const cmd = args?.trim() ? `"${exePath}" ${args.trim()}` : `"${exePath}"`;
+    // Use & call operator so PowerShell doesn't misparse arguments like /debug as division
+    const cmd = args?.trim() ? `& "${exePath}" ${args.trim()}` : `& "${exePath}"`;
     terminal.sendText(cmd);
 }
 
