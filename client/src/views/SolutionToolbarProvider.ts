@@ -33,8 +33,8 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
                 case 'openInClarionIDE':
                     vscode.commands.executeCommand('clarion.openInClarionIDE');
                     break;
-                case 'build':
-                    vscode.commands.executeCommand('clarion.buildAllProjects');
+                case 'run':
+                    vscode.commands.executeCommand('clarion.runWithoutDebugging');
                     break;
                 case 'buildAndRun':
                     await vscode.commands.executeCommand('clarion.buildAllProjects');
@@ -116,12 +116,12 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
   </div>
   <div class="sep"></div>
   <div class="row">
-    <button title="Build solution" onclick="send('build')">🔨&#xFE0E; <span>Build</span></button>
+    <button title="Run without debugging" onclick="send('run')">▶&#xFE0E; <span>Run</span></button>
     <button title="Build then run without debugging" onclick="send('buildAndRun')">▶&#xFE0E; <span>Build &amp; Run</span></button>
   </div>
   <div class="row">
+    <button title="Start debugger without building" onclick="send('startDebugging')">🐛&#xFE0E; <span>Debug</span></button>
     <button title="Build then start debugger" onclick="send('buildAndDebug')">🐛&#xFE0E; <span>Build &amp; Debug</span></button>
-    <button title="Start debugger without building" onclick="send('startDebugging')">🔍&#xFE0E; <span>Debug</span></button>
   </div>
   <script>
     const vscode = acquireVsCodeApi();
