@@ -433,7 +433,8 @@
       },
       {
         "command": "clarion.openInClarionIDE",
-        "title": "Open in Clarion IDE"
+        "title": "Open in Clarion IDE",
+        "icon": "images/sv57x57.png"
       },
       {
         "command": "clarion.importAppFromTextForSolution",
@@ -575,6 +576,11 @@
           "command": "clarion.openInClarionIDE",
           "when": "view == solutionView && viewItem == clarionSolution",
           "group": "navigation"
+        },
+        {
+          "command": "clarion.openInClarionIDE",
+          "when": "view == solutionView && viewItem == clarionSolution",
+          "group": "inline"
         },
         {
           "command": "clarion.copyFilePath",
