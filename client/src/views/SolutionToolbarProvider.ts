@@ -32,6 +32,10 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.onDidReceiveMessage(message => {
             switch (message.command) {
+                case 'ready':
+                    // Webview JS is loaded — send current state now
+                    this._postState();
+                    break;
                 case 'openInClarionIDE':
                     vscode.commands.executeCommand('clarion.openInClarionIDE');
                     break;
@@ -44,8 +48,7 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
             }
         });
 
-        // Push current state once view is ready
-        this._postState();
+        // Do NOT call _postState() here — wait for the 'ready' message from JS
         logger.info("✅ Solution toolbar webview resolved");
     }
 
@@ -149,6 +152,9 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
       document.getElementById('lblDebug').textContent = name ? 'Run in Debugger (' + name + ')' : 'Run in Debugger';
       document.getElementById('lblRun').textContent   = name ? 'Run (' + name + ')'            : 'Run';
     });
+
+    // Notify extension that JS is ready to receive state
+    vscode.postMessage({ command: 'ready' });
   </script>
 </body>
 </html>`;
