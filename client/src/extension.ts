@@ -21,7 +21,7 @@ import { registerImplementationCommands } from './commands/ImplementationCommand
 import { registerClassConstantCommands } from './commands/ClassConstantCommands';
 import { registerIncludeStatementCommands } from './commands/IncludeStatementCommands';
 import { registerNewSolutionCommands } from './commands/NewSolutionCommands';
-import { createSolutionTreeView, createStructureView, registerSolutionToolbar } from './views/ViewManager';
+import { createSolutionTreeView, createStructureView, registerSolutionToolbar, updateSolutionToolbar } from './views/ViewManager';
 import { registerLanguageFeatures } from './providers/LanguageFeatureManager';
 import * as SolutionOpener from './solution/SolutionOpener';
 import { showClarionQuickOpen } from './navigation/QuickOpenProvider';
@@ -193,6 +193,7 @@ async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: D
 
 async function initializeSolution(context: ExtensionContext, refreshDocs: boolean = false): Promise<void> {
     await SolutionInitializer.initializeSolution(context, refreshDocs, client, reinitializeEnvironment, documentManager);
+    updateSolutionToolbar();
 }
 
 async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<DocumentManager> {
@@ -218,6 +219,7 @@ export async function openClarionSolution(context: ExtensionContext) {
 
 export async function closeClarionSolution(context: ExtensionContext) {
     await SolutionOpener.closeClarionSolution(context, reinitializeEnvironment, documentManager);
+    updateSolutionToolbar();
 }
 
 async function registerOpenCommand(context: ExtensionContext) {

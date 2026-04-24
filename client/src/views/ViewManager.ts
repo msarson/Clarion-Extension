@@ -226,3 +226,7 @@ export function registerSolutionToolbar(context: ExtensionContext): void {
     );
     logger.info("✅ Solution toolbar registered");
 }
+
+export function updateSolutionToolbar(): void {
+    globalToolbarProvider?.update();
+}
