@@ -19,6 +19,7 @@ interface ProjectOutputInfo {
     outputName: string;
     configuration: string;
     projectDir: string;
+    isNativeExe: boolean;       // true = WinExe/Exe; false = library with external StartProgram
     startProgram?: string;
     startWorkingDirectory?: string;
     startArguments?: string;
@@ -82,10 +83,11 @@ function extractProjectOutputInfo(cwprojPath: string): ProjectOutputInfo | undef
         const startArguments = properties.get('startarguments') || '';
 
         const outputTypeLower = outputType.toLowerCase();
-        const isExecutable = (outputTypeLower === 'exe' || outputTypeLower === 'winexe') && outputName.length > 0;
+        const isNativeExe = (outputTypeLower === 'exe' || outputTypeLower === 'winexe') && outputName.length > 0;
 
-        if (!isExecutable) {
-            logger.info(`Project is not executable: OutputType=${outputType}`);
+        // Allow non-exe projects only if they have an explicit StartProgram (external exe)
+        if (!isNativeExe && !startProgram) {
+            logger.info(`Project is not executable and has no StartProgram: OutputType=${outputType}`);
             return undefined;
         }
 
@@ -94,6 +96,7 @@ function extractProjectOutputInfo(cwprojPath: string): ProjectOutputInfo | undef
             outputName,
             configuration: activeConfigName,
             projectDir,
+            isNativeExe,
             startProgram: startProgram || undefined,
             startWorkingDirectory: startWorkingDirectory || undefined,
             startArguments: startArguments || undefined,
@@ -110,14 +113,9 @@ function extractProjectOutputInfo(cwprojPath: string): ProjectOutputInfo | undef
  * @returns Path to the executable or undefined if not found
  */
 function findExecutable(outputInfo: ProjectOutputInfo): string | undefined {
-    const { outputName, projectDir, startProgram } = outputInfo;
+    const { outputName, projectDir, startProgram, isNativeExe } = outputInfo;
 
-    // Only look for .exe files
-    const exeName = outputName.toLowerCase().endsWith('.exe') ? outputName : `${outputName}.exe`;
-
-    logger.info(`Looking for executable: ${exeName} in project: ${projectDir}`);
-
-    // StartProgram is the most explicit — relative to project dir
+    // StartProgram is always the most explicit — relative to project dir
     if (startProgram) {
         const startProgramPath = path.isAbsolute(startProgram)
             ? startProgram
@@ -127,7 +125,13 @@ function findExecutable(outputInfo: ProjectOutputInfo): string | undefined {
             return startProgramPath;
         }
         logger.warn(`⚠️ StartProgram path does not exist: ${startProgramPath}`);
+        // For non-native-exe projects StartProgram is the only option
+        if (!isNativeExe) return undefined;
     }
+
+    // Only look for .exe files by name for native exe projects
+    const exeName = outputName.toLowerCase().endsWith('.exe') ? outputName : `${outputName}.exe`;
+    logger.info(`Looking for executable: ${exeName} in project: ${projectDir}`);
 
     // Try redirection service — *.exe entries are relative to project dir
     try {
@@ -147,20 +151,18 @@ function findExecutable(outputInfo: ProjectOutputInfo): string | undefined {
     }
 
     // Fallback: common locations relative to project dir
-    const possiblePaths = [
+    for (const p of [
         path.join(projectDir, exeName),
         path.join(projectDir, 'working', exeName),
         path.join(projectDir, 'bin', exeName),
-    ];
-
-    for (const p of possiblePaths) {
+    ]) {
         if (fs.existsSync(p)) {
             logger.info(`✅ Found executable: ${p}`);
             return p;
         }
     }
 
-    logger.warn(`❌ Executable not found. Searched: ${possiblePaths.join(', ')}`);
+    logger.warn(`❌ Executable not found in project dir or common subdirectories`);
     return undefined;
 }
 
@@ -201,11 +203,32 @@ function findDebuggerExecutable(): string | undefined {
 }
 
 /**
- * Launches CladbNE.exe with the given program path (detached, no terminal)
+ * Launches CladbNE.exe with the given program path (detached, no terminal).
+ * Explicitly passes the project's redirection file so the debugger can locate
+ * source files regardless of where the exe lives.
  */
-function launchDebugger(debuggerPath: string, exePath: string, workingDir?: string, args?: string): void {
+function launchDebugger(debuggerPath: string, exePath: string, projectDir: string, workingDir?: string, args?: string): void {
     const cwd = workingDir ?? path.dirname(exePath);
-    const spawnArgs = args?.trim() ? [exePath, ...args.trim().split(/\s+/)] : [exePath];
+
+    // Find the redirection file: prefer project-local, fall back to global Clarion one
+    const redFileName = globalSettings.redirectionFile;
+    const projectRedFile = redFileName ? path.join(projectDir, redFileName) : undefined;
+    const globalRedFile = redFileName
+        ? path.join(globalSettings.redirectionPath, redFileName)
+        : undefined;
+
+    let redArg: string | undefined;
+    if (projectRedFile && fs.existsSync(projectRedFile)) {
+        redArg = projectRedFile;
+    } else if (globalRedFile && fs.existsSync(globalRedFile)) {
+        redArg = globalRedFile;
+    }
+
+    const spawnArgs: string[] = [];
+    if (redArg) spawnArgs.push(redArg);
+    spawnArgs.push(exePath);
+    if (args?.trim()) spawnArgs.push(...args.trim().split(/\s+/));
+
     logger.info(`🐛 Launching debugger: ${debuggerPath} ${spawnArgs.join(' ')} (cwd: ${cwd})`);
     const proc = spawn(debuggerPath, spawnArgs, { cwd, detached: true, stdio: 'ignore' });
     proc.unref();
@@ -268,34 +291,25 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             const outputInfo = extractProjectOutputInfo(cwprojPath);
             
             if (!outputInfo) {
-                // Read the cwproj to show what was found
                 try {
                     const content = fs.readFileSync(cwprojPath, 'utf8');
                     const outputTypeMatch = /<OutputType>([^<]+)<\/OutputType>/i.exec(content);
-                    const outputNameMatch = /<OutputName>([^<]+)<\/OutputName>/i.exec(content);
-                    const modelMatch = /<Model>([^<]+)<\/Model>/i.exec(content);
-                    
-                    const outputType = outputTypeMatch ? outputTypeMatch[1] : 'not found';
-                    const outputName = outputNameMatch ? outputNameMatch[1] : 'not found';
-                    const model = modelMatch ? modelMatch[1] : 'not found';
-                    
-                    logger.warn(`Project not executable - OutputType: ${outputType}, OutputName: ${outputName}, Model: ${model}`);
-                    logger.warn(`Project file path: ${cwprojPath}`);
-                    logger.warn(`Project GUID: ${projectGuid}`);
-                    
+                    const outputType = outputTypeMatch ? outputTypeMatch[1] : 'unknown';
                     window.showWarningMessage(
-                        `${projectName} cannot be set as startup project.\n\n` +
-                        `Details:\n` +
-                        `• OutputType: ${outputType}\n` +
-                        `• OutputName: ${outputName}\n` +
-                        `• Model: ${model}\n\n` +
-                        `Project file: ${cwprojPath}\n\n` +
-                        `Only projects with OutputType='Exe' or 'WinExe' can be startup projects.`
+                        `'${projectName}' cannot be set as startup project — it is a library project (OutputType: ${outputType}) with no external StartProgram configured. ` +
+                        `Only executable projects (WinExe/Exe) or library projects with a <StartProgram> entry can be startup projects.`
                     );
-                } catch (readError) {
-                    window.showWarningMessage(`${projectName} is not an executable project and cannot be set as startup project.`);
+                } catch {
+                    window.showWarningMessage(`'${projectName}' is not an executable project and cannot be set as startup project.`);
                 }
                 return;
+            }
+
+            if (!outputInfo.isNativeExe) {
+                window.showInformationMessage(
+                    `'${projectName}' is a library project, but has an external StartProgram configured: ${outputInfo.startProgram}. ` +
+                    `It will be set as startup project and that program will be launched.`
+                );
             }
             
             // Save to workspace configuration
@@ -712,6 +726,7 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             }
 
             launchDebugger(debuggerExe, exePath,
+                outputInfo.projectDir,
                 outputInfo.startWorkingDirectory ? path.resolve(outputInfo.projectDir, outputInfo.startWorkingDirectory) : undefined,
                 outputInfo.startArguments);
             logger.info(`✅ Debugger launched for: ${exePath}`);
