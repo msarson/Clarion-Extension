@@ -66,64 +66,42 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
     margin: 0;
     padding: 4px 8px;
     display: flex;
-    flex-direction: column;
-    gap: 4px;
+    align-items: center;
+    gap: 2px;
     background: transparent;
     overflow: hidden;
-  }
-  .row {
-    display: flex;
-    align-items: center;
-    gap: 4px;
   }
   button {
     background: none;
     border: none;
     cursor: pointer;
-    padding: 3px 6px;
+    padding: 4px 6px;
     border-radius: 4px;
     display: flex;
     align-items: center;
-    gap: 4px;
-    font-size: 11px;
-    color: var(--vscode-foreground);
-    white-space: nowrap;
-  }
-  .run-row {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-  }
-  .run-row button {
-    flex: 1;
     justify-content: center;
     font-size: 14px;
-    padding: 4px 2px;
+    color: var(--vscode-foreground);
   }
   button:hover {
     background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2));
   }
   button img { width: 16px; height: 16px; }
   .sep {
-    border-top: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.3));
-    margin: 2px 0;
+    width: 1px;
+    height: 16px;
+    background: var(--vscode-widget-border, rgba(128,128,128,0.3));
+    margin: 0 2px;
   }
 </style>
 </head>
 <body>
-  <div class="row">
-    <button class="wide" title="Open Solution in Clarion IDE" onclick="send('openInClarionIDE')">
-      <img src="${iconUri}" />
-      <span>Open Solution in Clarion IDE</span>
-    </button>
-  </div>
+  <button title="Open Solution in Clarion IDE" onclick="send('openInClarionIDE')"><img src="${iconUri}" /></button>
   <div class="sep"></div>
-  <div class="run-row">
-    <button title="Run (Ctrl+F5)" onclick="send('run')">▶&#xFE0E;</button>
-    <button title="Build &amp; Run" onclick="send('buildAndRun')">🔨&#xFE0E;▶&#xFE0E;</button>
-    <button title="Debug (F5)" onclick="send('startDebugging')">🐛&#xFE0E;</button>
-    <button title="Build &amp; Debug" onclick="send('buildAndDebug')">🔨&#xFE0E;🐛&#xFE0E;</button>
-  </div>
+  <button title="Run (Ctrl+F5)" onclick="send('run')">▶&#xFE0E;</button>
+  <button title="Build &amp; Run" onclick="send('buildAndRun')">🔨&#xFE0E;▶&#xFE0E;</button>
+  <button title="Debug (F5)" onclick="send('startDebugging')">🐛&#xFE0E;</button>
+  <button title="Build &amp; Debug" onclick="send('buildAndDebug')">🔨&#xFE0E;🐛&#xFE0E;</button>
   <script>
     const vscode = acquireVsCodeApi();
     function send(cmd) { vscode.postMessage({ command: cmd }); }
