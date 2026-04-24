@@ -88,12 +88,17 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
     font-size: 11px;
     color: var(--vscode-foreground);
     white-space: nowrap;
+  }
+  .run-row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  .run-row button {
     flex: 1;
     justify-content: center;
-  }
-  button.wide {
-    flex: none;
-    justify-content: flex-start;
+    font-size: 14px;
+    padding: 4px 2px;
   }
   button:hover {
     background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2));
@@ -113,13 +118,11 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
     </button>
   </div>
   <div class="sep"></div>
-  <div class="row">
-    <button title="Run without debugging" onclick="send('run')">▶&#xFE0E; <span>Run</span></button>
-    <button title="Build then run without debugging" onclick="send('buildAndRun')">▶&#xFE0E; <span>Build &amp; Run</span></button>
-  </div>
-  <div class="row">
-    <button title="Start debugger without building" onclick="send('startDebugging')">🐛&#xFE0E; <span>Debug</span></button>
-    <button title="Build then start debugger" onclick="send('buildAndDebug')">🐛&#xFE0E; <span>Build &amp; Debug</span></button>
+  <div class="run-row">
+    <button title="Run (Ctrl+F5)" onclick="send('run')">▶&#xFE0E;</button>
+    <button title="Build &amp; Run" onclick="send('buildAndRun')">🔨&#xFE0E;▶&#xFE0E;</button>
+    <button title="Debug (F5)" onclick="send('startDebugging')">🐛&#xFE0E;</button>
+    <button title="Build &amp; Debug" onclick="send('buildAndDebug')">🔨&#xFE0E;🐛&#xFE0E;</button>
   </div>
   <script>
     const vscode = acquireVsCodeApi();
