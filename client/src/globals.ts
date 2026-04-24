@@ -347,11 +347,6 @@ export const globalSettings = {
                 clarionPropertiesFile = solution.propertiesFile;
                 clarionVersion = solution.version;
                 clarionConfiguration = solution.configuration;
-                // Persist the choice so next load doesn't need this fallback
-                const target = getClarionConfigTarget();
-                if (target !== undefined) {
-                    await workspace.getConfiguration().update("clarion.currentSolution", solution.solutionFile, target);
-                }
             }
         }
 
