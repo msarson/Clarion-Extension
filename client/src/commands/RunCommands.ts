@@ -4,8 +4,9 @@ import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { ClarionProjectInfo } from 'common/types';
 import { getLanguageClient } from '../LanguageClientManager';
 import { redirectionService } from '../paths/RedirectionService';
-import { globalSettings } from '../globals';
+import { globalSettings, globalSolutionFile, globalClarionPropertiesFile } from '../globals';
 import { buildSolutionOrProject } from '../buildTasks';
+import { writeIdePreferences } from '../solution/ClarionIdePreferences';
 import * as path from 'path';
 import * as fs from 'fs';
 import { spawn } from 'child_process';
@@ -307,6 +308,13 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             // Save to workspace configuration
             const config = workspace.getConfiguration('clarion');
             await config.update('startupProject', projectGuid, false);
+            
+            // Write-back to Clarion IDE preferences so the IDE stays in sync
+            if (globalSolutionFile && globalClarionPropertiesFile) {
+                await writeIdePreferences(globalSolutionFile, globalClarionPropertiesFile, {
+                    startupProjectGuid: projectGuid
+                });
+            }
             
             logger.info(`✅ Set ${projectName} (${projectGuid}) as startup project`);
             window.showInformationMessage(`${projectName} set as startup project.`);

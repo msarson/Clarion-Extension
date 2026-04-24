@@ -4,6 +4,7 @@ import { SolutionCache } from '../SolutionCache';
 import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { updateConfigurationStatusBar } from '../statusbar/StatusBarManager';
 import { readActiveConfigFromSlnCache, patchSlnCacheConfig, buildFullConfig } from '../utils/SlnCacheUtils';
+import { writeIdePreferences } from '../solution/ClarionIdePreferences';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("ConfigurationManager");
@@ -67,6 +68,15 @@ export async function setConfiguration(solutionTreeDataProvider?: SolutionTreeDa
         if (globalSolutionFile) {
             const existingFull = readActiveConfigFromSlnCache(globalSolutionFile);
             patchSlnCacheConfig(globalSolutionFile, buildFullConfig(selectedConfig, existingFull));
+        }
+
+        // Sync configuration back to Clarion IDE preferences
+        if (globalSolutionFile && globalClarionPropertiesFile) {
+            const parts = selectedConfig.split('|');
+            await writeIdePreferences(globalSolutionFile, globalClarionPropertiesFile, {
+                activeConfiguration: parts[0],
+                activePlatform: parts[1] ?? 'Win32'
+            });
         }
 
         updateConfigurationStatusBar(selectedConfig);

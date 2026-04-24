@@ -12,6 +12,7 @@ All notable changes to the Clarion Extension are documented here.
 
 - ✨ **F5 — Launch Clarion Debugger**: pressing F5 (when a solution is open) launches `CladbNE.exe` (the non-elevation Clarion debugger) against the startup project's executable. The debugger path is derived automatically from the Clarion bin folder already known to the extension — no extra settings required. A prompt offers to build the project first (using the current configuration, awaited to completion before launching). A warning is shown if the active build configuration is not a Debug variant, since source files will not be available in the debugger for Release builds.
 - ✨ **Ctrl+F5 — Build prompt before run**: running without debugging now prompts "Build and Run / Run Without Building / Cancel" before launching the executable, matching VS Code's standard pre-launch behaviour.
+- ✨ **Clarion IDE preferences sync**: on solution open, the extension now reads the Clarion IDE's preferences XML (`%AppData%\SoftVelocity\Clarion\<version>\preferences\<sln>.<hash>.xml`) and automatically applies the IDE's active startup project and build configuration to VS Code. Changes made in VS Code (switching configuration or setting the startup project) are written back to the same file so the Clarion IDE always reflects the current state. When creating a new solution the preferences XML is created automatically.
 
 ---
 

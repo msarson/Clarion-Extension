@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import LoggerManager from '../utils/LoggerManager';
 import { SmartSolutionOpener } from '../utils/SmartSolutionOpener';
+import { writeIdePreferences } from '../solution/ClarionIdePreferences';
 
 const logger = LoggerManager.getLogger("NewSolutionCommands");
 logger.setLevel("error");
@@ -158,6 +159,13 @@ export async function newSolution(): Promise<void> {
         fs.writeFileSync(cwprojPath, buildCwprojContent(trimmedName, projectGuid, clwName), 'utf8');
         fs.writeFileSync(clwPath, buildClwContent(), 'utf8');
         logger.info(`✅ Created new solution: ${trimmedName} in ${folderPath}`);
+
+        // Create the Clarion IDE preferences XML so the IDE recognises startup project + config
+        await writeIdePreferences(slnPath, installResult.installation.propertiesPath, {
+            startupProjectGuid: projectGuid,
+            activeConfiguration: configChoice,
+            activePlatform: 'Win32'
+        });
     } catch (err) {
         logger.error(`❌ Failed to create solution files: ${err}`);
         vscode.window.showErrorMessage(`Failed to create solution: ${err instanceof Error ? err.message : String(err)}`);
