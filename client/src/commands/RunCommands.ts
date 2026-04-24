@@ -210,19 +210,11 @@ function findDebuggerExecutable(): string | undefined {
 function launchDebugger(debuggerPath: string, exePath: string, projectDir: string, workingDir?: string, args?: string): void {
     const cwd = workingDir ?? path.dirname(exePath);
 
-    // Find the redirection file: prefer project-local, fall back to global Clarion one
+    // Only pass a redirection file if a project-local one exists;
+    // CladbNE already knows the standard global .red by default
     const redFileName = globalSettings.redirectionFile;
     const projectRedFile = redFileName ? path.join(projectDir, redFileName) : undefined;
-    const globalRedFile = redFileName
-        ? path.join(globalSettings.redirectionPath, redFileName)
-        : undefined;
-
-    let redArg: string | undefined;
-    if (projectRedFile && fs.existsSync(projectRedFile)) {
-        redArg = projectRedFile;
-    } else if (globalRedFile && fs.existsSync(globalRedFile)) {
-        redArg = globalRedFile;
-    }
+    const redArg = (projectRedFile && fs.existsSync(projectRedFile)) ? projectRedFile : undefined;
 
     const spawnArgs: string[] = [];
     if (redArg) spawnArgs.push(redArg);
