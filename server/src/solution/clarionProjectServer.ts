@@ -398,12 +398,15 @@ export class ClarionProjectServer {
             if (entry.extension.toLowerCase() === normalizedExt || entry.extension === "*.*") {
                 logger.info(`📂 Processing entry: ${entry.extension} from section ${entry.section}`);
                 
+                // Relative paths in the .red file are relative to the .red file's directory, not the project path
+                const redFileDir = path.dirname(entry.redFile);
+                
                 for (const p of entry.paths) {
-                    const resolvedPath = path.isAbsolute(p) ? p : path.resolve(this.path, p);
+                    const resolvedPath = path.isAbsolute(p) ? p : path.resolve(redFileDir, p);
                     
                     // Debug logging for dot paths
                     if (p === '.' || p === '.\\' || p === './') {
-                        logger.info(`🔍 Resolving '${p}' for project ${this.name}: ${this.path} → ${resolvedPath}`);
+                        logger.info(`🔍 Resolving '${p}' for project ${this.name}: ${redFileDir} → ${resolvedPath}`);
                     }
                     
                     pathSet.add(resolvedPath);
