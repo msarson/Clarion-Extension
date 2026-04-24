@@ -53,7 +53,7 @@ export class HoverFormatter {
             ``,
             `**Type:** \`${info.type}\``,
             ``,
-            `**Declared in:** ${scope.value} (line ${info.line + 1})`
+            `${scope.value}, line ${info.line + 1}`
         ].join('\n');
 
         return {
@@ -110,12 +110,12 @@ export class HoverFormatter {
         if (document) {
             const fileName = path.basename(document.uri.replace('file:///', ''));
             const lineNumber = info.line + 1;
-            // Append "Declared in" to the same line as scope label if it exists
+            // Append location to the same line as scope label if it exists
             const lastLine = markdown[markdown.length - 1];
             if (lastLine && lastLine.includes('variable')) {
-                markdown[markdown.length - 1] = `${lastLine} Declared in ${fileName}:${lineNumber}`;
+                markdown[markdown.length - 1] = `${lastLine}  ${fileName}:${lineNumber}`;
             } else {
-                markdown.push(`Declared in ${fileName}:${lineNumber}`);
+                markdown.push(`${fileName}:${lineNumber}`);
             }
             
             // Add the actual source code line
@@ -138,7 +138,7 @@ export class HoverFormatter {
                 markdown.push(DocCommentReader.toMarkdown(docComment));
             }
         } else {
-            markdown.push(`Declared at line ${info.line + 1}`);
+            markdown.push(`line ${info.line + 1}`);
         }
         return {
             contents: {

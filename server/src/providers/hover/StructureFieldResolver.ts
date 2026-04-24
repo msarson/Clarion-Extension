@@ -275,7 +275,7 @@ export class StructureFieldResolver {
                     const markdown = [
                         `**${structKind} Type:** \`${typeName}\``,
                         ``,
-                        `**Declared in:** ${incFileName}, line ${labelToken.line + 1}`,
+                        `${incFileName}:${labelToken.line + 1}`,
                         `**Fields:** ${fieldCount}`,
                         ``,
                         `\`\`\`clarion`,
@@ -363,7 +363,7 @@ export class StructureFieldResolver {
                     const markdown = [
                         `**${structKind} Type:** \`${typeName}\``,
                         ``,
-                        `**Declared in:** ${incFileName}, line ${labelToken.line + 1}`,
+                        `${incFileName}:${labelToken.line + 1}`,
                         `**Fields:** ${fieldCount}`,
                         ``,
                         `\`\`\`clarion`,
@@ -468,7 +468,7 @@ export class StructureFieldResolver {
                         const markdown = [
                             `**${typeName} Field:** \`${fieldName}\` — \`${fieldType}\``,
                             ``,
-                            `**Declared in:** ${incFileName}, line ${fieldToken.line + 1}`,
+                            `${incFileName}:${fieldToken.line + 1}`,
                             ``,
                             `\`\`\`clarion`,
                             declaration,

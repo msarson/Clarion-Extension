@@ -83,7 +83,7 @@ export class MethodHoverResolver {
                 const markdown = [
                     `**${className}** — \`${typeStr}\``,
                     ``,
-                    `🔷 Class declaration  Declared in ${fileName}:${lineNumber}`,
+                    `🔷 Class declaration  ${fileName}:${lineNumber}`,
                     ``,
                     '```clarion',
                     declaration,
@@ -229,7 +229,7 @@ export class MethodHoverResolver {
                     value: [
                         `**${className}.${currentToken.label}** (Method Declaration)`,
                         ``,
-                        `**Implemented in** \`${implFile}\` @ line ${implLine}`
+                        `${implFile}:${implLine}`
                     ].join('\n')
                 }
             };

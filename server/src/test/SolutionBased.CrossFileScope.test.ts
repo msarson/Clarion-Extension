@@ -996,8 +996,8 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             assert.ok(hoverText.includes('LONG'), 'Should show type');
             assert.ok(hoverText.includes('utils.clw:57'), 'Should show declaration location');
             
-            // Format should be: "🔧 Procedure variable Declared in utils.clw:57" on one line
-            assert.ok(hoverText.includes('Local procedure variable Declared in'), 'Scope and declaration should be on same line');
+            // Format should be: "🔧 Local procedure variable  utils.clw:57" on one line
+            assert.ok(hoverText.match(/Local procedure variable\s+utils\.clw:57/), 'Scope and declaration should be on same line');
         });
     });
     
