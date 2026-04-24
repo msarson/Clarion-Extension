@@ -387,13 +387,13 @@ export class VariableHoverResolver {
                     ``,
                     `---`,
                     `**${def.structureType} Definition:**`,
-                    `- File: \`${fileName}\` (line ${def.line + 1})`,
                     `- Type: ${def.structureType}${def.isType ? ',TYPE' : ''}`,
                 ];
                 
                 if (def.parentName) {
                     classInfo.push(`- Parent: \`${def.parentName}\``);
                 }
+                classInfo.push(`${fileName}:${def.line + 1}`);
                 
                 // Append to existing hover content
                 let existingContent = '';
