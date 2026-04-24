@@ -49,8 +49,8 @@ END`;
                 ? hover.contents 
                 : 'value' in hover.contents ? hover.contents.value : '';
             
-            assert.ok(content.includes('Implemented in') || content.includes('PROCEDURE'), 
-                'Should show implementation info');
+            assert.ok(content.includes('.clw:'), 
+                'Should show implementation location (file:line)');
         });
 
         test('should handle MAP declaration without implementation', async () => {
@@ -151,8 +151,8 @@ END`;
                 ? hover.contents 
                 : 'value' in hover.contents ? hover.contents.value : '';
             
-            assert.ok(content.includes('Declared in') || content.includes('MAP'), 
-                'Should show MAP declaration info');
+            assert.ok(content.includes('PROCEDURE'), 
+                'Should show MAP declaration signature code block');
         });
 
         test('should NOT show MAP hover for implementation outside MAP context', async () => {

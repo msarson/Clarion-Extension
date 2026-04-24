@@ -521,16 +521,16 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             
             // Check what's shown
             const hasGlobalScope = hoverText.includes('🌍') || hoverText.includes('Global');
-            const hasImplementedIn = hoverText.includes('Implemented in');
+            const hasImplementationRef = hoverText.includes('.clw:');
             const showsImplementationCode = hoverText.includes('MESSAGE') || hoverText.includes('CODE');
             
             console.log(`   ✓ Shows Global scope: ${hasGlobalScope ? '✅ YES' : '❌ NO'}`);
-            console.log(`   ✓ Shows "Implemented in": ${hasImplementedIn ? '✅ YES' : '❌ NO'}`);
+            console.log(`   ✓ Shows implementation location: ${hasImplementationRef ? '✅ YES' : '❌ NO'}`);
             console.log(`   ✓ Shows implementation code: ${showsImplementationCode ? '✅ YES' : '❌ NO'}`);
             
             // Assert expectations
             assert.ok(hasGlobalScope, 'Should show global scope icon/text');
-            assert.ok(hasImplementedIn, 'Should show "Implemented in" with file and line');
+            assert.ok(hasImplementationRef, 'Should show implementation file:line reference');
             
             console.log(`   ✅ PASS: GlobalHelper MAP hover shows implementation correctly`);
         });
@@ -784,8 +784,8 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             const hoverText = (hoverResult.contents as any).value;
             assert.ok(hoverText.includes('IncrementCounter'), 'Should show procedure name');
             assert.ok(hoverText.includes('📦'), 'Should show module scope icon');
-            assert.ok(hoverText.includes('Declared in'), 'Should show declaration location');
-            assert.ok(hoverText.includes('Implemented in'), 'Should show implementation location');
+            assert.ok(hoverText.includes('→'), 'Should show declaration → implementation locations');
+            assert.ok(hoverText.includes('→'), 'Should show declaration and implementation locations');
         });
         
         test('TEST 3: Hover on GetCounter at call site in main.clw line 95', async function() {
@@ -845,8 +845,8 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             const hoverText = (hoverResult.contents as any).value;
             assert.ok(hoverText.includes('GlobalHelper'), 'Should show procedure name');
             assert.ok(hoverText.includes('🌍'), 'Should show global scope icon');
-            assert.ok(hoverText.includes('Implemented in'), 'Should show implementation location');
-            assert.ok(hoverText.includes('line 105'), 'Should show correct implementation line');
+            assert.ok(hoverText.includes(':105') || hoverText.includes('105'), 'Should show implementation location');
+            assert.ok(hoverText.includes('105'), 'Should show correct implementation line');
         });
         
         test('TEST 5b: Hover on GlobalHelper at implementation in main.clw line 105', async function() {
@@ -866,9 +866,9 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             const hoverText = (hoverResult.contents as any).value;
             assert.ok(hoverText.includes('GlobalHelper'), 'Should show procedure name');
             assert.ok(hoverText.includes('🌍'), 'Should show global scope icon');
-            assert.ok(hoverText.includes('Declared in'), 'Should show declaration location');
-            assert.ok(hoverText.includes('line 84'), 'Should show correct declaration line');
-            assert.ok(!hoverText.includes('Implemented in'), 'Should NOT show implementation (we are at it)');
+            assert.ok(hoverText.includes(':84') || hoverText.includes('84'), 'Should show declaration location');
+            assert.ok(hoverText.includes('84'), 'Should show correct declaration line');
+            assert.ok(!hoverText.includes(':105'), 'Should NOT show implementation (we are at it)');
         });
         
         test('TEST 6: Hover on GlobalHelper call in utils.clw line 53', async function() {
@@ -927,7 +927,7 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             const hoverText = (hoverResult.contents as any).value;
             assert.ok(hoverText.includes('GlobalHelper'), 'Should show procedure name');
             assert.ok(hoverText.includes('🌍'), 'Should show global scope icon');
-            assert.ok(hoverText.includes('Implemented in') || hoverText.includes('Implementation'), 'Should show implementation location');
+            assert.ok(hoverText.includes('.clw:'), 'Should show implementation location');
             assert.ok(hoverText.includes('main.clw') || hoverText.includes('105'), 'Should show implementation file or line');
         });
         

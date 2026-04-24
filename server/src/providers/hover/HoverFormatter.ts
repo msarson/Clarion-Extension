@@ -524,68 +524,69 @@ export class HoverFormatter {
             }
         }
 
-        // Show MAP declaration - but NOT if we're hovering at the MAP declaration itself
+        // Show MAP declaration signature - but NOT if we're hovering at the MAP declaration itself
         logger.info(`formatProcedure: About to check MAP declaration, mapDecl=${!!mapDecl}, isAtMapDeclaration=${isAtMapDeclaration}`);
-        if (mapDecl && !isAtMapDeclaration) {
+        let declLocationStr = '';
+        if (mapDecl) {
             try {
-                // Check if MAP is in current document or if we need to read from disk
                 const isSameDocument = mapDecl.uri === currentDocument.uri;
                 let mapContent: string;
                 let mapUri: string;
-                
+
                 if (isSameDocument) {
-                    // Use current document content
                     mapContent = currentDocument.getText();
                     mapUri = currentDocument.uri;
                 } else if (mapDecl.uri.startsWith('test://')) {
-                    // Cannot read test:// URIs from filesystem - skip
                     logger.info(`formatProcedure: Skipping test:// URI MAP preview`);
                     throw new Error('Cannot read test:// URI from filesystem');
                 } else {
-                    // Read from filesystem
                     mapUri = decodeURIComponent(mapDecl.uri.replace('file:///', ''));
                     mapContent = fs.readFileSync(mapUri, 'utf-8');
                 }
-                
+
                 const mapLines = mapContent.split('\n');
                 const mapLine = mapLines[mapDecl.range.start.line];
-                
-                if (mapLine) {
-                    const trimmedMapLine = mapLine.trim();
-                    // Extract filename from URI (handle both file:// and test:// URIs)
-                    const fileName = mapUri.includes('://') 
-                        ? mapUri.split('/').pop() || 'unknown'
-                        : path.basename(mapUri);
-                    const lineNumber = mapDecl.range.start.line + 1;
-                    parts.push(`**Declared in** \`${fileName}\` @ line ${lineNumber}:\n\`\`\`clarion\n${trimmedMapLine}\n\`\`\``);
+                const fileName = mapUri.includes('://')
+                    ? mapUri.split('/').pop() || 'unknown'
+                    : path.basename(mapUri);
+                const lineNumber = mapDecl.range.start.line + 1;
+                declLocationStr = `${fileName}:${lineNumber}`;
+
+                if (mapLine && !isAtMapDeclaration) {
+                    parts.push(`\`\`\`clarion\n${mapLine.trim()}\n\`\`\``);
                 }
             } catch (error) {
                 logger.error(`Error reading MAP declaration: ${error}`);
             }
         }
-        
-        // Show PROCEDURE implementation - but NOT if we're hovering at the implementation itself
+
+        // Build implementation location string - but NOT if we're hovering at the implementation itself
         logger.info(`formatProcedure: About to check implementation, procImpl=${!!procImpl}, isAtImplementation=${isAtImplementation}`);
-        if (procImpl && !isAtImplementation) {
+        let implLocationStr = '';
+        if (procImpl) {
             try {
-                let implUri: string;
-                if (procImpl.uri.startsWith('test://')) {
-                    implUri = procImpl.uri;
-                } else {
-                    implUri = decodeURIComponent(procImpl.uri.replace('file:///', ''));
-                }
+                const implUri = procImpl.uri.startsWith('test://')
+                    ? procImpl.uri
+                    : decodeURIComponent(procImpl.uri.replace('file:///', ''));
                 const fileName = implUri.includes('://')
                     ? implUri.split('/').pop() || 'unknown'
                     : path.basename(implUri);
-                const lineNumber = procImpl.range.start.line + 1;
-                parts.push(`**Implemented in** \`${fileName}\` @ line ${lineNumber}`);
+                implLocationStr = `${fileName}:${procImpl.range.start.line + 1}`;
             } catch (error) {
                 logger.error(`Error reading PROCEDURE implementation: ${error}`);
             }
         } else {
             logger.info(`formatProcedure: Skipping implementation (procImpl=${!!procImpl}, isAtImplementation=${isAtImplementation})`);
         }
-        
+
+        // Single footer line: "decl → impl" (omit whichever is at cursor or missing)
+        const footerParts: string[] = [];
+        if (declLocationStr && !isAtMapDeclaration) footerParts.push(declLocationStr);
+        if (implLocationStr && !isAtImplementation) footerParts.push(implLocationStr);
+        if (footerParts.length > 0) {
+            parts.push(footerParts.join(' → '));
+        }
+
         if (parts.length > 1) {
             return {
                 contents: {
@@ -594,7 +595,7 @@ export class HoverFormatter {
                 }
             };
         }
-        
+
         return null;
     }
 
