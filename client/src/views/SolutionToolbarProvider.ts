@@ -33,6 +33,9 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
                 case 'openInClarionIDE':
                     vscode.commands.executeCommand('clarion.openInClarionIDE');
                     break;
+                case 'build':
+                    vscode.commands.executeCommand('clarion.buildAllProjects');
+                    break;
                 case 'run':
                     vscode.commands.executeCommand('clarion.runWithoutDebugging', false);
                     break;
@@ -97,6 +100,8 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
 </head>
 <body>
   <button title="Open Solution in Clarion IDE" onclick="send('openInClarionIDE')"><img src="${iconUri}" /></button>
+  <div class="sep"></div>
+  <button title="Build solution" onclick="send('build')">🔨&#xFE0E;</button>
   <div class="sep"></div>
   <button title="Run (Ctrl+F5)" onclick="send('run')">▶&#xFE0E;</button>
   <button title="Build &amp; Run" onclick="send('buildAndRun')">🔨&#xFE0E;▶&#xFE0E;</button>
