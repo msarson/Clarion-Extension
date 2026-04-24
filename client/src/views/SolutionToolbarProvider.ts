@@ -28,24 +28,22 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.html = this._getHtml(webviewView.webview);
 
-        webviewView.webview.onDidReceiveMessage(async message => {
+        webviewView.webview.onDidReceiveMessage(message => {
             switch (message.command) {
                 case 'openInClarionIDE':
                     vscode.commands.executeCommand('clarion.openInClarionIDE');
                     break;
                 case 'run':
-                    vscode.commands.executeCommand('clarion.runWithoutDebugging');
+                    vscode.commands.executeCommand('clarion.runWithoutDebugging', false);
                     break;
                 case 'buildAndRun':
-                    await vscode.commands.executeCommand('clarion.buildAllProjects');
-                    vscode.commands.executeCommand('clarion.runWithoutDebugging');
-                    break;
-                case 'buildAndDebug':
-                    await vscode.commands.executeCommand('clarion.buildAllProjects');
-                    vscode.commands.executeCommand('clarion.startDebugging');
+                    vscode.commands.executeCommand('clarion.runWithoutDebugging', true);
                     break;
                 case 'startDebugging':
-                    vscode.commands.executeCommand('clarion.startDebugging');
+                    vscode.commands.executeCommand('clarion.startDebugging', false);
+                    break;
+                case 'buildAndDebug':
+                    vscode.commands.executeCommand('clarion.startDebugging', true);
                     break;
             }
         });
