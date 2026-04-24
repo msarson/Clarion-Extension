@@ -27,7 +27,12 @@ logger.setLevel("error");
  *          will reload and re-activate the extension), false if the solution is already
  *          in the current workspace (caller should proceed with normal initialization).
  */
-async function switchToSolutionWorkspaceIfNeeded(solutionFilePath: string): Promise<boolean> {
+async function switchToSolutionWorkspaceIfNeeded(
+    solutionFilePath: string,
+    propertiesFile?: string,
+    version?: string,
+    configuration?: string
+): Promise<boolean> {
     const solutionFolder = path.normalize(path.dirname(solutionFilePath));
     const currentFolder = workspace.workspaceFolders?.[0]?.uri.fsPath;
     const currentFolderNorm = currentFolder ? path.normalize(currentFolder) : '';
@@ -39,13 +44,14 @@ async function switchToSolutionWorkspaceIfNeeded(solutionFilePath: string): Prom
 
     logger.info(`🔄 Solution is in a different folder: ${solutionFolder} (current: ${currentFolderNorm || 'none'})`);
 
-    // Save to global history BEFORE switching so it's remembered after the reload
+    // Save to global history BEFORE switching so it's remembered after the reload.
+    // Prefer explicitly-passed settings; fall back to current globals.
     await GlobalSolutionHistory.addSolution(
         solutionFilePath,
         solutionFolder,
-        globalClarionPropertiesFile || undefined,
-        globalClarionVersion || undefined,
-        globalSettings.configuration || undefined
+        propertiesFile ?? globalClarionPropertiesFile ?? undefined,
+        version ?? globalClarionVersion ?? undefined,
+        configuration ?? globalSettings.configuration ?? undefined
     );
     logger.info(`✅ Saved solution to global history before folder switch`);
 
@@ -120,7 +126,12 @@ export async function openSolutionFromList(
         }
         
         // If the selected solution is in a different folder/workspace, switch to it and reload
-        if (await switchToSolutionWorkspaceIfNeeded(selectedItem.solution.solutionFile)) {
+        if (await switchToSolutionWorkspaceIfNeeded(
+            selectedItem.solution.solutionFile,
+            selectedItem.solution.propertiesFile,
+            selectedItem.solution.version,
+            selectedItem.solution.configuration
+        )) {
             return; // VS Code is reloading with the new workspace
         }
 
@@ -243,7 +254,12 @@ export async function openClarionSolution(
                 logger.info(`📂 Selected existing Clarion solution: ${selectedItem.solution.solutionFile}`);
                 
                 // If the solution is in a different folder/workspace, switch to it and reload
-                if (await switchToSolutionWorkspaceIfNeeded(selectedItem.solution.solutionFile)) {
+                if (await switchToSolutionWorkspaceIfNeeded(
+                    selectedItem.solution.solutionFile,
+                    selectedItem.solution.propertiesFile,
+                    selectedItem.solution.version,
+                    selectedItem.solution.configuration
+                )) {
                     return; // VS Code is reloading with the new workspace
                 }
 
@@ -363,9 +379,15 @@ export async function openClarionSolution(
         await setGlobalClarionSelection(solutionFilePath, globalClarionPropertiesFile, globalClarionVersion, globalSettings.configuration);
         logger.info(`⚙️ Selected configuration: ${globalSettings.configuration}`);
         
-        // ✅ Add to global solution history
+        // ✅ Add to global solution history (with full settings so cross-folder restore works)
         const folderPath = path.dirname(solutionFilePath);
-        await GlobalSolutionHistory.addSolution(solutionFilePath, folderPath);
+        await GlobalSolutionHistory.addSolution(
+            solutionFilePath,
+            folderPath,
+            globalClarionPropertiesFile || undefined,
+            globalClarionVersion || undefined,
+            globalSettings.configuration || undefined
+        );
         logger.info("✅ Added to global solution history");
         
         // ✅ Set environment variable for the server to use
