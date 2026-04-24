@@ -28,16 +28,24 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.html = this._getHtml(webviewView.webview);
 
-        webviewView.webview.onDidReceiveMessage(message => {
+        webviewView.webview.onDidReceiveMessage(async message => {
             switch (message.command) {
                 case 'openInClarionIDE':
                     vscode.commands.executeCommand('clarion.openInClarionIDE');
                     break;
-                case 'startDebugging':
+                case 'build':
+                    vscode.commands.executeCommand('clarion.buildAllProjects');
+                    break;
+                case 'buildAndRun':
+                    await vscode.commands.executeCommand('clarion.buildAllProjects');
+                    vscode.commands.executeCommand('clarion.runWithoutDebugging');
+                    break;
+                case 'buildAndDebug':
+                    await vscode.commands.executeCommand('clarion.buildAllProjects');
                     vscode.commands.executeCommand('clarion.startDebugging');
                     break;
-                case 'runWithoutDebugging':
-                    vscode.commands.executeCommand('clarion.runWithoutDebugging');
+                case 'startDebugging':
+                    vscode.commands.executeCommand('clarion.startDebugging');
                     break;
             }
         });
@@ -68,41 +76,52 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
   .row {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
   }
   button {
     background: none;
     border: none;
     cursor: pointer;
-    padding: 3px 5px;
+    padding: 3px 6px;
     border-radius: 4px;
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 4px;
     font-size: 11px;
     color: var(--vscode-foreground);
     white-space: nowrap;
+    flex: 1;
+    justify-content: center;
+  }
+  button.wide {
+    flex: none;
+    justify-content: flex-start;
   }
   button:hover {
     background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2));
   }
   button img { width: 16px; height: 16px; }
+  .sep {
+    border-top: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.3));
+    margin: 2px 0;
+  }
 </style>
 </head>
 <body>
   <div class="row">
-    <button title="Open Solution in Clarion IDE" onclick="send('openInClarionIDE')">
+    <button class="wide" title="Open Solution in Clarion IDE" onclick="send('openInClarionIDE')">
       <img src="${iconUri}" />
       <span>Open Solution in Clarion IDE</span>
     </button>
   </div>
+  <div class="sep"></div>
   <div class="row">
-    <button title="Start Debugging (F5)" onclick="send('startDebugging')">
-      ▶&#xFE0E; <span>Run in Debugger</span>
-    </button>
-    <button title="Run Without Debugging (Ctrl+F5)" onclick="send('runWithoutDebugging')">
-      ⏵&#xFE0E; <span>Run</span>
-    </button>
+    <button title="Build solution" onclick="send('build')">🔨&#xFE0E; <span>Build</span></button>
+    <button title="Build then run without debugging" onclick="send('buildAndRun')">▶&#xFE0E; <span>Build &amp; Run</span></button>
+  </div>
+  <div class="row">
+    <button title="Build then start debugger" onclick="send('buildAndDebug')">🐛&#xFE0E; <span>Build &amp; Debug</span></button>
+    <button title="Start debugger without building" onclick="send('startDebugging')">🔍&#xFE0E; <span>Debug</span></button>
   </div>
   <script>
     const vscode = acquireVsCodeApi();
