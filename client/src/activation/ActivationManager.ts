@@ -11,6 +11,7 @@ import LoggerManager from '../utils/LoggerManager';
 import { isClientReady, getClientReadyPromise } from '../LanguageClientManager';
 
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
+import { setGlobalClarionSelection } from '../globals';
 import { updateBuildProjectStatusBar } from '../statusbar/StatusBarManager';
 import { createSolutionFileWatchers, handleSettingsChange } from '../providers/FileWatcherManager';
 import { startLanguageServer } from '../server/LanguageServerManager';
@@ -214,6 +215,24 @@ export async function setupFolderDependentFeatures(
 
         if (!isRefreshingRef.value) {
             await refreshOpenDocuments(state.documentManager);
+
+            // If workspace settings don't have a solution file, check global history
+            // for a match on the current workspace folder (happens after a cross-folder switch)
+            if (!globalSolutionFile && workspace.workspaceFolders?.length) {
+                const currentFolder = workspace.workspaceFolders[0].uri.fsPath;
+                const refs = await GlobalSolutionHistory.getValidReferences();
+                const match = refs.find(r => r.folderPath.toLowerCase() === currentFolder.toLowerCase());
+                if (match) {
+                    logger.info(`🔄 Restoring solution from global history after folder switch: ${match.solutionFile}`);
+                    await setGlobalClarionSelection(
+                        match.solutionFile,
+                        match.propertiesFile || '',
+                        match.version || '',
+                        match.configuration || '',
+                        false  // save to workspace settings so next open auto-restores without history
+                    );
+                }
+            }
 
             if (globalSolutionFile) {
                 logger.info(`✅ Solution file found in folder settings: ${globalSolutionFile}`);

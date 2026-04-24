@@ -7,6 +7,7 @@ import { redirectionService } from '../paths/RedirectionService';
 import { globalSettings, globalSolutionFile, globalClarionPropertiesFile } from '../globals';
 import { buildSolutionOrProject } from '../buildTasks';
 import { writeIdePreferences } from '../solution/ClarionIdePreferences';
+import { updateSolutionToolbar } from '../views/ViewManager';
 import * as path from 'path';
 import * as fs from 'fs';
 import { spawn } from 'child_process';
@@ -323,6 +324,7 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             if (solutionTreeDataProvider) {
                 await solutionTreeDataProvider.refresh();
             }
+            updateSolutionToolbar();
         }),
         
         commands.registerCommand('clarion.clearStartupProject', async () => {
@@ -338,9 +340,10 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             if (solutionTreeDataProvider) {
                 await solutionTreeDataProvider.refresh();
             }
+            updateSolutionToolbar();
         }),
         
-        commands.registerCommand('clarion.runWithoutDebugging', async () => {
+        commands.registerCommand('clarion.runWithoutDebugging', async (buildFirst?: boolean) => {
             logger.info("🚀 Running current project without debugging...");
             
             const activeEditor = window.activeTextEditor;
@@ -568,16 +571,23 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             logger.info(`✅ Output info: type=${outputInfo.outputType}, name=${outputInfo.outputName}`);
             
             // Offer to build the startup project before running
-            const buildChoice = await window.showInformationMessage(
-                `Build project '${selectedProject.name}' before running?`,
-                "Build and Run",
-                "Run Without Building",
-                "Cancel"
-            );
-            if (!buildChoice || buildChoice === "Cancel") {
-                return;
+            let shouldBuild: boolean;
+            if (buildFirst === undefined) {
+                const buildChoice = await window.showInformationMessage(
+                    `Build project '${selectedProject.name}' before running?`,
+                    "Build and Run",
+                    "Run Without Building",
+                    "Cancel"
+                );
+                if (!buildChoice || buildChoice === "Cancel") {
+                    return;
+                }
+                shouldBuild = buildChoice === "Build and Run";
+            } else {
+                shouldBuild = buildFirst;
             }
-            if (buildChoice === "Build and Run") {
+
+            if (shouldBuild) {
                 logger.info(`🔨 Building project '${selectedProject.name}' before running...`);
                 const { languages } = await import('vscode');
                 await buildSolutionOrProject("Project", selectedProject, languages.createDiagnosticCollection("clarion-run-build"), undefined, true);
@@ -602,7 +612,7 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             logger.info(`✅ Command completed successfully`);
         }),
 
-        commands.registerCommand('clarion.startDebugging', async () => {
+        commands.registerCommand('clarion.startDebugging', async (buildFirst?: boolean) => {
             logger.info("🐛 Starting Clarion debugger...");
 
             const debuggerExe = findDebuggerExecutable();
@@ -684,16 +694,23 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             }
 
             // Offer to build the startup project before launching the debugger
-            const buildChoice = await window.showInformationMessage(
-                `Build project '${selectedProject.name}' before starting the debugger?`,
-                "Build and Debug",
-                "Debug Without Building",
-                "Cancel"
-            );
-            if (!buildChoice || buildChoice === "Cancel") {
-                return;
+            let shouldBuild: boolean;
+            if (buildFirst === undefined) {
+                const buildChoice = await window.showInformationMessage(
+                    `Build project '${selectedProject.name}' before starting the debugger?`,
+                    "Build and Debug",
+                    "Debug Without Building",
+                    "Cancel"
+                );
+                if (!buildChoice || buildChoice === "Cancel") {
+                    return;
+                }
+                shouldBuild = buildChoice === "Build and Debug";
+            } else {
+                shouldBuild = buildFirst;
             }
-            if (buildChoice === "Build and Debug") {
+
+            if (shouldBuild) {
                 logger.info(`🔨 Building project '${selectedProject.name}' before debugging...`);
                 const { languages } = await import('vscode');
                 await buildSolutionOrProject("Project", selectedProject, languages.createDiagnosticCollection("clarion-debug-build"), undefined, true);

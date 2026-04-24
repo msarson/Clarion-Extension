@@ -336,6 +336,18 @@ export const globalSettings = {
             } else {
                 logger.warn(`⚠️ Current solution ${currentSolution} not found in solutions array`);
             }
+        } else {
+            // currentSolution is blank — fall back to solutions array
+            const solutions = workspace.getConfiguration().get<ClarionSolutionSettings[]>("clarion.solutions", []);
+            if (solutions.length > 0) {
+                // Use the first (or only) entry
+                const solution = solutions[0];
+                logger.info(`✅ currentSolution is empty, defaulting to first solution in array: ${solution.solutionFile}`);
+                solutionFile = solution.solutionFile;
+                clarionPropertiesFile = solution.propertiesFile;
+                clarionVersion = solution.version;
+                clarionConfiguration = solution.configuration;
+            }
         }
 
         logger.info(`🔍 Read from workspace settings:

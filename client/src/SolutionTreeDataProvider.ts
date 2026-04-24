@@ -4,7 +4,7 @@ import { ClarionSolutionInfo, ClarionProjectInfo, ClarionSourcerFileInfo } from 
 import LoggerManager from './utils/LoggerManager';
 import * as path from 'path';
 import { SolutionCache } from './SolutionCache';
-import { globalSolutionFile } from './globals';
+import { globalSolutionFile, globalSettings } from './globals';
 import * as fs from 'fs';
 import { ProjectIndex } from './ProjectIndex';
 import { PathUtils } from './PathUtils';
@@ -1195,6 +1195,21 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             // Add build progress to description if building
             treeItem.description = `Building ${this._buildProgress.current} of ${this._buildProgress.total}`;
             treeItem.tooltip = `Building solution: ${this._buildProgress.current} of ${this._buildProgress.total} projects completed`;
+        } else {
+            // Show startup project name and active configuration
+            const workspaceConfig = workspace.getConfiguration('clarion');
+            const startupGuid = workspaceConfig.get<string>('startupProject');
+            const config = (globalSettings.configuration || 'Debug').split('|')[0];
+
+            let startupName: string | undefined;
+            if (startupGuid) {
+                const match = solution.projects?.find(
+                    p => p.guid.replace(/[{}]/g, '').toLowerCase() === startupGuid.replace(/[{}]/g, '').toLowerCase()
+                );
+                startupName = match?.name;
+            }
+
+            treeItem.description = startupName ? `${startupName} (${config})` : `(${config})`;
         }
         
         treeItem.command = {
