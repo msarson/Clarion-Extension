@@ -104,13 +104,6 @@ export class VariableHoverResolver {
         
         const fileName = path.basename(document.uri.replace('file:///', ''));
         const lineNumber = symbolInfo.location.line + 1;
-        // Append location to the same line as scope label if it exists
-        const lastLine = markdown[markdown.length - 1];
-        if (lastLine && lastLine.includes('variable')) {
-            markdown[markdown.length - 1] = `${lastLine}  ${fileName}:${lineNumber}`;
-        } else {
-            markdown.push(`${fileName}:${lineNumber}`);
-        }
         
         // Add the actual source code line
         if (symbolInfo.declaration) {
@@ -119,6 +112,9 @@ export class VariableHoverResolver {
             markdown.push(symbolInfo.declaration);
             markdown.push('```');
         }
+
+        // Location at bottom, after code block
+        markdown.push(`${fileName}:${lineNumber}`);
         
         markdown.push(``);
         
@@ -280,13 +276,6 @@ export class VariableHoverResolver {
         
         const fileName = path.basename(document.uri.replace('file:///', ''));
         const lineNumber = globalVar.line + 1;
-        // Append location to the same line as scope/context label if it exists
-        const lastLine = markdown[markdown.length - 1];
-        if (lastLine && (lastLine.includes('variable') || lastLine.includes('procedure') || lastLine.includes('property') || lastLine.includes('method') || lastLine.includes('constant'))) {
-            markdown[markdown.length - 1] = `${lastLine}  ${fileName}:${lineNumber}`;
-        } else {
-            markdown.push(`${fileName}:${lineNumber}`);
-        }
         
         // Add the actual source code line
         const content = document.getText();
@@ -300,6 +289,9 @@ export class VariableHoverResolver {
                 markdown.push('```');
             }
         }
+
+        // Location at bottom, after code block
+        markdown.push(`${fileName}:${lineNumber}`);
         
         return {
             contents: {

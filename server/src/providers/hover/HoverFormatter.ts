@@ -110,13 +110,6 @@ export class HoverFormatter {
         if (document) {
             const fileName = path.basename(document.uri.replace('file:///', ''));
             const lineNumber = info.line + 1;
-            // Append location to the same line as scope label if it exists
-            const lastLine = markdown[markdown.length - 1];
-            if (lastLine && lastLine.includes('variable')) {
-                markdown[markdown.length - 1] = `${lastLine}  ${fileName}:${lineNumber}`;
-            } else {
-                markdown.push(`${fileName}:${lineNumber}`);
-            }
             
             // Add the actual source code line
             const content = document.getText();
@@ -130,6 +123,9 @@ export class HoverFormatter {
                     markdown.push('```');
                 }
             }
+
+            // Location at bottom, after code block
+            markdown.push(`${fileName}:${lineNumber}`);
 
             // Append doc comment if present
             const docComment = DocCommentReader.read(lines, info.line);
