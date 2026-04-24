@@ -15,9 +15,14 @@ All notable changes to the Clarion Extension are documented here.
 - ✨ **Clarion IDE preferences sync**: on solution open, the extension now reads the Clarion IDE's preferences XML (`%AppData%\SoftVelocity\Clarion\<version>\preferences\<sln>.<hash>.xml`) and automatically applies the IDE's active startup project and build configuration to VS Code. Changes made in VS Code (switching configuration or setting the startup project) are written back to the same file so the Clarion IDE always reflects the current state. When creating a new solution the preferences XML is created automatically.
 - ✨ **Clarion Actions toolbar**: a new **Actions** panel in the Explorer sidebar provides quick-access icon buttons for Build, Run (Ctrl+F5), Debug (F5), Open Solution, and Close Solution. Below the buttons, a summary table shows the current solution name, startup project, and active build configuration. The summary updates automatically when the configuration is changed from the status bar.
 
+**Hover Improvements**
+
+- 🎨 **Standardised hover location format**: all hover tooltips (procedures, methods, variables, structure types, fields, class declarations) now display the source location as `filename:N` placed at the bottom of the tooltip, after the code block — consistent across every hover type.
+- 🐛 **CLASS type header no longer picks up `Link()`/`DLL()` arguments**: `CLASS(), Link('x', SomeName)` was incorrectly shown as `CLASS(SomeName)` in the hover header. The type extractor now only looks inside the first `(…)` group of the structure keyword.
+
 **Bug Fixes**
 
-- 🐛 **Ctrl+P (Quick Open) now includes files from redirection paths**: relative paths in `.red` redirection files are now resolved relative to the `.red` file's own directory rather than the project directory, so files in accessory `libsrc` and other Clarion-managed source trees appear correctly in the quick-open file list.
+- 🐛 **Ctrl+P (Quick Open) now includes files from redirection paths**:relative paths in `.red` redirection files are now resolved relative to the `.red` file's own directory rather than the project directory, so files in accessory `libsrc` and other Clarion-managed source trees appear correctly in the quick-open file list.
 - 🐛 **Auto-restore solution after cross-folder workspace switch**: opening a solution from the Solution View history that lives in a different folder now correctly restores all settings (properties file, version, configuration) on the subsequent activation, eliminating the "Clarion settings are incomplete" warning.
 - 🐛 **GlobalSolutionHistory saves full settings on all paths**: history entries now always include `propertiesFile`, `version`, and `configuration` regardless of which code path triggered the save, so cross-folder restore has the information it needs.
 - 🐛 **Blank `currentSolution` no longer prevents solution load**: when `clarion.currentSolution` is empty but `clarion.solutions` contains entries (e.g. after closing a solution), the extension now falls back to the first solutions array entry so the solution loads correctly on next activation.
