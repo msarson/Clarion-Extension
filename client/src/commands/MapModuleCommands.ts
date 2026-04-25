@@ -11,6 +11,7 @@ interface AddMapModuleArgs {
     mapEndLine: number;
     firstClwFile: string;
     projectGuid: string;
+    isLocalMap?: boolean;
 }
 
 interface AddProcedureToModuleArgs {
@@ -134,7 +135,8 @@ async function addMapModule(...args: any[]): Promise<void> {
                 procedureName,
                 targetDir,
                 firstClwFile: params.firstClwFile,
-                indentString
+                indentString,
+                isLocalMap: params.isLocalMap ?? false
             }
         );
 

@@ -7,6 +7,7 @@ import {
 } from 'vscode-languageserver/node';
 import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
+import { TokenType } from '../tokenizer/TokenTypes';
 import LoggerManager from '../logger';
 import * as path from 'path';
 
@@ -61,6 +62,7 @@ export class MapModuleCodeActionProvider {
             // Cursor is in MAP but outside any MODULE — offer "Add MODULE with PROCEDURE"
             // and "Add PROCEDURE" (to existing module or current MEMBER file)
             let mapEndLine: number | undefined;
+            let isLocalMap = false;
             for (const mapToken of docStructure.getMapBlocks()) {
                 if (
                     mapToken.line < line &&
@@ -68,6 +70,7 @@ export class MapModuleCodeActionProvider {
                     line < mapToken.finishesAt
                 ) {
                     mapEndLine = mapToken.finishesAt;
+                    isLocalMap = mapToken.parent?.type === TokenType.Procedure;
                     break;
                 }
             }
@@ -100,7 +103,8 @@ export class MapModuleCodeActionProvider {
                         documentUri: document.uri,
                         mapEndLine,
                         firstClwFile,
-                        projectGuid: project?.guid ?? ''
+                        projectGuid: project?.guid ?? '',
+                        isLocalMap
                     }
                 )
             });
