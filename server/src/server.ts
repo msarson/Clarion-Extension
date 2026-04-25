@@ -695,6 +695,19 @@ documents.onDidChangeContent(event => {
                 logger.error(`⏱️ [SERVER] getTokens: ${tokensMs}ms, ${tokens.length} tokens for ${path.basename(decodeURIComponent(uri))}`);
                 logger.info(`🔍 Successfully refreshed tokens after edit: ${uri}, got ${tokens.length} tokens`);
                 
+                // Remove stale duplicate cache entries for this URI (e.g., file:///f:/ vs file:///f%3A/)
+                // CrossFileResolver may have created unencoded-URI entries from disk reads; these
+                // become stale after VS Code updates the document via the encoded URI.
+                const normalizedUri = decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).toLowerCase().replace(/\\/g, '/');
+                for (const cachedUri of tokenCache.getAllCachedUris()) {
+                    if (cachedUri !== uri) {
+                        const cachedNorm = decodeURIComponent(cachedUri.replace(/^file:\/\/\//i, '')).toLowerCase().replace(/\\/g, '/');
+                        if (cachedNorm === normalizedUri) {
+                            tokenCache.clearTokens(cachedUri);
+                        }
+                    }
+                }
+
                 // Validate document using fresh tokens
                 validateTextDocument(document, 'onDidChangeContent');
 

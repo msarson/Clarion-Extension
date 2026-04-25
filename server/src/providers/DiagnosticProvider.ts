@@ -72,9 +72,10 @@ export class DiagnosticProvider {
     /** Async pass: warn when a MAP/MODULE declaration has no implementation in the referenced CLW. Closes #89 */
     public static async validateMissingImplementations(
         tokens: Token[],
-        document: TextDocument
+        document: TextDocument,
+        getOpenDocumentContent?: (absPath: string) => string | null
     ): Promise<Diagnostic[]> {
-        return validateMissingImplementations(tokens, document);
+        return validateMissingImplementations(tokens, document, getOpenDocumentContent);
     }
 
     /** Async pass: warn when a variable's type is defined in an .inc not yet included. Closes #83 */
