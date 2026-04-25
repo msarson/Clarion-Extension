@@ -287,8 +287,11 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         }
 
         // 🚀 PERF: Skip if we just validated this exact version
+        // Exception: cross-file re-validation must bypass this guard because the
+        // document content hasn't changed but a *related* file has, so diagnostics
+        // that reference the related file may now be stale.
         const lastVersion = lastValidatedVersions.get(document.uri);
-        if (lastVersion === document.version) {
+        if (lastVersion === document.version && caller !== 'crossFileUpdate') {
             logger.info(`⚡ [DIAG] Skipping duplicate validation caller=${caller} v${document.version} uri=${document.uri}`);
             return;
         }

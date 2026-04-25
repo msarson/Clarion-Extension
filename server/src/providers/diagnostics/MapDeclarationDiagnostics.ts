@@ -187,15 +187,36 @@ export async function validateMissingImplementations(
             continue;
         }
 
-        // Get tokens for the implementation file
+        // Get tokens for the implementation file.
+        // Prefer live in-memory content from TokenCache so that WorkspaceEdit
+        // changes are visible even before the file is saved to disk.
         let implTokens: Token[];
+        let implFileContent: string;
         try {
-            const content = fs.readFileSync(clwPath, 'utf8');
-            const implDoc = TextDocument.create(
-                'file:///' + clwPath.replace(/\\/g, '/'),
-                'clarion', 1, content
-            );
-            implTokens = tokenCache.getTokens(implDoc);
+            const normalizedClwPath = clwPath.toLowerCase().replace(/\\/g, '/');
+            const liveUri = tokenCache.getAllCachedUris().find(uri => {
+                const uriPath = decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).toLowerCase().replace(/\\/g, '/');
+                return uriPath === normalizedClwPath;
+            });
+
+            if (liveUri) {
+                const liveText = tokenCache.getDocumentText(liveUri);
+                const liveCachedTokens = tokenCache.getTokensByUri(liveUri);
+                if (liveText && liveCachedTokens) {
+                    implTokens = liveCachedTokens;
+                    implFileContent = liveText;
+                } else if (liveText) {
+                    const implDoc = TextDocument.create(liveUri, 'clarion', 1, liveText);
+                    implTokens = tokenCache.getTokens(implDoc);
+                    implFileContent = liveText;
+                } else {
+                    throw new Error('no live text in cache');
+                }
+            } else {
+                implFileContent = fs.readFileSync(clwPath, 'utf8');
+                const implDoc = TextDocument.create('file:///' + clwPath.replace(/\\/g, '/'), 'clarion', 1, implFileContent);
+                implTokens = tokenCache.getTokens(implDoc);
+            }
         } catch (err) {
             logger.error(`Error loading implementation file '${clwPath}': ${err instanceof Error ? err.message : String(err)}`);
             continue;
@@ -251,7 +272,7 @@ export async function validateMissingImplementations(
                     );
 
                     if (implLine !== undefined) {
-                        const implFileLines = fs.readFileSync(clwPath, 'utf8').split('\n');
+                        const implFileLines = implFileContent.split('\n');
                         const implSig = implFileLines[implLine.line] ?? '';
                         const implParams = ProcedureSignatureUtils.extractParameterTypes(implSig);
                         const declSig = docLines[decl.line] ?? '';
