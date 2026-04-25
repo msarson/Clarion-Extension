@@ -363,6 +363,11 @@
         "when": "clarion.solutionOpen"
       },
       {
+        "command": "clarion.addMapModule",
+        "title": "Add MODULE with PROCEDURE",
+        "when": "clarion.solutionOpen"
+      },
+      {
         "command": "clarion.removeSourceFile",
         "title": "Remove Source File",
         "when": "clarion.solutionOpen"
@@ -648,6 +653,10 @@
       "commandPalette": [
         {
           "command": "clarion.addSourceFile",
+          "when": "false"
+        },
+        {
+          "command": "clarion.addMapModule",
           "when": "false"
         },
         {
