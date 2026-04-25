@@ -38,6 +38,19 @@ function getIndentString(uri?: vscode.Uri): string {
 }
 
 /**
+ * Returns the MAP prototype declaration for a procedure name,
+ * respecting the clarion.procedurePrototypeStyle setting.
+ * e.g. "MyProc PROCEDURE()" or "MyProc()"
+ */
+function getProtoDeclaration(procedureName: string, uri?: vscode.Uri): string {
+    const style = vscode.workspace.getConfiguration('clarion', uri)
+        .get<string>('procedurePrototypeStyle', 'keyword');
+    return style === 'shorthand'
+        ? `${procedureName}()`
+        : `${procedureName} PROCEDURE()`;
+}
+
+/**
  * Handles the 'clarion.addMapModule' command triggered by the MAP code action.
  */
 async function addMapModule(...args: any[]): Promise<void> {
@@ -122,9 +135,11 @@ async function addMapModule(...args: any[]): Promise<void> {
             targetDir = pick.dir;
         }
 
-        // 5. Determine indent string from the active editor config
         const activeUri = vscode.window.activeTextEditor?.document.uri;
         const indentString = getIndentString(activeUri);
+        const protoDecl = getProtoDeclaration(procedureName, activeUri);
+        const prototypeStyle = vscode.workspace.getConfiguration('clarion', activeUri)
+            .get<string>('procedurePrototypeStyle', 'keyword');
 
         // 6. Create the file and update the project
         const result = await client.sendRequest<{ success: boolean; filePath: string }>(
@@ -136,7 +151,8 @@ async function addMapModule(...args: any[]): Promise<void> {
                 targetDir,
                 firstClwFile: params.firstClwFile,
                 indentString,
-                isLocalMap: params.isLocalMap ?? false
+                isLocalMap: params.isLocalMap ?? false,
+                prototypeStyle
             }
         );
 
@@ -151,7 +167,7 @@ async function addMapModule(...args: any[]): Promise<void> {
         const insertPos = new vscode.Position(params.mapEndLine, 0);
         const moduleText =
             `${indentString}MODULE('${moduleName}')\n` +
-            `${procedureName} PROCEDURE()\n` +
+            `${protoDecl}\n` +
             `${indentString}END\n`;
         edit.insert(docUri, insertPos, moduleText);
         await vscode.workspace.applyEdit(edit);
@@ -213,6 +229,7 @@ async function addProcedureToModule(...args: any[]): Promise<void> {
 
         const activeUri = vscode.window.activeTextEditor?.document.uri;
         const indentString = getIndentString(activeUri);
+        const protoDecl = getProtoDeclaration(procedureName, activeUri);
 
         // 3. Open the CLW document to get its live line count
         const clwUri = vscode.Uri.file(resolved.clwFilePath);
@@ -224,7 +241,7 @@ async function addProcedureToModule(...args: any[]): Promise<void> {
 
         // Insert procedure declaration into the MODULE block (before END)
         const mapUri = vscode.Uri.parse(params.documentUri);
-        edit.insert(mapUri, new vscode.Position(params.moduleEndLine, 0), `${procedureName} PROCEDURE()\n`);
+        edit.insert(mapUri, new vscode.Position(params.moduleEndLine, 0), `${protoDecl}\n`);
 
         // Append procedure implementation to the CLW file
         const padding = ' '.repeat(Math.max(1, 16 - procedureName.length));
@@ -278,6 +295,7 @@ async function addProcedureFromMap(...args: any[]): Promise<void> {
 
         const fileUri = vscode.Uri.parse(params.documentUri);
         const indentString = getIndentString(fileUri);
+        const protoDecl = getProtoDeclaration(procedureName, fileUri);
         const padding = ' '.repeat(Math.max(1, 16 - procedureName.length));
 
         // Open the current file to get its live line count
@@ -286,7 +304,7 @@ async function addProcedureFromMap(...args: any[]): Promise<void> {
 
         const edit = new vscode.WorkspaceEdit();
         // Declaration directly in the MAP (before its END)
-        edit.insert(fileUri, new vscode.Position(params.mapEndLine, 0), `${procedureName} PROCEDURE()\n`);
+        edit.insert(fileUri, new vscode.Position(params.mapEndLine, 0), `${protoDecl}\n`);
         // Implementation appended at end of file
         const stub = `\r\n${procedureName}${padding}PROCEDURE()\r\n${indentString}CODE\r\n`;
         edit.insert(fileUri, new vscode.Position(insertLine, 0), stub);

@@ -855,6 +855,16 @@
       "type": "object",
       "title": "Clarion Extension Configuration",
       "properties": {
+        "clarion.procedurePrototypeStyle": {
+          "type": "string",
+          "enum": ["keyword", "shorthand"],
+          "enumDescriptions": [
+            "Use 'ProcName PROCEDURE()' — the preferred form (Clarion docs recommended)",
+            "Use 'ProcName()' — shorthand form (backward compatibility only)"
+          ],
+          "default": "keyword",
+          "description": "Controls the prototype style used when inserting procedure declarations inside MAP/MODULE structures."
+        },
         "clarion.build.revealOutput": {
           "type": "string",
           "enum": [

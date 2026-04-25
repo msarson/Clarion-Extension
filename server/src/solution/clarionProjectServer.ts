@@ -869,7 +869,8 @@ export class ClarionProjectServer {
         targetDir: string,
         firstClwFile: string,
         indentString: string,
-        isLocalMap: boolean = false
+        isLocalMap: boolean = false,
+        prototypeStyle: string = 'keyword'
     ): Promise<{ success: boolean; filePath: string }> {
         logger.info(`🔄 addModuleWithProcedure: ${moduleName} in ${targetDir}`);
 
@@ -880,10 +881,13 @@ export class ClarionProjectServer {
             const i = indentString;
             const memberRef = firstClwFile ? `'${firstClwFile}'` : "''";
             const padding = ' '.repeat(Math.max(1, 16 - procedureName.length));
+            const protoDecl = prototypeStyle === 'shorthand'
+                ? `${i}${i}${procedureName}()`
+                : `${i}${i}${procedureName}${padding}PROCEDURE()`;
 
             // For a local MAP module, the CLW must also declare the procedure inside its MAP/END
             const mapSection = isLocalMap
-                ? `${i}MAP\r\n${i}${i}${procedureName}${padding}PROCEDURE()\r\n${i}END\r\n\r\n`
+                ? `${i}MAP\r\n${protoDecl}\r\n${i}END\r\n\r\n`
                 : `${i}MAP\r\n${i}END\r\n\r\n`;
 
             const content =

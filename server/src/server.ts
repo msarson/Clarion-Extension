@@ -1347,6 +1347,7 @@ connection.onRequest('clarion/addModuleWithProcedure', async (params: {
     firstClwFile: string;
     indentString: string;
     isLocalMap?: boolean;
+    prototypeStyle?: string;
 }): Promise<{ success: boolean; filePath: string }> => {
     logger.info(`🔄 addModuleWithProcedure: ${params.moduleName}`);
     try {
@@ -1362,7 +1363,8 @@ connection.onRequest('clarion/addModuleWithProcedure', async (params: {
             params.targetDir,
             params.firstClwFile,
             params.indentString,
-            params.isLocalMap ?? false
+            params.isLocalMap ?? false,
+            params.prototypeStyle ?? 'keyword'
         );
         if (result.success) {
             try {
