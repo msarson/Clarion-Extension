@@ -74,12 +74,26 @@ export async function validateMissingMapDeclarations(
         return [];
     }
 
-    // Build a set of procedure names already declared in this file's own MAP blocks.
-    // A MEMBER file can have its own MAP/END (e.g. for local procedures) — those are
-    // valid declarations and must not trigger the warning.
+    // Build a set of procedure names declared in a MODULE('thisfile.clw') block
+    // within this file's own MAP. Only these count as true self-declarations — bare
+    // MAP entries with no MODULE wrapper are forward-declarations for calling external
+    // procedures and must not suppress the missing-declaration check.
+    const currentBasename = nodePath.basename(
+        decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''))
+    ).toLowerCase();
+
     const locallyDeclared = new Set<string>(
         tokens
-            .filter(t => t.subType === TokenType.MapProcedure && t.label)
+            .filter(t => {
+                if (t.subType !== TokenType.MapProcedure || !t.label) return false;
+                // Must be inside a MODULE block that references this file
+                const moduleParent = t.parent;
+                if (!moduleParent ||
+                    moduleParent.type !== TokenType.Structure ||
+                    moduleParent.value.toUpperCase() !== 'MODULE' ||
+                    !moduleParent.referencedFile) return false;
+                return nodePath.basename(moduleParent.referencedFile).toLowerCase() === currentBasename;
+            })
             .map(t => t.label!.toUpperCase())
     );
 
