@@ -49,6 +49,8 @@ export class FileRelationshipGraph {
     private _built = false;
     private _building = false;
     private _buildDurationMs: number | undefined;
+    private _buildStartTime: Date | undefined;
+    private _buildEndTime: Date | undefined;
 
     private constructor() {}
 
@@ -62,6 +64,8 @@ export class FileRelationshipGraph {
     public get isBuilt(): boolean { return this._built; }
     public get isBuilding(): boolean { return this._building; }
     public get buildDurationMs(): number | undefined { return this._buildDurationMs; }
+    public get buildStartTime(): Date | undefined { return this._buildStartTime; }
+    public get buildEndTime(): Date | undefined { return this._buildEndTime; }
 
     // ── Build ──────────────────────────────────────────────────────────────────
 
@@ -76,6 +80,8 @@ export class FileRelationshipGraph {
         this._building = true;
         this._built = false;
         this._buildDurationMs = undefined;
+        this._buildStartTime = new Date();
+        this._buildEndTime = undefined;
         this.forwardEdges.clear();
         this.reverseEdges.clear();
 
@@ -111,6 +117,7 @@ export class FileRelationshipGraph {
         }
 
         this._buildDurationMs = Date.now() - buildStart;
+        this._buildEndTime = new Date();
         this._built = true;
         this._building = false;
         const edgeCount = this.getAllEdges().length;

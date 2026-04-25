@@ -23,6 +23,8 @@ export function registerDebugCommands(context: ExtensionContext, client: Languag
                 isBuilt: boolean;
                 isBuilding: boolean;
                 buildDurationMs: number | undefined;
+                buildStartTime: string | undefined;
+                buildEndTime: string | undefined;
             }>('clarion/getFileRelationshipGraph');
 
             const lines: string[] = [];
@@ -40,6 +42,10 @@ export function registerDebugCommands(context: ExtensionContext, client: Languag
                     ? ` in ${(result.buildDurationMs / 1000).toFixed(1)}s`
                     : '';
                 lines.push(`✅ Graph built — ${result.edges.length} edge(s) total${duration}`);
+                if (result.buildStartTime) {
+                    const fmt = (iso: string) => new Date(iso).toLocaleTimeString();
+                    lines.push(`   Started: ${fmt(result.buildStartTime)}   Finished: ${result.buildEndTime ? fmt(result.buildEndTime) : '—'}`);
+                }
                 lines.push('');
             }
 

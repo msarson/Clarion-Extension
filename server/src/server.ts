@@ -1975,10 +1975,19 @@ connection.onRequest('clarion/getFileRelationshipGraph', async (): Promise<{
     isBuilt: boolean;
     isBuilding: boolean;
     buildDurationMs: number | undefined;
+    buildStartTime: string | undefined;
+    buildEndTime: string | undefined;
 }> => {
     const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
     const graph = FileRelationshipGraph.getInstance();
-    return { edges: graph.getAllEdges(), isBuilt: graph.isBuilt, isBuilding: graph.isBuilding, buildDurationMs: graph.buildDurationMs };
+    return {
+        edges: graph.getAllEdges(),
+        isBuilt: graph.isBuilt,
+        isBuilding: graph.isBuilding,
+        buildDurationMs: graph.buildDurationMs,
+        buildStartTime: graph.buildStartTime?.toISOString(),
+        buildEndTime: graph.buildEndTime?.toISOString(),
+    };
 });
 
 logger.info("🟢  Clarion Language Server is now listening for requests.");
