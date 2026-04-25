@@ -41,7 +41,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { ClarionDocumentSymbolProvider } from './providers/ClarionDocumentSymbolProvider';
 import { ClarionSemanticTokensProvider } from './providers/ClarionSemanticTokensProvider';
 
-import { Token } from './ClarionTokenizer';
+import { Token, TokenType } from './ClarionTokenizer';
 import { TokenCache } from './TokenCache';
 
 import LoggerManager from './logger';
@@ -561,6 +561,53 @@ function isStructureAffectingEdit(document: TextDocument): boolean {
 }
 
 // ✅ Handle Content Changes (Recompute Tokens)
+/**
+ * After any file change, re-validate documents that share a PROGRAM/MEMBER relationship
+ * with the changed file so cross-file diagnostics clear automatically:
+ *   - PROGRAM file changed → re-validate open MEMBER files that reference it
+ *   - MEMBER file changed  → re-validate the open PROGRAM file it references
+ */
+function revalidateRelatedDocuments(changedDocument: TextDocument, tokens: Token[]): void {
+    try {
+        const isProgramFile = tokens.some(t =>
+            t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'PROGRAM' && t.line < 5
+        );
+        const memberToken = tokens.find(t =>
+            t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'MEMBER' && t.line < 5 && t.referencedFile
+        );
+
+        if (isProgramFile) {
+            // Re-validate any open MEMBER files that reference this PROGRAM file
+            const changedBasename = path.basename(
+                decodeURIComponent(changedDocument.uri.replace(/^file:\/\/\//i, ''))
+            ).toLowerCase();
+            for (const openDoc of documents.all()) {
+                if (openDoc.uri === changedDocument.uri) continue;
+                const openTokens = tokenCache.getCachedTokens(openDoc);
+                if (!openTokens) continue;
+                const openMemberToken = openTokens.find(t =>
+                    t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'MEMBER' && t.referencedFile
+                );
+                if (openMemberToken?.referencedFile &&
+                    path.basename(openMemberToken.referencedFile).toLowerCase() === changedBasename) {
+                    validateTextDocument(openDoc, 'crossFileUpdate');
+                }
+            }
+        }
+
+        if (memberToken?.referencedFile) {
+            // Re-validate the PROGRAM file this MEMBER file references (if it's open)
+            const programUri = 'file:///' + memberToken.referencedFile.replace(/\\/g, '/');
+            const programDoc = documents.get(programUri);
+            if (programDoc) {
+                validateTextDocument(programDoc, 'crossFileUpdate');
+            }
+        }
+    } catch (err) {
+        logger.error(`❌ Error in revalidateRelatedDocuments: ${err instanceof Error ? err.message : String(err)}`);
+    }
+}
+
 documents.onDidChangeContent(event => {
     try {
         const document = event.document;
@@ -632,6 +679,9 @@ documents.onDidChangeContent(event => {
                 
                 // Validate document using fresh tokens
                 validateTextDocument(document, 'onDidChangeContent');
+
+                // Re-validate any related PROGRAM/MEMBER files so cross-file diagnostics clear
+                revalidateRelatedDocuments(document, tokens);
                 
                 // 🔄 Notify client that document symbols have changed
                 // This triggers structure view to refresh with fresh symbols
