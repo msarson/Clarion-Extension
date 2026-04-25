@@ -11,6 +11,7 @@ import {
 import { TokenCache } from '../TokenCache';
 import { TokenType } from '../tokenizer/TokenTypes';
 import { ProcedureSignatureUtils } from '../utils/ProcedureSignatureUtils';
+import { SolutionManager } from '../solution/solutionManager';
 import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../logger';
@@ -26,6 +27,39 @@ function uriToPath(uri: string): string {
 
 function pathToUri(absPath: string): string {
     return 'file:///' + absPath.replace(/\\/g, '/');
+}
+
+/**
+ * Resolve a bare CLW filename to an absolute path using the redirection parser,
+ * falling back to resolving relative to a sibling file's directory.
+ */
+function resolveClwPath(bareOrAbsolute: string, siblingFilePath?: string): string | null {
+    if (path.isAbsolute(bareOrAbsolute) && fs.existsSync(bareOrAbsolute)) {
+        return bareOrAbsolute;
+    }
+
+    // Try redirection parser first (same as compiler)
+    const solutionManager = SolutionManager.getInstance();
+    if (solutionManager?.solution) {
+        for (const proj of solutionManager.solution.projects) {
+            const resolved = proj.getRedirectionParser().findFile(bareOrAbsolute);
+            logger.debug(`🔍 [resolveClwPath] resolved=${JSON.stringify(resolved)}`);
+            if (resolved?.path && fs.existsSync(resolved.path)) {
+                return resolved.path;
+            }
+        }
+    } else {
+        logger.debug(`⚠️ [resolveClwPath] SolutionManager has no solution loaded`);
+    }
+
+    // Fall back: try same directory as sibling file
+    if (siblingFilePath) {
+        const candidate = path.join(path.dirname(siblingFilePath), path.basename(bareOrAbsolute));
+        logger.debug(`🔍 [resolveClwPath] sibling fallback: ${candidate}`);
+        if (fs.existsSync(candidate)) return candidate;
+    }
+
+    return null;
 }
 
 /** Return the leading whitespace of a line. */
@@ -234,39 +268,27 @@ export class MapDeclarationCodeActionProvider {
     private fixMissingImplementation(document: TextDocument, data: MissingImplData): CodeAction[] {
         if (!data?.procName || !data.clwFileUri) return [];
 
-        const clwPath = uriToPath(data.clwFileUri);
+        const docPath = uriToPath(document.uri);
+        const clwPath = resolveClwPath(uriToPath(data.clwFileUri), docPath);
+        if (!clwPath) return [];
 
         const docLines = document.getText().split('\n');
         const declLineText = docLines[data.declLine] ?? '';
-        // Strip return types/attributes: only take the (…) from the declaration
         const rawParams = ProcedureSignatureUtils.extractRawParameterList(declLineText);
 
-        // Build implementation text (no return type or attributes)
-        let clwContent = '';
-        if (fs.existsSync(clwPath)) {
-            clwContent = fs.readFileSync(clwPath, 'utf8');
-        }
+        const clwContent = fs.readFileSync(clwPath, 'utf8');
 
-        // Detect EOL style
         const eol = clwContent.includes('\r\n') ? '\r\n' : '\n';
         const endsWithNewline = clwContent.endsWith('\n');
         const prefix = clwContent.length > 0 && !endsWithNewline ? eol : '';
 
         const implText = `${prefix}${data.procName} PROCEDURE${rawParams}${eol}CODE${eol}RETURN${eol}`;
 
-        // Count lines so we know the insert position
         const clwLines = clwContent.split('\n');
-        const lastLine = clwLines.length; // insert after the last line
+        const lastLine = clwLines.length;
 
         const clwUri = pathToUri(clwPath);
         const insertPos = Position.create(lastLine, 0);
-
-        // For new files: write with document creation
-        if (!fs.existsSync(clwPath)) {
-            // Can't use WorkspaceEdit to create files in LSP without workspace resource operations.
-            // Since this is an edge case (CLW was declared but never created), skip.
-            return [];
-        }
 
         return [{
             title: `Add '${data.procName}' implementation to '${path.basename(clwPath)}'`,
@@ -285,10 +307,11 @@ export class MapDeclarationCodeActionProvider {
     private fixSignatureMismatchProgramSide(document: TextDocument, data: SigMismatchProgramData): CodeAction[] {
         if (!data?.procName || !data.clwFileUri) return [];
 
-        const clwPath = uriToPath(data.clwFileUri);
-        logger.debug(`🔧 [ProgramSide] proc=${data.procName} clwPath=${clwPath} declLine=${data.declLine} implLine=${data.implLine}`);
-        if (!fs.existsSync(clwPath)) {
-            logger.debug(`❌ [ProgramSide] clw file not found: ${clwPath}`);
+        const docPath = uriToPath(document.uri);
+        const clwPath = resolveClwPath(uriToPath(data.clwFileUri), docPath);
+        logger.debug(`🔧 [ProgramSide] proc=${data.procName} raw=${uriToPath(data.clwFileUri)} resolved=${clwPath} declLine=${data.declLine} implLine=${data.implLine}`);
+        if (!clwPath) {
+            logger.debug(`❌ [ProgramSide] could not resolve clw file`);
             return [];
         }
 
