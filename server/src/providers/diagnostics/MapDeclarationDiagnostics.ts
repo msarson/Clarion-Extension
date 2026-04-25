@@ -6,6 +6,7 @@ import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
 import { TokenCache } from '../../TokenCache';
 import { SolutionManager } from '../../solution/solutionManager';
 import LoggerManager from '../../logger';
+import { getLocalMapScope } from '../../utils/LocalMapScopeHelper';
 import * as fs from 'fs';
 import * as nodePath from 'path';
 
@@ -94,10 +95,13 @@ export async function validateMissingMapDeclarations(
         }
 
         try {
+            const localScope = getLocalMapScope(document.uri);
             const result = await resolver.findMapDeclarationInMemberFile(
                 procName,
                 memberToken.referencedFile,
-                document
+                document,
+                undefined,
+                localScope?.containingProcedure
             );
 
             const range: Range = {

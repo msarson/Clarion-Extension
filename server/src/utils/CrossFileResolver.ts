@@ -11,6 +11,7 @@ import { SolutionManager } from '../solution/solutionManager';
 import { DocumentStructure } from '../DocumentStructure';
 import { ProcedureSignatureUtils } from './ProcedureSignatureUtils';
 import { TokenCache } from '../TokenCache';
+import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -85,13 +86,15 @@ export class CrossFileResolver {
      * @param memberFile Parent file from MEMBER('filename')
      * @param currentDocument Current document (implementation file)
      * @param signature Optional signature for overload matching
+     * @param containingProcedure Optional — when set, only search MAP blocks inside this procedure (local MAP scope)
      * @returns MAP declaration result or null
      */
     public async findMapDeclarationInMemberFile(
         procName: string,
         memberFile: string,
         currentDocument: TextDocument,
-        signature?: string
+        signature?: string,
+        containingProcedure?: string
     ): Promise<MapDeclarationResult | null> {
         try {
             logger.info(`Finding MAP declaration for ${procName} in MEMBER file ${memberFile}`);
@@ -133,6 +136,29 @@ export class CrossFileResolver {
                 const mapEnd = mapBlock.finishesAt;
 
                 if (mapEnd === undefined) continue;
+
+                // When containingProcedure is specified, use FRG to check if this MAP
+                // belongs to the expected procedure (local MAP scope).
+                if (containingProcedure) {
+                    const graph = FileRelationshipGraph.getInstance();
+                    const currentFilePath = decodeURIComponent(currentDocument.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\').toLowerCase();
+                    const moduleEdges = graph.getModuleDeclarants(currentFilePath);
+                    const fromFile = normalizedResolved;
+                    const matchingEdge = moduleEdges.find(e =>
+                        e.fromFile === fromFile &&
+                        e.containingProcedure?.toUpperCase() === containingProcedure.toUpperCase()
+                    );
+                    if (!matchingEdge) {
+                        logger.info(`⏭️ Skipping MAP at line ${mapStart} — not inside procedure '${containingProcedure}'`);
+                        continue;
+                    }
+                    // Verify this MAP block contains the MODULE edge's line (if known)
+                    if (matchingEdge.fromLine !== undefined &&
+                        (matchingEdge.fromLine < mapStart || matchingEdge.fromLine > mapEnd)) {
+                        logger.info(`⏭️ Skipping MAP at line ${mapStart} — MODULE edge line ${matchingEdge.fromLine} outside this MAP`);
+                        continue;
+                    }
+                }
 
                 // Find MODULE blocks in this MAP
                 const moduleBlocks = parentTokens.filter(t =>

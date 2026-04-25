@@ -1459,8 +1459,26 @@ export class ReferencesProvider {
             // Module-level MAP procedures (type='PROCEDURE') are only available within the current
             // MEMBER module — do not expand to project-wide search.
             if (symbolInfo.type === 'PROCEDURE') {
-                logger.error(`[FAR] Scope="module" (MAP procedure) → searching only declaring file`);
-                return [symbolInfo.location.uri];
+                // Use FRG to also include MODULE implementation files from the declaring file.
+                // For a MAP-declared procedure, its implementation lives in a MODULE target file.
+                const declaringFilePath = decodeURIComponent(symbolInfo.location.uri.replace(/^file:\/\/\//i, ''))
+                    .replace(/\\/g, '/').toLowerCase();
+                const graph = FileRelationshipGraph.getInstance();
+                const implFiles: string[] = [symbolInfo.location.uri];
+
+                if (graph.isBuilt) {
+                    const moduleEdges = graph.getForwardEdges(declaringFilePath)
+                        .filter(e => e.type === 'MODULE');
+                    for (const edge of moduleEdges) {
+                        const implUri = `file:///${edge.toFile}`;
+                        if (!implFiles.includes(implUri)) {
+                            implFiles.push(implUri);
+                        }
+                    }
+                }
+
+                logger.error(`[FAR] Scope="module" (MAP procedure) → searching ${implFiles.length} file(s): declaring + MODULE targets`);
+                return implFiles;
             }
             const isMember = this.isMemberFile(symbolInfo.location.uri);
             const isProcDecl = this.isProcedureDeclaration(symbolInfo.location.uri, symbolInfo.location.line);

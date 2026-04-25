@@ -23,6 +23,7 @@ import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { CrossFileCache } from './hover/CrossFileCache';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
+import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -162,12 +163,14 @@ export class ImplementationProvider {
                 if (memberToken?.referencedFile) {
                     logger.info(`File has MEMBER('${memberToken.referencedFile}'), checking parent for ${word}`);
                     
+                    const localScope = getLocalMapScope(document.uri);
                     // Use CrossFileResolver to find MAP declaration in parent file
                     const memberResult = await this.crossFileResolver.findMapDeclarationInMemberFile(
                         word,
                         memberToken.referencedFile,
                         document,
-                        line
+                        line,
+                        localScope?.containingProcedure
                     );
                     
                     if (memberResult) {
