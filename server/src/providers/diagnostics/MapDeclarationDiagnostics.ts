@@ -40,11 +40,26 @@ export async function validateMissingMapDeclarations(
         return [];
     }
 
+    // Build a set of procedure names already declared in this file's own MAP blocks.
+    // A MEMBER file can have its own MAP/END (e.g. for local procedures) — those are
+    // valid declarations and must not trigger the warning.
+    const locallyDeclared = new Set<string>(
+        tokens
+            .filter(t => t.subType === TokenType.MapProcedure && t.label)
+            .map(t => t.label!.toUpperCase())
+    );
+
     const resolver = new CrossFileResolver(TokenCache.getInstance());
     const diagnostics: Diagnostic[] = [];
 
     for (const proc of implementations) {
         const procName = proc.label!;
+
+        // Skip procedures declared in this file's own MAP block
+        if (locallyDeclared.has(procName.toUpperCase())) {
+            continue;
+        }
+
         try {
             const result = await resolver.findMapDeclarationInMemberFile(
                 procName,
