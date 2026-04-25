@@ -879,10 +879,10 @@ export class ClarionProjectServer {
             const i = indentString;
             const memberRef = firstClwFile ? `'${firstClwFile}'` : "''";
             const content =
-                `${i}MEMBER(${memberRef})\n\n` +
-                `${i}MAP\n${i}END\n\n` +
-                `${procedureName}${' '.repeat(Math.max(1, 16 - procedureName.length))}PROCEDURE\n` +
-                `${i}CODE\n`;
+                `${i}MEMBER(${memberRef})\r\n\r\n` +
+                `${i}MAP\r\n${i}END\r\n\r\n` +
+                `${procedureName}${' '.repeat(Math.max(1, 16 - procedureName.length))}PROCEDURE()\r\n` +
+                `${i}CODE\r\n`;
 
             // Create the directory if needed
             if (!fs.existsSync(targetDir)) {
