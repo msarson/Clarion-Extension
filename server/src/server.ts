@@ -60,6 +60,7 @@ import { HoverProvider } from './providers/HoverProvider';
 import { ClassConstantsCodeActionProvider } from './providers/ClassConstantsCodeActionProvider';
 import { FlattenCodeActionProvider } from './providers/FlattenCodeActionProvider';
 import { MapModuleCodeActionProvider } from './providers/MapModuleCodeActionProvider';
+import { MapDeclarationCodeActionProvider } from './providers/MapDeclarationCodeActionProvider';
 import { SelectionRangeProvider } from './providers/SelectionRangeProvider';
 import { ClarionCodeLensProvider, formatReferenceCount } from './providers/ClarionCodeLensProvider';
 import { DiagnosticProvider } from './providers/DiagnosticProvider';
@@ -1675,7 +1676,10 @@ connection.onCodeAction(async (params) => {
         const mapModuleProvider = new MapModuleCodeActionProvider();
         const mapModuleActions = mapModuleProvider.provideCodeActions(document, params.range);
 
-        const allActions = [...actions, ...flattenActions, ...mapModuleActions];
+        const mapDeclProvider = new MapDeclarationCodeActionProvider();
+        const mapDeclActions = mapDeclProvider.provideCodeActions(document, params.range, params.context);
+
+        const allActions = [...actions, ...flattenActions, ...mapModuleActions, ...mapDeclActions];
         logger.info(`Provided ${allActions.length} code actions`);
         return allActions;
     } catch (error) {
