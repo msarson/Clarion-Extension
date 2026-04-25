@@ -20,7 +20,10 @@ import { registerClassCreationCommands } from './commands/ClassCreationCommands'
 import { registerImplementationCommands } from './commands/ImplementationCommands';
 import { registerClassConstantCommands } from './commands/ClassConstantCommands';
 import { registerIncludeStatementCommands } from './commands/IncludeStatementCommands';
-import { createSolutionTreeView, createStructureView } from './views/ViewManager';
+import { registerNewSolutionCommands } from './commands/NewSolutionCommands';
+import { registerMapModuleCommands } from './commands/MapModuleCommands';
+import { registerDebugCommands } from './commands/DebugCommands';
+import { createSolutionTreeView, createStructureView, registerSolutionToolbar, updateSolutionToolbar } from './views/ViewManager';
 import { registerLanguageFeatures } from './providers/LanguageFeatureManager';
 import * as SolutionOpener from './solution/SolutionOpener';
 import { showClarionQuickOpen } from './navigation/QuickOpenProvider';
@@ -121,6 +124,8 @@ export async function activate(context: ExtensionContext): Promise<void> {
     treeView = solutionTreeResult.treeView;
     solutionTreeDataProvider = solutionTreeResult.provider;
     context.subscriptions.push(treeView);
+
+    registerSolutionToolbar(context);
     
     const structureViewResult = await createStructureView(context, structureView, structureViewProvider);
     structureView = structureViewResult.structureView;
@@ -144,6 +149,15 @@ export async function activate(context: ExtensionContext): Promise<void> {
     
     // Register include statement commands
     context.subscriptions.push(...registerIncludeStatementCommands(context));
+
+    // Register new solution command
+    context.subscriptions.push(...registerNewSolutionCommands(context));
+
+    // Register MAP module command (Add MODULE with PROCEDURE from MAP code action)
+    context.subscriptions.push(...registerMapModuleCommands(context));
+
+    // Register debug commands (show internal graph state)
+    context.subscriptions.push(...registerDebugCommands(context, client));
     
     context.subscriptions.push(...disposables);
     
@@ -187,6 +201,7 @@ async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: D
 
 async function initializeSolution(context: ExtensionContext, refreshDocs: boolean = false): Promise<void> {
     await SolutionInitializer.initializeSolution(context, refreshDocs, client, reinitializeEnvironment, documentManager);
+    updateSolutionToolbar();
 }
 
 async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<DocumentManager> {
@@ -212,6 +227,7 @@ export async function openClarionSolution(context: ExtensionContext) {
 
 export async function closeClarionSolution(context: ExtensionContext) {
     await SolutionOpener.closeClarionSolution(context, reinitializeEnvironment, documentManager);
+    updateSolutionToolbar();
 }
 
 async function registerOpenCommand(context: ExtensionContext) {

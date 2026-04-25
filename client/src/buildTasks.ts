@@ -18,6 +18,17 @@ import { ProjectDependencyResolver } from "./utils/ProjectDependencyResolver";
 import { ClarionProjectInfo } from "../../common/types";
 const logger = LoggerManager.getLogger("BuildTasks");
 logger.setLevel("error"); // Production: Only log errors
+
+/**
+ * Saves all dirty documents before building if clarion.saveBeforeBuild is enabled.
+ */
+async function saveBeforeBuildIfEnabled(): Promise<void> {
+    const config = workspace.getConfiguration('clarion');
+    if (config.get<boolean>('saveBeforeBuild', true)) {
+        await workspace.saveAll(false);
+    }
+}
+
 /**
  * Main entry point for the Clarion build process
  */
@@ -29,7 +40,7 @@ export async function runClarionBuild(
         return;
     }
 
-    // Load the solution information
+    await saveBeforeBuildIfEnabled();
     const solutionData = await loadSolutionInfo();
     if (!solutionData) {
         return;
@@ -616,6 +627,8 @@ export async function buildSolutionWithDependencyOrder(
         return;
     }
 
+    await saveBeforeBuildIfEnabled();
+
     const solutionCache = SolutionCache.getInstance();
     const solutionInfo = solutionCache.getSolutionInfo();
 
@@ -808,7 +821,8 @@ export async function buildSolutionOrProject(
     buildTarget: "Solution" | "Project",
     project: ClarionProjectInfo | undefined,
     diagnosticCollection: DiagnosticCollection,
-    solutionTreeDataProvider?: any
+    solutionTreeDataProvider?: any,
+    waitForCompletion: boolean = false
 ): Promise<void> {
     const buildConfig = {
         buildTarget,
@@ -819,6 +833,8 @@ export async function buildSolutionOrProject(
     if (!validateBuildEnvironment()) {
         return;
     }
+
+    await saveBeforeBuildIfEnabled();
 
     const solutionCache = SolutionCache.getInstance();
     const solutionInfo = solutionCache.getSolutionInfo();
@@ -838,7 +854,11 @@ export async function buildSolutionOrProject(
         diagnosticCollection
     };
 
-    await executeBuildTask(buildParams);
+    if (waitForCompletion) {
+        await executeBuildTaskSync(buildParams);
+    } else {
+        await executeBuildTask(buildParams);
+    }
 }
 
 /**

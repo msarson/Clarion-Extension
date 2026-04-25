@@ -288,8 +288,15 @@ export const globalSettings = {
             }
             
             logger.info("✅ Migration to solutions array completed successfully.");
-        } else {
-            logger.info("✅ No migration needed or already migrated.");
+        }
+
+        // Always clean up legacy keys that are now redundant (they may linger from old installs)
+        for (const legacyKey of ['solutionFile', 'propertiesFile', 'version'] as const) {
+            const inspection = config.inspect(legacyKey);
+            if (inspection?.workspaceFolderValue !== undefined) {
+                await config.update(legacyKey, undefined, target);
+                logger.info(`✅ Removed legacy setting: clarion.${legacyKey}`);
+            }
         }
     },
     
@@ -329,6 +336,18 @@ export const globalSettings = {
             } else {
                 logger.warn(`⚠️ Current solution ${currentSolution} not found in solutions array`);
             }
+        } else {
+            // currentSolution is blank — fall back to solutions array
+            const solutions = workspace.getConfiguration().get<ClarionSolutionSettings[]>("clarion.solutions", []);
+            if (solutions.length > 0) {
+                // Use the first (or only) entry
+                const solution = solutions[0];
+                logger.info(`✅ currentSolution is empty, defaulting to first solution in array: ${solution.solutionFile}`);
+                solutionFile = solution.solutionFile;
+                clarionPropertiesFile = solution.propertiesFile;
+                clarionVersion = solution.version;
+                clarionConfiguration = solution.configuration;
+            }
         }
 
         logger.info(`🔍 Read from workspace settings:
@@ -340,6 +359,13 @@ export const globalSettings = {
         // ✅ Early exit if no solution is configured - don't try to save empty settings
         if (!solutionFile) {
             logger.info("ℹ️ No solution settings found in workspace - skipping initialization");
+            return;
+        }
+
+        // ✅ If the solution file no longer exists on disk, silently remove it from settings
+        if (!fs.existsSync(solutionFile)) {
+            logger.info(`ℹ️ Solution file no longer exists, removing from settings: ${solutionFile}`);
+            await SettingsStorageManager.removeMissingSolution(solutionFile);
             return;
         }
 

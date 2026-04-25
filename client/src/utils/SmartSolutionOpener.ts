@@ -11,6 +11,12 @@ import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("SmartSolutionOpener", "info");
 
+export interface PreSelectedSettings {
+    installation: ClarionInstallation;
+    compilerName: string;
+    configuration: string;
+}
+
 export class SmartSolutionOpener {
     /**
      * Checks if existing settings for a solution are still valid
@@ -85,7 +91,7 @@ export class SmartSolutionOpener {
     /**
      * Opens a detected solution with smart auto-detection
      */
-    static async openDetectedSolution(solutionPath: string): Promise<boolean> {
+    static async openDetectedSolution(solutionPath: string, preSelected?: PreSelectedSettings): Promise<boolean> {
         try {
             logger.info(`📂 Opening detected solution: ${solutionPath}`);
 
@@ -105,7 +111,16 @@ export class SmartSolutionOpener {
                         - version: ${existingSettings.version}
                         - configuration: ${existingSettings.configuration}`);
 
-                    // Save as current solution and update globals
+                    // Update globals BEFORE saving to settings so that onDidChangeConfiguration
+                    // handlers that fire during the save see the correct (new) solution path.
+                    await setGlobalClarionSelection(
+                        solutionPath,
+                        existingSettings.propertiesFile,
+                        existingSettings.version,
+                        existingSettings.configuration,
+                        true // skipSave — we save explicitly below
+                    );
+
                     const success = await SettingsStorageManager.saveSolutionSettings(
                         solutionPath,
                         existingSettings.propertiesFile,
@@ -114,14 +129,6 @@ export class SmartSolutionOpener {
                     );
 
                     if (success) {
-                        await setGlobalClarionSelection(
-                            solutionPath,
-                            existingSettings.propertiesFile,
-                            existingSettings.version,
-                            existingSettings.configuration,
-                            true
-                        );
-
                         // Set environment variable and context
                         process.env.CLARION_SOLUTION_FILE = solutionPath;
                         await commands.executeCommand("setContext", "clarion.solutionOpen", true);
@@ -139,6 +146,17 @@ export class SmartSolutionOpener {
             }
 
             // Step 2: No existing settings or they're invalid - proceed with auto-detection
+            // Skip detection if caller already selected version/config (e.g. new solution wizard)
+            let selectedInstallation: ClarionInstallation;
+            let selectedCompiler: string;
+            let selectedConfig: string;
+
+            if (preSelected) {
+                selectedInstallation = preSelected.installation;
+                selectedCompiler = preSelected.compilerName;
+                selectedConfig = preSelected.configuration;
+                logger.info(`✅ Using pre-selected: Clarion ${selectedInstallation.ideVersion} → ${selectedCompiler} (${selectedConfig})`);
+            } else {
             const installations = await ClarionInstallationDetector.detectInstallations();
 
             if (installations.length === 0) {
@@ -155,8 +173,6 @@ export class SmartSolutionOpener {
             }
 
             // Step 3: Let user select installation if multiple found
-            let selectedInstallation: ClarionInstallation;
-            let selectedCompiler: string;
 
             if (installations.length === 1 && installations[0].compilerVersions.length === 1) {
                 // Only one installation and one compiler - use it automatically
@@ -176,7 +192,6 @@ export class SmartSolutionOpener {
 
             // Step 4: Extract configurations from .sln file, auto-detect from .sln.cache
             const configurations = this.extractConfigurationsFromSolution(solutionPath);
-            let selectedConfig: string;
 
             // Check .sln.cache for the last-used config (written by Clarion IDE/MSBuild)
             // configurations may be full "Config|Platform" strings; match by config name prefix
@@ -197,8 +212,27 @@ export class SmartSolutionOpener {
             } else {
                 selectedConfig = configurations[0] ?? "Release";
             }
+            } // end else (not preSelected)
 
-            // Step 5: Save settings using smart storage manager
+            // Step 5: Update global variables BEFORE saving to settings so that
+            // onDidChangeConfiguration handlers fired during the save see the correct solution.
+            logger.info(`📝 Updating global variables with:
+                - solutionPath: ${solutionPath}
+                - propertiesPath: ${selectedInstallation.propertiesPath}
+                - compiler: ${selectedCompiler}
+                - config: ${selectedConfig}`);
+
+            await setGlobalClarionSelection(
+                solutionPath,
+                selectedInstallation.propertiesPath,
+                selectedCompiler,
+                selectedConfig,
+                true // skipSave — we save explicitly below
+            );
+
+            logger.info("✅ Global variables updated");
+
+            // Step 6: Save settings using smart storage manager
             const success = await SettingsStorageManager.saveSolutionSettings(
                 solutionPath,
                 selectedInstallation.propertiesPath,
@@ -209,24 +243,7 @@ export class SmartSolutionOpener {
             if (!success) {
                 window.showErrorMessage("Failed to save solution settings");
                 return false;
-            }
-
-            // Step 6: Update global variables (skip saving since we already saved above)
-            logger.info(`📝 Updating global variables with:
-                - solutionPath: ${solutionPath}
-                - propertiesPath: ${selectedInstallation.propertiesPath}
-                - compiler: ${selectedCompiler}
-                - config: ${selectedConfig}`);
-                
-            await setGlobalClarionSelection(
-                solutionPath,
-                selectedInstallation.propertiesPath,
-                selectedCompiler,
-                selectedConfig,
-                true // skipSave = true, we already saved above
-            );
-            
-            logger.info("✅ Global variables updated");
+            };
 
             // Step 7: Add to global solution history
             const folderPath = path.dirname(solutionPath);
@@ -254,45 +271,108 @@ export class SmartSolutionOpener {
     }
 
     /**
+     * Detects installations and lets the user pick one. Returns null if cancelled or none found.
+     * Used by the new solution wizard to do version selection before creating files.
+     */
+    static async detectAndPickInstallation(): Promise<{ installation: ClarionInstallation; compilerName: string } | null> {
+        const installations = await ClarionInstallationDetector.detectInstallations();
+
+        if (installations.length === 0) {
+            window.showErrorMessage("No Clarion installations detected. ClarionProperties.xml not found in standard locations.");
+            return null;
+        }
+
+        if (installations.length === 1 && installations[0].compilerVersions.length === 1) {
+            return { installation: installations[0], compilerName: installations[0].compilerVersions[0].name };
+        }
+
+        return this.showInstallationPicker(installations);
+    }
+
+    /**
      * Shows a picker for selecting Clarion installation and compiler
      */
     private static async showInstallationPicker(
         installations: ClarionInstallation[]
     ): Promise<{ installation: ClarionInstallation; compilerName: string } | null> {
-        
-        interface InstallationPickerItem {
-            label: string;
-            description: string;
-            installation: ClarionInstallation;
-            compilerName: string;
-        }
 
-        const items: InstallationPickerItem[] = [];
+        const BROWSE_LABEL = "$(folder-opened) Browse for ClarionProperties.xml…";
 
-        for (const installation of installations) {
-            for (const compiler of installation.compilerVersions) {
-                items.push({
-                    label: `$(file) Clarion ${installation.ideVersion}`,
-                    description: compiler.name,
-                    installation: installation,
-                    compilerName: compiler.name
-                });
+        // Step 1: pick Clarion IDE version (skip if only one), with browse option at bottom
+        let installation: ClarionInstallation;
+        if (installations.length > 1) {
+            interface IdeItem { label: string; installation?: ClarionInstallation; isBrowse?: boolean }
+            const ideItems: IdeItem[] = [
+                ...installations.map(inst => ({ label: `Clarion ${inst.ideVersion}`, installation: inst })),
+                { label: BROWSE_LABEL, isBrowse: true }
+            ];
+            const ideSelected = await window.showQuickPick(ideItems, {
+                placeHolder: "Select Clarion IDE version"
+            });
+            if (!ideSelected) return null;
+
+            if (ideSelected.isBrowse) {
+                const browsed = await this.browseForPropertiesFile();
+                if (!browsed) return null;
+                installation = browsed;
+            } else {
+                installation = ideSelected.installation!;
+            }
+        } else {
+            // Single IDE — still show a one-item picker so the browse option is accessible
+            interface IdeItem { label: string; installation?: ClarionInstallation; isBrowse?: boolean }
+            const ideItems: IdeItem[] = [
+                { label: `Clarion ${installations[0].ideVersion}`, installation: installations[0] },
+                { label: BROWSE_LABEL, isBrowse: true }
+            ];
+            const ideSelected = await window.showQuickPick(ideItems, {
+                placeHolder: "Select Clarion IDE version"
+            });
+            if (!ideSelected) return null;
+
+            if (ideSelected.isBrowse) {
+                const browsed = await this.browseForPropertiesFile();
+                if (!browsed) return null;
+                installation = browsed;
+            } else {
+                installation = ideSelected.installation!;
             }
         }
 
-        const selected = await window.showQuickPick(items, {
-            placeHolder: "Select Clarion IDE and compiler version",
-            matchOnDescription: true
-        });
-
-        if (!selected) {
-            return null;
+        // Step 2: pick compiler version (skip if only one)
+        const compilers = installation.compilerVersions;
+        if (compilers.length === 1) {
+            return { installation, compilerName: compilers[0].name };
         }
 
-        return {
-            installation: selected.installation,
-            compilerName: selected.compilerName
-        };
+        interface CompilerItem { label: string; compilerName: string }
+        const compilerItems: CompilerItem[] = compilers.map(c => ({
+            label: c.name,
+            compilerName: c.name
+        }));
+        const compilerSelected = await window.showQuickPick(compilerItems, {
+            placeHolder: `Clarion ${installation.ideVersion} — select compiler version`
+        });
+        if (!compilerSelected) return null;
+
+        return { installation, compilerName: compilerSelected.compilerName };
+    }
+
+    private static async browseForPropertiesFile(): Promise<ClarionInstallation | null> {
+        const uris = await window.showOpenDialog({
+            title: "Select ClarionProperties.xml",
+            filters: { "ClarionProperties": ["xml"] },
+            canSelectMany: false,
+            openLabel: "Select"
+        });
+        if (!uris || uris.length === 0) return null;
+
+        const installation = await ClarionInstallationDetector.parseInstallationFromPropertiesPath(uris[0].fsPath);
+        if (!installation) {
+            window.showErrorMessage("No Clarion compiler versions found in the selected ClarionProperties.xml.");
+            return null;
+        }
+        return installation;
     }
 
     /**

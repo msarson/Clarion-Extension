@@ -2,6 +2,7 @@ import { commands, window, window as vscodeWindow, workspace, ExtensionContext, 
 import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { StructureViewProvider } from './StructureViewProvider';
 import { StatusViewProvider } from '../StatusViewProvider';
+import { SolutionToolbarProvider } from './SolutionToolbarProvider';
 import { registerSolutionViewCommands, registerStructureViewCommands } from '../commands/ViewCommands';
 import LoggerManager from '../utils/LoggerManager';
 
@@ -210,4 +211,22 @@ export async function createStatusView(
     };
     
     return { statusView: view, provider };
+}
+
+let globalToolbarProvider: SolutionToolbarProvider | undefined;
+
+/**
+ * Registers the solution toolbar webview view provider.
+ */
+export function registerSolutionToolbar(context: ExtensionContext): void {
+    const provider = new SolutionToolbarProvider(context.extensionUri);
+    globalToolbarProvider = provider;
+    context.subscriptions.push(
+        window.registerWebviewViewProvider(SolutionToolbarProvider.viewId, provider)
+    );
+    logger.info("✅ Solution toolbar registered");
+}
+
+export function updateSolutionToolbar(): void {
+    globalToolbarProvider?.update();
 }

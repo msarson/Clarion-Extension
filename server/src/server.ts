@@ -26,6 +26,7 @@ import {
     TextEdit,
     Range,
     Position,
+    Location,
     DocumentColorParams,
     ColorInformation,
     ColorPresentationParams,
@@ -41,7 +42,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { ClarionDocumentSymbolProvider } from './providers/ClarionDocumentSymbolProvider';
 import { ClarionSemanticTokensProvider } from './providers/ClarionSemanticTokensProvider';
 
-import { Token } from './ClarionTokenizer';
+import { Token, TokenType } from './ClarionTokenizer';
 import { TokenCache } from './TokenCache';
 
 import LoggerManager from './logger';
@@ -59,6 +60,8 @@ import { DefinitionProvider } from './providers/DefinitionProvider';
 import { HoverProvider } from './providers/HoverProvider';
 import { ClassConstantsCodeActionProvider } from './providers/ClassConstantsCodeActionProvider';
 import { FlattenCodeActionProvider } from './providers/FlattenCodeActionProvider';
+import { MapModuleCodeActionProvider } from './providers/MapModuleCodeActionProvider';
+import { MapDeclarationCodeActionProvider } from './providers/MapDeclarationCodeActionProvider';
 import { SelectionRangeProvider } from './providers/SelectionRangeProvider';
 import { ClarionCodeLensProvider, formatReferenceCount } from './providers/ClarionCodeLensProvider';
 import { DiagnosticProvider } from './providers/DiagnosticProvider';
@@ -83,6 +86,10 @@ logger.setLevel("error");
 // Temporary diagnostic tracer — set to "warn" so traces appear in OUTPUT panel
 // Track if a solution operation is in progress
 export let solutionOperationInProgress = false;
+
+// CodeLens reference count cache — keyed by "uri:line:char", invalidated on any document change
+const codeLensRefCache = new Map<string, { refs: Location[]; generation: number }>();
+let codeLensGeneration = 0;
 
 // Make solutionOperationInProgress accessible globally
 (global as any).solutionOperationInProgress = false;
@@ -285,8 +292,11 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         }
 
         // 🚀 PERF: Skip if we just validated this exact version
+        // Exception: cross-file re-validation must bypass this guard because the
+        // document content hasn't changed but a *related* file has, so diagnostics
+        // that reference the related file may now be stale.
         const lastVersion = lastValidatedVersions.get(document.uri);
-        if (lastVersion === document.version) {
+        if (lastVersion === document.version && caller !== 'crossFileUpdate') {
             logger.info(`⚡ [DIAG] Skipping duplicate validation caller=${caller} v${document.version} uri=${document.uri}`);
             return;
         }
@@ -304,9 +314,23 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
 
         // Async pass: detect discarded return values via cross-file type resolution
         const memberLocator = new MemberLocatorService();
-        const discardedReturnDiags = await DiagnosticProvider.validateDiscardedReturnValues(
-            tokens, document, memberLocator
-        );
+        // Provide a live-document getter so validateMissingImplementations can read
+        // open files even when the TokenCache has been cleared (e.g. structure-affecting edit).
+        const getOpenDocumentContent = (absPath: string): string | null => {
+            const normalizedPath = absPath.toLowerCase().replace(/\\/g, '/');
+            for (const doc of documents.all()) {
+                const docPath = decodeURIComponent(doc.uri.replace(/^file:\/\/\//i, '')).toLowerCase().replace(/\\/g, '/');
+                if (docPath === normalizedPath) return doc.getText();
+            }
+            return null;
+        };
+        const [discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags] = await Promise.all([
+            DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator),
+            DiagnosticProvider.validateMissingIncludes(tokens, document),
+            DiagnosticProvider.validateMissingConstants(tokens, document),
+            DiagnosticProvider.validateMissingMapDeclarations(tokens, document),
+            DiagnosticProvider.validateMissingImplementations(tokens, document, getOpenDocumentContent),
+        ]);
 
         // Stale-version guard: document may have changed while we were resolving types
         const currentDoc = documents.get(document.uri);
@@ -314,10 +338,11 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             return;
         }
 
-        if (discardedReturnDiags.length > 0) {
-            diagnostics.push(...discardedReturnDiags);
-            connection.sendDiagnostics({ uri: document.uri, diagnostics });
-        }
+        const asyncDiags = [...discardedReturnDiags, ...missingIncludeDiags, ...missingConstantsDiags, ...missingMapDeclDiags, ...missingImplDiags];
+        // Always send the final combined list so previously-raised async diagnostics
+        // (e.g. map-impl-signature-mismatch) are cleared when they are no longer relevant.
+        diagnostics.push(...asyncDiags);
+        connection.sendDiagnostics({ uri: document.uri, diagnostics });
     } catch (error) {
         logger.error(`❌ Error validating document: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -469,11 +494,20 @@ connection.onCodeLensResolve(async (lens) => {
         const document = documents.get(data.uri);
         if (!document) return lens;
 
-        const refs = await referencesProvider.provideReferences(
-            document,
-            { line: data.line, character: data.character },
-            { includeDeclaration: true }
-        );
+        const cacheKey = `${data.uri}:${data.line}:${data.character}`;
+        const cached = codeLensRefCache.get(cacheKey);
+
+        let refs: Location[] | null;
+        if (cached && cached.generation === codeLensGeneration) {
+            refs = cached.refs;
+        } else {
+            refs = await referencesProvider.provideReferences(
+                document,
+                { line: data.line, character: data.character },
+                { includeDeclaration: true }
+            );
+            codeLensRefCache.set(cacheKey, { refs: refs ?? [], generation: codeLensGeneration });
+        }
 
         const count = refs?.length ?? 0;
         lens.command = {
@@ -554,6 +588,58 @@ function isStructureAffectingEdit(document: TextDocument): boolean {
 }
 
 // ✅ Handle Content Changes (Recompute Tokens)
+/**
+ * After any file change, re-validate documents that share a PROGRAM/MEMBER relationship
+ * with the changed file so cross-file diagnostics clear automatically:
+ *   - PROGRAM file changed → re-validate open MEMBER files that reference it
+ *   - MEMBER file changed  → re-validate the open PROGRAM file it references
+ */
+function revalidateRelatedDocuments(changedDocument: TextDocument, tokens: Token[]): void {
+    try {
+        const isProgramFile = tokens.some(t =>
+            t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'PROGRAM' && t.line < 5
+        );
+        const memberToken = tokens.find(t =>
+            t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'MEMBER' && t.line < 5 && t.referencedFile
+        );
+
+        if (isProgramFile) {
+            // Re-validate any open MEMBER files that reference this PROGRAM file
+            const changedBasename = path.basename(
+                decodeURIComponent(changedDocument.uri.replace(/^file:\/\/\//i, ''))
+            ).toLowerCase();
+            for (const openDoc of documents.all()) {
+                if (openDoc.uri === changedDocument.uri) continue;
+                const openTokens = tokenCache.getCachedTokens(openDoc);
+                if (!openTokens) continue;
+                const openMemberToken = openTokens.find(t =>
+                    t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'MEMBER' && t.referencedFile
+                );
+                if (openMemberToken?.referencedFile &&
+                    path.basename(openMemberToken.referencedFile).toLowerCase() === changedBasename) {
+                    validateTextDocument(openDoc, 'crossFileUpdate');
+                }
+            }
+        }
+
+        if (memberToken?.referencedFile) {
+            // Re-validate the PROGRAM file this MEMBER file references (if it's open).
+            // Avoid URI format mismatch (e.g. file:///f%3A vs file:///F:/) by comparing
+            // normalised paths instead of constructing a URI and calling documents.get().
+            const programBasename = path.basename(memberToken.referencedFile).toLowerCase();
+            for (const openDoc of documents.all()) {
+                if (openDoc.uri === changedDocument.uri) continue;
+                const openPath = decodeURIComponent(openDoc.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+                if (path.basename(openPath).toLowerCase() === programBasename) {
+                    validateTextDocument(openDoc, 'crossFileUpdate');
+                }
+            }
+        }
+    } catch (err) {
+        logger.error(`❌ Error in revalidateRelatedDocuments: ${err instanceof Error ? err.message : String(err)}`);
+    }
+}
+
 documents.onDidChangeContent(event => {
     try {
         const document = event.document;
@@ -568,6 +654,9 @@ documents.onDidChangeContent(event => {
         }
         
         logger.info(`📝 onDidChangeContent: ${uri} version=${currentVersion}`);
+        
+        // Any document change invalidates all CodeLens reference counts
+        codeLensGeneration++;
         
         // Skip XML files
         if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
@@ -606,7 +695,7 @@ documents.onDidChangeContent(event => {
 
         // 🚀 PERF: Don't clear cache until debounce completes
         // This allows other features to use stale tokens while user is typing
-        const timeout = setTimeout(() => {
+        const timeout = setTimeout(async () => {
             try {
                 logger.info(`🔍 Debounce timeout triggered, refreshing tokens for: ${uri}`);
                 
@@ -623,9 +712,31 @@ documents.onDidChangeContent(event => {
                 logger.error(`⏱️ [SERVER] getTokens: ${tokensMs}ms, ${tokens.length} tokens for ${path.basename(decodeURIComponent(uri))}`);
                 logger.info(`🔍 Successfully refreshed tokens after edit: ${uri}, got ${tokens.length} tokens`);
                 
+                // Remove stale duplicate cache entries for this URI (e.g., file:///f:/ vs file:///f%3A/)
+                // CrossFileResolver may have created unencoded-URI entries from disk reads; these
+                // become stale after VS Code updates the document via the encoded URI.
+                const normalizedUri = decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).toLowerCase().replace(/\\/g, '/');
+                for (const cachedUri of tokenCache.getAllCachedUris()) {
+                    if (cachedUri !== uri) {
+                        const cachedNorm = decodeURIComponent(cachedUri.replace(/^file:\/\/\//i, '')).toLowerCase().replace(/\\/g, '/');
+                        if (cachedNorm === normalizedUri) {
+                            tokenCache.clearTokens(cachedUri);
+                        }
+                    }
+                }
+
                 // Validate document using fresh tokens
                 validateTextDocument(document, 'onDidChangeContent');
-                
+
+                // Re-validate any related PROGRAM/MEMBER files so cross-file diagnostics clear
+                revalidateRelatedDocuments(document, tokens);
+
+                // Update file relationship graph edges for this file
+                const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
+                FileRelationshipGraph.getInstance().updateFile(uri).catch(err =>
+                    logger.error(`❌ [FRG] updateFile failed for ${uri}: ${err}`)
+                );
+
                 // 🔄 Notify client that document symbols have changed
                 // This triggers structure view to refresh with fresh symbols
                 connection.sendNotification('clarion/symbolsRefreshed', { uri });
@@ -1040,6 +1151,27 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 logger.error(`⏱️ [INDEX] Background structure index pre-build complete`);
             });
             
+            // Build the file-relationship graph (MODULE/INCLUDE/MEMBER edges) in the background.
+            // Enables O(1) reverse lookups for local MAP scope (#91) and include chains (#52).
+            setImmediate(async () => {
+                const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
+                const graph = FileRelationshipGraph.getInstance();
+                const solutionManager = SolutionManager.getInstance();
+                const allFiles: string[] = [];
+                if (solutionManager?.solution) {
+                    for (const project of solutionManager.solution.projects) {
+                        for (const sourceFile of project.sourceFiles) {
+                            const absPath = sourceFile.getAbsolutePath();
+                            if (absPath) allFiles.push(absPath);
+                        }
+                    }
+                }
+                logger.error(`⏱️ [FRG] Building FileRelationshipGraph for ${allFiles.length} source file(s) in background`);
+                await graph.buildInBackground(allFiles).catch(err =>
+                    logger.error(`❌ [FRG] Background build failed: ${err}`)
+                );
+            });
+
             // Log each project in the global solution
             for (let i = 0; i < globalSolution.projects.length; i++) {
                 const project = globalSolution.projects[i];
@@ -1093,6 +1225,25 @@ connection.onNotification('clarion/updatePaths', async (params: {
             };
         }
     }
+});
+
+
+// Re-validate all open documents when a .cwproj changes (e.g. after addClassConstants).
+// The source .clw hasn't changed so the LSP wouldn't otherwise re-run diagnostics.
+connection.onNotification('clarion/projectConstantsChanged', () => {
+    logger.error('📥 clarion/projectConstantsChanged — re-validating all open documents');
+    // Clear the version-skip cache so validateTextDocument doesn't skip documents
+    // whose source hasn't changed but whose cwproj has.
+    lastValidatedVersions.clear();
+    for (const document of documents.all()) {
+        validateTextDocument(document).catch(err =>
+            logger.error(`❌ Re-validation error for ${document.uri}: ${err}`)
+        );
+    }
+    // Reset file relationship graph — project file list may have changed
+    import('./FileRelationshipGraph').then(({ FileRelationshipGraph }) => {
+        FileRelationshipGraph.getInstance().reset();
+    });
 });
 
 
@@ -1299,6 +1450,98 @@ connection.onRequest('clarion/addSourceFile', async (params: { projectGuid: stri
     } catch (error) {
         logger.error(`❌ Error adding source file: ${error instanceof Error ? error.message : String(error)}`);
         return false;
+    }
+});
+
+// Get all CLW-candidate directories from the redirection file for a project
+connection.onRequest('clarion/getClwDirectories', (params: { projectGuid: string }): { label: string; dir: string; section: string }[] => {
+    logger.info(`🔍 getClwDirectories for project ${params.projectGuid}`);
+    try {
+        const sm = SolutionManager.getInstance();
+        const project = sm?.solution?.projects.find(p => p.guid === params.projectGuid);
+        if (!project) {
+            logger.warn(`⚠️ Project ${params.projectGuid} not found`);
+            return [];
+        }
+        return project.getClwDirectories();
+    } catch (error) {
+        logger.error(`❌ getClwDirectories error: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
+    }
+});
+
+// Create a new member CLW module and register it in the project
+connection.onRequest('clarion/addModuleWithProcedure', async (params: {
+    projectGuid: string;
+    moduleName: string;
+    procedureName: string;
+    targetDir: string;
+    firstClwFile: string;
+    indentString: string;
+    isLocalMap?: boolean;
+    prototypeStyle?: string;
+}): Promise<{ success: boolean; filePath: string }> => {
+    logger.info(`🔄 addModuleWithProcedure: ${params.moduleName}`);
+    try {
+        const sm = SolutionManager.getInstance();
+        const project = sm?.solution?.projects.find(p => p.guid === params.projectGuid);
+        if (!project) {
+            logger.warn(`⚠️ Project ${params.projectGuid} not found`);
+            return { success: false, filePath: '' };
+        }
+        const result = await project.addModuleWithProcedure(
+            params.moduleName,
+            params.procedureName,
+            params.targetDir,
+            params.firstClwFile,
+            params.indentString,
+            params.isLocalMap ?? false,
+            params.prototypeStyle ?? 'keyword'
+        );
+        if (result.success) {
+            try {
+                globalSolution = await buildClarionSolution();
+            } catch (buildError: any) {
+                logger.error(`❌ Error rebuilding solution after addModuleWithProcedure: ${buildError.message || buildError}`);
+            }
+        }
+        return result;
+    } catch (error) {
+        logger.error(`❌ addModuleWithProcedure error: ${error instanceof Error ? error.message : String(error)}`);
+        return { success: false, filePath: '' };
+    }
+});
+
+// Resolve the absolute path of a CLW file referenced by a MODULE token
+connection.onRequest('clarion/resolveModuleClwPath', (params: {
+    referencedFile: string;
+    projectGuid: string;
+}): { clwFilePath: string } | null => {
+    try {
+        const sm = SolutionManager.getInstance();
+        const projects = sm?.solution?.projects ?? [];
+
+        const project = params.projectGuid
+            ? projects.find(p => p.guid === params.projectGuid)
+            : projects[0];
+
+        if (!project) {
+            logger.warn(`⚠️ resolveModuleClwPath: no project found`);
+            return null;
+        }
+
+        const sf = project.findSourceFileByName(params.referencedFile);
+        if (!sf) {
+            logger.warn(`⚠️ resolveModuleClwPath: ${params.referencedFile} not in project source files`);
+            return null;
+        }
+
+        const clwFilePath = path.join(project.path, sf.relativePath || sf.name);
+        logger.info(`✅ resolveModuleClwPath: ${clwFilePath}`);
+        return { clwFilePath };
+    } catch (error) {
+        logger.error(`❌ resolveModuleClwPath error: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
     }
 });
 
@@ -1559,7 +1802,13 @@ connection.onCodeAction(async (params) => {
         const flattenProvider = new FlattenCodeActionProvider();
         const flattenActions = flattenProvider.provideCodeActions(document, params.range);
 
-        const allActions = [...actions, ...flattenActions];
+        const mapModuleProvider = new MapModuleCodeActionProvider();
+        const mapModuleActions = mapModuleProvider.provideCodeActions(document, params.range);
+
+        const mapDeclProvider = new MapDeclarationCodeActionProvider();
+        const mapDeclActions = mapDeclProvider.provideCodeActions(document, params.range, params.context);
+
+        const allActions = [...actions, ...flattenActions, ...mapModuleActions, ...mapDeclActions];
         logger.info(`Provided ${allActions.length} code actions`);
         return allActions;
     } catch (error) {
@@ -1736,6 +1985,26 @@ connection.onRequest('clarion/unreachableRanges', (params: { textDocument: { uri
         logger.error(`Error providing unreachable ranges: ${error instanceof Error ? error.message : String(error)}`);
         return [];
     }
+});
+
+connection.onRequest('clarion/getFileRelationshipGraph', async (): Promise<{
+    edges: Array<{ type: string; fromFile: string; toFile: string; fromLine?: number; containingProcedure?: string; containingClass?: string }>;
+    isBuilt: boolean;
+    isBuilding: boolean;
+    buildDurationMs: number | undefined;
+    buildStartTime: string | undefined;
+    buildEndTime: string | undefined;
+}> => {
+    const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
+    const graph = FileRelationshipGraph.getInstance();
+    return {
+        edges: graph.getAllEdges(),
+        isBuilt: graph.isBuilt,
+        isBuilding: graph.isBuilding,
+        buildDurationMs: graph.buildDurationMs,
+        buildStartTime: graph.buildStartTime?.toISOString(),
+        buildEndTime: graph.buildEndTime?.toISOString(),
+    };
 });
 
 logger.info("🟢  Clarion Language Server is now listening for requests.");

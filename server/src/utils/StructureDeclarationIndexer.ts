@@ -64,6 +64,9 @@ const TYPE_PATTERN =
     /^([A-Za-z_]\w*)\s+(CLASS|INTERFACE|QUEUE|GROUP|RECORD|FILE|VIEW)\b/i;
 const ITEMIZE_PATTERN =
     /^([A-Za-z_]\w*)\s+ITEMIZE\b/i;
+/** Blank-label ITEMIZE: indented keyword with no label at col 0, e.g. "          ITEMIZE,PRE(CLType)" */
+const ITEMIZE_BLANK_PATTERN =
+    /^\s+ITEMIZE\b/i;
 const EQUATE_PATTERN =
     /^([A-Za-z_][\w:]*)\s+EQUATE\b/i;
 const END_PATTERN =
@@ -121,7 +124,7 @@ export function scanSourceForDeclarations(
             continue;
         }
 
-        // ITEMIZE block start
+        // ITEMIZE block start (labeled or blank-label)
         let m: RegExpExecArray | null;
         if ((m = ITEMIZE_PATTERN.exec(trimmed))) {
             const name = m[1];
@@ -136,9 +139,17 @@ export function scanSourceForDeclarations(
                 isType: false,
                 lineContent: trimmed
             });
-            // Enter ITEMIZE state — subsequent EQUATEs get prefixed
             inItemize = true;
             itemizePre = pre;
+            itemizeLine = i;
+            continue;
+        }
+
+        // Blank-label ITEMIZE: no name to emit, but we must enter ITEMIZE state
+        // so that member EQUATEs get the correct PRE-prefixed names (e.g. CLType:BYTE)
+        if (ITEMIZE_BLANK_PATTERN.test(trimmed)) {
+            inItemize = true;
+            itemizePre = extractPre(trimmed);
             itemizeLine = i;
             continue;
         }

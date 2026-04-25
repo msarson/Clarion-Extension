@@ -275,12 +275,12 @@ export class StructureFieldResolver {
                     const markdown = [
                         `**${structKind} Type:** \`${typeName}\``,
                         ``,
-                        `**Declared in:** ${incFileName}, line ${labelToken.line + 1}`,
                         `**Fields:** ${fieldCount}`,
                         ``,
                         `\`\`\`clarion`,
                         declaration,
-                        `\`\`\``
+                        `\`\`\``,
+                        `${incFileName}:${labelToken.line + 1}`
                     ].join('\n');
                     return { contents: { kind: 'markdown', value: markdown } };
                 }
@@ -363,12 +363,12 @@ export class StructureFieldResolver {
                     const markdown = [
                         `**${structKind} Type:** \`${typeName}\``,
                         ``,
-                        `**Declared in:** ${incFileName}, line ${labelToken.line + 1}`,
                         `**Fields:** ${fieldCount}`,
                         ``,
                         `\`\`\`clarion`,
                         declaration,
-                        `\`\`\``
+                        `\`\`\``,
+                        `${incFileName}:${labelToken.line + 1}`
                     ].join('\n');
                     return { contents: { kind: 'markdown', value: markdown } };
                 }
@@ -468,11 +468,10 @@ export class StructureFieldResolver {
                         const markdown = [
                             `**${typeName} Field:** \`${fieldName}\` — \`${fieldType}\``,
                             ``,
-                            `**Declared in:** ${incFileName}, line ${fieldToken.line + 1}`,
-                            ``,
                             `\`\`\`clarion`,
                             declaration,
-                            `\`\`\``
+                            `\`\`\``,
+                            `${incFileName}:${fieldToken.line + 1}`
                         ].join('\n');
                         return { contents: { kind: 'markdown', value: markdown } };
                     }

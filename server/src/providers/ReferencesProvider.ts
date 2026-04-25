@@ -15,6 +15,7 @@ import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { serverSettings } from '../serverSettings';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { isAttributeKeyword } from '../utils/AttributeKeywords';
+import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
@@ -846,7 +847,38 @@ export class ReferencesProvider {
             }
         }
 
-        // Search all project source files — class members can be used in any CLW
+        // Use the FileRelationshipGraph to narrow the search: find all files that
+        // transitively include the class's declaration file (INC), rather than scanning
+        // every project source file. This is a BFS over reverse INCLUDE edges.
+        const graph = FileRelationshipGraph.getInstance();
+        if (graph.isBuilt && declarationFile) {
+            const fsPath = decodeURIComponent(declarationFile.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+            const visited = new Set<string>();
+            const queue: string[] = [fsPath];
+
+            while (queue.length > 0) {
+                const current = queue.shift()!;
+                const normCurrent = current.toLowerCase().replace(/\\/g, '/');
+                if (visited.has(normCurrent)) continue;
+                visited.add(normCurrent);
+
+                const reverseEdges = graph.getReverseIncludes(current);
+                for (const edge of reverseEdges) {
+                    // edge.fromFile is already normalized (lowercase forward-slash, no file://)
+                    const fromUri = 'file:///' + edge.fromFile;
+                    files.add(fromUri);
+                    queue.push(edge.fromFile);
+                }
+            }
+
+            if (files.size > 2) {
+                logger.info(`[FRG] getMemberSearchFiles: narrowed to ${files.size} file(s) via reverse includes`);
+                return Array.from(files);
+            }
+            // If graph gave us nothing useful (only document + declarationFile), fall through to full scan
+        }
+
+        // Graph not ready or returned no additional files — fall back to scanning all project files
         const solutionManager = SolutionManager.getInstance();
         if (solutionManager?.solution?.projects?.length) {
             for (const project of solutionManager.solution.projects) {
@@ -1568,11 +1600,64 @@ export class ReferencesProvider {
                 }
             }
 
+            // Build valid line ranges: base scope range + any locally-declared class method impl ranges.
+            // Locally-declared classes (e.g. ThisWindow CLASS(WindowManager) declared inside a procedure)
+            // have their method implementations outside the parent procedure's finishesAt, so we extend
+            // the search to include those implementation bodies.
+            let validLineRanges: Array<[number, number]> = [[startLine, endLine]];
+
+            if (startLine > 0 || endLine < Number.MAX_SAFE_INTEGER) {
+                const scopeToken = symbolInfo.scope.token;
+                if (scopeToken.type === TokenType.Procedure) {
+                    // Collect locally-declared CLASS names from the data section of the parent procedure.
+                    // Data section is between the procedure line and the CODE execution marker.
+                    const dataEndLine = scopeToken.executionMarker?.line ?? endLine;
+                    const localClassNames = new Set<string>();
+                    for (const t of tokens) {
+                        if (t.type === TokenType.Structure &&
+                            t.subType === TokenType.Class &&
+                            t.line > startLine && t.line < dataEndLine &&
+                            t.label) {
+                            localClassNames.add(t.label.toLowerCase());
+                        }
+                    }
+
+                    if (localClassNames.size > 0) {
+                        for (const t of tokens) {
+                            if (t.type === TokenType.Procedure &&
+                                t.subType === TokenType.MethodImplementation &&
+                                t.label &&
+                                t.line > endLine) {
+                                // Method impl labels are 2-part (ClassName.MethodName) for locally-declared
+                                // class methods. Extract the class name from the first segment.
+                                const dotIdx = t.label.indexOf('.');
+                                const implClassName = dotIdx > 0
+                                    ? t.label.substring(0, dotIdx).toLowerCase()
+                                    : '';
+                                if (implClassName && localClassNames.has(implClassName)) {
+                                    // Guard against cross-contamination: if another GlobalProcedure starts
+                                    // between our scope end and this impl, the impl belongs to that later
+                                    // procedure, not to our scope procedure.
+                                    const hasInterveningProc = tokens.some(tp =>
+                                        tp.type === TokenType.Procedure &&
+                                        tp.subType === TokenType.GlobalProcedure &&
+                                        tp.line > endLine && tp.line < t.line
+                                    );
+                                    if (!hasInterveningProc) {
+                                        validLineRanges.push([t.line, t.finishesAt ?? Number.MAX_SAFE_INTEGER]);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             const declarationLine = symbolInfo.location.line;
             const declarationUri = symbolInfo.location.uri;
 
             for (const token of tokens) {
-                if (token.line < startLine || token.line > endLine) continue;
+                if (!validLineRanges.some(([s, e]) => token.line >= s && token.line <= e)) continue;
                 if (token.type === TokenType.Comment || token.type === TokenType.String) continue;
 
                 let matchStart = token.start;

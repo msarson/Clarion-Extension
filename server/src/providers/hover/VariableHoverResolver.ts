@@ -104,13 +104,6 @@ export class VariableHoverResolver {
         
         const fileName = path.basename(document.uri.replace('file:///', ''));
         const lineNumber = symbolInfo.location.line + 1;
-        // Append "Declared in" to the same line as scope label if it exists
-        const lastLine = markdown[markdown.length - 1];
-        if (lastLine && lastLine.includes('variable')) {
-            markdown[markdown.length - 1] = `${lastLine} Declared in ${fileName}:${lineNumber}`;
-        } else {
-            markdown.push(`Declared in ${fileName}:${lineNumber}`);
-        }
         
         // Add the actual source code line
         if (symbolInfo.declaration) {
@@ -119,6 +112,9 @@ export class VariableHoverResolver {
             markdown.push(symbolInfo.declaration);
             markdown.push('```');
         }
+
+        // Location at bottom, after code block
+        markdown.push(`${fileName}:${lineNumber}`);
         
         markdown.push(``);
         
@@ -280,13 +276,6 @@ export class VariableHoverResolver {
         
         const fileName = path.basename(document.uri.replace('file:///', ''));
         const lineNumber = globalVar.line + 1;
-        // Append "Declared in" to the same line as scope/context label if it exists
-        const lastLine = markdown[markdown.length - 1];
-        if (lastLine && (lastLine.includes('variable') || lastLine.includes('procedure') || lastLine.includes('property') || lastLine.includes('method') || lastLine.includes('constant'))) {
-            markdown[markdown.length - 1] = `${lastLine} Declared in ${fileName}:${lineNumber}`;
-        } else {
-            markdown.push(`Declared in ${fileName}:${lineNumber}`);
-        }
         
         // Add the actual source code line
         const content = document.getText();
@@ -300,6 +289,9 @@ export class VariableHoverResolver {
                 markdown.push('```');
             }
         }
+
+        // Location at bottom, after code block
+        markdown.push(`${fileName}:${lineNumber}`);
         
         return {
             contents: {
@@ -379,8 +371,11 @@ export class VariableHoverResolver {
             // Look up the class
             const definitions = this.sdi.find(cleanTypeName, projectPath);
             
-            if (definitions.length > 0) {
-                const def = definitions[0]; // Use first definition
+            const classDefs = definitions.filter(d =>
+                d.structureType === 'CLASS' || d.structureType === 'INTERFACE'
+            );
+            if (classDefs.length > 0) {
+                const def = classDefs[0]; // Use first class/interface definition
                 
                 logger.info(`Found class definition: ${def.name} in ${def.filePath}:${def.line + 1}`);
                 
@@ -392,16 +387,13 @@ export class VariableHoverResolver {
                     ``,
                     `---`,
                     `**${def.structureType} Definition:**`,
-                    `- File: \`${fileName}\` (line ${def.line + 1})`,
                     `- Type: ${def.structureType}${def.isType ? ',TYPE' : ''}`,
                 ];
                 
                 if (def.parentName) {
                     classInfo.push(`- Parent: \`${def.parentName}\``);
                 }
-                
-                // Add indexer stats
-                classInfo.push(``,  `*Indexed ${index.byName.size} structures in project*`);
+                classInfo.push(`${fileName}:${def.line + 1}`);
                 
                 // Append to existing hover content
                 let existingContent = '';

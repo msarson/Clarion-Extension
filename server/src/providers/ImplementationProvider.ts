@@ -728,7 +728,7 @@ export class ImplementationProvider {
             return localImpl;
         }
         
-        // If we have a module file hint, try to find it first using redirection parser
+        // If a moduleFile hint is provided, try it first (fastest path — already resolved by caller)
         if (moduleFile) {
             logger.info(`Looking for module file: ${moduleFile}`);
             
@@ -775,6 +775,30 @@ export class ImplementationProvider {
             }
         }
         
+        // Use the FileRelationshipGraph's CLASS_MODULE index for O(1) lookup by class name.
+        // This covers library classes (e.g. StringTheory) that are not in the project source list
+        // and whose CLW path is already pre-resolved — avoids the expensive full-project scan below.
+        try {
+            const { FileRelationshipGraph } = await import('../FileRelationshipGraph');
+            const graph = FileRelationshipGraph.getInstance();
+            if (graph.isBuilt) {
+                const classEdges = graph.getEdgesForClass(className);
+                for (const edge of classEdges) {
+                    // Convert normalised graph path (lowercase, forward slashes) back to filesystem path
+                    const candidatePath = edge.toFile.replace(/\//g, path.sep);
+                    const implLocation = this.searchFileForMethodImplementation(
+                        candidatePath, className, methodName, paramCount, declarationSignature
+                    );
+                    if (implLocation) {
+                        logger.info(`✅ Found ${className}.${methodName} via FileRelationshipGraph edge → ${candidatePath}`);
+                        return implLocation;
+                    }
+                }
+            }
+        } catch (e) {
+            logger.info(`FileRelationshipGraph lookup failed: ${e}`);
+        }
+
         // Fallback: Search all solution files
         const solutionManager = SolutionManager.getInstance();
         if (!solutionManager || !solutionManager.solution) {

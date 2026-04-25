@@ -101,6 +101,26 @@ export class ClarionInstallationDetector {
                 logger.info(`   - Version ${inst.ideVersion}: ${inst.compilerVersions.join(', ')}`);
             });
 
+            // Promote ideVersion if a higher sibling folder exists with no ClarionProperties.xml.
+            // e.g. folder "11.1" exists but has no properties → the "11.0" installation is shown as "11.1".
+            const foldersWithoutProperties = versionDirs.filter(v =>
+                !fs.existsSync(path.join(clarionBasePath, v, "ClarionProperties.xml"))
+            );
+
+            for (const emptyFolder of foldersWithoutProperties) {
+                const emptyMajor = Math.floor(parseFloat(emptyFolder));
+                const emptyVal = parseFloat(emptyFolder);
+                // Find an installation in the same major family with a lower version number
+                const candidate = installations.find(inst => {
+                    const instMajor = Math.floor(parseFloat(inst.ideVersion));
+                    return instMajor === emptyMajor && parseFloat(inst.ideVersion) < emptyVal;
+                });
+                if (candidate) {
+                    logger.info(`⬆️ Promoting Clarion ${candidate.ideVersion} → ${emptyFolder} (empty sibling folder)`);
+                    candidate.ideVersion = emptyFolder;
+                }
+            }
+
             // Cache the results
             this.cachedInstallations = installations;
             
@@ -218,5 +238,26 @@ export class ClarionInstallationDetector {
     static async getInstallationByVersion(ideVersion: string): Promise<ClarionInstallation | null> {
         const installations = await this.detectInstallations();
         return installations.find(i => i.ideVersion === ideVersion) || null;
+    }
+
+    /**
+     * Parses a ClarionProperties.xml at an arbitrary path and returns a ClarionInstallation.
+     * Used when the user browses for a properties file manually (e.g. /Configdir setups).
+     */
+    static async parseInstallationFromPropertiesPath(propertiesPath: string): Promise<ClarionInstallation | null> {
+        try {
+            const compilerVersions = await this.parseCompilerVersions(propertiesPath);
+            if (compilerVersions.length === 0) return null;
+            // Use the folder name containing the file as a best-effort ideVersion label
+            const folderName = path.basename(path.dirname(propertiesPath));
+            return {
+                ideVersion: folderName,
+                propertiesPath,
+                compilerVersions
+            };
+        } catch (error) {
+            logger.error(`❌ Error parsing user-selected ClarionProperties.xml: ${propertiesPath}`, error);
+            return null;
+        }
     }
 }

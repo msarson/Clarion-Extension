@@ -188,7 +188,7 @@ export class HoverRouter {
             }
 
             const lines: string[] = [`**INTERFACE** \`${ifaceName}\``];
-            if (declFile) lines.push(`Declared in \`${declFile}\``);
+            if (declFile) lines.push(declFile);
             const content: MarkupContent = { kind: 'markdown', value: lines.join('\n\n') };
             return { contents: content };
         }

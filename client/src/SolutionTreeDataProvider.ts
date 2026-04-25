@@ -4,7 +4,7 @@ import { ClarionSolutionInfo, ClarionProjectInfo, ClarionSourcerFileInfo } from 
 import LoggerManager from './utils/LoggerManager';
 import * as path from 'path';
 import { SolutionCache } from './SolutionCache';
-import { globalSolutionFile } from './globals';
+import { globalSolutionFile, globalSettings } from './globals';
 import * as fs from 'fs';
 import { ProjectIndex } from './ProjectIndex';
 import { PathUtils } from './PathUtils';
@@ -407,9 +407,16 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                     TreeItemCollapsibleState.None,
                     { type: 'browseSolution', tooltip: "Open a Clarion solution file from anywhere" }
                 );
-                
+
+                const newSolutionNode = new TreeNode(
+                    "✨ New Solution...",
+                    TreeItemCollapsibleState.None,
+                    { type: 'newSolution', tooltip: "Create a new Clarion solution in this folder" }
+                );
+
                 nodes.push(noSolutionsNode);
                 nodes.push(browseNode);
+                nodes.push(newSolutionNode);
                 return nodes;
             }
             
@@ -856,6 +863,17 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             return treeItem;
         }
 
+        if ((data as any)?.type === 'newSolution') {
+            treeItem.iconPath = new ThemeIcon('add');
+            treeItem.tooltip = (data as any).tooltip || "Create a new Clarion solution in this folder";
+            treeItem.command = {
+                title: 'New Solution',
+                command: 'clarion.newSolution',
+                arguments: []
+            };
+            return treeItem;
+        }
+
         // Handle open folder node
         if ((data as any)?.type === 'openFolder') {
             treeItem.iconPath = new ThemeIcon('folder-opened');
@@ -1177,6 +1195,21 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             // Add build progress to description if building
             treeItem.description = `Building ${this._buildProgress.current} of ${this._buildProgress.total}`;
             treeItem.tooltip = `Building solution: ${this._buildProgress.current} of ${this._buildProgress.total} projects completed`;
+        } else {
+            // Show startup project name and active configuration
+            const workspaceConfig = workspace.getConfiguration('clarion');
+            const startupGuid = workspaceConfig.get<string>('startupProject');
+            const config = (globalSettings.configuration || 'Debug').split('|')[0];
+
+            let startupName: string | undefined;
+            if (startupGuid) {
+                const match = solution.projects?.find(
+                    p => p.guid.replace(/[{}]/g, '').toLowerCase() === startupGuid.replace(/[{}]/g, '').toLowerCase()
+                );
+                startupName = match?.name;
+            }
+
+            treeItem.description = startupName ? `${startupName} (${config})` : `(${config})`;
         }
         
         treeItem.command = {

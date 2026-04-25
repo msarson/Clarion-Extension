@@ -83,11 +83,12 @@ export class MethodHoverResolver {
                 const markdown = [
                     `**${className}** — \`${typeStr}\``,
                     ``,
-                    `🔷 Class declaration  Declared in ${fileName}:${lineNumber}`,
+                    `🔷 Class declaration`,
                     ``,
                     '```clarion',
                     declaration,
-                    '```'
+                    '```',
+                    `${fileName}:${lineNumber}`
                 ];
                 return { contents: { kind: 'markdown', value: markdown.join('\n') } };
             }
@@ -229,7 +230,7 @@ export class MethodHoverResolver {
                     value: [
                         `**${className}.${currentToken.label}** (Method Declaration)`,
                         ``,
-                        `**Implemented in** \`${implFile}\` @ line ${implLine}`
+                        `${implFile}:${implLine}`
                     ].join('\n')
                 }
             };

@@ -1,6 +1,7 @@
 import { window, workspace, StatusBarItem, StatusBarAlignment } from 'vscode';
 import { globalSolutionFile, getClarionConfigTarget } from '../globals';
 import { SolutionCache } from '../SolutionCache';
+import { SettingsStorageManager } from '../utils/SettingsStorageManager';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("StatusBarManager");
@@ -34,11 +35,7 @@ export async function updateConfigurationStatusBar(configuration: string): Promi
 
     if (currentConfig !== configuration) {
         logger.info(`🔄 Updating folder configuration: clarion.configuration = ${configuration}`);
-        const target = getClarionConfigTarget();
-        if (target && workspace.workspaceFolders) {
-            const config = workspace.getConfiguration("clarion", workspace.workspaceFolders[0].uri);
-            await config.update("configuration", configuration, target);
-        }
+        await SettingsStorageManager.updateActiveConfiguration(configuration);
     }
 }
 
@@ -82,17 +79,17 @@ export async function updateBuildProjectStatusBar(): Promise<void> {
     
     if (projects.length === 1) {
         // If we found exactly one project, show "Build [project name]"
-        buildProjectStatusBarItem.text = `$(play) Build ${projects[0].name}`;
+        buildProjectStatusBarItem.text = `🔨 Build ${projects[0].name}`;
         buildProjectStatusBarItem.tooltip = `Build project ${projects[0].name}`;
         buildProjectStatusBarItem.show();
     } else if (projects.length > 1) {
         // If the file is in multiple projects, show "Build (Multiple Projects...)"
-        buildProjectStatusBarItem.text = `$(play) Build (Multiple Projects...)`;
+        buildProjectStatusBarItem.text = `🔨 Build (Multiple Projects...)`;
         buildProjectStatusBarItem.tooltip = `File is in multiple projects. Click to select which to build.`;
         buildProjectStatusBarItem.show();
     } else {
         // If no project was found, show "Build Solution" instead
-        buildProjectStatusBarItem.text = `$(play) Build Solution`;
+        buildProjectStatusBarItem.text = `🔨 Build Solution`;
         buildProjectStatusBarItem.tooltip = `Build the entire solution`;
         buildProjectStatusBarItem.show();
     }

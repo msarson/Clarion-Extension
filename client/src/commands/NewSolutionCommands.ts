@@ -1,0 +1,187 @@
+import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as crypto from 'crypto';
+import LoggerManager from '../utils/LoggerManager';
+import { SmartSolutionOpener } from '../utils/SmartSolutionOpener';
+import { writeIdePreferences } from '../solution/ClarionIdePreferences';
+
+const logger = LoggerManager.getLogger("NewSolutionCommands");
+logger.setLevel("error");
+
+/** Generates an uppercase GUID like {XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX} */
+function generateGuid(): string {
+    return `{${crypto.randomUUID().toUpperCase()}}`;
+}
+
+function buildSlnContent(name: string, projectGuid: string): string {
+    return [
+        '\uFEFF',
+        'Microsoft Visual Studio Solution File, Format Version 12.00',
+        '# Visual Studio 2012',
+        '# Clarion 2.1.0.2447',
+        `Project("{12B76EC0-1D7B-4FA7-A7D0-C524288B48A1}") = "${name}", "${name}.cwproj", "${projectGuid}"`,
+        'EndProject',
+        'Global',
+        '\tGlobalSection(SolutionConfigurationPlatforms) = preSolution',
+        '\t\tDebug|Win32 = Debug|Win32',
+        '\t\tRelease|Win32 = Release|Win32',
+        '\tEndGlobalSection',
+        '\tGlobalSection(ProjectConfigurationPlatforms) = postSolution',
+        `\t\t${projectGuid}.Debug|Win32.Build.0 = Debug|Win32`,
+        `\t\t${projectGuid}.Debug|Win32.ActiveCfg = Debug|Win32`,
+        `\t\t${projectGuid}.Release|Win32.Build.0 = Release|Win32`,
+        `\t\t${projectGuid}.Release|Win32.ActiveCfg = Release|Win32`,
+        '\tEndGlobalSection',
+        'EndGlobal',
+        ''
+    ].join('\r\n');
+}
+
+function buildCwprojContent(name: string, projectGuid: string, clwName: string): string {
+    return [
+        '\uFEFF<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">',
+        '  <PropertyGroup>',
+        `    <ProjectGuid>${projectGuid}</ProjectGuid>`,
+        `    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>`,
+        `    <Platform Condition=" '$(Platform)' == '' ">Win32</Platform>`,
+        '    <OutputType>Exe</OutputType>',
+        `    <RootNamespace>${name}</RootNamespace>`,
+        `    <AssemblyName>${name}</AssemblyName>`,
+        `    <OutputName>${name}</OutputName>`,
+        '  </PropertyGroup>',
+        `  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">`,
+        '    <DebugSymbols>True</DebugSymbols>',
+        '    <DebugType>Full</DebugType>',
+        '    <vid>full</vid>',
+        '    <check_stack>True</check_stack>',
+        '    <check_index>True</check_index>',
+        '  </PropertyGroup>',
+        `  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">`,
+        '    <DebugSymbols>False</DebugSymbols>',
+        '    <DebugType>None</DebugType>',
+        '    <vid>off</vid>',
+        '    <check_stack>False</check_stack>',
+        '    <check_index>False</check_index>',
+        '  </PropertyGroup>',
+        '  <ItemGroup>',
+        `    <Compile Include="${clwName}" />`,
+        '  </ItemGroup>',
+        '  <Import Project="$(ClarionBinPath)\\SoftVelocity.Build.Clarion.targets" />',
+        '</Project>'
+    ].join('\r\n');
+}
+
+function buildClwContent(): string {
+    return [
+        '  PROGRAM',
+        '',
+        '  MAP',
+        '  END',
+        '',
+        '  CODE',
+        "  MESSAGE('Hello World')"
+    ].join('\r\n');
+}
+
+/**
+ * Creates a new Clarion solution (.sln + .cwproj + .clw) in the open workspace folder.
+ */
+export async function newSolution(): Promise<void> {
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (!workspaceFolders || workspaceFolders.length === 0) {
+        vscode.window.showErrorMessage('Open a folder first before creating a new Clarion solution.');
+        return;
+    }
+
+    const folderPath = workspaceFolders[0].uri.fsPath;
+    const defaultName = path.basename(folderPath);
+
+    // Step 1: Pick Clarion version/compiler before prompting for names
+    const installResult = await SmartSolutionOpener.detectAndPickInstallation();
+    if (!installResult) return;
+
+    // Step 2: Pick build configuration (no .sln exists yet, offer standard options)
+    const configChoice = await vscode.window.showQuickPick(['Debug', 'Release'], {
+        placeHolder: 'Select build configuration'
+    });
+    if (!configChoice) return;
+
+    // Step 3: Prompt for solution name
+    const solutionName = await vscode.window.showInputBox({
+        prompt: 'Solution name',
+        value: defaultName,
+        validateInput: (v) => {
+            if (!v || v.trim().length === 0) return 'Solution name cannot be empty';
+            if (/[\\/:*?"<>|]/.test(v)) return 'Solution name contains invalid characters';
+            return undefined;
+        }
+    });
+    if (!solutionName) return;
+
+    const trimmedName = solutionName.trim();
+
+    // Step 4: Prompt for main CLW filename
+    const clwInput = await vscode.window.showInputBox({
+        prompt: 'Main source file name',
+        value: `${trimmedName}.clw`,
+        validateInput: (v) => {
+            if (!v || v.trim().length === 0) return 'File name cannot be empty';
+            if (!v.trim().toLowerCase().endsWith('.clw')) return 'File must have a .clw extension';
+            if (/[\\/:*?"<>|]/.test(v.trim())) return 'File name contains invalid characters';
+            return undefined;
+        }
+    });
+    if (!clwInput) return;
+
+    const clwName = clwInput.trim();
+    const projectGuid = generateGuid();
+
+    const slnPath = path.join(folderPath, `${trimmedName}.sln`);
+    const cwprojPath = path.join(folderPath, `${trimmedName}.cwproj`);
+    const clwPath = path.join(folderPath, clwName);
+
+    // Step 5: Warn if any file already exists
+    const existing = [slnPath, cwprojPath, clwPath].filter(f => fs.existsSync(f));
+    if (existing.length > 0) {
+        const names = existing.map(f => path.basename(f)).join(', ');
+        const answer = await vscode.window.showWarningMessage(
+            `The following file(s) already exist: ${names}. Overwrite?`,
+            { modal: true },
+            'Overwrite'
+        );
+        if (answer !== 'Overwrite') return;
+    }
+
+    // Step 6: All user interaction done — write files
+    try {
+        fs.writeFileSync(slnPath, buildSlnContent(trimmedName, projectGuid), 'utf8');
+        fs.writeFileSync(cwprojPath, buildCwprojContent(trimmedName, projectGuid, clwName), 'utf8');
+        fs.writeFileSync(clwPath, buildClwContent(), 'utf8');
+        logger.info(`✅ Created new solution: ${trimmedName} in ${folderPath}`);
+
+        // Create the Clarion IDE preferences XML so the IDE recognises startup project + config
+        await writeIdePreferences(slnPath, installResult.installation.propertiesPath, {
+            startupProjectGuid: projectGuid,
+            activeConfiguration: configChoice,
+            activePlatform: 'Win32'
+        });
+    } catch (err) {
+        logger.error(`❌ Failed to create solution files: ${err}`);
+        vscode.window.showErrorMessage(`Failed to create solution: ${err instanceof Error ? err.message : String(err)}`);
+        return;
+    }
+
+    // Step 6: Open with pre-selected values — skips all pickers in openDetectedSolution
+    await vscode.commands.executeCommand('clarion.openDetectedSolution', slnPath, {
+        installation: installResult.installation,
+        compilerName: installResult.compilerName,
+        configuration: configChoice
+    });
+}
+
+export function registerNewSolutionCommands(context: vscode.ExtensionContext): vscode.Disposable[] {
+    return [
+        vscode.commands.registerCommand('clarion.newSolution', newSolution)
+    ];
+}

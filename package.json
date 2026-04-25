@@ -2,7 +2,7 @@
   "name": "clarion-extensions",
   "displayName": "Clarion Extensions",
   "description": "Extension for Clarion Language",
-  "version": "0.9.5",
+  "version": "0.9.7",
   "publisher": "msarson",
   "repository": {
     "type": "git",
@@ -197,6 +197,11 @@
         "when": "clarion.solutionOpen && editorTextFocus"
       },
       {
+        "command": "clarion.startDebugging",
+        "key": "f5",
+        "when": "clarion.solutionOpen && editorTextFocus"
+      },
+      {
         "command": "clarion.quickOpen",
         "key": "ctrl+p",
         "when": "clarion.solutionOpen && editorTextFocus"
@@ -229,6 +234,13 @@
     "views": {
       "clarionViews": [
         {
+          "id": "clarionSolutionToolbar",
+          "name": "Actions",
+          "type": "webview",
+          "icon": "images/sv57x57.png",
+          "visibility": "visible"
+        },
+        {
           "id": "solutionView",
           "name": "Solution View",
           "icon": "images/sv57x57.png"
@@ -249,6 +261,11 @@
       {
         "command": "clarion.runWithoutDebugging",
         "title": "Run Without Debugging",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.startDebugging",
+        "title": "Start Debugging (Clarion Debugger)",
         "when": "clarion.solutionOpen"
       },
       {
@@ -277,6 +294,11 @@
         "title": "Refresh Solution",
         "when": "clarion.solutionOpen",
         "icon": "$(sync)"
+      },
+      {
+        "command": "clarion.newSolution",
+        "title": "New Solution",
+        "icon": "$(add)"
       },
       {
         "command": "clarion.openSolution",
@@ -341,8 +363,28 @@
         "when": "clarion.solutionOpen"
       },
       {
+        "command": "clarion.addMapModule",
+        "title": "Add MODULE with PROCEDURE",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.addProcedureToModule",
+        "title": "Add PROCEDURE to MODULE",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.addProcedureFromMap",
+        "title": "Add PROCEDURE",
+        "when": "clarion.solutionOpen"
+      },
+      {
         "command": "clarion.removeSourceFile",
         "title": "Remove Source File",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.debug.showFileRelationshipGraph",
+        "title": "Clarion: Show File Relationship Graph (Debug)",
         "when": "clarion.solutionOpen"
       },
       {
@@ -418,7 +460,8 @@
       },
       {
         "command": "clarion.openInClarionIDE",
-        "title": "Open in Clarion IDE"
+        "title": "Open in Clarion IDE",
+        "icon": "images/sv57x57.png"
       },
       {
         "command": "clarion.importAppFromTextForSolution",
@@ -562,6 +605,11 @@
           "group": "navigation"
         },
         {
+          "command": "clarion.openInClarionIDE",
+          "when": "view == solutionView && viewItem == clarionSolution",
+          "group": "inline"
+        },
+        {
           "command": "clarion.copyFilePath",
           "when": "view == solutionView && viewItem == clarionProject",
           "group": "navigation"
@@ -623,6 +671,18 @@
           "when": "false"
         },
         {
+          "command": "clarion.addMapModule",
+          "when": "false"
+        },
+        {
+          "command": "clarion.addProcedureToModule",
+          "when": "false"
+        },
+        {
+          "command": "clarion.addProcedureFromMap",
+          "when": "false"
+        },
+        {
           "command": "clarion.removeSourceFile",
           "when": "false"
         },
@@ -636,6 +696,11 @@
         }
       ],
       "view/title": [
+        {
+          "command": "clarion.newSolution",
+          "when": "view == solutionView && !clarion.solutionOpen && workspaceFolderCount > 0",
+          "group": "navigation@0"
+        },
         {
           "command": "clarion.openSolution",
           "when": "view == solutionView && !clarion.solutionOpen",
@@ -795,6 +860,21 @@
       "type": "object",
       "title": "Clarion Extension Configuration",
       "properties": {
+        "clarion.saveBeforeBuild": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically save all unsaved files before triggering any Clarion build. Ensures the compiler always builds against the latest content."
+        },
+        "clarion.procedurePrototypeStyle": {
+          "type": "string",
+          "enum": ["keyword", "shorthand"],
+          "enumDescriptions": [
+            "Use 'ProcName PROCEDURE()' — the preferred form (Clarion docs recommended)",
+            "Use 'ProcName()' — shorthand form (backward compatibility only)"
+          ],
+          "default": "keyword",
+          "description": "Controls the prototype style used when inserting procedure declarations inside MAP/MODULE structures."
+        },
         "clarion.build.revealOutput": {
           "type": "string",
           "enum": [

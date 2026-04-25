@@ -106,9 +106,16 @@ export class CrossFileResolver {
             const currentFileName = path.basename(currentDocument.uri);
             logger.info(`Searching for MAP MODULE('${currentFileName}') in ${resolvedPath}`);
 
-            // Read parent file and get cached tokens/structure
-            const content = fs.readFileSync(resolvedPath, 'utf8');
-            const parentDoc = TextDocument.create(resolvedPath, 'clarion', 1, content);
+            // Read parent file — prefer live TokenCache content over stale disk
+            const resolvedUri = 'file:///' + resolvedPath.replace(/\\/g, '/');
+            const normalizedResolved = resolvedPath.toLowerCase().replace(/\\/g, '/');
+            const liveUri = this.tokenCache.getAllCachedUris().find(uri => {
+                const uriPath = decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).toLowerCase().replace(/\\/g, '/');
+                return uriPath === normalizedResolved;
+            });
+            const content = (liveUri && this.tokenCache.getDocumentText(liveUri))
+                ?? fs.readFileSync(resolvedPath, 'utf8');
+            const parentDoc = TextDocument.create(liveUri ?? resolvedUri, 'clarion', 1, content);
             const parentTokens = await this.tokenCache.getTokens(parentDoc);
 
             // Use cached DocumentStructure to find MAP blocks
@@ -288,9 +295,16 @@ export class CrossFileResolver {
                 return null;
             }
 
-            // Read parent file and get cached tokens/structure
-            const content = fs.readFileSync(resolvedPath, 'utf8');
-            const parentDoc = TextDocument.create(resolvedPath, 'clarion', 1, content);
+            // Read parent file — prefer live TokenCache content over stale disk
+            const resolvedUri2 = 'file:///' + resolvedPath.replace(/\\/g, '/');
+            const normalizedResolved2 = resolvedPath.toLowerCase().replace(/\\/g, '/');
+            const liveUri2 = this.tokenCache.getAllCachedUris().find(uri => {
+                const uriPath = decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).toLowerCase().replace(/\\/g, '/');
+                return uriPath === normalizedResolved2;
+            });
+            const content = (liveUri2 && this.tokenCache.getDocumentText(liveUri2))
+                ?? fs.readFileSync(resolvedPath, 'utf8');
+            const parentDoc = TextDocument.create(liveUri2 ?? resolvedUri2, 'clarion', 1, content);
             const parentTokens = await this.tokenCache.getTokens(parentDoc);
 
             // Use cached DocumentStructure to find global variables

@@ -11,6 +11,7 @@ import { createSolutionFileWatchers } from '../providers/FileWatcherManager';
 import { isClientReady, getClientReadyPromise } from '../LanguageClientManager';
 import { refreshOpenDocuments } from '../document/DocumentRefreshManager';
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
+import { readIdePreferences } from './ClarionIdePreferences';
 import LoggerManager from '../utils/LoggerManager';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -33,8 +34,9 @@ export async function workspaceHasBeenTrusted(
 ): Promise<void> {
     logger.info("✅ Workspace has been trusted or refreshed. Initializing...");
 
-    // Read solution file directly from workspace settings first
-    const solutionFileFromSettings = workspace.getConfiguration().get<string>("clarion.solutionFile", "");
+    // Read current solution directly from workspace settings
+    const solutionFileFromSettings = workspace.getConfiguration().get<string>("clarion.currentSolution", "")
+        || workspace.getConfiguration().get<string>("clarion.solutionFile", "");
     logger.info(`🔍 Solution file from workspace settings: ${solutionFileFromSettings || 'not set'}`);
 
     // Load settings from workspace.json
@@ -126,10 +128,43 @@ export async function workspaceHasBeenTrusted(
             }
         }
         
+        // Apply Clarion IDE preferences (configuration) before initializing so the right config is used
+        let idePrefStartupGuid: string | undefined;
+        if (globalSolutionFile && globalClarionPropertiesFile) {
+            const idePrefs = await readIdePreferences(globalSolutionFile, globalClarionPropertiesFile);
+            if (idePrefs) {
+                // Apply active configuration so initializeSolution validates/uses the IDE's choice
+                if (idePrefs.activeConfiguration && idePrefs.activePlatform) {
+                    const ideConfig = `${idePrefs.activeConfiguration}|${idePrefs.activePlatform}`;
+                    if (ideConfig !== globalSettings.configuration) {
+                        logger.info(`🔄 Applying IDE configuration: ${ideConfig}`);
+                        globalSettings.configuration = ideConfig;
+                    }
+                } else if (idePrefs.activeConfiguration) {
+                    // Platform not specified — attempt prefix match against current config
+                    if (!globalSettings.configuration?.startsWith(idePrefs.activeConfiguration + '|')) {
+                        logger.info(`🔄 Applying IDE configuration (no platform): ${idePrefs.activeConfiguration}`);
+                        globalSettings.configuration = idePrefs.activeConfiguration;
+                    }
+                }
+                idePrefStartupGuid = idePrefs.startupProjectGuid;
+            }
+        }
+
         // Try to initialize even if some settings are missing
         try {
             logger.info("✅ Attempting to initialize Clarion Solution...");
             await initializeSolution(context);
+
+            // Sync IDE startup project into workspace config after successful load
+            if (idePrefStartupGuid) {
+                const config = workspace.getConfiguration('clarion');
+                const current = config.get<string>('startupProject', '');
+                if (current.replace(/[{}]/g, '').toLowerCase() !== idePrefStartupGuid.replace(/[{}]/g, '').toLowerCase()) {
+                    logger.info(`🔄 Applying IDE startup project: ${idePrefStartupGuid}`);
+                    await config.update('startupProject', idePrefStartupGuid, false);
+                }
+            }
             
             // ✅ Register language features NOW
             registerLanguageFeatures(context, documentManager);
