@@ -1004,7 +1004,24 @@ export class ClassMemberResolver {
         const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         const sm = SolutionManager.getInstance();
 
-        // 1. Try CLW with same base name as the declaration file (via redirection)
+        // 1. Use the FileRelationshipGraph CLASS_MODULE index — pre-resolved paths, O(1) by class name.
+        //    Faster than re-running redirection for every Ctrl+F12 call.
+        try {
+            const { FileRelationshipGraph } = await import('../FileRelationshipGraph');
+            const graph = FileRelationshipGraph.getInstance();
+            if (graph.isBuilt) {
+                for (const edge of graph.getEdgesForClass(className)) {
+                    const candidatePath = edge.toFile.replace(/\//g, path.sep);
+                    const loc = this.findImplementationInFile(candidatePath, className, methodName, declarationSig);
+                    if (loc) {
+                        logger.error(`✅ [FRG] Found ${className}.${methodName} via graph → ${candidatePath}`);
+                        return loc;
+                    }
+                }
+            }
+        } catch { /* graph not available — fall through */ }
+
+        // 2. Try CLW with same base name as the declaration file (via redirection)
         if (memberInfo.file) {
             let declPath = memberInfo.file;
             if (declPath.startsWith('file:///')) {
@@ -1029,25 +1046,7 @@ export class ClassMemberResolver {
             }
         }
 
-        // 1b. Use FileRelationshipGraph CLASS_MODULE index to find the CLW via the
-        //     pre-resolved MODULE() attribute — covers cases where the CLW name differs
-        //     from the .inc file (e.g. CLASS Foo MODULE('bar.clw') in foo.inc).
-        try {
-            const { FileRelationshipGraph } = await import('../FileRelationshipGraph');
-            const graph = FileRelationshipGraph.getInstance();
-            if (graph.isBuilt) {
-                for (const edge of graph.getEdgesForClass(className)) {
-                    const candidatePath = edge.toFile.replace(/\//g, path.sep);
-                    const loc = this.findImplementationInFile(candidatePath, className, methodName, declarationSig);
-                    if (loc) {
-                        logger.error(`✅ [FRG] Found ${className}.${methodName} via graph → ${candidatePath}`);
-                        return loc;
-                    }
-                }
-            }
-        } catch { /* graph not available — fall through */ }
-
-        // 2. Search all project CLW source files
+        // 3. Search all project CLW source files
         if (sm?.solution) {
             for (const project of sm.solution.projects) {
                 for (const sf of project.sourceFiles) {
