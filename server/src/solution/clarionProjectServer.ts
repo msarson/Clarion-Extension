@@ -802,6 +802,7 @@ export class ClarionProjectServer {
     /**
      * Returns all directories from the redirection file where CLW files may be placed.
      * Ordering: project directory first, then non-Common sections, then Common last.
+     * Any path that resolves to the project directory is relabelled [Project] and shown first.
      * @returns Array of { label, dir, section } objects for use in a QuickPick
      */
     public getClwDirectories(): { label: string; dir: string; section: string }[] {
@@ -810,6 +811,7 @@ export class ClarionProjectServer {
         const configEntries: { label: string; dir: string; section: string }[] = [];
         const commonEntries: { label: string; dir: string; section: string }[] = [];
 
+        const projectKey = this.path.toLowerCase();
         const redParser = this.getRedirectionParser();
         const entries = redParser.parseRedFile(this.path);
 
@@ -825,6 +827,12 @@ export class ClarionProjectServer {
                 if (seen.has(key)) continue;
                 seen.add(key);
 
+                // Any path that resolves to the project folder becomes [Project]
+                if (key === projectKey) {
+                    projectEntries.push({ label: `[Project] ${resolved}`, dir: resolved, section: 'Project' });
+                    continue;
+                }
+
                 const isCommon = !entry.section || entry.section.toLowerCase() === 'common';
                 const sectionLabel = isCommon ? '[Common]' : `[${entry.section}]`;
                 const item = { label: `${sectionLabel} ${resolved}`, dir: resolved, section: entry.section };
@@ -837,10 +845,9 @@ export class ClarionProjectServer {
             }
         }
 
-        // Project directory comes first; add only if not already listed from RED file
-        const projectKey = this.path.toLowerCase();
+        // If project dir wasn't in the RED file at all, add it explicitly
         if (!seen.has(projectKey)) {
-            projectEntries.push({ label: `[Project] ${this.path}`, dir: this.path, section: 'Project' });
+            projectEntries.unshift({ label: `[Project] ${this.path}`, dir: this.path, section: 'Project' });
         }
 
         // Order: project dir → config-specific sections → Common
