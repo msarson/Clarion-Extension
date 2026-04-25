@@ -36,7 +36,9 @@ export interface FileEdge {
     type: EdgeType;
     fromFile: string;               // normalised absolute path (lowercase, forward slashes)
     toFile: string;                 // normalised absolute path
+    fromLine?: number;              // 0-based line of the token that created this edge
     containingProcedure?: string;   // for MODULE edges inside a local MAP (inside a procedure)
+    containingClass?: string;       // for CLASS_MODULE edges: the class label declaring this implementation
 }
 
 export class FileRelationshipGraph {
@@ -187,6 +189,7 @@ export class FileRelationshipGraph {
 
             let edgeType: EdgeType | null = null;
             let containingProcedure: string | undefined;
+            let containingClass: string | undefined;
 
             if (token.type === TokenType.ClarionDocument && token.value.toUpperCase() === 'MEMBER') {
                 edgeType = 'MEMBER';
@@ -202,6 +205,13 @@ export class FileRelationshipGraph {
 
                 if (!parentIsMap) {
                     edgeType = 'CLASS_MODULE';
+                    // Find the CLASS token on the same line to get the class label
+                    const classToken = tokens.find(t =>
+                        t.line === token.line &&
+                        t.type === TokenType.Structure &&
+                        t.value.toUpperCase() === 'CLASS'
+                    );
+                    containingClass = classToken?.label;
                 } else {
                     edgeType = 'MODULE';
                     // Detect local MAP: grandparent = procedure
@@ -221,7 +231,7 @@ export class FileRelationshipGraph {
             if (!resolved) continue;
 
             const toFile = this.normalizePath(resolved);
-            const edge: FileEdge = { type: edgeType, fromFile: filePath, toFile, containingProcedure };
+            const edge: FileEdge = { type: edgeType, fromFile: filePath, toFile, fromLine: token.line, containingProcedure, containingClass };
 
             // Forward edge
             if (!this.forwardEdges.has(filePath)) this.forwardEdges.set(filePath, []);

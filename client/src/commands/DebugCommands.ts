@@ -19,7 +19,7 @@ export function registerDebugCommands(context: ExtensionContext, client: Languag
 
         try {
             const result = await client.sendRequest<{
-                edges: Array<{ type: string; fromFile: string; toFile: string; containingProcedure?: string }>;
+                edges: Array<{ type: string; fromFile: string; toFile: string; fromLine?: number; containingProcedure?: string; containingClass?: string }>;
                 isBuilt: boolean;
                 isBuilding: boolean;
             }>('clarion/getFileRelationshipGraph');
@@ -58,11 +58,14 @@ export function registerDebugCommands(context: ExtensionContext, client: Languag
                             ? `  **[local MAP inside: ${edge.containingProcedure}]**`
                             : '  *(file-scope MAP)*';
                     } else if (edgeType === 'CLASS_MODULE') {
-                        proc = '  *(class implementation)*';
+                        proc = edge.containingClass
+                            ? `  *(class: ${edge.containingClass})*`
+                            : '  *(class implementation)*';
                     } else if (edgeType === 'IMPLICIT_INCLUDE') {
                         proc = '  *(compiler-injected)*';
                     }
-                    lines.push(`  ${from}  →  ${to}${proc}`);
+                    const lineAnnotation = edge.fromLine !== undefined ? ` [line ${edge.fromLine + 1}]` : '';
+                    lines.push(`  ${from}  →  ${to}${proc}${lineAnnotation}`);
                     lines.push(`    from: ${edge.fromFile}`);
                     lines.push(`    to:   ${edge.toFile}`);
                 }
