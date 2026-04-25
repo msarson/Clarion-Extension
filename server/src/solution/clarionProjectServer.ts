@@ -815,7 +815,7 @@ export class ClarionProjectServer {
 
         for (const entry of entries) {
             const ext = entry.extension.toLowerCase();
-            if (ext !== '*.clw' && ext !== '*.*') continue;
+            if (ext !== '*.clw') continue;
 
             for (const p of entry.paths) {
                 const resolved = path.isAbsolute(p)
